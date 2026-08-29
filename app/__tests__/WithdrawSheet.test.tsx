@@ -18,6 +18,12 @@
  *  - component: retry-after-unknown reuses identical envelope bytes (prepare* called ONCE, the
  *    SAME step bytes resubmitted), persisted across a remount (restart-mid-offramp resume), and
  *    editing the form re-enables fresh preparation.
+ *
+ * The DESTINATION is a PROP (SendSheet owns the one shared address field — see components/
+ * SendSheet.tsx + AddressField.tsx), so "the user edited the destination" is modelled here as a
+ * re-render with a new `address`, and the two callbacks that cross that boundary are asserted
+ * directly: `onResumeAddress` pushes a hydrated in-flight destination back UP into the shared
+ * field, and `onSaveAddress` hands the settled destination to the shared address book.
  */
 import {describe, test, expect, jest, beforeEach} from '@jest/globals';
 import React from 'react';
@@ -32,10 +38,6 @@ jest.mock('../services/rail', () => ({
   prepareErc20Withdrawal: jest.fn(),
   submitOfframpStep: jest.fn(),
   fetchGasFeeWei: jest.fn(),
-}));
-jest.mock('../services/withdraw', () => ({
-  loadSavedWithdrawAddr: jest.fn(async () => null),
-  saveWithdrawAddr: jest.fn(async () => undefined),
 }));
 
 import {
@@ -75,17 +77,26 @@ const STEPS: OfframpStep[] = [
   {ledger: 'ryjxe-uaaaa-aaaaa-aaabq-cai', envelopeHex: 'bb' + '02'.repeat(100), requestIdHex: 'r2', label: 'withdraw'},
 ];
 
-async function renderSheet() {
+/** The sheet element for a given shared-field destination. Factored out so a test can RE-RENDER
+ *  with a different `address` — that is what "the user edited the destination" now looks like from
+ *  this component's side, since the field itself lives in SendSheet. */
+type Handlers = {onResumeAddress?: (a: string) => void; onSaveAddress?: (a: string) => void};
+function sheet(address: string, h: Handlers = {}) {
+  return (
+    <WithdrawSheet
+      identity={IDENTITY} catalog={[DESC]} currency={4} decimals={18} display={DISPLAY}
+      family={'CkEthErc20' as MinterFamily} tokenContract={null} balance="1000000000000000"
+      address={address}
+      onResumeAddress={h.onResumeAddress ?? (() => {})}
+      onSaveAddress={h.onSaveAddress ?? (() => {})}
+      onClose={() => {}} onWithdrawn={() => {}}
+    />
+  );
+}
+
+async function renderSheet(address = ETH_DEST, h: Handlers = {}) {
   let tree!: renderer.ReactTestRenderer;
-  await act(async () => {
-    tree = renderer.create(
-      <WithdrawSheet
-        identity={IDENTITY} catalog={[DESC]} currency={4} decimals={18} display={DISPLAY}
-        family={'CkEthErc20' as MinterFamily} tokenContract={null} balance="1000000000000000"
-        onClose={() => {}} onWithdrawn={() => {}}
-      />,
-    );
-  });
+  await act(async () => { tree = renderer.create(sheet(address, h)); });
   return tree;
 }
 
@@ -160,10 +171,8 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'})   // retry: same withdraw envelope settles
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'});
 
-    const root = await renderSheet();
-    await act(async () => {
-      root.root.findByProps({testID: 'withdraw-address-input'}).props.onChangeText(ETH_DEST);
-    });
+    const onSaveAddress = jest.fn();
+    const root = await renderSheet(ETH_DEST, {onSaveAddress});
     await act(async () => {
       root.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
     });
@@ -182,9 +191,11 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     expect(calls[2][0].envelopeHex).toBe(STEPS[1].envelopeHex);
     expect(calls[2][0].envelopeHex).not.toBe(STEPS[0].envelopeHex);
 
-    // Settled end-to-end: done screen, retention cleared (no resume card), record removed.
+    // Settled end-to-end: done screen, retention cleared (no resume card), record removed, and the
+    // settled destination handed to the shared address book EXACTLY once (not per submitted step).
     expect(root.root.findByProps({testID: 'withdraw-status'}).props.children).toBe('Withdrawn ✓');
     expect(await AsyncStorage.getItem(offrampKey(IDENTITY.publicHex, 4))).toBeNull();
+    expect(onSaveAddress.mock.calls).toEqual([[ETH_DEST]]);
     act(() => { root.unmount(); });
   });
 
@@ -197,19 +208,20 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
 
     const first = await renderSheet();
     await act(async () => {
-      first.root.findByProps({testID: 'withdraw-address-input'}).props.onChangeText(ETH_DEST);
-    });
-    await act(async () => {
       first.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
     });
     await driveConfirm(first);
     expect(jest.mocked(submitOfframpStep).mock.calls).toHaveLength(2);
     act(() => { first.unmount(); });
 
-    // Fresh mount (restart): the resume effect hydrates the record; Confirm resumes verbatim.
-    const second = await renderSheet();
+    // Fresh mount (restart) — the shared destination field starts EMPTY, as it does after an app
+    // restart. The resume effect hydrates the record and pushes the in-flight destination back up
+    // to the parent field; Confirm then resumes verbatim.
+    const onResumeAddress = jest.fn();
+    const second = await renderSheet('', {onResumeAddress});
     await act(async () => { await Promise.resolve(); }); // let the load effects settle
     expect(second.root.findByProps({testID: 'withdraw-resume'}).props.testID).toBe('withdraw-resume');
+    expect(onResumeAddress.mock.calls).toEqual([[ETH_DEST]]);
     await driveConfirm(second);
     expect(prepareEthWithdrawal).toHaveBeenCalledTimes(1); // signed ONCE — before the "crash"
     const calls = jest.mocked(submitOfframpStep).mock.calls;
@@ -227,18 +239,14 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
 
     const root = await renderSheet();
     await act(async () => {
-      root.root.findByProps({testID: 'withdraw-address-input'}).props.onChangeText(ETH_DEST);
-    });
-    await act(async () => {
       root.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
     });
     await driveConfirm(root); // error phase, retained
 
-    // User edits the destination — the in-flight envelopes no longer match the form intent.
+    // User edits the destination in the SHARED field — it arrives here as a new `address` prop, and
+    // the in-flight envelopes no longer match the form intent.
     const NEW_DEST = '0x9999999999999999999999999999999999999999';
-    await act(async () => {
-      root.root.findByProps({testID: 'withdraw-address-input'}).props.onChangeText(NEW_DEST);
-    });
+    await act(async () => { root.update(sheet(NEW_DEST)); });
     // The review card (not the resume card) is back: this Confirm prepares FRESH envelopes.
     expect(root.root.findByProps({testID: 'withdraw-review'})).toBeDefined();
     await driveConfirm(root);
@@ -257,9 +265,6 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     jest.mocked(submitOfframpStep).mockResolvedValue({kind: 'settled', blockIndex: '1'});
 
     const root = await renderSheet();
-    await act(async () => {
-      root.root.findByProps({testID: 'withdraw-address-input'}).props.onChangeText(ETH_DEST);
-    });
     await act(async () => {
       root.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
     });

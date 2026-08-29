@@ -112,7 +112,7 @@ export type DpayCoreApi = {
   // form (spec-canonical only), resolving `{owner, subaccountHex}` where subaccountHex is "" for
   // the default subaccount — so the common case feeds straight into icpTransferArg.
   icpValidateIcrcAccount(text: string): Promise<IcpAccountParts>;
-  // The LEGACY 64-hex ICP account-identifier namespace (what exchanges hand out). Disjoint from
+  // The 64-hex ICP account-identifier namespace (what exchanges hand out). Disjoint from
   // principals — a one-way hash of the owner, so it is reachable ONLY via the ICP ledger's legacy
   // `transfer`, never via icrc1_transfer. CRC-checked; canonical lowercase out.
   icpValidateAccountId(text: string): Promise<string>;

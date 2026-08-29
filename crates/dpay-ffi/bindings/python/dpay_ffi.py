@@ -468,7 +468,7 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_generate_keypair() != 36207:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal() != 40452:
+    if lib.uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal() != 31976:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_approve_arg() != 32600:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -496,7 +496,7 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_ingress_expiry() != 40958:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_icp_legacy_transfer_arg() != 15723:
+    if lib.uniffi_dpay_ffi_checksum_func_icp_legacy_transfer_arg() != 30075:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_minter_account_arg() != 4862:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -514,7 +514,7 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 47706:
+    if lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 26912:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_validate_icrc_account() != 12721:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -3398,7 +3398,7 @@ def generate_keypair() -> "KeyPair":
 
 def icp_account_id_from_principal(owner_text: "str",subaccount_hex: "typing.Optional[str]") -> "str":
     """
-    Derive the legacy account identifier owned by `owner_text` on `subaccount_hex`. The app uses it
+    Derive the account identifier owned by `owner_text` on `subaccount_hex`. The app uses it
     for the self-send guard: a user who pastes their OWN exchange-style address must be warned, and
     the only way to recognise it is to derive ours and compare (the hash cannot be inverted).
     """
@@ -3580,8 +3580,12 @@ def icp_legacy_transfer_arg(to_account_id_hex: "str",from_subaccount_hex: "typin
     `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
     optional expected_allowance/expires_at/memo/from_subaccount/fee.
     `transfer` argument bytes for the ICP ledger's LEGACY method — the ONLY way to pay a 64-hex
-    account identifier (see `AccountIdentifier` in `dpay-icp`). ICP-ledger-only; every ck*/ICRC-1
-    ledger is principal-addressed and has no such method.
+    account identifier (see `AccountIdentifier` in `dpay-icp`). ICP-ledger-only; every chain-key and
+    ICRC-1 ledger is principal-addressed and has no such method.
+
+    NB: never write a `*` immediately followed by `/` in a doc comment on a `#[uniffi::export]` item.
+    UniFFI copies these verbatim into the generated Kotlin `/** … */` block, where that sequence
+    CLOSES the comment and breaks the Android build — a failure Rust itself cannot see.
 
     Amounts are decimal strings like every other builder here, but the ledger's `Tokens` is a
     `nat64`, so a value above u64::MAX is refused rather than silently truncated. `fee` is
@@ -3761,7 +3765,7 @@ def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[st
 
 def icp_validate_account_id(text: "str") -> "str":
     """
-    Validate a LEGACY 64-hex ICP account identifier and return it canonicalised (lowercase).
+    Validate a 64-hex ICP account identifier and return it canonicalised (lowercase).
     A different address namespace from a principal — see `AccountIdentifier` in `dpay-icp` for why
     it is reachable only through the ICP ledger's legacy `transfer`. The embedded CRC32 is checked,
     so a truncated or mistyped exchange deposit address fails HERE, not on-chain.

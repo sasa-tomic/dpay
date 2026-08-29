@@ -22,10 +22,11 @@
 // the withdraw surface.
 //
 // Selector contract: `asset-ckusdc-select` (the ckUSDC row whole-row select), `btn-pay-send`
-// (Pay → "Send to address"), `withdraw-address-input`, `withdraw-amount-input`,
-// `withdraw-gas-note` (the ckETH-gas-dependency note — renders ONLY for a ckERC20 token),
-// `btn-withdraw-confirm`, `withdraw-status`, `btn-pay-scan` (flip back to scan). Asset
-// segregation note: ckUSDC is currency 2 + ckETH currency 6, SEPARATE assets from the `$`
+// (Pay → "Send to address"), `send-address-input` (the ONE shared destination field —
+// SendSheet/AddressField own it), `send-status` (the route disclosure under the field),
+// `withdraw-amount-input`, `withdraw-gas-note` (the ckETH-gas-dependency note — renders ONLY for a
+// ckERC20 token), `btn-withdraw-confirm`, `withdraw-status`, `btn-pay-scan` (flip back to scan).
+// Asset segregation note: ckUSDC is currency 2 + ckETH currency 6, SEPARATE assets from the `$`
 // DEMO_USD header (currency 0).
 import { setup, assert, assertEq, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
@@ -95,9 +96,18 @@ export async function run() {
     console.log('[48-ckusdc-withdraw] selecting ckUSDC → Pay → Send to address…');
     await selectCurrency(driver, 'ckusdc');
     await openPaySend(driver);
-    await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
+    await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
 
-    // 5. Assert the ckETH gas-dependency note renders (Fork-C — no-swap honesty). It appears ONLY
+    // 5. Paste the Ethereum destination into the ONE shared field. A native-chain address routes to
+    //    the chain-key offramp, so the route line quotes ETHEREUM's economics and the WithdrawSheet
+    //    body renders below it, family-dispatched to the dual-ledger withdraw_erc20 path.
+    await driver.type('send-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
+    const routeTxt = await driver.readText('send-status', { timeoutMs: 4_000 });
+    // (ckERC20 carries no minter floor — withdrawMinRaw 0 — so the minimum reads a bare "0 USDC".)
+    assertEq(routeTxt, 'Ethereum · about 1 min', 'the route line discloses the Ethereum burn, with NO minimum clause (ckERC20 has no floor — "minimum 0" would read as a malfunction)');
+    await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
+
+    // 5b. Assert the ckETH gas-dependency note renders (Fork-C — no-swap honesty). It appears ONLY
     //    for a ckERC20 token (token_contract Some); the native-ETH sheet does NOT show it (flow 44
     //    asserts its absence). This is the honest "you need ckETH for gas" UX — dpay never
     //    converts ckUSDC→ckETH.
@@ -106,8 +116,7 @@ export async function run() {
     assert(gasNoteBody.includes('ckETH for gas'), `the gas-dependency note should mention ckETH. body excerpt:\n${gasNoteBody.slice(0, 500)}`);
     console.log('[48-ckusdc-withdraw] ✓ gas-dependency note renders ("You need ckETH for gas")');
 
-    // 6. Enter the ETH destination + amount (in USDC, >= the 0 floor), then confirm.
-    await driver.type('withdraw-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
+    // 6. Enter the amount (in USDC, >= the 0 floor), then confirm.
     await driver.type('withdraw-amount-input', WITHDRAW_USDC, { timeoutMs: 4_000 });
     // The review card appears once a valid amount is entered — proves the app parsed the USDC amount
     // at 6-dec precision. fmtAsset(1e6, 6, 'USDC') = "1.000000 USDC".

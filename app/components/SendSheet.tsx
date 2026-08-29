@@ -5,40 +5,60 @@ import {S} from '../styles';
 import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
-import type {CurrencyDescriptor} from '../config/catalog';
-import {displayName, fmtCurrencyAmount, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
+import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
+import {displayName, fmtCurrencyAmount, isTestnetCurrency, testnetDisplayName, isValidDestinationAddress} from '../config/catalog';
 import {detectAddressShape, routeForShape, chainNameOfShape} from '../lib/destination';
 import {prepareTransfer, prepareLegacyTransfer, submitTransfer, decodeLegacyReply, type RailPrepared, type RailOutcome} from '../services/rail';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {DpayCore} from '../services/native';
 import {AddressField, shortAddress} from './AddressField';
+import {WithdrawSheet} from './WithdrawSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {IconCheck, IconClock} from './icons';
 import {M} from '../i18n';
 
+/** Where an `icrc1_transfer` actually executes. Every ledger in this catalog is an IC canister, so
+ *  this is a fact about the RAIL, not about the asset — unlike `descriptor.network`, which names
+ *  the asset's BACKING chain ("Bitcoin" for ckBTC). Wire/display proper noun, never translated. */
+const IC_NETWORK = 'Internet Computer';
+
 /**
- * Send an IC asset to an EXTERNAL address — the direct rails: an `icrc1_transfer` to any ICRC-1
- * account, or the ICP ledger's legacy `transfer` to a 64-hex account identifier.
+ * THE send-to-address surface for every IC asset. ONE destination field; the address decides the
+ * rail, so the user never picks a mechanism — they paste an address and are told what will happen.
  *
- * ONE destination field decides which. `app/lib/destination.ts` classifies what was pasted or
- * scanned and this sheet renders the consequence BEFORE the user commits: which chain, how long,
- * what fee — or, when the address cannot be used, exactly what it is and what to do instead.
+ * `app/lib/destination.ts` classifies what was pasted or scanned, and this sheet renders the
+ * consequence BEFORE the user commits: which chain, how long, what fee — or, when the address
+ * cannot be used with this asset, exactly what it is and what to do instead.
  *
- * NOT the chain-key offramp. Burning ckBTC/ckETH to a native chain stays in `WithdrawSheet`, which
- * owns the multi-step approve→minter sequence and its double-burn resume discipline; this sheet is
- * a single envelope. The Pay tab's send sub-mode picks between the two by the ROUTE the typed
- * destination resolves to, so the user never chooses a mechanism — they paste an address.
+ * Three routes, two engines:
+ *   • an IC account       → `icrc1_transfer` on the asset's own ledger. Available to EVERY IC
+ *                           asset, which is what lets ckBTC go straight to an Internet Computer
+ *                           wallet instead of round-tripping through Bitcoin. Handled here.
+ *   • a 64-hex ICP account→ the ICP ledger's legacy `transfer`. ICP-ledger-only. Handled here.
+ *   • a native address    → the chain-key burn, DELEGATED to `WithdrawSheet`, which owns the
+ *                           multi-step approve→minter sequence and its double-burn resume
+ *                           discipline. That machinery is deliberately not duplicated here; this
+ *                           sheet only supplies the destination it already validated.
+ *
+ * The deposit side already offered both directions ("Already on the Internet Computer?" on the ck*
+ * sheets, 2026-08-29). Until this, sending back out the same way was impossible — the asymmetry
+ * this surface closes.
  *
  * Envelope discipline (rail-wide): a prepared envelope is submitted VERBATIM and never re-signed —
  * a fresh signature is a fresh request_id, i.e. a second payment. An 'unknown' outcome is honest
- * pending, never a failure, and the retained envelope is what a retry would resubmit.
+ * pending, never a failure.
  */
 export function SendSheet({
-  identity, desc, balance, onSent, onClose,
+  identity, catalog, desc, balance, family, display, tokenContract, onSent, onClose,
 }: {
   identity: Identity;
+  catalog: CurrencyDescriptor[];
   desc: CurrencyDescriptor;
   balance: string;
+  /** The chain-key family, when this asset has one — enables the NATIVE route. */
+  family: MinterFamily | null;
+  display: FamilyDisplay | null;
+  tokenContract: string | null;
   onSent: () => void;
   onClose: () => void;
 }) {
@@ -62,7 +82,12 @@ export function SendSheet({
   const displayDecimals = desc.display_decimals ?? decimals;
   const unit = desc.backing_symbol ?? desc.symbol ?? '';
   const assetName = isTestnetCurrency(desc) ? testnetDisplayName(desc) : displayName(desc);
-  const feeRaw = desc.fee ?? '0';
+  // The ledger fee, when the catalog registers one. NULL means the row carries no fee and the
+  // envelope is signed with `fee: None` — the ledger then charges its own default. We do NOT know
+  // that number, so nothing on this screen may state it: printing "fee 0" would be a false claim
+  // about money (and ckBTC's row is exactly this case).
+  const feeRaw: string | null = desc.fee;
+  const feeKnown = feeRaw != null;
   const assetKey = `ic:${desc.currency}`;
   const fmt = useCallback(
     (raw: string) => fmtAsset(raw, decimals, unit, displayDecimals),
@@ -111,16 +136,22 @@ export function SendSheet({
   // Fee is charged ON TOP of the amount by the ledger, so the spendable maximum is balance − fee.
   const maxSpendable = useMemo(() => {
     const b = BigInt(balance || '0');
-    const f = BigInt(feeRaw || '0');
+    const f = BigInt(feeRaw ?? '0');
     return b > f ? (b - f).toString() : '0';
   }, [balance, feeRaw]);
-  const total = useMemo(() => (BigInt(raw || '0') + BigInt(feeRaw || '0')).toString(), [raw, feeRaw]);
-  const overTotal = cmpRaw(total, balance) > 0;
+  // Only computable when the fee is known; otherwise the review omits it rather than guessing.
+  const total = useMemo(
+    () => (feeKnown ? (BigInt(raw || '0') + BigInt(feeRaw)).toString() : null),
+    [raw, feeRaw, feeKnown],
+  );
+  const overTotal = cmpRaw(total ?? raw, balance) > 0;
   const isSelf = !!resolved?.ok && !!selfAccount && (
     (resolved.kind === 'icrc' && resolved.owner === selfAccount.principal && resolved.subaccountHex === '') ||
     (resolved.kind === 'icp-legacy' && resolved.accountId === selfAccount.accountId)
   );
-  const canSend = !!resolved?.ok && raw !== '0' && !overTotal && phase === 'form';
+  // The native route is confirmed by WithdrawSheet's own button, not this one.
+  const directRoute = resolved?.ok === true && resolved.kind !== 'native';
+  const canSend = directRoute && raw !== '0' && !overTotal && phase === 'form';
 
   // The one status line under the address field: route disclosure when usable, the specific reason
   // when not. Never a bare "invalid address" — every branch names what the address IS.
@@ -129,14 +160,36 @@ export function SendSheet({
     if (resolved == null) return null; // still resolving — say nothing rather than flash a refusal
     if (!resolved.ok) return {text: resolved.message, tone: 'bad'};
     if (isSelf) return {text: M.withdraw.send.selfWarning, tone: 'warn'};
+    // A native destination is disclosed with ITS chain's economics — minutes and a minimum, not
+    // the IC's seconds-and-a-flat-fee. Showing the IC numbers for a Bitcoin withdrawal would be
+    // the single most misleading thing this screen could say.
+    if (resolved.kind === 'native' && display) {
+      // A zero floor is not a minimum — saying "minimum 0 USDC" reads as a malfunction. Only the
+      // chains that actually impose one (BTC, native ETH) get the clause.
+      return {
+        text: display.withdrawMinRaw > 0
+          ? M.withdraw.send.routeNative(
+              display.networkLabel,
+              display.blockMin,
+              fmtAsset(String(display.withdrawMinRaw), decimals, display.nativeAsset, display.amountDecimals),
+            )
+          : M.withdraw.send.routeNativeNoMin(display.networkLabel, display.blockMin),
+        tone: 'ok',
+      };
+    }
+    // The settlement chain for BOTH direct routes is the Internet Computer — that is where an
+    // icrc1_transfer executes, for every asset in this catalog. `desc.network` is the BACKING
+    // chain (ckBTC's is "Bitcoin"), so using it here would tell a ckBTC sender their IC transfer
+    // settles on Bitcoin. It does not.
+    if (!feeKnown) return {text: M.withdraw.send.routeIcrcUnknownFee(IC_NETWORK), tone: 'ok'};
     const feeText = fmt(feeRaw);
     return {
       text: resolved.kind === 'icp-legacy'
         ? M.withdraw.send.routeLegacy(feeText)
-        : M.withdraw.send.routeIcrc(desc.network ?? 'Internet Computer', feeText),
+        : M.withdraw.send.routeIcrc(IC_NETWORK, feeText),
       tone: 'ok',
     };
-  }, [address, resolved, isSelf, fmt, feeRaw, desc.network]);
+  }, [address, resolved, isSelf, fmt, feeRaw, feeKnown, display, decimals]);
 
   async function send() {
     if (!canSend || !resolved?.ok) return;
@@ -148,7 +201,7 @@ export function SendSheet({
       let out: RailOutcome;
       if (resolved.kind === 'icp-legacy') {
         prepared = await prepareLegacyTransfer(identity.secretHex, {
-          ledger: desc.ledger, toAccountId: resolved.accountId, amountE8s: raw, feeE8s: feeRaw,
+          ledger: desc.ledger, toAccountId: resolved.accountId, amountE8s: raw, feeE8s: feeRaw ?? '',
         });
         out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500}, decodeLegacyReply);
       } else {
@@ -242,6 +295,42 @@ export function SendSheet({
         testIDPrefix="send"
       />
 
+      {/* Naming is offered once the destination is usable, ABOVE the route split, so a chain-key
+          destination can be named too — it is saved by the offramp path on settle just as the
+          direct path saves its own. */}
+      {resolved?.ok && saved.every(sv => sv.address !== resolved.destination) ? (
+        <TextInput
+          testID="send-save-name"
+          style={S.withdrawAddrInput}
+          value={saveName}
+          onChangeText={setSaveName}
+          placeholder={M.withdraw.send.saveNamePlaceholder}
+          placeholderTextColor={C.sub2}
+          autoCapitalize="words"
+        />
+      ) : null}
+
+      {/* NATIVE route: hand off to the chain-key offramp engine, which owns the amount rules
+          (per-chain minimum, ckERC20 gas) and the retained/resume double-burn discipline. It
+          renders no destination field of its own — this one above is the only one. */}
+      {resolved?.ok && resolved.kind === 'native' && family && display ? (
+        <WithdrawSheet
+          identity={identity}
+          catalog={catalog}
+          currency={desc.currency}
+          decimals={decimals}
+          display={display}
+          family={family}
+          tokenContract={tokenContract}
+          balance={balance}
+          address={resolved.destination}
+          onResumeAddress={setAddress}
+          onSaveAddress={a => { void rememberAddress(assetKey, a, saveName.trim(), Date.now()).then(setSaved); }}
+          onClose={onClose}
+          onWithdrawn={onSent}
+        />
+      ) : (
+      <>
       <Text style={S.inputLabel}>{M.withdraw.amountLabel(unit)}</Text>
       <View style={S.amtRow}>
         <TextInput
@@ -282,31 +371,23 @@ export function SendSheet({
           </View>
           <View style={S.reviewRow}>
             <Text style={S.reviewRowLabel}>{M.withdraw.send.networkRow}</Text>
-            <Text style={S.reviewRowValue}>{desc.network ?? 'Internet Computer'}</Text>
+            <Text style={S.reviewRowValue}>{IC_NETWORK}</Text>
           </View>
           <View style={S.reviewRow}>
             <Text style={S.reviewRowLabel}>{M.withdraw.send.feeLine('')}</Text>
-            <Text testID="send-review-fee" style={S.reviewRowValue}>{fmt(feeRaw)}</Text>
+            <Text testID="send-review-fee" style={S.reviewRowValue}>
+              {feeKnown ? fmt(feeRaw) : M.withdraw.send.feeUnknown}
+            </Text>
           </View>
-          <View style={S.reviewRow}>
-            <Text style={S.reviewRowLabel}>{M.withdraw.send.totalLine('')}</Text>
-            <Text testID="send-review-total" style={S.reviewRowValue}>{fmt(total)}</Text>
-          </View>
+          {/* No total without a known fee — a "total" that silently equals the amount would
+              understate what leaves the account. */}
+          {total != null ? (
+            <View style={S.reviewRow}>
+              <Text style={S.reviewRowLabel}>{M.withdraw.send.totalLine('')}</Text>
+              <Text testID="send-review-total" style={S.reviewRowValue}>{fmt(total)}</Text>
+            </View>
+          ) : null}
         </View>
-      ) : null}
-
-      {/* Naming is optional and offered only once the destination is usable — an address worth
-          naming is one the user is about to send to. */}
-      {resolved?.ok && saved.every(s => s.address !== resolved.destination) ? (
-        <TextInput
-          testID="send-save-name"
-          style={S.withdrawAddrInput}
-          value={saveName}
-          onChangeText={setSaveName}
-          placeholder={M.withdraw.send.saveNamePlaceholder}
-          placeholderTextColor={C.sub2}
-          autoCapitalize="words"
-        />
       ) : null}
 
       {err ? <Text testID="send-err" style={S.err}>{err}</Text> : null}
@@ -325,6 +406,8 @@ export function SendSheet({
       </Pressable>
 
       {Platform.OS === 'web' ? <Text style={S.dim2}>{M.withdraw.pressEsc}</Text> : null}
+      </>
+      )}
     </View>
   );
 }
@@ -334,6 +417,7 @@ export function SendSheet({
 type ResolvedDestination =
   | {ok: true; kind: 'icrc'; destination: string; owner: string; subaccountHex: string}
   | {ok: true; kind: 'icp-legacy'; destination: string; accountId: string}
+  | {ok: true; kind: 'native'; destination: string; family: MinterFamily}
   | {ok: false; message: string};
 
 /**
@@ -380,8 +464,20 @@ export async function resolveDestination(text: string, desc: CurrencyDescriptor)
       return {ok: false, message: M.withdraw.send.refuseMistypedIc};
     }
   }
-  // A native route reached the direct-send sheet — a wiring bug, not a user error. Fail closed.
-  return {ok: false, message: M.withdraw.send.refuseUnrecognised(assetName)};
+  // A native-chain destination for this asset's own chain: the minter burn. Validated HERE, with
+  // the same strict check the offramp used to run on its own, so that EVERY route refuses in the
+  // one shared status line. Leaving it to the offramp body meant a short-but-plausible Bitcoin
+  // address passed the shape test, opened the burn form, and only then said "not a valid BTC
+  // address" — one refusal in a different place from all the others.
+  //
+  // Two stages by design, mirroring the IC path (shape → core CRC parse): `detectAddressShape`
+  // says WHICH namespace, `isValidDestinationAddress` says whether it is well-formed.
+  if (!isValidDestinationAddress(routed.route.family, text)) {
+    return {ok: false, message: M.withdraw.badAddress(desc.backing_symbol ?? assetName)};
+  }
+  // The text is kept VERBATIM — the minter is the final authority and a native address has no
+  // canonical re-spelling we are entitled to impose (base58 is case-significant).
+  return {ok: true, kind: 'native', destination: text.trim(), family: routed.route.family};
 }
 
 /** A fresh 16-byte memo, hex. Not a reconciliation key (a send has no open request to reconcile

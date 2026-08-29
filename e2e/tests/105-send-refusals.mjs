@@ -8,8 +8,8 @@
 // Four refusals, all on VCHF (a no-minter direct-ICRC asset that settles only on the IC):
 //   1. a real Bitcoin address        → named as Bitcoin, told VCHF settles on the Internet Computer
 //   2. a real Ethereum address       → named as Ethereum, same instruction
-//   3. a legacy 64-hex ICP account   → named as a legacy ICP account address; told only ICP itself
-//                                      can be sent to one, and to ask for the principal instead
+//   3. a 64-hex account identifier  → named as an ICP account identifier; told only ICP itself can
+//                                      be sent to one, and to ask for the principal instead
 //   4. a truncated IC principal      → the CRC catches it; told it is incomplete or mistyped
 //
 // (3) is the interesting one: the address form is entirely REAL and reachable — but only on the ICP
@@ -32,8 +32,8 @@ const SEED = 500_000_000;
 // Real addresses of each kind — the point is that they are VALID somewhere, just not here.
 const BTC_ADDR = 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
 const ETH_ADDR = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
-// The legacy account identifier of the ICRC-1 spec's k2t6j-…-6ae principal (CRC-valid).
-const LEGACY_ACCOUNT_ID = '051b05839339f89053454a4b9865ea0452a4bffe2b1cd41f4982bad10c1e637c';
+// The account identifier of the ICRC-1 spec's k2t6j-…-6ae principal (CRC-valid).
+const ACCOUNT_ID = '051b05839339f89053454a4b9865ea0452a4bffe2b1cd41f4982bad10c1e637c';
 // A real principal with its last character changed — shape-valid, checksum-invalid.
 const TRUNCATED_PRINCIPAL = 'k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6af';
 
@@ -41,8 +41,8 @@ export const meta = {
   id: '105',
   name: 'send-refusals',
   journey: 'withdraw',
-  covers: ['send-to-address', 'wrong-chain', 'legacy-account-id', 'crc', 'fail-closed', 'instructions'],
-  verifies: 'Send-to-address refusals are specific and actionable: a Bitcoin / Ethereum address is named as such and pointed at the right network, a legacy 64-hex ICP account is named and the principal asked for instead, and a checksum-broken principal is called incomplete — each with the send button left disabled.',
+  covers: ['send-to-address', 'wrong-chain', 'account-identifier', 'crc', 'fail-closed', 'instructions'],
+  verifies: 'Send-to-address refusals are specific and actionable: a Bitcoin / Ethereum address is named as such and pointed at the right network, a 64-hex ICP account identifier is named and the principal asked for instead, and a checksum-broken principal is called incomplete — each with the send button left disabled.',
   timeoutMs: 30000,
 };
 
@@ -85,9 +85,9 @@ export async function run() {
         why: 'names the pasted chain AND the chain VCHF actually settles on',
       },
       {
-        name: 'legacy 64-hex ICP account',
-        text: LEGACY_ACCOUNT_ID,
-        expect: ['legacy ICP account', 'principal'],
+        name: '64-hex ICP account identifier',
+        text: ACCOUNT_ID,
+        expect: ['ICP account identifier', 'principal'],
         why: 'names the address form and asks for the principal instead',
       },
       {

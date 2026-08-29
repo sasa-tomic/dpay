@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **99 flows**
-> (98 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **102 flows**
+> (101 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (7) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (10) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -55,7 +55,7 @@ wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 06 | request-qr | Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo). | request-qr, encode, merchant, to-name, memo |
+| 06 | request-qr | Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo); Share emits the payment link for the SAME request (own principal, exact asset/chain/amount, ref = the request nonce). | request-qr, encode, merchant, to-name, memo, pay-link, share |
 | 07 | scan-pay | Payer scans (auto-sign, one press): two-wallet real ed25519 sign + relay settle → 'Paid ✓', balances correct. | scan, sign, settle, receipt, history, recipient-name |
 | 08 | merchant-settle | Merchant scans the payer's signed icrc1_transfer envelope, submits it to the IC gateway → recipient 'Received' confirmation. | receive, settle, confirmation |
 | 09 | double-spend | identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard) | pay, replay-safety, confirmation |
@@ -112,12 +112,15 @@ wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
+| 104 | send-to-address | Send VCHF to an external IC account: the Pay tab exposes "Send to address" for a no-minter asset, the pasted principal is CRC-validated and its route disclosed with the fee, one icrc1_transfer settles, and both the sender (−amount−fee) and the recipient (+amount) move at the gateway; the UI balance follows. | send-to-address, direct-icrc, vchf, icrc1_transfer, route-disclosure, fee, balance-delta, ui-balance-delta |
+| 105 | send-refusals | Send-to-address refusals are specific and actionable: a Bitcoin / Ethereum address is named as such and pointed at the right network, a 64-hex ICP account identifier is named and the principal asked for instead, and a checksum-broken principal is called incomplete — each with the send button left disabled. | send-to-address, wrong-chain, account-identifier, crc, fail-closed, instructions |
+| 106 | send-auto-route | One destination field routes ckBTC by what is pasted: a Bitcoin address discloses the Bitcoin chain (~10 min, 0.0005 minimum) and shows the burn body; an IC principal discloses the Internet Computer and sends a plain icrc1_transfer that credits the recipient on the ckBTC ledger — a route that did not exist before. | send-to-address, auto-route, ckbtc, icrc1_transfer, route-disclosure, balance-delta |
 | 15 | withdraw | Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.00050000 BTC). | withdraw, icrc2-approve, retrieve_btc_with_approval, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
-| 18 | withdraw-errors | Withdraw error paths: below-min / over-balance / bad-addr warnings disable the confirm button; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit. | withdraw-errors, below-min, over-balance, bad-addr, rail-rejection, money-safe |
+| 18 | withdraw-errors | Withdraw error paths: below-min / over-balance warnings disable the confirm button, a wrong-chain destination is refused by name in send-status and renders no offramp body at all; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit. | withdraw-errors, below-min, over-balance, wrong-chain, rail-rejection, money-safe |
 | 44 | cketh-withdraw | Withdraw native ckETH: faucet-fund at the principal → enter 0x addr + ETH amount → query the minter gas price + sign approve + withdraw_eth on-device → gateway burns → "Withdrawn ✓"; balance debits fee+amount at both the gateway AND the UI (row drops to 3.999998 ETH). | native-eth-withdraw, cketh, family-dispatch, withdraw, icrc2-approve, withdraw_eth, gas-quote, sign, settle, balance-delta, ui-balance-delta |
 | 48 | ckusdc-withdraw | ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.990000 USDC. | ckerc20-offramp, ckusdc, withdraw, icrc2-approve, withdraw_erc20, dual-ledger-gas, gas-note, sign, settle, balance-delta, ui-balance-delta |
 | 52 | sol-withdraw | SOL withdraw: select SOL → Pay tab "Send to address" → enter addr+amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-tab-ia, sign |
-| 56 | withdraw-saved-addr | A successful rail withdraw (approve + retrieve settled on /api/v2) persists the destination (AsyncStorage); reopening the sheet shows a "Use last" chip that pre-fills the address input. | saved-address, btn-withdraw-saved, withdraw-persist |
+| 56 | withdraw-saved-addr | A successful chain-key send (approve + retrieve settled on /api/v2) writes the destination to the per-asset address book; after the send surface is closed and REMOUNTED the book is re-read from storage and the destination renders as a saved chip that pre-fills the shared field on tap. | saved-address, address-book, send-saved, withdraw-persist |
 | 77 | sol-usdc-withdraw | USDC send to address: happy path (USDC units + rent disclosure note → Sent ✓) and the below-rent pre-check failure (friendly error, no Sent). | sol-usdc-withdraw, spl-transfer, ata-note, rent-precheck, sol-send |
 
 ### NFC (tap-to-pay)

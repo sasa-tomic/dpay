@@ -21,10 +21,11 @@
 // crosses an HTTP boundary is a decimal STRING (the relay's U64String parses it losslessly).
 //
 // Selector contract: `asset-cketh-select` (the native-ETH row whole-row select), `btn-pay-send`
-// (Pay → "Send to address"), `withdraw-address-input`, `withdraw-amount-input`,
-// `btn-withdraw-confirm`, `withdraw-status`, `btn-copy-destination`, `btn-pay-scan` (flip back
-// to scan). Asset segregation note: native ETH is currency 6, a SEPARATE asset from the `$`
-// DEMO_USD header (currency 0) — the withdraw debits currency 6 only.
+// (Pay → "Send to address"), `send-address-input` (the ONE shared destination field —
+// SendSheet/AddressField own it), `send-status` (the route disclosure under the field),
+// `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`, `btn-copy-destination`,
+// `btn-pay-scan` (flip back to scan). Asset segregation note: native ETH is currency 6, a SEPARATE
+// asset from the `$` DEMO_USD header (currency 0) — the withdraw debits currency 6 only.
 import { setup, assert, assertEq, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
 
 const NATIVE_ETH_CURRENCY = 6; // native ckETH — CkEthErc20 + token_contract == null (family dispatch)
@@ -85,15 +86,24 @@ export async function run() {
     console.log('[44-cketh-withdraw] selecting ckETH → Pay → Send to address…');
     await selectCurrency(driver, 'cketh');
     await openPaySend(driver);
-    await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
+    await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
 
-    // 4b. Family-dispatch discriminator: token_contract == null → NO "ckETH for gas" hint (that
-    //     note only renders for ckERC20 sends — flow 48 asserts its presence there).
+    // 5. Paste the ETH destination into the ONE shared field. A native-chain address routes to the
+    //    chain-key offramp, so the route line quotes ETHEREUM's economics and the WithdrawSheet
+    //    body renders below it, family-dispatched to the withdraw_eth branch.
+    await driver.type('send-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
+    const routeTxt = await driver.readText('send-status', { timeoutMs: 4_000 });
+    assertEq(routeTxt, 'Ethereum · about 1 min · minimum 0.010000 ETH', 'the route line discloses the Ethereum burn before the user commits');
+    await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
+
+    // 5b. Family-dispatch discriminator, asserted on the RENDERED native body: token_contract ==
+    //     null → NO "ckETH for gas" hint (that note only renders for ckERC20 sends — flow 48
+    //     asserts its presence there). Checked only once the body exists, so the absence is a real
+    //     dispatch fact rather than the body simply not being on screen yet.
     const gasNotePresent = await driver.isPresent('withdraw-gas-note');
     assert(!gasNotePresent, 'native-ETH sheet must NOT show the ckERC20 "ckETH for gas" note (family dispatch)');
 
-    // 5. Enter the ETH destination + amount (in ETH, >= the 0.01 ETH local floor), then confirm.
-    await driver.type('withdraw-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
+    // Enter the amount (in ETH, >= the 0.01 ETH local floor), then confirm.
     await driver.type('withdraw-amount-input', WITHDRAW_ETH, { timeoutMs: 4_000 });
     // The review card appears once a valid amount is entered — proves the app parsed the ETH amount
     // at 18-dec Wei precision (display shows 6 fractional places via display_decimals).

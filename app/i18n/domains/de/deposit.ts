@@ -192,8 +192,6 @@ export const withdrawDe: WithdrawMessages = {
     sendToNative: (networkLabel, nativeAsset) => `Sende dein ${networkLabel} an eine native ${nativeAsset}-Adresse`,
     availableMin: (available, min) => `Verfügbar: ${available} · min. ${min}`,
     addressLabel: asset => `${asset}-Adresse`,
-    useLastLabel: 'Zuletzt gespeicherte Adresse verwenden',
-    useLast: address => `Zuletzt: ${address}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Unter der Mindestauszahlung von ${min}.`,
     gasNote: 'Du brauchst ckETH für Gas. Zahle zuerst ckETH ein, falls du keins hast.',
@@ -214,13 +212,16 @@ export const withdrawDe: WithdrawMessages = {
     scanCancel: 'Stattdessen von Hand eingeben',
 
     routeIcrc: (network, fee) => `${network} · in Sekunden da · Gebühr ${fee}`,
+    routeIcrcUnknownFee: network => `${network} · in Sekunden da · es gilt die Gebühr des Ledgers`,
+    feeUnknown: 'vom Ledger festgelegt',
     routeLegacy: fee => `ICP-Konto · in Sekunden da · Gebühr ${fee}`,
     routeNative: (chain, minutes, min) => `${chain} · etwa ${minutes} Min. · Minimum ${min}`,
+    routeNativeNoMin: (chain, minutes) => `${chain} · etwa ${minutes} Min.`,
 
     refuseWrongChain: (pastedChain, asset, assetChain) =>
       `Das ist eine ${pastedChain}-Adresse. ${asset} wird auf ${assetChain} abgewickelt und kann sie deshalb nicht erreichen — füge stattdessen eine ${assetChain}-Adresse ein.`,
     refuseLegacyNotIcp: asset =>
-      `Das ist eine alte ICP-Kontoadresse (64 Zeichen). Nur ICP selbst kann dorthin gesendet werden — für ${asset} brauchst du den Internet-Computer-Principal des Empfängers (die Schreibweise mit Bindestrichen).`,
+      `Das ist ein ICP-Account-Identifier — die Form mit 64 Zeichen. Dorthin kann nur ICP selbst gesendet werden; für ${asset} brauchst du den Internet-Computer-Principal des Empfängers (die Schreibweise mit Bindestrichen).`,
     refuseUnrecognised: asset => `Das sieht nicht nach einer Adresse aus, an die ${asset} gesendet werden kann.`,
     refuseMistypedIc: 'Diese Internet-Computer-Adresse ist unvollständig oder vertippt — prüfe, ob du sie ganz kopiert hast.',
     refuseMistypedLegacy: 'Diese ICP-Kontoadresse ist unvollständig oder vertippt — prüfe, ob du alle 64 Zeichen kopiert hast.',
@@ -231,9 +232,7 @@ export const withdrawDe: WithdrawMessages = {
     totalLine: total => `Gesamt ${total}`,
 
     savedTitle: 'Gespeicherte Adressen',
-    saveLabel: 'Diese Adresse speichern',
     saveNamePlaceholder: 'Name vergeben (optional)',
-    saveConfirm: 'Speichern',
     forgetLabel: address => `Gespeicherte Adresse ${address} entfernen`,
     unnamed: 'Ohne Namen',
 

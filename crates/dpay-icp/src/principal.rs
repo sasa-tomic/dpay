@@ -189,7 +189,7 @@ impl Account {
 /// 32 bits / 5 bits-per-char = 7 chars, RFC4648 unpadded.
 const CHECKSUM_LEN: usize = 7;
 
-/// The ICP ledger's LEGACY account identifier: 32 bytes, `CRC32(h) BE ‖ h` where
+/// The ICP ledger's ACCOUNT IDENTIFIER: 32 bytes, `CRC32(h) BE ‖ h` where
 /// `h = SHA224("\x0Aaccount-id" ‖ owner ‖ subaccount)`.
 ///
 /// This is a DIFFERENT address namespace from a principal / ICRC-1 account, and the two are
@@ -495,7 +495,7 @@ mod tests {
         assert!(Account::from_text("k2t6j2nvnp4zjm3-25dtz6xhaac7boj5gayfoj3xs-i43lp-teztq-6ae-6cc627i.1").is_err());
     }
 
-    /// The legacy 64-hex ICP account identifier: CRC-checked, case-folded, canonical lowercase out.
+    /// The 64-hex ICP account identifier: CRC-checked, case-folded, canonical lowercase out.
     #[test]
     fn account_identifier_text_is_crc_checked() {
         let owner = Principal::from_text("k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae").unwrap();

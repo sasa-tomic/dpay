@@ -6,12 +6,10 @@ import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
-import {isValidDestinationAddress} from '../config/catalog';
 import {prepareBtcWithdrawal, prepareEthWithdrawal, prepareErc20Withdrawal, submitOfframpStep, fetchGasFeeWei} from '../services/rail';
 import type {OfframpStep} from '../services/rail';
 import {planOfframpConfirm, type RetainedOfframp} from '../services/offrampRetry';
 import {loadOfframp, saveOfframp, clearOfframp} from '../services/offrampPersist';
-import {loadSavedWithdrawAddr, saveWithdrawAddr} from '../services/withdraw';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {IconCheck, IconCopy} from './icons';
@@ -38,13 +36,11 @@ import {M} from '../i18n';
  * amount from its own ledger (dual-ledger withdraw_erc20). dpay NEVER converts ckUSDC→ckETH; the
  * user MUST independently hold ckETH for gas (the minter fails closed otherwise — honest retryable).
  */
-export function WithdrawSheet({identity, catalog, currency, decimals, display, family, tokenContract, balance, onClose, onWithdrawn}: {identity: Identity; catalog: CurrencyDescriptor[]; currency: number; decimals: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; onClose: () => void; onWithdrawn: () => void}) {
-  const [address, setAddress] = useState('');
+export function WithdrawSheet({identity, catalog, currency, decimals, display, family, tokenContract, balance, address, onResumeAddress, onSaveAddress, onClose, onWithdrawn}: {identity: Identity; catalog: CurrencyDescriptor[]; currency: number; decimals: number; display: FamilyDisplay; family: MinterFamily; tokenContract: string | null; balance: string; address: string; onResumeAddress: (a: string) => void; onSaveAddress: (a: string) => void; onClose: () => void; onWithdrawn: () => void}) {
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<{amount: string; btcAddress: string} | null>(null);
-  const [savedAddr, setSavedAddr] = useState<string | null>(null);
   // The prepared offramp retained across retries and restarts (double-burn guard — see header).
   // null ⇒ the next Confirm PREPARES fresh envelopes; non-null ⇒ Confirm RESUMES the SAME bytes.
   const [retained, setRetained] = useState<RetainedOfframp | null>(null);
@@ -53,13 +49,6 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
   const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, display.nativeAsset, display.amountDecimals);
 
   useEscapeToClose(onClose);
-
-  // Load the last-used destination for this currency on open (Fork-B: tap-to-reuse, no re-paste).
-  useEffect(() => {
-    let alive = true;
-    loadSavedWithdrawAddr(currency).then(a => { if (alive && a) { setSavedAddr(a); } });
-    return () => { alive = false; };
-  }, [currency]);
 
   // RESUME an offramp persisted by a previous session (app died mid-sequence). Re-preparing would
   // mint fresh request_ids for a withdrawal that may already be in flight (double-burn); instead
@@ -70,19 +59,27 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
     loadOfframp(identity.publicHex, currency).then(rec => {
       if (!alive || !rec) return;
       setRetained({steps: rec.steps, nextIdx: rec.nextIdx, destination: rec.destination, amountRaw: rec.amountRaw});
-      setAddress(rec.destination);
+      onResumeAddress(rec.destination);
       setErr(M.withdraw.ic.resumed);
     });
     return () => { alive = false; };
+  // onResumeAddress is a stable setter from the parent; re-running on its identity would re-read
+  // AsyncStorage on every parent render for no behavioural change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity.publicHex, currency]);
 
-  // Editing the form = a NEW withdrawal intent: drop the retained envelopes (any in-flight ones
-  // settle independently — honest, visible via the balance refresh). Routed through wrappers so
-  // every input path (typing, the saved-address chip) invalidates.
-  const editAddress = useCallback((t: string) => {
-    setAddress(t);
-    if (retained) setRetained(null);
-  }, [retained]);
+  // Editing = a NEW withdrawal intent: drop the retained envelopes (any in-flight ones settle
+  // independently — honest, visible via the balance refresh). The DESTINATION now lives in the
+  // parent's shared field, so a destination change arrives as a new `address` prop and is
+  // invalidated by the effect below; the amount is still owned here.
+  useEffect(() => {
+    const a = address.trim();
+    // An EMPTY address is not a new intent — it is also the state during resume hydration, before
+    // `onResumeAddress` has propagated back down as a prop. Clearing here would destroy the very
+    // retained envelopes the resume just loaded and re-sign them on the next Confirm: a double burn.
+    if (a.length === 0) return;
+    setRetained(r => (r && r.destination !== a ? null : r));
+  }, [address]);
   const editAmount = useCallback((t: string) => {
     setAmountStr(t);
     if (retained) setRetained(null);
@@ -94,9 +91,11 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
   const raw = toUnits(amountStr, decimals);
   const belowMin = raw !== '0' && cmpRaw(raw, String(display.withdrawMinRaw)) < 0;
   const overBalance = cmpRaw(raw, balance) > 0;
+  // The destination is validated by the shared field BEFORE this body is ever rendered (see
+  // SendSheet.resolveDestination), so an address reaching here is already well-formed for this
+  // family. Re-checking it would be a second copy of the same rule, free to drift.
   const addrEntered = address.trim().length > 0;
-  const badAddr = addrEntered && !isValidDestinationAddress(family, address);
-  const canReview = addrEntered && !badAddr && raw !== '0' && !belowMin && !overBalance;
+  const canReview = addrEntered && raw !== '0' && !belowMin && !overBalance;
   // ckERC20 (token_contract Some) burns ckETH for gas on the dual-ledger withdraw_erc20 path. Native
   // ETH (token_contract None) and BTC are NOT affected — they don't carry a separate gas ledger.
   const isErc20 = family === 'CkEthErc20' && tokenContract != null;
@@ -120,7 +119,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
     setRetained(null);
     setReceipt({amount: amountRawArg, btcAddress: dest});
     setPhase('done');
-    void saveWithdrawAddr(currency, dest); // remember for next cash-out (Fork-B)
+    onSaveAddress(dest); // remember in the shared address book (one store for every rail)
     onWithdrawn(); // trigger a balance/history refresh
   }
 
@@ -220,23 +219,6 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
           <Text style={S.label}>{M.withdraw.ic.sendToNative(display.networkLabel, display.nativeAsset)}</Text>
           <Text style={S.dim2}>{M.withdraw.ic.availableMin(fmt(balance), fmt(String(display.withdrawMinRaw)))}</Text>
 
-          <Text style={S.inputLabel}>{M.withdraw.ic.addressLabel(display.nativeAsset)}</Text>
-          {savedAddr && address.trim().length === 0 ? (
-            <Pressable testID="btn-withdraw-saved" style={S.savedAddrChip} onPress={() => editAddress(savedAddr)} accessibilityRole="button" accessibilityLabel={M.withdraw.ic.useLastLabel} accessibilityState={{disabled: false}}>
-              <Text style={S.savedAddrText}>{M.withdraw.ic.useLast(savedAddr.length > 28 ? savedAddr.slice(0, 14) + '…' + savedAddr.slice(-12) : savedAddr)}</Text>
-            </Pressable>
-          ) : null}
-          <TextInput
-            testID="withdraw-address-input"
-            style={S.withdrawAddrInput}
-            value={address}
-            onChangeText={editAddress}
-            placeholder={display.addressPlaceholder}
-            placeholderTextColor={C.sub2}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-
           <Text style={S.inputLabel}>{M.withdraw.amountLabel(display.nativeAsset)}</Text>
           <TextInput
             testID="withdraw-amount-input"
@@ -250,7 +232,6 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
 
           {belowMin ? <Text style={S.warnNote}>{M.withdraw.ic.belowMin(fmt(String(display.withdrawMinRaw)))}</Text> : null}
           {overBalance ? <Text style={S.warnNote}>{M.withdraw.overBalance(fmt(balance))}</Text> : null}
-          {badAddr ? <Text testID="withdraw-bad-addr" style={S.warnNote}>{M.withdraw.badAddress(display.nativeAsset)}</Text> : null}
 
           {isErc20 ? (
             <Text testID="withdraw-gas-note" style={S.warnNote}>{M.withdraw.ic.gasNote}</Text>

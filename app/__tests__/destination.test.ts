@@ -37,7 +37,7 @@ describe('detectAddressShape', () => {
     expect(detectAddressShape(OISY_VCHF.toUpperCase())).toBe('ic-account');
   });
 
-  it('recognises the legacy 64-hex ICP account identifier, and not other hex lengths', () => {
+  it('recognises the 64-hex ICP account identifier, and not other hex lengths', () => {
     expect(detectAddressShape(K2_ACCOUNT_ID)).toBe('icp-account-id');
     expect(detectAddressShape(K2_ACCOUNT_ID.toUpperCase())).toBe('icp-account-id');
     // 63 or 65 hex chars is not the namespace — it must not be routed to the legacy path.

@@ -186,6 +186,28 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   (founder): the prod deploy so Android can actually fetch assetlinks.json — see `OPEN_ISSUES.md`
   "Physical / outer-loop gates".
 
+- **Send to an external address — ONE destination field, routed by what you paste (2026-08-30).**
+  Pay ▸ *Send to address* now renders for every asset that can leave the wallet, not just the
+  chain-key families. VCHF/ICP previously had NO send path at all (the toggle was gated on a minter
+  family) while the Receive tab already handled them — the asymmetry this closes. Paste or **scan**
+  a destination; `app/lib/destination.ts` classifies it by address NAMESPACE and the route decides
+  the rail: an IC account → `icrc1_transfer` on the asset's own ledger (so ckBTC reaches an Internet
+  Computer wallet without a Bitcoin round trip — the outbound half of the "Already on the Internet
+  Computer?" deposit route); a 64-hex ICP **account identifier** → the ICP ledger's legacy
+  `transfer` (ICP-ledger-only — that method exists nowhere else); a native address → the existing
+  chain-key burn, delegated to `WithdrawSheet` with its double-burn resume intact. The route, its
+  speed and its fee are disclosed BEFORE the amount is entered; refusals name what the address IS
+  and what to do instead (founder rule 2026-08-29). Max subtracts the fee; an unregistered fee is
+  shown as "set by the ledger", never as 0; self-send warns, never blocks. Address book replaces the
+  single last-used slot (`app/services/addressBook.ts`, per-asset, MRU, capped at 10). Core adds
+  `Account::from_text` (ICRC-1 textual accounts incl. subaccounts, spec-canonical only),
+  `AccountIdentifier`, and the legacy `transfer` arg/reply codec — all golden-pinned against the ICP
+  ledger's own published IDL through `@dfinity/candid`. **Terminology checked against DFINITY's
+  primary sources:** the `transfer` METHOD is documented as "legacy" by DFINITY; the 64-hex address
+  form is NOT deprecated (it is what exchanges require and what `icp-cli` emits by default), so user
+  copy calls it an *account identifier*. Verified: e2e 101/101 (new flows 104/105/106), jest
+  67 suites/1244, dpay-relay 49/49, dpay-icp 40+27, emulator device gate + `just campreview` green.
+
 **Device gate — now built and runnable in-sandbox** (this environment has `/dev/kvm`, the Android SDK/NDK, an x86_64 emulator, and `dfx`; see [[sandbox-can-run-device-gate]]):
 - **real dfx deploy** (`just deploy`, `scripts/dfx-deploy.sh`) — a live local replica settles the *exact* offline-signed 292-byte wire via `dfx canister call` (built by `dpay-fixture` from the shared core); funds move, replay refused. `dfx.json` + extracted candid in `dfx/`.
 - **NDK build** (`just ndk`, `scripts/ndk-build-ffi.sh`) — `libdpay_ffi.so` for arm64-v8a + x86_64, **16 KB-page-aligned** (Android 15 / Play); auto-detects the newest installed NDK.

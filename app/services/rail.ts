@@ -56,7 +56,7 @@ export async function prepareTransfer(
   return {ledger: desc.ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, amount: req.amount, currency: req.currency, memoHex: req.nonceHex};
 }
 
-/** Build + sign a send to a LEGACY 64-hex ICP account identifier, via the ICP ledger's legacy
+/** Build + sign a send to a 64-hex ICP account identifier, via the ICP ledger's legacy
  *  `transfer`. Same envelope discipline as `prepareTransfer` (clock-gated, resubmit verbatim,
  *  never re-sign) — only the method and arg shape differ.
  *

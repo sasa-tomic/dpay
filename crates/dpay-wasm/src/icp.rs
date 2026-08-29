@@ -217,7 +217,7 @@ pub extern "C" fn w_icp_validate_icrc_account(ptr: u32, len: u32, out_ptr: u32, 
     write_str_out(json.as_bytes(), out_ptr, cap)
 }
 
-/// `icp_validate_account_id`: CRC-checked parse of a LEGACY 64-hex ICP account identifier,
+/// `icp_validate_account_id`: CRC-checked parse of a 64-hex ICP account identifier,
 /// writing the canonical lowercase text. Twin of the UniFFI `icp_validate_account_id`.
 #[no_mangle]
 pub extern "C" fn w_icp_validate_account_id(ptr: u32, len: u32, out_ptr: u32, cap: u32) -> u32 {
@@ -232,7 +232,7 @@ pub extern "C" fn w_icp_validate_account_id(ptr: u32, len: u32, out_ptr: u32, ca
     write_str_out(id.to_text().as_bytes(), out_ptr, cap)
 }
 
-/// `icp_account_id_from_principal`: derive the legacy account identifier for an owner+subaccount.
+/// `icp_account_id_from_principal`: derive the account identifier for an owner+subaccount.
 /// Twin of the UniFFI export; used for the send screen's self-send guard.
 #[no_mangle]
 pub extern "C" fn w_icp_account_id_from_principal(

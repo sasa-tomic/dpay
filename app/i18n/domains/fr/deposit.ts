@@ -193,8 +193,6 @@ export const withdrawFr: WithdrawMessages = {
     sendToNative: (networkLabel, nativeAsset) => `Envoyez vos ${networkLabel} vers une adresse ${nativeAsset} native`,
     availableMin: (available, min) => `Disponible : ${available} · min. ${min}`,
     addressLabel: asset => `Adresse ${asset}`,
-    useLastLabel: 'Utiliser la dernière adresse enregistrée',
-    useLast: address => `Réutiliser : ${address}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Inférieur au retrait minimum de ${min}.`,
     gasNote: 'Il vous faut des ckETH pour les frais de réseau. Ajoutez-en d’abord si vous n’en avez pas.',
@@ -215,13 +213,16 @@ export const withdrawFr: WithdrawMessages = {
     scanCancel: 'La saisir à la main',
 
     routeIcrc: (network, fee) => `${network} · arrive en quelques secondes · frais ${fee}`,
+    routeIcrcUnknownFee: network => `${network} · arrive en quelques secondes · les frais du registre s’appliquent`,
+    feeUnknown: 'fixés par le registre',
     routeLegacy: fee => `Compte ICP · arrive en quelques secondes · frais ${fee}`,
     routeNative: (chain, minutes, min) => `${chain} · environ ${minutes} min · minimum ${min}`,
+    routeNativeNoMin: (chain, minutes) => `${chain} · environ ${minutes} min`,
 
     refuseWrongChain: (pastedChain, asset, assetChain) =>
       `C’est une adresse ${pastedChain}. ${asset} ne circule que sur ${assetChain} et ne peut donc pas l’atteindre — collez plutôt une adresse ${assetChain}.`,
     refuseLegacyNotIcp: asset =>
-      `C’est une ancienne adresse de compte ICP (64 caractères). Seul l’ICP peut y être envoyé — pour ${asset}, demandez au destinataire son principal Internet Computer (la forme avec des tirets).`,
+      `C’est un identifiant de compte ICP — la forme à 64 caractères. Seul l’ICP peut y être envoyé ; pour ${asset}, demandez au destinataire son principal Internet Computer (la forme avec des tirets).`,
     refuseUnrecognised: asset => `Cela ne ressemble pas à une adresse vers laquelle ${asset} peut être envoyé.`,
     refuseMistypedIc: 'Cette adresse Internet Computer est incomplète ou mal saisie — vérifiez que vous l’avez copiée en entier.',
     refuseMistypedLegacy: 'Cette adresse de compte ICP est incomplète ou mal saisie — vérifiez que vous avez bien copié les 64 caractères.',
@@ -232,9 +233,7 @@ export const withdrawFr: WithdrawMessages = {
     totalLine: total => `Total ${total}`,
 
     savedTitle: 'Adresses enregistrées',
-    saveLabel: 'Enregistrer cette adresse',
     saveNamePlaceholder: 'Donnez-lui un nom (facultatif)',
-    saveConfirm: 'Enregistrer',
     forgetLabel: address => `Supprimer l’adresse enregistrée ${address}`,
     unnamed: 'Sans nom',
 

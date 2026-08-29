@@ -3,9 +3,14 @@
 //
 // The withdrawal path has layers of error handling, and this flow drives ALL of them through the
 // REAL WithdrawSheet:
-//   1. APP-LEVEL UI GUARDS (the first line of defense): the sheet gates `canReview` on
-//      `!belowMin && !overBalance && !badAddr`, so an invalid amount/address shows an inline
-//      warning + a DISABLED confirm button — the error never reaches the rail.
+//   1. APP-LEVEL UI GUARDS (the first line of defense), which now sit at TWO levels:
+//      a. AMOUNT, in the offramp body: `canReview` is gated on `!belowMin && !overBalance`, so an
+//         invalid amount shows an inline warning + a DISABLED confirm button.
+//      b. DESTINATION, one level up in the shared field: the address is classified BEFORE any rail
+//         is chosen, so a wrong-chain paste is refused by name in `send-status` and the offramp
+//         body is never rendered — there is no confirm button to disable, which is a stricter
+//         fail-closed than the old bad-address warning it replaced.
+//      Either way the error never reaches the rail.
 //   2. RAIL REJECTION (the honest-failure surface): a fully-valid confirm that the LEDGER/MINTER
 //      refuses must surface as a message in `withdraw-err` — never silent, never a lie. The
 //      constructible case on this fake rail: withdraw the ENTIRE balance ("empty the wallet,
@@ -27,9 +32,10 @@
 // covered relay-direct in crates/dpay-relay/tests/ — they need no browser.
 //
 // Selector contract: `balance` (header → Balances), `asset-cketh-select` (the native-ETH row
-// whole-row select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
-// `withdraw-amount-input`, `btn-withdraw-confirm` (asserted disabled via aria-disabled),
-// `withdraw-err` (the surfaced rail rejection).
+// whole-row select), `btn-pay-send` (Pay → "Send to address"), `send-address-input` (the ONE
+// shared destination field — SendSheet/AddressField own it), `send-status` (the route disclosure /
+// refusal under the field), `withdraw-amount-input`, `btn-withdraw-confirm` (asserted disabled via
+// aria-disabled), `withdraw-err` (the surfaced rail rejection).
 import { setup, assert, assertEq, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend, assertDisabled } from '../harness/lib.mjs';
 
 const ETH_CURRENCY = 6; // native ckETH — CkEthErc20 + token_contract None (the withdraw_eth path)
@@ -47,8 +53,8 @@ export const meta = {
   id: '18',
   name: 'withdraw-errors',
   journey: 'withdraw',
-  covers: ['withdraw-errors', 'below-min', 'over-balance', 'bad-addr', 'rail-rejection', 'money-safe'],
-  verifies: 'Withdraw error paths: below-min / over-balance / bad-addr warnings disable the confirm button; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit.',
+  covers: ['withdraw-errors', 'below-min', 'over-balance', 'wrong-chain', 'rail-rejection', 'money-safe'],
+  verifies: 'Withdraw error paths: below-min / over-balance warnings disable the confirm button, a wrong-chain destination is refused by name in send-status and renders no offramp body at all; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit.',
   timeoutMs: 35000,
 };
 
@@ -73,11 +79,13 @@ export async function run() {
     await driver.waitForText('5.000000 ETH', { timeoutMs: 8_000 });
     await selectCurrency(driver, 'cketh');
     await openPaySend(driver);
-    await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
+    await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
 
-    // --- 1. BELOW-MINIMUM (UI guard): type an amount under the 0.01 ETH family floor. ----------
+    // --- 1. BELOW-MINIMUM (UI guard): a valid 0x destination routes to the ETH offramp body, then
+    //        type an amount under the 0.01 ETH family floor. ----------------------------------
     console.log('[18-withdraw-errors] below-min UI guard…');
-    await driver.type('withdraw-address-input', DEST, { timeoutMs: 4_000 });
+    await driver.type('send-address-input', DEST, { timeoutMs: 4_000 });
+    await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
     await driver.type('withdraw-amount-input', '0.001', { timeoutMs: 4_000 }); // 1e15 Wei < 1e16 min
     const bodyBelow = await driver.bodyText();
     assertIncludes(bodyBelow, 'Below the 0.010000 ETH minimum withdrawal.', 'below-min warning');
@@ -94,16 +102,23 @@ export async function run() {
     await assertDisabled(driver, 'btn-withdraw-confirm', 'the confirm button must be DISABLED for an over-balance amount (canReview=false)');
     console.log('[18-withdraw-errors] ✓ over-balance warning shows + confirm disabled');
 
-    // --- 2b. INVALID ADDRESS (UI guard): paste a wrong-chain address (BTC format in the ETH
-    //         cash-out) — the documented invalid-address guard. ---------------------------------
-    console.log('[18-withdraw-errors] invalid-address UI guard…');
-    await driver.type('withdraw-address-input', BTC_STYLE_ADDR, { timeoutMs: 4_000 });
-    await driver.type('withdraw-amount-input', '1', { timeoutMs: 4_000 }); // valid amount (1e18 Wei)
-    const bodyBad = await driver.bodyText();
-    assertIncludes(bodyBad, "That doesn't look like a valid ETH address.", 'bad-addr warning');
-    await driver.findByTestID('withdraw-bad-addr', { timeoutMs: 4_000 });
-    await assertDisabled(driver, 'btn-withdraw-confirm', 'confirm must be DISABLED for a wrong-chain address');
-    console.log('[18-withdraw-errors] ✓ invalid-address warning + confirm disabled');
+    // --- 2b. WRONG-CHAIN ADDRESS (UI guard): paste a Bitcoin address into the ETH cash-out. The
+    //         shared destination field classifies it BEFORE a rail is picked, so the refusal NAMES
+    //         what was pasted and where this asset actually settles (founder rule: every dead end
+    //         says what to do next), and the offramp body — amount field, review card and confirm
+    //         button — is not rendered at all. Nothing to submit is stronger than a disabled
+    //         button, so the assertion is absence, not aria-disabled. ------------------------
+    console.log('[18-withdraw-errors] wrong-chain address UI guard…');
+    await driver.type('send-address-input', BTC_STYLE_ADDR, { timeoutMs: 4_000 });
+    const refusal = await driver.readText('send-status', { timeoutMs: 4_000 });
+    assertEq(
+      refusal,
+      "Bitcoin addresses can't receive ETH — it settles on Ethereum. Paste an address for that network instead.",
+      'the wrong-chain refusal names the pasted chain, the asset and the network to use instead',
+    );
+    await driver.waitGone('withdraw-amount-input', { timeoutMs: 4_000 });
+    assert(!(await driver.isPresent('btn-withdraw-confirm')), 'no confirm button may exist for a wrong-chain destination (the offramp body must not render)');
+    console.log(`[18-withdraw-errors] ✓ wrong-chain refusal surfaced + no submit path: "${refusal}"`);
 
     await driver.screenshot('18-withdraw-errors-guards');
 
@@ -115,7 +130,8 @@ export async function run() {
     //         is a real ledger call, so its fee (2e12 Wei) is genuinely spent; the withdrawn
     //         amount itself NEVER moves (5e18 − 2e12 remains — exactly fee-only). -----------------
     console.log('[18-withdraw-errors] rail rejection (minter-refused full-balance withdraw)…');
-    await driver.type('withdraw-address-input', DEST, { timeoutMs: 4_000 });
+    await driver.type('send-address-input', DEST, { timeoutMs: 4_000 });
+    await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 }); // the offramp body is back
     await driver.type('withdraw-amount-input', '5', { timeoutMs: 4_000 }); // == the full balance
     await driver.findByTestID('withdraw-review-amount', { timeoutMs: 4_000 }); // parsed 5 ETH at 18-dec
     await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });

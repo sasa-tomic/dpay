@@ -23,8 +23,9 @@
 // wired and this flow drives it directly.)
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the row whole-row
-// select), `btn-pay-send` (Pay → "Send to address"), `withdraw-address-input`,
-// `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`,
+// select), `btn-pay-send` (Pay → "Send to address"), `send-address-input` (the ONE shared
+// destination field — SendSheet/AddressField own it), `send-status` (the route disclosure under
+// the field), `withdraw-amount-input`, `btn-withdraw-confirm`, `withdraw-status`,
 // `btn-copy-destination` (L3), `btn-withdraw-done` (success-screen Done),
 // `btn-pay-scan` (flip back to scan).
 import { setup, assert, assertEq, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openPaySend } from '../harness/lib.mjs';
@@ -83,12 +84,18 @@ export async function run() {
     console.log('[15-withdraw] selecting BTC → Pay → Send to address…');
     await selectCurrency(driver, BTC_ASSET_KEY);
     await openPaySend(driver);
-    await driver.findByTestID('withdraw-address-input', { timeoutMs: 5_000 });
+    await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
+
+    // 5. Paste the BTC destination into the ONE shared field. A native-chain address routes to the
+    //    chain-key offramp, so the route line quotes BITCOIN's economics (~10 min, 0.0005 BTC
+    //    minimum — not the IC's seconds-and-a-flat-fee) and the WithdrawSheet body, which owns the
+    //    amount rules, renders below it. Then enter the amount (>= the 0.0005 min) and confirm.
+    await driver.type('send-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
+    const routeTxt = await driver.readText('send-status', { timeoutMs: 4_000 });
+    assertEq(routeTxt, 'Bitcoin · about 10 min · minimum 0.00050000 BTC', 'the route line discloses the Bitcoin burn before the user commits');
+    await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
     const sheetBody = await driver.bodyText();
     assertIncludes(sheetBody, 'native BTC address', 'the withdraw sheet presents the BTC destination surface');
-
-    // 5. Enter the BTC destination + amount (in BTC, >= the 0.0005 min), then confirm.
-    await driver.type('withdraw-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
     await driver.type('withdraw-amount-input', WITHDRAW_BTC, { timeoutMs: 4_000 });
     // The review card appears once a valid amount is entered — proves the app parsed the BTC amount.
     await driver.findByTestID('withdraw-review-amount', { timeoutMs: 4_000 });

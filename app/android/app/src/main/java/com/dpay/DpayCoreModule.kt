@@ -237,7 +237,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Validate a LEGACY 64-hex ICP account identifier (the form exchanges hand out), CRC-checked,
+    /** Validate a 64-hex ICP account identifier (the form exchanges hand out), CRC-checked,
      *  returning canonical lowercase. A different address namespace from a principal. */
     @ReactMethod
     fun icpValidateAccountId(text: String, promise: Promise) {
@@ -248,7 +248,7 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
-    /** Derive the legacy account identifier for an owner+subaccount — the send screen's self-send
+    /** Derive the account identifier for an owner+subaccount — the send screen's self-send
      *  guard (the hash cannot be inverted, so recognising our own address means deriving it). */
     @ReactMethod
     fun icpAccountIdFromPrincipal(ownerText: String, subaccountHex: String, promise: Promise) {

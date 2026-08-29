@@ -593,7 +593,7 @@ const EIP1559_GAS_LIMIT: u128 = 30_000;
 const EIP1559_MAX_FEE_PER_GAS: u128 = 2_500_000_000_000; // 2.5 kgwei
 const EIP1559_MAX_PRIORITY_FEE_PER_GAS: u128 = 100_000_000; // 0.1 gwei
 
-/// Balance-key owner prefix for a legacy account identifier that matched no account the gateway
+/// Balance-key owner prefix for an account identifier that matched no account the gateway
 /// knows.
 /// Deliberately NOT valid principal text (`:` is outside base32), so a synthetic key can never
 /// collide with a real account, never parses back into one, and never surfaces in a user's

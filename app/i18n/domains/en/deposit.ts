@@ -378,9 +378,6 @@ export type WithdrawMessages = {
     sendToNative: (networkLabel: string, nativeAsset: string) => string;
     availableMin: (available: string, min: string) => string;
     addressLabel: (asset: string) => string;
-    useLastLabel: string;
-    /** The remembered destination, already truncated by the caller. */
-    useLast: (address: string) => string;
     amountPlaceholder: string;
     belowMin: (min: string) => string;
     /** ckERC20 burns ckETH for gas — dpay never swaps, so the user must hold it (Fork-C). */
@@ -407,8 +404,14 @@ export type WithdrawMessages = {
     scanCancel: string;
     /** Route disclosure — what WILL happen, shown before the user commits. */
     routeIcrc: (network: string, fee: string) => string;
+    /** Used when the asset's catalog row carries NO registered fee: the ledger charges its own
+     *  default and we do not know the number, so we say so rather than print a made-up 0. */
+    routeIcrcUnknownFee: (network: string) => string;
+    feeUnknown: string;
     routeLegacy: (fee: string) => string;
     routeNative: (chain: string, minutes: number, min: string) => string;
+    /** Same line for a chain with NO withdraw floor — "minimum 0" reads as a malfunction. */
+    routeNativeNoMin: (chain: string, minutes: number) => string;
     /**
      * Refusals. Each names what the pasted address IS and what to do instead — never a bare
      * "invalid address" (founder hard rule 2026-08-29: a dead end that only describes itself is
@@ -427,9 +430,7 @@ export type WithdrawMessages = {
     totalLine: (total: string) => string;
     /** Saved destinations (the address book). */
     savedTitle: string;
-    saveLabel: string;
     saveNamePlaceholder: string;
-    saveConfirm: string;
     forgetLabel: (address: string) => string;
     unnamed: string;
     /** The send itself. */
@@ -491,8 +492,6 @@ export const withdrawEn: WithdrawMessages = {
     sendToNative: (networkLabel, nativeAsset) => `Send your ${networkLabel} to a native ${nativeAsset} address`,
     availableMin: (available, min) => `Available: ${available} · min ${min}`,
     addressLabel: asset => `${asset} address`,
-    useLastLabel: 'Use last saved address',
-    useLast: address => `Use last: ${address}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Below the ${min} minimum withdrawal.`,
     gasNote: "You need ckETH for gas. Add ckETH first if you don't have any.",
@@ -513,8 +512,11 @@ export const withdrawEn: WithdrawMessages = {
     scanCancel: 'Enter it by hand instead',
 
     routeIcrc: (network, fee) => `${network} · arrives in seconds · fee ${fee}`,
+    routeIcrcUnknownFee: network => `${network} · arrives in seconds · the ledger's own fee applies`,
+    feeUnknown: 'set by the ledger',
     routeLegacy: fee => `ICP account · arrives in seconds · fee ${fee}`,
     routeNative: (chain, minutes, min) => `${chain} · about ${minutes} min · minimum ${min}`,
+    routeNativeNoMin: (chain, minutes) => `${chain} · about ${minutes} min`,
 
     // No article immediately before an interpolated name: "a ${chain}" produces "a Ethereum".
     // English cannot pick a/an without knowing the next word, and there is no pluralisation
@@ -524,7 +526,7 @@ export const withdrawEn: WithdrawMessages = {
     refuseWrongChain: (pastedChain, asset, assetChain) =>
       `${pastedChain} addresses can't receive ${asset} — it settles on ${assetChain}. Paste an address for that network instead.`,
     refuseLegacyNotIcp: asset =>
-      `That's a legacy ICP account address (64 characters). Only ICP itself can be sent to one — for ${asset}, ask the recipient for their Internet Computer principal (the dashed form).`,
+      `That's an ICP account identifier — the 64-character form. Only ICP itself can be sent to one; for ${asset}, ask the recipient for their Internet Computer principal (the dashed form).`,
     refuseUnrecognised: asset => `That doesn't look like an address ${asset} can be sent to.`,
     refuseMistypedIc: 'This Internet Computer address is incomplete or mistyped — check you copied all of it.',
     refuseMistypedLegacy: 'This ICP account address is incomplete or mistyped — check you copied all 64 characters.',
@@ -535,9 +537,7 @@ export const withdrawEn: WithdrawMessages = {
     totalLine: total => `Total ${total}`,
 
     savedTitle: 'Saved addresses',
-    saveLabel: 'Save this address',
     saveNamePlaceholder: 'Name it (optional)',
-    saveConfirm: 'Save',
     forgetLabel: address => `Remove the saved address ${address}`,
     unnamed: 'Unnamed',
 

@@ -71,7 +71,7 @@ export async function run() {
     await driver.click('btn-pay-send');
     const sendTxt = await driver.readText('pay-fund');
     assertIncludes(sendTxt, 'Add BTC to send', 'send sub-mode shows the same fund panel');
-    const sendFormLeak = await driver.eval(() => document.querySelector('[data-testid="withdraw-address-input"]') != null);
+    const sendFormLeak = await driver.eval(() => document.querySelector('[data-testid="send-address-input"]') != null);
     assert(!sendFormLeak, 'send form must NOT be mounted while gated');
     assertIncludes(sendTxt, 'Show my BTC address', 'send panel keeps the deposit primary');
   } finally {

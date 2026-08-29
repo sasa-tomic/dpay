@@ -16,7 +16,6 @@ import {NfcIcon} from './NfcIcon';
 import {QrScanner} from './QrScanner';
 import {FundFirstPanel} from './FundFirstPanel';
 import {ModeToggle} from './ModeToggle';
-import {WithdrawSheet} from './WithdrawSheet';
 import {SendSheet} from './SendSheet';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
@@ -513,46 +512,34 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   //     the ICP ledger's legacy `transfer` for a 64-hex account identifier.
   // DEMO reaches neither and shows no toggle at all — it has no on-chain identity, matching the
   // Receive tab, where the "My address" toggle is likewise `depositFamily || directIcrc`.
-  if (subMode === 'send' && sendCapable) {
-    const sendToggle = (
-      <ModeToggle
-        testID="pay-mode-toggle"
-        value={subMode}
-        onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
-        left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
-        right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
-      />
-    );
-    if (withdrawFamily && withdrawDisplay) {
-      return (
-        <View style={S.center}>
-          {sendToggle}
-          {fundPanel ?? (
-            <WithdrawSheet
-              identity={identity}
-              catalog={catalog}
-              currency={withdrawCurrency}
-              decimals={catalog.find(c => c.currency === withdrawCurrency)?.decimals ?? withdrawDisplay.amountDecimals}
-              display={withdrawDisplay}
-              family={withdrawFamily}
-              tokenContract={withdrawTokenContract}
-              balance={withdrawBalance}
-              onClose={() => onSubModeChange('scan')}
-              onWithdrawn={onSettled}
-            />
-          )}
-        </View>
-      );
-    }
-    // Direct-ICRC (no minter). `sendCapable` guarantees gateDesc is a complete direct-ICRC row here.
+  // "Send to address" sub-mode, rendered INLINE (the tab body provides the surface). The toggle
+  // above flips back to "Scan to pay". The fund-first gate applies here too — no amount entry
+  // against a known-zero balance, same as the SOL rail's send branch.
+  //
+  // ONE entry point for every send-capable asset: `SendSheet` owns the destination field and picks
+  // the rail from the ADDRESS, delegating a native-chain destination to the chain-key offramp. So
+  // ckBTC reaches both a Bitcoin address and an Internet Computer account from the same field,
+  // and VCHF/ICP — which have no minter at all — are no longer excluded from the surface.
+  // DEMO shows no toggle: it has no on-chain identity, matching the Receive tab.
+  if (subMode === 'send' && sendCapable && gateDesc) {
     return (
       <View style={S.center}>
-        {sendToggle}
+        <ModeToggle
+          testID="pay-mode-toggle"
+          value={subMode}
+          onChange={(v) => onSubModeChange(v as 'scan' | 'send')}
+          left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
+          right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
+        />
         {fundPanel ?? (
           <SendSheet
             identity={identity}
-            desc={gateDesc!}
+            catalog={catalog}
+            desc={gateDesc}
             balance={withdrawBalance}
+            family={withdrawFamily}
+            display={withdrawDisplay}
+            tokenContract={withdrawTokenContract}
             onSent={onSettled}
             onClose={() => onSubModeChange('scan')}
           />

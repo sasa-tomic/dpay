@@ -192,8 +192,6 @@ export const withdrawEs: WithdrawMessages = {
     sendToNative: (networkLabel, nativeAsset) => `Envía tu ${networkLabel} a una dirección nativa de ${nativeAsset}`,
     availableMin: (available, min) => `Disponible: ${available} · mín. ${min}`,
     addressLabel: asset => `Dirección de ${asset}`,
-    useLastLabel: 'Usar la última dirección guardada',
-    useLast: address => `Usar la última: ${address}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Está por debajo del retiro mínimo de ${min}.`,
     gasNote: 'Necesitas ckETH para el gas. Si no tienes, añade ckETH primero.',
@@ -214,13 +212,16 @@ export const withdrawEs: WithdrawMessages = {
     scanCancel: 'Escribirla a mano',
 
     routeIcrc: (network, fee) => `${network} · llega en segundos · comisión ${fee}`,
+    routeIcrcUnknownFee: network => `${network} · llega en segundos · se aplica la comisión del registro`,
+    feeUnknown: 'la fija el registro',
     routeLegacy: fee => `Cuenta ICP · llega en segundos · comisión ${fee}`,
     routeNative: (chain, minutes, min) => `${chain} · aprox. ${minutes} min · mínimo ${min}`,
+    routeNativeNoMin: (chain, minutes) => `${chain} · aprox. ${minutes} min`,
 
     refuseWrongChain: (pastedChain, asset, assetChain) =>
       `Esa es una dirección de ${pastedChain}. ${asset} se liquida en ${assetChain}, así que no puede llegar ahí: pega una dirección de ${assetChain}.`,
     refuseLegacyNotIcp: asset =>
-      `Esa es una dirección de cuenta ICP antigua (64 caracteres). Solo se puede enviar ICP a una de ellas: para ${asset}, pídele al destinatario su principal de Internet Computer (el que lleva guiones).`,
+      `Ese es un identificador de cuenta ICP: el formato de 64 caracteres. Solo se puede enviar ICP a uno de ellos; para ${asset}, pídele al destinatario su principal de Internet Computer (el que lleva guiones).`,
     refuseUnrecognised: asset => `Esto no parece una dirección a la que se pueda enviar ${asset}.`,
     refuseMistypedIc: 'Esta dirección de Internet Computer está incompleta o mal escrita: comprueba que la has copiado entera.',
     refuseMistypedLegacy: 'Esta dirección de cuenta ICP está incompleta o mal escrita: comprueba que has copiado los 64 caracteres.',
@@ -231,9 +232,7 @@ export const withdrawEs: WithdrawMessages = {
     totalLine: total => `Total ${total}`,
 
     savedTitle: 'Direcciones guardadas',
-    saveLabel: 'Guardar esta dirección',
     saveNamePlaceholder: 'Ponle un nombre (opcional)',
-    saveConfirm: 'Guardar',
     forgetLabel: address => `Eliminar la dirección guardada ${address}`,
     unnamed: 'Sin nombre',
 

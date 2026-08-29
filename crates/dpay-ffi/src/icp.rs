@@ -157,7 +157,7 @@ pub fn icp_validate_icrc_account(text: String) -> Result<IcpAccountParts, DpayEr
     Ok(IcpAccountParts { owner: a.owner.to_text(), subaccount_hex: sub })
 }
 
-/// Validate a LEGACY 64-hex ICP account identifier and return it canonicalised (lowercase).
+/// Validate a 64-hex ICP account identifier and return it canonicalised (lowercase).
 /// A different address namespace from a principal — see `AccountIdentifier` in `dpay-icp` for why
 /// it is reachable only through the ICP ledger's legacy `transfer`. The embedded CRC32 is checked,
 /// so a truncated or mistyped exchange deposit address fails HERE, not on-chain.
@@ -168,7 +168,7 @@ pub fn icp_validate_account_id(text: String) -> Result<String, DpayError> {
     Ok(id.to_text())
 }
 
-/// Derive the legacy account identifier owned by `owner_text` on `subaccount_hex`. The app uses it
+/// Derive the account identifier owned by `owner_text` on `subaccount_hex`. The app uses it
 /// for the self-send guard: a user who pastes their OWN exchange-style address must be warned, and
 /// the only way to recognise it is to derive ours and compare (the hash cannot be inverted).
 #[uniffi::export]
@@ -221,8 +221,12 @@ pub fn icp_transfer_arg(
 /// `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
 /// optional expected_allowance/expires_at/memo/from_subaccount/fee.
 /// `transfer` argument bytes for the ICP ledger's LEGACY method — the ONLY way to pay a 64-hex
-/// account identifier (see `AccountIdentifier` in `dpay-icp`). ICP-ledger-only; every ck*/ICRC-1
-/// ledger is principal-addressed and has no such method.
+/// account identifier (see `AccountIdentifier` in `dpay-icp`). ICP-ledger-only; every chain-key and
+/// ICRC-1 ledger is principal-addressed and has no such method.
+///
+/// NB: never write a `*` immediately followed by `/` in a doc comment on a `#[uniffi::export]` item.
+/// UniFFI copies these verbatim into the generated Kotlin `/** … */` block, where that sequence
+/// CLOSES the comment and breaks the Android build — a failure Rust itself cannot see.
 ///
 /// Amounts are decimal strings like every other builder here, but the ledger's `Tokens` is a
 /// `nat64`, so a value above u64::MAX is refused rather than silently truncated. `fee` is
@@ -777,7 +781,7 @@ mod tests {
         assert_eq!(icp_validate_icrc_account(oisy.into()).unwrap().owner, oisy);
     }
 
-    /// The legacy 64-hex namespace: CRC-checked, and provably disjoint from the principal one.
+    /// The 64-hex account-identifier namespace: CRC-checked, and provably disjoint from the principal one.
     #[test]
     fn validate_account_id_and_derivation() {
         let mine = icp_self_principal(SEED_A.to_vec()).unwrap();

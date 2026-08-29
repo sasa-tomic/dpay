@@ -424,7 +424,7 @@ async function icpValidateIcrcAccount(text: string): Promise<{owner: string; sub
   return jsonOut(ex, len, out, 'icp_validate_icrc_account') as {owner: string; subaccountHex: string};
 }
 
-/** Validate a LEGACY 64-hex ICP account identifier (CRC-checked), returning canonical lowercase. */
+/** Validate a 64-hex ICP account identifier (CRC-checked), returning canonical lowercase. */
 async function icpValidateAccountId(text: string): Promise<string> {
   const ex = await core();
   const [p, len0] = putStr(ex, text);
@@ -434,7 +434,7 @@ async function icpValidateAccountId(text: string): Promise<string> {
   return readStr(ex, out, len);
 }
 
-/** Derive the legacy account identifier owned by `ownerText` on `subaccountHex` (the self-send guard). */
+/** Derive the account identifier owned by `ownerText` on `subaccountHex` (the self-send guard). */
 async function icpAccountIdFromPrincipal(ownerText: string, subaccountHex: string): Promise<string> {
   const ex = await core();
   const owner = putStr(ex, ownerText);
