@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **102 flows**
-> (101 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **103 flows**
+> (102 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (10) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -115,6 +115,7 @@ wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (
 | 104 | send-to-address | Send VCHF to an external IC account: the Pay tab exposes "Send to address" for a no-minter asset, the pasted principal is CRC-validated and its route disclosed with the fee, one icrc1_transfer settles, and both the sender (−amount−fee) and the recipient (+amount) move at the gateway; the UI balance follows. | send-to-address, direct-icrc, vchf, icrc1_transfer, route-disclosure, fee, balance-delta, ui-balance-delta |
 | 105 | send-refusals | Send-to-address refusals are specific and actionable: a Bitcoin / Ethereum address is named as such and pointed at the right network, a 64-hex ICP account identifier is named and the principal asked for instead, and a checksum-broken principal is called incomplete — each with the send button left disabled. | send-to-address, wrong-chain, account-identifier, crc, fail-closed, instructions |
 | 106 | send-auto-route | One destination field routes ckBTC by what is pasted: a Bitcoin address discloses the Bitcoin chain (~10 min, 0.0005 minimum) and shows the burn body; an IC principal discloses the Internet Computer and sends a plain icrc1_transfer that credits the recipient on the ckBTC ledger — a route that did not exist before. | send-to-address, auto-route, ckbtc, icrc1_transfer, route-disclosure, balance-delta |
+| 107 | send-account-identifier | Send ICP to a 64-hex account identifier via the ledger's legacy `transfer`: the address is CRC-validated by the real core, the route disclosed with the fee, one envelope signed on-device, and the gateway credits the principal owning that identifier — the address form icrc1_transfer cannot reach. | send-to-address, account-identifier, icp, legacy-transfer, crc, balance-delta |
 | 15 | withdraw | Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.00050000 BTC). | withdraw, icrc2-approve, retrieve_btc_with_approval, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
 | 18 | withdraw-errors | Withdraw error paths: below-min / over-balance warnings disable the confirm button, a wrong-chain destination is refused by name in send-status and renders no offramp body at all; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit. | withdraw-errors, below-min, over-balance, wrong-chain, rail-rejection, money-safe |
 | 44 | cketh-withdraw | Withdraw native ckETH: faucet-fund at the principal → enter 0x addr + ETH amount → query the minter gas price + sign approve + withdraw_eth on-device → gateway burns → "Withdrawn ✓"; balance debits fee+amount at both the gateway AND the UI (row drops to 3.999998 ETH). | native-eth-withdraw, cketh, family-dispatch, withdraw, icrc2-approve, withdraw_eth, gas-quote, sign, settle, balance-delta, ui-balance-delta |

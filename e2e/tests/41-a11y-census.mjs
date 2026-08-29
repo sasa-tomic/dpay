@@ -14,7 +14,8 @@
 // flow catches. A bare <Text>/<View> renders as <div> with NO role/aria (correct: not interactive).
 //
 // The census walks the same primary surfaces flow 35 (UX tour) screenshots: wallet home (Pay),
-// Receive + currency picker, Balances hub, Settings, Transactions. On each surface it queries the
+// Receive + currency picker, Balances hub, Settings, Transactions, and Pay → "Send to address"
+// (which needs a funded asset to reach — see `paySend`). On each surface it queries the
 // DOM for every [data-testid] matching a known-interactive prefix (btn-* / tab-* / req-* /
 // req-pick-* / settings-relay / amount-input / memo-input / privacy-policy / ledger-filter-* /
 // asset-add-* / btn-withdraw / btn-topup / btn-balances-close / btn-settings-close / balance /
@@ -28,8 +29,19 @@
 // alongside the new testID).
 //
 // Selector contract: surfaces are reached by the same taps a user makes — `tab-receive`,
-// `req-prefix`, `balance`, `btn-settings`, `tab-transactions`.
-import { setup, onboardWallet, assert } from '../harness/lib.mjs';
+// `req-prefix`, `balance`, `btn-settings`, `tab-transactions`, `asset-vchf-select`, `btn-pay-send`.
+import {
+  setup, onboardWallet, assert, accountOf, faucetAccount, openBalances, selectCurrency, openPaySend,
+  railPrincipalText,
+} from '../harness/lib.mjs';
+
+// The asset the send census runs on: VCHF is a no-minter direct-ICRC row, so "Send to address"
+// lands on the direct send form rather than delegating to the chain-key burn body.
+const SEND_CURRENCY = 7;
+const SEND_ASSET_KEY = 'vchf';
+const SEND_SEED = 500_000_000; // 5.00000000 VCHF — any non-zero balance clears the fund-first gate
+// A second wallet's pubkey; its principal is a real external destination as far as the app knows.
+const SEND_RECIPIENT_PUBKEY = 'e'.repeat(64);
 
 // The expected interactive testIDs per primary surface. A testID is in scope here ONLY if it's
 // (a) interactive (a Pressable-onPress or a TextInput) AND (b) carries a testID. Non-interactive
@@ -75,6 +87,18 @@ const SURFACES = {
   // Transactions tab — empty initially (no transactions). When history is non-empty, ledger-filter-*
   // chips render (one per present currency); a fresh wallet has none, so only the chrome asserts.
   transactions: [],
+  // Pay tab → "Send to address" (SendSheet + AddressField — the one send-to-address surface for
+  // every IC asset). Reached with `btn-pay-send`, but only for an asset that is BOTH send-capable
+  // and funded: a known-zero balance replaces the whole form with the fund-first panel, so the
+  // census funds VCHF and selects it first. `btn-pay-scan`/`btn-pay-send` are the two segments of
+  // the sub-mode toggle; `send-scan` is the destination field's QR button; `btn-send-max` fills the
+  // spendable maximum. (`send-save-name` renders only once a destination has resolved and is
+  // censused on the sub-surface below, exactly as the settings confirm-gates are.)
+  paySend: ['btn-pay-scan', 'btn-pay-send', 'send-address-input', 'send-scan',
+            'send-amount-input', 'btn-send-max', 'btn-send-confirm'],
+  // Pay → Send to address, with a resolved destination in the field. Surface = the same form plus
+  // the optional "name this address" field the address book offers once there is something to name.
+  paySendResolved: ['send-save-name'],
 };
 
 // HTML tags that imply an interactive role even when no `role` attribute is present (RNW's rendering
@@ -102,10 +126,18 @@ export async function run() {
   console.log('[41-a11y-census] setup (relay + web + browser)…');
   const env = await setup();
   try {
-    const { driver } = env;
+    const { driver, relayBaseURL } = env;
 
     console.log('[41-a11y-census] onboarding…');
     await onboardWallet(driver, 'e2e-a11y');
+
+    // Fund VCHF up front: the send surface censused at the end is behind the fund-first gate, and a
+    // zero balance would substitute the fund panel for the very controls under census.
+    const identity = await accountOf(driver);
+    const accountHex = identity?.publicHex;
+    assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be a 32-byte hex pubkey, got "${accountHex}"`);
+    const fund = await faucetAccount(relayBaseURL, accountHex, SEND_SEED, { currency: SEND_CURRENCY });
+    assert(fund.ok, `faucet funding must succeed, got HTTP ${fund.status}: ${JSON.stringify(fund.body)}`);
 
     const allMissing = []; // {surface, testid, missing: ['role'|'label']}
     const allChecked = []; // {surface, testid, role, label} for the report
@@ -202,6 +234,23 @@ export async function run() {
     await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
     await census('transactions');
     console.log('[41-a11y-census] ✓ census: transactions (empty wallet)');
+
+    // 6. Pay → "Send to address" for the funded VCHF row. Selecting the asset in Balances is the
+    //    only way to make it active (the row is one whole select Pressable), and the sub-mode
+    //    toggle is what opens the send form. Run LAST so it cannot perturb the surfaces above.
+    await openBalances(driver);
+    await selectCurrency(driver, SEND_ASSET_KEY);
+    await openPaySend(driver);
+    await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
+    await census('paySend');
+    console.log('[41-a11y-census] ✓ census: pay → send to address');
+
+    // 6b. The same form once a destination resolves — the address book's optional name field
+    //     appears only then, exactly as the settings confirm-gates reveal their children.
+    await driver.type('send-address-input', await railPrincipalText(SEND_RECIPIENT_PUBKEY), { timeoutMs: 4_000 });
+    await driver.findByTestID('send-save-name', { timeoutMs: 6_000 });
+    await census('paySendResolved');
+    console.log('[41-a11y-census] ✓ census: pay → send to address (destination resolved)');
 
     // Final report + verdict.
     const checked = allChecked.length;

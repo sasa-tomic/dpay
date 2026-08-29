@@ -335,10 +335,13 @@ export async function fetchGasFeeWei(
 /** Empty DIDL argument (`icrc1_fee` takes no parameters). */
 const EMPTY_DIDL_ARG_HEX = '4449444c0000';
 
-/** The ledger's icrc1_fee — ICRC-2 `approve` MUST carry it verbatim (a wrong/absent fee is
- * rejected with BadFee, exactly like a transfer). Fetched live per ledger: the catalog's fee
- * field is display metadata; the ledger is authoritative. */
-async function fetchApproveFee(secretHex: string, ledger: string): Promise<string> {
+/** The ledger's icrc1_fee. Fetched live per ledger: the catalog's fee field is display metadata;
+ * THE LEDGER IS AUTHORITATIVE. ICRC-2 `approve` must carry it verbatim (a wrong/absent fee is
+ * rejected with BadFee, exactly like a transfer), and the send screen quotes it to the user rather
+ * than repeating a catalog value that may be stale — or, worse, printing 0 for a row that simply
+ * registers no fee. Throws when the ledger cannot be reached: an unknown fee is stated as unknown,
+ * never defaulted. */
+export async function fetchLedgerFee(secretHex: string, ledger: string): Promise<string> {
   const reply = await icQuery(secretHex, ledger, 'icrc1_fee', EMPTY_DIDL_ARG_HEX);
   if (reply == null) throw new Error(M.errors.ic.feeUnavailable);
   return await DpayCore.icpDecodeInt(reply);
@@ -353,7 +356,7 @@ export async function prepareBtcWithdrawal(
   amountSats: string,
 ): Promise<OfframpStep[]> {
   const expiry = await icStampExpiry(secretHex);
-  const fee = await fetchApproveFee(secretHex, ledger);
+  const fee = await fetchLedgerFee(secretHex, ledger);
   const steps: OfframpStep[] = [];
   {
     const argHex = await DpayCore.icpApproveArg(minter, '', '', amountSats, '', '', '', fee);
@@ -378,7 +381,7 @@ export async function prepareEthWithdrawal(
   gasFeeWei: string,
 ): Promise<OfframpStep[]> {
   const expiry = await icStampExpiry(secretHex);
-  const fee = await fetchApproveFee(secretHex, ckethLedger);
+  const fee = await fetchLedgerFee(secretHex, ckethLedger);
   const steps: OfframpStep[] = [];
   const totalApprove = (BigInt(amountWei) + BigInt(gasFeeWei)).toString();
   {
@@ -406,8 +409,8 @@ export async function prepareErc20Withdrawal(
   gasFeeWei: string,
 ): Promise<OfframpStep[]> {
   const expiry = await icStampExpiry(secretHex);
-  const gasLedgerFee = await fetchApproveFee(secretHex, ckethLedger);
-  const erc20LedgerFee = await fetchApproveFee(secretHex, ckerc20Ledger);
+  const gasLedgerFee = await fetchLedgerFee(secretHex, ckethLedger);
+  const erc20LedgerFee = await fetchLedgerFee(secretHex, ckerc20Ledger);
   const steps: OfframpStep[] = [];
   {
     const argHex = await DpayCore.icpApproveArg(minter, '', '', gasFeeWei, '', '', '', gasLedgerFee);

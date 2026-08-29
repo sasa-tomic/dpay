@@ -101,12 +101,12 @@ export async function run() {
     // rails genuinely have different rules, and the right one is being applied.
     await driver.type('send-amount-input', SEND_TEXT, { timeoutMs: 4_000 });
     await driver.findByTestID('send-review-amount', { timeoutMs: 4_000 });
-    // ckBTC's catalog row registers NO fee, so the envelope goes out with `fee: None` and the
-    // ledger charges its own. The app must SAY that rather than print a fabricated "0" — and with
-    // no fee number there is deliberately no total row to render.
+    // The fee shown is the one the LEDGER reported (icrc1_fee), not the catalog's — ckBTC's row
+    // carries none at all, so a catalog-sourced screen would have printed a fabricated 0. This
+    // ledger charges nothing, and a zero fee is stated in words: a money screen never shows
+    // "0.00000000 BTC", which reads as a malfunction rather than as good news.
     const feeCell = await driver.readText('send-review-fee');
-    assertIncludes(feeCell, 'set by the ledger', 'an unregistered fee is disclosed as unknown, never shown as 0');
-    assert(!(await driver.isPresent('send-review-total')), 'no total row without a known fee — it would understate what leaves the account');
+    assertEq(feeCell, 'none', 'a genuinely-zero ledger fee reads as "none", never as 0.00000000 BTC');
     await driver.click('btn-send-confirm', { timeoutMs: 5_000 });
     const sent = await driver.waitForText('Sent', { timeoutMs: 15_000 });
     const body = await driver.bodyText();

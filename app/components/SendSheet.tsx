@@ -8,7 +8,7 @@ import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
 import {displayName, fmtCurrencyAmount, isTestnetCurrency, testnetDisplayName, isValidDestinationAddress} from '../config/catalog';
 import {detectAddressShape, routeForShape, chainNameOfShape} from '../lib/destination';
-import {prepareTransfer, prepareLegacyTransfer, submitTransfer, decodeLegacyReply, type RailPrepared, type RailOutcome} from '../services/rail';
+import {prepareTransfer, prepareLegacyTransfer, submitTransfer, decodeLegacyReply, fetchLedgerFee, type RailPrepared, type RailOutcome} from '../services/rail';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {DpayCore} from '../services/native';
 import {AddressField, shortAddress} from './AddressField';
@@ -82,16 +82,23 @@ export function SendSheet({
   const displayDecimals = desc.display_decimals ?? decimals;
   const unit = desc.backing_symbol ?? desc.symbol ?? '';
   const assetName = isTestnetCurrency(desc) ? testnetDisplayName(desc) : displayName(desc);
-  // The ledger fee, when the catalog registers one. NULL means the row carries no fee and the
-  // envelope is signed with `fee: None` — the ledger then charges its own default. We do NOT know
-  // that number, so nothing on this screen may state it: printing "fee 0" would be a false claim
-  // about money (and ckBTC's row is exactly this case).
-  const feeRaw: string | null = desc.fee;
+  // The fee is READ FROM THE LEDGER, not from the catalog: the catalog's fee is display metadata
+  // and some rows (ckBTC) carry none at all, so quoting it would either be stale or a fabricated 0.
+  // Until the query answers, the fee is genuinely UNKNOWN and the screen says so — it never
+  // defaults to 0, and no total is shown that would understate what leaves the account.
+  const [feeRaw, setFeeRaw] = useState<string | null>(null);
   const feeKnown = feeRaw != null;
   const assetKey = `ic:${desc.currency}`;
   const fmt = useCallback(
     (raw: string) => fmtAsset(raw, decimals, unit, displayDecimals),
     [decimals, unit, displayDecimals],
+  );
+  // How a fee READS. A ledger that genuinely charges nothing says so in words — the deposit sheets
+  // set this precedent (`M.deposit.ck.feeNone`), because "0.00000000 BTC" on a money screen looks
+  // like a bug rather than good news. Distinct from an UNKNOWN fee, which is a different statement.
+  const feeText = useCallback(
+    (raw: string) => (BigInt(raw) === 0n ? M.deposit.ck.feeNone : fmt(raw)),
+    [fmt],
   );
 
   // The user's own accounts, in BOTH namespaces — the self-send guard. An account identifier is a
@@ -118,6 +125,20 @@ export function SendSheet({
     return () => { alive = false; };
   }, [assetKey]);
 
+  // The authoritative fee. A failure leaves it null — honest "we don't know" beats a wrong number
+  // on a money screen — and the send still works, since the envelope carries `fee: None` and the
+  // ledger applies its own.
+  useEffect(() => {
+    let alive = true;
+    if (!desc.ledger) return;
+    fetchLedgerFee(identity.secretHex, desc.ledger)
+      .then(f => { if (alive) setFeeRaw(f); })
+      .catch((e: unknown) => {
+        console.warn('ledger fee query failed:', e instanceof Error ? e.message : String(e));
+      });
+    return () => { alive = false; };
+  }, [identity.secretHex, desc.ledger]);
+
   // Resolve the typed destination: shape → route → the core validator for that route. Generation-
   // guarded so a slow validation for an older keystroke can never overwrite a newer verdict.
   useEffect(() => {
@@ -134,9 +155,14 @@ export function SendSheet({
   const raw = toUnits(amountStr, decimals);
   const overBalance = cmpRaw(raw, balance) > 0;
   // Fee is charged ON TOP of the amount by the ledger, so the spendable maximum is balance − fee.
+  // Only computable once the ledger has told us its fee. Without it, "Max" would fill the entire
+  // balance and the transfer would be rejected for amount+fee — a doomed action offered as a
+  // convenience. Reserving a GUESSED fee is not an option on a screen whose rule is never to state
+  // a fee it does not know, so the button is simply disabled until the query answers.
   const maxSpendable = useMemo(() => {
+    if (feeRaw == null) return null;
     const b = BigInt(balance || '0');
-    const f = BigInt(feeRaw ?? '0');
+    const f = BigInt(feeRaw);
     return b > f ? (b - f).toString() : '0';
   }, [balance, feeRaw]);
   // Only computable when the fee is known; otherwise the review omits it rather than guessing.
@@ -182,14 +208,14 @@ export function SendSheet({
     // chain (ckBTC's is "Bitcoin"), so using it here would tell a ckBTC sender their IC transfer
     // settles on Bitcoin. It does not.
     if (!feeKnown) return {text: M.withdraw.send.routeIcrcUnknownFee(IC_NETWORK), tone: 'ok'};
-    const feeText = fmt(feeRaw);
+    const fee = feeText(feeRaw);
     return {
       text: resolved.kind === 'icp-legacy'
-        ? M.withdraw.send.routeLegacy(feeText)
-        : M.withdraw.send.routeIcrc(IC_NETWORK, feeText),
+        ? M.withdraw.send.routeLegacy(fee)
+        : M.withdraw.send.routeIcrc(IC_NETWORK, fee),
       tone: 'ok',
     };
-  }, [address, resolved, isSelf, fmt, feeRaw, feeKnown, display, decimals]);
+  }, [address, resolved, isSelf, feeText, feeRaw, feeKnown, display, decimals]);
 
   async function send() {
     if (!canSend || !resolved?.ok) return;
@@ -301,6 +327,7 @@ export function SendSheet({
       {resolved?.ok && saved.every(sv => sv.address !== resolved.destination) ? (
         <TextInput
           testID="send-save-name"
+          accessibilityLabel={M.withdraw.send.saveNamePlaceholder}
           style={S.withdrawAddrInput}
           value={saveName}
           onChangeText={setSaveName}
@@ -335,6 +362,7 @@ export function SendSheet({
       <View style={S.amtRow}>
         <TextInput
           testID="send-amount-input"
+          accessibilityLabel={M.withdraw.amountLabel(unit)}
           style={[S.withdrawAmtInput, {flex: 1}]}
           value={amountStr}
           onChangeText={setAmountStr}
@@ -346,11 +374,12 @@ export function SendSheet({
             produce a total the balance cannot cover. */}
         <Pressable
           testID="btn-send-max"
-          style={S.maxBtn}
-          onPress={() => setAmountStr(fmtAsset(maxSpendable, decimals, '', decimals).trim())}
+          style={[S.maxBtn, maxSpendable == null && S.disabledFlat]}
+          disabled={maxSpendable == null}
+          onPress={() => { if (maxSpendable != null) setAmountStr(fmtAsset(maxSpendable, decimals, '', decimals).trim()); }}
           accessibilityRole="button"
           accessibilityLabel={M.withdraw.send.maxLabel}
-          accessibilityState={{disabled: false}}>
+          accessibilityState={{disabled: maxSpendable == null}}>
           <Text style={S.maxBtnText}>{M.withdraw.send.maxLabel}</Text>
         </Pressable>
       </View>
@@ -376,7 +405,7 @@ export function SendSheet({
           <View style={S.reviewRow}>
             <Text style={S.reviewRowLabel}>{M.withdraw.send.feeLine('')}</Text>
             <Text testID="send-review-fee" style={S.reviewRowValue}>
-              {feeKnown ? fmt(feeRaw) : M.withdraw.send.feeUnknown}
+              {feeKnown ? feeText(feeRaw) : M.withdraw.send.feeUnknown}
             </Text>
           </View>
           {/* No total without a known fee — a "total" that silently equals the amount would

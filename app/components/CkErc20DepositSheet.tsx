@@ -429,6 +429,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
           <Text style={S.inputLabel}>{M.deposit.amountLabel(display.nativeAsset)}</Text>
           <TextInput
             testID="ckerc20-amount"
+            accessibilityLabel={M.deposit.erc20.amountPlaceholder}
             style={S.amountInput}
             keyboardType="decimal-pad"
             placeholder={M.deposit.erc20.amountPlaceholder}

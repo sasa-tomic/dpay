@@ -205,8 +205,8 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   ledger's own published IDL through `@dfinity/candid`. **Terminology checked against DFINITY's
   primary sources:** the `transfer` METHOD is documented as "legacy" by DFINITY; the 64-hex address
   form is NOT deprecated (it is what exchanges require and what `icp-cli` emits by default), so user
-  copy calls it an *account identifier*. Verified: e2e 101/101 (new flows 104/105/106), jest
-  67 suites/1244, dpay-relay 49/49, dpay-icp 40+27, emulator device gate + `just campreview` green.
+  copy calls it an *account identifier*. Verified: e2e 102/102 (new flows 104-107), jest 67
+  suites/1244, dpay-relay 49/49, dpay-icp 40+27, emulator device gate + `just campreview` green.
 
 **Device gate — now built and runnable in-sandbox** (this environment has `/dev/kvm`, the Android SDK/NDK, an x86_64 emulator, and `dfx`; see [[sandbox-can-run-device-gate]]):
 - **real dfx deploy** (`just deploy`, `scripts/dfx-deploy.sh`) — a live local replica settles the *exact* offline-signed 292-byte wire via `dfx canister call` (built by `dpay-fixture` from the shared core); funds move, replay refused. `dfx.json` + extracted candid in `dfx/`.

@@ -222,6 +222,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
           <Text style={S.inputLabel}>{M.withdraw.amountLabel(display.nativeAsset)}</Text>
           <TextInput
             testID="withdraw-amount-input"
+            accessibilityLabel={M.withdraw.amountLabel(display.nativeAsset)}
             style={S.withdrawAmtInput}
             value={amountStr}
             onChangeText={editAmount}

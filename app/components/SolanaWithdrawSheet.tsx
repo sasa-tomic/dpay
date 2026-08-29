@@ -163,6 +163,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
           <Text style={S.inputLabel}>{M.withdraw.sol.addressLabel}</Text>
           <TextInput
             testID="sol-send-address-input"
+            accessibilityLabel={M.withdraw.sol.addressLabel}
             style={S.withdrawAddrInput}
             value={address}
             onChangeText={setAddress}
@@ -175,6 +176,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
           <Text style={S.inputLabel}>{M.withdraw.amountLabel(unit)}</Text>
           <TextInput
             testID="sol-send-amount-input"
+            accessibilityLabel={M.withdraw.amountLabel(token)}
             style={S.withdrawAmtInput}
             value={amountStr}
             onChangeText={setAmountStr}

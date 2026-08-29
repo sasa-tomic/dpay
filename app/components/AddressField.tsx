@@ -49,6 +49,7 @@ export function AddressField({
       <View style={S.addrRow}>
         <TextInput
           testID={`${testIDPrefix}-address-input`}
+          accessibilityLabel={M.withdraw.send.destLabel}
           style={S.addrInput}
           value={value}
           onChangeText={onChange}

@@ -261,6 +261,25 @@ export function icpPrincipalBytes(pubkey32) {
   return Uint8Array.from([...h, 0x02]);
 }
 
+/** The ICP ledger's ACCOUNT IDENTIFIER for a principal + subaccount, as 64-char lowercase hex:
+ *  `CRC32(h) BE ‖ h` where `h = SHA224("\x0Aaccount-id" ‖ owner ‖ subaccount)`.
+ *
+ *  This is the harness's INDEPENDENT oracle for the derivation `dpay_icp::AccountIdentifier`
+ *  implements — same relationship `icpPrincipalBytes` has to the Rust principal derivation. It is
+ *  what lets a flow name a destination in the account-identifier namespace and then read the
+ *  credited balance back at the principal that owns it, without trusting the app's own maths.
+ *
+ *  Deliberately re-derived here rather than imported: an oracle that calls the code under test
+ *  proves nothing. It is cross-pinned by `golden_account_identifier_from_principal` in
+ *  crates/dpay-icp/tests/goldens.rs, whose vector was produced by a third implementation. */
+export function icpAccountIdentifierHex(pubkey32, subaccount = new Uint8Array(32)) {
+  const owner = icpPrincipalBytes(pubkey32);
+  const h = sha224(Buffer.concat([Buffer.from('\x0Aaccount-id', 'binary'), Buffer.from(owner), Buffer.from(subaccount)]));
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(Buffer.from(h)));
+  return Buffer.concat([crc, Buffer.from(h)]).toString('hex');
+}
+
 /** request_id (SHA256-based) over the content fields — mirrors dpay_icp::request_id.
  *  fields: {key: string, hashInput: bytes}[]; sorts by SHA256(key) (order-independent). */
 /** request_id per the IC spec (mirrors dpay_icp::request_id exactly): each value is HASHED to a
