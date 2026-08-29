@@ -14,7 +14,8 @@ import {M} from '../i18n';
  *
  * Used by BOTH rails (SOL/USDC via SolPayMode, IC via PayMode) — the same-surfaces hard rule: no
  * per-rail special IA. Copy is passed in by the caller so each rail states its truth (USDC adds
- * the keep-a-little-SOL note; a no-minter IC asset omits the primary).
+ * the keep-a-little-SOL note). Founder hard rule 2026-08-29: whenever a funding path EXISTS the
+ * primary must be present — a dead-end body without an action is a bug.
  */
 export function FundFirstPanel({
   testID,

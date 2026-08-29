@@ -48,6 +48,20 @@ export const depositDe: DepositMessages = {
     mintedAmount: amount => `${amount} gutgeschrieben`,
   },
 
+  icrc: {
+    sendToAccount: (symbol, network) => [
+      {t: 'Sende '},
+      {t: symbol, em: true},
+      {t: ' von jeder '},
+      {t: network, em: true},
+      {t: '-Wallet, die es unterstützt, an dein Konto unten.'},
+    ],
+    noMemo: 'Kein Memo und keine Referenz nötig — eine normale Überweisung an dieses Konto genügt.',
+    feeLine: fee => `Netzwerkgebühr ${fee}`,
+    custody: asset => `dpay hält deine Schlüssel nie und wechselt nie — ${asset} landet direkt in deiner Wallet.`,
+    receivedAmount: amount => `${amount} empfangen`,
+  },
+
   erc20: {
     onrampParamsErr: 'Der Server war für die Einzahlungsdetails nicht erreichbar.',
     deriveErr: 'Deine Einzahlungsadresse konnte nicht abgeleitet werden — schließe die Ansicht und öffne sie erneut.',

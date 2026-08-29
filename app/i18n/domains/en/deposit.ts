@@ -80,6 +80,20 @@ export type DepositMessages = {
     mintedAmount: (amount: string) => string;
   };
 
+  /**
+   * Direct-ICRC rail (IcrcDepositSheet): no minter — receiving IS a plain ICRC-1 transfer to the
+   * user's own account (VCHF/ICP). Founder hard rule 2026-08-29: practical instructions always.
+   */
+  icrc: {
+    sendToAccount: (symbol: string, network: string) => InstrRun[];
+    /** Practical instruction: no memo/reference gymnastics needed for a plain transfer. */
+    noMemo: string;
+    feeLine: (fee: string) => string;
+    custody: (asset: string) => string;
+    /** Honest receive detection: ledger balance strictly above the watched baseline. */
+    receivedAmount: (amount: string) => string;
+  };
+
   /** ckETH / ckERC20 rail (CkErc20DepositSheet): the user's OWN Ethereum wallet signs the deposit. */
   erc20: {
     onrampParamsErr: string;
@@ -205,6 +219,20 @@ export const depositEn: DepositMessages = {
     checkingEvery: seconds => `checking every ${seconds}s`,
     checkNowLabel: 'Check deposit status now',
     mintedAmount: amount => `${amount} minted`,
+  },
+
+  icrc: {
+    sendToAccount: (symbol, network) => [
+      {t: 'Send '},
+      {t: symbol, em: true},
+      {t: ' from any '},
+      {t: network, em: true},
+      {t: ' wallet that supports it to your account below.'},
+    ],
+    noMemo: 'No memo or reference needed — a plain transfer to this account is enough.',
+    feeLine: fee => `Network fee ${fee}`,
+    custody: asset => `dpay never holds your keys and never converts — ${asset} lands directly in your wallet.`,
+    receivedAmount: amount => `${amount} received`,
   },
 
   erc20: {

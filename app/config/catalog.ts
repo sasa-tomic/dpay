@@ -417,7 +417,7 @@ export function resolveNfcDisclosure(
 // minter_family).
 const RAW_UINT_RE = /^\d+$/;
 function isCompleteDirectIcrcRow(a: CurrencyDescriptor): boolean {
-  if (a.ledger.length === 0) return false;
+  if (!a.ledger || a.ledger.length === 0) return false;
   if (a.decimals == null || !Number.isInteger(a.decimals) || a.decimals < 0 || a.decimals > MAX_DECIMALS) return false;
   if (!a.wrapper_name || a.wrapper_name.length === 0) return false;
   if (!a.backing_symbol || a.backing_symbol.length === 0) return false;
@@ -425,6 +425,19 @@ function isCompleteDirectIcrcRow(a: CurrencyDescriptor): boolean {
   if (a.fee == null || !RAW_UINT_RE.test(a.fee)) return false;
   if (a.cap == null || !RAW_UINT_RE.test(a.cap) || BigInt(a.cap) <= 0n) return false;
   return true;
+}
+
+// --- direct-ICRC receive address (2026-08-29 founder hard rule: every funding gate gives the
+// user useful practical instructions — a "check back soon" dead end is a bug) ----------------------
+// A complete no-minter direct-ICRC row (VCHF 7 / ICP 8) is RECEIVABLE by a plain icrc1_transfer
+// from ANY Internet Computer wallet to the user's OWN account (owner = self-authenticating
+// principal, default subaccount) on the row's ledger — the exact rail payments already use. This
+// predicate gates the two surfaces that turn the zero-balance fund gate into real top-up
+// instructions: the Receive tab's "My address" sub-mode and the Pay fund-first primary. Family
+// rows keep their family sheets (a native BTC/ETH deposit is strictly more useful there); mintable
+// rows never hit the fund gate (faucet); incomplete rows fail closed.
+export function isDirectIcrcAsset(a: CurrencyDescriptor | null | undefined): boolean {
+  return !!a && !a.mintable && a.minter == null && isCompleteDirectIcrcRow(a);
 }
 
 // MC5 — the "is this currency a PAYABLE asset" predicate. Used as the defense-in-depth gate BEFORE

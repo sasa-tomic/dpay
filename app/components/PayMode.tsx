@@ -6,7 +6,7 @@ import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
 import {short, parseRequestQR} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
-import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
+import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {Identity, Req, NfcStatus} from '../lib/types';
 import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, type RailPrepared} from '../services/rail';
 import {shareHandoff, receiptShareBlob} from '../lib/deepLink';
@@ -456,21 +456,26 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   //   - ONLINE + KNOWN zero (non-DEMO) → the fund-first panel replaces the scanner + send form.
   //   - Offline / loading / null FAIL OPEN to the live surfaces (offline-first rule — the
   //     review-level lowbal backstop still catches a doomed payment at Approve).
-  //   - A no-onramp asset keeps the panel but omits the primary and says so honestly.
+  //   - A family-depositable asset OR a complete no-minter direct-ICRC row (VCHF/ICP — receivable
+  //     by a plain ICRC-1 transfer to the user's own principal) shows the REAL top-up instruction
+  //     + the "Show my … address" primary (founder hard rule 2026-08-29: useful practical
+  //     instructions on every step — a "check back soon" dead end is a bug). Only a genuinely
+  //     undepositable malformed row keeps the honest no-primary copy.
   const gateDesc = catalog.find(c => c.currency === withdrawCurrency) ?? null;
   const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : M.pay.fundsSymbol;
   const gateDepositable = !!gateDesc && !gateDesc.mintable && gateDesc.onramp !== 'Unavailable' && gateDesc.minter != null;
+  const gateCanFund = gateDepositable || isDirectIcrcAsset(gateDesc);
   const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
   const fundGate = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
   const fundPanel = fundGate ? (
     <FundFirstPanel
       testID="pay-fund"
       title={M.pay.fundTitle(gateSymbol, subMode === 'send' ? 'send' : 'pay')}
-      body={gateDepositable
+      body={gateCanFund
         ? M.pay.fundBody(gateSymbol, subMode === 'send' ? 'send' : 'pay')
         : M.pay.fundBodyNoDeposits(gateSymbol)}
-      primaryLabel={gateDepositable ? M.pay.showMyAddress(gateSymbol) : undefined}
-      onPrimary={gateDepositable ? onShowDepositAddress : undefined}
+      primaryLabel={gateCanFund ? M.pay.showMyAddress(gateSymbol) : undefined}
+      onPrimary={gateCanFund ? onShowDepositAddress : undefined}
       onRecheck={onRefreshBalances}
         recheckBusy={refreshBusy}
     />

@@ -18,8 +18,10 @@
 //         compared pre/post for both sides).
 //   * (7) The payer's Ledger shows the outgoing row: "−1.00000001 VCHF" (U+2212) + the payee's
 //         short principal as counterparty.
-//   * Fund-first honesty: an UNFUNDED VCHF selection parks the Pay tab on the no-deposit fund panel
-//         ("Add VCHF to pay" / not depositable — VCHF has no onramp and no minter).
+//   * Fund-first honesty + real instructions: an UNFUNDED VCHF selection parks the Pay tab on the
+//         fund panel ("Add VCHF to pay" + the practical "Send VCHF to your address" instruction
+//         with a primary that opens the ICRC receive-address surface — the wallet's own ICRC-1
+//         principal; no onramp and no minter, yet fully receivable by plain transfer).
 //
 // The camera-scan twin (auto-sign one-press entry) for ICP is flow 96; the VCHF merchant/reconcile
 // twin is flow 97.
@@ -50,7 +52,7 @@ export const meta = {
   name: 'vchf-pay',
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'asset-selector', 'no-ramp', 'deeplink', 'explicit-approve', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the no-deposit fund panel; a 1.00000001 VCHF deeplink request reviews with exact unit/amount and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key.',
+  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send VCHF to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a 1.00000001 VCHF deeplink request reviews with exact unit/amount and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + deeplink reload + settle polls
 };
 
@@ -79,7 +81,9 @@ export async function run() {
     const topupCount = await driver.eval(() => document.querySelectorAll('[data-testid="btn-topup"]').length);
     assertEq(String(topupCount), '1', 'exactly one btn-topup in the sheet (DEMO faucet only — VCHF has none)');
 
-    // Select VCHF; unfunded selection must park the Pay tab on the no-deposit fund panel.
+    // Select VCHF; unfunded selection parks the Pay tab on the fund panel WITH real top-up
+    // instructions (founder hard rule 2026-08-29: no "check back soon" dead ends — receiving a
+    // no-minter direct-ICRC asset is a plain ICRC-1 transfer to the user's own principal).
     await selectCurrency(driver, 'vchf');
     assertEq(await driver.readText('active-asset-label'), 'VCHF balance', 'header active-asset label after VCHF select');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
@@ -87,7 +91,16 @@ export async function run() {
     assert(fundPanel != null, 'unfunded VCHF selection parks Pay tab on the fund panel');
     const fundBody = await driver.bodyText();
     assertIncludes(fundBody, 'Add VCHF to pay', 'fund panel title names VCHF');
-    assertIncludes(fundBody, 'available for deposits yet', 'fund panel explains VCHF is not depositable (no onramp, no minter)');
+    assertIncludes(fundBody, 'Send VCHF to your address', 'fund panel gives the practical top-up instruction');
+    // Tap through: the primary lands on the Receive ▸ My-address ICRC surface, which shows THIS
+    // wallet's own ICRC-1 account (its self principal) + the no-memo instruction.
+    await driver.click('pay-fund-go', { timeoutMs: 5_000 });
+    assert(await driver.findByTestID('deposit-address', { timeoutMs: 10_000 }) != null, 'primary opens the ICRC receive-address surface');
+    const shownAddr = (await driver.readText('deposit-address')).trim();
+    assertEq(shownAddr, await railPrincipalText(account.publicHex), 'shown address is the wallet\'s own ICRC-1 principal');
+    assertIncludes(await driver.bodyText(), 'No memo or reference needed', 'receive surface carries practical instructions');
+    assert(await driver.findByTestID('btn-receive-request', { timeoutMs: 4_000 }) != null, 'the Request/My-address toggle is present for VCHF');
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // --- Seed VCHF; both balances refresh by the exact amount --------------------------------
     console.log('[95-vchf-pay] faucet 2.10000001 VCHF and wait for in-app refresh…');

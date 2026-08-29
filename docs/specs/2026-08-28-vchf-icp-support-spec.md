@@ -477,3 +477,37 @@ This spec is complete only when:
 ICPSwap buy/sell remains a separate follow-up. Its future spec must include quote freshness,
 price-impact/slippage bounds, exact allowance/expiry, asynchronous output/refund reconciliation,
 residual allowance revocation, and persistent recovery states described in the analysis.
+
+---
+
+## Addendum (2026-08-29): real top-up instructions for the no-ramp rows — transfer-in without a ramp
+
+Founder hard rule (verbatim, set 2026-08-29): **"user MUST be given useful practical instructions
+on every step, especially error path. If you cannot figure out what the instructions should be,
+ask."** (Now `CLAUDE.md` → "Non-negotiable: useful practical instructions on every step".)
+
+The spec's "no Add money / Cash out actions until a compliant ramp exists" rule stands for FIAT
+ramps — but the shipped fund gate conflated ramp-based funding with plain transfer-in, dead-ending
+the user on "not available for deposits yet — check back soon". Receiving VCHF/ICP needs NO ramp:
+any Internet Computer wallet can `icrc1_transfer` to the user's OWN ICRC-1 account (owner = self
+principal, default subaccount) on the exact ledger — the same rail payments already use. The U5
+assertion "no Add/Cash actions are emitted for either row" is narrowed, not broken: the Balances
+rows still emit NO ramp actions; the zero-balance Pay fund gate and the Receive ▸ My address
+sub-mode now carry the real instruction and surface:
+
+- `app/config/catalog.ts` `isDirectIcrcAsset()` — true only for complete no-minter rows
+  (fail-closed on malformed; family rows keep their family sheets; mintable rows never gate).
+- `app/components/IcrcDepositSheet.tsx` — the user's own principal as QR + copyable text,
+  send-from-any-IC-wallet instruction, no-memo note, the ledger fee from the catalog, the
+  dpay-never-holds/never-converts line, and the same honest baseline+delta receive watch as
+  `DepositSheet` (signed `icrc1_balance_of`, strictly-higher = received).
+- `PayMode` fund gate: `gateCanFund = gateDepositable || isDirectIcrcAsset(gateDesc)` — the
+  "Show my … address" primary now renders for VCHF/ICP; `fundBodyNoDeposits` is unreachable for
+  every payable bundled row.
+- `ReceiveMode`: the `[ Request payment | My address ]` toggle + inline `IcrcDepositSheet` render
+  for direct-ICRC rows (family rows unchanged).
+- Relay catalog: UNCHANGED — VCHF/ICP stay `onramp = offramp = Unavailable` (fiat-ramp honesty);
+  the app branches on direct-ICRC-ness, never on `onramp`.
+- Coverage: i18n `deposit.icrc` ×4 locales; e2e flows 95/96 tap `pay-fund-go` → the ICRC surface
+  and pin the shown address == the wallet's own principal (`railPrincipalText`); jest
+  `IcrcDepositSheet.test.tsx` (gate matrix) + `isDirectIcrcAsset` cases in `catalog.test.ts`.

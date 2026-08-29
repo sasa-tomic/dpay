@@ -49,6 +49,20 @@ export const depositEs: DepositMessages = {
     mintedAmount: amount => `${amount} emitidos`,
   },
 
+  icrc: {
+    sendToAccount: (symbol, network) => [
+      {t: 'Envía '},
+      {t: symbol, em: true},
+      {t: ' desde cualquier billetera de '},
+      {t: network, em: true},
+      {t: ' que lo soporte a tu cuenta de abajo.'},
+    ],
+    noMemo: 'No hace falta memo ni referencia — una transferencia normal a esta cuenta es suficiente.',
+    feeLine: fee => `Comisión de red ${fee}`,
+    custody: asset => `dpay nunca guarda tus claves ni convierte — ${asset} llega directamente a tu billetera.`,
+    receivedAmount: amount => `${amount} recibidos`,
+  },
+
   erc20: {
     onrampParamsErr: 'No se pudo contactar con el servidor para obtener los datos del depósito.',
     deriveErr: 'No se pudo generar tu dirección de depósito. Cierra y vuelve a abrir esta pantalla.',

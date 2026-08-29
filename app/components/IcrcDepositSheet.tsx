@@ -1,0 +1,170 @@
+import {useCallback, useEffect, useRef, useState} from 'react';
+import {View, Text, Pressable, ActivityIndicator, Platform} from 'react-native';
+import {QrCode} from './QrCode';
+import {C} from '../config/palette';
+import {S} from '../styles';
+import {POLL, QR_SIZE_SMALL} from '../config/constants';
+import {cmpRaw} from '../lib/amount';
+import type {Identity} from '../lib/types';
+import {type CurrencyDescriptor, displayName, fmtCurrencyAmount, isDirectIcrcAsset} from '../config/catalog';
+import {railBalanceOf} from '../services/rail';
+import {DpayCore} from '../services/native';
+import {useEscapeToClose} from '../hooks/useHotkeys';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {IconCheck, IconCopy} from './icons';
+import {InstrLine} from './InstrLine';
+import {M} from '../i18n';
+
+/**
+ * Direct-ICRC receive sheet (VCHF/ICP, 2026-08-29 founder hard rule: every funding gate gives
+ * useful practical instructions — never a "check back soon" dead end). These assets have NO
+ * minter: receiving is a plain icrc1_transfer from ANY Internet Computer wallet to THIS user's
+ * own ICRC-1 account (owner = self-authenticating principal, default subaccount) on the row's
+ * ledger — the exact rail payments already use. The "address" is therefore the user's principal
+ * (derived LOCALLY by the core — no gateway round trip), shown as QR + copyable text with honest
+ * instructions: send this asset only, no memo needed, the ledger fee from the catalog, and the
+ * dpay-never-holds/never-converts line. Receive detection is the same honest watch as
+ * DepositSheet: a signed icrc1_balance_of baseline + strictly-higher delta while open.
+ */
+export function IcrcDepositSheet({identity, catalog, currency, onClose}: {identity: Identity; catalog: CurrencyDescriptor[]; currency: number; onClose: () => void}) {
+  const desc = catalog.find(c => c.currency === currency) ?? null;
+  const [principal, setPrincipal] = useState<string | null>(null);
+  const [receivedTotal, setReceivedTotal] = useState<string | null>(null);
+  // Balance baseline (first successful ledger read while open); received = strictly above it.
+  const baselineRef = useRef<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const {copied, copy: doCopy} = useCopyFeedback();
+  const [checkBusy, setCheckBusy] = useState(false);
+
+  useEscapeToClose(onClose);
+
+  // The receive address is the user's OWN principal — derived locally (a derivation failure is
+  // the only error path; no network dependency at this step).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true); setErr(null);
+      try {
+        if (!isDirectIcrcAsset(desc)) { if (alive) setErr(M.deposit.ck.noAddress); return; }
+        const p = await DpayCore.icpSelfPrincipal(identity.secretHex);
+        if (alive) setPrincipal(p);
+      } catch {
+        if (alive) setErr(M.deposit.ck.addressErr);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [identity.secretHex, desc]);
+
+  // ONE refresh reused by BOTH the poll and the manual "Check now" — single source of truth,
+  // mirroring DepositSheet's honest watch (baseline + strictly-higher delta).
+  const refreshNow = useCallback(async (manual: boolean) => {
+    if (manual) setCheckBusy(true);
+    try {
+      const ledger = desc?.ledger ?? '';
+      if (!ledger) return;
+      const bal = await railBalanceOf(identity.secretHex, ledger);
+      if (bal != null) {
+        const base = baselineRef.current;
+        if (base == null) {
+          baselineRef.current = bal; // first successful read while open — the watching baseline
+        } else if (cmpRaw(bal, base) > 0) {
+          setReceivedTotal((BigInt(bal) - BigInt(base)).toString());
+        }
+      }
+    } catch (e) { console.warn('icrc receive balance recheck failed: ', e); }
+    finally { if (manual) setCheckBusy(false); }
+  }, [identity.secretHex, desc]);
+
+  // Poll every POLL.deposit while open; cleans up on close.
+  useEffect(() => {
+    let alive = true;
+    const poll = () => { if (alive) { refreshNow(false); } };
+    poll(); const id = setInterval(poll, POLL.deposit);
+    return () => { alive = false; clearInterval(id); };
+  }, [refreshNow]);
+
+  const copy = useCallback(async () => {
+    if (principal) { await doCopy(principal); }
+  }, [principal, doCopy]);
+
+  const symbol = desc ? displayName(desc) : '';
+  const network = desc?.network ?? '';
+  // The ledger fee from the catalog descriptor (already formatted in the asset's own units); the
+  // feeNone word only renders for a malformed descriptor the caller failed to gate out.
+  const feeVal = desc && desc.fee != null ? fmtCurrencyAmount(catalog, currency, desc.fee) : M.deposit.ck.feeNone;
+
+  const body = (
+    <>
+      {loading ? (
+        <View style={S.centerAll}>
+          <ActivityIndicator color={C.brand} />
+          <Text style={S.dim2}>{M.deposit.ck.fetchingAddress}</Text>
+        </View>
+      ) : err || !principal ? (
+        <View style={S.centerAll}>
+          <Text style={S.err}>{err ?? M.deposit.ck.noAddress}</Text>
+        </View>
+      ) : receivedTotal != null ? (
+        <View style={S.centerAll}>
+          <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
+          <Text style={S.paidText}>{M.deposit.deposited}</Text>
+          <Text style={S.paidSub}>{M.deposit.icrc.receivedAmount(fmtCurrencyAmount(catalog, currency, receivedTotal))}</Text>
+          <Text style={S.dim2}>{M.deposit.balanceAuto}</Text>
+          <Pressable testID="btn-deposit-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
+        </View>
+      ) : (
+        <>
+          {/* Complete, practical instructions: which asset, from where, no-memo, the exact
+              network fee, and the non-custody line. All facts from the catalog descriptor. */}
+          <View testID="deposit-instructions" style={S.instrCard}>
+            <InstrLine runs={M.deposit.icrc.sendToAccount(symbol, network)} />
+            <Text style={S.instrMeta}>{M.deposit.icrc.noMemo}</Text>
+            <Text style={S.instrMeta}>{M.deposit.icrc.feeLine(feeVal)}</Text>
+            <Text style={S.instrCustody}>{M.deposit.icrc.custody(symbol)}</Text>
+          </View>
+
+          <View testID="deposit-qr" style={S.qrCard}><QrCode value={principal} size={QR_SIZE_SMALL} ecl="L" /></View>
+
+          <Text testID="deposit-address" style={S.sheetAddr} selectable={true}>{principal}</Text>
+
+          <Pressable
+            testID="btn-deposit-copy"
+            accessibilityRole="button"
+            accessibilityLabel={copied === 'clipboard' ? M.deposit.addressCopied : copied === 'shared' ? M.deposit.addressShared : M.deposit.ck.copyDepositAddress}
+            style={[S.primaryWide, S.depositCopy]}
+            onPress={copy}>
+            <IconCopy size={18} color={C.brandInk}/>
+            <Text style={S.primaryText}>{copied === 'clipboard' ? M.deposit.copied : copied === 'shared' ? M.deposit.shared : M.deposit.copyAddress}</Text>
+          </Pressable>
+
+          {/* Same honest single progress cue as DepositSheet: watching + manual nudge. */}
+          <View testID="deposit-status" style={S.depositStatus}>
+            <Text style={S.depositStatusTitle}>{M.deposit.ck.statusTitle}</Text>
+            <Text style={S.depositStatusMain}>{M.deposit.ck.watching}</Text>
+            <Text style={S.depositStatusRow}>{M.deposit.ck.checkingEvery(POLL.deposit / 1000)}</Text>
+          </View>
+
+          <Pressable
+            testID="btn-deposit-check"
+            accessibilityRole="button"
+            accessibilityLabel={M.deposit.ck.checkNowLabel}
+            accessibilityState={{disabled: checkBusy}}
+            style={[S.checkBtn, checkBusy && S.dim]}
+            disabled={checkBusy}
+            onPress={() => refreshNow(true)}>
+            {checkBusy
+              ? <ActivityIndicator size="small" color={C.brand} />
+              : <Text style={S.checkBtnText}>{M.deposit.checkNow}</Text>}
+          </Pressable>
+
+          {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
+        </>
+      )}
+    </>
+  );
+
+  return <View style={S.sheetBody}>{body}</View>;
+}

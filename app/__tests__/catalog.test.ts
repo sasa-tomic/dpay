@@ -10,6 +10,7 @@ import {
   fmtCurrencyAmount,
   assetTestKey,
   isPayableAsset,
+  isDirectIcrcAsset,
   isTestnetCurrency,
   testnetDisplayName,
   catalogCacheKey,
@@ -1079,5 +1080,45 @@ describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
       {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null, onramp: 'Direct', offramp: 'Direct'},
       {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
     ]);
+  });
+});
+
+// isDirectIcrcAsset — the direct-ICRC receive gate (VCHF/ICP funding instructions, founder hard
+// rule 2026-08-29). True ONLY for complete no-minter rows (receivable by a plain icrc1_transfer
+// to the user's own principal); family rows, mintable rows and malformed rows all fail closed.
+describe('isDirectIcrcAsset', () => {
+  const flat = icpCatalogOf(BUNDLED_NETWORKS);
+  const vchf = flat.find(c => c.currency === 7)!;
+  const icp = flat.find(c => c.currency === 8)!;
+
+  it('is TRUE for the bundled VCHF and ICP rows (complete no-minter direct-ICRC)', () => {
+    expect(isDirectIcrcAsset(vchf)).toBe(true);
+    expect(isDirectIcrcAsset(icp)).toBe(true);
+  });
+
+  it('is FALSE for mintable rows (DEMO — faucet), family rows (ckBTC/ckETH have minters) and null/undefined', () => {
+    expect(isDirectIcrcAsset(flat.find(c => c.currency === 0)!)).toBe(false); // DEMO: mintable
+    expect(isDirectIcrcAsset(flat.find(c => c.currency === 1)!)).toBe(false); // ckBTC: minter
+    expect(isDirectIcrcAsset(flat.find(c => c.currency === 2)!)).toBe(false); // ckUSDC: minter
+    expect(isDirectIcrcAsset(flat.find(c => c.currency === 6)!)).toBe(false); // ckETH: minter
+    expect(isDirectIcrcAsset(null)).toBe(false);
+    expect(isDirectIcrcAsset(undefined)).toBe(false);
+  });
+
+  it('fails CLOSED on an incomplete no-minter row (missing ledger / decimals / fee / cap)', () => {
+    // `ledger: null as string` deliberately breaks the declared type at runtime — a malformed
+    // wire row is exactly the threat model (this shape null-deref'd before the guard existed).
+    expect(isDirectIcrcAsset({...vchf, ledger: null as unknown as string})).toBe(false);
+    expect(isDirectIcrcAsset({...vchf, ledger: ''})).toBe(false);
+    expect(isDirectIcrcAsset({...vchf, decimals: null})).toBe(false);
+    expect(isDirectIcrcAsset({...vchf, fee: null})).toBe(false);
+    expect(isDirectIcrcAsset({...vchf, cap: null})).toBe(false);
+    expect(isDirectIcrcAsset({...vchf, wrapper_name: null})).toBe(false);
+    expect(isDirectIcrcAsset({...vchf, network: null})).toBe(false);
+  });
+
+  it('is FALSE the moment a minter appears (a family sheet is strictly more useful)', () => {
+    expect(isDirectIcrcAsset({...vchf, minter: 'aaaaa-aa'})).toBe(false);
+    expect(isDirectIcrcAsset({...vchf, mintable: true})).toBe(false);
   });
 });

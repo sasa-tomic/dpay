@@ -50,6 +50,20 @@ export const depositFr: DepositMessages = {
     mintedAmount: amount => `${amount} émis`,
   },
 
+  icrc: {
+    sendToAccount: (symbol, network) => [
+      {t: 'Envoyez des '},
+      {t: symbol, em: true},
+      {t: ' depuis n’importe quel portefeuille '},
+      {t: network, em: true},
+      {t: ' qui les prend en charge, vers votre compte ci-dessous.'},
+    ],
+    noMemo: 'Aucun memo ni référence nécessaire — un simple transfert vers ce compte suffit.',
+    feeLine: fee => `Frais de réseau ${fee}`,
+    custody: asset => `dpay ne détient jamais vos clés et ne convertit rien — les ${asset} arrivent directement dans votre portefeuille.`,
+    receivedAmount: amount => `${amount} reçus`,
+  },
+
   erc20: {
     onrampParamsErr: 'Impossible de contacter le serveur pour les paramètres de dépôt.',
     deriveErr: 'Impossible de calculer votre adresse de dépôt — rouvrez cette fenêtre.',

@@ -15,8 +15,10 @@
 //         amount, and NO other currency changes (full 0..8 snapshot pre/post both sides).
 //   * (7) The payer's Ledger shows the outgoing row: "−1.00000001 ICP" (U+2212) + the payee's
 //         short principal as counterparty.
-//   * Fund-first honesty: an UNFUNDED ICP selection parks the Pay tab on the no-deposit fund panel
-//         ("Add ICP to pay" / not depositable — ICP has no onramp and no minter).
+//   * Fund-first honesty + real instructions: an UNFUNDED ICP selection parks the Pay tab on the
+//         fund panel ("Add ICP to pay" + the practical "Send ICP to your address" instruction
+//         with a primary that opens the ICRC receive-address surface — the wallet's own ICRC-1
+//         principal; no onramp and no minter, yet fully receivable by plain transfer).
 //
 // The deeplink explicit-approve twin (VCHF) is flow 95; the ICP merchant/reconcile twin is 98.
 import {
@@ -46,7 +48,7 @@ export const meta = {
   name: 'icp-pay',
   journey: 'pay',
   covers: ['icp', 'icp-mainnet', 'asset-selector', 'no-ramp', 'camera-scan', 'auto-sign', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the no-deposit fund panel; a scanned 1.00000001 ICP request signs ONLY against the ICP ledger and settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 ICP to the payee short key.',
+  verifies: 'ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send ICP to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a scanned 1.00000001 ICP request signs ONLY against the ICP ledger and settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 ICP to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + scan + settle polls
 };
 
@@ -75,7 +77,8 @@ export async function run() {
     const topupCount = await driver.eval(() => document.querySelectorAll('[data-testid="btn-topup"]').length);
     assertEq(String(topupCount), '1', 'exactly one btn-topup in the sheet (DEMO faucet only — ICP has none)');
 
-    // Select ICP; unfunded selection must park the Pay tab on the no-deposit fund panel.
+    // Select ICP; unfunded selection parks the Pay tab on the fund panel (real top-up
+    // instructions — founder hard rule 2026-08-29).
     await selectCurrency(driver, 'icp');
     assertEq(await driver.readText('active-asset-label'), 'ICP balance', 'header active-asset label after ICP select');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
@@ -83,7 +86,15 @@ export async function run() {
     assert(fundPanel != null, 'unfunded ICP selection parks Pay tab on the fund panel');
     const fundBody = await driver.bodyText();
     assertIncludes(fundBody, 'Add ICP to pay', 'fund panel title names ICP');
-    assertIncludes(fundBody, 'available for deposits yet', 'fund panel explains ICP is not depositable (no onramp, no minter)');
+    assertIncludes(fundBody, 'Send ICP to your address', 'fund panel gives the practical top-up instruction');
+    // Tap through: the primary lands on the Receive ▸ My-address ICRC surface showing THIS
+    // wallet's own ICRC-1 principal (founder hard rule 2026-08-29 — real instructions, no dead end).
+    await driver.click('pay-fund-go', { timeoutMs: 5_000 });
+    assert(await driver.findByTestID('deposit-address', { timeoutMs: 10_000 }) != null, 'primary opens the ICRC receive-address surface');
+    const shownAddr = (await driver.readText('deposit-address')).trim();
+    assertEq(shownAddr, await railPrincipalText(account.publicHex), 'shown address is the wallet\'s own ICRC-1 principal');
+    assertIncludes(await driver.bodyText(), 'No memo or reference needed', 'receive surface carries practical instructions');
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // --- Seed ICP; balances refresh by the exact amount ---------------------------------------
     console.log('[96-icp-pay] faucet 2.10000001 ICP and wait for in-app refresh…');
