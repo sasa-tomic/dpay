@@ -23,6 +23,7 @@ import {
   type NetworkSection,
 } from '../config/catalog';
 import {SOL_DECIMALS} from '../solana/identity';
+import {ICP_LEDGER_PRINCIPAL} from '../config/constants';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {MINT_HEX} from '../lib/format';
 
@@ -728,6 +729,16 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(a.ledger).toBe(TRUTH.principals.icp_ledger);
     expect(a.decimals).toBe(TRUTH.decimals.icp);
     expect(a.decimals).toBe(8);
+  });
+
+  it('ICP_LEDGER_PRINCIPAL matches the shared truth AND the currency-8 row', () => {
+    // The send rail asks "does this ledger expose the LEGACY `transfer` method?" by comparing
+    // against this constant (app/lib/destination.ts isNativeIcpLedger), so a drift would either
+    // strand exchange-style 64-hex ICP addresses or — worse — offer the legacy rail for an asset
+    // whose ledger has no such method. Pinned to BOTH the JSON truth and the catalog row so the
+    // three cannot disagree.
+    expect(ICP_LEDGER_PRINCIPAL).toBe(TRUTH.principals.icp_ledger);
+    expect(ICP_LEDGER_PRINCIPAL).toBe(byId(8).ledger);
   });
 
   it('VCHF/ICP rows pin the locked identity table: unit strings, fee, caps, no-minter shape, Unavailable ramps, order', () => {

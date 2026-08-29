@@ -57,6 +57,14 @@ export const WALLET_ORIGIN = 'https://dpay.kalaj.org';
 // store listing. This is the stable website URL, independent of the user-editable relay endpoint.
 export const PRIVACY_URL = `${WALLET_ORIGIN}/privacy`;
 
+// The NATIVE ICP ledger canister. Pinned here — not merely read off the selected catalog row —
+// because the send rail asks a question only an identity can answer: "does this ledger expose the
+// LEGACY `transfer` method?", i.e. can it be paid at a 64-hex account identifier. That method
+// exists on this canister and on no other ICRC-1 ledger, so the principal IS the capability.
+// The relay pins its own copy (`crates/dpay-relay/src/catalog.rs` ICP_LEDGER_PRINCIPAL) and both
+// sides are drift-checked against `dfx/catalog_truth.json` (`principals.icp_ledger`) by tests.
+export const ICP_LEDGER_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+
 // Poll intervals — read once at module load. The e2e harness injects a shortened override via
 // `window.__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument, before the bundle evaluates) so the
 // suite isn't paced by production cadence. In a shipped build that global is never set → every `??`
