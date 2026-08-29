@@ -508,6 +508,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_validate_principal() != 38992:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg() != 8560:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_withdraw_eth_arg() != 22070:
@@ -933,6 +935,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_principal.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_principal.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
@@ -1339,6 +1346,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_update.restype = ctypes.c_uint
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_principal.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_principal.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg.restype = ctypes.c_uint16
@@ -2359,27 +2369,27 @@ class NfcPhase(enum.Enum):
     """
 
     IDLE = 0
-
+    
     LINKING = 1
-
+    
     EXCHANGING = 2
-
+    
     AWAITING_APPROVAL = 3
-
+    
     SETTLING = 4
     """
     The bundle was transferred; the merchant is settling it before returning a signed result.
     """
 
-
+    
     COMPLETE = 5
     """
     The payer verified the merchant-signed result.
     """
 
-
+    
     DECLINED = 6
-
+    
 
 
 class _UniffiConverterTypeNfcPhase(_UniffiConverterRustBuffer):
@@ -2449,11 +2459,11 @@ class NfcResultStatus(enum.Enum):
     """
 
     SETTLED = 0
-
+    
     REJECTED = 1
-
+    
     UNKNOWN = 2
-
+    
 
 
 class _UniffiConverterTypeNfcResultStatus(_UniffiConverterRustBuffer):
@@ -2505,37 +2515,37 @@ class NfcStep(enum.Enum):
     Send the next command from `next_command`.
     """
 
-
+    
     PENDING = 1
     """
     The payer is still deciding — keep polling / re-tap (`next_command` re-SELECTs).
     """
 
-
+    
     DONE = 2
     """
     The signed DPN2 bundle is ready; fetch it with `wire()`, settle, then provide a result.
     """
 
-
+    
     AWAITING_RESULT = 3
     """
     A re-tapped payer already received the bundle; provide and return only the result.
     """
 
-
+    
     CONFIRMED = 4
     """
     The payer accepted and verified the merchant-signed result.
     """
 
-
+    
     DECLINED = 5
     """
     The payer declined; abandon the sale.
     """
 
-
+    
     WAITING_FOR_PAYER = 6
     """
     The card answered NOT_READY at SELECT: a dpay card is routed but no payer session is armed
@@ -2543,7 +2553,7 @@ class NfcStep(enum.Enum):
     actionable message and stop.
     """
 
-
+    
 
 
 class _UniffiConverterTypeNfcStep(_UniffiConverterRustBuffer):
@@ -2841,7 +2851,7 @@ class FfiCardSession():
         """
 
         _UniffiConverterUInt32.check_lower(max_chunk)
-
+        
         self._pointer = _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_constructor_fficardsession_new,
         _UniffiConverterUInt32.lower(max_chunk))
 
@@ -2921,7 +2931,7 @@ class FfiCardSession():
         """
 
         _UniffiConverterBytes.check_lower(command)
-
+        
         return _UniffiConverterBytes.lift(
             _uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_process,self._uniffi_clone_pointer(),
         _UniffiConverterBytes.lower(command))
@@ -2938,7 +2948,7 @@ class FfiCardSession():
         """
 
         _UniffiConverterBytes.check_lower(wire)
-
+        
         _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire,self._uniffi_clone_pointer(),
         _UniffiConverterBytes.lower(wire))
 
@@ -3075,9 +3085,9 @@ class FfiReaderConductor():
         """
 
         _UniffiConverterBytes.check_lower(request)
-
+        
         _UniffiConverterUInt32.check_lower(max_chunk)
-
+        
         self._pointer = _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new,
         _UniffiConverterBytes.lower(request),
         _UniffiConverterUInt32.lower(max_chunk))
@@ -3108,7 +3118,7 @@ class FfiReaderConductor():
         """
 
         _UniffiConverterBytes.check_lower(response)
-
+        
         return _UniffiConverterTypeNfcStep.lift(
             _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response,self._uniffi_clone_pointer(),
         _UniffiConverterBytes.lower(response))
@@ -3151,7 +3161,7 @@ class FfiReaderConductor():
         """
 
         _UniffiConverterBytes.check_lower(result)
-
+        
         _uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_result,self._uniffi_clone_pointer(),
         _UniffiConverterBytes.lower(result))
 
@@ -3224,7 +3234,7 @@ def decode_request(qr: "str") -> "PaymentRequestData":
     """
 
     _UniffiConverterString.check_lower(qr)
-
+    
     return _UniffiConverterTypePaymentRequestData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_decode_request,
         _UniffiConverterString.lower(qr)))
 
@@ -3240,19 +3250,19 @@ def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",curren
     """
 
     _UniffiConverterBytes.check_lower(to)
-
+    
     _UniffiConverterUInt64.check_lower(amount)
-
+    
     _UniffiConverterBytes.check_lower(nonce)
-
+    
     _UniffiConverterUInt64.check_lower(expiry)
-
+    
     _UniffiConverterUInt32.check_lower(currency)
-
+    
     _UniffiConverterString.check_lower(to_name)
-
+    
     _UniffiConverterString.check_lower(memo)
-
+    
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_encode_request,
         _UniffiConverterBytes.lower(to),
         _UniffiConverterUInt64.lower(amount),
@@ -3272,9 +3282,9 @@ def format_amount(raw: "int",decimals: "int") -> "str":
     """
 
     _UniffiConverterUInt64.check_lower(raw)
-
+    
     _UniffiConverterUInt8.check_lower(decimals)
-
+    
     return _UniffiConverterString.lift(_uniffi_rust_call(_UniffiLib.uniffi_dpay_ffi_fn_func_format_amount,
         _UniffiConverterUInt64.lower(raw),
         _UniffiConverterUInt8.lower(decimals)))
@@ -3295,21 +3305,21 @@ def icp_approve_arg(spender_owner_text: "str",spender_subaccount_hex: "typing.Op
     """
 
     _UniffiConverterString.check_lower(spender_owner_text)
-
+    
     _UniffiConverterOptionalString.check_lower(spender_subaccount_hex)
-
+    
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-
+    
     _UniffiConverterOptionalString.check_lower(amount)
-
+    
     _UniffiConverterOptionalString.check_lower(expected_allowance)
-
+    
     _UniffiConverterOptionalString.check_lower(expires_at_ns)
-
+    
     _UniffiConverterOptionalString.check_lower(memo_hex)
-
+    
     _UniffiConverterOptionalString.check_lower(fee)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_approve_arg,
         _UniffiConverterString.lower(spender_owner_text),
         _UniffiConverterOptionalString.lower(spender_subaccount_hex),
@@ -3327,9 +3337,9 @@ def icp_balance_of_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]")
     """
 
     _UniffiConverterString.check_lower(owner_text)
-
+    
     _UniffiConverterOptionalString.check_lower(subaccount_hex)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg,
         _UniffiConverterString.lower(owner_text),
         _UniffiConverterOptionalString.lower(subaccount_hex)))
@@ -3337,7 +3347,7 @@ def icp_balance_of_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]")
 
 def icp_decode_eip1559_price(arg: "bytes") -> "IcpEip1559Price":
     _UniffiConverterBytes.check_lower(arg)
-
+    
     return _UniffiConverterTypeIcpEip1559Price.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price,
         _UniffiConverterBytes.lower(arg)))
 
@@ -3348,7 +3358,7 @@ def icp_decode_int(arg: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(arg)
-
+    
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_int,
         _UniffiConverterBytes.lower(arg)))
 
@@ -3362,23 +3372,23 @@ def icp_decode_minter_ok(arg: "bytes") -> "IcpTransferOutcome":
     """
 
     _UniffiConverterBytes.check_lower(arg)
-
+    
     return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_minter_ok,
         _UniffiConverterBytes.lower(arg)))
 
 
 def icp_decode_query(body: "bytes") -> "IcpQueryReply":
     _UniffiConverterBytes.check_lower(body)
-
+    
     return _UniffiConverterTypeIcpQueryReply.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_query,
         _UniffiConverterBytes.lower(body)))
 
 
 def icp_decode_read_state(body: "bytes",request_ids: "typing.List[bytes]") -> "IcpStateRead":
     _UniffiConverterBytes.check_lower(body)
-
+    
     _UniffiConverterSequenceBytes.check_lower(request_ids)
-
+    
     return _UniffiConverterTypeIcpStateRead.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state,
         _UniffiConverterBytes.lower(body),
         _UniffiConverterSequenceBytes.lower(request_ids)))
@@ -3390,14 +3400,14 @@ def icp_decode_text(arg: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(arg)
-
+    
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text,
         _UniffiConverterBytes.lower(arg)))
 
 
 def icp_decode_transfer_result(arg: "bytes") -> "IcpTransferOutcome":
     _UniffiConverterBytes.check_lower(arg)
-
+    
     return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result,
         _UniffiConverterBytes.lower(arg)))
 
@@ -3409,7 +3419,7 @@ def icp_eip1559_price_arg(ckerc20_ledger_text: "str") -> "bytes":
     """
 
     _UniffiConverterString.check_lower(ckerc20_ledger_text)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg,
         _UniffiConverterString.lower(ckerc20_ledger_text)))
 
@@ -3421,7 +3431,7 @@ def icp_envelope_request_id(envelope: "bytes") -> "bytes":
     """
 
     _UniffiConverterBytes.check_lower(envelope)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_envelope_request_id,
         _UniffiConverterBytes.lower(envelope)))
 
@@ -3434,9 +3444,9 @@ def icp_ingress_expiry(now_ns: "str",ahead_s: "int") -> "str":
     """
 
     _UniffiConverterString.check_lower(now_ns)
-
+    
     _UniffiConverterUInt64.check_lower(ahead_s)
-
+    
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_ingress_expiry,
         _UniffiConverterString.lower(now_ns),
         _UniffiConverterUInt64.lower(ahead_s)))
@@ -3448,9 +3458,9 @@ def icp_minter_account_arg(owner_text: "str",subaccount_hex: "typing.Optional[st
     """
 
     _UniffiConverterString.check_lower(owner_text)
-
+    
     _UniffiConverterOptionalString.check_lower(subaccount_hex)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_minter_account_arg,
         _UniffiConverterString.lower(owner_text),
         _UniffiConverterOptionalString.lower(subaccount_hex)))
@@ -3465,7 +3475,7 @@ def icp_principal_from_pubkey(pubkey: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(pubkey)
-
+    
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey,
         _UniffiConverterBytes.lower(pubkey)))
 
@@ -3477,11 +3487,11 @@ def icp_retrieve_btc_arg(address: "str",amount_sats: "str",from_subaccount_hex: 
     """
 
     _UniffiConverterString.check_lower(address)
-
+    
     _UniffiConverterString.check_lower(amount_sats)
-
+    
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg,
         _UniffiConverterString.lower(address),
         _UniffiConverterString.lower(amount_sats),
@@ -3495,7 +3505,7 @@ def icp_self_principal(secret: "bytes") -> "str":
     """
 
     _UniffiConverterBytes.check_lower(secret)
-
+    
     return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_self_principal,
         _UniffiConverterBytes.lower(secret)))
 
@@ -3506,15 +3516,15 @@ def icp_sign_query(secret: "bytes",canister_text: "str",method_name: "str",arg: 
     """
 
     _UniffiConverterBytes.check_lower(secret)
-
+    
     _UniffiConverterString.check_lower(canister_text)
-
+    
     _UniffiConverterString.check_lower(method_name)
-
+    
     _UniffiConverterBytes.check_lower(arg)
-
+    
     _UniffiConverterString.check_lower(ingress_expiry_ns)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_query,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterString.lower(canister_text),
@@ -3531,13 +3541,13 @@ def icp_sign_read_state(secret: "bytes",request_ids: "typing.List[bytes]",want_t
     """
 
     _UniffiConverterBytes.check_lower(secret)
-
+    
     _UniffiConverterSequenceBytes.check_lower(request_ids)
-
+    
     _UniffiConverterBool.check_lower(want_time)
-
+    
     _UniffiConverterString.check_lower(ingress_expiry_ns)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_read_state,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterSequenceBytes.lower(request_ids),
@@ -3547,15 +3557,15 @@ def icp_sign_read_state(secret: "bytes",request_ids: "typing.List[bytes]",want_t
 
 def icp_sign_update(secret: "bytes",canister_text: "str",method_name: "str",arg: "bytes",ingress_expiry_ns: "str") -> "IcpSignedUpdate":
     _UniffiConverterBytes.check_lower(secret)
-
+    
     _UniffiConverterString.check_lower(canister_text)
-
+    
     _UniffiConverterString.check_lower(method_name)
-
+    
     _UniffiConverterBytes.check_lower(arg)
-
+    
     _UniffiConverterString.check_lower(ingress_expiry_ns)
-
+    
     return _UniffiConverterTypeIcpSignedUpdate.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_update,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterString.lower(canister_text),
@@ -3571,17 +3581,17 @@ def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[st
     """
 
     _UniffiConverterString.check_lower(to_owner_text)
-
+    
     _UniffiConverterOptionalString.check_lower(to_subaccount_hex)
-
+    
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-
+    
     _UniffiConverterString.check_lower(amount)
-
+    
     _UniffiConverterOptionalString.check_lower(fee)
-
+    
     _UniffiConverterOptionalString.check_lower(memo_hex)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg,
         _UniffiConverterString.lower(to_owner_text),
         _UniffiConverterOptionalString.lower(to_subaccount_hex),
@@ -3589,6 +3599,21 @@ def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[st
         _UniffiConverterString.lower(amount),
         _UniffiConverterOptionalString.lower(fee),
         _UniffiConverterOptionalString.lower(memo_hex)))
+
+
+def icp_validate_principal(text: "str") -> "str":
+    """
+    Validate an ICRC-1 owner principal in TEXT form and return it canonicalised. The parse is the
+    real base32-CRC decode (`Principal::from_text`), so a mistyped or truncated principal — the
+    failure mode of a payment link that travelled through a chat app — is refused here, before the
+    payer is ever shown a destination. Returns the canonical `to_text()` so one principal has ONE
+    spelling everywhere in the UI (grouping/case normalised).
+    """
+
+    _UniffiConverterString.check_lower(text)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_principal,
+        _UniffiConverterString.lower(text)))
 
 
 def icp_withdraw_erc20_arg(amount: "str",ckerc20_ledger_text: "str",recipient: "str",from_cketh_subaccount_hex: "typing.Optional[str]",from_ckerc20_subaccount_hex: "typing.Optional[str]") -> "bytes":
@@ -3599,15 +3624,15 @@ def icp_withdraw_erc20_arg(amount: "str",ckerc20_ledger_text: "str",recipient: "
     """
 
     _UniffiConverterString.check_lower(amount)
-
+    
     _UniffiConverterString.check_lower(ckerc20_ledger_text)
-
+    
     _UniffiConverterString.check_lower(recipient)
-
+    
     _UniffiConverterOptionalString.check_lower(from_cketh_subaccount_hex)
-
+    
     _UniffiConverterOptionalString.check_lower(from_ckerc20_subaccount_hex)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg,
         _UniffiConverterString.lower(amount),
         _UniffiConverterString.lower(ckerc20_ledger_text),
@@ -3623,11 +3648,11 @@ def icp_withdraw_eth_arg(recipient: "str",amount_wei: "str",from_subaccount_hex:
     """
 
     _UniffiConverterString.check_lower(recipient)
-
+    
     _UniffiConverterString.check_lower(amount_wei)
-
+    
     _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg,
         _UniffiConverterString.lower(recipient),
         _UniffiConverterString.lower(amount_wei),
@@ -3643,7 +3668,7 @@ def keypair_from_secret(secret: "bytes") -> "KeyPair":
     """
 
     _UniffiConverterBytes.check_lower(secret)
-
+    
     return _UniffiConverterTypeKeyPair.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_keypair_from_secret,
         _UniffiConverterBytes.lower(secret)))
 
@@ -3654,9 +3679,9 @@ def nfc_bundle_bytes(update: "bytes",read_state: "bytes") -> "bytes":
     """
 
     _UniffiConverterBytes.check_lower(update)
-
+    
     _UniffiConverterBytes.check_lower(read_state)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_bundle_bytes,
         _UniffiConverterBytes.lower(update),
         _UniffiConverterBytes.lower(read_state)))
@@ -3668,7 +3693,7 @@ def nfc_decode_bundle(bytes: "bytes") -> "NfcBundleData":
     """
 
     _UniffiConverterBytes.check_lower(bytes)
-
+    
     return _UniffiConverterTypeNfcBundleData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_bundle,
         _UniffiConverterBytes.lower(bytes)))
 
@@ -3681,7 +3706,7 @@ def nfc_decode_request(bytes: "bytes") -> "PaymentRequestData":
     """
 
     _UniffiConverterBytes.check_lower(bytes)
-
+    
     return _UniffiConverterTypePaymentRequestData.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_decode_request,
         _UniffiConverterBytes.lower(bytes)))
 
@@ -3703,19 +3728,19 @@ def nfc_request_bytes(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",cur
     """
 
     _UniffiConverterBytes.check_lower(to)
-
+    
     _UniffiConverterUInt64.check_lower(amount)
-
+    
     _UniffiConverterBytes.check_lower(nonce)
-
+    
     _UniffiConverterUInt64.check_lower(expiry)
-
+    
     _UniffiConverterUInt32.check_lower(currency)
-
+    
     _UniffiConverterString.check_lower(to_name)
-
+    
     _UniffiConverterString.check_lower(memo)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_request_bytes,
         _UniffiConverterBytes.lower(to),
         _UniffiConverterUInt64.lower(amount),
@@ -3732,13 +3757,13 @@ def nfc_result_bytes(secret: "bytes",status: "NfcResultStatus",nonce: "bytes",re
     """
 
     _UniffiConverterBytes.check_lower(secret)
-
+    
     _UniffiConverterTypeNfcResultStatus.check_lower(status)
-
+    
     _UniffiConverterBytes.check_lower(nonce)
-
+    
     _UniffiConverterBytes.check_lower(request_id)
-
+    
     return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_nfc_result_bytes,
         _UniffiConverterBytes.lower(secret),
         _UniffiConverterTypeNfcResultStatus.lower(status),
@@ -3756,9 +3781,9 @@ def parse_amount(human: "str",decimals: "int") -> "int":
     """
 
     _UniffiConverterString.check_lower(human)
-
+    
     _UniffiConverterUInt8.check_lower(decimals)
-
+    
     return _UniffiConverterUInt64.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount,
         _UniffiConverterString.lower(human),
         _UniffiConverterUInt8.lower(decimals)))
@@ -3804,6 +3829,7 @@ __all__ = [
     "icp_sign_read_state",
     "icp_sign_update",
     "icp_transfer_arg",
+    "icp_validate_principal",
     "icp_withdraw_erc20_arg",
     "icp_withdraw_eth_arg",
     "keypair_from_secret",

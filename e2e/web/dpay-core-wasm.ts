@@ -90,6 +90,7 @@ type WasmExports = WebAssembly.Exports & {
   // numerics; structured results are compact JSON returned by length (0 = cap/bad input).
   w_icp_self_principal(seedPtr: number, outPtr: number, cap: number): number;
   w_icp_principal_from_pubkey(ptr: number, len: number, outPtr: number, cap: number): number;
+  w_icp_validate_principal(ptr: number, len: number, outPtr: number, cap: number): number;
   w_icp_ingress_expiry(nowPtr: number, nowLen: number, aheadS: number, outPtr: number, cap: number): number;
   w_icp_transfer_arg(toOwnerPtr: number, toOwnerLen: number, toSubPtr: number, toSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, feePtr: number, feeLen: number, memoPtr: number, memoLen: number, outPtr: number, cap: number): number;
   w_icp_approve_arg(spenderOwnerPtr: number, spenderOwnerLen: number, spenderSubPtr: number, spenderSubLen: number, fromSubPtr: number, fromSubLen: number, amountPtr: number, amountLen: number, expectedPtr: number, expectedLen: number, expiresPtr: number, expiresLen: number, memoPtr: number, memoLen: number, feePtr: number, feeLen: number, outPtr: number, cap: number): number;
@@ -394,6 +395,18 @@ async function icpPrincipalFromPubkey(pubkeyHex: string): Promise<string> {
   return readStr(ex, out, len);
 }
 
+/** Validate a payment link's destination principal through the REAL core parser (base32-CRC).
+ *  A wasm status code (≤3) means the text is not a principal — thrown, never returned as a
+ *  bogus 1–3 character "principal". */
+async function icpValidatePrincipal(text: string): Promise<string> {
+  const ex = await core();
+  const [p, len0] = putStr(ex, text);
+  const out = outBuf(ex, 128, 'icp_validate_principal');
+  const len = ex.w_icp_validate_principal(p, len0, out, 128);
+  if (len <= 3) throw new Error('DpayCore wasm: icp_validate_principal failed');
+  return readStr(ex, out, len);
+}
+
 async function icpIngressExpiry(nowNs: string, aheadS: number): Promise<string> {
   const ex = await core();
   const [nowP, nowLen] = putStr(ex, nowNs);
@@ -664,6 +677,7 @@ export const DpayCore = {
   nfcStatus,
   icpSelfPrincipal,
   icpPrincipalFromPubkey,
+  icpValidatePrincipal,
   icpIngressExpiry,
   icpTransferArg,
   icpApproveArg,

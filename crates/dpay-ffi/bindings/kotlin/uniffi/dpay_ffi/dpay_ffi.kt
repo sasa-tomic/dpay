@@ -818,17 +818,19 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
-// N.B. the name of the extension is very misleading, since it is
-// rather `InterfaceTooLargeException`, caused by too many methods
+// N.B. the name of the extension is very misleading, since it is 
+// rather `InterfaceTooLargeException`, caused by too many methods 
 // in the interface for large crates.
 //
 // By splitting the otherwise huge interface into two parts
-// * UniffiLib
+// * UniffiLib 
 // * IntegrityCheckingUniffiLib (this)
 // we allow for ~2x as many methods in the UniffiLib interface.
-//
-// The `ffi_uniffi_contract_version` method and all checksum methods are put
+// 
+// The `ffi_uniffi_contract_version` method and all checksum methods are put 
 // into `IntegrityCheckingUniffiLib` and these methods are called only once,
 // when the library is loaded.
 internal interface IntegrityCheckingUniffiLib : Library {
@@ -880,6 +882,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_sign_read_state(
 fun uniffi_dpay_ffi_checksum_func_icp_sign_update(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_transfer_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_validate_principal(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg(
 ): Short
@@ -947,8 +951,8 @@ internal interface UniffiLib : Library {
         internal val INSTANCE: UniffiLib by lazy {
             val componentName = "dpay_ffi"
             // For large crates we prevent `MethodTooLargeException` (see #2340)
-            // N.B. the name of the extension is very misleading, since it is
-            // rather `InterfaceTooLargeException`, caused by too many methods
+            // N.B. the name of the extension is very misleading, since it is 
+            // rather `InterfaceTooLargeException`, caused by too many methods 
             // in the interface for large crates.
             //
             // By splitting the otherwise huge interface into two parts
@@ -956,7 +960,7 @@ internal interface UniffiLib : Library {
             // * IntegrityCheckingUniffiLib
             // And all checksum methods are put into `IntegrityCheckingUniffiLib`
             // we allow for ~2x as many methods in the UniffiLib interface.
-            //
+            // 
             // Thus we first load the library with `loadIndirect` as `IntegrityCheckingUniffiLib`
             // so that we can (optionally!) call `uniffiCheckApiChecksums`...
             loadIndirect<IntegrityCheckingUniffiLib>(componentName)
@@ -971,12 +975,12 @@ internal interface UniffiLib : Library {
             // to trigger this issue, the performance impact is negligible, running on
             // a macOS M1 machine the `loadIndirect` call takes ~50ms.
             val lib = loadIndirect<UniffiLib>(componentName)
-            // No need to check the contract version and checksums, since
+            // No need to check the contract version and checksums, since 
             // we already did that with `IntegrityCheckingUniffiLib` above.
             // Loading of library with integrity check done.
             lib
         }
-
+        
         // The Cleaner for the whole library
         internal val CLEANER: UniffiCleaner by lazy {
             UniffiCleaner.create()
@@ -984,123 +988,125 @@ internal interface UniffiLib : Library {
     }
 
     // FFI functions
-    fun uniffi_dpay_ffi_fn_clone_fficardsession(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+    fun uniffi_dpay_ffi_fn_clone_fficardsession(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Pointer
-fun uniffi_dpay_ffi_fn_free_fficardsession(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_free_fficardsession(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-fun uniffi_dpay_ffi_fn_constructor_fficardsession_new(`maxChunk`: Int,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_constructor_fficardsession_new(`maxChunk`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): Pointer
-fun uniffi_dpay_ffi_fn_method_fficardsession_awaiting_decision(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_awaiting_decision(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-fun uniffi_dpay_ffi_fn_method_fficardsession_decline(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_decline(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-fun uniffi_dpay_ffi_fn_method_fficardsession_is_complete(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_is_complete(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-fun uniffi_dpay_ffi_fn_method_fficardsession_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_method_fficardsession_process(`ptr`: Pointer,`command`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_process(`ptr`: Pointer,`command`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_method_fficardsession_provide_wire(`ptr`: Pointer,`wire`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_provide_wire(`ptr`: Pointer,`wire`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-fun uniffi_dpay_ffi_fn_method_fficardsession_request(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_request(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_method_fficardsession_result(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_result(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_method_fficardsession_wire_delivered(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_fficardsession_wire_delivered(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
-fun uniffi_dpay_ffi_fn_clone_ffireaderconductor(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_clone_ffireaderconductor(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Pointer
-fun uniffi_dpay_ffi_fn_free_ffireaderconductor(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_free_ffireaderconductor(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-fun uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new(`request`: RustBuffer.ByValue,`maxChunk`: Int,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_constructor_ffireaderconductor_new(`request`: RustBuffer.ByValue,`maxChunk`: Int,uniffi_out_err: UniffiRustCallStatus, 
 ): Pointer
-fun uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response(`ptr`: Pointer,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_handle_response(`ptr`: Pointer,`response`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_next_command(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_method_ffireaderconductor_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_phase(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_result(`ptr`: Pointer,`result`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_result(`ptr`: Pointer,`result`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-fun uniffi_dpay_ffi_fn_method_ffireaderconductor_reset_link(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_reset_link(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-fun uniffi_dpay_ffi_fn_method_ffireaderconductor_wire(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_method_ffireaderconductor_wire(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_decode_request(`qr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_decode_request(`qr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_encode_request(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_format_amount(`raw`: Long,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_format_amount(`raw`: Long,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_generate_keypair(uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_approve_arg(`spenderOwnerText`: RustBuffer.ByValue,`spenderSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`expectedAllowance`: RustBuffer.ByValue,`expiresAtNs`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_approve_arg(`spenderOwnerText`: RustBuffer.ByValue,`spenderSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`expectedAllowance`: RustBuffer.ByValue,`expiresAtNs`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_decode_int(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_decode_int(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_decode_minter_ok(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_decode_minter_ok(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_decode_query(`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_decode_query(`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_decode_read_state(`body`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_decode_read_state(`body`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_decode_text(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_decode_text(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg(`ckerc20LedgerText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg(`ckerc20LedgerText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_envelope_request_id(`envelope`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_envelope_request_id(`envelope`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_ingress_expiry(`nowNs`: RustBuffer.ByValue,`aheadS`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_ingress_expiry(`nowNs`: RustBuffer.ByValue,`aheadS`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_minter_account_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_minter_account_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey(`pubkey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_principal_from_pubkey(`pubkey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg(`address`: RustBuffer.ByValue,`amountSats`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_retrieve_btc_arg(`address`: RustBuffer.ByValue,`amountSats`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_self_principal(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_self_principal(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_sign_query(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_sign_query(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_sign_read_state(`secret`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,`wantTime`: Byte,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_sign_read_state(`secret`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,`wantTime`: Byte,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_sign_update(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_sign_update(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_transfer_arg(`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_transfer_arg(`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg(`amount`: RustBuffer.ByValue,`ckerc20LedgerText`: RustBuffer.ByValue,`recipient`: RustBuffer.ByValue,`fromCkethSubaccountHex`: RustBuffer.ByValue,`fromCkerc20SubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_validate_principal(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg(`recipient`: RustBuffer.ByValue,`amountWei`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_withdraw_erc20_arg(`amount`: RustBuffer.ByValue,`ckerc20LedgerText`: RustBuffer.ByValue,`recipient`: RustBuffer.ByValue,`fromCkethSubaccountHex`: RustBuffer.ByValue,`fromCkerc20SubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_keypair_from_secret(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_icp_withdraw_eth_arg(`recipient`: RustBuffer.ByValue,`amountWei`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_nfc_bundle_bytes(`update`: RustBuffer.ByValue,`readState`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_keypair_from_secret(`secret`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_nfc_decode_bundle(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_nfc_bundle_bytes(`update`: RustBuffer.ByValue,`readState`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_nfc_decode_request(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_nfc_decode_bundle(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_nfc_default_max_chunk(uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_nfc_decode_request(`bytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_nfc_default_max_chunk(uniffi_out_err: UniffiRustCallStatus, 
 ): Int
-fun uniffi_dpay_ffi_fn_func_nfc_request_bytes(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_nfc_request_bytes(`to`: RustBuffer.ByValue,`amount`: Long,`nonce`: RustBuffer.ByValue,`expiry`: Long,`currency`: Int,`toName`: RustBuffer.ByValue,`memo`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_nfc_result_bytes(`secret`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`requestId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_nfc_result_bytes(`secret`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`requestId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_dpay_ffi_fn_func_parse_amount(`human`: RustBuffer.ByValue,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus,
+fun uniffi_dpay_ffi_fn_func_parse_amount(`human`: RustBuffer.ByValue,`decimals`: Byte,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-fun ffi_dpay_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun ffi_dpay_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun ffi_dpay_ffi_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-fun ffi_dpay_ffi_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun ffi_dpay_ffi_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1108,7 +1114,7 @@ fun ffi_dpay_ffi_rust_future_cancel_u8(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_u8(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 fun ffi_dpay_ffi_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1116,7 +1122,7 @@ fun ffi_dpay_ffi_rust_future_cancel_i8(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_i8(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 fun ffi_dpay_ffi_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1124,7 +1130,7 @@ fun ffi_dpay_ffi_rust_future_cancel_u16(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_u16(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Short
 fun ffi_dpay_ffi_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1132,7 +1138,7 @@ fun ffi_dpay_ffi_rust_future_cancel_i16(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_i16(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Short
 fun ffi_dpay_ffi_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1140,7 +1146,7 @@ fun ffi_dpay_ffi_rust_future_cancel_u32(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_u32(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 fun ffi_dpay_ffi_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1148,7 +1154,7 @@ fun ffi_dpay_ffi_rust_future_cancel_i32(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_i32(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Int
 fun ffi_dpay_ffi_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1156,7 +1162,7 @@ fun ffi_dpay_ffi_rust_future_cancel_u64(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_u64(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 fun ffi_dpay_ffi_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1164,7 +1170,7 @@ fun ffi_dpay_ffi_rust_future_cancel_i64(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_i64(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 fun ffi_dpay_ffi_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1172,7 +1178,7 @@ fun ffi_dpay_ffi_rust_future_cancel_f32(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_f32(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Float
 fun ffi_dpay_ffi_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1180,7 +1186,7 @@ fun ffi_dpay_ffi_rust_future_cancel_f64(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_f64(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Double
 fun ffi_dpay_ffi_rust_future_poll_pointer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1188,7 +1194,7 @@ fun ffi_dpay_ffi_rust_future_cancel_pointer(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_pointer(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_pointer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Pointer
 fun ffi_dpay_ffi_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1196,7 +1202,7 @@ fun ffi_dpay_ffi_rust_future_cancel_rust_buffer(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_rust_buffer(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun ffi_dpay_ffi_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
 ): Unit
@@ -1204,7 +1210,7 @@ fun ffi_dpay_ffi_rust_future_cancel_void(`handle`: Long,
 ): Unit
 fun ffi_dpay_ffi_rust_future_free_void(`handle`: Long,
 ): Unit
-fun ffi_dpay_ffi_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+fun ffi_dpay_ffi_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 
 }
@@ -1290,6 +1296,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_validate_principal() != 38992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_withdraw_erc20_arg() != 8560.toShort()) {
@@ -1445,7 +1454,7 @@ inline fun <T : Disposable?, R> T.use(block: (T) -> R) =
         }
     }
 
-/**
+/** 
  * Used to instantiate an interface without an actual pointer, for fakes in tests, mostly.
  *
  * @suppress
@@ -1789,54 +1798,54 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
  * call [`provide_wire`](Self::provide_wire) (approve) or [`decline`](Self::decline).
  */
 public interface FfiCardSessionInterface {
-
+    
     /**
      * True exactly when the app must approve or decline (a request is held, no decision yet).
      */
     fun `awaitingDecision`(): kotlin.Boolean
-
+    
     /**
      * Decline: the payer rejected the payment. Every subsequent pull returns DECLINED.
      */
     fun `decline`()
-
+    
     /**
      * True only after the merchant's signed result was verified by the payer.
      */
     fun `isComplete`(): kotlin.Boolean
-
+    
     /**
      * Lifecycle phase for the payer-side status UI.
      */
     fun `phase`(): NfcPhase
-
+    
     /**
      * Process one command APDU; returns the response APDU bytes. Total function — never throws.
      */
     fun `process`(`command`: kotlin.ByteArray): kotlin.ByteArray
-
+    
     /**
      * Approve: supply the DPN2 update/read_state bundle to serve. Errors (`NfcWrongState`) unless
      * a request is held and no decision has been made; the bundle and framing are validated.
      */
     fun `provideWire`(`wire`: kotlin.ByteArray)
-
+    
     /**
      * The full received request bytes, once collected (decode with [`decode_request`] shifted — see
      * [`nfc_decode_request`]), or `None` while still collecting.
      */
     fun `request`(): kotlin.ByteArray?
-
+    
     /**
      * The verified merchant result, available only after `is_complete()` becomes true.
      */
     fun `result`(): NfcCardResult?
-
+    
     /**
      * True once the complete DPN2 bundle has left the payer, even while the result is pending.
      */
     fun `wireDelivered`(): kotlin.Boolean
-
+    
     companion object
 }
 
@@ -1938,7 +1947,7 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
         }
     }
 
-
+    
     /**
      * True exactly when the app must approve or decline (a request is held, no decision yet).
      */override fun `awaitingDecision`(): kotlin.Boolean {
@@ -1951,24 +1960,24 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * Decline: the payer rejected the payment. Every subsequent pull returns DECLINED.
      */
     @Throws(DpayException::class)override fun `decline`()
-        =
+        = 
     callWithPointer {
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_fficardsession_decline(
         it, _status)
 }
     }
+    
+    
 
-
-
-
+    
     /**
      * True only after the merchant's signed result was verified by the payer.
      */override fun `isComplete`(): kotlin.Boolean {
@@ -1981,9 +1990,9 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * Lifecycle phase for the payer-side status UI.
      */override fun `phase`(): NfcPhase {
@@ -1996,9 +2005,9 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * Process one command APDU; returns the response APDU bytes. Total function — never throws.
      */override fun `process`(`command`: kotlin.ByteArray): kotlin.ByteArray {
@@ -2011,25 +2020,25 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * Approve: supply the DPN2 update/read_state bundle to serve. Errors (`NfcWrongState`) unless
      * a request is held and no decision has been made; the bundle and framing are validated.
      */
     @Throws(DpayException::class)override fun `provideWire`(`wire`: kotlin.ByteArray)
-        =
+        = 
     callWithPointer {
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_fficardsession_provide_wire(
         it, FfiConverterByteArray.lower(`wire`),_status)
 }
     }
+    
+    
 
-
-
-
+    
     /**
      * The full received request bytes, once collected (decode with [`decode_request`] shifted — see
      * [`nfc_decode_request`]), or `None` while still collecting.
@@ -2043,9 +2052,9 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * The verified merchant result, available only after `is_complete()` becomes true.
      */override fun `result`(): NfcCardResult? {
@@ -2058,9 +2067,9 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * True once the complete DPN2 bundle has left the payer, even while the result is pending.
      */override fun `wireDelivered`(): kotlin.Boolean {
@@ -2073,14 +2082,14 @@ open class FfiCardSession: Disposable, AutoCloseable, FfiCardSessionInterface
     }
     )
     }
+    
 
+    
 
-
-
-
-
+    
+    
     companion object
-
+    
 }
 
 /**
@@ -2215,40 +2224,40 @@ public object FfiConverterTypeFfiCardSession: FfiConverter<FfiCardSession, Point
  * c.handle_response(transceive(cmd)); ... }`; on `Done`, read [`wire`](Self::wire), verify, submit.
  */
 public interface FfiReaderConductorInterface {
-
+    
     /**
      * Feed the response to the last command; advance the state machine. On `Done` the wire is
      * captured (fetch via [`wire`](Self::wire)). Errors on a malformed/unexpected response.
      */
     fun `handleResponse`(`response`: kotlin.ByteArray): NfcStep
-
+    
     /**
      * The next command APDU to transceive, or `None` once the exchange is terminal.
      */
     fun `nextCommand`(): kotlin.ByteArray?
-
+    
     /**
      * Lifecycle phase for the merchant-side status UI. (`AwaitingApproval` is surfaced via a
      * `Pending` step from `handle_response`, not this accessor — see `NfcStep`.)
      */
     fun `phase`(): NfcPhase
-
+    
     /**
      * Supply the fixed merchant-signed result after `Done` (or `AwaitingResult` on a re-tap).
      */
     fun `provideResult`(`result`: kotlin.ByteArray)
-
+    
     /**
      * Reset an interrupted RF link. The next command re-SELECTs and restarts any partial frame
      * transfer without discarding the request, completed bundle, or queued result.
      */
     fun `resetLink`()
-
+    
     /**
      * The byte-identical DPN2 bundle once the exchange reached `Done`, else `None`.
      */
     fun `wire`(): kotlin.ByteArray?
-
+    
     companion object
 }
 
@@ -2349,7 +2358,7 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
         }
     }
 
-
+    
     /**
      * Feed the response to the last command; advance the state machine. On `Done` the wire is
      * captured (fetch via [`wire`](Self::wire)). Errors on a malformed/unexpected response.
@@ -2364,9 +2373,9 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
     }
     )
     }
+    
 
-
-
+    
     /**
      * The next command APDU to transceive, or `None` once the exchange is terminal.
      */override fun `nextCommand`(): kotlin.ByteArray? {
@@ -2379,9 +2388,9 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
     }
     )
     }
+    
 
-
-
+    
     /**
      * Lifecycle phase for the merchant-side status UI. (`AwaitingApproval` is surfaced via a
      * `Pending` step from `handle_response`, not this accessor — see `NfcStep`.)
@@ -2395,39 +2404,39 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
     }
     )
     }
+    
 
-
-
+    
     /**
      * Supply the fixed merchant-signed result after `Done` (or `AwaitingResult` on a re-tap).
      */
     @Throws(DpayException::class)override fun `provideResult`(`result`: kotlin.ByteArray)
-        =
+        = 
     callWithPointer {
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_ffireaderconductor_provide_result(
         it, FfiConverterByteArray.lower(`result`),_status)
 }
     }
+    
+    
 
-
-
-
+    
     /**
      * Reset an interrupted RF link. The next command re-SELECTs and restarts any partial frame
      * transfer without discarding the request, completed bundle, or queued result.
      */override fun `resetLink`()
-        =
+        = 
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_method_ffireaderconductor_reset_link(
         it, _status)
 }
     }
+    
+    
 
-
-
-
+    
     /**
      * The byte-identical DPN2 bundle once the exchange reached `Done`, else `None`.
      */override fun `wire`(): kotlin.ByteArray? {
@@ -2440,14 +2449,14 @@ open class FfiReaderConductor: Disposable, AutoCloseable, FfiReaderConductorInte
     }
     )
     }
+    
 
+    
 
-
-
-
-
+    
+    
     companion object
-
+    
 }
 
 /**
@@ -2484,13 +2493,13 @@ public object FfiConverterTypeFfiReaderConductor: FfiConverter<FfiReaderConducto
  * Decoded `eip_1559_transaction_price` reply — Wei figures as decimal strings.
  */
 data class IcpEip1559Price (
-    var `gasLimit`: kotlin.String,
-    var `maxFeePerGas`: kotlin.String,
-    var `maxPriorityFeePerGas`: kotlin.String,
-    var `maxTransactionFee`: kotlin.String,
+    var `gasLimit`: kotlin.String, 
+    var `maxFeePerGas`: kotlin.String, 
+    var `maxPriorityFeePerGas`: kotlin.String, 
+    var `maxTransactionFee`: kotlin.String, 
     var `timestampNs`: kotlin.String?
 ) {
-
+    
     companion object
 }
 
@@ -2532,13 +2541,13 @@ public object FfiConverterTypeIcpEip1559Price: FfiConverterRustBuffer<IcpEip1559
  * triple. Flat record (not an enum) for cheap Kotlin/JS marshaling.
  */
 data class IcpQueryReply (
-    var `replied`: kotlin.Boolean,
-    var `arg`: kotlin.ByteArray?,
-    var `rejectCode`: kotlin.ULong,
-    var `rejectMessage`: kotlin.String,
+    var `replied`: kotlin.Boolean, 
+    var `arg`: kotlin.ByteArray?, 
+    var `rejectCode`: kotlin.ULong, 
+    var `rejectMessage`: kotlin.String, 
     var `errorCode`: kotlin.String?
 ) {
-
+    
     companion object
 }
 
@@ -2581,14 +2590,14 @@ public object FfiConverterTypeIcpQueryReply: FfiConverterRustBuffer<IcpQueryRepl
  * keep polling (the 2–5 s consensus window); `replied` carries the reply arg.
  */
 data class IcpRequestStatus (
-    var `requestId`: kotlin.ByteArray,
-    var `state`: kotlin.String,
-    var `replyArg`: kotlin.ByteArray?,
-    var `rejectCode`: kotlin.ULong?,
-    var `rejectMessage`: kotlin.String?,
+    var `requestId`: kotlin.ByteArray, 
+    var `state`: kotlin.String, 
+    var `replyArg`: kotlin.ByteArray?, 
+    var `rejectCode`: kotlin.ULong?, 
+    var `rejectMessage`: kotlin.String?, 
     var `errorCode`: kotlin.String?
 ) {
-
+    
     companion object
 }
 
@@ -2636,13 +2645,13 @@ data class IcpSignedUpdate (
     /**
      * Full signed envelope bytes — POST to `/api/v2/canister/<canister>/call`.
      */
-    var `envelope`: kotlin.ByteArray,
+    var `envelope`: kotlin.ByteArray, 
     /**
      * 32-byte request_id — poll `/read_state` under `request_status/<rid>`.
      */
     var `requestId`: kotlin.ByteArray
 ) {
-
+    
     companion object
 }
 
@@ -2675,10 +2684,10 @@ public object FfiConverterTypeIcpSignedUpdate: FfiConverterRustBuffer<IcpSignedU
  * pruned) plus the per-request statuses.
  */
 data class IcpStateRead (
-    var `timeNs`: kotlin.String?,
+    var `timeNs`: kotlin.String?, 
     var `statuses`: List<IcpRequestStatus>
 ) {
-
+    
     companion object
 }
 
@@ -2711,18 +2720,18 @@ public object FfiConverterTypeIcpStateRead: FfiConverterRustBuffer<IcpStateRead>
  * ledger block index (decimal string); errors flatten to a variant tag + human detail.
  */
 data class IcpTransferOutcome (
-    var `ok`: kotlin.Boolean,
-    var `blockIndex`: kotlin.String?,
+    var `ok`: kotlin.Boolean, 
+    var `blockIndex`: kotlin.String?, 
     /**
      * e.g. `InsufficientFunds`, `BadFee`, `Duplicate`, `GenericError`, … empty when ok.
      */
-    var `errVariant`: kotlin.String,
+    var `errVariant`: kotlin.String, 
     /**
      * Human-readable detail (e.g. "balance 0, need 10000").
      */
     var `errDetail`: kotlin.String
 ) {
-
+    
     companion object
 }
 
@@ -2767,13 +2776,13 @@ data class KeyPair (
     /**
      * 32-byte Ed25519 signing seed (secret). Keep on device only.
      */
-    var `secret`: kotlin.ByteArray,
+    var `secret`: kotlin.ByteArray, 
     /**
      * 32-byte Ed25519 public key — this is the account's `from`/`to` identity on the ledger.
      */
     var `public`: kotlin.ByteArray
 ) {
-
+    
     companion object
 }
 
@@ -2805,11 +2814,11 @@ public object FfiConverterTypeKeyPair: FfiConverterRustBuffer<KeyPair> {
  * Decoded DPN2 envelope bundle. `request_id` is the update envelope's IC request id.
  */
 data class NfcBundleData (
-    var `requestId`: kotlin.ByteArray,
-    var `update`: kotlin.ByteArray,
+    var `requestId`: kotlin.ByteArray, 
+    var `update`: kotlin.ByteArray, 
     var `readState`: kotlin.ByteArray
 ) {
-
+    
     companion object
 }
 
@@ -2844,11 +2853,11 @@ public object FfiConverterTypeNfcBundleData: FfiConverterRustBuffer<NfcBundleDat
  * The verified result retained by the payer card session.
  */
 data class NfcCardResult (
-    var `status`: NfcResultStatus,
-    var `nonce`: kotlin.ByteArray,
+    var `status`: NfcResultStatus, 
+    var `nonce`: kotlin.ByteArray, 
     var `requestId`: kotlin.ByteArray
 ) {
-
+    
     companion object
 }
 
@@ -2886,21 +2895,21 @@ public object FfiConverterTypeNfcCardResult: FfiConverterRustBuffer<NfcCardResul
  * from their 32-byte NUL-padded wire fields to `String` by [`decode_name_field`].
  */
 data class PaymentRequestData (
-    var `to`: kotlin.ByteArray,
-    var `amount`: kotlin.ULong,
-    var `nonce`: kotlin.ByteArray,
-    var `expiry`: kotlin.ULong,
-    var `currency`: kotlin.UInt,
+    var `to`: kotlin.ByteArray, 
+    var `amount`: kotlin.ULong, 
+    var `nonce`: kotlin.ByteArray, 
+    var `expiry`: kotlin.ULong, 
+    var `currency`: kotlin.UInt, 
     /**
      * The payee's display name (NUL-trimmed, lossy-decoded from the 32-byte wire field).
      */
-    var `toName`: kotlin.String,
+    var `toName`: kotlin.String, 
     /**
      * The merchant-set memo (NUL-trimmed, lossy-decoded from the 32-byte wire field).
      */
     var `memo`: kotlin.String
 ) {
-
+    
     companion object
 }
 
@@ -2950,88 +2959,88 @@ public object FfiConverterTypePaymentRequestData: FfiConverterRustBuffer<Payment
  * (bad key length, malformed QR, a rejected authorization) without string-sniffing.
  */
 sealed class DpayException: kotlin.Exception() {
-
+    
     class BadSecretLength(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class BadPubkeyLength(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class BadNonceLength(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class BadBase64(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class BadWireLength(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class PubkeyMismatch(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class BadInput(
-
+        
         val v1: kotlin.String
         ) : DpayException() {
         override val message
             get() = "v1=${ v1 }"
     }
-
+    
     /**
      * A decimal amount string was rejected by `parse_amount`. Carries a debuggable code matching
      * `dpay_core::AmountError` (`empty`/`not_a_number`/`negative`/`too_many_decimals`/`overflow`)
      * so the app reacts without string-sniffing. MC1 unit 1.
      */
     class Amount(
-
+        
         val v1: kotlin.String
         ) : DpayException() {
         override val message
             get() = "v1=${ v1 }"
     }
-
+    
     class NfcWrongState(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class NfcNotDpay(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
     class NfcProtocol(
         ) : DpayException() {
         override val message
             get() = ""
     }
-
+    
 
     companion object ErrorHandler : UniffiRustCallStatusErrorHandler<DpayException> {
         override fun lift(error_buf: RustBuffer.ByValue): DpayException = FfiConverterTypeDpayError.lift(error_buf)
     }
 
-
+    
 }
 
 /**
@@ -3039,7 +3048,7 @@ sealed class DpayException: kotlin.Exception() {
  */
 public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> {
     override fun read(buf: ByteBuffer): DpayException {
-
+        
 
         return when(buf.getInt()) {
             1 -> DpayException.BadSecretLength()
@@ -3175,7 +3184,7 @@ public object FfiConverterTypeDpayError : FfiConverterRustBuffer<DpayException> 
  */
 
 enum class NfcPhase {
-
+    
     IDLE,
     LINKING,
     EXCHANGING,
@@ -3219,7 +3228,7 @@ public object FfiConverterTypeNfcPhase: FfiConverterRustBuffer<NfcPhase> {
  */
 
 enum class NfcResultStatus {
-
+    
     SETTLED,
     REJECTED,
     UNKNOWN;
@@ -3255,7 +3264,7 @@ public object FfiConverterTypeNfcResultStatus: FfiConverterRustBuffer<NfcResultS
  */
 
 enum class NfcStep {
-
+    
     /**
      * Send the next command from `next_command`.
      */
@@ -3504,7 +3513,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
@@ -3522,7 +3531,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Format raw `u64` units as a human decimal string at `decimals` precision (e.g.
@@ -3537,7 +3546,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Generate a fresh Ed25519 keypair (native OS CSPRNG). Called once per device at onboarding.
@@ -3549,7 +3558,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
@@ -3563,7 +3572,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * `icrc1_balance_of` argument bytes for the account.
@@ -3576,7 +3585,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
     @Throws(DpayException::class) fun `icpDecodeEip1559Price`(`arg`: kotlin.ByteArray): IcpEip1559Price {
             return FfiConverterTypeIcpEip1559Price.lift(
@@ -3586,7 +3595,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Decode a bare candid `int`/`nat` reply (e.g. `icrc1_balance_of`) to a decimal string.
@@ -3599,7 +3608,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Decode the minter retrieve/withdraw Ok({block_index}) reply (single source `dpay-icp`
@@ -3615,7 +3624,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
     @Throws(DpayException::class) fun `icpDecodeQuery`(`body`: kotlin.ByteArray): IcpQueryReply {
             return FfiConverterTypeIcpQueryReply.lift(
@@ -3625,7 +3634,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
     @Throws(DpayException::class) fun `icpDecodeReadState`(`body`: kotlin.ByteArray, `requestIds`: List<kotlin.ByteArray>): IcpStateRead {
             return FfiConverterTypeIcpStateRead.lift(
@@ -3635,7 +3644,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Decode a bare `text` reply (get_btc_address / any single-text query).
@@ -3648,7 +3657,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
     @Throws(DpayException::class) fun `icpDecodeTransferResult`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
             return FfiConverterTypeIcpTransferOutcome.lift(
@@ -3658,7 +3667,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * ckETH minter `eip_1559_transaction_price` QUERY arg (opt record{ckerc20_ledger_id}) — the
@@ -3672,7 +3681,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * The request_id of an already-signed envelope (the merchant side: rid of a payer-carried
@@ -3686,7 +3695,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Ingress expiry stamp: `now_ns + ahead_s * 1e9`, as a decimal-ns string (see module docs on why
@@ -3701,7 +3710,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * ckBTC minter `get_btc_address(MinterAccount)` — ONE record arg (2-tuples trap IC0503).
@@ -3714,7 +3723,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Payee principal text derived from an Ed25519 PUBLIC KEY (32 bytes) — the payment-request
@@ -3730,7 +3739,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * ckBTC minter `retrieve_btc_with_approval({address, from_subaccount, amount})` (sats, after the
@@ -3744,7 +3753,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * The user's self-authenticating IC principal text for an Ed25519 seed — the account identity on
@@ -3758,7 +3767,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * A signed query call: envelope bytes for `/api/v2/canister/<canister>/query`.
@@ -3771,7 +3780,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * A signed `read_state` call: envelope bytes for `/api/v2/canister/<canister>/read_state`,
@@ -3786,7 +3795,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
     @Throws(DpayException::class) fun `icpSignUpdate`(`secret`: kotlin.ByteArray, `canisterText`: kotlin.String, `methodName`: kotlin.String, `arg`: kotlin.ByteArray, `ingressExpiryNs`: kotlin.String): IcpSignedUpdate {
             return FfiConverterTypeIcpSignedUpdate.lift(
@@ -3796,7 +3805,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * `icrc1_transfer` argument bytes (DIDL record): `to` account, amount, optional
@@ -3810,7 +3819,24 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
+    
 
+        /**
+         * Validate an ICRC-1 owner principal in TEXT form and return it canonicalised. The parse is the
+         * real base32-CRC decode (`Principal::from_text`), so a mistyped or truncated principal — the
+         * failure mode of a payment link that travelled through a chat app — is refused here, before the
+         * payer is ever shown a destination. Returns the canonical `to_text()` so one principal has ONE
+         * spelling everywhere in the UI (grouping/case normalised).
+         */
+    @Throws(DpayException::class) fun `icpValidatePrincipal`(`text`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_validate_principal(
+        FfiConverterString.lower(`text`),_status)
+}
+    )
+    }
+    
 
         /**
          * ckETH minter `withdraw_erc20({ckerc20_ledger_id, recipient, from_cketh_subaccount,
@@ -3825,7 +3851,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * ckETH minter `withdraw_eth({recipient, from_subaccount, amount})` (Wei, after `icrc2_approve`
@@ -3839,7 +3865,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Derive the Ed25519 keypair from an existing 32-byte seed (the recovery seed Backup reveals).
@@ -3855,7 +3881,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Build a DPN2 bundle and derive its request id from the exact signed update envelope.
@@ -3868,7 +3894,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Decode and validate a DPN2 bundle byte-exactly.
@@ -3881,7 +3907,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Payer side: decode the request bytes the card reassembled back into its fields, to show
@@ -3896,7 +3922,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * The recommended per-frame max payload (bytes) — pass to the session/conductor constructors.
@@ -3908,7 +3934,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Merchant side: the raw 132-byte request wire the reader will push over NFC (the same bytes the
@@ -3924,7 +3950,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Build the fixed 114-byte merchant-signed result bound to a request nonce and IC request id.
@@ -3937,7 +3963,7 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
         /**
          * Parse a human decimal string (e.g. `"8.4"`) into raw `u64` units at `decimals` precision — the
@@ -3954,6 +3980,6 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
 }
     )
     }
-
+    
 
 

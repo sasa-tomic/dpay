@@ -173,6 +173,23 @@ pub extern "C" fn w_icp_principal_from_pubkey(ptr: u32, len: u32, out_ptr: u32, 
     write_str_out(text.as_bytes(), out_ptr, cap)
 }
 
+/// `icp_validate_principal`: base32-CRC parse of an ICRC-1 owner principal TEXT, writing the
+/// CANONICAL text to `out_ptr`. Twin of the UniFFI `icp_validate_principal` — the web wallet
+/// validates a payment link's destination through the same core parser the phone uses, so a
+/// mistyped/truncated principal is refused before the payer sees a destination.
+#[no_mangle]
+pub extern "C" fn w_icp_validate_principal(ptr: u32, len: u32, out_ptr: u32, cap: u32) -> u32 {
+    let text = match text_at(ptr, len) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+    let p = match Principal::from_text(&text) {
+        Ok(p) => p,
+        Err(_) => return BAD_UTF8,
+    };
+    write_str_out(p.to_text().as_bytes(), out_ptr, cap)
+}
+
 /// `icp_ingress_expiry`: `now_ns + ahead_s * 1e9` as a decimal string at `out_ptr`.
 #[no_mangle]
 pub extern "C" fn w_icp_ingress_expiry(now_ptr: u32, now_len: u32, ahead_s: u32, out_ptr: u32, cap: u32) -> u32 {

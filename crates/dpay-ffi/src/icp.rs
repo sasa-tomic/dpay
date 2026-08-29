@@ -113,6 +113,18 @@ pub fn icp_principal_from_pubkey(pubkey: Vec<u8>) -> Result<String, DpayError> {
     Ok(Principal::self_authenticating_ed25519(&pk).to_text())
 }
 
+/// Validate an ICRC-1 owner principal in TEXT form and return it canonicalised. The parse is the
+/// real base32-CRC decode (`Principal::from_text`), so a mistyped or truncated principal — the
+/// failure mode of a payment link that travelled through a chat app — is refused here, before the
+/// payer is ever shown a destination. Returns the canonical `to_text()` so one principal has ONE
+/// spelling everywhere in the UI (grouping/case normalised).
+#[uniffi::export]
+pub fn icp_validate_principal(text: String) -> Result<String, DpayError> {
+    let p = Principal::from_text(&text)
+        .map_err(|e| DpayError::BadInput(format!("invalid principal: {e}")))?;
+    Ok(p.to_text())
+}
+
 /// Ingress expiry stamp: `now_ns + ahead_s * 1e9`, as a decimal-ns string (see module docs on why
 /// strings). The submission window is measured `[now, now+5:30]` on the IC — callers pick
 /// `ahead_s` in 240–300 s.
@@ -602,6 +614,31 @@ mod tests {
     fn principal_text_is_validated() {
         assert!(icp_balance_of_arg("not-a-principal".into(), None).is_err());
         assert!(icp_transfer_arg("not-a-principal".into(), None, None, "1".into(), None, None).is_err());
+    }
+
+    #[test]
+    fn validate_principal_accepts_canonical_and_normalises_case() {
+        // The ICP ledger principal — the destination a payment link would carry.
+        let icp = "ryjl3-tyaaa-aaaaa-aaaba-cai";
+        assert_eq!(icp_validate_principal(icp.into()).unwrap(), icp);
+        // Case is normalised (the text form is canonically lowercase); a self-derived principal
+        // round-trips unchanged.
+        assert_eq!(icp_validate_principal(icp.to_uppercase()).unwrap(), icp);
+        let mine = icp_self_principal(SEED_A.to_vec()).unwrap();
+        assert_eq!(icp_validate_principal(mine.clone()).unwrap(), mine);
+    }
+
+    #[test]
+    fn validate_principal_rejects_corruption() {
+        // Empty, junk, a one-character CRC break, and a dropped group each fail — these are the
+        // real ways a principal breaks when a link is retyped or truncated in a chat app.
+        assert!(icp_validate_principal(String::new()).is_err());
+        assert!(icp_validate_principal("not-a-principal".into()).is_err());
+        assert!(icp_validate_principal("ryjl3-tyaaa-aaaaa-aaaba-cbi".into()).is_err());
+        assert!(icp_validate_principal("ryjl3-tyaaa-aaaaa-aaaba".into()).is_err());
+        // Correct payload, non-canonical grouping (dashes moved) — refused, so one principal has
+        // exactly one spelling.
+        assert!(icp_validate_principal("ryjl3tyaaa-aaaaa-aaaba-cai".into()).is_err());
     }
 
     #[test]

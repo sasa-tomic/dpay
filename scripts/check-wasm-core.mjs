@@ -327,7 +327,8 @@ for (const c of CASES) {
 // list; a rename/removal is an ABI break and fails here).
 {
   const PINNED_ICP_EXPORTS = [
-    'w_icp_self_principal', 'w_icp_principal_from_pubkey', 'w_icp_ingress_expiry',
+    'w_icp_self_principal', 'w_icp_principal_from_pubkey', 'w_icp_validate_principal',
+    'w_icp_ingress_expiry',
     'w_icp_transfer_arg', 'w_icp_approve_arg', 'w_icp_balance_of_arg',
     'w_icp_minter_account_arg', 'w_icp_retrieve_btc_arg', 'w_icp_withdraw_eth_arg',
     'w_icp_withdraw_erc20_arg', 'w_icp_eip1559_price_arg',
