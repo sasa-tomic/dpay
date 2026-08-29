@@ -13,11 +13,11 @@
 //    these exact transfer arguments. It must never be rendered as a decline.
 import {DpayCore} from './native';
 import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS, INGRESS_AHEAD_S} from './icp';
-import {hexToBytes, bytesToHex, base} from '../lib/format';
+import {hexToBytes, bytesToHex, base, short} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 import {fetchWithTimeout} from './relay';
 import {HISTORY_TIMEOUT_MS} from '../config/constants';
-import type {TransactionsRow} from '../lib/types';
+import type {PayIntent, Req, TransactionsRow} from '../lib/types';
 import {M} from '../i18n';
 
 export type RailPrepared = {
@@ -45,16 +45,34 @@ export type RailOutcome =
 export async function prepareTransfer(
   secretHex: string,
   catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>},
-  req: {toHex: string; amount: string; currency: number; nonceHex: string},
+  req: {toPrincipal: string; amount: string; currency: number; nonceHex: string},
 ): Promise<RailPrepared> {
   const desc = catalog.currencies.find(c => c.currency === req.currency);
   if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
-  const toPrincipal = await DpayCore.icpPrincipalFromPubkey(req.toHex);
-  const argHex = await DpayCore.icpTransferArg(toPrincipal, '', '', req.amount, desc.fee ?? '', req.nonceHex);
+  const argHex = await DpayCore.icpTransferArg(req.toPrincipal, '', '', req.amount, desc.fee ?? '', req.nonceHex);
   // Clock-gated: refuses to sign when the IC clock is unreachable or skewed vs the device.
   const expiry = await icStampExpiry(secretHex);
   const signed = await DpayCore.icpSignUpdate(secretHex, desc.ledger, 'icrc1_transfer', argHex, expiry);
   return {ledger: desc.ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, amount: req.amount, currency: req.currency, memoHex: req.nonceHex};
+}
+
+/** Turn a decoded 132-byte wire request into the payment intent the review + sign path consumes.
+ *  The wire addresses the payee by raw Ed25519 PUBKEY; the ledger account owner is
+ *  `self_authenticating(pubkey)` — that derivation is the ONE place the wire's addressing meets the
+ *  rail's, and it lives here so a payment link (which already carries a principal) needs no second
+ *  conversion. The destination renders as the short pubkey, exactly as a scanned request always has. */
+export async function wireRequestToIntent(req: Req): Promise<PayIntent> {
+  return {
+    toPrincipal: await DpayCore.icpPrincipalFromPubkey(req.toHex),
+    toName: req.toName,
+    toAccountText: short(req.toHex),
+    amount: req.amount,
+    currency: req.currency,
+    nonceHex: req.nonceHex,
+    memo: req.memo,
+    expiry: req.expiry,
+    source: 'wire',
+  };
 }
 
 /** NFC payer preparation performs no network call. The online merchant stamped `req.expiry` from

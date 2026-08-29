@@ -109,7 +109,7 @@ export async function run() {
     console.log('[50-deeplink-receipt] injecting a FORGED proof before payment — must NOT flip to Received…');
     const forgedRid = randomBytes(32).toString('hex');
     const forgedBlob = b64urlEncode(Buffer.from(JSON.stringify({ledger, block_index: '0', request_id: forgedRid}), 'utf8'));
-    await driver.eval((b) => window.__DPAY_TEST_DEEPLINK({kind: 'pay', blob: b}), forgedBlob);
+    await driver.eval((b) => window.__DPAY_TEST_DEEPLINK(`dpay:pay/${b}`), forgedBlob);
     await new Promise((r) => setTimeout(r, 6000));
     const body0 = await driver.bodyText();
     assert(!body0.includes('Received'), `a forged proof without a matching ledger row must not show Received; page: ${body0.slice(0, 200)}`);
@@ -148,12 +148,13 @@ const proof = { ledger, block_index: '0', request_id: pay.requestIdHex };
 const blob = b64urlEncode(Buffer.from(JSON.stringify(proof), 'utf8'));
 
     // --- Hand the proof back: inject a FOREGROUND dpay:pay deeplink via the __DPAY_TEST_DEEPLINK
-    //     seam (Wallet registers it to drive the SAME applyBlob the web ?pay= reader + the native
-    //     url listener use — a reload would wipe the open request the proof binds to).
+    //     seam. The seam takes the URI VERBATIM and runs the same handler the native url listener
+    //     does, so the test exercises the real scheme parsing (a reload would wipe the open
+    //     request the proof binds to).
     console.log('[50-deeplink-receipt] handing the proof back via the dpay:pay deeplink seam…');
     await driver.eval((b) => {
-      if (typeof window.__DPAY_TEST_DEEPLINK !== 'function') throw new Error('__DPAY_TEST_DEEPLINK seam not mounted (Wallet deeplink effect missing)');
-      window.__DPAY_TEST_DEEPLINK({kind: 'pay', blob: b});
+      if (typeof window.__DPAY_TEST_DEEPLINK !== 'function') throw new Error('__DPAY_TEST_DEEPLINK seam not mounted (Wallet link effect missing)');
+      window.__DPAY_TEST_DEEPLINK(`dpay:pay/${b}`);
     }, blob);
 
     // --- Merchant's Receive screen flips to Received: the proof bound to the OPEN request (rid

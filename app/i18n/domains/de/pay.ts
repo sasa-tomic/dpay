@@ -55,6 +55,25 @@ export const payDe: PayMessages = {
   approveHint: 'Signiert den angezeigten Betrag mit deinem Schlüssel und sendet ihn',
   signing: 'Signieren…',
   signsOffline: 'Das wird offline signiert — der Händler wickelt beim Einreichen ab.',
+  linkNameClaimed: 'Name vom Absender angegeben — prüfe das Konto darüber.',
+
+  link: {
+    title: 'Dieser Zahlungslink kann nicht bezahlt werden',
+    part: {recipient: 'das Empfängerkonto', asset: 'der Vermögenswert', network: 'das Netzwerk', amount: 'der Betrag', ref: 'die Referenz'},
+    malformed: part => `Im Link fehlt ${part} oder der Wert ist beschädigt. Bitte den Absender um einen neuen Link.`,
+    unknownAsset: (token, network) =>
+      `Der Link verlangt ${token} auf ${network}. Diese Wallet kennt diesen Wert nicht, und dpay tauscht nie um — es gibt keinen Ersatz. Bitte den Absender um einen Link in einem Wert, den du hältst.`,
+    wrongNetwork: (token, network) =>
+      `Der Link verlangt ${token} auf ${network}. Du hältst ${token} auf einem anderen Netzwerk — das ist ein anderer Vermögenswert, und die Zahlung ginge auf die falsche Chain. Bitte den Absender um einen Link auf einem Netzwerk, das du hältst.`,
+    hiddenAsset: token =>
+      `Der Link verlangt ${token}, einen Testnetz-Wert. Öffne „Guthaben“, aktiviere „Testnetz-Werte anzeigen“ und öffne den Link erneut.`,
+    unsupportedAsset: token =>
+      `Der Link verlangt ${token}. Diese Wallet kann das nicht bezahlen, und dpay tauscht nie um. Bitte den Absender um einen Link in einem Wert, den du hältst.`,
+    badAmount: (amount, token) =>
+      `„${amount}“ ist kein gültiger ${token}-Betrag — womöglich hat er mehr Nachkommastellen, als ${token} kennt. Bitte den Absender um einen neuen Link.`,
+    badAccount: network =>
+      `Das Konto in diesem Link ist kein gültiges ${network}-Konto. Bitte den Absender, es zu prüfen und den Link erneut zu senden.`,
+  },
 
   fundsSymbol: 'Guthaben',
   fundTitle: (symbol, action) => `${symbol} zum ${action === 'pay' ? 'Bezahlen' : 'Senden'} aufladen`,

@@ -5,9 +5,9 @@ import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {toUnits, randNonceHex, nowSecs} from '../lib/format';
-import {shareHandoff, decodeReceiptDeeplink, parseRailProof} from '../lib/deepLink';
+import {encodePayLink, shareOrigin, decodeReceiptDeeplink, parseRailProof} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol, isDirectIcrcAsset} from '../config/catalog';
-import {type SelectableAsset} from '../config/assets';
+import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId} from '../lib/types';
 import {qrPayloadToEnvelopeHex, submitAndConfirmIncomingTransfer, confirmIncomingTransfer} from '../services/rail';
@@ -82,6 +82,18 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // share sibling of useCopyFeedback). Dismissed sheets leave the label honest.
   const {shared, share} = useShareFeedback();
 
+  // This wallet's own ICRC-1 account — the destination a shared payment link names. Derived LOCALLY
+  // by the core (no gateway round trip), once per identity; the same principal the Receive ▸ My
+  // address surface shows, so a user has ONE address, not one per surface.
+  const [selfPrincipal, setSelfPrincipal] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    DpayCore.icpSelfPrincipal(identity.secretHex)
+      .then(p => { if (alive) setSelfPrincipal(p); })
+      .catch((e: unknown) => { console.warn('icpSelfPrincipal failed (no share link):', e instanceof Error ? e.message : String(e)); });
+    return () => { alive = false; };
+  }, [identity.secretHex]);
+
   // Phase 5 — lock the idle asset selection while a request QR is showing or a settlement result is
   // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is the
   // encoded request a payer is scanning; the result is the settled outcome). The idle form is free.
@@ -108,6 +120,26 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   const directIcrc = isDirectIcrcAsset(reqDesc);
   const reqDecimals = reqDesc?.decimals ?? 2;
   const reqPrefix = currencySymbol(catalog, selectedCurrency);
+
+  // The shareable payment link for the OPEN request — the same payment the QR encodes, in the URL
+  // form a chat app can carry. `amount` is the merchant's own typed decimal (what they see is what
+  // they share); `ref` is this request's nonce, which is also the on-chain memo the settlement poll
+  // below matches, so a link payment reconciles exactly like a scanned one. Null (and the button
+  // hidden) when the asset cannot be named in a link or the principal has not derived yet — a link
+  // that cannot name its destination or its asset must never be produced.
+  const linkAsset = assets.find(a => a.id === selectedAssetId) ?? null;
+  const payLink = useMemo(() => {
+    if (!reqQr || selfPrincipal == null || linkAsset == null || linkAsset.linkToken == null) return null;
+    return encodePayLink(shareOrigin(), {
+      recipient: selfPrincipal,
+      asset: linkAsset.linkToken,
+      network: linkNetworkOf(linkAsset),
+      amount: amount.trim(),
+      label: identity.username,
+      memo: memo.trim(),
+      ref: reqQr.nonce,
+    });
+  }, [reqQr, selfPrincipal, linkAsset, amount, identity.username, memo]);
 
   async function makeRequest() {
     const rawAmount = toUnits(amount, reqDecimals);
@@ -291,14 +323,17 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
                 cluster) so it is seen without scrolling on a phone viewport; inline, never blocks
                 the QR or the scan path. */}
             <CoachTip tipKey="receiveRequest" />
-            {/* Item 6 — share this request as a dpay:req/ link so a payer far away (no camera, over a
-                messaging app) can open it and have the pay review screen pre-filled. The blob is the
-                EXACT base64url the QR carries (no new codec); the payer still taps Approve. */}
+            {/* Share this request as a PAYMENT LINK so a payer far away (no camera, over a messaging
+                app) can open it and land on a pre-filled review — the payer still taps Approve. The
+                link names this wallet's own ICRC-1 account, the exact asset + settlement chain, and
+                carries the request nonce as `ref`, so paying it twice replays one transfer the
+                ledger dedups and THIS request screen reconciles it like any other payment. */}
+            {payLink ? (
             <Pressable
               testID="btn-share-request"
               style={S.ghostBtn}
               onPress={() => {
-                share(shareHandoff('req', reqQr.value));
+                share(payLink);
               }}
               accessibilityRole="button"
               accessibilityLabel={M.receive.shareRequestLink}
@@ -307,6 +342,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
               <IconShare size={16} color={C.sub}/>
               <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
             </Pressable>
+            ) : null}
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>{M.receive.scanPayerSignedQrPrompt}</Text></>
             ) : (

@@ -1,4 +1,4 @@
-import {useState, useEffect, useRef} from 'react';
+import {useState, useEffect, useMemo, useRef} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import bs58 from 'bs58';
@@ -7,7 +7,7 @@ import {S} from '../styles';
 import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
-import {type SelectableAsset} from '../config/assets';
+import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
@@ -30,9 +30,11 @@ import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
+import {encodePayLink, shareOrigin} from '../lib/deepLink';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {useReportLock} from '../hooks/useReportLock';
-import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr} from './icons';
+import {IconCheck, IconChevronDown, IconClock, IconCopy, IconQr, IconShare} from './icons';
 import {CoachTip} from './CoachTip';
 import {M} from '../i18n';
 
@@ -75,9 +77,30 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
   const [result, setResult] = useState<{amount: string; cur: 'SOL' | 'USDC'; sig: string | null} | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const {copied, copy: doCopy} = useCopyFeedback();
+  const {shared, share} = useShareFeedback();
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
+
+  // The shareable payment link for this request — the SAME grammar the IC rail shares, pointing at
+  // this device's Solana address (the same-surfaces hard rule: one link format, both rails). It is
+  // NOT the `solreq:v2:` QR above it: that one is blockhash-bound and dies in ~90 seconds, which is
+  // exactly why it cannot be sent through a chat. This link is durable and carries no `ref` — the
+  // SOL rail attaches no on-chain reconciliation memo, and a reference we cannot put on-chain
+  // would be a promise the rail can't keep.
+  const linkAsset = assets.find(a => a.id === selectedAssetId) ?? null;
+  const payLink = useMemo(() => {
+    if (linkAsset == null || linkAsset.linkToken == null || amount.trim().length === 0) return null;
+    return encodePayLink(shareOrigin(), {
+      recipient: solAddress,
+      asset: linkAsset.linkToken,
+      network: linkNetworkOf(linkAsset),
+      amount: amount.trim(),
+      label: identity.username,
+      memo: memo.trim(),
+      ref: null,
+    });
+  }, [linkAsset, amount, solAddress, identity.username, memo]);
   // Reconciliation state — when a broadcast was interrupted (outcome 'broadcasting'/'unknown' in
   // persist), the accepted tx is preserved so the merchant can retry. null when not reconciling.
   const [reconcile, setReconcile] = useState<{acceptedSig: string; acceptedTx: string} | null>(null);
@@ -360,6 +383,23 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
                     Reading-zone mount (after the status line, before the action cluster) — same
                     placement decision as the IC ReceiveMode. */}
                 <CoachTip tipKey="receiveRequest" />
+                {/* Share this request as a PAYMENT LINK — the same affordance, in the same place,
+                    as the IC rail's (same-surfaces hard rule). It carries this device's Solana
+                    address + the exact asset and amount, and unlike the QR above it does not
+                    expire, so it can travel through a messaging app. */}
+                {payLink ? (
+                  <Pressable
+                    testID="btn-share-request"
+                    style={S.ghostBtn}
+                    onPress={() => { share(payLink); }}
+                    accessibilityRole="button"
+                    accessibilityLabel={M.receive.shareRequestLink}
+                    accessibilityHint={M.receive.shareRequestHint}
+                    accessibilityState={{disabled: false}}>
+                    <IconShare size={16} color={C.sub}/>
+                    <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
+                  </Pressable>
+                ) : null}
                 <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedCode} accessibilityHint={M.receive.scanPayerSignedQrHint} accessibilityState={{disabled: false}}>
                   <IconQr size={16} color={C.sub}/>
                   <Text style={S.ghostBtnText}>{M.receive.scanPayerSignedCode}</Text>

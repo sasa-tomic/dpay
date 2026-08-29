@@ -536,6 +536,20 @@ export function isValidDestinationAddress(family: MinterFamily, addr: string): b
 // every CkEthErc20 no longer inherits "USDC" — a future ckUSDT renders as "USDT". DISTINCT from
 // `currencySymbol` (the amount-prefix glyph: ∂/₿/$) and from `wrapper_name` (the IC token id like
 // "ckUSDC"). So a user scanning for an asset sees its NAME (BTC/USDC/DEMO), not the chain it rides.
+// The token that names this asset in a shared payment link (`?asset=`). It is the LEDGER token —
+// `wrapper_name` when the row has one (ckBTC, ckUSDC, ckETH, ckTESTBTC, …), else the plain symbol
+// (VCHF, ICP) — and NEVER the backing native symbol `displayName` returns: a link that said
+// `asset=BTC` would be a lie, because native BTC cannot be sent to an IC principal. DEMO (currency
+// 0) is named 'DEMO' (its symbol is the '$' glyph). Returns null for a row with no name that reads
+// as a token (a bare glyph): such an asset simply cannot be named in a link — fail closed rather
+// than invent a token for it.
+const RE_LINK_TOKEN = /^[A-Za-z][A-Za-z0-9]*$/;
+export function assetLinkToken(a: CurrencyDescriptor): string | null {
+  if (a.currency === 0) return 'DEMO';
+  const name = a.wrapper_name ?? a.symbol;
+  return name != null && RE_LINK_TOKEN.test(name) ? name : null;
+}
+
 export function displayName(a: CurrencyDescriptor): string {
   if (a.currency === 0) return 'DEMO';
   // Authoritative per-currency backing symbol first (MC1 unit 5).

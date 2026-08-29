@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -38,7 +38,7 @@ import {M} from '../i18n';
  * (`sol-send-*`) — "send" applies to both SOL and SPL. The review-amount text carries the unit
  * (USDC vs SOL) so e2e can distinguish them.
  */
-export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string} | null; onPrefillConsumed?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -47,6 +47,21 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
   const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
+
+  // A shared payment link resolved to this rail: fill the form with its destination + amount and
+  // let the payer confirm. It ONLY pre-fills — the Review/Send presses below are still the consent,
+  // exactly as when the user types the two fields by hand. Guarded on the form phase so an incoming
+  // link can never rewrite a send that is already submitting, and consumed as it is taken so the
+  // payer's own edits are never overwritten by a re-render.
+  useEffect(() => {
+    if (prefill == null || phase !== 'form') return;
+    setAddress(prefill.address);
+    setAmountStr(prefill.amount);
+    onPrefillConsumed?.();
+    // onPrefillConsumed is an inline closure; the [prefill, phase] guard + immediate clear make its
+    // identity irrelevant (exhaustive-deps would force a re-run on every render's new closure).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill, phase]);
 
   const decimals = token === 'SOL' ? SOL_DECIMALS : USDC_DECIMALS;
   const unit = token === 'SOL' ? SOL_UNIT : 'USDC';

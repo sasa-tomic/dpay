@@ -35,6 +35,9 @@ jest.mock('../services/rail', () => ({
   submitTransfer: jest.fn(),
   pollTransfer: jest.fn(),
   envelopeToQrPayload: jest.fn(),
+  // The wire→intent conversion is exercised for real in rail.test.ts; here it is stubbed so this
+  // suite stays a pure component test (no DpayCore principal derivation on the scan path).
+  wireRequestToIntent: jest.fn(),
 }));
 jest.mock('../components/QrScanner', () => ({
   QrScanner: (_props: {onScan: (raw: string) => void}) => null,
@@ -44,10 +47,11 @@ jest.mock('../components/NfcTap', () => ({
 }));
 
 import {DpayCore} from '../services/native';
-import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, type RailPrepared} from '../services/rail';
+import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, wireRequestToIntent, type RailPrepared} from '../services/rail';
 import {PayMode} from '../components/PayMode';
 import {POLL} from '../config/constants';
-import type {Req, Identity} from '../lib/types';
+import type {Req, Identity, PayIntent} from '../lib/types';
+import {M} from '../i18n';
 
 const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(32), username: 'Alice'};
 const PAYEE_HEX = 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90';
@@ -59,6 +63,29 @@ const REQ: Req = {
   currency: 0,
   toName: 'Cafe',
   memo: '',
+};
+// The payee's ICRC-1 account — what a payment LINK names directly (a scanned request names the
+// pubkey above and the principal is derived from it).
+const PAYEE_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+// The intent a scanned wire request converts to (rail.wireRequestToIntent is stubbed in this suite).
+const WIRE_INTENT: PayIntent = {
+  toPrincipal: PAYEE_PRINCIPAL,
+  toName: 'Cafe',
+  toAccountText: 'a1b2c3d4…',
+  amount: '2500',
+  currency: 0,
+  nonceHex: 'ab'.repeat(16),
+  memo: '',
+  expiry: REQ.expiry,
+  source: 'wire',
+};
+// The intent a shared payment link resolves to: the destination is the full principal, there is no
+// request expiry, and the name is whatever the sender wrote into the URL.
+const LINK_INTENT: PayIntent = {
+  ...WIRE_INTENT,
+  toAccountText: PAYEE_PRINCIPAL,
+  expiry: null,
+  source: 'link',
 };
 // A fixed prepared IC-rail transfer (the payer's signed /call envelope + its request_id).
 const PREPARED: RailPrepared = {
@@ -111,6 +138,7 @@ function mountPay(props: Partial<PayModeProps> = {}) {
  *  pay-intent gate first — the scanner stub is not mounted until "Pay Now" is pressed. */
 async function scanToSign(tree: renderer.ReactTestRenderer, req: Req) {
   jest.mocked(DpayCore.decodeRequest).mockResolvedValue(req);
+  jest.mocked(wireRequestToIntent).mockResolvedValue({...WIRE_INTENT, amount: req.amount, currency: req.currency, nonceHex: req.nonceHex, expiry: req.expiry, toName: req.toName, memo: req.memo});
   pressByTestID(tree, 'btn-start-scan');
   const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
   await act(async () => {
@@ -453,14 +481,40 @@ describe('PayMode — pay-intent scan gate', () => {
     });
   });
 
-  test('deeplink prefill reviews from IDLE — no arming, no camera, and NO auto-sign (zero-press entry)', async () => {
-    jest.mocked(DpayCore.decodeRequest).mockResolvedValue(REQ);
-    const tree = mountPay({prefillRequest: 'abcdef123456', onPrefillConsumed: () => {}});
+  test('a payment link reviews from IDLE — no arming, no camera, and NO auto-sign (zero-press entry)', async () => {
+    const tree = mountPay({prefillIntent: LINK_INTENT, onPrefillConsumed: () => {}});
     await act(async () => {});
     expect(texts(tree)).toContain('to Cafe'); // review reached without btn-start-scan
     expect(hasTestID(tree, 'btn-start-scan')).toBe(false);
-    expect(hasTestID(tree, 'btn-approve')).toBe(true); // the kept deeplink review: ONE deliberate press
+    expect(hasTestID(tree, 'btn-approve')).toBe(true); // the kept link review: ONE deliberate press
     expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(0); // nothing signed before that press
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('a payment link shows the FULL destination account and marks the sender-given name as claimed', async () => {
+    // The account is the identity; the label is only what the sender wrote into the URL. Both are
+    // on screen, and the caveat sits with the name (phishing surface).
+    const tree = mountPay({prefillIntent: LINK_INTENT, onPrefillConsumed: () => {}});
+    await act(async () => {});
+    expect(textByTestID(tree, 'review-payee')).toBe(PAYEE_PRINCIPAL);
+    expect(hasTestID(tree, 'review-claimed')).toBe(true);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('a payment link has no request expiry — an old link still reviews and signs', async () => {
+    // A wire request dies after EXPIRY_WINDOW; a link is meant to survive a chat thread, so the
+    // expiry gate must not fire on it (the envelope's own IC ingress expiry still bounds signing).
+    jest.mocked(prepareTransfer).mockResolvedValue(PREPARED);
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '7'});
+    const tree = mountPay({prefillIntent: LINK_INTENT, onPrefillConsumed: () => {}});
+    await act(async () => {});
+    await act(async () => { pressByTestID(tree, 'btn-approve'); });
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(1);
+    expect(texts(tree)).not.toContain(M.pay.requestExpired);
     act(() => {
       tree.unmount();
     });

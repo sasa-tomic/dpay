@@ -71,6 +71,25 @@ export type PayMessages = {
   approveHint: string;
   signing: string;
   signsOffline: string;
+  /** Review of a payment that arrived as a shared LINK: the payee name came out of a URL and is
+   *  unverified, so the account shown above it is the part the payer can actually check. */
+  linkNameClaimed: string;
+
+  // --- a shared payment link that cannot be paid --------------------------------------------
+  // Every branch names the asset/chain the link asked for and ends with the one action the payer
+  // can take. dpay never swaps, so "pay it with something else" is never offered.
+  link: {
+    title: string;
+    /** Which part of the link is missing or damaged (composed into `malformed`). */
+    part: {recipient: string; asset: string; network: string; amount: string; ref: string};
+    malformed: (part: string) => string;
+    unknownAsset: (token: string, network: string) => string;
+    wrongNetwork: (token: string, network: string) => string;
+    hiddenAsset: (token: string) => string;
+    unsupportedAsset: (token: string) => string;
+    badAmount: (amount: string, token: string) => string;
+    badAccount: (network: string) => string;
+  };
 
   // --- the fund-first gate ------------------------------------------------------------------
   /** Stand-in noun when the selected asset has no display name yet ("Add funds to pay"). */
@@ -155,6 +174,25 @@ export const payEn: PayMessages = {
   approveHint: 'Sign the displayed amount with your key and send it',
   signing: 'Signing…',
   signsOffline: 'This signs offline — the merchant settles when they submit it.',
+  linkNameClaimed: 'Name given by the sender — check the account above.',
+
+  link: {
+    title: 'This payment link can’t be paid',
+    part: {recipient: 'the account to pay', asset: 'the asset', network: 'the network', amount: 'the amount', ref: 'the reference'},
+    malformed: part => `The link is missing or has a damaged value for ${part}. Ask the sender to send you a new link.`,
+    unknownAsset: (token, network) =>
+      `The link asks for ${token} on ${network}. This wallet has no such asset, and dpay never swaps, so it can’t pay it with anything else. Ask the sender for a link in an asset you hold.`,
+    wrongNetwork: (token, network) =>
+      `The link asks for ${token} on ${network}. You hold ${token} on a different network — that is a different asset, and paying it would send your money to the wrong chain. Ask the sender for a link on a network you hold.`,
+    hiddenAsset: token =>
+      `The link asks for ${token}, a test-network asset. Open Balances, turn on “Show testnet assets”, then open the link again.`,
+    unsupportedAsset: token =>
+      `The link asks for ${token}, which this wallet can’t pay. dpay never swaps, so there’s no fallback. Ask the sender for a link in an asset you hold.`,
+    badAmount: (amount, token) =>
+      `“${amount}” isn’t a valid ${token} amount — it may have more decimal places than ${token} has. Ask the sender for a new link.`,
+    badAccount: network =>
+      `The account in this link isn’t a valid ${network} account. Ask the sender to check it and send the link again.`,
+  },
 
   fundsSymbol: 'funds',
   fundTitle: (symbol, action) => `Add ${symbol} to ${action}`,

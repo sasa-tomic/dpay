@@ -28,10 +28,10 @@ import type {AssetId} from '../lib/types';
 // ---- Fixtures: the same SelectableAsset shape buildSelectableAssets produces. testKeys matter —
 // they become the testID suffix the e2e net taps (`req-pick-sol`, `asset-ckusdc-select`, etc.).
 const ASSETS: SelectableAsset[] = [
-  {id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', networkLabel: 'Internet Computer', network: null, decimals: 2, visible: true, capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'demo'},
-  {id: 'ic:2', protocol: 'ic', currency: 2, symbol: 'USDC', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 6, visible: true, capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'ckusdc'},
-  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', decimals: 9, visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'sol'},
-  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', decimals: 6, visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'sol-usdc'},
+  {id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', networkLabel: 'Internet Computer', network: null, decimals: 2, linkToken: 'DEMO', visible: true, capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'demo'},
+  {id: 'ic:2', protocol: 'ic', currency: 2, symbol: 'USDC', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 6, linkToken: 'ckUSDC', visible: true, capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'ckusdc'},
+  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', decimals: 9, linkToken: 'SOL', visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'sol'},
+  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', decimals: 6, linkToken: 'USDC', visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'sol-usdc'},
 ];
 
 const BALANCES: Record<AssetId, BalanceView> = {

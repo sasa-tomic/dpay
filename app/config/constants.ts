@@ -46,9 +46,16 @@ export const LOCALE_STORAGE_KEY = 'dpay.locale.v1';
 // (walkthroughDone, recoverySaved, …). Same AsyncStorage pattern as identity/relay/theme; persisted
 // so the first-run walkthrough shows exactly once and later waves' passport survives relaunch.
 export const JOURNEY_STORAGE_KEY = 'dpay.journey.v1';
+// The canonical public origin of the dpay web wallet. Independent of the user-editable relay
+// endpoint (an operator may point the app at their own relay; a link they SHARE must still open
+// for a recipient who has never heard of that relay). Used for the privacy URL and — on native,
+// where there is no `location.origin` to read — as the origin of a shared payment link. The
+// Android App Link filter (app/android/app/src/main/AndroidManifest.xml) and the relay's
+// `/.well-known/assetlinks.json` are pinned to this same host.
+export const WALLET_ORIGIN = 'https://dpay.kalaj.org';
 // Google Play requires the public privacy policy to be reachable from inside the app as well as the
 // store listing. This is the stable website URL, independent of the user-editable relay endpoint.
-export const PRIVACY_URL = 'https://dpay.kalaj.org/privacy';
+export const PRIVACY_URL = `${WALLET_ORIGIN}/privacy`;
 
 // Poll intervals — read once at module load. The e2e harness injects a shortened override via
 // `window.__DPAY_TEST_POLL` (driver.mjs evaluateOnNewDocument, before the bundle evaluates) so the

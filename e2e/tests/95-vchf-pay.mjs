@@ -5,7 +5,7 @@
 //   * (1) The VCHF mainnet row appears in the shared asset selector (BalancesSheet) with the exact
 //         unit + network ("VCHF · Internet Computer") and NO ramp actions — no "Add money" /
 //         "Cash out" anywhere, and the only btn-topup in the sheet is DEMO's faucet button.
-//   * (3) The payer opens a `?req=` deeplink request, sees the exact unit + amount
+//   * (3) The payer opens a VCHF payment link, sees the exact unit + amount
 //         ("Pay 1.00000001 VCHF"), the payee short key + merchant name — and the request does NOT
 //         auto-sign: the deeplink entry keeps the full review card with a single explicit Approve.
 //   * (4) The app signs an icrc1_transfer whose ONLY canister target is VCHF's exact ledger
@@ -29,7 +29,7 @@ import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, armPayScan, waitForScanner, railPrincipalText,
 } from '../harness/lib.mjs';
-import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
+import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 const CURRENCY = 7; // VCHF
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
@@ -114,24 +114,26 @@ export async function run() {
     assertEq(aliceBefore[CURRENCY], String(SEED), 'payer VCHF balance after faucet (raw)');
     assertEq(aliceBefore['0'], '10000', 'payer DEMO balance untouched by VCHF faucet');
 
-    // --- Deeplink request: exact unit/amount review, explicit approve, exact ledger target ----
-    console.log('[95-vchf-pay] open ?req= deeplink (1.00000001 VCHF → Bob)…');
+    // --- Payment link: exact unit/amount review, explicit approve, exact ledger target --------
+    //     The link names VCHF on the Internet Computer explicitly, so the 8-decimal amount is
+    //     converted at VCHF's own precision — the odd raw tail below proves no rounding anywhere.
+    console.log('[95-vchf-pay] open the VCHF payment link (1.00000001 VCHF → Bob)…');
     const nonce = randNonceHex();
-    const expiry = Math.floor(Date.now() / 1000) + 600;
-    const blob = buildRequestQR(bob.publicHex, PAY, nonce, expiry, CURRENCY, 'Bob');
+    const bobPrincipal = await railPrincipalText(bob.publicHex);
     await driver.navigate(
       webBaseURL,
-      `/?relay=${encodeURIComponent(relayBaseURL)}&req=${encodeURIComponent(blob)}`,
+      `/wallet/pay/${bobPrincipal}?asset=VCHF&network=internet-computer&amount=1.00000001&label=Bob&ref=${nonce}`
+        + `&relay=${encodeURIComponent(relayBaseURL)}`,
       { waitUntil: 'domcontentloaded', timeoutMs: 8_000 },
     );
     await driver.waitReady({ timeoutMs: 10_000 });
 
     const payAmount = await driver.findByTestID('pay-amount', { timeoutMs: 6_000 });
-    assert(payAmount != null, 'deeplink request reaches the review card');
+    assert(payAmount != null, 'the payment link reaches the review card');
     assertIncludes(await driver.readText('pay-amount'), 'Pay 1.00000001 VCHF', 'review shows exact unit + amount');
-    assertEq(await driver.readText('review-payee'), `${bob.publicHex.slice(0, 8)}…`, 'review shows payee short key');
-    assertIncludes(await driver.bodyText(), 'Bob', 'review shows merchant name');
-    assert(!(await driver.bodyText()).match(/\bPaid\b/), 'deeplink entry must NOT auto-sign (no Paid before Approve)');
+    assertEq(await driver.readText('review-payee'), bobPrincipal, 'review shows the full destination account');
+    assertIncludes(await driver.bodyText(), 'Bob', 'review shows the label the link carried');
+    assert(!(await driver.bodyText()).match(/\bPaid\b/), 'a payment link must NOT auto-sign (no Paid before Approve)');
 
     // (4) Ledger-target recorder: installed AFTER the reload (window state resets), BEFORE approve.
     await driver.eval(() => {

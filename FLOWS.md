@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **97 flows**
-> (96 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **99 flows**
+> (98 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (23) · offline (9) · deposit (8) · withdraw (7) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (7) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -61,6 +61,8 @@ wire (1) · onboard (13) · pay (23) · offline (9) · deposit (8) · withdraw (
 | 09 | double-spend | identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard) | pay, replay-safety, confirmation |
 | 10 | expired | Payer scans an already-expired request → auto-sign refused client-side, honest error, no leaked nonce. | expiry, honest-error, no-sign |
 | 101 | native-asset-fail-closed | Insufficient VCHF and ICP requests park on review-lowbal with no approve/paid button and no signed envelope; an unknown-currency (99) request hits the unsupported-asset branch with no fallback; the payee receives nothing and the payer keeps exactly its seeded balances. | vchf, icp, icp-mainnet, insufficient, unknown-currency, unsupported-asset, fail-closed, no-swap |
+| 102 | sol-pay-link | A SOL payment link selects the SOL rail and pre-fills the Send-to-address form with the link's address + amount (no auto-send); Confirm broadcasts it. | pay-link, url-routing, sol-send, rail-parity |
+| 103 | pay-link-refused | A payment link naming the wrong chain, an unknown asset, or a damaged field is refused with an instruction the payer can act on — never a guessed asset and never a silent dead end. | pay-link, fail-closed, wrong-network, honest-instructions |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
@@ -70,7 +72,7 @@ wire (1) · onboard (13) · pay (23) · offline (9) · deposit (8) · withdraw (
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review '0.050000 USDC', byte-exact raw, app-signed icrc1_transfer settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
 | 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly 'This isn't't a dpay payment code' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec ckETH (display-TRUNCATED to 6, never rounded) amounts render with exact decimals on the sign surface (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal, display-decimals |
-| 49 | deeplink-request | dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve). | deeplink, request-link, prefill, pay-review |
+| 49 | deeplink-request | A shared /wallet/pay/<recipient> link opens the pay review pre-filled with the exact asset, amount and destination account (no auto-approve), and Approve settles it. | pay-link, url-routing, prefill, pay-review |
 | 50 | deeplink-receipt | merchant treats dpay:pay as a trigger; a forged proof before settlement never flips Received — only the exact nonce-bound ledger row does; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback, forgery |
 | 59 | share-receipt | After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓". | share-receipt, receipt-link, handback, online-settle, deeplink |
 | 61 | merchant-received-name | IC-rail counterparty rendering: history shows the short PRINCIPAL TEXT (not full principal, not hex pubkey) and the memo (reconciliation key) is visible; friendly names died with the facade settlement. | receive, settle, confirmation, counterparty-rendering, memo-reconciliation |
@@ -148,7 +150,7 @@ wire (1) · onboard (13) · pay (23) · offline (9) · deposit (8) · withdraw (
 | 63 | picker-sol-rail | SOL is selectable in the Receive currency picker → switches the active rail to SolReceiveMode. | receive-picker, sol-rail, currency-switch |
 | 64 | settings-restore | Settings → Restore replaces wallet identity from 24 words OR 64-hex seed (no wipe); username preserved. | restore-seed, restore-mnemonic-words, settings-restore, identity-replace, keypair-from-secret |
 | 69 | sol-usdc-selection | IC USDC ↔ Solana USDC: unified picker switches rail + clears amount (symmetric in both directions). | asset-picker, ic-usdc, sol-usdc, rail-switch, amount-clear |
-| 70 | deeplink-ic-routing | A dpay:req deeplink arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the blob is never silently lost. | deeplink-routing, ic-engine-routing, solana-to-ic-handoff, prefill-preserve |
+| 70 | deeplink-ic-routing | An IC payment link arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the payment is never silently lost. | pay-link-routing, ic-engine-routing, solana-to-ic-handoff, prefill-preserve |
 | 71 | selection-lock | An in-flight pay review locks the idle asset selection: the Balances button is disabled + a no-op, and canceling the review re-enables it. | selection-lock, in-flight-preserve, balances-disable, nfc-arming-invariant |
 | 72 | sol-usdc-send | Solana USDC "Send to address": fail-closed device-ATA gate → one-tap create (busy → form appears) and the create-failure leg (err shown, sheet stays usable). | sol-usdc-send, spl-transfer, fail-closed-ata, asset-aware-send, ata-create-one-tap |
 | 75 | seam-fail-loud | Every injection seam (scan/NFC/SOL-NFC) throws when no listener is mounted — regression guard against silent-drop bugs. | seam-integrity, fail-loud, regression-guard |

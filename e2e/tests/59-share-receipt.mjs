@@ -2,7 +2,7 @@
 //
 // The NFC-less receipt hand-back button: when the payer settles ONLINE (NFC unavailable), they hold
 // the canister-signed receipt. PayMode.tsx renders a `btn-share-receipt` that calls
-// `Share.share({message: shareHandoff('pay', receiptShareBlob(paid.receipt!))})` so the payer can
+// `Share.share({message: shareReceipt(paid.receipt!)})` so the payer can
 // hand the receipt back for the merchant to verify + reconcile. On web the payload is an OPENABLE
 // `<origin>/wallet?pay=<base64url>` URL (a browser cannot open the dpay: scheme); on native it is
 // the `dpay:pay/<base64url>` URI. This button had ZERO e2e coverage (it only renders when
@@ -13,7 +13,7 @@
 //
 // The Share.share call is captured by the `window.__DPAY_TEST_SHARE` seam (shims.ts wraps Share.share
 // to record the `message` field before resolving the clipboard-fallback sharedAction — mirrors the
-// clipboard seam). This proves the button hands encodeReceiptDeeplink's output to Share, byte-for-byte
+// clipboard seam). This proves the button hands shareReceipt's output to Share, byte-for-byte
 // the URI scheme a merchant opens via flow 50's verify path. The sharedAction flip also drives the
 // in-DOM 'Link copied ✓' feedback label (asserted below).
 //
@@ -72,7 +72,7 @@ export async function run() {
     console.log('[59-share-receipt] ✓ btn-share-receipt rendered (online settle captured a receipt)');
 
     // --- Reset the Share seam, tap btn-share-receipt, assert the captured payload is an OPENABLE
-    //     /wallet?pay=<base64url> URL (web shareHandoff) — the wallet's own readPaymentDeeplink
+    //     /wallet?pay=<base64url> URL (web shareReceipt) — the wallet's own readPaymentDeeplink
     //     consumes the same blob, so the merchant lands on the verified receipt hand-back. --------
     await driver.eval(() => { window.__DPAY_TEST_SHARE = ''; });
     console.log('[59-share-receipt] clicking btn-share-receipt…');

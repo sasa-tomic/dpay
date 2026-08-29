@@ -12,7 +12,7 @@
  * Then the flow-20 close-out: the counterparty submits the captured envelope, the payer comes
  * back online and reconciles to Paid — proving the coaching never blocked the money path.
  */
-import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, waitForScanner} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, waitForScanner, railPrincipalText} from '../harness/lib.mjs';
 import {generateKeypair, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
 
 export const meta = {
@@ -62,31 +62,32 @@ export async function run() {
     console.log(`[${meta.name}] ✓ receiveRequest: shown once, dismissed, remembered`);
     await env.driver.click('tab-pay', {timeoutMs: 4_000});
 
-    // --- payReview: mounts ONLY on the DEEPLINK review (the one remaining review surface —
-    //     the camera scan AUTO-SIGNS now, so a scan-then-sign never shows this tip). Arrive via
-    //     the ?req= web mirror of the dpay:pay deeplink (flow 49's reload pattern).
-    const req1 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
-    await env.driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}&req=${encodeURIComponent(req1)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    // --- payReview: mounts ONLY on the PAYMENT-LINK review (the one remaining review surface —
+    //     the camera scan AUTO-SIGNS now, so a scan-then-sign never shows this tip). Arrive by
+    //     opening a shared payment link (flow 49's navigation pattern).
+    const bobPrincipal = await railPrincipalText(bob.publicHex);
+    const payLink = (ref) => `/wallet/pay/${bobPrincipal}?asset=DEMO&network=internet-computer&amount=25&label=bob&ref=${ref}`
+      + `&relay=${encodeURIComponent(env.relayBaseURL)}`;
+    await env.driver.navigate(env.webBaseURL, payLink(randNonceHex()), {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await env.driver.waitReady({timeoutMs: 10_000});
     await env.driver.findByTestID('coach-payReview', {timeoutMs: 6_000});
-    assert(await env.driver.isPresent('btn-approve'), 'the deeplink review carries its single Approve (zero-press entry)');
+    assert(await env.driver.isPresent('btn-approve'), 'the payment-link review carries its single Approve (zero-press entry)');
     await settle(); // let the tip's 480ms rise+fade entrance finish before the shot
     await env.driver.screenshot('91-coach-review');
     await env.driver.click('btn-coach-payReview-dismiss', {timeoutMs: 4_000});
     await env.driver.waitGone('coach-payReview', {timeoutMs: 6_000});
     await env.driver.click('btn-review-cancel', {timeoutMs: 4_000});
-    // Same identity, fresh deeplink review (new nonce) → absent.
-    const req2 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
-    await env.driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}&req=${encodeURIComponent(req2)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    // Same identity, fresh payment-link review (new ref) → absent.
+    await env.driver.navigate(env.webBaseURL, payLink(randNonceHex()), {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await env.driver.waitReady({timeoutMs: 10_000});
     await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
     assert(!(await env.driver.isPresent('coach-payReview')), 'payReview tip must not re-show after dismissal');
     await env.driver.click('btn-review-cancel', {timeoutMs: 4_000});
-    console.log(`[${meta.name}] ✓ payReview (deeplink review): shown once, never blocks Approve, remembered`);
+    console.log(`[${meta.name}] ✓ payReview (payment-link review): shown once, never blocks Approve, remembered`);
 
     // --- offlineQr + pendingOutcome: the flow-20 offline hand-off, coached exactly once. -------
     //     (The camera scan AUTO-SIGNS while offline — no review, no btn-approve, no payReview tip;
-    //     the seen-marker from the deeplink legs above stays set regardless.)
+    //     the seen-marker from the payment-link legs above stays set regardless.)
     await goOffline(env.driver, {keepGateway: true});
     await env.driver.waitForText('approx.', {timeoutMs: 8_000});
     const req3 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');

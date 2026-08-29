@@ -22,15 +22,19 @@ import {
   type RampCapability,
   type SolanaAsset,
   BUNDLED_NETWORKS,
+  assetLinkToken,
   assetTestKey,
   displayName,
   familyDisplay,
+  isPayableAsset,
   isTestnetCurrency,
   solanaAssetsOf,
   testnetDisplayName,
 } from './catalog';
 import {IS_SOLANA_DEVNET, SOLANA_RPC_URL} from './constants';
 import {USDC_MINT_ADDRESS} from '../solana/spl';
+import {parseDecimalToUnits} from '../lib/amount';
+import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
 import {M} from '../i18n';
 
@@ -55,6 +59,7 @@ export type SelectableAsset =
       protocol: 'ic';
       currency: number;
       symbol: string;          // display NAME (BTC/USDC/DEMO/BTC testnet) — never a raw ledger id
+      linkToken: string | null; // the payment link's `?asset=` token (ckBTC/VCHF/ICP/DEMO); null ⇒ not linkable
       networkLabel: string;    // subtitle ("<symbol> · <network>" for non-DEMO; "play money…" for DEMO)
       network: string | null;  // the CHAIN's proper noun ('Bitcoin'/'Ethereum') — wire/constant, never translated; null for DEMO
       decimals: number;        // smallest-unit decimal count for amount formatting
@@ -67,6 +72,7 @@ export type SelectableAsset =
       protocol: 'solana';
       token: 'SOL' | 'USDC';
       symbol: string;          // 'SOL' | 'USDC'
+      linkToken: string | null; // the payment link's `?asset=` token — the ledger token itself
       networkLabel: string;    // 'SOL · Solana' | 'USDC · Solana' — distinct from any IC USDC
       network: 'Solana';       // the chain's proper noun — never translated
       decimals: number;        // SOL=9, USDC=6
@@ -149,6 +155,7 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
     protocol: 'ic',
     currency: desc.currency,
     symbol: name,
+    linkToken: assetLinkToken(desc),
     networkLabel,
     network,
     decimals: desc.decimals ?? 0,
@@ -169,6 +176,9 @@ function solanaAssetRow(row: SolanaAsset, token: 'SOL' | 'USDC', testKey: string
     protocol: 'solana',
     token,
     symbol: row.symbol,
+    // The Solana rail's link token IS its ledger token ('SOL'/'USDC') — the mint is the asset, so
+    // the symbol needs no wrapper distinction (and never collides with the IC 'ckUSDC' row).
+    linkToken: token,
     networkLabel: M.wallet.asset.networkLabel(row.symbol, 'Solana'),
     network: 'Solana',
     decimals: row.decimals,
@@ -206,15 +216,14 @@ export function reconcileSelectedAsset(selectedId: AssetId | null, assets: Selec
   return assets.length > 0 ? assets[0].id : null;
 }
 
-// Phase 5 — deeplink routing to the IC engine. A `dpay:req`/`dpay:pay` blob is IC-only: the requested
-// currency lives INSIDE the blob (only DpayCore.decodeRequest can read it), so at routing time ANY IC
-// selection suffices — PayMode/ReceiveMode decode the blob and review with the EXACT requested asset.
-// If a Solana asset is idle-selected when such a blob arrives, SolPayMode/SolReceiveMode would mount
-// instead and the blob would be SILENTLY LOST (those engines never consume IC prefills). This returns
-// the IC asset id the Wallet must programmatically select so the IC engine mounts. It is a NO-OP when
-// an IC asset is already selected (preserve the exact id — do not reset to ic:0, which would churn the
-// header). Solana deeplinks (solreq:/solpay:) are a different scheme handled by the SOL engines' own
-// QR-scan path and are NOT OS deeplinks; this helper is for IC blobs only.
+// Phase 5 — receipt-hand-back routing to the IC engine. A `dpay:pay/<blob>` rail proof is IC-only:
+// its currency lives inside the settled transfer, so at routing time ANY IC selection suffices —
+// ReceiveMode verifies the proof against the open request. If a Solana asset is idle-selected when
+// such a blob arrives, SolReceiveMode would mount instead and the blob would be SILENTLY LOST (that
+// engine never consumes IC prefills). This returns the IC asset id the Wallet must programmatically
+// select so the IC engine mounts. It is a NO-OP when an IC asset is already selected (preserve the
+// exact id — do not reset to ic:0, which would churn the header). A payment LINK needs no such
+// helper: it names its own asset, so resolvePayLink yields the exact id to select — on either rail.
 export function routeDeeplinkToIc(selectedId: AssetId | null, assets: SelectableAsset[]): AssetId | null {
   // Already on an IC asset — the IC engine mounts; nothing to change.
   if (selectedId !== null && selectedId.startsWith('ic:')) return selectedId;
@@ -223,6 +232,86 @@ export function routeDeeplinkToIc(selectedId: AssetId | null, assets: Selectable
   if (demo) return demo.id;
   const firstIc = assets.find(a => a.protocol === 'ic');
   return firstIc ? firstIc.id : null;
+}
+
+// --- payment-link resolution: which asset does `?asset=<token>` mean, and how much is `?amount=` ---
+// The money-critical half of the payment link (the pure URL grammar lives in lib/deepLink.ts). It
+// turns the link's TEXT into a concrete asset + a raw amount, or refuses. It never guesses: dpay
+// does not swap, so paying "something close to what the link said" is not an option.
+//
+// Resolution is an exact, case-insensitive match on the PAIR (link token, settlement chain) over
+// the VISIBLE asset list (the list the wallet can actually mount an engine for). The chain is half
+// the identity, not a tie-breaker: "USDC" names a different asset on the Internet Computer, on
+// Ethereum and on Solana, and paying the wrong chain is unrecoverable. Failure modes are
+// distinguished so each gets its own instruction on screen:
+//   unknown    — no such token anywhere in the catalog
+//   wrong_network — the token exists but not on the chain the link named (e.g. `USDC` +
+//                   `internet-computer`, where the IC row is ckUSDC): refuse, never "correct" it
+//   ambiguous  — two visible rows share BOTH token and chain (a malformed catalog)
+//   hidden     — the token names a testnet row the user has not revealed (actionable: reveal it)
+//   unsupported— the row exists but is not payable (isPayableAsset fails closed before signing)
+//   amount     — not a number / negative / more precision than the asset has / zero / overflow
+
+/** The resolved link: which asset to pay and the exact raw amount, plus the link it came from. */
+export type PayLinkTarget = {asset: SelectableAsset; rawAmount: string; link: PayLink};
+/** Why a well-formed payment link cannot be paid on THIS wallet. */
+export type PayLinkResolveErr =
+  | 'unknown_asset' | 'wrong_network' | 'ambiguous_asset' | 'hidden_asset' | 'unsupported_asset' | 'amount';
+export type PayLinkResolution = {ok: true; target: PayLinkTarget} | {ok: false; err: PayLinkResolveErr};
+
+/** The SETTLEMENT chain of an asset, as a payment link spells it: where the transfer actually
+ *  executes. Every IC row settles on the Internet Computer — including the chain-key wrappers,
+ *  whose catalog `network` names the chain they are BACKED by (ckUSDC: Ethereum) and which must
+ *  therefore never be used here. Solana rows settle on Solana. */
+export function linkNetworkOf(asset: SelectableAsset): string {
+  return asset.protocol === 'ic' ? 'internet-computer' : 'solana';
+}
+
+/** A settlement-chain slug as prose for an error message: `internet-computer` → "Internet
+ *  Computer". Chain names are proper nouns (never translated — the same rule the asset rows'
+ *  `network` field follows), so this is a pure spelling transform, not a lookup table that would
+ *  have to be extended for every future chain. */
+export function prettyNetwork(slug: string): string {
+  return slug
+    .split('-')
+    .filter(w => w.length > 0)
+    .map(w => w[0].toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/** Case-insensitive token match (ASCII tokens only — see `assetLinkToken`). */
+const tokenEq = (a: string | null, b: string) => a != null && a.toLowerCase() === b.toLowerCase();
+
+/** Resolve a parsed payment link against the wallet's visible assets + full catalog. PURE. */
+export function resolvePayLink(
+  link: PayLink,
+  assets: SelectableAsset[],
+  catalog: CurrencyDescriptor[],
+): PayLinkResolution {
+  const network = normaliseNetwork(link.network);
+  const byToken = assets.filter(a => tokenEq(a.linkToken, link.asset));
+  const matches = byToken.filter(a => linkNetworkOf(a) === network);
+  if (matches.length > 1) return {ok: false, err: 'ambiguous_asset'};
+  if (matches.length === 0) {
+    // The token exists here, but on a different chain than the link named. Refusing is the whole
+    // point of carrying the chain: silently paying the same-named asset on the wrong chain sends
+    // real money somewhere the sender never asked for.
+    if (byToken.length > 0) return {ok: false, err: 'wrong_network'};
+    // Not visible at all — is it a testnet row the user simply has not revealed? That is a
+    // different (recoverable) situation from an asset this wallet has never heard of.
+    const hidden = catalog.find(c => tokenEq(assetLinkToken(c), link.asset));
+    return {ok: false, err: hidden && isTestnetCurrency(hidden) ? 'hidden_asset' : 'unknown_asset'};
+  }
+  const asset = matches[0];
+  // Fail closed BEFORE any amount is shown: an IC row that is not payable can never be signed.
+  if (asset.protocol === 'ic' && !isPayableAsset(catalog, asset.currency)) {
+    return {ok: false, err: 'unsupported_asset'};
+  }
+  // Exact decimal → raw units at THIS asset's precision. Over-precision/overflow is refused, never
+  // rounded: a link that says 0.001 BTC-with-2-decimals is a broken link, not a 0.00 payment.
+  const parsed = parseDecimalToUnits(link.amount, asset.decimals);
+  if (!parsed.ok || parsed.raw === '0') return {ok: false, err: 'amount'};
+  return {ok: true, target: {asset, rawAmount: parsed.raw, link}};
 }
 
 // Phase 5 — the selection-lock gate for USER-initiated asset selection. While an in-flight pay/receive

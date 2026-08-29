@@ -56,6 +56,25 @@ export const payFr: PayMessages = {
   approveHint: 'Signe le montant affiché avec votre clé et l’envoie',
   signing: 'Signature…',
   signsOffline: 'La signature se fait hors ligne — le commerçant règle en envoyant le paiement.',
+  linkNameClaimed: 'Nom fourni par l’expéditeur — vérifiez le compte ci-dessus.',
+
+  link: {
+    title: 'Ce lien de paiement ne peut pas être payé',
+    part: {recipient: 'le compte à payer', asset: 'l’actif', network: 'le réseau', amount: 'le montant', ref: 'la référence'},
+    malformed: part => `Le lien n’indique pas ${part}, ou la valeur est corrompue. Demandez un nouveau lien à l’expéditeur.`,
+    unknownAsset: (token, network) =>
+      `Le lien demande ${token} sur ${network}. Ce portefeuille n’a pas cet actif, et dpay ne convertit jamais : aucun remplacement n’est possible. Demandez un lien dans un actif que vous détenez.`,
+    wrongNetwork: (token, network) =>
+      `Le lien demande ${token} sur ${network}. Vous détenez ${token} sur un autre réseau — c’est un actif différent, et le paiement partirait sur la mauvaise chaîne. Demandez un lien sur un réseau que vous détenez.`,
+    hiddenAsset: token =>
+      `Le lien demande ${token}, un actif de réseau de test. Ouvrez « Soldes », activez « Afficher les actifs de test », puis rouvrez le lien.`,
+    unsupportedAsset: token =>
+      `Le lien demande ${token}, que ce portefeuille ne peut pas payer. dpay ne convertit jamais : il n’y a pas de solution de repli. Demandez un lien dans un actif que vous détenez.`,
+    badAmount: (amount, token) =>
+      `« ${amount} » n’est pas un montant ${token} valide — il a peut-être plus de décimales que ${token} n’en accepte. Demandez un nouveau lien à l’expéditeur.`,
+    badAccount: network =>
+      `Le compte de ce lien n’est pas un compte ${network} valide. Demandez à l’expéditeur de le vérifier et de renvoyer le lien.`,
+  },
 
   fundsSymbol: 'fonds',
   fundTitle: (symbol, action) => `Ajouter des ${symbol} pour ${action === 'pay' ? 'payer' : 'envoyer'}`,

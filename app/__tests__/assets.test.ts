@@ -23,12 +23,15 @@ import {describe, it, expect} from '@jest/globals';
 import {
   buildSelectableAssets,
   chipLabel,
+  linkNetworkOf,
   reconcileSelectedAsset,
+  resolvePayLink,
   solanaUsdcAvailable,
   solanaUsdcCoherent,
   type SelectableAsset,
 } from '../config/assets';
-import {BUNDLED_NETWORKS, icpCatalogOf, parseNetworkCatalog} from '../config/catalog';
+import {assetLinkToken, BUNDLED_NETWORKS, displayName, icpCatalogOf, parseNetworkCatalog} from '../config/catalog';
+import type {PayLink} from '../lib/deepLink';
 import type {CurrencyDescriptor, NetworkSection, SolanaAsset} from '../config/catalog';
 import {buildAssetBalances} from '../lib/assetBalances';
 
@@ -478,5 +481,127 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       // BalancesSheet/WithdrawSheet cash-out family gate mirror — FALSE for both rows.
       expect(d.offramp !== 'Unavailable' && (d.minter_family === 'CkBtcUtxo' || d.minter_family === 'CkEthErc20')).toBe(false);
     }
+  });
+});
+
+// =============================================================================================
+// 8. resolvePayLink — which asset does a shared payment link mean, and for how much
+// =============================================================================================
+// The money-critical half of the payment link (the URL grammar itself is pinned in
+// deeplink.test.ts). Every branch here is a REFUSAL boundary: dpay never swaps, so resolving to
+// "an asset close to what the link said" would move the wrong money on the wrong chain.
+describe('resolvePayLink — link → asset + raw amount', () => {
+  // A visible list with BOTH USDCs present: the IC chain-key wrapper (ckUSDC, backed by Ethereum,
+  // settling on the Internet Computer) and native Solana USDC. This is the collision the
+  // settlement-chain parameter exists for.
+  const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const link = (over: Partial<PayLink> = {}): PayLink => ({
+    recipient: 'ryjl3-tyaaa-aaaaa-aaaba-cai', asset: 'ckUSDC', network: 'internet-computer',
+    amount: '1.5', label: '', memo: '', ref: null, ...over,
+  });
+
+  it('resolves an IC asset and converts the amount at that asset\'s decimals', () => {
+    const out = resolvePayLink(link(), assets, BASE_CATALOG);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.target.asset.id).toBe('ic:2');
+    expect(out.target.rawAmount).toBe('1500000'); // 1.5 at 6 decimals
+  });
+
+  it('resolves the Solana rail from the same grammar (one link shape, both rails)', () => {
+    const out = resolvePayLink(link({asset: 'SOL', network: 'solana', amount: '0.5'}), assets, BASE_CATALOG);
+    expect(out.ok && out.target.asset.id).toBe('solana:SOL');
+    expect(out.ok && out.target.rawAmount).toBe('500000000'); // 0.5 SOL at 9 decimals
+  });
+
+  it('separates the two USDCs by settlement chain — the collision the chain param exists for', () => {
+    const onSolana = resolvePayLink(link({asset: 'USDC', network: 'solana', amount: '2'}), assets, BASE_CATALOG);
+    expect(onSolana.ok && onSolana.target.asset.id).toBe('solana:USDC');
+    // 'USDC' is NOT the IC row's token (that row is ckUSDC), so the IC chain has no such asset.
+    const onIc = resolvePayLink(link({asset: 'USDC', network: 'internet-computer', amount: '2'}), assets, BASE_CATALOG);
+    expect(onIc).toEqual({ok: false, err: 'wrong_network'});
+  });
+
+  it('refuses a right-token/wrong-chain link instead of paying the other chain', () => {
+    // ckUSDC exists here, but only on the Internet Computer. A link claiming it settles on Solana
+    // is refused — never silently redirected to the IC row.
+    expect(resolvePayLink(link({network: 'solana'}), assets, BASE_CATALOG)).toEqual({ok: false, err: 'wrong_network'});
+  });
+
+  it('matches token and chain case-insensitively (a hand-typed link still works)', () => {
+    const out = resolvePayLink(link({asset: 'ckusdc', network: 'INTERNET-COMPUTER'}), assets, BASE_CATALOG);
+    expect(out.ok && out.target.asset.id).toBe('ic:2');
+  });
+
+  it('names DEMO explicitly (its catalog symbol is the "$" glyph, never a link token)', () => {
+    const out = resolvePayLink(link({asset: 'DEMO', amount: '25'}), assets, BASE_CATALOG);
+    expect(out.ok && out.target.asset.id).toBe('ic:0');
+    expect(out.ok && out.target.rawAmount).toBe('2500'); // 25.00 at 2 decimals
+    expect(resolvePayLink(link({asset: '$'}), assets, BASE_CATALOG)).toEqual({ok: false, err: 'unknown_asset'});
+  });
+
+  it('refuses an asset this wallet has never heard of', () => {
+    expect(resolvePayLink(link({asset: 'ckDOGE'}), assets, BASE_CATALOG)).toEqual({ok: false, err: 'unknown_asset'});
+  });
+
+  it('distinguishes a HIDDEN testnet asset from an unknown one (the user can reveal it)', () => {
+    const full = [...BASE_CATALOG, CKTESTBTC];
+    const visible = buildSelectableAssets(full, {showTestnet: false, solanaEnabled: false});
+    expect(resolvePayLink(link({asset: 'ckTESTBTC'}), visible, full)).toEqual({ok: false, err: 'hidden_asset'});
+    // Revealed, it resolves normally — same link, no re-share needed.
+    const revealed = buildSelectableAssets(full, {showTestnet: true, solanaEnabled: false});
+    expect(resolvePayLink(link({asset: 'ckTESTBTC', amount: '0.001'}), revealed, full).ok).toBe(true);
+  });
+
+  it('refuses an amount with more precision than the asset has (never rounds money)', () => {
+    // ckUSDC has 6 decimals; a 7-decimal amount is a broken link, not a rounded payment.
+    expect(resolvePayLink(link({amount: '1.1234567'}), assets, BASE_CATALOG)).toEqual({ok: false, err: 'amount'});
+  });
+
+  it('refuses a zero, negative, non-numeric or overflowing amount', () => {
+    for (const amount of ['0', '0.00', '-1', 'abc', '9'.repeat(30)]) {
+      expect(resolvePayLink(link({amount}), assets, BASE_CATALOG)).toEqual({ok: false, err: 'amount'});
+    }
+  });
+
+  it('refuses an IC row that is not payable, BEFORE any amount reaches the signer', () => {
+    // A row with no minter family and an incomplete ICRC descriptor (no ledger/decimals) fails
+    // isPayableAsset — the same fail-closed gate the scan path applies.
+    const broken = mk({currency: 9, minter_family: null, symbol: 'BROKEN', decimals: null, wrapper_name: 'BROKEN'});
+    const withBroken = [...BASE_CATALOG, broken];
+    const visible = buildSelectableAssets(withBroken, {showTestnet: false, solanaEnabled: false});
+    expect(resolvePayLink(link({asset: 'BROKEN'}), visible, withBroken)).toEqual({ok: false, err: 'unsupported_asset'});
+  });
+});
+
+describe('linkNetworkOf — the settlement chain a link must name', () => {
+  const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  it('every IC asset settles on the Internet Computer, including the chain-key wrappers', () => {
+    // ckUSDC's catalog `network` says 'Ethereum' — that is what BACKS it. The link must name where
+    // the transfer EXECUTES, or a link would claim an Ethereum payment that never touches Ethereum.
+    const ckusdc = assets.find(a => a.id === 'ic:2')!;
+    expect(ckusdc.network).toBe('Ethereum');
+    expect(linkNetworkOf(ckusdc)).toBe('internet-computer');
+    expect(assets.filter(a => a.protocol === 'ic').every(a => linkNetworkOf(a) === 'internet-computer')).toBe(true);
+  });
+  it('Solana rows settle on Solana', () => {
+    expect(linkNetworkOf(assets.find(a => a.id === 'solana:USDC')!)).toBe('solana');
+  });
+});
+
+describe('assetLinkToken — the ledger token that names an asset in a link', () => {
+  it('is the wrapper name for chain-key assets, never the backing symbol', () => {
+    // 'BTC' is what the wallet DISPLAYS for ckBTC; a link saying asset=BTC would promise a native
+    // Bitcoin payment that an IC principal cannot receive.
+    expect(assetLinkToken(CKBTC)).toBe('ckBTC');
+    expect(displayName(CKBTC)).toBe('BTC');
+  });
+  it('is the plain symbol for a direct ICRC asset, and DEMO for the demo rail', () => {
+    expect(assetLinkToken(mk({currency: 7, minter_family: null, symbol: 'VCHF', wrapper_name: 'VCHF'}))).toBe('VCHF');
+    expect(assetLinkToken(DEMO)).toBe('DEMO');
+  });
+  it('is null for a row whose only name is a glyph (unnameable ⇒ not linkable)', () => {
+    expect(assetLinkToken(mk({currency: 5, minter_family: null, symbol: '₿'}))).toBeNull();
+    expect(assetLinkToken(mk({currency: 5, minter_family: null, symbol: null}))).toBeNull();
   });
 });

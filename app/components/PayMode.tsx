@@ -4,12 +4,12 @@ import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
-import {short, parseRequestQR} from '../lib/format';
+import {parseRequestQR} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
-import type {Identity, Req, NfcStatus} from '../lib/types';
-import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, type RailPrepared} from '../services/rail';
-import {shareHandoff, receiptShareBlob} from '../lib/deepLink';
+import type {Identity, PayIntent, NfcStatus} from '../lib/types';
+import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, type RailPrepared} from '../services/rail';
+import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcIcon} from './NfcIcon';
@@ -29,17 +29,15 @@ import {PaidStamp} from './tapMotion';
 import {IconCheck, IconClock, IconInfo, IconShare} from './icons';
 import {M} from '../i18n';
 
-export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillRequest, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillRequest?: string | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
-  // How the current request arrived. 'scan' = the camera path — the "Pay Now" gate already WAS the
-  // one deliberate press, so a payable request auto-signs and 'review' renders only the transient
-  // signing status / honest blocked / error surfaces. 'deeplink' = a dpay:pay link from another app
-  // (a ZERO-PRESS entry) — it keeps today's full review card with its single Approve press.
-  const [entry, setEntry] = useState<'scan' | 'deeplink'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow (the WithdrawSheet body, lifted inline). The toggle renders only
   // when withdrawFamily is non-null (an on-chain offramp family); DEMO hides it.
-  const [req, setReq] = useState<Req | null>(null);
+  // The payment under review — the ONE shape for both entries (a scanned wire request and a shared
+  // payment link; see PayIntent). `source` decides whether the camera's already-given consent
+  // auto-signs, and how the destination renders.
+  const [intent, setIntent] = useState<PayIntent | null>(null);
   // The signed IC envelope handoff (offline QR / pending reconcile). `prepared` holds the
   // VERBATIM envelope bytes — resubmission must reuse them (identical-byte retry only;
   // re-signing = new request_id = double-pay).
@@ -65,8 +63,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // Pay-intent gate (founder rule 2026-08-23): the camera and the HCE card start ONLY after the
   // payer's explicit "Pay Now" tap — nothing scans before the user asks. Disarmed by
   // reset() (a concluded attempt needs a fresh intent) and by leaving the scan sub-mode; tab
-  // switches unmount this component (no disarm needed there). Deeplink prefill bypasses it —
-  // a prefilled request never needs the camera.
+  // switches unmount this component (no disarm needed there). A payment link bypasses it —
+  // a prefilled payment never needs the camera.
   const [scanArmed, setScanArmed] = useState(false);
   useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
   // NFC is usable only when the adapter probe reports 'ready' (on + present). Everything else falls
@@ -99,46 +97,45 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   const locked = phase !== 'scan';
   useReportLock(onLockChange, locked);
 
-  async function onRequestString(raw: string, fromDeeplink: boolean) {
+  // The CAMERA entry: decode the scanned 132-byte request into the shared payment intent.
+  async function onRequestString(raw: string) {
     try {
       // The request QR is plain base64url now (the payee's `to_name` + `memo` live inside the 132-byte
       // request — wire-format v2; the `|name` suffix is gone). parseRequestQR trims + strips a stray
       // suffix defensively; decodeRequest extracts to_name + memo from the bytes.
       const reqB64 = parseRequestQR(raw);
       const r = await DpayCore.decodeRequest(reqB64);
-      setReq(r); setErr(null); setEntry(fromDeeplink ? 'deeplink' : 'scan'); setPhase('review');
+      const i = await wireRequestToIntent(r);
+      setIntent(i); setErr(null); setPhase('review');
       // One-press rule (founder directive 2026-08-24): on the CAMERA path the "Pay Now" gate was
       // the single deliberate press — a decoded, payable request signs immediately, no confirm
       // screen. Blocked legs (unsupported asset / online+insufficient) never sign: they render
-      // their honest screens below. Deeplink prefill NEVER auto-signs (see the effect comment).
-      if (!fromDeeplink) {
-        const payable = isPayableAsset(catalog, r.currency);
-        const reqBalance = r.currency === 0 ? shownBalance : (assetBalances[r.currency] ?? null);
-        const insufficient = reqBalance != null && cmpRaw(r.amount, reqBalance) > 0;
-        if (payable && !(online && insufficient)) void approve(r);
-      }
+      // their honest screens below. A payment LINK never auto-signs (see the prefill effect).
+      const payable = isPayableAsset(catalog, i.currency);
+      const reqBalance = i.currency === 0 ? shownBalance : (assetBalances[i.currency] ?? null);
+      const insufficient = reqBalance != null && cmpRaw(i.amount, reqBalance) > 0;
+      if (payable && !(online && insufficient)) void approve(i);
     } catch (e: unknown) { console.warn('decode request QR failed:', e instanceof Error ? e.message : String(e)); setErr(M.pay.notAPaymentCode); }
   }
 
-  // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) hands the EXACT
-  // base64url blob the merchant's QR carries straight to this effect, which reuses the camera-scan
-  // decode path (onRequestString → parseRequestQR → decodeRequest → review). NO duplicate decode —
-  // the deeplink blob goes through the same single source of truth. SECURITY INVARIANT: a deeplink
-  // is a ZERO-PRESS entry (no Pay Now gate was ever passed on this device), so it NEVER auto-signs —
-  // the payer taps Approve on the kept review screen. Guarded on phase==='scan' so it can't clobber
-  // an in-flight review/qr/paid. The prefill is cleared (onPrefillConsumed) BEFORE the async decode
-  // resolves so the effect can't re-fire mid-flight.
+  // The LINK entry: a shared `…/wallet/pay/<recipient>?asset=…` URL, already parsed + resolved
+  // against the catalog by the Wallet (which owns the asset routing), arrives here as a ready
+  // PayIntent. SECURITY INVARIANT: a link is a ZERO-PRESS entry (no Pay Now gate was ever passed on
+  // this device), so it NEVER auto-signs — the payer taps Approve on the review screen, having seen
+  // the full destination account. Guarded on phase==='scan' so it can't clobber an in-flight
+  // review/qr/paid; cleared (onPrefillConsumed) as it is taken so the effect can't re-fire.
   useEffect(() => {
-    if (prefillRequest == null) return;
+    if (prefillIntent == null) return;
     if (phase !== 'scan') return;
-    const blob = prefillRequest;
     onPrefillConsumed?.();
-    onRequestString(blob, true);
-    // onRequestString/onPrefillConsumed are inline closures; the [prefillRequest, phase] guard +
-    // immediate clear make their identity irrelevant (exhaustive-deps would force a re-run on every
-    // render's new closure for no behavioral change).
+    setIntent(prefillIntent);
+    setErr(null);
+    setPhase('review');
+    // onPrefillConsumed is an inline closure; the [prefillIntent, phase] guard + immediate clear
+    // make its identity irrelevant (exhaustive-deps would force a re-run on every render's new
+    // closure for no behavioral change).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillRequest, phase]);
+  }, [prefillIntent, phase]);
 
   // Reconcile an offline (QR-dance) settlement via the IC rail: poll read_state for the prepared
   // envelope's request_id. Terminal replied → Paid (decoded TransferResult); rejected → surfaced
@@ -181,13 +178,15 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
      return () => { alive = false; clearInterval(id); };
   }, [phase, prepared, qr, err, onSettled, identity]);
 
-  // The sign path (parameterized: the camera path auto-signs the FRESHLY decoded request before
-  // the `req` state has flushed; the deeplink review's Approve passes the parked req).
-  async function approve(r: Req) {
+  // The sign path (parameterized: the camera path auto-signs the FRESHLY decoded intent before the
+  // `intent` state has flushed; the link review's Approve passes the parked intent).
+  async function approve(r: PayIntent) {
     // The IC rail has no server-side dpay-request expiry — the payer's app IS the gate. A stale
     // request QR must die here, before any envelope is built (memo/nonce reconciliation only ever
-    // sees fresh transfers), with copy that explains the expiry (C1).
-    if (r.expiry * 1000 <= Date.now()) {
+    // sees fresh transfers), with copy that explains the expiry (C1). A payment LINK carries no
+    // request expiry (`expiry === null`): it is meant to survive a chat thread, and the signed
+    // envelope's own IC ingress expiry still bounds the signature.
+    if (r.expiry != null && r.expiry * 1000 <= Date.now()) {
       setErr(M.pay.requestExpired);
       return;
     }
@@ -203,11 +202,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     }
     setBusy(true);
     try {
-      // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (payee principal
-      // derived from the request's `to` pubkey; memo = the request nonce = reconciliation key).
-      // prepareTransfer refuses to sign on unreachable/skewed IC clock — surfaced as the error.
+      // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (the intent
+      // already carries the payee's ICRC-1 principal — derived from the request pubkey, or taken
+      // verbatim from a payment link; memo = the nonce = reconciliation key). prepareTransfer
+      // refuses to sign on unreachable/skewed IC clock — surfaced as the error.
       const p = await prepareTransfer(identity.secretHex, {currencies: catalog}, r);
-      const who = r.toName || short(r.toHex);
+      const who = r.toName || r.toAccountText;
       setPrepared(p);
       if (online) {
         const out = await submitTransfer(p, identity.secretHex, {attempts: 12, intervalMs: 500});
@@ -238,7 +238,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setReq(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
+  function reset() { setIntent(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -282,7 +282,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             testID="btn-share-receipt"
             style={S.ghostBtn}
             onPress={() => {
-              share(shareHandoff('pay', receiptShareBlob(paid.receipt!)));
+              share(shareReceipt(paid.receipt!));
             }}
             accessibilityRole="button"
             accessibilityLabel={M.pay.shareReceipt}
@@ -331,50 +331,61 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     );
   }
 
-  if (phase === 'review' && req) {
-    // MC5 — fail closed BEFORE signing: a request carrying an unknown/unsupported currency (a
+  if (phase === 'review' && intent) {
+    // MC5 — fail closed BEFORE signing: a payment carrying an unknown/unsupported currency (a
     // garbage/retired id, or a CkSol-family currency with no ramp config) must NEVER reach the
     // envelope signer (prepareTransfer). The ledger also rejects these, but the app should never
     // let the user Approve a sign for an unsupported asset. Mirror the BalancesSheet "Unsupported asset" pattern:
     // honest copy + NO sign button + a back-to-scan affordance. dpay never swaps, so we do NOT
     // offer to substitute another asset — the request is for this asset or none.
-    if (!isPayableAsset(catalog, req.currency)) {
+    if (!isPayableAsset(catalog, intent.currency)) {
       return (
         <View style={S.center}>
           <Text style={S.label}>{M.pay.unsupportedAsset}</Text>
-          <Text testID="review-unsupported" style={S.warnNote}>{M.pay.unsupportedAssetBody(req.currency)}</Text>
+          <Text testID="review-unsupported" style={S.warnNote}>{M.pay.unsupportedAssetBody(intent.currency)}</Text>
           <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.cancel}</Text></Pressable>
         </View>
       );
     }
-    // MC5: locked-asset review — the payer sees + pays the EXACT asset the merchant requested (dpay
+    // MC5: locked-asset review — the payer sees + pays the EXACT asset that was requested (dpay
     // never swaps). The balance check uses ONLY that asset's balance: currency 0 → shownBalance
-    // (DEMO_USD, tracked in the header), else assetBalances[req.currency] (the polled per-asset
+    // (DEMO_USD, tracked in the header), else assetBalances[currency] (the polled per-asset
     // balance). An unknown balance (null) is treated as "don't block" (same as the old DEMO path).
-    const reqBalance = req.currency === 0 ? shownBalance : (assetBalances[req.currency] ?? null);
+    const reqBalance = intent.currency === 0 ? shownBalance : (assetBalances[intent.currency] ?? null);
     // C2: when ONLINE and the known balance can't cover the amount, gate PRE-SUBMIT (no doomed
-    // /pay). Offline we can't be sure (the local balance may be stale), so we only WARN there and
+    // submit). Offline we can't be sure (the local balance may be stale), so we only WARN there and
     // let the merchant's online verify be the real gate. MC1 units 2-4: `cmpRaw` (BigInt) — never a
     // lexicographic string compare (which would wrongly rank "9" > "10").
-    const insufficient = reqBalance != null && cmpRaw(req.amount, reqBalance) > 0;
+    const insufficient = reqBalance != null && cmpRaw(intent.amount, reqBalance) > 0;
     const blockApprove = online && insufficient;
-    // Deeplink entry (zero-press): today's full review card — the single Approve press IS the
-    // consent. C1: any shown error (expired / insufficient relay-reject / verify-fail) disables the
-    // button so a doomed payment can't be re-tapped.
-    if (entry === 'deeplink') {
+    // The destination, always rendered: the short pubkey of a scanned request, the FULL ICRC-1
+    // principal of a payment link. A link can name any account on the ledger, and the account IS
+    // the identity — the label beside it is only what the sender claims to be called.
+    const payeeLine = (
+      <>
+        <Text style={S.reviewTo}>{M.pay.toWho(intent.toName || intent.toAccountText)}</Text>
+        {/* U-F5 — the destination account as a subdued second line when a display name is shown,
+            so the payer can verify where the money goes beyond a claimed name (phishing surface).
+            The no-name fallback already renders the account as the primary "to" line. */}
+        {intent.toName ? <Text testID="review-payee" style={S.dim2}>{intent.toAccountText}</Text> : null}
+      </>
+    );
+    if (intent.source === 'link') {
+      // Link entry (zero-press): the full review card — the single Approve press IS the consent.
+      // C1: any shown error (insufficient / verify-fail) disables the button so a doomed payment
+      // can't be re-tapped.
       const approveDisabled = busy || !!err || blockApprove;
       return (
         <View style={S.center}>
           <Text style={S.label}>{M.pay.reviewPayment}</Text>
-          <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, req.currency, req.amount))}</Text>
-          <Text style={S.reviewTo}>{M.pay.toWho(req.toName || short(req.toHex))}</Text>
-          {/* U-F5 — the payee's short pubkey as a subdued second line when a display name is shown,
-              so the payer can verify the destination beyond a claimed name (phishing surface). The
-              no-name fallback already renders the short key as the primary "to" line. */}
-          {req.toName ? <Text testID="review-payee" style={S.dim2}>{short(req.toHex)}</Text> : null}
-          {/* The merchant-set memo (if any) — shown as a small subtitle so the payer sees the note
-              attached to this request before approving. Empty memo renders nothing. */}
-          {req.memo ? <Text testID="review-memo" style={S.dim2}>{req.memo}</Text> : null}
+          <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
+          {payeeLine}
+          {/* A link's payee name is UNVERIFIED — anyone can write any name into a URL. Say so, once,
+              right where the name is read: the account above it is the part that is checkable. */}
+          {intent.toName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.linkNameClaimed}</Text> : null}
+          {/* The sender-set memo (if any) — shown as a small subtitle so the payer sees the note
+              attached to this payment before approving. Empty memo renders nothing. */}
+          {intent.memo ? <Text testID="review-memo" style={S.dim2}>{intent.memo}</Text> : null}
           {/* Trip Ready J4 — one-time first-use coaching, mounted in the reading zone (right under
               the amount/payee block it explains) so it is seen without scrolling; inline, never
               covers the buttons. Shows until dismissed; dismissal persists via journey seen-markers. */}
@@ -395,7 +406,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             accessibilityLabel={M.pay.approveA11y}
             accessibilityHint={M.pay.approveHint}
             accessibilityState={{disabled: approveDisabled}}
-            onPress={() => void approve(req)}>
+            onPress={() => void approve(intent)}>
             <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
           </Pressable>
           {/* Audit P2: Cancel-as-secondary-button parity — a bordered secondary button of the same
@@ -422,9 +433,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     return (
       <View style={S.center}>
         <Text style={S.label}>{M.pay.paying}</Text>
-        <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, req.currency, req.amount))}</Text>
-        <Text style={S.reviewTo}>{M.pay.toWho(req.toName || short(req.toHex))}</Text>
-        {req.toName ? <Text testID="review-payee" style={S.dim2}>{short(req.toHex)}</Text> : null}
+        <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
+        {payeeLine}
         {insufficient ? (
           <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
             ? M.pay.notEnoughBalance
@@ -563,7 +573,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           )}
           {Platform.OS !== 'web' && !nfcReady ? <Text style={S.dim2}>{M.pay.scanQrToPay}</Text> : null}
           {scanArmed ? (
-            <QrScanner onScan={raw => onRequestString(raw, false)} />
+            <QrScanner onScan={raw => onRequestString(raw)} />
           ) : (
             <>
               <Pressable

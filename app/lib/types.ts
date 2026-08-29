@@ -59,6 +59,27 @@ export type SolNfcPhaseName = 'listening' | 'linking' | 'exchanging' | 'awaiting
 // full u64 range round-trips without precision loss above 2^53. `expiry`/`currency`/time fields stay
 // `number` (they are small bounded values, not money).
 export type Req = {toHex: string; amount: string; nonceHex: string; expiry: number; currency: number; toName: string; memo: string};
+// A payment the payer is about to review — the ONE shape both entries produce, so there is a single
+// review/sign path no matter how the payment arrived:
+//   • 'wire' — a scanned/tapped 132-byte request. It addresses the payee by raw Ed25519 pubkey, so
+//     `toPrincipal` is derived (self_authenticating(pubkey)) and `expiry` is the request's own.
+//   • 'link' — a shared payment link. It addresses the payee by ICRC-1 principal directly (so it
+//     can pay ANY IC account, not only a dpay user) and has NO request expiry: a link is durable,
+//     and the signed envelope's IC ingress expiry is what bounds the signature.
+// The distinction drives exactly two things: whether the review auto-signs (the camera's "Pay Now"
+// tap was already the deliberate press; a link is a zero-press entry and must never auto-sign) and
+// how the destination is rendered.
+export type PayIntent = {
+  toPrincipal: string;      // the ICRC-1 account owner the transfer targets
+  toName: string;           // the payee's CLAIMED display name ('' when the payment names none)
+  toAccountText: string;    // the destination as shown to the payer (short pubkey for wire, full principal for a link)
+  amount: string;           // raw units (decimal-digit string)
+  currency: number;
+  nonceHex: string;         // the ICRC memo — the reconciliation key the payee watches for
+  memo: string;             // display-only note (the on-chain memo is the nonce, never this)
+  expiry: number | null;    // request expiry in seconds; null for a link (none by design)
+  source: 'wire' | 'link';
+};
 export type Identity = {secretHex: string; publicHex: string; username: string};
 export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; dir: 'out' | 'in'; currency: number};
 // One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex). The
@@ -82,6 +103,10 @@ export type DpayCoreApi = {
   // as lowercase hex; "" for an absent subaccount/memo. Retry = identical-byte resubmit ONLY.
   icpSelfPrincipal(secretHex: string): Promise<string>;
   icpPrincipalFromPubkey(pubkeyHex: string): Promise<string>;
+  // Base32-CRC parse of an ICRC-1 owner principal TEXT → its canonical spelling. Rejects a
+  // mistyped/truncated principal (the failure mode of a payment link forwarded through chat)
+  // before the payer is shown a destination.
+  icpValidatePrincipal(text: string): Promise<string>;
   icpIngressExpiry(nowNs: string, aheadS: number): Promise<string>;
   icpTransferArg(toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string, amount: string, fee: string, memoHex: string): Promise<string>;
   icpApproveArg(spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string, amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string): Promise<string>;

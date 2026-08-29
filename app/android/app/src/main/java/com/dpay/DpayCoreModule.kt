@@ -199,6 +199,17 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Validate an ICRC-1 owner principal in text form (base32-CRC) and return it canonicalised.
+     *  The destination of a shared payment link goes through this before the payer sees it. */
+    @ReactMethod
+    fun icpValidatePrincipal(text: String, promise: Promise) {
+        try {
+            promise.resolve(uniffi.dpay_ffi.icpValidatePrincipal(text))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** ingress expiry (ns) = now_ns + ahead_s * 1e9. The caller supplies `now_ns` from the
      *  certified IC clock (read_state `time` leaf) — REFUSE to sign on large skew. */
     @ReactMethod

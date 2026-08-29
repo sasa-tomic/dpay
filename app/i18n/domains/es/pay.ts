@@ -55,6 +55,25 @@ export const payEs: PayMessages = {
   approveHint: 'Firma con tu clave el importe mostrado y lo envía',
   signing: 'Firmando…',
   signsOffline: 'Esto se firma sin conexión: el comercio lo confirma al enviarlo.',
+  linkNameClaimed: 'Nombre indicado por quien envía: comprueba la cuenta de arriba.',
+
+  link: {
+    title: 'Este enlace de pago no se puede pagar',
+    part: {recipient: 'la cuenta que cobra', asset: 'el activo', network: 'la red', amount: 'el importe', ref: 'la referencia'},
+    malformed: part => `Al enlace le falta ${part} o el valor está dañado. Pide un enlace nuevo a quien te lo envió.`,
+    unknownAsset: (token, network) =>
+      `El enlace pide ${token} en ${network}. Esta cartera no tiene ese activo y dpay nunca convierte, así que no hay alternativa. Pide un enlace en un activo que tengas.`,
+    wrongNetwork: (token, network) =>
+      `El enlace pide ${token} en ${network}. Tú tienes ${token} en otra red: es un activo distinto y el pago iría a la cadena equivocada. Pide un enlace en una red que tengas.`,
+    hiddenAsset: token =>
+      `El enlace pide ${token}, un activo de red de pruebas. Abre «Saldos», activa «Mostrar activos de prueba» y vuelve a abrir el enlace.`,
+    unsupportedAsset: token =>
+      `El enlace pide ${token} y esta cartera no puede pagarlo. dpay nunca convierte, así que no hay alternativa. Pide un enlace en un activo que tengas.`,
+    badAmount: (amount, token) =>
+      `«${amount}» no es un importe válido de ${token}: puede tener más decimales de los que admite ${token}. Pide un enlace nuevo.`,
+    badAccount: network =>
+      `La cuenta de este enlace no es una cuenta válida de ${network}. Pide a quien te lo envió que la revise y te mande el enlace otra vez.`,
+  },
 
   fundsSymbol: 'fondos',
   fundTitle: (symbol, action) => `Añade ${symbol} para ${action === 'pay' ? 'pagar' : 'enviar'}`,

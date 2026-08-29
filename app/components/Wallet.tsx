@@ -6,12 +6,12 @@ import {S, isDark} from '../styles';
 import {M} from '../i18n';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
-import {base} from '../lib/format';
+import {base, randNonceHex} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
-import {buildSelectableAssets, chipLabel, reconcileSelectedAsset, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable, solPayGate} from '../config/assets';
+import {buildSelectableAssets, chipLabel, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable, solPayGate} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
-import type {AssetId, Identity, NfcStatus} from '../lib/types';
+import type {AssetId, Identity, NfcStatus, PayIntent} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
@@ -23,8 +23,9 @@ import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createUsdcAta} from '../solana';
+import {isValidSolanaAddress} from '../solana/identity';
 import {friendlySolError} from '../solana/errors';
-import {readDepositDeepLink, readRequestDeeplink, readPaymentDeeplink, decodeDeeplink, type DeeplinkKind} from '../lib/deepLink';
+import {readDepositDeepLink, readPayLink, readPaymentDeeplink, parsePayLink, decodeDeeplink, type PayLink, type PayLinkParse} from '../lib/deepLink';
 import {WordmarkLink} from './Logo';
 import {HotkeyHint} from './HotkeyHint';
 import {Tab} from './Tab';
@@ -45,11 +46,20 @@ import type {ReadinessKey} from '../lib/readiness';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
-  // Deeplink prefill (item 6): a `dpay:req/<blob>` (or the web `?req=<blob>` mirror) sets the raw
-  // base64url blob + flips mode to 'pay'; PayMode consumes it via its prefill effect (which reuses
-  // the camera-scan decode path), then calls onPrefillConsumed to clear it. A deeplink ONLY
-  // pre-fills review — it never auto-signs/approves.
-  const [prefillRequest, setPrefillRequest] = useState<string | null>(null);
+  // A shared payment link that has been PARSED but not yet resolved against the catalog (which
+  // loads async). Held here until the resolve effect below turns it into a concrete asset + amount,
+  // or into an honest on-screen refusal.
+  const [pendingLink, setPendingLink] = useState<PayLink | null>(null);
+  // Why an incoming payment link cannot be paid, in the user's language, with the action they can
+  // take. Rendered as a modal over the wallet; dismissing it drops the link.
+  const [linkError, setLinkError] = useState<string | null>(null);
+  // A resolved payment link handed to the IC engine: PayMode consumes it via its prefill effect,
+  // then calls onPrefillConsumed to clear it. A link ONLY pre-fills the review — it never
+  // auto-signs/approves.
+  const [prefillIntent, setPrefillIntent] = useState<PayIntent | null>(null);
+  // The Solana rail's equivalent: address + decimal amount pre-filled into the "Send to address"
+  // form (SOL has no request/review engine — same tab, same toggle, per the same-surfaces rule).
+  const [solPrefill, setSolPrefill] = useState<{address: string; amount: string} | null>(null);
   // The symmetric `dpay:pay/<blob>` (NFC-less receipt hand-back): a payer who settled online shares
   // the rail proof {ledger, block_index, request_id} back to the merchant. This holds the raw blob;
   // ReceiveMode consumes it via its verify effect (format-check → request_id binding → on-chain
@@ -298,59 +308,67 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     });
   }, []);
 
-  // Deeplink routing (item 6 + receipt hand-back): a `dpay:req/<blob>` arriving at launch pre-fills
-  // the Pay review screen; a `dpay:pay/<blob>` carries the rail proof to the merchant's
-  // Receive screen. Two receive paths each, both bounded + best-effort (a failure just doesn't
-  // prefill — but it's logged, never swallowed):
-  //   • Web: readRequestDeeplink()/readPaymentDeeplink() read `?req=`/`?pay=` from the page URL (the
-  //     OS scheme never fires on web — there's no dpay: handler in a browser).
-  //   • Native: Linking.getInitialURL() returns the dpay: URI the OS handed the app on launch
-  //     (Android intent-filter), and the 'url' listener catches a dpay: link tapped while the app is
-  //     foreground. On web getInitialURL returns the http page URL → decodeDeeplink → null → no-op,
-  //     so BOTH paths are safe to run on every platform and decodeDeeplink's null cleanly separates.
+  // Inbound links (2026-08-29): the wallet accepts exactly two, and this effect is the ONE door.
+  //   • a PAYMENT LINK `…/wallet/pay/<recipient>?asset=…&network=…&amount=…` — parsed here, resolved
+  //     against the catalog by the effect below, and pre-filled into the Pay tab. It NEVER signs.
+  //   • the receipt hand-back `dpay:pay/<blob>` — the rail proof for the merchant's Receive screen.
+  // Both arrive by two routes and both are bounded + best-effort (a failure never wedges the app,
+  // and is surfaced, never swallowed):
+  //   • Web: the page's own location — readPayLink() reads the path, readPaymentDeeplink() the
+  //     `?pay=` query (the OS scheme never fires in a browser).
+  //   • Native: Linking.getInitialURL() returns the URI the OS handed the app on launch (an Android
+  //     App Link for the payment link, the dpay: scheme for the receipt), and the 'url' listener
+  //     catches one arriving while the app is foreground.
   // getInitialURL is wrapped in a 2s timeout so a stalled native bridge can't wedge the prefill (the
-  // repo rule: all I/O has a timeout). SECURITY: applyBlob only sets a blob + mode — it never signs
-  // (req) and never marks Paid (pay — ReceiveMode verifies the receipt signature first).
+  // repo rule: all I/O has a timeout).
   useEffect(() => {
     let alive = true;
-    const applyBlob = (kind: DeeplinkKind, blob: string) => {
+    const applyLink = (parsed: PayLinkParse) => {
       if (!alive) return;
-      if (kind === 'req') { setPrefillRequest(blob); setMode('pay'); }
-      else { setPrefillReceipt(blob); setMode('receive'); }
-      // A6 — a req/pay deep link targets a specific Pay/Receive flow, so dismiss the Balances landing
-      // sheet (it would otherwise overlay the deep-linked screen).
+      // A malformed link is REPORTED, never silently ignored: the payer is told which part is
+      // damaged so they can ask the sender for a new one (founder rule — every dead end gives an
+      // instruction). A well-formed one waits for catalog resolution in the effect below.
+      if (!parsed.ok) setLinkError(M.pay.link.malformed(M.pay.link.part[parsed.err]));
+      else setPendingLink(parsed.link);
+      setMode('pay');
+      // A6 — an incoming link targets a specific Pay/Receive flow, so dismiss the Balances landing
+      // sheet (it would otherwise overlay the linked screen).
       setBalancesOpen(false);
     };
-    // Web path first (sync read of ?req= / ?pay=).
-    const webReq = readRequestDeeplink();
-    if (webReq) applyBlob('req', webReq);
+    const applyReceipt = (blob: string) => {
+      if (!alive) return;
+      setPrefillReceipt(blob);
+      setMode('receive');
+      setBalancesOpen(false);
+    };
+    // Web path first (sync reads of the page location).
+    const webLink = readPayLink();
+    if (webLink) applyLink(webLink);
     const webPay = readPaymentDeeplink();
-    if (webPay) applyBlob('pay', webPay);
-    // Native path: the launch dpay: URI, timeout-bounded. On web this resolves to the page URL and
-    // decodeDeeplink returns null (harmless fall-through — the web readers above already handled the
-    // query params).
+    if (webPay) applyReceipt(webPay);
+    // Native path: the launch URI, timeout-bounded. On web this resolves to the page URL, which the
+    // sync readers above already handled — parsing it again is idempotent (same link, same state).
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
     const initial = (Linking.getInitialURL?.() ?? Promise.resolve(null)) as Promise<string | null>;
-    Promise.race([initial, timeout])
-      .then((url) => {
-        if (!alive || !url) return;
-        const dl = decodeDeeplink(String(url));
-        if (dl) applyBlob(dl.kind, dl.blob);
-      })
-      .catch((e: unknown) => { console.log(`[dpay] deeplink getInitialURL failed: ${e instanceof Error ? e.message : String(e)}`); });
-    // Foreground links: a dpay: link tapped while the app is already open.
-    const sub = Linking.addEventListener('url', ({url}) => {
+    const handleUrl = (url: string) => {
+      const link = parsePayLink(url);
+      if (link) { applyLink(link); return; }
       const dl = decodeDeeplink(url);
-      if (dl) applyBlob(dl.kind, dl.blob);
-    });
-    // Phase 5 test seam — simulate a FOREGROUND native deeplink arriving while a Solana asset is
+      if (dl) applyReceipt(dl.blob);
+    };
+    Promise.race([initial, timeout])
+      .then((url) => { if (alive && url) handleUrl(String(url)); })
+      .catch((e: unknown) => { console.log(`[dpay] deeplink getInitialURL failed: ${e instanceof Error ? e.message : String(e)}`); });
+    // Foreground links: one tapped while the app is already open.
+    const sub = Linking.addEventListener('url', ({url}) => handleUrl(url));
+    // Phase 5 test seam — simulate a FOREGROUND native link arriving while a Solana asset is
     // idle-selected. This is the scenario web reload CANNOT reproduce: selectedAssetId is
-    // session-local, so a reload resets it to the IC default and the SOL→IC routing never fires. The
-    // harness injects `dpay:req`/`dpay:pay` via this hook instead of a real OS intent — it drives the
-    // SAME applyBlob path as the web readers + getInitialURL + the foreground listener above.
+    // session-local, so a reload resets it to the IC default and the cross-rail routing never
+    // fires. The harness injects a URL through this hook instead of a real OS intent — it drives
+    // the SAME handleUrl path as the web readers + getInitialURL + the foreground listener above.
     // (Test-only hook: prod code never reads it; harmless if unset.)
     if (typeof globalThis !== 'undefined') {
-      (globalThis as unknown as {__DPAY_TEST_DEEPLINK?: (d: {kind: DeeplinkKind; blob: string}) => void}).__DPAY_TEST_DEEPLINK = (d) => applyBlob(d.kind, d.blob);
+      (globalThis as unknown as {__DPAY_TEST_DEEPLINK?: (url: string) => void}).__DPAY_TEST_DEEPLINK = handleUrl;
     }
     return () => {
       alive = false;
@@ -361,20 +379,102 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     };
   }, []);
 
-  // Phase 5 (concern A) — route an IC deeplink to the IC engine regardless of the idle selection. A
-  // `dpay:req`/`dpay:pay` blob is IC-only (the requested currency lives INSIDE the blob, readable only
-  // by DpayCore.decodeRequest). If a Solana asset is idle-selected when the blob arrives,
-  // SolPayMode/SolReceiveMode would mount instead and the blob would be SILENTLY LOST (those engines
-  // never consume IC prefills). This programmatically selects an IC asset so the IC engine mounts +
-  // consumes the blob; the engine then reviews with the EXACT requested asset. PROGRAMMATIC — calls
-  // setSelectedAssetId directly, NOT handleSelect, so it bypasses the selection lock (an incoming
-  // request is not a user gesture; routing to the right engine must always win).
+  // Resolve a parsed payment link against the LIVE catalog, then hand it to the right rail's engine.
+  // Kept separate from the reader above because resolution needs the catalog, which loads async: the
+  // bundled default renders instantly and the relay's copy lands a moment later, so this re-runs on
+  // every catalog change until it succeeds. A link that resolves on the second pass therefore
+  // self-heals — the earlier error is replaced, never left stale on screen.
+  //
+  // What it does, in order: resolve the asset + amount (refuses on unknown/wrong-chain/over-precise
+  // — see resolvePayLink) → programmatically select that asset so ITS engine mounts (direct
+  // setSelectedAssetId, bypassing the selection lock exactly like the receipt routing below: an
+  // incoming link is not a user gesture and must reach the right engine) → validate the destination
+  // account with the REAL parser for that rail → hand the engine a ready payment.
+  // SECURITY: nothing here signs. The IC engine renders a review the payer must Approve; the SOL
+  // engine renders a pre-filled send form the payer must confirm.
+  const linkGenRef = useRef(0);
   useEffect(() => {
-    if (prefillRequest == null && prefillReceipt == null) return;
+    if (pendingLink == null) return;
+    const link = pendingLink;
+    const gen = ++linkGenRef.current;
+    const resolved = resolvePayLink(link, assets, catalog);
+    if (!resolved.ok) {
+      const chain = prettyNetwork(link.network);
+      setLinkError(
+        resolved.err === 'unknown_asset' ? M.pay.link.unknownAsset(link.asset, chain)
+        : resolved.err === 'wrong_network' ? M.pay.link.wrongNetwork(link.asset, chain)
+        : resolved.err === 'hidden_asset' ? M.pay.link.hiddenAsset(link.asset)
+        : resolved.err === 'ambiguous_asset' ? M.pay.link.unknownAsset(link.asset, chain)
+        : resolved.err === 'unsupported_asset' ? M.pay.link.unsupportedAsset(link.asset)
+        : M.pay.link.badAmount(link.amount, link.asset),
+      );
+      return;
+    }
+    const {asset, rawAmount} = resolved.target;
+    let alive = true;
+    (async () => {
+      if (asset.protocol === 'ic') {
+        // The destination is an ICRC-1 owner principal. Validate it through the core's base32-CRC
+        // parser (never a regex): a link that travelled through a chat app can arrive truncated,
+        // and a bad principal must be refused BEFORE the payer sees a destination to approve.
+        let principal: string;
+        try {
+          principal = await DpayCore.icpValidatePrincipal(link.recipient);
+        } catch (e: unknown) {
+          console.warn('pay link principal rejected:', e instanceof Error ? e.message : String(e));
+          if (alive && gen === linkGenRef.current) setLinkError(M.pay.link.badAccount(prettyNetwork(link.network)));
+          return;
+        }
+        if (!alive || gen !== linkGenRef.current) return;
+        setSelectedAssetId(asset.id);
+        setPrefillIntent({
+          toPrincipal: principal,
+          toName: link.label,
+          toAccountText: principal,
+          amount: rawAmount,
+          currency: asset.currency,
+          // `ref` present ⇒ the sender's own reconciliation nonce: paying twice replays the identical
+          // transfer, which the ledger dedups (an invoice). Absent ⇒ a fresh nonce per payment, so
+          // one reusable link can be paid again (a tip jar).
+          nonceHex: link.ref ?? randNonceHex(),
+          memo: link.memo,
+          expiry: null,
+          source: 'link',
+        });
+        setPaySubMode('scan');
+      } else {
+        // The Solana rail: a base58 address, validated by the same check the send form applies.
+        if (!isValidSolanaAddress(link.recipient)) {
+          if (alive && gen === linkGenRef.current) setLinkError(M.pay.link.badAccount(prettyNetwork(link.network)));
+          return;
+        }
+        if (!alive || gen !== linkGenRef.current) return;
+        setSelectedAssetId(asset.id);
+        // SOL has no IC-style request/review engine; its equivalent surface is the pre-filled
+        // "Send to address" form in the SAME Pay tab (the same-surfaces hard rule).
+        setSolPrefill({address: link.recipient, amount: link.amount});
+        setPaySubMode('send');
+      }
+      setMode('pay');
+      setLinkError(null);
+      setPendingLink(null);
+    })();
+    return () => { alive = false; };
+  }, [pendingLink, assets, catalog]);
+
+  // Phase 5 (concern A) — route the receipt hand-back to the IC engine regardless of the idle
+  // selection. A `dpay:pay/<blob>` proof is IC-only (its currency lives inside the settled
+  // transfer). If a Solana asset is idle-selected when the blob arrives, SolReceiveMode would mount
+  // instead and the blob would be SILENTLY LOST (that engine never consumes IC prefills). This
+  // programmatically selects an IC asset so the IC engine mounts + consumes the blob. PROGRAMMATIC —
+  // calls setSelectedAssetId directly, NOT handleSelect, so it bypasses the selection lock (an
+  // incoming proof is not a user gesture; routing to the right engine must always win).
+  useEffect(() => {
+    if (prefillReceipt == null) return;
     if (selectedAsset?.protocol === 'ic') return;          // IC engine already mounts — nothing to do
     const icId = routeDeeplinkToIc(effectiveSelectedId, assets);
     if (icId) setSelectedAssetId(icId);
-  }, [prefillRequest, prefillReceipt, selectedAsset, effectiveSelectedId, assets]);
+  }, [prefillReceipt, selectedAsset, effectiveSelectedId, assets]);
 
   // MC8 U5 — AUTO-OPEN the ckERC20 deposit on mount if a watching deposit was persisted across a
   // restart. The watching poll is relay-bound (NOT Ethereum), so it is resumable WITHOUT a wallet
@@ -591,6 +691,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     setBalancesOpen(false);
   }, [depositReturnTo]);
 
+  // Dismissing the link refusal drops the link with it: the resolve effect re-runs on every
+  // catalog change, so keeping the link around would make the message reappear on the next
+  // refresh after the user closed it.
+  const dismissLinkError = useCallback(() => {
+    setLinkError(null);
+    setPendingLink(null);
+  }, []);
+
   // Passport deep-links (founder ask 2026-08-24): tapping an unfilled stamp (or NEXT, which
   // routes with the first-missing key) goes straight to the surface where that step completes.
   // The passport closes FIRST in every branch — one surface at a time. SettingsSheet reuses
@@ -712,7 +820,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc}                   onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} nfcReady={nfc === 'ready'} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc}                   onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -725,7 +833,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   withdrawTokenContract={selectedDesc?.token_contract ?? null}
                   withdrawBalance={displayAssetBalances[selectedCurrency] ?? '0'}
                   subMode={paySubMode} onSubModeChange={setPaySubMode}
-                  prefillRequest={prefillRequest} onPrefillConsumed={() => setPrefillRequest(null)}
+                  prefillIntent={prefillIntent} onPrefillConsumed={() => setPrefillIntent(null)}
                   onLockChange={setSelectionLocked}
                 />
           )
@@ -827,6 +935,36 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             onClose={() => setHowItWorksOpen(false)}
             onDone={() => setHowItWorksOpen(false)}
           />
+        </AppModal>
+      ) : null}
+      {/* An incoming payment link that cannot be paid. It states WHICH asset/chain the link asked
+          for and the one action the payer can take (founder hard rule: every dead end gives a
+          useful instruction). dpay never swaps, so no "pay it with something else" is offered.
+          Dismissing drops the link — nothing is retried behind the user's back. */}
+      {linkError ? (
+        <AppModal onRequestClose={dismissLinkError}>
+          {/* Centered dimmed card — the same shape as the NFC "why is this unavailable" popup, so a
+              short explanation reads as a popup on BOTH platforms instead of a full screen with one
+              paragraph pinned to the top (found on the emulator, 2026-08-29). Tapping the backdrop
+              dismisses, matching that popup. */}
+          {/* No accessibilityRole here — an accessible backdrop renders as a <button> on web and
+              nesting the Close button inside it is invalid HTML. The explicit Close button below
+              carries the label; this matches the NFC popup exactly. */}
+          <Pressable style={S.pickBackdrop} onPress={dismissLinkError}>
+            <View testID="pay-link-error" style={S.pickCard} onStartShouldSetResponder={() => true}>
+              <Text style={S.pickTitle}>{M.pay.link.title}</Text>
+              <Text testID="pay-link-error-body" style={S.nfcInfoBody}>{linkError}</Text>
+              <Pressable
+                testID="btn-pay-link-error-close"
+                style={S.nfcInfoClose}
+                onPress={dismissLinkError}
+                accessibilityRole="button"
+                accessibilityLabel={M.pay.close}
+                accessibilityState={{disabled: false}}>
+                <Text style={S.nfcInfoCloseText}>{M.pay.close}</Text>
+              </Pressable>
+            </View>
+          </Pressable>
         </AppModal>
       ) : null}
     </SafeAreaView>

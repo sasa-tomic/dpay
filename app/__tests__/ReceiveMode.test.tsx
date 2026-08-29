@@ -19,6 +19,8 @@ import {Share, Platform, Text} from 'react-native';
 jest.mock('../services/native', () => ({
   DpayCore: {
     encodeRequest: jest.fn(),
+    // The wallet's own ICRC-1 account — the destination of the shareable payment link.
+    icpSelfPrincipal: jest.fn(async () => 'ryjl3-tyaaa-aaaaa-aaaba-cai'),
   },
   DpayNfc: {
     buildRequest: jest.fn(),
@@ -47,6 +49,7 @@ import {receiptShareBlob} from '../lib/deepLink';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {S} from '../styles';
 import type {CurrencyDescriptor} from '../config/catalog';
+import type {SelectableAsset} from '../config/assets';
 import type {AssetId} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
 import type {Identity} from '../lib/types';
@@ -58,6 +61,17 @@ const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(3
 const BALANCES: Record<AssetId, BalanceView> = {
   'solana:SOL': {displayText: '—', status: 'unavailable'},
   'solana:USDC': {displayText: '—', status: 'unavailable'},
+};
+
+// The wallet's own ICRC-1 account (mocked DpayCore.icpSelfPrincipal) — the destination of the
+// shareable payment link built from an open request.
+const SELF_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
+// The selected asset the share link names. DEMO settles on the Internet Computer like every other
+// IC row, so its link reads `?asset=DEMO&network=internet-computer`.
+const DEMO_ASSET: SelectableAsset = {
+  id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', linkToken: 'DEMO',
+  networkLabel: 'play money', network: null, decimals: 2, visible: true,
+  capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'demo',
 };
 
 const shareSpy = jest.spyOn(Share, 'share');
@@ -80,8 +94,8 @@ function fullProps(over: Partial<ReceiveModeProps> = {}): ReceiveModeProps {
     subMode: 'request',
     onSubModeChange: () => {},
     selectedCurrency: 0,
-    assets: [],
-    selectedAssetId: null,
+    assets: [DEMO_ASSET],
+    selectedAssetId: 'ic:0',
     balances: BALANCES,
     onSelectAsset: () => {},
     ...over,
@@ -214,9 +228,18 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
     await act(async () => {
       btn.props.onPress();
     });
-    // web semantics (U-F1): the share payload is the /wallet?req= handoff URL — NOT the native
-    // dpay:req/ scheme (shareHandoff branches on Platform.OS; this test mounts as web).
-    expect(shareSpy).toHaveBeenCalledWith({message: '/wallet?req=REQB64VALUE'});
+    // The shared payload is the PAYMENT LINK: this wallet's own account in the path, the exact
+    // asset + settlement chain and the typed amount in the query, and the request nonce as `ref`
+    // so a link payment reconciles against this very request. On web it carries the page origin
+    // (empty in jest — a relative URL is still openable same-origin).
+    const shared = jest.mocked(shareSpy).mock.calls[0][0] as {message: string};
+    expect(shared.message).toContain(`/wallet/pay/${SELF_PRINCIPAL}?`);
+    const q = new URL(shared.message, 'https://dpay.invalid').searchParams;
+    expect(q.get('asset')).toBe('DEMO');
+    expect(q.get('network')).toBe('internet-computer');
+    expect(q.get('amount')).toBe('25'); // the amount makeRequest types
+    expect(q.get('label')).toBe(IDENTITY.username);
+    expect(q.get('ref')).toMatch(/^[0-9a-f]{32}$/);
     expect(texts(tree)).toContain('Link copied ✓');
     expect(texts(tree)).not.toContain('Share request link');
     expect(hasTestID(tree, 'btn-share-request')).toBe(true);
@@ -232,9 +255,10 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
     await act(async () => {
       btn.props.onPress();
     });
-    // native semantics (U-F1): the share payload is the dpay:req/ scheme URI (shareHandoff's
-    // other branch) — the web test above pins the /wallet?req= handoff URL.
-    expect(shareSpy).toHaveBeenCalledWith({message: expect.stringContaining('dpay:req/')});
+    // On native there is no page origin to read, so the link carries the canonical public wallet
+    // origin — a link shared from a phone must open for a recipient who has never heard of this
+    // device's relay setting.
+    expect(shareSpy).toHaveBeenCalledWith({message: expect.stringContaining(`https://dpay.kalaj.org/wallet/pay/${SELF_PRINCIPAL}?`)});
     expect(texts(tree)).toContain('Shared ✓');
     expect(texts(tree)).not.toContain('Link copied ✓');
     act(() => {

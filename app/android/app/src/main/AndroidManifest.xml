@@ -42,13 +42,30 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
-        <!-- Item 6 — dpay: deeplink scheme. A `dpay:req/<blob>` (or `dpay:pay/<blob>`) opened from a
-             messaging app / QR / NFC handoff routes into MainActivity, which RN's Linking surfaces
-             via getInitialURL (launch) + the 'url' event (foreground). singleTask (set above) keeps
-             the existing instance singleTop so a deeplink reaches the live Wallet instead of stacking
-             a second activity. The blob is the exact base64url the request QR carries — Wallet decodes
-             + pre-fills the pay review (never auto-signs). BROWSABLE lets a web page / messaging app
-             dispatch the link. -->
+        <!-- Android App Link for a shared PAYMENT LINK
+             (https://dpay.kalaj.org/wallet/pay/<recipient>?asset=…&amp;network=…&amp;amount=…).
+             autoVerify makes Android fetch https://dpay.kalaj.org/.well-known/assetlinks.json
+             (served by the relay) and check this build's signing certificate against it; when it
+             matches, tapping the link in a messaging app opens THIS app instead of a browser tab.
+             The same URL still works as a plain web link for anyone without the app installed —
+             that is the point of using https rather than a private scheme. RN's Linking surfaces
+             it via getInitialURL (launch) + the 'url' event (foreground); singleTask (set above)
+             keeps the existing instance so the link reaches the live Wallet instead of stacking a
+             second activity. Path-scoped to /wallet/pay/ so the app never claims the whole site
+             (the landing page, /privacy and the plain /wallet stay in the browser). Wallet
+             resolves the link and pre-fills the pay review — it NEVER auto-signs. -->
+        <intent-filter android:autoVerify="true">
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" android:host="dpay.kalaj.org" android:pathPrefix="/wallet/pay/" />
+        </intent-filter>
+        <!-- dpay: scheme — the NFC-less receipt hand-back `dpay:pay/<blob>`: the payer shares the
+             rail proof of a settled payment back to the merchant, whose Receive screen verifies it
+             against on-chain history (never trusting the blob alone). This one stays a private
+             scheme because it is machine state passed between two phones, not a human-facing link:
+             nothing outside dpay can do anything with it. BROWSABLE lets a messaging app dispatch
+             it. -->
         <intent-filter>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.DEFAULT" />

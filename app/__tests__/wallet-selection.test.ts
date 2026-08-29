@@ -214,7 +214,7 @@ describe('reconcileSelectedAsset — hiding a selected testnet asset applies the
 // Phase 5 — deeplink routing to the IC engine + selection-lock predicate (pure helpers)
 // =============================================================================================
 //
-// A `dpay:req`/`dpay:pay` blob is IC-only: the requested currency lives INSIDE the blob (only
+// A `dpay:pay` rail-proof blob is IC-only: its currency lives inside the settled transfer (only
 // DpayCore.decodeRequest can read it). If a Solana asset is idle-selected when such a blob arrives,
 // SolPayMode/SolReceiveMode would mount and the blob would be SILENTLY LOST. `routeDeeplinkToIc`
 // returns the IC asset id to programmatically select so the IC engine mounts — any IC selection

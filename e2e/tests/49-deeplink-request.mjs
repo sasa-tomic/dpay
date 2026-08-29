@@ -1,26 +1,32 @@
-// Flow 49 — Deeplink request pre-fill (`dpay:req` via the web `?req=` mirror).
+// Flow 49 — a shared PAYMENT LINK pre-fills the pay review and settles for real.
 //
-// A merchant's Request QR is a raw base64url blob; the deeplink wraps it as `dpay:req/<blob>` so it
-// can be shared over a messaging app and opened on the payer's phone to PRE-FILL the pay review
-// screen (the payer still taps Approve — a deeplink NEVER auto-signs). On web the same blob rides as
-// `?req=<blob>` (the OS scheme handler doesn't exist in a browser), so this flow exercises the REAL
-// web path: navigate the browser to `?relay=<relay>&req=<blob>` (identity persists in AsyncStorage →
-// the wallet auto-loads → Wallet's mount effect reads ?req= → PayMode's prefill effect decodes →
-// review screen). This is the EXACT code path a real web user hitting `dpay.kalaj.org/?req=...` runs.
+// `https://<origin>/wallet/pay/<recipient>?asset=…&network=…&amount=…` is THE URL format for "pay
+// me": readable, hand-authorable, shareable over a messaging app, and (via Android App Links) able
+// to open the installed app. It replaced the opaque `?req=<blob>` mirror — a link now says what it
+// asks for instead of hiding it in base64.
 //
-// The blob is byte-identical to a camera-scanned request (flow 07), so the full Approve→settle path
-// is reused end-to-end (settles on the REAL FakeLedger). The security assertion: the deeplink lands
-// on REVIEW (btn-approve present + NOT yet Paid) — proving it prefilled WITHOUT auto-paying.
+// This flow drives the REAL web path end to end: navigate the browser to a payment link (identity
+// persists in AsyncStorage → the wallet auto-loads → Wallet's link effect reads it off `location` →
+// resolves the asset against the catalog → validates the recipient principal through the core →
+// PayMode reviews it), then Approve → sign → settle on the REAL FakeLedger.
 //
-// Approach chosen (reload, not a JS seam): the reload tests the real `?req=` reader with ZERO
-// test-only prod code (no `__DPAY_TEST_DEEPLINK` global). Flow 12 proves reload+remount is reliable;
-// `?relay=` is preserved in the URL so the test relay is still used on the reloaded page.
+// The assertions that matter:
+//   • the review is REACHED but NOT paid — a link is a zero-press entry and must never auto-sign;
+//   • the FULL destination account is on screen (a link names any ICRC-1 account, and the account
+//     is the identity — the sender-given label is marked as claimed);
+//   • the amount is converted at the asset's own decimals (∂25.00 from `amount=25`);
+//   • Approve settles for real: payer ∂100 → ∂75 and the payee's ledger balance is ∂25.
 //
-// Selector contract: `tab-pay`, `pay-amount`, `btn-approve`, `btn-new`, `balance`.
-import { setup, assert, assertIncludes, getBalance, onboardWallet } from '../harness/lib.mjs';
-import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
+// Approach chosen (navigate, not a JS seam): it tests the real location reader with ZERO test-only
+// prod code. `?relay=` rides alongside the link's own params so the loaded page still talks to the
+// test relay (relay-config reads it at module load; the link parser ignores unknown params).
+//
+// Selector contract: `pay-amount`, `review-payee`, `review-claimed`, `btn-approve`, `btn-new`, `balance`.
+import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
+import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
-const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
+const PAY_AMOUNT = '25';   // decimal display units — what the link carries
+const PAY_CENTS = 2500;    // the same amount in raw units (DEMO has 2 decimals)
 const MERCHANT_NAME = 'Bob';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -30,8 +36,8 @@ export const meta = {
   id: '49',
   name: 'deeplink-request',
   journey: 'pay',
-  covers: ['deeplink', 'request-link', 'prefill', 'pay-review'],
-  verifies: 'dpay:req deeplink opens the pay review screen pre-filled with the merchant request (no auto-approve).',
+  covers: ['pay-link', 'url-routing', 'prefill', 'pay-review'],
+  verifies: 'A shared /wallet/pay/<recipient> link opens the pay review pre-filled with the exact asset, amount and destination account (no auto-approve), and Approve settles it.',
   timeoutMs: 20000,
 };
 
@@ -44,7 +50,8 @@ export async function run() {
 
     // --- wallet B: a fresh keypair generated in-test (the payee). -----------------------------
     const bob = await generateKeypair();
-    console.log(`[49-deeplink-request] wallet B (payee): ${bob.publicHex.slice(0, 16)}…`);
+    const bobPrincipal = await railPrincipalText(bob.publicHex);
+    console.log(`[49-deeplink-request] wallet B (payee): ${bobPrincipal}`);
     const bobBefore = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(bobBefore === '0', `payee B must start at 0, got ${bobBefore}`);
 
@@ -52,53 +59,49 @@ export async function run() {
     console.log('[49-deeplink-request] onboarding wallet A (payer)…');
     await onboardWallet(driver, 'e2e-deeplink');
 
-    // --- B's request blob: to=B, amount=∂25, fresh nonce, +10min expiry, currency 0, name 'Bob'.
-    //     This is the EXACT base64url blob the merchant's QR carries (buildRequestQR) — the deeplink
-    //     wraps it in `dpay:req/<blob>`; on web it rides as `?req=<blob>`. ----------------------
-    const nonce = randNonceHex();
-    const expiry = Math.floor(Date.now() / 1000) + 600;
-    const blob = buildRequestQR(bob.publicHex, PAY_CENTS, nonce, expiry, 0, MERCHANT_NAME);
-    console.log('[49-deeplink-request] reloading with ?relay=&req=<blob> to simulate the deeplink…');
-
-    // --- Simulate the deeplink arriving: reload the browser to the SAME origin with `?req=<blob>`
-    //     (and `?relay=` preserved so the reloaded page still talks to the test relay — relay-config
-    //     reads ?relay= at module load). AsyncStorage identity persists, so the wallet auto-loads →
-    //     Wallet mounts → its deeplink effect reads ?req= → sets prefillRequest + mode='pay' →
-    //     PayMode's prefill effect decodes the blob via the SAME onRequestString path a camera scan
-    //     uses → review screen. -----------------------------------------------------------------
-    const reloadPath = `/?relay=${encodeURIComponent(relayBaseURL)}&req=${encodeURIComponent(blob)}`;
-    await driver.navigate(webBaseURL, reloadPath, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    // --- B's payment link: pay 25 DEMO on the Internet Computer to B's own ICRC-1 account, with
+    //     B's name as the (unverified) label and a `ref` — the reconciliation nonce that becomes
+    //     the on-chain memo, making this link a single invoice rather than a reusable tip jar. ---
+    const ref = randNonceHex();
+    const link = `/wallet/pay/${bobPrincipal}`
+      + `?asset=DEMO&network=internet-computer&amount=${PAY_AMOUNT}`
+      + `&label=${encodeURIComponent(MERCHANT_NAME)}&ref=${ref}`
+      + `&relay=${encodeURIComponent(relayBaseURL)}`;
+    console.log('[49-deeplink-request] opening the payment link…');
+    await driver.navigate(webBaseURL, link, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 10_000 });
 
-    // --- Review screen pre-filled with the merchant request. The deeplink did NOT auto-pay: the
-    //     payer must be ON the review screen (btn-approve visible) and NOT on the Paid screen. -----
+    // --- Review screen pre-filled from the link. It did NOT auto-pay: the payer must be ON the
+    //     review screen (btn-approve visible) and NOT on the Paid screen. ----------------------
     await driver.findByTestID('pay-amount', { timeoutMs: 6_000 });
     const payAmt = await driver.readText('pay-amount');
-    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00", got "${payAmt}"`);
+    assert(payAmt.includes('∂25.00'), `review should show "Pay ∂25.00" (25 at DEMO's 2 decimals), got "${payAmt}"`);
     const reviewBody = await driver.bodyText();
-    assertIncludes(reviewBody, MERCHANT_NAME, 'review should name the merchant from the deeplink');
-    // U-F5 (relocated from the scan flows 26/27 — the camera sign status is transient now, this
-    // stable review is the one surface that still parks): the short pubkey under the name.
+    assertIncludes(reviewBody, MERCHANT_NAME, 'review should show the label the link carried');
+    // The destination account in FULL — a link can name ANY ICRC-1 account, so the account (not the
+    // sender-supplied name) is the identity the payer checks.
     const reviewPayee = await driver.readText('review-payee');
-    assert(reviewPayee === `${bob.publicHex.slice(0, 8)}…`,
-      `review short-payee line (U-F5): expected ${bob.publicHex.slice(0, 8)}…, got "${reviewPayee}"`);
-    // SECURITY INVARIANT: the deeplink prefilled review only — it must NOT have reached Paid.
-    assert(!/\bPaid\b/.test(reviewBody), 'deeplink must NOT auto-pay — review screen only (no "Paid")');
+    assert(reviewPayee === bobPrincipal,
+      `review must show the full destination account: expected ${bobPrincipal}, got "${reviewPayee}"`);
+    // ...and the name beside it is marked as CLAIMED (anyone can write any name into a URL).
+    await driver.findByTestID('review-claimed', { timeoutMs: 4_000 });
+    // SECURITY INVARIANT: the link prefilled the review only — it must NOT have reached Paid.
+    assert(!/\bPaid\b/.test(reviewBody), 'a payment link must NOT auto-pay — review screen only (no "Paid")');
     await driver.findByTestID('btn-approve', { timeoutMs: 4_000 });
-    console.log(`[49-deeplink-request] ✓ review pre-filled: ${payAmt} to ${MERCHANT_NAME} (no auto-approve)`);
+    console.log(`[49-deeplink-request] ✓ review pre-filled: ${payAmt} to ${MERCHANT_NAME} @ ${bobPrincipal} (no auto-approve)`);
 
-    // --- Approve → the app signs offline + submits to the REAL relay → FakeLedger settles. This
-    //     proves the deeplink blob is byte-identical to a camera-scanned blob (settles for real) +
-    //     that the prefill fully wired into the settle path. Mirrors flow 07. --------------------
+    // --- Approve → the app signs locally + submits the envelope → the ledger settles. This proves
+    //     the link's resolved asset/amount/destination reach the SAME sign+settle path a scanned
+    //     request uses (flow 07). ------------------------------------------------------------
     console.log('[49-deeplink-request] clicking btn-approve (sign + pay)…');
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
-    assert(paid, 'payer should reach the Paid screen after the relay settles the prefilled request');
+    assert(paid, 'payer should reach the Paid screen after the ledger settles the linked payment');
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, 'payer A balance should be ∂75.00 (∂100 − ∂25) after the settle');
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);
     assert(String(bobAfter) === String(PAY_CENTS), `payee B balance after settle: expected ${PAY_CENTS}, got ${bobAfter}`);
-    console.log(`[49-deeplink-request] ✓ settled: A ∂100→∂75, B 0→∂25 (real FakeLedger settle of the deeplink blob)`);
+    console.log('[49-deeplink-request] ✓ settled: A ∂100→∂75, B 0→∂25 (real ledger settle of the linked payment)');
 
     await driver.screenshot('49-deeplink-request');
 

@@ -43,7 +43,7 @@ import {M} from '../i18n';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, onLockChange}: {identity: Identity; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onLockChange}: {identity: Identity; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
@@ -117,6 +117,8 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
           identity={identity}
           token={selectedToken}
           balance={sendBalance}
+          prefill={sendPrefill}
+          onPrefillConsumed={onSendPrefillConsumed}
           usdcAtaAbsent={usdcAtaAbsent}
           solBalance={solBalance}
           solChecking={solChecking}
