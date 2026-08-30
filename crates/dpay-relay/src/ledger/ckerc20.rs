@@ -176,6 +176,7 @@ mod ckerc20_onramp_chain_id_tests {
             backing_symbol: None,
             network: None,
             display_decimals: None,
+            min_fraction_digits: None,
             fee: None,
             cap: None,
             chain_id,

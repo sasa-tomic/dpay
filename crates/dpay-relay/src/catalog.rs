@@ -126,6 +126,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: None,
             network: None,
             display_decimals: None,
+            min_fraction_digits: None,
             fee: None, // DEMO fee is not part of the served row (faucet asset; fake accepts any)
             cap: Some(U64String(100_000)), // $1,000.00 — the same per-tx cap the facade registers
             chain_id: None,
@@ -146,6 +147,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("BTC".into()),
             network: Some("Bitcoin".into()),
             display_decimals: Some(8),
+            min_fraction_digits: None,
             fee: None, // ckBTC ledger fee read live at runtime (MC2 validates)
             cap: Some(U64String(100_000)),
             chain_id: None,   // not EVM
@@ -166,6 +168,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("USDC".into()),
             network: Some("Ethereum".into()),
             display_decimals: Some(6),
+            min_fraction_digits: Some(2), // ckUSDC: unit-denominated — keep 2 decimals ('1.50', '0.00')
             fee: Some(U64String(10_000)), // ckUSDC ledger icrc1_fee (O6): 0.01 USDC = 10000 raw
             cap: Some(U64String(100_000)),
             chain_id: Some(1), // Ethereum mainnet
@@ -199,6 +202,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("ETH".into()),
             network: Some("Ethereum".into()),
             display_decimals: Some(6), // prod ckETH (display_decimals=6 ≠ decimals=18) — exercises the truncation codepath
+            min_fraction_digits: None,
             fee: Some(U64String(2_000_000_000_000)), // the live ckETH ledger icrc1_fee (0.000002 ETH)
             cap: Some(U64String(100_000)),
             chain_id: Some(1),       // Ethereum mainnet
@@ -224,6 +228,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("BTC".into()),
             network: Some("Bitcoin Testnet".into()),
             display_decimals: None,
+            min_fraction_digits: None,
             fee: Some(U64String(10)), // the live testnet ckBTC ledger fee
             cap: Some(U64String(100_000)),
             chain_id: None,
@@ -249,6 +254,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("USDC".into()),
             network: Some("Sepolia".into()),
             display_decimals: None,
+            min_fraction_digits: Some(2), // ckSepoliaUSDC: unit-denominated — keep 2 decimals ('1.50', '0.00')
             fee: Some(U64String(4_000)), // the live testnet ckUSDC ledger fee
             cap: Some(U64String(100_000)),
             chain_id: Some(11155111), // Sepolia
@@ -273,6 +279,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("ETH".into()),
             network: Some("Sepolia".into()),
             display_decimals: Some(6),
+            min_fraction_digits: None,
             fee: Some(U64String(10_000_000_000)), // the live testnet ckETH ledger fee
             cap: Some(U64String(100_000)),
             chain_id: Some(11155111), // Sepolia
@@ -304,6 +311,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("VCHF".into()),
             network: Some("Internet Computer".into()), // mainnet label — U3 classification
             display_decimals: Some(8),
+            min_fraction_digits: Some(2), // VCHF: unit-denominated — keep 2 decimals ('1.50', '0.00')
             fee: Some(U64String(10_000)), // 0.0001 VCHF
             cap: Some(U64String(1_000_000_000_000)), // initial payment-policy cap: 10,000 VCHF
             chain_id: None,       // not EVM
@@ -333,6 +341,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             backing_symbol: Some("ICP".into()),
             network: Some("Internet Computer".into()), // mainnet label — U3 classification
             display_decimals: Some(8),
+            min_fraction_digits: None,
             fee: Some(U64String(10_000)), // 0.0001 ICP
             cap: Some(U64String(100_000_000_000)), // initial payment-policy cap: 1,000 ICP
             chain_id: None,       // not EVM
@@ -385,6 +394,7 @@ fn solana_network_section() -> NetworkBody {
                 token: "SOL",
                 symbol: "SOL",
                 decimals: 9, // SOL_DECIMALS (app/solana/identity.ts)
+                min_fraction_digits: None, // SOL is written trimmed ('1.5 SOL')
                 mint: None,  // native L1 asset — no SPL mint
                 onramp: RampCapability::Direct,
                 offramp: RampCapability::Direct,
@@ -393,6 +403,7 @@ fn solana_network_section() -> NetworkBody {
                 token: "USDC",
                 symbol: "USDC",
                 decimals: 6, // USDC_DECIMALS (app/solana/spl.ts)
+                min_fraction_digits: Some(2), // unit-denominated, exactly like the IC ckUSDC row
                 mint: Some(SOLANA_USDC_MINT),
                 onramp: RampCapability::Direct,
                 offramp: RampCapability::Direct,
@@ -462,6 +473,9 @@ pub(crate) struct SolanaAsset {
     token: &'static str,
     symbol: &'static str,
     decimals: u8,
+    /// Compact-display minimum fractional digits — the same display policy the IC rows carry
+    /// (see `CurrencyDescriptor::min_fraction_digits`), so USDC reads `1.50` on BOTH rails.
+    min_fraction_digits: Option<u8>,
     mint: Option<&'static str>,
     onramp: RampCapability,
     offramp: RampCapability,
@@ -491,6 +505,7 @@ mod environment_partition_tests {
             backing_symbol: None,
             network: network.map(Into::into),
             display_decimals: None,
+            min_fraction_digits: None,
             fee: None,
             cap: None,
             chain_id: None,
@@ -953,5 +968,57 @@ mod catalog_truth_tests {
         assert_eq!(icp.chain_id, None);
         assert_eq!(icp.token_contract, None);
         assert_eq!(icp.gas_ledger, None);
+    }
+
+    /// The compact-display floor, pinned per row. Exactly the unit-denominated tokens people
+    /// count like money carry `Some(2)` (ckUSDC, ckSepoliaUSDC, VCHF → `1.50`, `0.00`); every
+    /// other row is unset ⇒ 0, i.e. written trimmed (`1.5 ICP`, `0 BTC`). This is display policy
+    /// and never touches a raw amount, but a silent flip changes every balance the wallet
+    /// renders, so it is pinned like the rest of the row shape.
+    #[test]
+    fn ic_rows_min_fraction_digits_locked() {
+        let cat = ic_rows();
+        let got: Vec<(Currency, Option<u8>)> = cat
+            .iter()
+            .map(|d| (d.currency, d.min_fraction_digits))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (DEMO_USD, None), // DEMO renders through the app's `usd()` ∂ formatter, not this
+                (1, None),        // ckBTC
+                (2, Some(2)),     // ckUSDC
+                (6, None),        // ckETH
+                (3, None),        // ckTESTBTC
+                (4, Some(2)),     // ckSepoliaUSDC
+                (5, None),        // ckSepoliaETH
+                (7, Some(2)),     // VCHF
+                (8, None),        // ICP
+            ]
+        );
+        // A floor above the display cap would ask the formatter for digits it may not show.
+        for d in &cat {
+            let cap = d.display_decimals.or(d.decimals).unwrap_or(0);
+            assert!(
+                d.min_fraction_digits.unwrap_or(0) <= cap,
+                "currency {}: min_fraction_digits must be ≤ the display cap",
+                d.currency
+            );
+        }
+    }
+
+    /// The Solana rail carries the SAME display policy as the IC rows — USDC reads `1.50` on
+    /// both rails, SOL trimmed. Pinned so the two rails cannot drift into rendering one asset
+    /// two ways (CLAUDE.md: every currency goes through the same UI surfaces).
+    #[test]
+    fn solana_rows_min_fraction_digits_match_the_ic_policy() {
+        let NetworkAssets::Solana(rows) = solana_network_section().assets else {
+            panic!("the solana section must carry Solana rows");
+        };
+        let got: Vec<(&str, Option<u8>)> = rows
+            .iter()
+            .map(|r| (r.token, r.min_fraction_digits))
+            .collect();
+        assert_eq!(got, vec![("SOL", None), ("USDC", Some(2))]);
     }
 }

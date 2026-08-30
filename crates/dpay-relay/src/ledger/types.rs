@@ -148,6 +148,12 @@ pub struct CurrencyDescriptor {
     pub network: Option<String>,
     /// UI display precision; default = `decimals` (full precision) when unset. ≤ `decimals`.
     pub display_decimals: Option<u8>,
+    /// The MINIMUM fractional digits the compact display keeps after trimming trailing zeros —
+    /// the counterpart to [`Self::display_decimals`] (which caps the maximum). `Some(2)` for the
+    /// unit-denominated tokens people count like money (ckUSDC, VCHF: `1.50`, `0.00`); unset (⇒ 0)
+    /// for the ones written trimmed (BTC/ETH/ICP/SOL: `1.5`, `0`). Display policy only — it never
+    /// changes a raw amount, and the exact formatter ignores it.
+    pub min_fraction_digits: Option<u8>,
     /// ICRC ledger fee in RAW smallest units (registered statically; MC2 adds live validation).
     pub fee: Option<U64String>,
     /// Per-currency tx cap in RAW smallest units (registered; MC2 governs).

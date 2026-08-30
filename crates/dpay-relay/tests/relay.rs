@@ -1901,6 +1901,7 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         backing_symbol: Some("ETH".into()),
         network: Some("Ethereum".into()),
         display_decimals: Some(18),
+        min_fraction_digits: None,
         fee: None,
         cap: None,
         chain_id: Some(1),
@@ -1936,6 +1937,7 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         backing_symbol: Some("BTC".into()),
         network: Some("Bitcoin".into()),
         display_decimals: Some(8),
+        min_fraction_digits: None,
         fee: None,
         cap: None,
         chain_id: None,
@@ -1970,6 +1972,7 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         backing_symbol: Some("USDC".into()),
         network: Some("Sepolia".into()),
         display_decimals: Some(6),
+        min_fraction_digits: None,
         fee: None,
         cap: None,
         chain_id: Some(11155111), // Sepolia
