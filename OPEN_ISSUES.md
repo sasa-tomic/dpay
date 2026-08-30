@@ -37,8 +37,9 @@
 5. **Reconcile heartbeat + paging** (###5 deferral): bounded walk exists; add the deferred
    periodic heartbeat + pagination on top.
 6. **SOL v2 follow-ups (low):** source-ATA auto-create for USDC offline pay; stronger
-   `getTransaction` receipt verify. Audit flow 62 (`sol-usdc-ata`) first — it may partially cover
-   the first item.
+   `getTransaction` receipt verify. Audit flow 76 (`sol-usdc-ata-gate`) first — it may partially
+   cover the first item. (Was written as "flow 62"; there is no flow 62 — the id range has a gap
+   at 62 and the ATA flow is 76.)
 
 ## Physical / outer-loop gates (NOT autonomous)
 
