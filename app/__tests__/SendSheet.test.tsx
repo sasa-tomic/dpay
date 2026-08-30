@@ -403,3 +403,41 @@ describe('SendSheet — a send fills the Trip Readiness PAYMENT TESTED stamp, bu
     act(() => { tree.unmount(); });
   });
 });
+
+// The Pay camera can now hand this sheet a destination it read off a QR (defect fixed 2026-08-30 —
+// scanning a wallet address used to dead-end on "This isn't a dpay payment code"). The prefill is
+// the SAME text a paste would produce, so everything downstream — resolution, route disclosure,
+// the Confirm press that is the consent — is unchanged and untested here on purpose.
+describe('SendSheet — a destination handed over by the camera', () => {
+  test('a prefilled destination is indistinguishable from a pasted one, and is consumed once', async () => {
+    // The contract is equivalence, not a special case: the same address must produce the same
+    // field value and the same route disclosure whichever way it arrived. Asserting it against a
+    // real paste (rather than a hardcoded fee string) is what keeps that true as the copy changes.
+    const consumed: number[] = [];
+    const scanned = await mountSend({prefillAddress: K2, onPrefillConsumed: () => consumed.push(1)});
+    await act(async () => {}); // the prefill's resolution is async, exactly like a keystroke's
+    const pasted = await mountSend();
+    await typeAddress(pasted, K2);
+
+    expect(field(scanned).value).toBe(field(pasted).value);
+    expect(field(scanned).status).toEqual(field(pasted).status);
+    expect(consumed).toHaveLength(1); // consumed as taken — a re-render cannot re-apply it
+    act(() => { scanned.unmount(); pasted.unmount(); });
+  });
+
+  test('a prefill arriving mid-send cannot rewrite the destination', async () => {
+    // Guarded on the form phase: the done screen shows the address the user actually confirmed,
+    // and a scan landing a moment later must not repaint it as somewhere else.
+    jest.mocked(prepareTransfer).mockResolvedValue({ledger: VCHF.ledger, envelopeHex: 'ee', requestIdHex: 'cd', amount: '100000000', currency: 7, memoHex: 'ab'});
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '9'});
+    const tree = await mountSend();
+    await typeAddress(tree, K2);
+    await typeAmount(tree, '1.0');
+    await act(async () => { confirm(tree).onPress(); });
+    expect(textOf(tree, 'send-status')).toBe(M.withdraw.send.sent);
+    act(() => { tree.update(sendElement({prefillAddress: SOL_ADDR})); });
+    await act(async () => {});
+    expect(textOf(tree, 'send-destination')).toBe(K2);
+    act(() => { tree.unmount(); });
+  });
+});

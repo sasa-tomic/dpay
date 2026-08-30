@@ -85,6 +85,12 @@ export const payEs: PayMessages = {
   showMyAddress: symbol => `Ver mi dirección de ${symbol}`,
   createUsdcAccount: 'Crear mi cuenta de USDC',
 
+  offlineSendTitle: 'Enviar a una dirección necesita conexión',
+  offlineSendBody: symbol =>
+    `Al enviar a una dirección es tu teléfono quien envía la operación, así que necesita estar en línea. Para pagar sin conexión, escanea el código de pago del comercio: su teléfono envía tu pago en ${symbol} por ti.`,
+  scannedAddressNotSendable: symbol =>
+    `Eso es una dirección de billetera. ${symbol} no se puede enviar a una dirección: escanea el código de pago del comercio para pagar.`,
+
   scanToPay: 'Escanear y pagar',
   sendToAddress: 'Enviar a dirección',
   tapOrScanToPay: 'Acerca o escanea para pagar',

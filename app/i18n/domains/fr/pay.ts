@@ -86,6 +86,12 @@ export const payFr: PayMessages = {
   showMyAddress: symbol => `Voir mon adresse ${symbol}`,
   createUsdcAccount: 'Créer mon compte USDC',
 
+  offlineSendTitle: 'Envoyer vers une adresse demande une connexion',
+  offlineSendBody: symbol =>
+    `Pour un envoi vers une adresse, c’est votre téléphone qui soumet l’opération : il doit donc être en ligne. Pour payer hors ligne, scannez plutôt le code de paiement du commerçant — son téléphone soumet votre paiement en ${symbol} à votre place.`,
+  scannedAddressNotSendable: symbol =>
+    `C’est une adresse de portefeuille. Les ${symbol} ne peuvent pas être envoyés vers une adresse — scannez le code de paiement du commerçant pour payer.`,
+
   scanToPay: 'Scanner pour payer',
   sendToAddress: 'Vers une adresse',
   tapOrScanToPay: 'Sans contact ou scan',

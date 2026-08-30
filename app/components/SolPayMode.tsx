@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {QrCode} from './QrCode';
-import {FundFirstPanel} from './FundFirstPanel';
+import {InstructionPanel} from './InstructionPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {S} from '../styles';
 import {C} from '../config/palette';
@@ -12,6 +12,7 @@ import type {Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {classifyScan} from '../lib/scan';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
 import type {SolReqV2} from '../solana/qr';
 import {isSolReqV2Expired} from '../solana/payments';
@@ -44,7 +45,7 @@ import {M} from '../i18n';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onLockChange}: {identity: Identity; nfcStatus: NfcStatus; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
@@ -61,6 +62,11 @@ export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAt
   // leaving the scan sub-mode; rail/tab switches unmount this component.
   const [scanArmed, setScanArmed] = useState(false);
   useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
+  // A wallet address the camera read instead of a payment code — handed to the send form, which is
+  // the one place that knows whether an address is usable on this rail and what it is when it is
+  // not. Takes precedence over a link prefill: both fill the same form and the scan is the newer
+  // intent. IC twin: PayMode's `scannedAddress`.
+  const [scannedAddress, setScannedAddress] = useState<string | null>(null);
 
   // U-F1 — visible confirmation after the share resolves (the DepositSheet copy pattern). Dismissed
   // sheets leave the label honest.
@@ -89,6 +95,26 @@ export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAt
   if (subMode === 'send') {
     const sendBalance = selectedToken === 'SOL' ? solBalance : usdcBalance;
     const sendOnSent = selectedToken === 'SOL' ? onSent : onSentUsdc;
+    // Offline gate — IC twin: PayMode's `offlinePanel`, same reason. This rail broadcasts straight
+    // to a Solana RPC from THIS phone, so airplane mode blocks an address send outright while
+    // scan-to-pay keeps working (the payer signs offline against the merchant's blockhash and the
+    // merchant broadcasts). Checked BEFORE the funds gate: a balance read while offline is stale.
+    if (!online) {
+      return (
+        <View style={S.center}>
+          {toggle}
+          <InstructionPanel
+            testID="sol-send-offline"
+            title={M.pay.offlineSendTitle}
+            body={M.pay.offlineSendBody(selectedToken)}
+            primaryLabel={M.pay.scanToPay}
+            onPrimary={() => onSubModeChange('scan')}
+            onRecheck={onRecheckBalances}
+            recheckBusy={recheckBusy}
+          />
+        </View>
+      );
+    }
     // Zero-funds gate (2026-08-16): the send form is replaced by the fund-first panel while the
     // active token is KNOWN unfunded — no amount entry against a zero balance. Same panel, same
     // copy family as the scan branch (only "…to send" instead of "…to pay"), per the spec.
@@ -97,7 +123,7 @@ export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAt
       return (
         <View style={S.center}>
           {toggle}
-          <FundFirstPanel
+          <InstructionPanel
             testID="sol-send-fund"
             title={M.pay.fundTitle(isSol ? 'SOL' : 'USDC', 'send')}
             body={isSol
@@ -121,8 +147,8 @@ export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAt
           identity={identity}
           token={selectedToken}
           balance={sendBalance}
-          prefill={sendPrefill}
-          onPrefillConsumed={onSendPrefillConsumed}
+          prefill={scannedAddress != null ? {address: scannedAddress, amount: ''} : sendPrefill}
+          onPrefillConsumed={() => { if (scannedAddress != null) setScannedAddress(null); else onSendPrefillConsumed?.(); }}
           usdcAtaAbsent={usdcAtaAbsent}
           solBalance={solBalance}
           solChecking={solChecking}
@@ -158,8 +184,27 @@ export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAt
       // Same honest-contract split as PayMode's decode failure: the user gets friendly copy (never
       // the raw codec error), the dev cause goes to the console.
       console.warn('solpay decode failed:', e);
-      setErr(M.pay.notAPaymentCode);
+      onNotARequest(raw);
     }
+  }
+
+  // The solreq codec refused the scan. IC twin: PayMode.onNotARequest — same three verdicts, same
+  // order, because the same-surfaces rule means a scanned link and a scanned address behave
+  // identically whichever rail is active. A link goes to the Wallet's ONE link pipeline (which can
+  // route it back to the IC rail if that is where the asset lives); an address — of ANY namespace,
+  // not just base58 — goes to the send form, whose status line names the chain it belongs to and
+  // refuses a wrong-chain paste by name. Every SOL asset is sendable, so there is no
+  // not-sendable branch here.
+  function onNotARequest(raw: string) {
+    const what = classifyScan(raw);
+    if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
+    if (what.kind === 'address') {
+      setErr(null);
+      setScannedAddress(raw.trim());
+      onSubModeChange('send');
+      return;
+    }
+    setErr(M.pay.notAPaymentCode);
   }
 
   // Offline sign (PURE, no RPC) → show the signed solpay:v2: QR. Auto-fired by onScan; a sign
@@ -201,7 +246,7 @@ export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAt
       return (
         <View style={S.center}>
           {toggle}
-          <FundFirstPanel
+          <InstructionPanel
             testID="sol-pay-fund"
             title={M.pay.fundTitle(isSol ? 'SOL' : 'USDC', 'pay')}
             body={isSol

@@ -51,7 +51,8 @@ const IC_NETWORK = 'Internet Computer';
  * pending, never a failure.
  */
 export function SendSheet({
-  identity, catalog, desc, balance, family, display, tokenContract, onSent, onClose,
+  identity, catalog, desc, balance, family, display, tokenContract,
+  prefillAddress = null, onPrefillConsumed, onSent, onClose,
 }: {
   identity: Identity;
   catalog: CurrencyDescriptor[];
@@ -61,6 +62,11 @@ export function SendSheet({
   family: MinterFamily | null;
   display: FamilyDisplay | null;
   tokenContract: string | null;
+  /** A destination the Pay tab's camera read instead of a payment code. Pre-fills the field ONLY —
+   *  the route disclosure and the Confirm press below are still the whole consent, exactly as when
+   *  the address is typed by hand. */
+  prefillAddress?: string | null;
+  onPrefillConsumed?: () => void;
   onSent: () => void;
   onClose: () => void;
 }) {
@@ -131,6 +137,19 @@ export function SendSheet({
     loadAddressBook(assetKey).then(list => { if (alive) setSaved(list); });
     return () => { alive = false; };
   }, [assetKey]);
+
+  // A destination the Pay camera read instead of a payment code. Guarded on the form phase so an
+  // arriving scan can never rewrite a send already in flight, and consumed as it is taken so the
+  // user's own edits are never overwritten by a re-render. Mirrors SolanaWithdrawSheet's prefill.
+  useEffect(() => {
+    if (prefillAddress == null || phase !== 'form') return;
+    setAddress(prefillAddress);
+    onPrefillConsumed?.();
+    // onPrefillConsumed is an inline closure; the [prefillAddress, phase] guard + immediate clear
+    // make its identity irrelevant (exhaustive-deps would force a re-run on every render's new
+    // closure for no behavioral change).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillAddress, phase]);
 
   // The authoritative fee. A failure leaves it null — honest "we don't know" beats a wrong number
   // on a money screen — and the send still works, since the envelope carries `fee: None` and the

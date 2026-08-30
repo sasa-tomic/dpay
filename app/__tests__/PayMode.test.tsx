@@ -45,10 +45,17 @@ jest.mock('../components/QrScanner', () => ({
 jest.mock('../components/NfcTap', () => ({
   NfcTap: (_props: {role: string}) => null,
 }));
+// The send-to-address body is exercised in SendSheet.test.tsx; here it is stubbed so this suite
+// stays a pure PayMode test (SendSheet queries the ledger fee and derives the self-account), while
+// the props PayMode hands it — the scanned-address prefill — stay assertable.
+jest.mock('../components/SendSheet', () => ({
+  SendSheet: (_props: {prefillAddress?: string | null}) => null,
+}));
 
 import {DpayCore} from '../services/native';
 import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, wireRequestToIntent, type RailPrepared} from '../services/rail';
 import {PayMode} from '../components/PayMode';
+import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {POLL} from '../config/constants';
 import type {Req, Identity, PayIntent} from '../lib/types';
 import {M} from '../i18n';
@@ -119,6 +126,7 @@ function payElement(props: Partial<PayModeProps> = {}) {
       withdrawBalance="10000"
       subMode="scan"
       onSubModeChange={() => {}}
+      onScannedLink={() => {}}
       onShowDepositAddress={() => {}}
       {...props}
     />
@@ -367,26 +375,7 @@ describe('PayMode — offline-QR reconcile + re-approve guards', () => {
     expect(texts(tree)).toContain('Waiting for Cafe to scan…'); // online waiting copy, no Cancel
     // The payer can only back out once the connection drops (the offline variant shows Cancel).
     act(() => {
-      tree.update(
-        <PayMode
-          identity={IDENTITY}
-          online={false}
-          nfcStatus="unknown"
-          onSettled={() => {}}
-          onOfflinePaid={() => {}}
-          shownBalance="10000"
-          catalog={[]}
-          assetBalances={{}}
-          withdrawCurrency={0}
-          withdrawDisplay={null}
-          withdrawFamily={null}
-          withdrawTokenContract={null}
-          withdrawBalance="10000"
-          subMode="scan"
-          onSubModeChange={() => {}}
-          onShowDepositAddress={() => {}}
-        />,
-      );
+      tree.update(payElement({online: false}));
     });
     // reset via Cancel — then re-scan the SAME request (auto-sign) → the SAME envelope's QR,
     // no fresh signature (the merchant may already have scanned the first QR).
@@ -518,5 +507,100 @@ describe('PayMode — pay-intent scan gate', () => {
     act(() => {
       tree.unmount();
     });
+  });
+});
+
+// The camera's second opinion (defects found 2026-08-30). "Not a 132-byte wire request" used to be
+// the end of the conversation, which made two legitimate codes dead ends: a printed PAYMENT LINK
+// (only ever reachable through an OS App Link) and a plain wallet ADDRESS (including the principal
+// dpay's own Receive ▸ My address renders). Founder rule 2026-08-29: every error path gives the
+// user something to do. Classification itself is pinned in scan.test.ts; these pin the ROUTING.
+describe('PayMode — what the camera does with a code that is not a payment request', () => {
+  const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
+  const CKBTC = CATALOG.find(c => c.currency === 1)!;
+  const PAY_LINK = `https://dpay.kalaj.org/wallet/pay/${PAYEE_PRINCIPAL}?asset=ckBTC&network=internet-computer&amount=0.001`;
+  const IC_ACCOUNT = 'k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae';
+
+  /** Scan a payload the wire codec REFUSES — the entry to the fallback classifier. */
+  async function scanUnreadable(tree: renderer.ReactTestRenderer, raw: string) {
+    jest.mocked(DpayCore.decodeRequest).mockRejectedValue(new Error('bad wire request'));
+    pressByTestID(tree, 'btn-start-scan');
+    const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+    await act(async () => {
+      scanner.props.onScan(raw);
+    });
+  }
+
+  /** A send-capable asset (ckBTC): a scanned address has somewhere to go. */
+  function sendCapableProps() {
+    return {catalog: CATALOG, withdrawCurrency: 1, withdrawFamily: 'CkBtcUtxo' as const, assetBalances: {1: '100000'}};
+  }
+
+  test('a scanned payment LINK is handed to the Wallet link pipeline VERBATIM — one link, one resolution', async () => {
+    const scanned: string[] = [];
+    const tree = mountPay({onScannedLink: (u: string) => scanned.push(u)});
+    await scanUnreadable(tree, `  ${PAY_LINK}\n`);
+    // Trimmed but otherwise untouched: PayMode must not re-parse or re-derive what the Wallet's
+    // link pipeline already owns (catalog resolution, per-part error copy, cross-rail routing).
+    expect(scanned).toEqual([PAY_LINK]);
+    expect(texts(tree)).not.toContain(M.pay.notAPaymentCode);
+    expect(jest.mocked(prepareTransfer).mock.calls.length).toBe(0); // a link NEVER auto-signs
+    act(() => { tree.unmount(); });
+  });
+
+  test('a scanned ADDRESS switches to Send to address and prefills the destination', async () => {
+    const modes: string[] = [];
+    const tree = mountPay({...sendCapableProps(), online: true, onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, IC_ACCOUNT);
+    expect(modes).toEqual(['send']);
+    expect(texts(tree)).not.toContain(M.pay.notAPaymentCode);
+    // Wallet owns subMode, so re-render as it would: the send body receives the scanned address.
+    act(() => { tree.update(payElement({...sendCapableProps(), online: true, subMode: 'send'})); });
+    const sheet = tree.root.find(node => node.props && 'prefillAddress' in node.props);
+    expect(sheet.props.prefillAddress).toBe(IC_ACCOUNT);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a scanned address for an asset that cannot leave the wallet refuses BY NAME and stays on scan', async () => {
+    // DEMO has no on-chain identity, so there is no send form to open — the refusal has to be the
+    // instruction, and it has to name the asset rather than shrug at the code.
+    const modes: string[] = [];
+    const tree = mountPay({catalog: CATALOG, withdrawCurrency: 0, onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, IC_ACCOUNT);
+    expect(modes).toEqual([]);
+    expect(texts(tree)).toContain(M.pay.scannedAddressNotSendable('DEMO'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('a payload NOTHING recognises keeps the honest "not a payment code" refusal', async () => {
+    const scanned: string[] = [];
+    const modes: string[] = [];
+    const tree = mountPay({...sendCapableProps(), onScannedLink: (u: string) => scanned.push(u), onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, 'this is definitely not a valid request QR!!!');
+    expect(texts(tree)).toContain(M.pay.notAPaymentCode);
+    expect(scanned).toEqual([]);
+    expect(modes).toEqual([]);
+    act(() => { tree.unmount(); });
+  });
+
+  // The Pay tab's two halves have OPPOSITE connectivity truths and only one was ever stated. An
+  // address send is submitted by THIS phone; offline it used to render the full form, disable Max
+  // with no reason (the fee query failed silently) and fail at Confirm with a raw error string.
+  test('offline, Send to address states the constraint and offers the rail that DOES work offline', () => {
+    const modes: string[] = [];
+    const tree = mountPay({...sendCapableProps(), online: false, subMode: 'send', onSubModeChange: (m: string) => modes.push(m)});
+    expect(hasTestID(tree, 'pay-send-offline')).toBe(true);
+    expect(tree.root.findAll(node => node.props && 'prefillAddress' in node.props)).toHaveLength(0);
+    expect(texts(tree)).toContain(M.pay.offlineSendBody(CKBTC.backing_symbol ?? ''));
+    pressByTestID(tree, 'pay-send-offline-go');
+    expect(modes).toEqual(['scan']); // the primary is the way out, not a dead end
+    act(() => { tree.unmount(); });
+  });
+
+  test('online, Send to address renders the form — the gate is connectivity, nothing else', () => {
+    const tree = mountPay({...sendCapableProps(), online: true, subMode: 'send'});
+    expect(hasTestID(tree, 'pay-send-offline')).toBe(false);
+    expect(tree.root.findAll(node => node.props && 'prefillAddress' in node.props)).toHaveLength(1);
+    act(() => { tree.unmount(); });
   });
 });

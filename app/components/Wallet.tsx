@@ -189,7 +189,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
   }, [refreshSol, refreshUsdc]);
   // IC rail twin (UX review r3 MUST-1): same self-clearing busy affordance for the shared
-  // FundFirstPanel's "Check again" — without this, the IC panel's button gives zero feedback
+  // InstructionPanel's "Check again" — without this, the IC panel's button gives zero feedback
   // while the identical SOL panel spins (per-rail divergence in a shared surface).
   const recheckIcBalances = useCallback(() => {
     refreshBalances();
@@ -329,26 +329,37 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   //     catches one arriving while the app is foreground.
   // getInitialURL is wrapped in a 2s timeout so a stalled native bridge can't wedge the prefill (the
   // repo rule: all I/O has a timeout).
+  // ONE link pipeline, four sources: the page location, the launch intent, a foreground intent —
+  // and, since the Pay camera learned to recognise a link (PayMode/SolPayMode → classifyScan), a
+  // scanned QR. A payment link is MEANT to be printed, so a wallet that opens it from an App Link
+  // but not from its own camera was the same link with two different outcomes; routing the scan
+  // here means one resolution, one set of per-part error messages, one cross-rail routing.
+  // Stable identity (no deps): every setter it closes over is a stable useState setter.
+  const applyLink = useCallback((parsed: PayLinkParse) => {
+    // A malformed link is REPORTED, never silently ignored: the payer is told which part is
+    // damaged so they can ask the sender for a new one (founder rule — every dead end gives an
+    // instruction). A well-formed one waits for catalog resolution in the effect below.
+    if (!parsed.ok) setLinkError(M.pay.link.malformed(M.pay.link.part[parsed.err]));
+    else setPendingLink(parsed.link);
+    setMode('pay');
+    // A6 — an incoming link targets a specific Pay/Receive flow, so dismiss the Balances landing
+    // sheet (it would otherwise overlay the linked screen).
+    setBalancesOpen(false);
+  }, []);
+  const applyReceipt = useCallback((blob: string) => {
+    setPrefillReceipt(blob);
+    setMode('receive');
+    setBalancesOpen(false);
+  }, []);
+  const handleUrl = useCallback((url: string) => {
+    const link = parsePayLink(url);
+    if (link) { applyLink(link); return; }
+    const dl = decodeDeeplink(url);
+    if (dl) applyReceipt(dl.blob);
+  }, [applyLink, applyReceipt]);
+
   useEffect(() => {
     let alive = true;
-    const applyLink = (parsed: PayLinkParse) => {
-      if (!alive) return;
-      // A malformed link is REPORTED, never silently ignored: the payer is told which part is
-      // damaged so they can ask the sender for a new one (founder rule — every dead end gives an
-      // instruction). A well-formed one waits for catalog resolution in the effect below.
-      if (!parsed.ok) setLinkError(M.pay.link.malformed(M.pay.link.part[parsed.err]));
-      else setPendingLink(parsed.link);
-      setMode('pay');
-      // A6 — an incoming link targets a specific Pay/Receive flow, so dismiss the Balances landing
-      // sheet (it would otherwise overlay the linked screen).
-      setBalancesOpen(false);
-    };
-    const applyReceipt = (blob: string) => {
-      if (!alive) return;
-      setPrefillReceipt(blob);
-      setMode('receive');
-      setBalancesOpen(false);
-    };
     // Web path first (sync reads of the page location).
     const webLink = readPayLink();
     if (webLink) applyLink(webLink);
@@ -358,12 +369,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     // sync readers above already handled — parsing it again is idempotent (same link, same state).
     const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
     const initial = (Linking.getInitialURL?.() ?? Promise.resolve(null)) as Promise<string | null>;
-    const handleUrl = (url: string) => {
-      const link = parsePayLink(url);
-      if (link) { applyLink(link); return; }
-      const dl = decodeDeeplink(url);
-      if (dl) applyReceipt(dl.blob);
-    };
     Promise.race([initial, timeout])
       .then((url) => { if (alive && url) handleUrl(String(url)); })
       .catch((e: unknown) => { console.log(`[dpay] deeplink getInitialURL failed: ${e instanceof Error ? e.message : String(e)}`); });
@@ -385,7 +390,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         delete (globalThis as unknown as {__DPAY_TEST_DEEPLINK?: unknown}).__DPAY_TEST_DEEPLINK;
       }
     };
-  }, []);
+  }, [applyLink, applyReceipt, handleUrl]);
 
   // Resolve a parsed payment link against the LIVE catalog, then hand it to the right rail's engine.
   // Kept separate from the reader above because resolution needs the catalog, which loads async: the
@@ -678,7 +683,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   }, [selectionLocked]);
 
   // Zero-funds funnel (2026-08-16 UX): the ONE programmatic "show this asset's deposit address"
-  // action used by every fund-first surface (SolPayMode's FundFirstPanel + AtaSetupCard's
+  // action used by every fund-first surface (SolPayMode's InstructionPanel + AtaSetupCard's
   // fund-SOL secondary). Programmatic like the deeplink router — it bypasses the selection lock
   // (a fund prompt is never in-flight money movement, and the lock only guards payer snapshots).
   // Lands on the existing Receive → My-address surface (the ONE funding QR — no inline dupe).
@@ -834,7 +839,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} nfcStatus={nfc} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={onSolSent} onSentUsdc={onSolUsdcSent}                onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={onSolSent} onSentUsdc={onSolUsdcSent}                onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -848,6 +853,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   withdrawBalance={displayAssetBalances[selectedCurrency] ?? '0'}
                   subMode={paySubMode} onSubModeChange={setPaySubMode}
                   prefillIntent={prefillIntent} onPrefillConsumed={() => setPrefillIntent(null)}
+                  onScannedLink={handleUrl}
                   onLockChange={setSelectionLocked}
                 />
           )

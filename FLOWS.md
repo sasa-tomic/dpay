@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **104 flows**
-> (103 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **106 flows**
+> (105 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (26) · offline (9) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (27) · offline (10) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -64,6 +64,7 @@ wire (1) · onboard (13) · pay (26) · offline (9) · deposit (8) · withdraw (
 | 102 | sol-pay-link | A SOL payment link selects the SOL rail and pre-fills the Send-to-address form with the link's address + amount (no auto-send); Confirm broadcasts it. | pay-link, url-routing, sol-send, rail-parity |
 | 103 | pay-link-refused | A payment link naming the wrong chain, an unknown asset, or a damaged field is refused with an instruction the payer can act on — never a guessed asset and never a silent dead end. | pay-link, fail-closed, wrong-network, honest-instructions |
 | 108 | sol-transactions | A Solana transaction appears in the Transactions tab: the SOL rail history is polled through the RPC seam, merged with the IC rail by timestamp, and rendered by the one Ledger — SOL row in SOL units with its short counterparty, the IC faucet row still in ∂, and a filter chip per rail. | sol-history, ledger, transactions, mixed-rail, ledger-filter, sol-tab-ia |
+| 109 | scan-link-and-address | The Pay camera classifies what it read: a payment-link QR opens the pre-filled review (no auto-sign), a bare IC account opens Send to address with the destination filled + route disclosed, and unrecognised input keeps the honest "not a payment code" refusal. | scan-fallback, pay-link, send-to-address, error-handling, input-validation |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
@@ -87,6 +88,7 @@ wire (1) · onboard (13) · pay (26) · offline (9) · deposit (8) · withdraw (
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 100 | offline-bundled-assets | A dead-relay cold start (no cached catalog) still renders both bundled native rows in the shared selector — "VCHF · Internet Computer" and "ICP · Internet Computer" — with no ramp actions. | offline, cold-start, bundled-catalog, vchf, icp, icp-mainnet, asset-selector, no-ramp |
+| 110 | offline-send-gate | Offline, Pay ▸ Send to address replaces the form with an instruction naming the constraint and routing to Scan to pay (the rail that works offline); the form returns when the connection does. | offline, send-to-address, error-handling, graceful |
 | 20 | offline-handoff | offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows | offline-pay, hand-off, reconcile |
 | 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger | receive-scan, offline-settle |
 | 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → AUTO-SIGN (no setup, no nonce) → solpay:v2 QR (U-F5 short destination rides the qr header) → honest pending. | sol-offline-sign, qr-handoff, honest-pending, sign-status-short-payee |
@@ -117,10 +119,10 @@ wire (1) · onboard (13) · pay (26) · offline (9) · deposit (8) · withdraw (
 | 105 | send-refusals | Send-to-address refusals are specific and actionable: a Bitcoin / Ethereum address is named as such and pointed at the right network, a 64-hex ICP account identifier is named and the principal asked for instead, and a checksum-broken principal is called incomplete — each with the send button left disabled. | send-to-address, wrong-chain, account-identifier, crc, fail-closed, instructions |
 | 106 | send-auto-route | One destination field routes ckBTC by what is pasted: a Bitcoin address discloses the Bitcoin chain (~10 min, 0.0005 minimum) and shows the burn body; an IC principal discloses the Internet Computer and sends a plain icrc1_transfer that credits the recipient on the ckBTC ledger — a route that did not exist before. | send-to-address, auto-route, ckbtc, icrc1_transfer, route-disclosure, balance-delta |
 | 107 | send-account-identifier | Send ICP to a 64-hex account identifier via the ledger's legacy `transfer`: the address is CRC-validated by the real core, the route disclosed with the fee, one envelope signed on-device, and the gateway credits the principal owning that identifier — the address form icrc1_transfer cannot reach. | send-to-address, account-identifier, icp, legacy-transfer, crc, balance-delta |
-| 15 | withdraw | Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.00050000 BTC). | withdraw, icrc2-approve, retrieve_btc_with_approval, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
+| 15 | withdraw | Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.0005 BTC). | withdraw, icrc2-approve, retrieve_btc_with_approval, sign, settle, clipboard, balance-delta, destination-copy, ui-balance-delta |
 | 18 | withdraw-errors | Withdraw error paths: below-min / over-balance warnings disable the confirm button, a wrong-chain destination is refused by name in send-status and renders no offramp body at all; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit. | withdraw-errors, below-min, over-balance, wrong-chain, rail-rejection, money-safe |
 | 44 | cketh-withdraw | Withdraw native ckETH: faucet-fund at the principal → enter 0x addr + ETH amount → query the minter gas price + sign approve + withdraw_eth on-device → gateway burns → "Withdrawn ✓"; balance debits fee+amount at both the gateway AND the UI (row drops to 3.999998 ETH). | native-eth-withdraw, cketh, family-dispatch, withdraw, icrc2-approve, withdraw_eth, gas-quote, sign, settle, balance-delta, ui-balance-delta |
-| 48 | ckusdc-withdraw | ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.990000 USDC. | ckerc20-offramp, ckusdc, withdraw, icrc2-approve, withdraw_erc20, dual-ledger-gas, gas-note, sign, settle, balance-delta, ui-balance-delta |
+| 48 | ckusdc-withdraw | ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.99 USDC. | ckerc20-offramp, ckusdc, withdraw, icrc2-approve, withdraw_erc20, dual-ledger-gas, gas-note, sign, settle, balance-delta, ui-balance-delta |
 | 52 | sol-withdraw | SOL withdraw: select SOL → Pay tab "Send to address" → enter addr+amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-tab-ia, sign |
 | 56 | withdraw-saved-addr | A successful chain-key send (approve + retrieve settled on /api/v2) writes the destination to the per-asset address book; after the send surface is closed and REMOUNTED the book is re-read from storage and the destination renders as a saved chip that pre-fills the shared field on tap. | saved-address, address-book, send-saved, withdraw-persist |
 | 77 | sol-usdc-withdraw | USDC send to address: happy path (USDC units + rent disclosure note → Sent ✓) and the below-rent pre-check failure (friendly error, no Sent). | sol-usdc-withdraw, spl-transfer, ata-note, rent-precheck, sol-send |

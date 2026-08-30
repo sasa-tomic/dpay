@@ -102,6 +102,15 @@ export type PayMessages = {
   /** Also used by SolReceiveMode's inline ATA setup card. */
   createUsdcAccount: string;
 
+  // --- send-to-address needs a connection; scan-to-pay does not ------------------------------
+  /** Shown in place of the send form while the wallet is offline. A send goes straight to the
+   *  ledger with no counterparty to carry it, so it is the ONE Pay-tab action airplane mode
+   *  genuinely blocks — and the payer's way out is the rail that was built for exactly this. */
+  offlineSendTitle: string;
+  offlineSendBody: (symbol: string) => string;
+  /** A scanned wallet address for an asset that cannot leave the wallet to an address at all. */
+  scannedAddressNotSendable: (symbol: string) => string;
+
   // --- the scan surface + its NFC status row ------------------------------------------------
   scanToPay: string;
   sendToAddress: string;
@@ -203,6 +212,12 @@ export const payEn: PayMessages = {
   fundBodyUsdc: 'Send USDC (Solana) to your USDC address. Keep a little SOL in the wallet for network fees.',
   showMyAddress: symbol => `Show my ${symbol} address`,
   createUsdcAccount: 'Create my USDC account',
+
+  offlineSendTitle: 'Sending to an address needs a connection',
+  offlineSendBody: symbol =>
+    `Your phone submits an address send itself, so it has to be online. To pay while you're offline, scan the merchant's payment code instead — their phone submits your ${symbol} payment for you.`,
+  scannedAddressNotSendable: symbol =>
+    `That's a wallet address. ${symbol} can't be sent to an address — scan the merchant's payment code to pay.`,
 
   scanToPay: 'Scan to pay',
   sendToAddress: 'Send to address',

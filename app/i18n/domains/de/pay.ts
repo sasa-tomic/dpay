@@ -85,6 +85,12 @@ export const payDe: PayMessages = {
   showMyAddress: symbol => `Meine ${symbol}-Adresse zeigen`,
   createUsdcAccount: 'Mein USDC-Konto erstellen',
 
+  offlineSendTitle: 'Senden an eine Adresse braucht eine Verbindung',
+  offlineSendBody: symbol =>
+    `Beim Senden an eine Adresse reicht dein Handy die Zahlung selbst ein — dafür muss es online sein. Um offline zu bezahlen, scanne stattdessen den Zahlungscode des Händlers: sein Handy reicht deine ${symbol}-Zahlung für dich ein.`,
+  scannedAddressNotSendable: symbol =>
+    `Das ist eine Wallet-Adresse. ${symbol} kann nicht an eine Adresse gesendet werden — scanne den Zahlungscode des Händlers, um zu bezahlen.`,
+
   scanToPay: 'Scannen & zahlen',
   sendToAddress: 'An Adresse senden',
   tapOrScanToPay: 'Auflegen oder scannen',

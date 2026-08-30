@@ -5,6 +5,7 @@ import {S} from '../styles';
 import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
 import {parseRequestQR} from '../lib/format';
+import {classifyScan} from '../lib/scan';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {Identity, PayIntent, NfcStatus} from '../lib/types';
@@ -14,7 +15,7 @@ import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
 import {NfcStatusRow} from './NfcStatusRow';
 import {QrScanner} from './QrScanner';
-import {FundFirstPanel} from './FundFirstPanel';
+import {InstructionPanel} from './InstructionPanel';
 import {ModeToggle} from './ModeToggle';
 import {SendSheet} from './SendSheet';
 import {useReportLock} from '../hooks/useReportLock';
@@ -28,7 +29,7 @@ import {PaidStamp} from './tapMotion';
 import {IconCheck, IconClock, IconShare} from './icons';
 import {M} from '../i18n';
 
-export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -69,6 +70,25 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // NFC is usable only when the adapter probe reports 'ready' (on + present). Everything else falls
   // through to the QR-only scan surface, with a per-reason explanation in the info popup below.
   const nfcReady = nfcStatus === 'ready';
+
+  // The SELECTED asset's facts, derived once: both the scan handler (which must know whether a
+  // scanned address has anywhere to go) and the send/fund surfaces below read them.
+  const gateDesc = catalog.find(c => c.currency === withdrawCurrency) ?? null;
+  // Can this asset leave the wallet to an external address at all? Either it has a chain-key minter
+  // family (burn → native chain) or it is a complete no-minter direct-ICRC row (a plain
+  // icrc1_transfer to any account). This is the SEND capability, deliberately distinct from
+  // `withdrawFamily` alone — gating on the family excluded VCHF/ICP entirely, which is exactly the
+  // asymmetry the Receive tab already fixed with `depositFamily || directIcrc`
+  // (ReceiveMode.tsx), and which CLAUDE.md's same-surfaces rule calls a bug rather than an
+  // exception. Ramp capability is NOT consulted: onramp/offramp describe FIAT ramps, and VCHF/ICP
+  // are `Unavailable` on both while being perfectly sendable on-chain.
+  const sendCapable = withdrawFamily != null || isDirectIcrcAsset(gateDesc);
+  const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : M.pay.fundsSymbol;
+
+  // A wallet address the camera read instead of a payment code. Handed to the send form as a
+  // prefill (mirrors the SOL rail's link prefill), so the ONE place that knows whether an address
+  // is usable for this asset — and what it is when it is not — is the place that says so.
+  const [scannedAddress, setScannedAddress] = useState<string | null>(null);
 
   // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
   // (the paid-screen receipt link + the offline-QR auth code — mutually exclusive phases, so one
@@ -112,7 +132,35 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       const reqBalance = i.currency === 0 ? shownBalance : (assetBalances[i.currency] ?? null);
       const insufficient = reqBalance != null && cmpRaw(i.amount, reqBalance) > 0;
       if (payable && !(online && insufficient)) void approve(i);
-    } catch (e: unknown) { console.warn('decode request QR failed:', e instanceof Error ? e.message : String(e)); setErr(M.pay.notAPaymentCode); }
+    } catch (e: unknown) {
+      console.warn('decode request QR failed:', e instanceof Error ? e.message : String(e));
+      onNotARequest(raw);
+    }
+  }
+
+  // The wire codec refused the scan — but "not a 132-byte request" is not the same as "meaningless",
+  // and answering every refusal with one message made two legitimate codes dead ends (founder rule
+  // 2026-08-29: every step, especially the error path, gives the user something to do):
+  //   • a payment LINK — the shareable format built to be printed as a QR, which until now only
+  //     worked when the OS handed it over as an App Link. Routed to the Wallet's existing link
+  //     pipeline, so a scanned link and a tapped link land on the identical review.
+  //   • a wallet ADDRESS — including the principal dpay's own "My address" screen renders. Routed
+  //     to the send form with the address prefilled: its status line then names the route and its
+  //     fee, or names what the address IS when it cannot be used for this asset.
+  // Anything else keeps the honest "not a payment code" refusal.
+  function onNotARequest(raw: string) {
+    const what = classifyScan(raw);
+    if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
+    if (what.kind === 'address') {
+      // An asset with no route off the wallet (DEMO) has nothing to prefill, so say that instead of
+      // opening a form that could only refuse.
+      if (!sendCapable) { setErr(M.pay.scannedAddressNotSendable(gateSymbol)); return; }
+      setErr(null);
+      setScannedAddress(raw.trim());
+      onSubModeChange('send');
+      return;
+    }
+    setErr(M.pay.notAPaymentCode);
   }
 
   // The LINK entry: a shared `…/wallet/pay/<recipient>?asset=…` URL, already parsed + resolved
@@ -468,23 +516,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   //     + the "Show my … address" primary (founder hard rule 2026-08-29: useful practical
   //     instructions on every step — a "check back soon" dead end is a bug). Only a genuinely
   //     undepositable malformed row keeps the honest no-primary copy.
-  const gateDesc = catalog.find(c => c.currency === withdrawCurrency) ?? null;
-  // Can this asset leave the wallet to an external address at all? Either it has a chain-key minter
-  // family (burn → native chain) or it is a complete no-minter direct-ICRC row (a plain
-  // icrc1_transfer to any account). This is the SEND capability, deliberately distinct from
-  // `withdrawFamily` alone — gating on the family excluded VCHF/ICP entirely, which is exactly the
-  // asymmetry the Receive tab already fixed with `depositFamily || directIcrc`
-  // (ReceiveMode.tsx), and which CLAUDE.md's same-surfaces rule calls a bug rather than an
-  // exception. Ramp capability is NOT consulted: onramp/offramp describe FIAT ramps, and VCHF/ICP
-  // are `Unavailable` on both while being perfectly sendable on-chain.
-  const sendCapable = withdrawFamily != null || isDirectIcrcAsset(gateDesc);
-  const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : M.pay.fundsSymbol;
   const gateDepositable = !!gateDesc && !gateDesc.mintable && gateDesc.onramp !== 'Unavailable' && gateDesc.minter != null;
   const gateCanFund = gateDepositable || isDirectIcrcAsset(gateDesc);
   const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
   const fundGate = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
   const fundPanel = fundGate ? (
-    <FundFirstPanel
+    <InstructionPanel
       testID="pay-fund"
       title={M.pay.fundTitle(gateSymbol, subMode === 'send' ? 'send' : 'pay')}
       body={gateCanFund
@@ -497,27 +534,35 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     />
   ) : null;
 
-  // "Send to address" sub-mode: render the send flow INLINE for the active asset. The toggle above
-  // lets the user flip back to "Scan to pay". Inline-only (no overlay chrome — the tab body provides
-  // the surface). The fund-first gate applies HERE too (same surface as SOL's send branch — no
-  // amount entry against a known-zero balance).
-  //
-  // Which body depends on how the asset can leave the wallet:
-  //   • a chain-key family (ckBTC/ckETH/ckUSDC) → WithdrawSheet: burn, and the minter pays out on
-  //     the native chain. A multi-step approve→minter sequence with its own double-burn resume.
-  //   • a complete no-minter direct-ICRC row (VCHF/ICP) → SendSheet: ONE signed icrc1_transfer, or
-  //     the ICP ledger's legacy `transfer` for a 64-hex account identifier.
-  // DEMO reaches neither and shows no toggle at all — it has no on-chain identity, matching the
-  // Receive tab, where the "My address" toggle is likewise `depositFamily || directIcrc`.
-  // "Send to address" sub-mode, rendered INLINE (the tab body provides the surface). The toggle
-  // above flips back to "Scan to pay". The fund-first gate applies here too — no amount entry
-  // against a known-zero balance, same as the SOL rail's send branch.
+  // Offline gate for the send surface. The Pay tab's two halves have OPPOSITE connectivity truths
+  // and only one of them was ever stated: scan-to-pay is the offline rail — the payer signs in
+  // airplane mode and the merchant's phone submits — while an address send has no counterparty, so
+  // the payer's own phone must reach the ledger. Offline it used to render the full form, disable
+  // Max with no reason (the fee query silently failed), and fail at Confirm with a raw error. Now
+  // it says so up front and points at the rail that does work offline (founder rule 2026-08-29).
+  // Ordered BEFORE the fund gate: a zero balance read while offline is stale, so connectivity is
+  // the honest thing to report first.
+  const offlinePanel = !online ? (
+    <InstructionPanel
+      testID="pay-send-offline"
+      title={M.pay.offlineSendTitle}
+      body={M.pay.offlineSendBody(gateSymbol)}
+      primaryLabel={M.pay.scanToPay}
+      onPrimary={() => onSubModeChange('scan')}
+      onRecheck={onRefreshBalances}
+      recheckBusy={refreshBusy}
+    />
+  ) : null;
+
+  // "Send to address" sub-mode, rendered INLINE (the tab body provides the surface — no overlay
+  // chrome). The toggle above flips back to "Scan to pay".
   //
   // ONE entry point for every send-capable asset: `SendSheet` owns the destination field and picks
   // the rail from the ADDRESS, delegating a native-chain destination to the chain-key offramp. So
   // ckBTC reaches both a Bitcoin address and an Internet Computer account from the same field,
   // and VCHF/ICP — which have no minter at all — are no longer excluded from the surface.
-  // DEMO shows no toggle: it has no on-chain identity, matching the Receive tab.
+  // DEMO shows no toggle: it has no on-chain identity, matching the Receive tab, where the "My
+  // address" toggle is likewise `depositFamily || directIcrc`.
   if (subMode === 'send' && sendCapable && gateDesc) {
     return (
       <View style={S.center}>
@@ -528,7 +573,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
           right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
         />
-        {fundPanel ?? (
+        {offlinePanel ?? fundPanel ?? (
           <SendSheet
             identity={identity}
             catalog={catalog}
@@ -537,6 +582,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             family={withdrawFamily}
             display={withdrawDisplay}
             tokenContract={withdrawTokenContract}
+            prefillAddress={scannedAddress}
+            onPrefillConsumed={() => setScannedAddress(null)}
             onSent={onSettled}
             onClose={() => onSubModeChange('scan')}
           />

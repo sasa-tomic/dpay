@@ -4,20 +4,22 @@ import {S} from '../styles';
 import {M} from '../i18n';
 
 /**
- * FundFirstPanel — the shared "add funds before you pay/send" surface (2026-08-16 zero-funds UX).
+ * InstructionPanel — the shared "you can't do that yet, here is what to do" surface.
  *
- * Rendered IN PLACE OF the Pay-tab scanner (and in place of the Send-to-address body) when the
- * active asset is KNOWN unfunded — the user's fastest path to a working payment is their own
- * deposit address, not a scanner that can only produce a doomed signature. Presentational ONLY:
- * the Wallet owns the gate decision (`solPayGate`) and the navigation (`goToDeposit`); this panel
- * just renders title + body + one primary action (+ optional secondary + recheck link).
+ * The founder's hard rule (2026-08-29) is that every gate names the user's next action, so every
+ * gate needs the same shape: title, one sentence of truth, one primary action, and an optional way
+ * to re-check. This panel is that shape, and nothing else — presentational ONLY. The caller owns
+ * both the decision to show it and the copy, so each situation states its own truth:
+ *
+ *   • zero balance (2026-08-16) — the fastest path to a working payment is the user's own deposit
+ *     address, not a scanner that can only produce a doomed signature.
+ *   • offline send — an address send is submitted by the payer's own phone, so airplane mode
+ *     genuinely blocks it; the way out is the scan-to-pay rail, which was built for exactly this.
  *
  * Used by BOTH rails (SOL/USDC via SolPayMode, IC via PayMode) — the same-surfaces hard rule: no
- * per-rail special IA. Copy is passed in by the caller so each rail states its truth (USDC adds
- * the keep-a-little-SOL note). Founder hard rule 2026-08-29: whenever a funding path EXISTS the
- * primary must be present — a dead-end body without an action is a bug.
+ * per-rail special IA.
  */
-export function FundFirstPanel({
+export function InstructionPanel({
   testID,
   title,
   body,

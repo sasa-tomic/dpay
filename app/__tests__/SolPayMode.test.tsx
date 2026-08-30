@@ -29,6 +29,11 @@ jest.mock('../components/SolNfcTap', () => ({
 jest.mock('../services/native', () => ({
   DpaySolNfc: {},
 }));
+// The send-to-address body has its own suite (SolanaWithdrawSheet.test.tsx); stubbed here so this
+// suite stays a pure SolPayMode test while the prefill prop it is handed stays assertable.
+jest.mock('../components/SolanaWithdrawSheet', () => ({
+  SolanaWithdrawSheet: (_props: {prefill?: {address: string; amount: string} | null}) => null,
+}));
 // The signer is real by default (the U-F1 tests sign genuinely); the U-F5 suite swaps in a
 // throwing implementation to park the read-only sign surface with its honest error terminal.
 jest.mock('../solana', () => {
@@ -44,6 +49,7 @@ import {encodeSolReq, type SolReqInput} from '../solana/qr';
 import {signSolPayment} from '../solana';
 import {SolPayMode} from '../components/SolPayMode';
 import type {Identity} from '../lib/types';
+import {M} from '../i18n';
 
 const IDENTITY: Identity = {secretHex: '33'.repeat(32), publicHex: '44'.repeat(32), username: 'Payer'};
 const MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
@@ -74,28 +80,36 @@ function solReqUri(name: string = 'Cafe Sol'): string {
 
 type SolPayModeProps = Parameters<typeof SolPayMode>[0];
 
+/** The element under test with every required prop defaulted — ONE prop list for mounts and for
+ *  the re-render (`tree.update`) cases, so a new required prop is added in one place. */
+function solPayElement(props: Partial<SolPayModeProps> = {}) {
+  return (
+    <SolPayMode
+      identity={IDENTITY}
+      online={true}
+      nfcStatus="off"
+      solBalance="5000000000"
+      usdcBalance="0"
+      usdcAtaAbsent={false}
+      payGate="none"
+      selectedToken="SOL"
+      onSent={() => {}}
+      onSentUsdc={() => {}}
+      onShowSolAddress={() => {}}
+      onShowUsdcAddress={() => {}}
+      onRecheckBalances={() => {}}
+      subMode="scan"
+      onSubModeChange={() => {}}
+      onScannedLink={() => {}}
+      {...props}
+    />
+  );
+}
+
 function mountSolPay(props: Partial<SolPayModeProps> = {}) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
-    tree = renderer.create(
-      <SolPayMode
-        identity={IDENTITY}
-        nfcStatus="off"
-        solBalance="5000000000"
-        usdcBalance="0"
-        usdcAtaAbsent={false}
-        payGate="none"
-        selectedToken="SOL"
-        onSent={() => {}}
-        onSentUsdc={() => {}}
-        onShowSolAddress={() => {}}
-        onShowUsdcAddress={() => {}}
-        onRecheckBalances={() => {}}
-        subMode="scan"
-        onSubModeChange={() => {}}
-        {...props}
-      />,
-    );
+    tree = renderer.create(solPayElement(props));
   });
   return tree;
 }
@@ -132,6 +146,10 @@ function textOf(children: unknown): string {
 /** All visible text of Text nodes — the assertion target for label flips. */
 function texts(tree: renderer.ReactTestRenderer): string[] {
   return tree.root.findAllByType(Text).map(n => textOf(n.props.children));
+}
+
+function hasTestID(tree: renderer.ReactTestRenderer, testID: string): boolean {
+  return tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
 }
 
 function pressByTestID(tree: renderer.ReactTestRenderer, testID: string) {
@@ -257,10 +275,6 @@ describe('SolPayMode — sign status shows the short destination under a merchan
 // and the HCE card (SolNfcTap) mount ONLY after "Pay Now". The sol-pay-scan container
 // + hint stay in IDLE; reset() and leaving the scan sub-mode disarm.
 describe('SolPayMode — pay-intent scan gate', () => {
-  function hasTestID(tree: renderer.ReactTestRenderer, testID: string): boolean {
-    return tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
-  }
-
   test('idle: NEITHER rail mounts; sol-pay-scan + CTA render; one tap arms BOTH rails', () => {
     const tree = mountSolPay({nfcStatus: 'ready'});
     expect(hasTestID(tree, 'sol-pay-scan')).toBe(true); // idle keeps the container + hint
@@ -293,50 +307,92 @@ describe('SolPayMode — pay-intent scan gate', () => {
     pressByTestID(tree, 'btn-sol-start-scan');
     expect(scannerNodes(tree)).toHaveLength(1);
     act(() => {
-      tree.update(
-        <SolPayMode
-          identity={IDENTITY}
-          nfcStatus="off"
-          solBalance="5000000000"
-          usdcBalance="0"
-          usdcAtaAbsent={false}
-          payGate="none"
-          selectedToken="SOL"
-          onSent={() => {}}
-          onSentUsdc={() => {}}
-          onShowSolAddress={() => {}}
-          onShowUsdcAddress={() => {}}
-          onRecheckBalances={() => {}}
-          subMode="send"
-          onSubModeChange={() => {}}
-        />,
-      );
+      tree.update(solPayElement({subMode: 'send'}));
     });
     expect(scannerNodes(tree)).toHaveLength(0);
     act(() => {
-      tree.update(
-        <SolPayMode
-          identity={IDENTITY}
-          nfcStatus="off"
-          solBalance="5000000000"
-          usdcBalance="0"
-          usdcAtaAbsent={false}
-          payGate="none"
-          selectedToken="SOL"
-          onSent={() => {}}
-          onSentUsdc={() => {}}
-          onShowSolAddress={() => {}}
-          onShowUsdcAddress={() => {}}
-          onRecheckBalances={() => {}}
-          subMode="scan"
-          onSubModeChange={() => {}}
-        />,
-      );
+      tree.update(solPayElement({subMode: 'scan'}));
     });
     expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
     expect(scannerNodes(tree)).toHaveLength(0);
     act(() => {
       tree.unmount();
     });
+  });
+});
+
+// The camera's second opinion, SOL side (defects found 2026-08-30). Identical routing to the IC
+// rail's PayMode — same three verdicts in the same order — because the same-surfaces hard rule
+// says a scanned link and a scanned address must behave the same whichever rail is active.
+// Classification is pinned in scan.test.ts; these pin the ROUTING.
+describe('SolPayMode — what the camera does with a code that is not a payment request', () => {
+  const IC_ACCOUNT = 'k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae';
+  const PAY_LINK = `https://dpay.kalaj.org/wallet/pay/${MERCHANT}?asset=SOL&network=solana&amount=0.5`;
+
+  async function scanUnreadable(tree: renderer.ReactTestRenderer, raw: string) {
+    pressByTestID(tree, 'btn-sol-start-scan');
+    const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+    await act(async () => {
+      scanner.props.onScan(raw);
+    });
+  }
+
+  test('a scanned payment LINK is handed to the Wallet link pipeline VERBATIM', async () => {
+    const scanned: string[] = [];
+    const tree = mountSolPay({onScannedLink: (u: string) => scanned.push(u)});
+    await scanUnreadable(tree, ` ${PAY_LINK} `);
+    expect(scanned).toEqual([PAY_LINK]);
+    expect(texts(tree)).not.toContain(M.pay.notAPaymentCode);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a scanned Solana ADDRESS switches to Send to address with the destination prefilled', async () => {
+    const modes: string[] = [];
+    const tree = mountSolPay({onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, MERCHANT);
+    expect(modes).toEqual(['send']);
+    act(() => { tree.update(solPayElement({subMode: 'send'})); });
+    const sheet = tree.root.find(node => node.props && 'prefill' in node.props);
+    expect(sheet.props.prefill).toEqual({address: MERCHANT, amount: ''});
+    act(() => { tree.unmount(); });
+  });
+
+  test('a WRONG-CHAIN address still opens the send form — the one place that can name the chain', async () => {
+    // An IC principal scanned on the SOL rail is a real user mistake. Refusing it here would give a
+    // generic message; the send form's status line says what the address IS and what to do instead.
+    const modes: string[] = [];
+    const tree = mountSolPay({onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, IC_ACCOUNT);
+    expect(modes).toEqual(['send']);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a payload NOTHING recognises keeps the honest "not a payment code" refusal', async () => {
+    const modes: string[] = [];
+    const tree = mountSolPay({onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, 'solreq:v2:not-actually-a-request');
+    expect(texts(tree)).toContain(M.pay.notAPaymentCode);
+    expect(modes).toEqual([]);
+    act(() => { tree.unmount(); });
+  });
+
+  test('offline, Send to address states the constraint and offers the rail that DOES work offline', () => {
+    // This rail broadcasts to a Solana RPC from THIS phone, so airplane mode blocks an address send
+    // outright — while scan-to-pay keeps working (the payer signs against the merchant's blockhash).
+    const modes: string[] = [];
+    const tree = mountSolPay({online: false, subMode: 'send', onSubModeChange: (m: string) => modes.push(m)});
+    expect(hasTestID(tree, 'sol-send-offline')).toBe(true);
+    expect(tree.root.findAll(node => node.props && 'prefill' in node.props)).toHaveLength(0);
+    expect(texts(tree)).toContain(M.pay.offlineSendBody('SOL'));
+    pressByTestID(tree, 'sol-send-offline-go');
+    expect(modes).toEqual(['scan']);
+    act(() => { tree.unmount(); });
+  });
+
+  test('online, Send to address renders the form — the gate is connectivity, nothing else', () => {
+    const tree = mountSolPay({online: true, subMode: 'send'});
+    expect(hasTestID(tree, 'sol-send-offline')).toBe(false);
+    expect(tree.root.findAll(node => node.props && 'prefill' in node.props)).toHaveLength(1);
+    act(() => { tree.unmount(); });
   });
 });
