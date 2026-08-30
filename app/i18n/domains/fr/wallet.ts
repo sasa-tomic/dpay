@@ -67,6 +67,7 @@ export const walletFr: WalletMessages = {
     to: who => `à ${who}`,
     from: who => `de ${who}`,
     mintCounterparty: 'la démo',
+    failed: 'Échec — seuls les frais de réseau ont été prélevés',
   },
 
   fund: {checking: 'Vérification…', checkAgain: 'Revérifier'},

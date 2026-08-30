@@ -66,6 +66,7 @@ export const walletEs: WalletMessages = {
     to: who => `a ${who}`,
     from: who => `de ${who}`,
     mintCounterparty: 'Fondos de prueba',
+    failed: 'Falló — solo se cobró la comisión de red',
   },
 
   fund: {checking: 'Revisando…', checkAgain: 'Revisar de nuevo'},

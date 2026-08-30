@@ -301,3 +301,100 @@ export async function getFeeForMessage(
   const result = (await rpcFetch(url, 'getFeeForMessage', [messageBase64, config], opts)) as number | null;
   return result === null ? null : BigInt(result);
 }
+
+// ============================================================================
+// Transaction history — the two reads `solana/history.ts` composes into the SOL rail's ledger.
+// These stay THIN on purpose: they validate only what makes the response usable AT ALL (the
+// signature list must be an ordered array of {signature, slot}), and hand the transaction detail
+// back verbatim. The money-critical validation (balance arrays, token amounts, decimals) lives in
+// history.ts, because there a single malformed transaction must become one logged, counted drop —
+// not an exception that blanks the whole list.
+// ============================================================================
+
+/** One entry of `getSignaturesForAddress`. `slot` is the ordering key: always present and
+ *  monotonic, unlike the `blockTime` the same response carries — which a node may not have, and
+ *  which is read off the transaction DETAIL (one source) rather than duplicated from here. */
+export interface SolanaSignatureInfo {
+  readonly signature: string;
+  readonly slot: number;
+}
+
+/** One pre/post SPL token balance snapshot from `meta`. `owner` is the token account's OWNER
+ *  wallet (not the token account itself) — the field that says whose money this is. It is optional
+ *  on the wire; history.ts refuses to guess when it is missing for a mint it is accounting. */
+export interface SolanaTokenBalance {
+  readonly accountIndex: number;
+  readonly mint: string;
+  readonly owner?: string;
+  readonly uiTokenAmount: {readonly amount: string; readonly decimals: number};
+}
+
+/** `meta` of a confirmed transaction. `preBalances`/`postBalances` are lamports indexed over the
+ *  FULL account list (static message keys ++ loadedAddresses.writable ++ loadedAddresses.readonly).
+ *  `err` is non-null exactly when the transaction failed on-chain (the fee is still charged). */
+export interface SolanaTransactionMeta {
+  readonly err: unknown;
+  readonly fee: number;
+  readonly preBalances: readonly number[];
+  readonly postBalances: readonly number[];
+  readonly preTokenBalances?: readonly SolanaTokenBalance[];
+  readonly postTokenBalances?: readonly SolanaTokenBalance[];
+  /** Present for versioned (v0) transactions that resolve accounts through address lookup tables. */
+  readonly loadedAddresses?: {writable: readonly string[]; readonly: readonly string[]};
+}
+
+/** A confirmed transaction as returned by `getTransaction` with `encoding:'json'` (accountKeys are
+ *  base58 STRINGS — `jsonParsed` would make them objects and is not requested). */
+export interface SolanaTransactionDetail {
+  readonly slot: number;
+  readonly blockTime: number | null;
+  readonly meta: SolanaTransactionMeta | null;
+  readonly transaction: {readonly message: {readonly accountKeys: readonly string[]}};
+}
+
+/** The most recent `limit` transaction signatures that touched `address`, newest-first. Bounded by
+ *  `limit` — no `before` cursor is exposed (the wallet shows a recent list, never an unbounded
+ *  walk). Throws on a malformed entry: a list we cannot order is unusable, not a partial result. */
+export async function getSignaturesForAddress(
+  url: string,
+  address: string,
+  limit: number,
+  opts?: SolanaRpcOpts,
+): Promise<SolanaSignatureInfo[]> {
+  const result = (await rpcFetch(
+    url,
+    'getSignaturesForAddress',
+    [address, {limit, commitment: SOL_PAYMENT_COMMITMENT}],
+    opts,
+  )) as unknown;
+  if (!Array.isArray(result)) {
+    throw new Error(`solana rpc: getSignaturesForAddress returned a non-array for ${address}`);
+  }
+  return result.map((e: {signature?: unknown; slot?: unknown}) => {
+    if (typeof e?.signature !== 'string' || !Number.isSafeInteger(e?.slot)) {
+      throw new Error(`solana rpc: getSignaturesForAddress returned a malformed entry for ${address}`);
+    }
+    return {signature: e.signature, slot: e.slot as number};
+  });
+}
+
+/** A confirmed transaction's detail, or `null` when the node does not have it (unknown signature,
+ *  or pruned). `maxSupportedTransactionVersion:0` is REQUIRED — without it the RPC errors outright
+ *  on every versioned (v0) transaction, which is most of mainnet. */
+export async function getTransaction(
+  url: string,
+  signature: string,
+  opts?: SolanaRpcOpts,
+): Promise<SolanaTransactionDetail | null> {
+  const result = (await rpcFetch(
+    url,
+    'getTransaction',
+    [signature, {encoding: 'json', commitment: SOL_PAYMENT_COMMITMENT, maxSupportedTransactionVersion: 0}],
+    opts,
+  )) as unknown;
+  if (result === null) return null;
+  if (typeof result !== 'object') {
+    throw new Error(`solana rpc: getTransaction returned a non-object for ${signature}`);
+  }
+  return result as SolanaTransactionDetail;
+}

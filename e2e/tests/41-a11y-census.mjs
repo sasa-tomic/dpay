@@ -85,7 +85,8 @@ const SURFACES = {
   // form (settings-restore-seed-input + the confirm/cancel pair). Mirrors settingsResetConfirm.
   settingsRestoreConfirm: ['settings-restore-seed-input', 'btn-settings-restore-confirm', 'btn-settings-restore-cancel'],
   // Transactions tab — empty initially (no transactions). When history is non-empty, ledger-filter-*
-  // chips render (one per present currency); a fresh wallet has none, so only the chrome asserts.
+  // chips render (one per present ASSET, across both rails); a fresh wallet has none, so only the
+  // chrome asserts.
   transactions: [],
   // Pay tab → "Send to address" (SendSheet + AddressField — the one send-to-address surface for
   // every IC asset). Reached with `btn-pay-send`, but only for an asset that is BOTH send-capable

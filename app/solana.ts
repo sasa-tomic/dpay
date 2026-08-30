@@ -24,10 +24,14 @@ import {buildSplTransferInstruction, buildCreateAtaIdempotentInstruction, buildC
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
 import type {SolanaSignatureStatus} from './solana/rpc';
+import type {SolanaHistory} from './solana/history';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './solana/payments';
 import {M} from './i18n';
 
 export {deriveSolanaAddress};
+// Type-only re-export: the history hook consumes these shapes but must reach the network module
+// only through this seam. `export type` is erased, so nothing is pulled into the bundle.
+export type {SolanaHistory, SolanaHistoryRow} from './solana/history';
 
 // --- existing exports (unchanged) ----------------------------------------------
 
@@ -37,6 +41,18 @@ export async function getSolanaBalance(address: string, signal?: AbortSignal): P
   if (!SOLANA_RPC_URL) return null;
   const {getBalance} = await import('./solana/rpc');
   return getBalance(SOLANA_RPC_URL, address, {signal});
+}
+
+/** Recent SOL + USDC movements for `address`, newest-first (the SOL rail's half of the Transactions
+ *  list). Returns `null` (no throw, no network, no dynamic import) when SOL is offline
+ *  (`SOLANA_RPC_URL` empty) — the SAME offline contract as `getSolanaBalance`, so the offline inner
+ *  loop never reaches the network module. THROWS when the RPC is configured but the signature
+ *  queries fail: an unreadable list is an error state the caller surfaces, never an empty ledger.
+ *  Individually unreadable transactions are logged and counted in `SolanaHistory.dropped`. */
+export async function getSolanaHistory(address: string, signal?: AbortSignal): Promise<SolanaHistory | null> {
+  if (!SOLANA_RPC_URL) return null;
+  const {fetchSolanaHistory} = await import('./solana/history');
+  return fetchSolanaHistory(SOLANA_RPC_URL, address, {signal});
 }
 
 /** Build, sign, broadcast, and confirm a System Program Transfer of `lamports` to `toAddress`.

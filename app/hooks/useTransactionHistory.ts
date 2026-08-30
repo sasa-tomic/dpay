@@ -83,7 +83,7 @@ export function useTransactionHistory(args: Args): {history: Txn[]; refreshHisto
       const who = (dir === 'in' && !counterparty)
         ? M.wallet.ledger.mintCounterparty
         : (dir === 'out' ? (toName || short(rec.to)) : (fromName || short(rec.from)));
-      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), dir, currency: rec.currency};
+      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), ts: rec.timestamp, dir, assetId: `ic:${rec.currency}`};
     }));
     // `catalog` is captured by closure but intentionally NOT a dep — it's a new array each render;
     // `catalogCurrencyIds` (a stable string) is the signature that retriggers the fetch only when a

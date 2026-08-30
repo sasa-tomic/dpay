@@ -81,7 +81,16 @@ export type PayIntent = {
   source: 'wire' | 'link';
 };
 export type Identity = {secretHex: string; publicHex: string; username: string};
-export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; dir: 'out' | 'in'; currency: number};
+// One row of the Transactions list, RAIL-AGNOSTIC. The list merges the IC rail
+// (`hooks/useTransactionHistory.ts`) with the Solana device-key rail (`hooks/useSolanaHistory.ts`),
+// and `AssetId` is the only asset domain that spans both — an IC currency u32 cannot name `SOL`.
+//
+// `ts` is the SORT key and is deliberately separate from `time`: `time` is already a formatted,
+// locale-relative STRING ("Today, 1:19 PM"), which cannot be ordered, so merging two independently
+// sorted lists needs the raw unix SECONDS that produced it. It is `NaN` when the source has no time
+// (a Solana block whose `blockTime` the node does not have) — never `now`: `fmtTime` renders a
+// non-finite `ts` as '—' and `lib/ledger.ts#mergeHistoryByTime` sorts those rows last.
+export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; ts: number; dir: 'out' | 'in'; assetId: AssetId};
 // One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex). The
 // relay returns from_name/to_name/memo as JSON STRINGS (NUL-trimmed, lossy; may be ""). `amount` is
 // a decimal-digit string (MC1 units 2-4: protocol u64 amounts cross the JSON boundary as strings).

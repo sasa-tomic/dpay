@@ -106,23 +106,24 @@
 
 ## Other open issues
 
-- **(low) Rail/surface asymmetries surfaced by the 2026-08-30 send-to-address audit.** None block
-  the send feature; all are pre-existing and violate the CLAUDE.md same-surfaces rule to some
-  degree. In rough value order:
-  (a) the SOL rail has **no transaction history at all** — the Transactions tab renders for a
-  SOL-selected wallet but `useTransactionHistory` is IC-only;
-  (b) a completed send/withdraw awards **no** `paymentTested` stamp on either rail
-  (`awardPaymentTested` is called from the pay/receive/NFC paths only), so a user whose only real
-  money movement is a send never fills PAYMENT TESTED;
-  (c) the IC rail has no fund-funnel **resume** link ("Back to paying X") — `Wallet.tsx` passes no
-  `returnTo` when routing to the IC deposit, while the SOL rail does;
-  (d) `SolPayMode` has no NFC status row or "why unavailable" popup (IC does), and takes
-  `nfcReady: boolean` where IC takes the 4-state `NfcStatus`;
-  (e) IC keeps its Pay/Receive toggle hidden during review/qr/paid phases where SOL keeps it;
-  (f) `CkErc20DepositSheet` has no manual "Check now" recheck (the other three deposit sheets do).
-- **(low) `SelectableAsset.capabilities` is dead** (`app/config/assets.ts`) — built for every asset,
-  read by zero UI call sites. It looks like the field that *should* gate ramp affordances; either
-  wire it or delete it.
+- ~~**Rail/surface asymmetries surfaced by the 2026-08-30 send-to-address audit**~~ **ALL FIXED
+  2026-08-30.** (a) Solana transaction history now exists (`app/solana/history.ts` +
+  `useSolanaHistory`, merged into the Transactions tab, which is now keyed on `AssetId` rather than
+  an IC currency id — flow 108); (b) a confirmed send/withdraw awards `paymentTested` on both rails,
+  never on an unknown outcome; (c) the IC fund funnel records its origin and offers the
+  "Back to paying X" resume once the balance goes positive (flow 81); (d) `NfcStatusRow` is shared
+  by both Pay screens and SolPayMode takes the 4-state `NfcStatus`; (e) the sub-mode toggle no
+  longer renders mid-payment on either rail; (f) ckERC20 deposits got the manual recheck the other
+  three sheets had (flow 33). `SelectableAsset.capabilities` and `SolanaAsset.onramp/offramp` were
+  dead ramp copies and are deleted; `CurrencyDescriptor.onramp/offramp` stays (the IC fund gate
+  reads it).
+- **(low) Solana history is unit-proven, not cluster-proven.** `fetchSolanaHistory` is asserted
+  against stubbed RPC responses shaped from the JSON-RPC spec; it has never run against a live
+  cluster. Its balance-delta reading of direction/amount, the v0 `loadedAddresses` account
+  indexing, and the USDC-row/SOL-fee-row suppression are the parts a real transaction would test.
+- **(low) `SolanaHistory.dropped` is logged, not surfaced.** A transaction the reader cannot parse
+  is counted and warned, so a short list is never silently short — but the user is not told. Needs
+  copy in 4 locales before it can be shown.
 - **(medium) Withdrawal approve→retrieve front-running residual** (old ###9) — includes the
   inherent dual-approve partial-failure class (old O4); documented mitigation in place.
 - **WC per-`request()` unbounded** (`app/wallet.ts`) — inherent to EIP-1193 (no standard timeout

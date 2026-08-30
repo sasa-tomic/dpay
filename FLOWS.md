@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **103 flows**
-> (102 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **104 flows**
+> (103 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (26) · offline (9) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -63,6 +63,7 @@ wire (1) · onboard (13) · pay (25) · offline (9) · deposit (8) · withdraw (
 | 101 | native-asset-fail-closed | Insufficient VCHF and ICP requests park on review-lowbal with no approve/paid button and no signed envelope; an unknown-currency (99) request hits the unsupported-asset branch with no fallback; the payee receives nothing and the payer keeps exactly its seeded balances. | vchf, icp, icp-mainnet, insufficient, unknown-currency, unsupported-asset, fail-closed, no-swap |
 | 102 | sol-pay-link | A SOL payment link selects the SOL rail and pre-fills the Send-to-address form with the link's address + amount (no auto-send); Confirm broadcasts it. | pay-link, url-routing, sol-send, rail-parity |
 | 103 | pay-link-refused | A payment link naming the wrong chain, an unknown asset, or a damaged field is refused with an instruction the payer can act on — never a guessed asset and never a silent dead end. | pay-link, fail-closed, wrong-network, honest-instructions |
+| 108 | sol-transactions | A Solana transaction appears in the Transactions tab: the SOL rail history is polled through the RPC seam, merged with the IC rail by timestamp, and rendered by the one Ledger — SOL row in SOL units with its short counterparty, the IC faucet row still in ∂, and a filter chip per rail. | sol-history, ledger, transactions, mixed-rail, ledger-filter, sol-tab-ia |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |

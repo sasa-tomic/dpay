@@ -11,6 +11,7 @@ import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
 import {buildSelectableAssets, chipLabel, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable, solPayGate} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
+import {mergeHistoryByTime} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
@@ -20,6 +21,7 @@ import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
+import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
 import {deriveSolanaAddress, createUsdcAta} from '../solana';
@@ -196,6 +198,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
   }, [refreshBalances]);
   const solBalance = solState.balance;
+  // The SOL rail's half of the Transactions list, read straight from the Solana RPC (no relay, no
+  // canister — same device-key rail as the balances above). Gated on `solAddress` exactly as
+  // `buildSelectableAssets`' `solanaEnabled` is: no device key ⇒ no rail ⇒ no polling. The two
+  // lists are merged newest-first below and rendered by the ONE Ledger surface both rails share.
+  const {history: solHistory, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
+  const ledgerHistory = useMemo(() => mergeHistoryByTime(history, solHistory), [history, solHistory]);
 
   // One-time USDC account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
   // gate + Pay "Send to address" gate) share one busy/err state + one handler. createUsdcAta signs
@@ -518,6 +526,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // writer to `history` (fetched eagerly inside the hook — no optimistic in-memory state). Stable
   // across renders.
   const onActivity = useCallback(() => { refreshHistory(); }, [refreshHistory]);
+  // The SOL rail's twin of `onActivity`: a confirmed send moves the balance AND adds a ledger row,
+  // so both are re-read rather than waiting out the poll. The two token callbacks stay separate
+  // because the BALANCES are independent (a SOL send must not perturb the USDC status); the
+  // Transactions list is one list per rail, so both refresh it.
+  const onSolSent = useCallback(() => { refreshSol(); refreshSolHistory(); }, [refreshSol, refreshSolHistory]);
+  const onSolUsdcSent = useCallback(() => { refreshUsdc(); refreshSolHistory(); }, [refreshUsdc, refreshSolHistory]);
   // The DEMO header balance (currency 0): when online the polled balance is authoritative (the
   // deduction resets on every successful poll); when offline we apply the per-currency deduction.
   const shownBalance = applyOffline(balance, online ? {} : offlineSpent, 0);
@@ -820,7 +834,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} nfcStatus={nfc} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={refreshSol} onSentUsdc={refreshUsdc}                   onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} nfcStatus={nfc} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={onSolSent} onSentUsdc={onSolUsdcSent}                onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -900,7 +914,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   />
                 )
           )
-          : <Ledger history={history} catalog={catalog} />}
+          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} />}
       </ScrollView>
 
       {balancesOpen ? (

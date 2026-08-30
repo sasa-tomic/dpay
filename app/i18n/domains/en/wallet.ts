@@ -115,6 +115,12 @@ export type WalletMessages = {
      * key would take that choice away.
      */
     mintCounterparty: string;
+    /**
+     * The note on a row whose transaction FAILED on-chain. Solana charges the fee even when the
+     * transfer is rolled back, so the row's honest amount is a small debit — which alone would read
+     * as a tiny successful payment. This line is what stops that.
+     */
+    failed: string;
   };
 
   /** The shared "add funds before you pay" panel's recheck link (both rails). */
@@ -199,6 +205,7 @@ export const walletEn: WalletMessages = {
     to: who => `to ${who}`,
     from: who => `from ${who}`,
     mintCounterparty: 'Demo funds',
+    failed: 'Failed — only the network fee was charged',
   },
 
   fund: {checking: 'Checking…', checkAgain: 'Check again'},

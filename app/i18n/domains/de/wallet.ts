@@ -66,6 +66,7 @@ export const walletDe: WalletMessages = {
     to: who => `an ${who}`,
     from: who => `von ${who}`,
     mintCounterparty: 'Demo-Guthaben',
+    failed: 'Fehlgeschlagen — nur die Netzwerkgebühr wurde abgebucht',
   },
 
   fund: {checking: 'Wird geprüft…', checkAgain: 'Erneut prüfen'},
