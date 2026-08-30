@@ -45,20 +45,27 @@
 
 ## Physical / outer-loop gates (NOT autonomous)
 
-- **Android App Link verification — the SERVER half is now done; the PHONE half is not**
-  (payment links, 2026-08-29; updated 2026-08-30 after the prod deploy).
-  Verified live 2026-08-30: `GET https://dpay.kalaj.org/.well-known/assetlinks.json` returns HTTP
-  200 with one statement for `org.kalaj.dpay` carrying all 4 project cert fingerprints. So the
-  blocker named in the original entry — "prod does not serve assetlinks.json" — is GONE.
-  What remains is on the device, and it is NOT done: the founder's phone (`9cdf67b8`) still runs
-  the APK installed 2026-08-27, which PREDATES the `autoVerify` intent filter, so
-  `pm get-app-links org.kalaj.dpay` returns nothing at all (no declared links to verify — not a
-  failed verification). Steps: install the freshly built APK on the phone, then
-  `adb shell pm verify-app-links --re-verify org.kalaj.dpay` and
-  `adb shell pm get-app-links org.kalaj.dpay`, expecting `dpay.kalaj.org: verified`; a tapped
-  `https://dpay.kalaj.org/wallet/pay/…` link must then open the app, not a browser.
-  Until that is recorded, a shared link is web-only on real installs — the designed fallback, so
-  no user-facing breakage, just no native hand-off.
+- ~~**Android App Link verification**~~ **CLOSED 2026-08-30 — verified on the founder's physical
+  phone (`9cdf67b8`, MIUI), both halves.**
+  Server: `GET /.well-known/assetlinks.json` → HTTP 200, one statement for `org.kalaj.dpay`
+  carrying all 4 project certs, and the APK's actual signer
+  (`1E:5C:F5:10:…:89:D1`, the upload key) is among them — checked by pulling the installed APK and
+  running `apksigner verify --print-certs` on both it and the new build.
+  Device: the new APK installed with `-r` (signer identical to the previous install, so app data —
+  including the wallet seed — was preserved), and Android verified the domain ON INSTALL without a
+  manual re-verify: `pm get-app-links org.kalaj.dpay` reports `dpay.kalaj.org: verified`.
+  Functional: firing a real link
+  (`…/wallet/pay/3nrdb-…-4qe?asset=VCHF&network=internet-computer&amount=1.50`) resumed
+  `org.kalaj.dpay/com.dpay.MainActivity` — no browser, no chooser — on the pre-filled review screen
+  showing `1,50000000 VCHF bezahlen` to the full destination principal.
+  TRIPWIRE for whoever checks this next: `cmd package resolve-activity` reports MIUI's
+  `MiuiResolverActivity` for the same URL and looks like a FAILURE. It is not — that static query
+  does not account for the verified-domain preference. Only the real intent dispatch settles it, so
+  test with `am start` + a top-activity read, never with `resolve-activity`.
+  Incidentally proven on real hardware by the same run: the device-locale German catalog renders
+  throughout; the link did NOT auto-sign (explicit Approve, per the security invariant); and the
+  online-insufficient-balance gate fired correctly — "Dein Guthaben reicht für diese Zahlung nicht
+  aus." with Freigeben (Approve) DISABLED against a 0 VCHF balance.
 - **SOL HCE hardware tap — the only physical gate left** (AID `F06470617902`, `DpaySolNfc`).
   The IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
   (founder-run retest; commit `8940b1d`).

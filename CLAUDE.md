@@ -182,9 +182,10 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   before the payer sees it. Relay serves `/wallet/pay/{recipient}` + `/.well-known/assetlinks.json`
   (all four project signing certs, incl. the upload key so sideloaded builds verify too). Verified:
   `just verify` EXIT=0 (98/98 e2e incl. new flows 102/103), jest 1203/1203, `just test-relay` 47/47,
-  emulator device gate green + the link driven on-device (review + refusal screenshots). The prod
-  deploy landed 2026-08-30 and assetlinks.json is verified serving (HTTP 200, all 4 certs), so the
-  server half is done; the phone half is not — see `OPEN_ISSUES.md` "Physical / outer-loop gates".
+  emulator device gate green + the link driven on-device (review + refusal screenshots). **Android
+  App Links are LIVE and verified end-to-end on physical hardware (2026-08-30):** prod serves
+  assetlinks.json (HTTP 200, all 4 certs), the phone reports `dpay.kalaj.org: verified`, and a real
+  `…/wallet/pay/…` link opens the app straight onto the pre-filled review — no browser, no chooser.
 
 - **Send to an external address — ONE destination field, routed by what you paste (2026-08-30).**
   Pay ▸ *Send to address* now renders for every asset that can leave the wallet, not just the
