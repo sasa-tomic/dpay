@@ -70,8 +70,7 @@ const SELF_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 // IC row, so its link reads `?asset=DEMO&network=internet-computer`.
 const DEMO_ASSET: SelectableAsset = {
   id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', linkToken: 'DEMO',
-  networkLabel: 'play money', network: null, decimals: 2, visible: true,
-  capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'demo',
+  networkLabel: 'play money', network: null, decimals: 2, visible: true, testKey: 'demo',
 };
 
 const shareSpy = jest.spyOn(Share, 'share');

@@ -19,7 +19,6 @@
 import {
   type CurrencyDescriptor,
   type NetworkSection,
-  type RampCapability,
   type SolanaAsset,
   BUNDLED_NETWORKS,
   assetLinkToken,
@@ -37,13 +36,6 @@ import {parseDecimalToUnits} from '../lib/amount';
 import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
 import {M} from '../i18n';
-
-// Per-asset funding / cash-out capability. Mirrors the catalog's `RampCapability` shape so a
-// consumer renders IC and Solana rows through the SAME capability logic — no rail special case at
-// the UI surface (the capability values differ; the SHAPE is uniform). SOL carries Direct/Direct:
-// the device holds the key, so deposit = send SOL/USDC to the device address and withdraw = sign a
-// transfer from it (no third-party counterparty, no swap, no relay).
-export type AssetCapabilities = {onramp: RampCapability; offramp: RampCapability};
 
 // A resolved, display-ready view of one selectable asset. Built fresh from the current catalog +
 // Solana config on every call; React state stores only the STABLE `id`, never a `SelectableAsset`
@@ -64,7 +56,6 @@ export type SelectableAsset =
       network: string | null;  // the CHAIN's proper noun ('Bitcoin'/'Ethereum') — wire/constant, never translated; null for DEMO
       decimals: number;        // smallest-unit decimal count for amount formatting
       visible: boolean;        // true on every entry the builder returns (the builder IS the filter)
-      capabilities: AssetCapabilities;
       testKey: string;         // stable ASCII testID key (unique within a built list)
     }
   | {
@@ -77,7 +68,6 @@ export type SelectableAsset =
       network: 'Solana';       // the chain's proper noun — never translated
       decimals: number;        // SOL=9, USDC=6
       visible: boolean;        // always true (appended only when the rail is enabled)
-      capabilities: AssetCapabilities; // Direct/Direct — device-key rail
       testKey: string;         // stable ASCII testID key ('sol' | 'sol-usdc')
     };
 
@@ -120,7 +110,7 @@ export function buildSelectableAssets(
     assets.push(icAsset(desc));
   }
   if (solanaEnabled) {
-    // Catalog v2: the SOL/USDC display facts (symbol/decimals/ramps) are CATALOG-DRIVEN — read from
+    // Catalog v2: the SOL/USDC display facts (symbol/decimals) are CATALOG-DRIVEN — read from
     // the network sections (the parsed relay response, or the bundled fallback when omitted — same
     // one code path, so cold/offline first-load rendering is identical). A missing SOL row simply
     // omits the asset; ids/testKeys stay stable literals so testID derivation never shifts.
@@ -160,13 +150,12 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
     network,
     decimals: desc.decimals ?? 0,
     visible: true,
-    capabilities: {onramp: desc.onramp, offramp: desc.offramp},
     testKey: icTestKey(desc, isPrimary, testnet),
   };
 }
 
 // Build the SelectableAsset for one Solana catalog row. The display facts come from the row the
-// relay/bundled sections supplied (symbol/decimals/ramps); the id/testKey stay STABLE literals so
+// relay/bundled sections supplied (symbol/decimals); the id/testKey stay STABLE literals so
 // selection + testID derivation never shifts with catalog metadata. USDC's `networkLabel` is
 // distinct from any IC USDC so the two never read as the same balance (no-swap / no-confusion
 // invariant).
@@ -183,7 +172,6 @@ function solanaAssetRow(row: SolanaAsset, token: 'SOL' | 'USDC', testKey: string
     network: 'Solana',
     decimals: row.decimals,
     visible: true,
-    capabilities: {onramp: row.onramp, offramp: row.offramp},
     testKey,
   };
 }

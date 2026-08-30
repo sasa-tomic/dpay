@@ -104,8 +104,8 @@ describe('buildSelectableAssets — complete visible list', () => {
 // =============================================================================================
 describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', () => {
   const SOL_ROWS: SolanaAsset[] = [
-    {token: 'SOL', symbol: 'SOLANA', decimals: 4, mint: null, onramp: 'Direct', offramp: 'Partner'},
-    {token: 'USDC', symbol: 'USDC', decimals: 5, mint: 'Mint111111111111111111111111111111111111111', onramp: 'Direct', offramp: 'Direct'},
+    {token: 'SOL', symbol: 'SOLANA', decimals: 4, mint: null},
+    {token: 'USDC', symbol: 'USDC', decimals: 5, mint: 'Mint111111111111111111111111111111111111111'},
   ];
   const NETWORKS: NetworkSection[] = [
     {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: []},
@@ -125,15 +125,13 @@ describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', ()
     expect(usdc.testKey).toBe('sol-usdc');
   });
 
-  it('reads symbol/decimals/ramps from the solana section rows when networks is supplied', () => {
+  it('reads symbol/decimals from the solana section rows when networks is supplied', () => {
     const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: NETWORKS});
     const sol = assets.find(a => a.id === 'solana:SOL')!;
     expect(sol.symbol).toBe('SOLANA');
     expect(sol.decimals).toBe(4);
-    expect(sol.capabilities).toEqual({onramp: 'Direct', offramp: 'Partner'});
     const usdc = assets.find(a => a.id === 'solana:USDC')!;
     expect(usdc.decimals).toBe(5);
-    expect(usdc.capabilities).toEqual({onramp: 'Direct', offramp: 'Direct'});
   });
 
   it('ids + testKeys stay the stable literals regardless of catalog metadata (testID contract)', () => {
@@ -466,13 +464,13 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
   it('NO Add money / Cash out actions for VCHF/ICP: ramps Unavailable, no minter, not mintable', () => {
     // The catalog-level mirror of the UI action gates: PayMode's Add-money predicate
     // (gateDepositable = !mintable && onramp !== 'Unavailable' && minter != null) and the
-    // BalancesSheet/WithdrawSheet cash-out family gate both read exactly these fields. VCHF/ICP
-    // fail every leg ⇒ no action button is ever emitted, while remaining selectable/payable.
-    const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
-    for (const [id, currency] of [['ic:7', 7], ['ic:8', 8]] as const) {
-      const a = assets.find(x => x.id === id)!;
-      expect(a.capabilities).toEqual({onramp: 'Unavailable', offramp: 'Unavailable'});
+    // BalancesSheet/WithdrawSheet cash-out family gate both read exactly these DESCRIPTOR fields —
+    // the view model carries no ramp copy. VCHF/ICP fail every leg ⇒ no action button is ever
+    // emitted, while remaining selectable/payable (rows asserted above).
+    for (const currency of [7, 8] as const) {
       const d = BUNDLED.find(c => c.currency === currency)!;
+      expect(d.onramp).toBe('Unavailable');
+      expect(d.offramp).toBe('Unavailable');
       expect(d.mintable).toBe(false);
       expect(d.minter).toBeNull();
       expect(d.minter_family).toBeNull();

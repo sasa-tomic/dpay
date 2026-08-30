@@ -57,13 +57,13 @@ describe('icons registry', () => {
 
 // Fixtures — real SelectableAsset shapes from config/assets.ts.
 const ASSETS: SelectableAsset[] = [
-  {id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', networkLabel: 'Internet Computer', network: null, decimals: 2, linkToken: 'DEMO', visible: true, capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'demo'},
-  {id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'ckBTC', networkLabel: 'Bitcoin', network: 'Bitcoin', decimals: 8, linkToken: 'ckBTC', visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'ckbtc'},
-  {id: 'ic:2', protocol: 'ic', currency: 2, symbol: 'ckETH', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 18, linkToken: 'ckETH', visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'cketh'},
-  {id: 'ic:3', protocol: 'ic', currency: 3, symbol: 'ckUSDC', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 6, linkToken: 'ckUSDC', visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'ckusdc'},
-  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', decimals: 9, linkToken: 'SOL', visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'sol'},
-  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', decimals: 6, linkToken: 'USDC', visible: true, capabilities: {onramp: 'Direct', offramp: 'Direct'}, testKey: 'sol-usdc'},
-  {id: 'ic:9', protocol: 'ic', currency: 9, symbol: 'CHF', networkLabel: 'Swiss Franc', network: 'Swiss Franc', decimals: 2, linkToken: 'CHF', visible: true, capabilities: {onramp: 'Direct', offramp: 'Unavailable'}, testKey: 'chf'},
+  {id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', networkLabel: 'Internet Computer', network: null, decimals: 2, linkToken: 'DEMO', visible: true, testKey: 'demo'},
+  {id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'ckBTC', networkLabel: 'Bitcoin', network: 'Bitcoin', decimals: 8, linkToken: 'ckBTC', visible: true, testKey: 'ckbtc'},
+  {id: 'ic:2', protocol: 'ic', currency: 2, symbol: 'ckETH', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 18, linkToken: 'ckETH', visible: true, testKey: 'cketh'},
+  {id: 'ic:3', protocol: 'ic', currency: 3, symbol: 'ckUSDC', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 6, linkToken: 'ckUSDC', visible: true, testKey: 'ckusdc'},
+  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', decimals: 9, linkToken: 'SOL', visible: true, testKey: 'sol'},
+  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', decimals: 6, linkToken: 'USDC', visible: true, testKey: 'sol-usdc'},
+  {id: 'ic:9', protocol: 'ic', currency: 9, symbol: 'CHF', networkLabel: 'Swiss Franc', network: 'Swiss Franc', decimals: 2, linkToken: 'CHF', visible: true, testKey: 'chf'},
 ];
 
 describe('glyphFor', () => {

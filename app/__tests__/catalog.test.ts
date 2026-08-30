@@ -948,11 +948,14 @@ describe('parseNetworkCatalog — network-first envelope (catalog v2)', () => {
     expect(flat[0].onramp).toBe('Unavailable');
   });
 
-  it('solanaAssetsOf returns the solana section rows (symbol/decimals/mint/ramps)', () => {
+  it('solanaAssetsOf returns the solana section rows (symbol/decimals/mint)', () => {
+    // The relay still EMITS onramp/offramp on solana rows; the app deliberately does not parse
+    // them (nothing reads them — the device holds the key, so the rail's capability is structural,
+    // not catalog-declared). `toEqual` is exact, so this also pins that they are not silently kept.
     const sol = solanaAssetsOf(parseNetworkCatalog(NETWORKS_JSON)!);
     expect(sol).toEqual([
-      {token: 'SOL', symbol: 'SOL', decimals: 9, mint: null, onramp: 'Direct', offramp: 'Direct'},
-      {token: 'USDC', symbol: 'USDC', decimals: 6, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'SOL', symbol: 'SOL', decimals: 9, mint: null},
+      {token: 'USDC', symbol: 'USDC', decimals: 6, mint: USDC_MINT_ADDRESS},
     ]);
   });
 
@@ -1015,7 +1018,7 @@ describe('parseNetworkCatalog — network-first envelope (catalog v2)', () => {
       {token: 'USDC', symbol: 'USDC', decimals: 6},     // valid (mint omitted ⇒ null)
     ]}]};
     const sol = solanaAssetsOf(parseNetworkCatalog(j)!);
-    expect(sol).toEqual([{token: 'USDC', symbol: 'USDC', decimals: 6, mint: null, onramp: 'Unavailable', offramp: 'Unavailable'}]);
+    expect(sol).toEqual([{token: 'USDC', symbol: 'USDC', decimals: 6, mint: null}]);
   });
 
   it('survives a JSON round-trip through the cached envelope (the cache read parses the SAME shape)', () => {
@@ -1088,8 +1091,8 @@ describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
 
   it('mirrors the solana rail constants VERBATIM (decimals + mint imported from the rail modules)', () => {
     expect(solanaAssetsOf(BUNDLED_NETWORKS)).toEqual([
-      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null, onramp: 'Direct', offramp: 'Direct'},
-      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS},
     ]);
   });
 });

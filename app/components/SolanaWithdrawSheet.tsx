@@ -5,6 +5,8 @@ import {S} from '../styles';
 import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
+import {useJourney} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, isValidSolanaAddress} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
@@ -44,6 +46,10 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+  // Trip Ready J5b — paymentTested: the same stamp the IC rails award, on the same event (a send
+  // that CONFIRMED). `sendSol`/`sendSpl` resolve only on a confirmed signature and throw otherwise,
+  // so the catch below — the honest "we don't know" path — never reaches the award.
+  const {journey} = useJourney();
   const {copied, copy: doCopy} = useCopyFeedback();
 
   useEscapeToClose(onClose);
@@ -93,6 +99,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
       setSignature(sig);
       setPhase('done');
       onSent(); // trigger an immediate balance refresh (SOL or USDC — the parent wires the right one)
+      awardPaymentTested(journey);
     } catch (e: unknown) {
       // A Solana RPC error (insufficient funds / rent-exempt violation / network / missing ATA) or abort.
       setErr(friendlySolError(e instanceof Error ? e.message : String(e)));

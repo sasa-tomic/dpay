@@ -4,6 +4,8 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
+import {useJourney} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
 import {displayName, fmtCurrencyAmount, isTestnetCurrency, testnetDisplayName, isValidDestinationAddress} from '../config/catalog';
@@ -75,6 +77,11 @@ export function SendSheet({
   // while an in-progress address is still being typed.
   const [resolved, setResolved] = useState<ResolvedDestination | null>(null);
   const [selfAccount, setSelfAccount] = useState<{principal: string; accountId: string} | null>(null);
+  // Trip Ready J5b — paymentTested. A send IS a real payment, so it fills the stamp exactly as a
+  // scanned or tapped one does; without this a wallet whose only money movement is outbound never
+  // completed the passport. `send()` is called from the Confirm press, so the plain hook value is
+  // the current render's journey (no ref needed — unlike the poll/effect call sites in PayMode).
+  const {journey} = useJourney();
 
   useEscapeToClose(onClose);
 
@@ -244,6 +251,7 @@ export function SendSheet({
         setPhase('done');
         void rememberAddress(assetKey, resolved.destination, saveName.trim(), Date.now());
         onSent();
+        awardPaymentTested(journey); // CONFIRMED settle only — the 'unknown' branch below claims nothing
         return;
       }
       if (out.kind === 'rejected') { setErr(out.reason); setPhase('form'); return; }

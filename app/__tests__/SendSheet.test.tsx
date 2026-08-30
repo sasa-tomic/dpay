@@ -20,6 +20,8 @@
  *  - the self-send warning, in both account namespaces — it needs the wallet's own identity as the
  *    destination, which a flow would have to construct.
  *  - the button state DURING an in-flight validation: a race with no deterministic browser handle.
+ *  - the Trip Readiness PAYMENT TESTED stamp, which is awarded on a CONFIRMED settle and withheld
+ *    on the honest-pending 'unknown' outcome. Only a mock can produce an 'unknown' at all.
  *
  * `AddressField` and `WithdrawSheet` are null-rendering doubles that keep the props under assertion
  * (`status`, `onChange`); the core validators and the rail are mocked at their module boundaries,
@@ -57,8 +59,10 @@ jest.mock('../components/WithdrawSheet', () => ({
   WithdrawSheet: (_props: {address: string}) => null,
 }));
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {DpayCore} from '../services/native';
-import {fetchLedgerFee} from '../services/rail';
+import {fetchLedgerFee, prepareTransfer, submitTransfer} from '../services/rail';
+import {hasStamp, loadJourney} from '../lib/journey';
 import {SendSheet, resolveDestination} from '../components/SendSheet';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {CurrencyDescriptor} from '../config/catalog';
@@ -85,8 +89,9 @@ const SOL_ADDR = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 // then rejected by that family's own validator — the branch below the shape/route split.
 const BTC_TRUNCATED = 'bc1qar0srrr7xfkvy5l';
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  await AsyncStorage.clear(); // the journey store is global — a stamp must not leak across tests
   jest.mocked(fetchLedgerFee).mockResolvedValue(LEDGER_FEE);
   jest.mocked(DpayCore.icpSelfPrincipal).mockResolvedValue(OISY);
   jest.mocked(DpayCore.icpAccountIdFromPrincipal).mockResolvedValue('ff'.repeat(32));
@@ -350,6 +355,51 @@ describe('SendSheet — the confirm gate while no destination is resolved', () =
     expect(field(tree).status).toBeNull();
     expect(confirm(tree).disabled).toBe(true);
 
+    act(() => { tree.unmount(); });
+  });
+});
+
+// --- the PAYMENT TESTED stamp ---------------------------------------------------------------------
+
+describe('SendSheet — a send fills the Trip Readiness PAYMENT TESTED stamp, but only once settled', () => {
+  const PREPARED = {
+    ledger: VCHF.ledger!, envelopeHex: 'aa'.repeat(64), requestIdHex: 'rr'.repeat(16),
+    amount: '100000000', currency: 7, memoHex: 'be'.repeat(16),
+  };
+
+  /** Drive Confirm, then give the journey store's fire-and-forget write queue a macrotask to land. */
+  async function sendAndReadStamp(tree: renderer.ReactTestRenderer): Promise<boolean> {
+    await act(async () => { confirm(tree).onPress(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    return hasStamp(await loadJourney(), 'paymentTested');
+  }
+
+  async function armedSend() {
+    jest.mocked(prepareTransfer).mockResolvedValue(PREPARED);
+    const tree = await mountSend();
+    await typeAddress(tree, K2);
+    await typeAmount(tree, '1.00000000');
+    return tree;
+  }
+
+  test('a SETTLED transfer stamps it — sending IS a real payment, and for an outbound-only wallet the only one', async () => {
+    // Before this, the stamp was reachable only by scanning/tapping: a wallet whose entire money
+    // history is sends could never complete the passport, though it had moved real funds.
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '8168'});
+    const tree = await armedSend();
+    expect(await sendAndReadStamp(tree)).toBe(true);
+    expect(textOf(tree, 'send-status')).toBe(M.withdraw.send.sent); // it really reached the settled screen
+    act(() => { tree.unmount(); });
+  });
+
+  test('an UNKNOWN outcome stamps NOTHING — a transfer that may never have executed is not a payment made', async () => {
+    // The honest-pending branch: the envelope was submitted but never reached a terminal state in
+    // budget. Awarding here would tell the user they had tested paying on the strength of a
+    // transfer nobody has confirmed.
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'unknown'});
+    const tree = await armedSend();
+    expect(await sendAndReadStamp(tree)).toBe(false);
+    expect(textOf(tree, 'send-status')).toBe(M.withdraw.send.sentUnknown); // the pending screen, not a failure
     act(() => { tree.unmount(); });
   });
 });

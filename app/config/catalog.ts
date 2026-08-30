@@ -68,8 +68,9 @@ export type SolanaAsset = {
   symbol: string;             // display symbol ('SOL' / 'USDC')
   decimals: number;           // smallest-unit decimal count (SOL=9, USDC=6)
   mint: string | null;        // SPL mint principal as text; null for native SOL
-  onramp: RampCapability;     // device-key rail: deposit = send to the device address
-  offramp: RampCapability;    // withdraw = sign a transfer from the device key
+  // NO ramp fields here. The relay emits them for solana rows, but nothing in the app reads them:
+  // the device holds the key, so deposit/withdraw capability is structural, not catalog-declared.
+  // `CurrencyDescriptor` keeps its pair because the IC fund gate genuinely reads it.
 };
 export type NetworkSection =
   | {protocol: 'icp'; name: string; environment: 'mainnet' | 'testnet'; assets: CurrencyDescriptor[]}
@@ -164,8 +165,6 @@ function parseSolanaRow(a: unknown): SolanaAsset | null {
     symbol: r.symbol,
     decimals: r.decimals,
     mint: typeof r.mint === 'string' ? r.mint : null,
-    onramp: parseRamp(r.onramp),
-    offramp: parseRamp(r.offramp),
   };
 }
 
@@ -259,8 +258,8 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
   {
     protocol: 'solana', name: 'Solana', environment: 'mainnet',
     assets: [
-      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null, onramp: 'Direct', offramp: 'Direct'},
-      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS},
     ],
   },
 ];

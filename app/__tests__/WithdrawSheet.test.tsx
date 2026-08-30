@@ -24,6 +24,9 @@
  * re-render with a new `address`, and the two callbacks that cross that boundary are asserted
  * directly: `onResumeAddress` pushes a hydrated in-flight destination back UP into the shared
  * field, and `onSaveAddress` hands the settled destination to the shared address book.
+ *
+ * The same unknown/settled boundary governs the Trip Readiness PAYMENT TESTED stamp, pinned at the
+ * end: a cash-out is a real payment, but only the WHOLE sequence settling is one.
  */
 import {describe, test, expect, jest, beforeEach} from '@jest/globals';
 import React from 'react';
@@ -45,6 +48,7 @@ import {
   submitOfframpStep,
 } from '../services/rail';
 import {planOfframpConfirm} from '../services/offrampRetry';
+import {hasStamp, loadJourney} from '../lib/journey';
 import {hydrateOfframp, offrampKey} from '../services/offrampPersist';
 import {WithdrawSheet} from '../components/WithdrawSheet';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -277,6 +281,36 @@ describe('WithdrawSheet retry-after-unknown (double-burn guard)', () => {
     expect(prepareEthWithdrawal).toHaveBeenCalledTimes(1);
     expect(jest.mocked(submitOfframpStep).mock.calls.length).toBeGreaterThanOrEqual(1);
     expect(root.root.findByProps({testID: 'withdraw-status'}).props.children).toBe('Withdrawn ✓');
+    act(() => { root.unmount(); });
+  });
+});
+
+describe('WithdrawSheet — the PAYMENT TESTED stamp follows the WHOLE sequence, not a step', () => {
+  /** Give the journey store's fire-and-forget write queue a macrotask, then read what persisted. */
+  async function stamped(): Promise<boolean> {
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    return hasStamp(await loadJourney(), 'paymentTested');
+  }
+
+  test('a settled approve + an UNKNOWN burn stamps nothing; the retry that settles the burn stamps it', async () => {
+    // The approve settling means funds were authorised, not sent. Stamping there would claim a
+    // completed payment off a withdrawal whose burn nobody has confirmed — and the burn is the
+    // payment. Only the last step settling (runOfframp reaching its end) earns the stamp.
+    jest.mocked(submitOfframpStep)
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'}) // approve settles
+      .mockResolvedValueOnce({kind: 'unknown'})                  // burn unknown — honest pending
+      .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'}); // retry: the same burn settles
+
+    const root = await renderSheet();
+    await act(async () => {
+      root.root.findByProps({testID: 'withdraw-amount-input'}).props.onChangeText('0.001');
+    });
+    await driveConfirm(root);
+    expect(await stamped()).toBe(false);
+
+    await driveConfirm(root);
+    expect(root.root.findByProps({testID: 'withdraw-status'}).props.children).toBe('Withdrawn ✓');
+    expect(await stamped()).toBe(true);
     act(() => { root.unmount(); });
   });
 });

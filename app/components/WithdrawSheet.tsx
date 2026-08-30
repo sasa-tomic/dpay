@@ -4,6 +4,8 @@ import {C} from '../config/palette';
 import {S} from '../styles';
 import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
+import {useJourney} from '../lib/journey';
+import {awardPaymentTested} from '../lib/readiness';
 import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
 import {prepareBtcWithdrawal, prepareEthWithdrawal, prepareErc20Withdrawal, submitOfframpStep, fetchGasFeeWei} from '../services/rail';
@@ -44,6 +46,10 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
   // The prepared offramp retained across retries and restarts (double-burn guard — see header).
   // null ⇒ the next Confirm PREPARES fresh envelopes; non-null ⇒ Confirm RESUMES the SAME bytes.
   const [retained, setRetained] = useState<RetainedOfframp | null>(null);
+  // Trip Ready J5b — paymentTested: a cash-out is a real payment. Awarded only where the WHOLE step
+  // sequence settled (runOfframp below); a rejected or unknown step throws before that point, so a
+  // burn whose outcome is still open never claims a completed payment.
+  const {journey} = useJourney();
   const {copied, copy: doCopy} = useCopyFeedback();
   // Every amount on this sheet is the same asset at the same precision — one formatter, one place.
   const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, display.nativeAsset, display.amountDecimals);
@@ -121,6 +127,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
     setPhase('done');
     onSaveAddress(dest); // remember in the shared address book (one store for every rail)
     onWithdrawn(); // trigger a balance/history refresh
+    awardPaymentTested(journey);
   }
 
   async function confirm() {
