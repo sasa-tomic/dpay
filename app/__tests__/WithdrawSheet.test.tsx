@@ -63,7 +63,7 @@ const DESC: CurrencyDescriptor = {
   currency: 4, ledger: 'ryjxe-uaaaa-aaaaa-aaabq-cai', mintable: false,
   minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20' as MinterFamily,
   symbol: 'ckETH', decimals: 18, wrapper_name: 'ckETH', backing_symbol: 'ETH',
-  network: 'Ethereum', display_decimals: 6,
+  network: 'Ethereum', display_decimals: 6, min_fraction_digits: null,
   fee: '20000000000000', cap: null, chain_id: 1, token_contract: null, gas_ledger: null,
   onramp: 'Direct', offramp: 'Direct', testnet: false,
 };

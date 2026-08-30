@@ -55,6 +55,7 @@ export type SelectableAsset =
       networkLabel: string;    // subtitle ("<symbol> · <network>" for non-DEMO; "play money…" for DEMO)
       network: string | null;  // the CHAIN's proper noun ('Bitcoin'/'Ethereum') — wire/constant, never translated; null for DEMO
       decimals: number;        // smallest-unit decimal count for amount formatting
+      minFractionDigits: number; // compact-display floor (catalog `min_fraction_digits`; 0 when unset)
       visible: boolean;        // true on every entry the builder returns (the builder IS the filter)
       testKey: string;         // stable ASCII testID key (unique within a built list)
     }
@@ -67,6 +68,7 @@ export type SelectableAsset =
       networkLabel: string;    // 'SOL · Solana' | 'USDC · Solana' — distinct from any IC USDC
       network: 'Solana';       // the chain's proper noun — never translated
       decimals: number;        // SOL=9, USDC=6
+      minFractionDigits: number; // compact-display floor (catalog `min_fraction_digits`; 0 when unset)
       visible: boolean;        // always true (appended only when the rail is enabled)
       testKey: string;         // stable ASCII testID key ('sol' | 'sol-usdc')
     };
@@ -149,6 +151,7 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
     networkLabel,
     network,
     decimals: desc.decimals ?? 0,
+    minFractionDigits: desc.min_fraction_digits ?? 0,
     visible: true,
     testKey: icTestKey(desc, isPrimary, testnet),
   };
@@ -171,6 +174,7 @@ function solanaAssetRow(row: SolanaAsset, token: 'SOL' | 'USDC', testKey: string
     networkLabel: M.wallet.asset.networkLabel(row.symbol, 'Solana'),
     network: 'Solana',
     decimals: row.decimals,
+    minFractionDigits: row.min_fraction_digits ?? 0,
     visible: true,
     testKey,
   };

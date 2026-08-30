@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {base, fmtAsset, usd} from '../lib/format';
+import {base, fmtAsset, fmtAssetCompact, usd} from '../lib/format';
 import {MAX_DECIMALS} from '../lib/amount';
 import {M} from '../i18n';
 import {BALANCE_TIMEOUT_MS} from './constants';
@@ -45,6 +45,11 @@ export type CurrencyDescriptor = {
   backing_symbol: string | null;   // backing native-chain asset symbol ("BTC"/"USDC"/"ETH")
   network: string | null;          // native settlement network name ("Bitcoin"/"Ethereum")
   display_decimals: number | null; // UI precision; default = `decimals` (full precision) when unset
+  // The compact display's MINIMUM fractional digits — the floor `display_decimals` caps from
+  // above. 2 for the unit-denominated tokens counted like money (ckUSDC/VCHF → "1.50", "0.00"),
+  // null ⇒ 0 for the ones written trimmed (BTC/ETH/ICP/SOL → "1.5", "0"). Read ONLY by
+  // `fmtAssetCompact`; the exact formatter (`fmtAsset`) ignores it.
+  min_fraction_digits: number | null;
   fee: string | null;              // ICRC ledger fee in RAW units (string for forward-compat; MC2 governs)
   cap: string | null;              // per-currency tx cap in RAW units (string for forward-compat; MC2 governs)
   chain_id: number | null;         // EVM chain id for ckERC20 (1=Ethereum mainnet)
@@ -67,6 +72,8 @@ export type SolanaAsset = {
   token: string;              // 'SOL' | 'USDC' — the SelectableAsset token literal
   symbol: string;             // display symbol ('SOL' / 'USDC')
   decimals: number;           // smallest-unit decimal count (SOL=9, USDC=6)
+  // The same compact-display floor the IC rows carry, so USDC reads "1.50" on BOTH rails.
+  min_fraction_digits: number | null;
   mint: string | null;        // SPL mint principal as text; null for native SOL
   // NO ramp fields here. The relay emits them for solana rows, but nothing in the app reads them:
   // the device holds the key, so deposit/withdraw capability is structural, not catalog-declared.
@@ -139,6 +146,7 @@ function parseIcpRow(c: unknown, testnet: boolean): CurrencyDescriptor | null {
     backing_symbol: typeof r.backing_symbol === 'string' ? r.backing_symbol : null,
     network: typeof r.network === 'string' ? r.network : null,
     display_decimals: typeof r.display_decimals === 'number' ? r.display_decimals : null,
+    min_fraction_digits: typeof r.min_fraction_digits === 'number' ? r.min_fraction_digits : null,
     // fee/cap: accept number or string from the relay; carry as string (forward-compatible for
     // u64 values that exceed Number.MAX_SAFE_INTEGER once MC2 governs them).
     fee: r.fee == null ? null : String(r.fee),
@@ -164,6 +172,7 @@ function parseSolanaRow(a: unknown): SolanaAsset | null {
     token: r.token,
     symbol: r.symbol,
     decimals: r.decimals,
+    min_fraction_digits: typeof r.min_fraction_digits === 'number' ? r.min_fraction_digits : null,
     mint: typeof r.mint === 'string' ? r.mint : null,
   };
 }
@@ -227,16 +236,16 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
     protocol: 'icp', name: 'Internet Computer', environment: 'mainnet',
     assets: [
       {currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2,
-        wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, fee: null, cap: null,
+        wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, min_fraction_digits: null, fee: null, cap: null,
         chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Unavailable', testnet: false},
       {currency: 1, ledger: 'mxzaz-hqaaa-aaaar-qaada-cai', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8,
-        wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, fee: null, cap: null,
+        wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, min_fraction_digits: null, fee: null, cap: null,
         chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct', testnet: false},
       {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,
-        wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', cap: null,
+        wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, min_fraction_digits: 2, fee: '10000', cap: null,
         chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct', testnet: false},
       {currency: 6, ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ETH', decimals: 18,
-        wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6, fee: '2000000000000', cap: null,
+        wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6, min_fraction_digits: null, fee: '2000000000000', cap: null,
         chain_id: 1, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct', testnet: false},
       // VCHF (currency 7) + ICP (currency 8) — complete NO-MINTER direct-ICRC mainnet assets
       // (2026-08-28; docs/specs/2026-08-28-vchf-icp-support-spec.md). External IC ledgers, not
@@ -247,10 +256,10 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
       // not ledger limits. Principals + decimals are drift-checked against dfx/catalog_truth.json
       // (vchf_ledger / icp_ledger) by the jest suite.
       {currency: 7, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', mintable: false, minter: null, minter_family: null, symbol: 'VCHF', decimals: 8,
-        wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer', display_decimals: 8, fee: '10000', cap: '1000000000000',
+        wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer', display_decimals: 8, min_fraction_digits: 2, fee: '10000', cap: '1000000000000',
         chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
       {currency: 8, ledger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', mintable: false, minter: null, minter_family: null, symbol: 'ICP', decimals: 8,
-        wrapper_name: 'ICP', backing_symbol: 'ICP', network: 'Internet Computer', display_decimals: 8, fee: '10000', cap: '100000000000',
+        wrapper_name: 'ICP', backing_symbol: 'ICP', network: 'Internet Computer', display_decimals: 8, min_fraction_digits: null, fee: '10000', cap: '100000000000',
         chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false},
     ],
   },
@@ -258,8 +267,8 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
   {
     protocol: 'solana', name: 'Solana', environment: 'mainnet',
     assets: [
-      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null},
-      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS},
+      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, min_fraction_digits: null, mint: null},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, min_fraction_digits: 2, mint: USDC_MINT_ADDRESS},
     ],
   },
 ];
@@ -608,13 +617,45 @@ export function currencySymbol(catalog: CurrencyDescriptor[], currency: number):
 // exact BigInt parser (no precision loss above 2^53).
 export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: number, raw: string): string {
   if (currency === 0) return usd(raw);
+  const d = amountDisplayOf(catalog, currency);
+  if (!d) return M.wallet.asset.unsupported;
+  return fmtAsset(raw, d.decimals, d.unit, d.displayDecimals);
+}
+
+// The COMPACT sibling — same asset resolution, `fmtAssetCompact` instead of the exact formatter.
+// Reserved for the glanceable surfaces (Balances rows, the wallet header, Ledger history); every
+// screen where the user commits money keeps `fmtCurrencyAmount`. See `fmtAssetCompact` for the
+// trim/truncate/mark rules.
+export function fmtCurrencyAmountCompact(
+  catalog: CurrencyDescriptor[], currency: number, raw: string, sign = '',
+): string {
+  // DEMO (currency 0) is fixed-width ∂ play money at 2 decimals — its exact rendering already IS
+  // its compact one, so delegate and keep the "currency 0 → usd()" rule in exactly one place. It
+  // never carries a truncation marker, so its sign is a plain prefix.
+  if (currency === 0) return `${sign}${fmtCurrencyAmount(catalog, currency, raw)}`;
+  const d = amountDisplayOf(catalog, currency);
+  if (!d) return M.wallet.asset.unsupported;
+  return fmtAssetCompact(raw, d.decimals, d.unit, d.displayDecimals, d.minFractionDigits, sign);
+}
+
+// The ONE asset→display-facts resolution both formatters share (unit + the three precisions).
+// Returns null when the asset cannot be rendered honestly — an unknown family with no
+// backing_symbol, or a descriptor with no decimals — so both callers fail closed to "Unsupported"
+// rather than printing a wrong "… BTC" amount (MC1 unit 6). Currency 0 (DEMO) never reaches here:
+// both formatters early-return the `∂` formatter for it.
+type AmountDisplay = {unit: string; decimals: number; displayDecimals: number; minFractionDigits: number};
+function amountDisplayOf(catalog: CurrencyDescriptor[], currency: number): AmountDisplay | null {
   const a = catalog.find(c => c.currency === currency);
   // The display unit is the per-currency backing symbol (authoritative); fall back to the family's
   // cosmetic label only for a legacy descriptor without backing_symbol. An unknown family fail-closes.
   const unit = a?.backing_symbol ?? familyDisplay(catalog, currency)?.networkLabel;
-  if (!unit) return M.wallet.asset.unsupported;
+  if (!unit) return null;
   const decimals = a?.decimals ?? null;
-  if (decimals == null) return M.wallet.asset.unsupported;
-  const displayDecimals = a?.display_decimals ?? decimals;
-  return fmtAsset(raw, decimals, unit, displayDecimals);
+  if (decimals == null) return null;
+  return {
+    unit,
+    decimals,
+    displayDecimals: a?.display_decimals ?? decimals,
+    minFractionDigits: a?.min_fraction_digits ?? 0,
+  };
 }

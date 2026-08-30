@@ -136,6 +136,53 @@ export function fmtAsset(raw: string, decimals: number, unit: string, displayDec
   const fracStr = fracPart.toString().padStart(decimals, '0').slice(0, dd).padEnd(dd, '0');
   return `${whole}${decimalSep()}${fracStr} ${unit}`;
 }
+// The COMPACT sibling of `fmtAsset` — the glanceable amount (Balances rows, the wallet header,
+// Ledger history). `fmtAsset` stays the EXACT formatter and keeps every surface where the user
+// commits money (payment review, fees, Max, receipts, the NFC disclosure): a padded, full-precision
+// string. Two display contracts, one BigInt core; a compact string never reaches a signing screen.
+//
+// Three rules, in order of importance:
+//   1. Trim trailing zeros down to `minFractionDigits` (the asset's `min_fraction_digits`, 0 when
+//      unset). Lossless — it removes noise, never information: "1.50000000 VCHF" → "1.50 VCHF",
+//      "1.500000000 SOL" → "1.5 SOL", "0.00050000 BTC" → "0.0005 BTC". A full-precision value is
+//      left whole ("0.12345678 BTC"), because those digits are the user's money.
+//   2. Truncate toward zero at `displayDecimals`, NEVER round — the wallet must not print a bigger
+//      number than the user holds. Only ckETH (display 6 of 18 decimals) actually hits this today.
+//   3. Say so when the cap hides value. Truncation that drops a nonzero digit is marked "≈"; a
+//      holding smaller than the display resolution reads "< 0.000001 ETH". Before this, 500 Wei
+//      rendered a flat "0.000000 ETH" — a nonzero balance shown as nothing.
+//
+// `sign` ('−'/'+', Ledger rows) is applied BY the formatter, not concatenated by the caller: the
+// marker has to sit outside the signed number ("≈ −0.039922 ETH"), and a caller prepending its own
+// sign would produce "−≈ 0.039922 ETH". The threshold form takes no sign at all — there is no
+// number to sign, and "< −0.000001" bounds a negative instead of a magnitude, so direction stays
+// with the Ledger row's arrow and colour.
+export function fmtAssetCompact(
+  raw: string, decimals: number, unit: string, displayDecimals?: number, minFractionDigits = 0,
+  sign = '',
+): string {
+  const n = BigInt(raw);
+  const dd = displayDecimals != null && displayDecimals >= 0 && displayDecimals <= decimals ? displayDecimals : decimals;
+  const min = Math.max(0, Math.min(minFractionDigits, dd));
+  let scale = 1n;
+  for (let i = 0; i < decimals; i++) scale *= 10n;
+  const whole = groupDigits((n / scale).toString());
+  const fracAll = (n % scale).toString().padStart(decimals, '0');
+  const kept = fracAll.slice(0, dd);
+  // Below the display resolution: name the threshold rather than render a zero the user would read
+  // as "empty". `n !== 0n` keeps a REAL zero on the normal path ("0 BTC" / "0.00 VCHF").
+  if (n !== 0n && whole === '0' && !/[1-9]/.test(kept)) {
+    const threshold = dd === 0 ? '1' : `0${decimalSep()}${'0'.repeat(dd - 1)}1`;
+    return `< ${threshold} ${unit}`;
+  }
+  // Trailing-zero trim (rule 1). It only ever removes '0's, so it can never trigger rule 3.
+  let frac = kept;
+  while (frac.length > min && frac.endsWith('0')) frac = frac.slice(0, -1);
+  const num = frac.length === 0 ? whole : `${whole}${decimalSep()}${frac}`;
+  // The ticker rides as a suffix in every locale, exactly as in `fmtAsset`.
+  return `${/[1-9]/.test(fracAll.slice(dd)) ? '≈ ' : ''}${sign}${num} ${unit}`;
+}
+
 // Parse a user-entered amount (decimal string) into integer smallest-units at the given decimal
 // count, as a decimal-digit STRING. Drives the merchant's currency-aware request encoder (ReceiveMode
 // encodes the runtime currency id's raw units: 2 for DEMO, 8 for ckBTC, 6 for ckUSDC) and the

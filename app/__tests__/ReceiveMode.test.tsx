@@ -70,7 +70,7 @@ const SELF_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 // IC row, so its link reads `?asset=DEMO&network=internet-computer`.
 const DEMO_ASSET: SelectableAsset = {
   id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', linkToken: 'DEMO',
-  networkLabel: 'play money', network: null, decimals: 2, visible: true, testKey: 'demo',
+  networkLabel: 'play money', network: null, decimals: 2, minFractionDigits: 0, visible: true, testKey: 'demo',
 };
 
 const shareSpy = jest.spyOn(Share, 'share');
@@ -286,7 +286,7 @@ describe('ReceiveMode — rail-proof deeplink is history-gated, never fabricated
   const CATALOG: CurrencyDescriptor[] = [{
     currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null,
     minter_family: null, symbol: null, decimals: 2, wrapper_name: null, backing_symbol: null,
-    network: null, display_decimals: 2, fee: null, cap: null, chain_id: null, token_contract: null,
+    network: null, display_decimals: 2, min_fraction_digits: null, fee: null, cap: null, chain_id: null, token_contract: null,
     gas_ledger: null, onramp: 'Unavailable', offramp: 'Unavailable', testnet: false,
   }];
   const FORGED = receiptShareBlob({request_id: '00'.repeat(32), block_index: '7', ledger: 'x'});

@@ -38,7 +38,7 @@ import {buildAssetBalances} from '../lib/assetBalances';
 // --- shared fixtures (mirror catalog.test.ts's `mk`) -----------------------------------------
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
-  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
+  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, min_fraction_digits: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
   onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
 });
@@ -104,8 +104,8 @@ describe('buildSelectableAssets — complete visible list', () => {
 // =============================================================================================
 describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', () => {
   const SOL_ROWS: SolanaAsset[] = [
-    {token: 'SOL', symbol: 'SOLANA', decimals: 4, mint: null},
-    {token: 'USDC', symbol: 'USDC', decimals: 5, mint: 'Mint111111111111111111111111111111111111111'},
+    {token: 'SOL', symbol: 'SOLANA', decimals: 4, min_fraction_digits: null, mint: null},
+    {token: 'USDC', symbol: 'USDC', decimals: 5, min_fraction_digits: 2, mint: 'Mint111111111111111111111111111111111111111'},
   ];
   const NETWORKS: NetworkSection[] = [
     {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: []},

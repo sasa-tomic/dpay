@@ -8,6 +8,7 @@ import {
   displayName,
   currencySymbol,
   fmtCurrencyAmount,
+  fmtCurrencyAmountCompact,
   assetTestKey,
   isPayableAsset,
   isDirectIcrcAsset,
@@ -39,12 +40,12 @@ const BUNDLED_CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
 // time stamp from the owning icp section's environment.
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
-  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
+  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, min_fraction_digits: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
   onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
 });
 const CKBTC_DESC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
-const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: '10000', chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'});
+const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, min_fraction_digits: null, fee: '10000', chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai', onramp: 'Direct', offramp: 'Direct'});
 const CKSOL_DESC: CurrencyDescriptor = mk({currency: 99, minter: 'x', minter_family: 'CkSol', symbol: 'SOL', decimals: 9});
 const DEMO_DESC: CurrencyDescriptor = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2, onramp: 'Direct', offramp: 'Unavailable'});
 const KNOWN_CATALOG: CurrencyDescriptor[] = [DEMO_DESC, CKBTC_DESC, CKUSDC_DESC];
@@ -167,6 +168,31 @@ describe('fmtCurrencyAmount — explicit "Unsupported" sentinel for unknown fami
   });
 });
 
+// The compact sibling. Same asset resolution, same fail-closed contract — it differs ONLY in how
+// the digits are rendered, which is what keeps the exact string on the money-committing screens.
+describe('fmtCurrencyAmountCompact — the glanceable amount, resolved from the catalog', () => {
+  it('reads the row\'s own floor: ckBTC trims away, ckUSDC keeps two decimals', () => {
+    const usdc2 = {...CKUSDC_DESC, min_fraction_digits: 2};
+    expect(fmtCurrencyAmountCompact(KNOWN_CATALOG, 1, '50000')).toBe('0.0005 BTC');
+    expect(fmtCurrencyAmountCompact([usdc2], 2, '1000000')).toBe('1.00 USDC');
+    expect(fmtCurrencyAmountCompact([usdc2], 2, '0')).toBe('0.00 USDC');
+  });
+  it('marks a display cap that hides value (ckETH: 6 shown of 18 held)', () => {
+    const cketh = mk({currency: 6, minter_family: 'CkEthErc20', symbol: 'ckETH', decimals: 18,
+      wrapper_name: 'ckETH', backing_symbol: 'ETH', network: 'Ethereum', display_decimals: 6});
+    expect(fmtCurrencyAmountCompact([cketh], 6, '39922980593032000')).toBe('≈ 0.039922 ETH');
+    expect(fmtCurrencyAmountCompact([cketh], 6, '500')).toBe('< 0.000001 ETH');
+  });
+  it('delegates DEMO to the ∂ formatter — its exact rendering already IS its compact one', () => {
+    expect(fmtCurrencyAmountCompact(KNOWN_CATALOG, 0, '2500')).toBe('∂25.00');
+    expect(fmtCurrencyAmountCompact(KNOWN_CATALOG, 0, '2500', '−')).toBe('−∂25.00');
+  });
+  it('fails closed to "Unsupported" for an unknown family, exactly like the exact formatter', () => {
+    expect(fmtCurrencyAmountCompact(UNKNOWN_CATALOG, 99, '123456789')).toBe('Unsupported');
+    expect(fmtCurrencyAmountCompact([], 42, '1')).toBe('Unsupported');
+  });
+});
+
 describe('displayName — no BTC fallback for unknown families', () => {
   it('returns "BTC" for CkBtcUtxo (unchanged)', () => {
     expect(displayName(CKBTC_DESC)).toBe('BTC');
@@ -212,7 +238,7 @@ describe('currencySymbol — no BTC glyph fallback for unknown families', () => 
       ...mk({
         currency: 7, minter_family: null, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', symbol: 'VCHF', decimals: 8,
         wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer',
-        display_decimals: 8, fee: '10000', cap: null,
+        display_decimals: 8, min_fraction_digits: null, fee: '10000', cap: null,
       }),
     }];
     expect(currencySymbol(incomplete, 7)).toBe('?');
@@ -495,7 +521,7 @@ describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)'
   const VCHF_COMPLETE: CurrencyDescriptor = mk({
     currency: 7, minter_family: null, ledger: 'ly36x-wiaaa-aaaai-aqj7q-cai', symbol: 'VCHF', decimals: 8,
     wrapper_name: 'VCHF', backing_symbol: 'VCHF', network: 'Internet Computer',
-    display_decimals: 8, fee: '10000', cap: '1000000000000',
+    display_decimals: 8, min_fraction_digits: null, fee: '10000', cap: '1000000000000',
     // mk defaults onramp/offramp to 'Unavailable' — this fixture pays with NO ramps by construction.
   });
 
@@ -759,6 +785,7 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(vchf.backing_symbol).toBe('VCHF');
     expect(vchf.network).toBe('Internet Computer');
     expect(vchf.display_decimals).toBe(8);
+    expect(vchf.min_fraction_digits).toBe(2);        // unit-denominated: "1.50", never "1.5"
     expect(vchf.fee).toBe('10000');                       // raw 10_000 e8-splits
     expect(vchf.cap).toBe('1000000000000');               // raw 1_000_000_000_000 = 10,000 VCHF
     expect(vchf.mintable).toBe(false);
@@ -777,6 +804,7 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     expect(icp.backing_symbol).toBe('ICP');
     expect(icp.network).toBe('Internet Computer');
     expect(icp.display_decimals).toBe(8);
+    expect(icp.min_fraction_digits).toBeNull();      // ICP is written trimmed: "1.5"
     expect(icp.fee).toBe('10000');
     expect(icp.cap).toBe('100000000000');                 // raw 100_000_000_000 = 1,000 ICP
     expect(icp.mintable).toBe(false);
@@ -880,21 +908,21 @@ describe('catalogCacheKey — relay-URL-scoped cache (Phase 1)', () => {
 const wireIcpRow = (over: Record<string, unknown>): Record<string, unknown> => ({
   currency: 1, ledger: 'mxzaz-hqaaa-aaaar-qaada-cai', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai',
   minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC',
-  network: 'Bitcoin', display_decimals: 8, fee: null, cap: null, chain_id: null, token_contract: null,
+  network: 'Bitcoin', display_decimals: 8, min_fraction_digits: null, fee: null, cap: null, chain_id: null, token_contract: null,
   gas_ledger: null, onramp: 'Direct', offramp: 'Direct', ...over,
 });
 const NETWORKS_JSON = {
   networks: [
     {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: [
       wireIcpRow({currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2, wrapper_name: null, backing_symbol: null, network: null, display_decimals: null}),
-      wireIcpRow({currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, fee: 10000, chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai'}),
+      wireIcpRow({currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, min_fraction_digits: null, fee: 10000, chain_id: 1, token_contract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', gas_ledger: 'ss2fx-dyaaa-aaaar-qacoq-cai'}),
     ]},
     {protocol: 'icp', name: 'Internet Computer', environment: 'testnet', assets: [
       wireIcpRow({currency: 3, minter: 'mt', wrapper_name: 'ckTESTBTC', network: 'Bitcoin Testnet'}),
     ]},
     {protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: [
       {token: 'SOL', symbol: 'SOL', decimals: 9, mint: null, onramp: 'Direct', offramp: 'Direct'},
-      {token: 'USDC', symbol: 'USDC', decimals: 6, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
+      {token: 'USDC', symbol: 'USDC', decimals: 6, min_fraction_digits: 2, mint: USDC_MINT_ADDRESS, onramp: 'Direct', offramp: 'Direct'},
     ]},
   ],
 };
@@ -948,14 +976,14 @@ describe('parseNetworkCatalog — network-first envelope (catalog v2)', () => {
     expect(flat[0].onramp).toBe('Unavailable');
   });
 
-  it('solanaAssetsOf returns the solana section rows (symbol/decimals/mint)', () => {
+  it('solanaAssetsOf returns the solana section rows (symbol/decimals/floor/mint)', () => {
     // The relay still EMITS onramp/offramp on solana rows; the app deliberately does not parse
     // them (nothing reads them — the device holds the key, so the rail's capability is structural,
     // not catalog-declared). `toEqual` is exact, so this also pins that they are not silently kept.
     const sol = solanaAssetsOf(parseNetworkCatalog(NETWORKS_JSON)!);
     expect(sol).toEqual([
-      {token: 'SOL', symbol: 'SOL', decimals: 9, mint: null},
-      {token: 'USDC', symbol: 'USDC', decimals: 6, mint: USDC_MINT_ADDRESS},
+      {token: 'SOL', symbol: 'SOL', decimals: 9, min_fraction_digits: null, mint: null},
+      {token: 'USDC', symbol: 'USDC', decimals: 6, min_fraction_digits: 2, mint: USDC_MINT_ADDRESS},
     ]);
   });
 
@@ -1018,7 +1046,7 @@ describe('parseNetworkCatalog — network-first envelope (catalog v2)', () => {
       {token: 'USDC', symbol: 'USDC', decimals: 6},     // valid (mint omitted ⇒ null)
     ]}]};
     const sol = solanaAssetsOf(parseNetworkCatalog(j)!);
-    expect(sol).toEqual([{token: 'USDC', symbol: 'USDC', decimals: 6, mint: null}]);
+    expect(sol).toEqual([{token: 'USDC', symbol: 'USDC', decimals: 6, min_fraction_digits: null, mint: null}]);
   });
 
   it('survives a JSON round-trip through the cached envelope (the cache read parses the SAME shape)', () => {
@@ -1091,8 +1119,8 @@ describe('BUNDLED_NETWORKS — one shape with the wire (catalog v2)', () => {
 
   it('mirrors the solana rail constants VERBATIM (decimals + mint imported from the rail modules)', () => {
     expect(solanaAssetsOf(BUNDLED_NETWORKS)).toEqual([
-      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, mint: null},
-      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, mint: USDC_MINT_ADDRESS},
+      {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, min_fraction_digits: null, mint: null},
+      {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, min_fraction_digits: 2, mint: USDC_MINT_ADDRESS},
     ]);
   });
 });

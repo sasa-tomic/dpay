@@ -92,7 +92,7 @@ jest.mock('../solana', () => {
 // Catalog fixture — same shape as nfc-disclosure.test.ts's KNOWN_CATALOG (ckBTC, 8 decimals).
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
-  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null,
+  wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, min_fraction_digits: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
   onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
 });
