@@ -256,7 +256,12 @@ export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAt
         ) : null}
         {!nfcActive ? (
           <>
-            <NfcStatusRow nfcStatus={nfcStatus} testID="sol-nfc-status" />
+            {/* testID is `sol-nfc-row`, NOT `sol-nfc-status`: that one is already owned by the SOL
+                tap OVERLAY (SolNfcTap → NfcTapView), and flows 47/51/66/74/93 wait for the overlay
+                to appear and then disappear. An always-present row sharing its id makes `waitGone`
+                unsatisfiable. The IC twin has no such clash — its overlay is `nfc-status` while the
+                row is `pay-scan`. */}
+            <NfcStatusRow nfcStatus={nfcStatus} testID="sol-nfc-row" />
             <View testID="sol-pay-scan" style={S.scanWrap}>
               {/* P3 — a leading IconScan on the hint only; the camBox/scanWrap/center nesting is
                   UNTOUCHED (the 0×0 camBox collapse class is gated by `just campreview`). */}
