@@ -65,7 +65,7 @@ export async function run() {
 
     // --- Fund ckUSDC for A at her principal so assetBalances[2] is non-zero. The credit is
     //     immediate; the app's next balance poll (150ms in the harness) surfaces it as
-    //     `asset-ckusdc` "0.060000 USDC". ----------------------------------------------------------
+    //     `asset-ckusdc` "0.06 USDC". ---------------------------------------------------------------
     console.log(`[31-ckusdc-pay] funding ${SEED_RAW} raw (${(SEED_RAW / 1e6).toFixed(6)} USDC) ckUSDC for A via faucet…`);
     const funded = await faucetAccount(relayBaseURL, accountHex, SEED_RAW, { currency: CKUSDC_CURRENCY });
     assert(funded.ok, `faucet ckUSDC funding should succeed, got status ${funded.status}: ${JSON.stringify(funded.body)}`);
@@ -75,8 +75,8 @@ export async function run() {
     // PayMode's review gate reads it). Mirrors flow 27's pattern (open Balances, assert the row).
     console.log('[31-ckusdc-pay] opening Balances; waiting for A’s ckUSDC balance to render…');
     await openBalances(driver);
-    const seededShown = await driver.waitForText('0.060000 USDC', { timeoutMs: 10_000 });
-    assert(seededShown, 'A should render 0.060000 USDC in the Balances USDC row after funding (assetBalances[2] populated)');
+    const seededShown = await driver.waitForText('0.06 USDC', { timeoutMs: 10_000 });
+    assert(seededShown, 'A should render 0.06 USDC in the Balances USDC row after funding (assetBalances[2] populated)');
     console.log('[31-ckusdc-pay] ✓ A’s ckUSDC balance visible (assetBalances[2] populated)');
     // Close Balances so the Pay tab's QrScanner is the top surface again before the camera scan.
     await driver.click('btn-balances-close', { timeoutMs: 5_000 });

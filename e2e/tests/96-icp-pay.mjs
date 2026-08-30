@@ -160,10 +160,10 @@ export async function run() {
     }
 
     // In-app refresh by the exact amount: header shows the post-fee remainder.
-    await driver.waitForText('1.09990000 ICP', { timeoutMs: 10_000 });
+    await driver.waitForText('1.0999 ICP', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('asset-icp'), '1.09990000 ICP', 'balances sheet ICP row refreshed to post-pay amount');
+    assertIncludes(await driver.readText('asset-icp'), '1.0999 ICP', 'balances sheet ICP row refreshed to post-pay amount');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the sheet');
     await driver.click('btn-balances-close', { timeoutMs: 4_000 });
     await driver.waitGone('btn-balances-close', { timeoutMs: 4_000 });

@@ -93,11 +93,11 @@ describe('Ledger — a mixed IC + Solana list', () => {
     [txn('solana:SOL', '1000000000', TS_OLD, {dir: 'in'})],    // 1 SOL in lamports
   );
 
-  test('formats each amount in its OWN units — DEMO in ∂, SOL at 9 decimals', () => {
+  test('formats each amount in its OWN units, compactly — DEMO in ∂, SOL trimmed', () => {
     const tree = mount(MIXED);
     const all = texts(tree);
     expect(all).toContain('−∂25.00');
-    expect(all).toContain('+1.000000000 SOL');
+    expect(all).toContain('+1 SOL');
     act(() => { tree.unmount(); });
   });
 
@@ -120,7 +120,7 @@ describe('Ledger — a mixed IC + Solana list', () => {
     const chip = tree.root.findAll(n => n.props?.testID === 'ledger-filter-sol' && typeof n.props.onPress === 'function')[0];
     act(() => { chip.props.onPress(); });
     const all = texts(tree);
-    expect(all).toContain('+1.000000000 SOL');
+    expect(all).toContain('+1 SOL');
     expect(all).not.toContain('−∂25.00');
     act(() => { tree.unmount(); });
   });
@@ -131,13 +131,13 @@ describe('Ledger — a mixed IC + Solana list', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('a Solana USDC row formats at 6 decimals, distinctly from the IC USDC chip', () => {
+  test('a Solana USDC row formats to USDC\'s 2-decimal floor, distinctly from the IC USDC chip', () => {
     const tree = mount(mergeHistoryByTime(
       [txn('ic:2', '2500000', TS_NEW)],
       [txn('solana:USDC', '2500000', TS_OLD)],
     ));
     const all = texts(tree);
-    expect(all.filter(t => t === '−2.500000 USDC')).toHaveLength(2); // same amount, same unit…
+    expect(all.filter(t => t === '−2.50 USDC')).toHaveLength(2);    // same amount, same unit…
     const ids = testIDs(tree);
     expect(ids).toContain('ledger-filter-ckusdc');                  // …but two distinct chips,
     expect(ids).toContain('ledger-filter-sol-usdc');
@@ -154,7 +154,10 @@ describe('Ledger — a mixed IC + Solana list', () => {
       [txn('ic:0', '2500', TS_NEW), txn('ic:9999', '50000', TS_OLD)],
       [],
     ));
-    expect(texts(tree)).toContain(`−${M.wallet.asset.unsupported}`);
+    // Unsigned: the sentinel is not a number, so it never takes a direction sign ("−Unsupported"
+    // was the old concatenate-outside artefact).
+    expect(texts(tree)).toContain(M.wallet.asset.unsupported);
+    expect(texts(tree)).not.toContain(`−${M.wallet.asset.unsupported}`);
     expect(testIDs(tree)).not.toContain('ledger-filter-asset');
     act(() => { tree.unmount(); });
   });

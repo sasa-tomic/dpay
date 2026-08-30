@@ -147,7 +147,7 @@ export async function run() {
     await openBalances(driver);
     const assetEl = await driver.findByTestID('asset-ckbtc', { timeoutMs: 8_000 });
     const assetTxt = await assetEl.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(assetTxt, '0.00050000 BTC', `the wallet's visible BTC card should show the minted BTC after the sheet closes. card text:\n${assetTxt}`);
+    assertIncludes(assetTxt, '0.0005 BTC', `the wallet's visible BTC card should show the minted BTC after the sheet closes. card text:\n${assetTxt}`);
     assertIncludes(assetTxt, 'BTC', 'the BTC card should be clearly labeled "BTC" (the deposited asset name, H1)');
     console.log(`[05-deposit-credited] ✓ BTC balance VISIBLE in the wallet post-close: "${assetTxt}"`);
 

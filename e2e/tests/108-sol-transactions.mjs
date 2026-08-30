@@ -9,7 +9,7 @@
 // `__DPAY_TEST_SOLANA_RPC_STUB` seam every other SOL flow uses (real `fetchSolanaHistory` over real
 // `getSignaturesForAddress` / `getTransaction` bodies — the balance-delta reader is doing the work,
 // not a fixture), the rows are merged with the IC rail's by timestamp, and ONE Ledger renders both:
-//   1. the SOL row shows the NET lamport delta in SOL units (2.000005000 SOL — the 2 SOL transfer
+//   1. the SOL row shows the NET lamport delta in SOL units (2.000005 SOL — the 2 SOL transfer
 //      plus the 5000-lamport fee this wallet paid, which is the honest "what left my wallet"),
 //   2. its counterparty is the short form of the address the lamports actually moved to,
 //   3. the IC rail's own row (the onboarding ∂100 faucet mint) is still there, in ∂ — each rail
@@ -106,14 +106,14 @@ export async function run() {
     await driver.findByTestID('ledger-view', {timeoutMs: 5_000});
 
     // 1. The SOL row lands (the next history poll picks the stub up) in SOL units. 2 SOL + the
-    //    5000-lamport fee = 2.000005000 SOL is the net that left the wallet. Every assertion below
+    //    5000-lamport fee = 2.000005 SOL is the net that left the wallet. Every assertion below
     //    reads the LEDGER's own text, never the whole page — the header balance carries a ∂ amount
     //    too, and a body-wide match would pass on it.
-    const landed = await driver.waitForText('2.000005000 SOL', {timeoutMs: 10_000});
+    const landed = await driver.waitForText('2.000005 SOL', {timeoutMs: 10_000});
     const ledger = await driver.readText('ledger-view');
     assert(landed, `the SOL transaction should appear in the Transactions tab. ledger text:\n${ledger.slice(0, 800)}`);
-    assertIncludes(ledger, '−2.000005000 SOL', 'the SOL row renders as an outgoing amount in SOL units');
-    console.log('[108-sol-transactions] ✓ SOL row: −2.000005000 SOL');
+    assertIncludes(ledger, '−2.000005 SOL', 'the SOL row renders as an outgoing amount in SOL units');
+    console.log('[108-sol-transactions] ✓ SOL row: −2.000005 SOL');
 
     // 2. The counterparty is the short form of the address the lamports moved to — derived from the
     //    same deltas, not from the request that created the payment.
@@ -133,7 +133,7 @@ export async function run() {
     // Filtering to SOL leaves the IC row out — proof the chip filters on the row's AssetId.
     await driver.click('ledger-filter-sol', {timeoutMs: 5_000});
     const filtered = await driver.readText('ledger-view');
-    assertIncludes(filtered, '−2.000005000 SOL', 'the SOL row survives its own filter');
+    assertIncludes(filtered, '−2.000005 SOL', 'the SOL row survives its own filter');
     assert(!filtered.includes('+∂100.00'), `the DEMO row must be filtered out when the SOL chip is active. ledger text:\n${filtered.slice(0, 500)}`);
     console.log('[108-sol-transactions] ✓ the SOL chip filters to the SOL rail alone');
 

@@ -5,7 +5,7 @@
 // Wallet A "e2e-alice" onboards (faucet-funded ∂100 DEMO = 10000 cents) and is then funded ckBTC
 // (currency 1) at her PRINCIPAL via the faucet `{account, currency: 1, amount}` — the IC-rail
 // deposit-simulation seam (the test/deposit/seed route died with the facade). A's app poll surfaces
-// the funded ckBTC balance as `asset-ckbtc` "0.00060000 BTC" — this PROVES assetBalances[1] is
+// the funded ckBTC balance as `asset-ckbtc` "0.0006 BTC" — this PROVES assetBalances[1] is
 // populated + flows into PayMode's review gate.
 //
 // Then wallet B "Bob" (in-test keypair) builds a ckBTC request: 50000 sats (0.00050000 BTC). A
@@ -18,12 +18,12 @@
 // review also displays "0.00050000 BTC" (NOT a misleading "$500.00") — the locked-asset display.
 //
 // Asserts:
-//   - After funding, A's app shows `0.00060000 BTC` (assetBalances[1] populated through the poll).
+//   - After funding, A's app shows `0.0006 BTC` (assetBalances[1] populated through the poll).
 //   - The review's pay-amount reads "Pay 0.00050000 BTC" (locked-asset display, no `$`).
 //   - The review names the merchant "Bob" (from the request bytes).
 //   - the per-asset balance gate (60_000 ≥ 50_000 sats) lets the AUTO-SIGN through → Paid.
 //   - B's ckBTC balance (currency 1) grew by 50000 sats (correct ledger settlement at the principal).
-//   - The payer's Ledger row renders the EXACT ckBTC units ("0.00050000 BTC", no `$`).
+//   - The payer's Ledger row renders the ckBTC units ("0.0005 BTC" compact, no `$`).
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in Balances),
 // `btn-balances-close`, `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
@@ -62,7 +62,7 @@ export async function run() {
 
     // --- Fund ckBTC for A at her principal so assetBalances[1] is non-zero. The credit is
     //     immediate (the faucet credits the fake-IC gateway's principal-keyed ledger); the app's
-    //     next balance poll (150ms in the harness) surfaces it as `asset-ckbtc` "0.00060000 BTC". --
+    //     next balance poll (150ms in the harness) surfaces it as `asset-ckbtc` "0.0006 BTC". ------
     console.log(`[27-asset-pay] funding ${SEED_SATS} sats ckBTC for A via faucet…`);
     const funded = await faucetAccount(relayBaseURL, accountHex, SEED_SATS, { currency: CKBTC_CURRENCY });
     assert(funded.ok, `faucet ckBTC funding should succeed, got status ${funded.status}: ${JSON.stringify(funded.body)}`);
@@ -73,8 +73,8 @@ export async function run() {
     // funded amount is verified in the Balances sheet (the money hub).
     console.log('[27-asset-pay] opening Balances; waiting for A’s ckBTC balance to render…');
     await openBalances(driver);
-    const seededShown = await driver.waitForText('0.00060000 BTC', { timeoutMs: 10_000 });
-    assert(seededShown, 'A should render 0.00060000 BTC in the Balances BTC row after funding (assetBalances[1] populated)');
+    const seededShown = await driver.waitForText('0.0006 BTC', { timeoutMs: 10_000 });
+    assert(seededShown, 'A should render 0.0006 BTC in the Balances BTC row after funding (assetBalances[1] populated)');
     console.log('[27-asset-pay] ✓ A’s ckBTC balance visible (assetBalances[1] populated)');
     // Close Balances so the Pay tab's QrScanner is the top surface again before the camera scan.
     await driver.click('btn-balances-close', { timeoutMs: 5_000 });
@@ -114,7 +114,7 @@ export async function run() {
     console.log(`[27-asset-pay] ✓ B credited ${bobAfter} ckBTC sats on currency 1`);
 
     // --- Ledger row exact units (closes the MC5 coverage gap): the payer's transaction history row
-    //     must render the ckBTC payment in its OWN asset's units — "−0.00050000 BTC" (Ledger.tsx
+    //     must render the ckBTC payment in its OWN asset's units — "−0.0005 BTC" (Ledger.tsx
     //     composes the U+2212 minus + fmtCurrencyAmount) — NOT a misleading dollar amount. The
     //     history hook fetches EVERY catalog currency, so the currency-1 rail row lands regardless
     //     of the active asset. 'RECENT' is uppercased via CSS text-transform (matches flow 07's
@@ -123,11 +123,11 @@ export async function run() {
     const hasRecent = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasRecent, 'the Ledger should render the ckBTC payment row once it lands in history');
     const ledgerBody = await driver.bodyText();
-    assertIncludes(ledgerBody, '0.00050000 BTC', 'Ledger row must show the EXACT ckBTC units (−0.00050000 BTC), not a $ amount');
+    assertIncludes(ledgerBody, '0.0005 BTC', 'Ledger row must show the ckBTC units (−0.0005 BTC), not a $ amount');
     // The row must not leak a dollar figure for this ckBTC payment (the header's ∂ glyph is not '$',
     // so any '$' here would be a cross-asset formatting bug).
     assert(!ledgerBody.includes('$'), 'Ledger must not show a dollar amount for a ckBTC payment row');
-    console.log('[27-asset-pay] ✓ Ledger row shows the exact ckBTC units (−0.00050000 BTC, no $)');
+    console.log('[27-asset-pay] ✓ Ledger row shows the ckBTC units (−0.0005 BTC, no $)');
 
     await driver.screenshot('27-asset-pay');
 

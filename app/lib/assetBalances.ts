@@ -14,9 +14,9 @@
 // USDC row and the Solana USDC row are financially isolated (invariant #8).
 
 import {M} from '../i18n';
-import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
+import {type CurrencyDescriptor, fmtCurrencyAmountCompact} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
-import {usd, fmtAsset} from './format';
+import {usd, fmtAssetCompact} from './format';
 import {cmpRaw} from './amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS} from '../solana/spl';
@@ -37,8 +37,12 @@ import type {AssetId} from './types';
 export type BalanceStatus = 'ok' | 'zero' | 'absent' | 'unavailable' | 'error' | 'loading';
 
 // One asset's rendered amount + status. `displayText` is the fully-formatted amount string the UI
-// shows verbatim (e.g. "∂100.00", "0 BTC", "—", "1.50 USDC"). It already includes any offline
-// approximation marker for DEMO ("~∂91.00") so the header and the sheet read byte-identical text.
+// shows verbatim (e.g. "∂100.00", "0 BTC", "—", "1.50 USDC"). Balances are a GLANCEABLE surface, so
+// every non-DEMO amount here is the COMPACT rendering (trailing zeros trimmed to the asset's floor;
+// "≈"/"<" when a display cap hides value) — see `fmtAssetCompact`. The exact, padded string belongs
+// on the surfaces where the user commits money, and is never sourced from this map. `displayText`
+// already includes any offline approximation marker for DEMO ("~∂91.00") so the header and the
+// sheet read byte-identical text.
 export type BalanceView = {displayText: string; status: BalanceStatus};
 
 // The SOL hook status union (mirrors `SolBalanceStatus` from hooks/useSolanaBalances.ts without a
@@ -71,10 +75,10 @@ export function buildAssetBalances(args: {
         ? demoView(primaryBalance, online)
         : icAssetView(catalog, a.currency, icBalances[a.currency] ?? '0');
     } else if (a.token === 'SOL') {
-      out[a.id] = solView(solState);
+      out[a.id] = solView(solState, a.minFractionDigits);
     } else {
       // a.token === 'USDC'
-      out[a.id] = usdcView(usdcState);
+      out[a.id] = usdcView(usdcState, a.minFractionDigits);
     }
   }
   return out as Record<AssetId, BalanceView>;
@@ -92,12 +96,12 @@ function demoView(primaryBalance: string | null, online: boolean): BalanceView {
 }
 
 // A non-DEMO IC catalog asset. A not-yet-polled asset defaults to '0' (the poll seeds '0'); funded ⇒
-// 'ok', unfunded ⇒ 'zero' (dims). The amount is formatted via the catalog's per-currency formatter
-// (backs `displayName`/`familyDisplay`'s unit + decimals) so ckBTC renders "0.00050000 BTC", never a
-// misleading dollar amount.
+// 'ok', unfunded ⇒ 'zero' (dims). The amount is formatted via the catalog's per-currency COMPACT
+// formatter (backs `displayName`/`familyDisplay`'s unit + decimals) so ckBTC renders "0.0005 BTC",
+// never a misleading dollar amount.
 function icAssetView(catalog: CurrencyDescriptor[], currency: number, balance: string): BalanceView {
   return {
-    displayText: fmtCurrencyAmount(catalog, currency, balance),
+    displayText: fmtCurrencyAmountCompact(catalog, currency, balance),
     status: cmpRaw(balance, '0') > 0 ? 'ok' : 'zero',
   };
 }
@@ -105,17 +109,17 @@ function icAssetView(catalog: CurrencyDescriptor[], currency: number, balance: s
 // Native SOL. 'ok' ⇒ check the value for a zero balance; 'unavailable' ⇒ the RPC is empty/offline
 // (the jest/e2e default — renders '—'); 'error' ⇒ PRESERVES the prior balance (never zeroes it —
 // plan invariant: an RPC failure must not look like a zero balance); 'loading' ⇒ first poll pending.
-function solView(solState: SolStateInput): BalanceView {
+function solView(solState: SolStateInput, minFractionDigits: number): BalanceView {
   switch (solState.status) {
     case 'ok':
       if (solState.balance == null) return {displayText: '—', status: 'unavailable'};
-      if (cmpRaw(solState.balance, '0') === 0) return {displayText: fmtAsset(solState.balance, SOL_DECIMALS, SOL_UNIT), status: 'zero'};
-      return {displayText: fmtAsset(solState.balance, SOL_DECIMALS, SOL_UNIT), status: 'ok'};
+      if (cmpRaw(solState.balance, '0') === 0) return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'zero'};
+      return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'ok'};
     case 'unavailable':
       return {displayText: '—', status: 'unavailable'};
     case 'error':
       return {
-        displayText: solState.balance == null ? '—' : fmtAsset(solState.balance, SOL_DECIMALS, SOL_UNIT),
+        displayText: solState.balance == null ? '—' : fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits),
         status: 'error',
       };
     case 'loading':
@@ -130,24 +134,24 @@ function solView(solState: SolStateInput): BalanceView {
 // the rail is misconfigured/offline; 'error' ⇒ preserves the prior amount (never zeroes);
 // 'loading' ⇒ first poll pending. The unit is always 'USDC' (distinct from any IC USDC's
 // "USDC · Ethereum" label — invariant #5).
-function usdcView(usdcState: UsdcStateInput): BalanceView {
+function usdcView(usdcState: UsdcStateInput, minFractionDigits: number): BalanceView {
   const decimals = usdcState.decimals ?? USDC_DECIMALS;
   switch (usdcState.status) {
     case 'balance':
       if (usdcState.amount == null) return {displayText: '—', status: 'zero'};
-      if (cmpRaw(usdcState.amount, '0') === 0) return {displayText: fmtAsset(usdcState.amount, decimals, 'USDC'), status: 'zero'};
-      return {displayText: fmtAsset(usdcState.amount, decimals, 'USDC'), status: 'ok'};
+      if (cmpRaw(usdcState.amount, '0') === 0) return {displayText: fmtAssetCompact(usdcState.amount, decimals, 'USDC', undefined, minFractionDigits), status: 'zero'};
+      return {displayText: fmtAssetCompact(usdcState.amount, decimals, 'USDC', undefined, minFractionDigits), status: 'ok'};
     case 'absent':
       // D3: a missing ATA is a KNOWN zero (the RPC answered — the account simply doesn't exist), so
-      // render a real "0 USDC" with normal formatting. The '—' placeholder is reserved strictly for
+      // render a real "0.00 USDC" with normal formatting. The '—' placeholder is reserved strictly for
       // unknown/unreachable states (offline / error / loading). Status stays 'absent' so the row
       // still dims and the receive/send setup-gate surfaces keep their trigger.
-      return {displayText: fmtAsset('0', decimals, 'USDC'), status: 'absent'};
+      return {displayText: fmtAssetCompact('0', decimals, 'USDC', undefined, minFractionDigits), status: 'absent'};
     case 'unavailable':
       return {displayText: '—', status: 'unavailable'};
     case 'error':
       return {
-        displayText: usdcState.amount == null ? '—' : fmtAsset(usdcState.amount, decimals, 'USDC'),
+        displayText: usdcState.amount == null ? '—' : fmtAssetCompact(usdcState.amount, decimals, 'USDC', undefined, minFractionDigits),
         status: 'error',
       };
     case 'loading':

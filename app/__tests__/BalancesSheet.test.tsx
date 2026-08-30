@@ -69,7 +69,7 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
     const tree = mountSheet();
     const vchf = rowText(tree, 'asset-vchf');
     const icp = rowText(tree, 'asset-icp');
-    expect(vchf).toContain('0 VCHF');
+    expect(vchf).toContain('0.00 VCHF');
     expect(icp).toContain('0 ICP');
     // The network label distinguishes the IC rows honestly (M.wallet.asset.networkLabel renders
     // "VCHF · Internet Computer" from the descriptor's own network string).

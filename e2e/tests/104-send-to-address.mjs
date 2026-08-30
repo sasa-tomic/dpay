@@ -76,7 +76,7 @@ export async function run() {
     // headline regression guard: it did not before this change.
     console.log('[104-send-to-address] selecting VCHF → Pay → Send to address…');
     await openBalances(driver);
-    await driver.waitForText('5.00000000 VCHF', { timeoutMs: 8_000 });
+    await driver.waitForText('5.00 VCHF', { timeoutMs: 8_000 });
     await selectCurrency(driver, ASSET_KEY);
     await openPaySend(driver);
     await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
@@ -125,11 +125,11 @@ export async function run() {
     // The wallet SURFACE agrees with the gateway (a stale balance cache would fail here).
     await driver.click('btn-send-done', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('3.74990000 VCHF', { timeoutMs: 10_000 });
+    const reduced = await driver.waitForText('3.7499 VCHF', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
-    assert(reduced, `Balances VCHF row should show the reduced 3.74990000 VCHF. body excerpt:\n${balBody.slice(0, 500)}`);
-    assert(!balBody.includes('5.00000000 VCHF'), 'Balances must NOT still show the pre-send 5.00000000 VCHF (stale cache?)');
-    console.log('[104-send-to-address] ✓ UI VCHF balance dropped to 3.74990000 VCHF');
+    assert(reduced, `Balances VCHF row should show the reduced 3.7499 VCHF. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(!balBody.includes('5.00 VCHF'), 'Balances must NOT still show the pre-send 5.00 VCHF (stale cache?)');
+    console.log('[104-send-to-address] ✓ UI VCHF balance dropped to 3.7499 VCHF');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[104-send-to-address] GREEN in ${elapsed}s`);

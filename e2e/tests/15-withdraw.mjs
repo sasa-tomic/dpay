@@ -45,7 +45,7 @@ export const meta = {
   name: 'withdraw',
   journey: 'withdraw',
   covers: ['withdraw', 'icrc2-approve', 'retrieve_btc_with_approval', 'sign', 'settle', 'clipboard', 'balance-delta', 'destination-copy', 'ui-balance-delta'],
-  verifies: 'Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.00050000 BTC).',
+  verifies: 'Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.0005 BTC).',
   timeoutMs: 25000,
 };
 
@@ -137,16 +137,16 @@ export async function run() {
     // 9. UI balance delta (closes the withdraw coverage gap): the gateway-level delta is already
     //    proven in step 7. This step proves the wallet SURFACE reflects the debit too — flip the
     //    toggle back to "Scan to pay" (hides the inline withdraw body), open the Balances hub,
-    //    and assert the ckBTC row now shows the REDUCED remaining balance (0.00050000 BTC =
+    //    and assert the ckBTC row now shows the REDUCED remaining balance (0.0005 BTC compact =
     //    50000 sats), not the pre-withdraw 0.00100000 BTC. This locks the UI↔gateway agreement
     //    (a stale balance cache would fail here).
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('0.00050000 BTC', { timeoutMs: 10_000 });
+    const reduced = await driver.waitForText('0.0005 BTC', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
-    assert(reduced, `Balances ckBTC row should show the reduced 0.00050000 BTC (50000 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(reduced, `Balances ckBTC row should show the reduced 0.0005 BTC (50000 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
     assert(!balBody.includes('0.00100000 BTC'), 'Balances must NOT still show the pre-withdraw 0.00100000 BTC (stale balance cache?)');
-    console.log('[15-withdraw] ✓ UI ckBTC balance dropped to 0.00050000 BTC (matches the gateway delta)');
+    console.log('[15-withdraw] ✓ UI ckBTC balance dropped to 0.0005 BTC (matches the gateway delta)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[15-withdraw] GREEN in ${elapsed}s`);

@@ -49,9 +49,9 @@ describe('buildAssetBalances — per-asset balance map', () => {
       usdcState: {amount: null, decimals: null, status: 'unavailable'},
     });
     expect(m['ic:1'].status).toBe('ok');
-    expect(m['ic:1'].displayText).toBe('0.00050000 BTC');
+    expect(m['ic:1'].displayText).toBe('0.0005 BTC');   // compact: BTC has no decimal floor
     expect(m['ic:2'].status).toBe('zero');
-    expect(m['ic:2'].displayText).toBe('0 USDC');
+    expect(m['ic:2'].displayText).toBe('0.00 USDC'); // …USDC keeps its 2-decimal money floor
   });
 
   it('a not-yet-polled IC asset defaults to "0" ⇒ zero (dims), matching the funded-gate UI', () => {
@@ -103,9 +103,9 @@ describe('buildAssetBalances — per-asset balance map', () => {
       });
       return m['solana:SOL'];
     };
-    // ok non-zero (fmtAsset shows full decimals — the real app behavior, no zero-trimming)
-    expect(sol('1000000000', 'ok')).toEqual({displayText: '1.000000000 SOL', status: 'ok'});
-    // ok zero (fmtAsset special-cases 0 → '0 SOL', no decimal padding)
+    // ok non-zero — compact: SOL's trailing zeros are trimmed away entirely (floor 0)
+    expect(sol('1000000000', 'ok')).toEqual({displayText: '1 SOL', status: 'ok'});
+    // ok zero → '0 SOL', no decimal padding
     expect(sol('0', 'ok')).toEqual({displayText: '0 SOL', status: 'zero'});
     // unavailable (RPC empty — the jest/e2e path)
     expect(sol(null, 'unavailable')).toEqual({displayText: '—', status: 'unavailable'});
@@ -117,11 +117,11 @@ describe('buildAssetBalances — per-asset balance map', () => {
       solState: {balance: '2500000000', status: 'error'}, // prior balance preserved
       usdcState: {amount: null, decimals: null, status: 'unavailable'},
     });
-    expect(m['solana:SOL'].displayText).toBe('2.500000000 SOL');
+    expect(m['solana:SOL'].displayText).toBe('2.5 SOL');
     expect(m['solana:SOL'].status).toBe('error');
   });
 
-  it('Solana USDC: balance non-zero ⇒ ok; absent ⇒ "0 USDC" (no ATA = known zero, D3); unavailable ⇒ "—"', () => {
+  it('Solana USDC: balance non-zero ⇒ ok; absent ⇒ "0.00 USDC" (no ATA = known zero, D3); unavailable ⇒ "—"', () => {
     const usdc = (
       amount: string | null, decimals: number | null,
       status: 'balance' | 'absent' | 'unavailable',
@@ -130,11 +130,11 @@ describe('buildAssetBalances — per-asset balance map', () => {
       solState: {balance: null, status: 'unavailable'},
       usdcState: {amount, decimals, status},
     })['solana:USDC'];
-    expect(usdc('1500000', 6, 'balance')).toEqual({displayText: '1.500000 USDC', status: 'ok'});
-    expect(usdc('0', 6, 'balance')).toEqual({displayText: '0 USDC', status: 'zero'});
-    // D3: a missing ATA is a KNOWN zero (RPC reachable) → "0 USDC", not "—"; "—" is reserved for
+    expect(usdc('1500000', 6, 'balance')).toEqual({displayText: '1.50 USDC', status: 'ok'});
+    expect(usdc('0', 6, 'balance')).toEqual({displayText: '0.00 USDC', status: 'zero'});
+    // D3: a missing ATA is a KNOWN zero (RPC reachable) → "0.00 USDC", not "—"; "—" is reserved for
     // offline/unknown (unavailable/error/loading below).
-    expect(usdc(null, null, 'absent')).toEqual({displayText: '0 USDC', status: 'absent'});
+    expect(usdc(null, null, 'absent')).toEqual({displayText: '0.00 USDC', status: 'absent'});
     expect(usdc(null, null, 'unavailable')).toEqual({displayText: '—', status: 'unavailable'});
   });
 
@@ -149,7 +149,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     // IC USDC (ic:2) shows its funded balance; Solana USDC (solana:USDC) is independently zero.
     expect(m['ic:2'].displayText).toBe('0.999999 USDC');
     expect(m['ic:2'].status).toBe('ok');
-    expect(m['solana:USDC'].displayText).toBe('0 USDC');
+    expect(m['solana:USDC'].displayText).toBe('0.00 USDC');
     expect(m['solana:USDC'].status).toBe('zero');
   });
 });

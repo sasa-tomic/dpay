@@ -3,9 +3,9 @@ import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
 import {C} from '../config/palette';
-import {assetTestKey, fmtCurrencyAmount, type CurrencyDescriptor} from '../config/catalog';
+import {assetTestKey, fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
 import {chipLabel, type SelectableAsset} from '../config/assets';
-import {fmtAsset} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 import {IconArrowDownLeft, IconArrowUpRight} from './icons';
 import type {AssetId, Txn} from '../lib/types';
 
@@ -19,18 +19,24 @@ function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): s
   return desc ? assetTestKey(desc) : null;
 }
 
-// One row's amount in the row's OWN units, dispatched on rail. An IC row goes through
-// `fmtCurrencyAmount` (DEMO's `∂` early-return lives inside it, and it fail-closes to the explicit
-// "Unsupported" sentinel for an unknown family — never a wrong "… BTC"); a Solana row formats at its
-// SelectableAsset's `decimals` + `symbol`, the only place those facts exist for that rail. A row
+// One row's amount in the row's OWN units, dispatched on rail. History is a glanceable surface, so
+// both rails use the COMPACT formatter (trailing zeros trimmed to the asset's floor; "≈"/"<" when a
+// display cap hides value) — the exact string stays on the surfaces where money is committed. An IC
+// row goes through `fmtCurrencyAmountCompact` (DEMO's `∂` early-return lives inside it, and it
+// fail-closes to the explicit "Unsupported" sentinel for an unknown family — never a wrong
+// "… BTC"); a Solana row formats at its SelectableAsset's `decimals` + `symbol` + compact floor,
+// the only place those facts exist for that rail. A row
 // whose asset is not in the visible list (a testnet asset hidden mid-poll, a disabled rail) fails
 // closed to the SAME sentinel rather than guessing a unit.
 function fmtRowAmount(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[]): string {
   const asset = assets.find(a => a.id === t.assetId);
   if (!asset) return M.wallet.asset.unsupported;
+  // The direction sign goes THROUGH the formatter (never concatenated here) so it lands inside a
+  // truncation marker — "≈ −0.039922 ETH", not "−≈ 0.039922 ETH". See fmtAssetCompact.
+  const sign = t.dir === 'out' ? '−' : '+';
   return asset.protocol === 'ic'
-    ? fmtCurrencyAmount(catalog, asset.currency, t.amount)
-    : fmtAsset(t.amount, asset.decimals, asset.symbol);
+    ? fmtCurrencyAmountCompact(catalog, asset.currency, t.amount, sign)
+    : fmtAssetCompact(t.amount, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
 }
 
 // The transaction list, promoted from an inline card under Pay/Receive into its own tab. Renders the
@@ -117,7 +123,7 @@ export function Ledger({history, catalog, assets}: {history: Txn[]; catalog: Cur
               <Text style={S.histWho}>{t.dir === 'out' ? M.wallet.ledger.to(t.who || '—') : M.wallet.ledger.from(t.who || '—')}</Text>
               {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}
             </View>
-            <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{`${t.dir === 'out' ? '−' : '+'}${amtTxt}`}</Text>
+            <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{amtTxt}</Text>
             {/* testID: the visual flows (40/84) MASK this element — the rendered time is
                 inherently time-varying (minute digits + 1↔2-digit hour width), so an unmasked
                 diff is a standing flake riding just under the 0.5% tolerance. */}

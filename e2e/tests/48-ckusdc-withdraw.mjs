@@ -16,7 +16,7 @@
 // Funding: per-ledger buckets mean the wallet needs BOTH assets — ckUSDC (currency 2) for the
 // amount + its 10000-microunit approve fee, AND ckETH (currency 6) for the 78e12-Wei gas burn
 // + its 2e12-Wei approve fee. Honest post-withdraw expectations: ckUSDC 1e9 − 1e6 − 10000 =
-// 998990000 ('998.990000 USDC'); ckETH seed − 2e12 − 78e12.
+// 998990000 (the row reads '998.99 USDC'); ckETH seed − 2e12 − 78e12.
 //
 // Flow 15 (BTC) + flow 44 (native ETH) + flow 48 (ckERC20) cover ALL three family branches of
 // the withdraw surface.
@@ -52,7 +52,7 @@ export const meta = {
   name: 'ckusdc-withdraw',
   journey: 'withdraw',
   covers: ['ckerc20-offramp', 'ckusdc', 'withdraw', 'icrc2-approve', 'withdraw_erc20', 'dual-ledger-gas', 'gas-note', 'sign', 'settle', 'balance-delta', 'ui-balance-delta'],
-  verifies: 'ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.990000 USDC.',
+  verifies: 'ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.99 USDC.',
   timeoutMs: 25000,
 };
 
@@ -89,7 +89,7 @@ export async function run() {
     //    up the faucet credit), then SELECT ckUSDC (makes it the active asset).
     console.log('[48-ckusdc-withdraw] opening Balances; waiting for the funded ckUSDC row…');
     await openBalances(driver);
-    await driver.waitForText('1000.000000 USDC', { timeoutMs: 8_000 });
+    await driver.waitForText('1,000.00 USDC', { timeoutMs: 8_000 });
 
     // 4. Select ckUSDC → Pay → "Send to address" (the inline WithdrawSheet body, family-dispatched
     //    to the dual-ledger withdraw_erc20 path).
@@ -147,15 +147,15 @@ export async function run() {
 
     // 9. UI balance delta (locks the UI↔gateway agreement): flip the toggle back to "Scan to pay"
     //    (hides the inline withdraw body), re-open the Balances hub, and assert the ckUSDC row now
-    //    shows the REDUCED remaining balance (998.990000 USDC = 998_990_000 raw), not the
+    //    shows the REDUCED remaining balance (998.99 USDC = 998_990_000 raw), not the
     //    pre-withdraw 1000 USDC.
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('998.990000 USDC', { timeoutMs: 10_000 });
+    const reduced = await driver.waitForText('998.99 USDC', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
-    assert(reduced, `Balances ckUSDC row should show the reduced 998.990000 USDC (998990000 raw remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
-    assert(!balBody.includes('1000.000000 USDC'), 'Balances must NOT still show the pre-withdraw 1000.000000 USDC (stale balance cache?)');
-    console.log('[48-ckusdc-withdraw] ✓ UI ckUSDC balance dropped to 998.990000 USDC (matches the gateway delta)');
+    assert(reduced, `Balances ckUSDC row should show the reduced 998.99 USDC (998990000 raw remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(!balBody.includes('1,000.00 USDC'), 'Balances must NOT still show the pre-withdraw 1,000.00 USDC (stale balance cache?)');
+    console.log('[48-ckusdc-withdraw] ✓ UI ckUSDC balance dropped to 998.99 USDC (matches the gateway delta)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[48-ckusdc-withdraw] GREEN in ${elapsed}s`);

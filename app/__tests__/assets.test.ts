@@ -457,7 +457,7 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       solState: {balance: null, status: 'unavailable'},
       usdcState: {amount: null, decimals: null, status: 'unavailable'},
     });
-    expect(balances['ic:7']).toEqual({displayText: '0 VCHF', status: 'zero'});
+    expect(balances['ic:7']).toEqual({displayText: '0.00 VCHF', status: 'zero'});
     expect(balances['ic:8']).toEqual({displayText: '0 ICP', status: 'zero'});
   });
 
