@@ -36,4 +36,16 @@ module.exports = {
   // checked by `just typecheck`). `/node_modules/` is re-stated because setting this field replaces
   // jest's default ignore list.
   testPathIgnorePatterns: ['/node_modules/', '<rootDir>/__tests__/walletconnect-fake.ts'],
+  // Jest's 5s default is a HANG detector, not a performance budget — and as a budget it was too
+  // tight to be honest here. Measured on an idle box: the slowest single test is ~2.5s (the
+  // fake-timer animation suites — Walkthrough drives ~1.5s of Animated frames per tap, each frame
+  // a React re-render), so the default left barely a 2× margin. This machine routinely runs at a
+  // load average of 20–50 from concurrent work, which stretches those tests 3–5× and pushed them
+  // over the line: `Walkthrough › renders scene 1 only…` failed with "Exceeded timeout of 5000 ms"
+  // in a full parallel run while passing in isolation and under `--runInBand`. Reproduced on an
+  // untouched checkout, so it was never about any one change — it was a machine-speed-dependent
+  // red, i.e. exactly the kind of flake that teaches people to re-run the suite instead of reading
+  // it. 30s restores ~12× headroom over the measured worst case while still catching a real hang
+  // (a hung test never finishes). Set here, once, so every suite gets the same honest budget.
+  testTimeout: 30_000,
 };

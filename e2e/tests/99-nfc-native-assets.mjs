@@ -47,6 +47,29 @@ export async function run() {
       return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event);
     };
 
+    // Escape a terminal NfcTapView: the button flips its label to "Done" on a terminal phase.
+    // Dispatching a phase only QUEUES a React update, so reading the DOM in the same tick can still
+    // see the OLD label ('Cancel') — a race that only loses on a loaded machine (this flow went RED
+    // in a full parallel run while passing in isolation). Poll for the expected label, then click;
+    // if it never arrives, return whichever label is present so the assert names what it saw.
+    const clickNfcButton = async (expected) => {
+      for (let i = 0; i < 40; i++) {
+        const hit = await driver.eval((label) => {
+          const btn = document.querySelector(`button[aria-label="${label}"]`);
+          if (btn) { btn.click(); return label; }
+          return null;
+        }, expected);
+        if (hit) return hit;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return driver.eval(() => {
+        for (const label of ['Done', 'Cancel']) {
+          if (document.querySelector(`button[aria-label="${label}"]`)) return label;
+        }
+        return null;
+      });
+    };
+
     for (const leg of LEGS) {
       console.log(`[99-nfc-native-assets] ${leg.tag} disclosure leg…`);
       const nowSecs = Math.floor(Date.now() / 1000);
@@ -84,14 +107,8 @@ export async function run() {
       // button so the card re-arms for the next leg (flow 60's terminal-escape pattern — the
       // button flips its aria-label to "Done" on a terminal phase).
       await dispatch({ type: 'phase', role: 'card', phase: 'declined' });
-      const escaped = await driver.eval(() => {
-        for (const label of ['Done', 'Cancel']) {
-          const btn = document.querySelector(`button[aria-label="${label}"]`);
-          if (btn) { btn.click(); return label; }
-        }
-        return null;
-      });
-      assert(escaped === 'Done', 'NFC terminal view should offer a Done escape between legs');
+      const escaped = await clickNfcButton('Done');
+      assert(escaped === 'Done', `NFC terminal view should offer a Done escape between legs (saw: ${escaped})`);
       await driver.waitGone('nfc-status', { timeoutMs: 5_000 });
     }
 

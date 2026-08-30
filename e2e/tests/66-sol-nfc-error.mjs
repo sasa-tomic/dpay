@@ -91,13 +91,29 @@ export async function run() {
 
     const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
 
-    const clickNfcButton = () => driver.eval(() => {
-      for (const label of ['Done', 'Cancel']) {
-        const btn = document.querySelector(`button[aria-label="${label}"]`);
-        if (btn) { btn.click(); return label; }
+    // Escape a terminal/non-terminal NfcTapView: the button flips its label to "Done" on a terminal
+    // phase (success/declined/error/pending) and stays "Cancel" mid-flow (settling). Dispatching a
+    // phase only QUEUES a React update, so reading the DOM in the same tick can still see the OLD
+    // label — a race that only loses on a loaded machine. Poll for the EXPECTED label (bounded),
+    // then click it; if it never arrives, return whichever label is present so the caller's assert
+    // names what it actually saw.
+    const clickNfcButton = async (expected) => {
+      for (let i = 0; i < 40; i++) {
+        const hit = await driver.eval((label) => {
+          const btn = document.querySelector(`button[aria-label="${label}"]`);
+          if (btn) { btn.click(); return label; }
+          return null;
+        }, expected);
+        if (hit) return hit;
+        await new Promise((r) => setTimeout(r, 100));
       }
-      return null;
-    });
+      return driver.eval(() => {
+        for (const label of ['Done', 'Cancel']) {
+          if (document.querySelector(`button[aria-label="${label}"]`)) return label;
+        }
+        return null;
+      });
+    };
 
     // --- 1. EXPIRED REQUEST → AUTO-DECLINE AT SIGN (the expiry gate is authoritative there). ---
     // One-press rule: no review card exists, so isSolReqV2Expired is re-checked INSIDE the sign —
@@ -120,7 +136,7 @@ export async function run() {
       assert(solpay == null, 'no solpay URI may exist for an expired request (nothing signed)');
     }
     console.log('[66-sol-nfc-error] ✓ expired solreq → auto-decline "This payment request has expired", no sign, no fake Paid');
-    assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a decline');
+    assert((await clickNfcButton('Done')) === 'Done', 'the Done button should be reachable after a decline');
     await driver.waitGone('sol-nfc-status', {timeoutMs: 5_000});
 
     // --- 2. TRANSPORT ERROR mid-tap: honest "Tap failed", no fake Paid. -----------------------
@@ -135,7 +151,7 @@ export async function run() {
     assert(errBody.includes('Lost the radio link'),
       `the error reason should render as the sub-line. body excerpt:\n${errBody.slice(0, 400)}`);
     console.log('[66-sol-nfc-error] ✓ transport error → "Tap failed" + reason, no fake Paid');
-    assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after an error');
+    assert((await clickNfcButton('Done')) === 'Done', 'the Done button should be reachable after an error');
     await driver.waitGone('sol-nfc-status', {timeoutMs: 5_000});
 
     // --- 3. LATE ERROR AFTER SETTLING IGNORED (no false failure over a decided outcome). --------
@@ -160,7 +176,7 @@ export async function run() {
     assert(!/Tap failed/.test(lateErrBody),
       'a late error must NOT flip the status to "Tap failed"');
     console.log('[66-sol-nfc-error] ✓ late error after settling ignored — phase stays on the receipt path');
-    assert((await clickNfcButton()) === 'Cancel',
+    assert((await clickNfcButton('Cancel')) === 'Cancel',
       'the Cancel button should be reachable on the receipt path (mid-flow)');
 
     // --- 4. MERCHANT (READER) DECLINE: the merchant sees the same decline. --------------------

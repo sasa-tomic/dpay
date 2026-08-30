@@ -54,14 +54,28 @@ export async function run() {
     // Helper: dispatch one NFC event through the seam (role='card' = the payer being tapped).
     const dispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
     // Escape a terminal/non-terminal NfcTapView: the button flips its label to "Done" on a terminal
-    // phase (success/declined/error/pending) and stays "Cancel" mid-flow (settling). Try both.
-    const clickNfcButton = () => driver.eval(() => {
-      for (const label of ['Done', 'Cancel']) {
-        const btn = document.querySelector(`button[aria-label="${label}"]`);
-        if (btn) { btn.click(); return label; }
+    // phase (success/declined/error/pending) and stays "Cancel" mid-flow (settling). Dispatching a
+    // phase only QUEUES a React update, so reading the DOM in the same tick can still see the OLD
+    // label — a race that only loses on a loaded machine. Poll for the EXPECTED label (bounded),
+    // then click it; if it never arrives, return whichever label is present so the caller's assert
+    // names what it actually saw.
+    const clickNfcButton = async (expected) => {
+      for (let i = 0; i < 40; i++) {
+        const hit = await driver.eval((label) => {
+          const btn = document.querySelector(`button[aria-label="${label}"]`);
+          if (btn) { btn.click(); return label; }
+          return null;
+        }, expected);
+        if (hit) return hit;
+        await new Promise((r) => setTimeout(r, 100));
       }
-      return null;
-    });
+      return driver.eval(() => {
+        for (const label of ['Done', 'Cancel']) {
+          if (document.querySelector(`button[aria-label="${label}"]`)) return label;
+        }
+        return null;
+      });
+    };
 
     // --- 1. TRANSPORT ERROR mid-tap (linking → error): honest "Tap failed", no fake Paid. -------
     console.log('[60-nfc-error] case 1: transport error mid-tap (linking → error)…');
@@ -79,7 +93,7 @@ export async function run() {
     assert(balAfterErr.includes('∂100.00'), `balance must be unchanged after a failed tap, got "${balAfterErr}"`);
     console.log('[60-nfc-error] ✓ transport error → "Tap failed" + reason, no debit, no fake Paid');
     // Escape the terminal view so the next case starts clean (Done re-arms the card).
-    assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a terminal error');
+    assert((await clickNfcButton('Done')) === 'Done', 'the Done button should be reachable after a terminal error');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
 
     // --- 2. FAIL-CLOSED AUTO-DECLINE (unsupported asset — no review card to decline from). ------
@@ -103,7 +117,7 @@ export async function run() {
     const balAfterDecl = await driver.readText('balance');
     assert(balAfterDecl.includes('∂100.00'), `balance must be unchanged after a declined tap, got "${balAfterDecl}"`);
     console.log('[60-nfc-error] ✓ auto-decline → "Declined" + "Unsupported asset (currency 99)", no wire, no debit, no fake Paid');
-    assert((await clickNfcButton()) === 'Done', 'the Done button should be reachable after a decline');
+    assert((await clickNfcButton('Done')) === 'Done', 'the Done button should be reachable after a decline');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
 
     // --- 3. LATE error AFTER settling is IGNORED (no false failure over a decided outcome). -----
@@ -129,7 +143,7 @@ export async function run() {
     assert(!bodyAfterLate.includes('should be ignored'), 'the late-error reason must NOT render (the error was ignored)');
     assert(!/Tap failed/.test(bodyAfterLate), 'a late error must NOT flip the status to "Tap failed"');
     console.log('[60-nfc-error] ✓ late error after settling ignored — settlement remains authoritative');
-    assert((await clickNfcButton()) === 'Cancel', 'the Cancel button should be reachable while settling');
+    assert((await clickNfcButton('Cancel')) === 'Cancel', 'the Cancel button should be reachable while settling');
 
     await driver.screenshot('60-nfc-error');
 
