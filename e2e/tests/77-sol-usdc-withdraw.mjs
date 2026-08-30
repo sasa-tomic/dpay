@@ -29,7 +29,7 @@
 //
 // Selector contract: `asset-sol-usdc-select`, `btn-pay-send`, `sol-send-address-input`,
 // `sol-send-amount-input`, `sol-send-review-amount`, `sol-send-ata-note`, `btn-sol-send-confirm`,
-// `sol-send-status`, `sol-send-signature`, `sol-send-err`.
+// `sol-send-outcome`, `sol-send-signature`, `sol-send-err`.
 import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
@@ -116,7 +116,7 @@ export async function run() {
     // 4. Confirm → sendSpl through the stub (sender+recipient exist → plain SPL transfer) → Sent ✓.
     console.log('[77-sol-usdc-withdraw] confirming (sign + broadcast via stub)…');
     await driver.click('btn-sol-send-confirm', {timeoutMs: 5_000});
-    const status = await driver.findByTestID('sol-send-status', {timeoutMs: 12_000});
+    const status = await driver.findByTestID('sol-send-outcome', {timeoutMs: 12_000});
     const statusTxt = await status.evaluate((n) => (n.textContent ?? '').trim());
     assert(/Sent/.test(statusTxt), `the sheet should show "Sent ✓", got: "${statusTxt}"`);
     console.log(`[77-sol-usdc-withdraw] ✓ ${statusTxt}`);
@@ -132,7 +132,7 @@ export async function run() {
     //    any broadcast — the friendly rent message renders via `sol-send-err`, no "Sent ✓".
     console.log('[77-sol-usdc-withdraw] case 2: absent recipient ATA + 0.001 SOL sender…');
     await driver.click('btn-sol-send-done', {timeoutMs: 5_000});
-    await driver.waitGone('sol-send-status', {timeoutMs: 5_000});
+    await driver.waitGone('sol-send-outcome', {timeoutMs: 5_000});
     await driver.eval(() => {
       const st = globalThis.__DPAY_TEST_SEND_STATE;
       st.recipientAtaAbsent = true;
@@ -152,7 +152,7 @@ export async function run() {
     console.log('[77-sol-usdc-withdraw] ✓ rent pre-check failure surfaced verbatim');
 
     // No success state: the sheet stays on the form — no "Sent ✓", no signature, no broadcast.
-    const sent = await driver.eval(() => !!document.querySelector('[data-testid="sol-send-status"]'));
+    const sent = await driver.eval(() => !!document.querySelector('[data-testid="sol-send-outcome"]'));
     assert(sent === false, 'no "Sent ✓" state may be reached on a below-rent pre-check failure');
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 5_000});
     console.log('[77-sol-usdc-withdraw] ✓ no Sent state; the form is still up');

@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -7,17 +7,24 @@ import {fmtAsset, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
+import {detectAddressShape, routeForSolana, chainNameOfShape} from '../lib/destination';
 import type {Identity} from '../lib/types';
-import {SOL_DECIMALS, SOL_UNIT, isValidSolanaAddress} from '../solana/identity';
+import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {sendSol, sendSpl} from '../solana';
 import {friendlySolError} from '../solana/errors';
+import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
+import {AddressField} from './AddressField';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {IconCheck, IconCopy} from './icons';
 import {M} from '../i18n';
+
+/** The chain this rail settles on. Wire/display proper noun, never translated — the twin of
+ *  SendSheet's `IC_NETWORK`. */
+const SOL_NETWORK = 'Solana';
 
 /**
  * Send SOL or USDC to a native Solana address (Phase 6 — asset-aware direct send). Mirrors
@@ -39,6 +46,12 @@ import {M} from '../i18n';
  * Rendered inline in the Pay tab's "Send to address" sub-mode. The testIDs stay token-agnostic
  * (`sol-send-*`) — "send" applies to both SOL and SPL. The review-amount text carries the unit
  * (USDC vs SOL) so e2e can distinguish them.
+ *
+ * The destination is the SHARED `AddressField` — the same input, scanner button and saved-address
+ * list the IC rail uses — over the shared `destination.ts` classifier. Before this it was a bare
+ * TextInput whose only verdict was "not a valid Solana address", which cannot tell a typo from a
+ * Bitcoin address pasted into the wrong wallet, and which offered neither a scanner nor an address
+ * book that the IC surface had. CLAUDE.md's same-surfaces rule calls that divergence a bug.
  */
 export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string} | null; onPrefillConsumed?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
@@ -46,6 +59,8 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
   const [err, setErr] = useState<string | null>(null);
   const [signature, setSignature] = useState<string | null>(null);
+  const [saved, setSaved] = useState<SavedAddress[]>([]);
+  const [saveName, setSaveName] = useState('');
   // Trip Ready J5b — paymentTested: the same stamp the IC rails award, on the same event (a send
   // that CONFIRMED). `sendSol`/`sendSpl` resolve only on a confirmed signature and throw otherwise,
   // so the catch below — the honest "we don't know" path — never reaches the award.
@@ -75,18 +90,57 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
   // Every amount on this sheet is the same token at the same precision — one formatter, one place.
   const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, unit);
 
+  // Per-token address book, mirroring the IC rail's `ic:<currency>` key: SOL and USDC are sent to
+  // the same KIND of address but to different people, so one shared list would mix two audiences.
+  const assetKey = `sol:${token}`;
+  useEffect(() => {
+    let alive = true;
+    loadAddressBook(assetKey).then(list => { if (alive) setSaved(list); });
+    return () => { alive = false; };
+  }, [assetKey]);
+
+  // The wallet's own Solana address — the self-send warning. Derivation is pure and synchronous
+  // here (SLIP-10 over the device seed), unlike the IC rail's async core validators.
+  const selfAddress = useMemo(() => deriveSolanaAddress(identity.secretHex), [identity.secretHex]);
+
   // Convert the entered amount to base units at the selected token's decimals. `cmpRaw` (BigInt) for
   // presence — never `>` on strings (lexicographic trap).
   const raw = toUnits(amountStr, decimals);
   const overBalance = cmpRaw(raw, balance) > 0;
-  const addrEntered = address.trim().length > 0;
-  const badAddr = addrEntered && !isValidSolanaAddress(address);
-  const canReview = addrEntered && !badAddr && raw !== '0' && !overBalance;
+
+  // What the typed destination IS. Two stages, exactly as the IC rail: `detectAddressShape` names
+  // the NAMESPACE and `routeForSolana` says whether this rail can reach it, then the rail's own
+  // parser decides validity — so a checksum failure is reported against a known namespace ("not a
+  // valid Solana address") instead of being lumped in with a Bitcoin address pasted by mistake.
+  // Synchronous, so no resolution race to guard: `isValidSolanaAddress` is a local base58 decode.
+  const resolved = useMemo((): {ok: true; destination: string} | {ok: false; message: string} | null => {
+    const text = address.trim();
+    if (text.length === 0) return null;
+    const routed = routeForSolana(detectAddressShape(text));
+    if (!routed.ok) {
+      return routed.refusal.reason === 'wrong-chain'
+        ? {ok: false, message: M.withdraw.send.refuseWrongChain(chainNameOfShape(routed.refusal.shape) ?? '', unit, SOL_NETWORK)}
+        : {ok: false, message: M.withdraw.send.refuseUnrecognised(unit)};
+    }
+    if (!isValidSolanaAddress(text)) return {ok: false, message: M.withdraw.badAddress(SOL_NETWORK)};
+    return {ok: true, destination: text};
+  }, [address, unit]);
+
+  // The one status line under the field: the route when usable, the specific reason when not.
+  const status = useMemo((): {text: string; tone: 'ok' | 'warn' | 'bad'} | null => {
+    if (resolved == null) return null;
+    if (!resolved.ok) return {text: resolved.message, tone: 'bad'};
+    if (resolved.destination === selfAddress) return {text: M.withdraw.send.selfWarning, tone: 'warn'};
+    return {text: M.withdraw.send.routeSolana(SOL_NETWORK), tone: 'ok'};
+  }, [resolved, selfAddress]);
+
+  const canReview = resolved?.ok === true && raw !== '0' && !overBalance;
 
   async function confirm() {
-    if (!canReview) {
+    if (!canReview || !resolved?.ok) {
       return;
     }
+    const destination = resolved.destination;
     setPhase('submitting');
     setErr(null);
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
@@ -94,10 +148,11 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
       // Branch on token: SOL → System Transfer; USDC → SPL Token transfer (recipient ATA derived +
       // fail-closed checked inside sendSpl). Both sign locally + broadcast directly to the RPC.
       const sig = isUsdc
-        ? await sendSpl(identity.secretHex, address.trim(), BigInt(raw), signal)
-        : await sendSol(identity.secretHex, address.trim(), BigInt(raw), signal);
+        ? await sendSpl(identity.secretHex, destination, BigInt(raw), signal)
+        : await sendSol(identity.secretHex, destination, BigInt(raw), signal);
       setSignature(sig);
       setPhase('done');
+      void rememberAddress(assetKey, destination, saveName.trim(), Date.now());
       onSent(); // trigger an immediate balance refresh (SOL or USDC — the parent wires the right one)
       awardPaymentTested(journey);
     } catch (e: unknown) {
@@ -145,7 +200,7 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
       {phase === 'done' && signature ? (
         <View style={S.centerAll}>
           <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-          <Text testID="sol-send-status" style={S.paidText}>{M.withdraw.sol.sent}</Text>
+          <Text testID="sol-send-outcome" style={S.paidText}>{M.withdraw.sol.sent}</Text>
           <Text style={S.paidSub}>{fmt(raw)}</Text>
           <Text style={S.dim2}>{M.withdraw.sol.txSignature}</Text>
           <Text testID="sol-send-signature" selectable={true} style={S.sheetAddr}>{signature}</Text>
@@ -167,18 +222,29 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
           <Text style={S.label}>{M.withdraw.sol.sendToSolana(unit)}</Text>
           <Text style={S.dim2}>{M.withdraw.sol.available(fmt(balance))}</Text>
 
-          <Text style={S.inputLabel}>{M.withdraw.sol.addressLabel}</Text>
-          <TextInput
-            testID="sol-send-address-input"
-            accessibilityLabel={M.withdraw.sol.addressLabel}
-            style={S.withdrawAddrInput}
+          <AddressField
             value={address}
-            onChangeText={setAddress}
-            placeholder={M.withdraw.sol.addressPlaceholder}
-            placeholderTextColor={C.sub2}
-            autoCapitalize="none"
-            autoCorrect={false}
+            onChange={setAddress}
+            status={status}
+            saved={saved}
+            onPickSaved={setAddress}
+            onForgetSaved={a => { void forgetAddress(assetKey, a).then(setSaved); }}
+            testIDPrefix="sol-send"
           />
+
+          {/* Naming is offered once the destination is usable — the IC rail's placement exactly. */}
+          {resolved?.ok && saved.every(sv => sv.address !== resolved.destination) ? (
+            <TextInput
+              testID="sol-send-save-name"
+              accessibilityLabel={M.withdraw.send.saveNamePlaceholder}
+              style={S.withdrawAddrInput}
+              value={saveName}
+              onChangeText={setSaveName}
+              placeholder={M.withdraw.send.saveNamePlaceholder}
+              placeholderTextColor={C.sub2}
+              autoCapitalize="words"
+            />
+          ) : null}
 
           <Text style={S.inputLabel}>{M.withdraw.amountLabel(unit)}</Text>
           <TextInput
@@ -193,7 +259,6 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
           />
 
           {overBalance ? <Text style={S.warnNote}>{M.withdraw.overBalance(fmt(balance))}</Text> : null}
-          {badAddr ? <Text testID="sol-send-bad-addr" style={S.warnNote}>{M.withdraw.badAddress('Solana')}</Text> : null}
           {/* Known-zero SOL while sending USDC (2026-08-16 UX review finding 13): fees + a possible
               recipient-ATA creation are paid in SOL — say so BEFORE the user types an amount, so
               a funded-USDC/zero-SOL wallet learns the real constraint up front (honest, no block). */}

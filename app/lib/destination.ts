@@ -53,6 +53,16 @@ export type RefusalReason =
 
 export type DestinationRoute = {ok: true; route: SendRoute} | {ok: false; refusal: RefusalReason};
 
+/** The Solana rail's verdict. It carries no route variant because the rail has exactly one way to
+ *  move money — a device-key-signed transfer to a base58 wallet address — so "usable" is the whole
+ *  answer. The refusal type is SHARED with the IC rail on purpose: that is what makes both rails
+ *  refuse a wrong-chain paste in the same words. It is narrowed to the two reasons this rail can
+ *  actually produce, so the caller's handling is exhaustive without a dead branch — `legacy-not-icp`
+ *  is a fact about the ICP ledger and has no meaning here. */
+export type SolanaRoute =
+  | {ok: true}
+  | {ok: false; refusal: Extract<RefusalReason, {reason: 'wrong-chain' | 'unrecognised'}>};
+
 // Shape patterns. Conservative and mutually exclusive on real input — each anchors on a feature the
 // others cannot have (dashes / exact hex length / the 0x prefix / bech32 + base58 leaders).
 const RE_ICP_ACCOUNT_ID = /^[0-9a-fA-F]{64}$/;
@@ -121,6 +131,30 @@ export function routeForShape(shape: AddressShape, desc: CurrencyDescriptor | nu
     case 'base58':
       // A Solana address. No IC asset settles on Solana, and dpay never swaps, so this is always a
       // wrong-chain paste — named as such rather than lumped in with unparseable junk.
+      return {ok: false, refusal: {reason: 'wrong-chain', shape}};
+    case 'unknown':
+      return {ok: false, refusal: {reason: 'unrecognised'}};
+  }
+}
+
+/** The Solana rail's half of the same policy table. It takes no descriptor because the rail has
+ *  none — the device holds the key and talks to a Solana RPC directly, so there is no IC catalog
+ *  row to consult; SOL and USDC-on-Solana are both addressed by the same base58 wallet address.
+ *
+ *  It exists so BOTH rails refuse in the same words: before this, the SOL send form answered every
+ *  bad paste with "not a valid Solana address", which cannot tell a typo from a Bitcoin address a
+ *  user pasted into the wrong wallet. That divergence is what CLAUDE.md's same-surfaces rule calls
+ *  a bug rather than an exception. */
+export function routeForSolana(shape: AddressShape): SolanaRoute {
+  switch (shape) {
+    case 'base58':
+      return {ok: true};
+    case 'evm':
+    case 'btc':
+    case 'ic-account':
+    case 'icp-account-id':
+      // Every other namespace is a real address on a real chain that is not Solana. Naming it is
+      // the whole point — a wrong-chain paste is the most dangerous mistake this screen can accept.
       return {ok: false, refusal: {reason: 'wrong-chain', shape}};
     case 'unknown':
       return {ok: false, refusal: {reason: 'unrecognised'}};

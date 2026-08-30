@@ -16,19 +16,23 @@
 //
 // Selector contract: `asset-sol-select`, `tab-pay`, `btn-pay-send`, `sol-send-address-input`,
 // `sol-send-amount-input`, `sol-send-review`, `sol-send-review-amount`, `btn-sol-send-confirm`,
-// `sol-send-status`, `sol-send-signature`.
+// `sol-send-signature`, `sol-send-status` (the shared AddressField's route/refusal line, form
+// phase) and `sol-send-outcome` (the "Sent ✓" headline, done phase). The two are deliberately
+// DIFFERENT ids: flow 77 asserts the outcome's ABSENCE to prove nothing was sent, which a shared id
+// would silently satisfy from the form. The IC rail splits them the same way.
 import {setup, assert, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '52',
   name: 'sol-withdraw',
   journey: 'withdraw',
-  covers: ['sol-withdraw', 'sol-send', 'sol-tab-ia', 'sign'],
-  verifies: 'SOL withdraw: select SOL → Pay tab "Send to address" → enter addr+amount → sign+broadcast (stub) → Sent ✓.',
+  covers: ['sol-withdraw', 'sol-send', 'sol-tab-ia', 'sign', 'route-disclosure', 'error-handling'],
+  verifies: 'SOL withdraw: select SOL → Pay tab "Send to address" → a wrong-chain paste is refused by name and a valid one has its route disclosed → enter amount → sign+broadcast (stub) → Sent ✓.',
   timeoutMs: 25000,
 };
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address
+const BTC_ADDR = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';   // a real address on the WRONG chain
 const SEND_AMOUNT = '0.001'; // 0.001 SOL = 1_000_000 lamports
 
 export async function run() {
@@ -87,7 +91,26 @@ export async function run() {
     // 3. Re-open "Send to address" + enter the destination address + amount.
     await driver.click('btn-pay-send', {timeoutMs: 5_000});
     await driver.findByTestID('sol-send-address-input', {timeoutMs: 5_000});
+
+    // Rail parity (2026-08-30): this field is now the SHARED AddressField over the shared
+    // destination classifier, so a wrong-chain paste is named rather than shrugged at. Pinned here
+    // because a Bitcoin address in a Solana field is the most expensive mistake this screen can
+    // accept, and "not a valid Solana address" never told the user which mistake they made.
+    await driver.type('sol-send-address-input', BTC_ADDR, {timeoutMs: 4_000});
+    const refusal = await driver.readText('sol-send-status');
+    assert(/Bitcoin/.test(refusal) && /Solana/.test(refusal), `a Bitcoin address must be refused BY NAME, got: "${refusal}"`);
+    assert(
+      await driver.eval(() => !!document.querySelector('[data-testid="btn-sol-send-confirm"]')?.getAttribute('disabled') ||
+        document.querySelector('[data-testid="btn-sol-send-confirm"]')?.getAttribute('aria-disabled') === 'true'),
+      'a refused destination must leave Confirm disabled',
+    );
+    console.log(`[52-sol-withdraw] ✓ wrong-chain refusal names both chains: ${refusal}`);
+    await driver.screenshot('52-sol-send-refusal');
+
     await driver.type('sol-send-address-input', DEST_ADDR, {timeoutMs: 4_000});
+    const route = await driver.readText('sol-send-status');
+    assert(/Solana/.test(route), `a valid destination must disclose its route, got: "${route}"`);
+    console.log(`[52-sol-withdraw] ✓ route disclosed before the amount: ${route}`);
     await driver.type('sol-send-amount-input', SEND_AMOUNT, {timeoutMs: 4_000});
 
     // 4. The review card appears once a valid amount is entered.
@@ -101,7 +124,7 @@ export async function run() {
     await driver.click('btn-sol-send-confirm', {timeoutMs: 5_000});
 
     // 6. Assert the success state.
-    const status = await driver.findByTestID('sol-send-status', {timeoutMs: 12_000});
+    const status = await driver.findByTestID('sol-send-outcome', {timeoutMs: 12_000});
     const statusTxt = await status.evaluate((n) => (n.textContent ?? '').trim());
     assert(/Sent/.test(statusTxt), `the sheet should show "Sent ✓", got: "${statusTxt}"`);
     console.log(`[52-sol-withdraw] ✓ ${statusTxt}`);

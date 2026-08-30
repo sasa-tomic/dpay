@@ -213,6 +213,7 @@ export const withdrawEs: WithdrawMessages = {
 
     routeIcrc: (network, fee) => `${network} · llega en segundos · comisión ${fee}`,
     routeIcrcUnknownFee: network => `${network} · llega en segundos · se aplica la comisión del registro`,
+    routeSolana: network => `${network} · llega en segundos · se aplica una pequeña comisión de red en SOL`,
     feeUnknown: 'la fija el registro',
     routeLegacy: fee => `Cuenta ICP · llega en segundos · comisión ${fee}`,
     routeNative: (chain, minutes, min) => `${chain} · aprox. ${minutes} min · mínimo ${min}`,
@@ -259,8 +260,6 @@ export const withdrawEs: WithdrawMessages = {
     confirmingOnSolana: 'Confirmando en Solana: puede tardar hasta un minuto.',
     sendToSolana: asset => `Envía tus ${asset} a una dirección de Solana`,
     available: available => `Disponible: ${available}`,
-    addressLabel: 'Dirección de Solana',
-    addressPlaceholder: 'Dirección base58 del destinatario',
     usdcAmountPlaceholder: '1.5',
     solAmountPlaceholder: '0.025',
     needsSol: 'Enviar USDC requiere un poco de SOL en la billetera para las comisiones de red: añade algo primero.',

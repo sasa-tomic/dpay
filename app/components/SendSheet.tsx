@@ -294,7 +294,7 @@ export function SendSheet({
           <View style={[S.check, pending && S.checkAlready]}>
             {pending ? <IconClock size={44} color={C.brandInk} /> : <IconCheck size={44} color={C.brandInk} />}
           </View>
-          <Text testID="send-status" style={S.paidText}>
+          <Text testID="send-outcome" style={S.paidText}>
             {pending ? M.withdraw.send.sentUnknown : M.withdraw.send.sent}
           </Text>
           <Text style={S.paidSub}>{fmt(raw)}</Text>

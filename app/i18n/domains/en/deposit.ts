@@ -407,6 +407,9 @@ export type WithdrawMessages = {
     /** Used when the asset's catalog row carries NO registered fee: the ledger charges its own
      *  default and we do not know the number, so we say so rather than print a made-up 0. */
     routeIcrcUnknownFee: (network: string) => string;
+    /** The Solana rail's route line. No fee number: this rail signs on-device and broadcasts to an
+     *  RPC, so nothing has quoted one — and the screen never prints a fee it does not know. */
+    routeSolana: (network: string) => string;
     feeUnknown: string;
     routeLegacy: (fee: string) => string;
     routeNative: (chain: string, minutes: number, min: string) => string;
@@ -457,8 +460,6 @@ export type WithdrawMessages = {
     confirmingOnSolana: string;
     sendToSolana: (asset: string) => string;
     available: (available: string) => string;
-    addressLabel: string;
-    addressPlaceholder: string;
     usdcAmountPlaceholder: string;
     solAmountPlaceholder: string;
     /** Fees (and a possible recipient-account creation) are paid in SOL — said BEFORE the amount. */
@@ -513,6 +514,7 @@ export const withdrawEn: WithdrawMessages = {
 
     routeIcrc: (network, fee) => `${network} · arrives in seconds · fee ${fee}`,
     routeIcrcUnknownFee: network => `${network} · arrives in seconds · the ledger's own fee applies`,
+    routeSolana: network => `${network} · arrives in seconds · a small SOL network fee applies`,
     feeUnknown: 'set by the ledger',
     routeLegacy: fee => `ICP account · arrives in seconds · fee ${fee}`,
     routeNative: (chain, minutes, min) => `${chain} · about ${minutes} min · minimum ${min}`,
@@ -564,8 +566,6 @@ export const withdrawEn: WithdrawMessages = {
     confirmingOnSolana: 'Confirming on Solana — this can take up to a minute.',
     sendToSolana: asset => `Send your ${asset} to a Solana address`,
     available: available => `Available: ${available}`,
-    addressLabel: 'Solana address',
-    addressPlaceholder: 'Receiver base58 address',
     usdcAmountPlaceholder: '1.5',
     solAmountPlaceholder: '0.025',
     needsSol: 'Sending USDC needs a little SOL in the wallet for network fees — add some first.',

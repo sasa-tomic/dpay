@@ -21,7 +21,8 @@
 // Selector contract: `balance` (header → Balances), `asset-vchf-select`, `btn-pay-send`
 // (Pay → "Send to address"), `send-address-input`, `send-status` (route disclosure),
 // `send-amount-input`, `send-review-amount`, `send-review-fee`, `send-review-total`,
-// `btn-send-confirm`, `send-status` → 'Sent', `send-destination`, `btn-send-done`, `btn-pay-scan`.
+// `btn-send-confirm`, `send-destination`, `btn-send-done`, `btn-pay-scan`, and `send-outcome` —
+// the DONE headline, deliberately a DIFFERENT id from the form-phase `send-status` line above it.
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, openPaySend, railPrincipalText,

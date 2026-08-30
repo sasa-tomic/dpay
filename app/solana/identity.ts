@@ -95,16 +95,31 @@ export function deriveSolanaAddress(secretHex: string): string {
 
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
-// Conservative Solana address sanity check: base58 charset + the length a 32-byte pubkey encodes to
-// (32–44 chars). Purely a paste-error guard (mirrors the catalog's isValidDestinationAddress for
-// BTC/ETH) — catches a wrong-chain paste before the user signs. Does NOT verify on-chain existence.
+// Is this a well-formed Solana address? Base58 charset + the length a 32-byte pubkey encodes to
+// (32–44 chars), and then the DECODE ITSELF: exactly 32 bytes, which is the same check
+// `base58Decode32` (solana/tx.ts) applies when it builds the transaction.
+//
+// The decode is what makes the guard mean something. Charset+length alone accepts a 33-character
+// base58 string, which is not an address at all: the user typed an amount, pressed Confirm, and got
+// "expected 32-byte Solana pubkey, got 24" out of the transaction builder — a refusal arriving from
+// the wrong layer, after the commit, in the codec's words (founder rule 2026-08-29: the error path
+// instructs, where the user still has something to fix). Deciding it here puts the refusal under
+// the field being typed.
+//
+// The cheap pre-checks stay in front: they are what keeps a half-typed address from throwing on
+// every keystroke. Still a WELL-FORMEDNESS test — it does NOT verify on-chain existence.
 export function isValidSolanaAddress(addr: string): boolean {
   const a = addr.trim();
   if (a.length < 32 || a.length > 44) return false;
   for (let i = 0; i < a.length; i++) {
     if (!BASE58_ALPHABET.includes(a[i])) return false;
   }
-  return true;
+  try {
+    return bs58.decode(a).length === 32;
+  } catch {
+    // A decode throw IS the answer to "is this valid" — this is a predicate, not a dropped failure.
+    return false;
+  }
 }
 
 // 9 decimals: 1 SOL = 1_000_000_000 lamports. Centralised so callers never hard-code it.

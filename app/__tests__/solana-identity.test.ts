@@ -92,6 +92,16 @@ describe('solana/identity — isValidSolanaAddress', () => {
     expect(isValidSolanaAddress('short')).toBe(false);
   });
 
+  test('rejects base58 of the right SHAPE that does not decode to 32 bytes', () => {
+    // The case charset+length alone cannot catch, and the one a mistyped/truncated paste actually
+    // produces: 33 valid base58 characters inside the 32–44 window that decode to 24 bytes. Before
+    // the decode was part of this predicate it passed here and blew up inside the transaction
+    // builder instead — after the user had already committed to an amount.
+    const truncated = EXPECTED_ADDRESS.slice(0, 33);
+    expect(truncated.length).toBeGreaterThanOrEqual(32); // still inside the 32–44 length window
+    expect(isValidSolanaAddress(truncated)).toBe(false);
+  });
+
   test('rejects empty / whitespace', () => {
     expect(isValidSolanaAddress('')).toBe(false);
     expect(isValidSolanaAddress('   ')).toBe(false);

@@ -1,5 +1,5 @@
 import {describe, it, expect} from '@jest/globals';
-import {detectAddressShape, routeForShape, isNativeIcpLedger, chainNameOfShape} from '../lib/destination';
+import {detectAddressShape, routeForShape, routeForSolana, isNativeIcpLedger, chainNameOfShape} from '../lib/destination';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {CurrencyDescriptor} from '../config/catalog';
 
@@ -158,5 +158,29 @@ describe('end-to-end shape→route for the addresses that motivated this feature
   it('an exchange-style ICP address sends ICP over the legacy rail but refuses for VCHF', () => {
     expect(routeForShape(detectAddressShape(K2_ACCOUNT_ID), ICP)).toEqual({ok: true, route: {kind: 'icp-legacy'}});
     expect(routeForShape(detectAddressShape(K2_ACCOUNT_ID), VCHF)).toEqual({ok: false, refusal: {reason: 'legacy-not-icp'}});
+  });
+});
+
+// The Solana rail's half of the same table. It exists so BOTH rails refuse a wrong-chain paste in
+// the same words: the SOL send form used to answer every bad paste with "not a valid Solana
+// address", which cannot distinguish a typo from a Bitcoin address in the wrong wallet.
+describe('routeForSolana — the rail with exactly one way to move money', () => {
+  it('accepts a base58 address, the only namespace this rail can reach', () => {
+    expect(routeForSolana(detectAddressShape(SOL_ADDR))).toEqual({ok: true});
+  });
+
+  it('names every other chain rather than lumping it in with unparseable text', () => {
+    // A user pasting an Ethereum or Bitcoin address into the SOL field has made a specific,
+    // recoverable mistake; "invalid address" hides which one.
+    for (const addr of [ETH_ADDR, BTC_BECH32, BTC_LEGACY, K2, K2_ACCOUNT_ID]) {
+      const routed = routeForSolana(detectAddressShape(addr));
+      if (routed.ok || routed.refusal.reason !== 'wrong-chain') throw new Error(`expected a wrong-chain refusal for ${addr}`);
+      // The refusal carries the shape, which is what turns into the chain's proper name on screen.
+      expect(chainNameOfShape(routed.refusal.shape)).not.toBeNull();
+    }
+  });
+
+  it('text that belongs to no namespace is unrecognised, not wrong-chain', () => {
+    expect(routeForSolana(detectAddressShape('send it to dave'))).toEqual({ok: false, refusal: {reason: 'unrecognised'}});
   });
 });

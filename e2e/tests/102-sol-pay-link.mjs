@@ -18,7 +18,7 @@
 //   4. Confirm signs + broadcasts (stub) → Sent ✓ — the link fed the REAL send path.
 //
 // Selector contract: `active-asset-label`, `sol-send-address-input`, `sol-send-amount-input`,
-// `sol-send-review`, `btn-sol-send-confirm`, `sol-send-status`.
+// `sol-send-review`, `btn-sol-send-confirm`, `sol-send-outcome`.
 import {setup, assert, assertEq, onboardWallet} from '../harness/lib.mjs';
 
 export const meta = {
@@ -92,7 +92,7 @@ export async function run() {
     // 4. Confirm → the REAL send path (local sign + broadcast through the stub).
     console.log('[102-sol-pay-link] confirming (sign + broadcast via stub)…');
     await driver.click('btn-sol-send-confirm', {timeoutMs: 5_000});
-    const status = await driver.findByTestID('sol-send-status', {timeoutMs: 12_000});
+    const status = await driver.findByTestID('sol-send-outcome', {timeoutMs: 12_000});
     const statusTxt = await status.evaluate((n) => (n.textContent ?? '').trim());
     assert(/Sent/.test(statusTxt), `the sheet should show "Sent ✓", got: "${statusTxt}"`);
     console.log(`[102-sol-pay-link] ✓ ${statusTxt}`);
