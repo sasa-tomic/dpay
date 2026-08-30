@@ -84,8 +84,18 @@ export const depositDe: DepositMessages = {
     missingErc20Address: 'In den Einzahlungsdetails fehlt die ERC-20-Adresse.',
     txReverted: 'Die Transaktion wurde on-chain zurückgewiesen.',
     txUnconfirmed: 'Transaktion gesendet, aber noch nicht bestätigt — wir warten weiter auf die Gutschrift.',
+    approveReverted:
+      'Die Freigabe wurde on-chain zurückgewiesen, die Einzahlung wurde also nie gesendet und es hat kein Geld deine Wallet verlassen. Versuch es erneut — deine Wallet fragt zuerst nach der Freigabe und dann nach der Einzahlung.',
+    approveUnconfirmed:
+      'Die Freigabe wurde gesendet, aber nicht bestätigt, die Einzahlung wurde also nie gesendet und es hat kein Geld deine Wallet verlassen. Warte einen Moment und versuch es erneut: Deine Wallet fragt dann noch einmal nach der Freigabe — das ist normal und kostet nur Gas.',
+    depositHashUnknown:
+      'Deine Wallet hat die Einzahlung angenommen, aber keine Transaktions-ID zurückgegeben — dpay kann daher nicht erkennen, ob sie gesendet wurde. Sieh in deiner Wallet-App in den letzten Aktivitäten nach, bevor du es erneut versuchst: Ist die Einzahlung dort, wird sie in etwa 20 Minuten gutgeschrieben, und eine zweite Einzahlung würde das Geld doppelt senden.',
+    approveHashUnknown:
+      'Deine Wallet hat die Freigabe angenommen, aber keine Transaktions-ID zurückgegeben — dpay kann daher nicht erkennen, ob sie gesendet wurde. Es wurde nichts eingezahlt und es hat kein Geld deine Wallet verlassen. Sieh in deiner Wallet-App in den letzten Aktivitäten nach und versuch es dann erneut — sie fragt zuerst nach der Freigabe, das ist normal und kostet nur Gas.',
     txNotSigned: 'Transaktion nicht signiert.',
     txFailed: 'Transaktion fehlgeschlagen.',
+    allowanceStands:
+      'Deine Freigabe ist bereits on-chain bestätigt und es hat kein Geld deine Wallet verlassen. Beim nächsten Versuch fragt deine Wallet wieder nach Freigabe und Einzahlung — beide Signaturen wie zuvor.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Sende nur '},
       {t: nativeAsset, em: true},
@@ -98,9 +108,13 @@ export const depositDe: DepositMessages = {
     gasNative: 'Die Netzwerkgebühr wird in ETH bezahlt — sende etwas mehr, als du einzahlen willst.',
     gasErc20: 'Du brauchst etwas ETH für die Gas-Gebühren im Ethereum-Netzwerk.',
     scanToPair: 'Zum Koppeln mit deiner Wallet scannen',
-    openWalletHint: 'Öffnet eine installierte Wallet-App auf diesem Gerät',
-    openWallet: 'Wallet auf diesem Gerät öffnen',
-    walletListPair: 'MetaMask · Trust · Rabby · jede WalletConnect-Wallet',
+    orOpenHere: 'Oder öffne eine Wallet auf diesem Handy:',
+    openNamedWallet: name => `${name} öffnen`,
+    otherWallet: 'Andere Wallet',
+    otherWalletHint:
+      'Bei „Andere Wallet“ wählt dein Handy die App aus. Das Koppeln funktioniert, aber dpay kann sie später nicht für dich öffnen — du musst zum Bestätigen der Einzahlung selbst dorthin wechseln.',
+    couldntOpenWallet: name =>
+      `${name} konnte nicht geöffnet werden — die App ist vielleicht nicht mehr installiert. Wähle unten eine andere Wallet oder scanne den QR-Code mit einer Wallet auf einem anderen Gerät.`,
     walletList: 'MetaMask · Trust · Rabby · jede WalletConnect-kompatible Wallet',
     explainNative:
       'Sende ETH direkt an den Einzahlungs-Contract — eine Transaktion, die deine Wallet signiert, mit deinem Einzahlungsbetrag als ETH-Wert.',
@@ -111,6 +125,7 @@ export const depositDe: DepositMessages = {
     amountPlaceholder: '0.00',
     fromAccount: shortAccount => `Von ${shortAccount}`,
     confirmingLabel: 'Bestätigung in deiner Wallet',
+    switchToWalletApp: 'Deine Wallet sollte sich zum Bestätigen öffnen. Falls nicht, wechsle selbst dorthin — und komm dann hierher zurück.',
     deposit: 'Einzahlen',
     approveDepositLabel: 'Freigeben und einzahlen',
     approveDeposit: 'Freigeben & einzahlen',

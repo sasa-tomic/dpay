@@ -25,6 +25,10 @@
  */
 import {jest} from '@jest/globals';
 import type {EthereumProvider, EthereumProviderOptions} from '@walletconnect/ethereum-provider';
+// TYPE-ONLY, and it must stay that way: `__stubs__/walletconnect-stub.ts` imports this module for
+// its value (`FAKE_INIT`) and `walletconnect.ts` imports that stub under jest — a runtime import
+// here would close the cycle. `import type` is erased (isolatedModules pins that).
+import type {WalletConnectSession} from '../walletconnect';
 
 /** The real public provider instance type (the contract `EthereumProvider` itself `implements`). */
 type EthereumProviderInstance = InstanceType<typeof EthereumProvider>;
@@ -44,9 +48,38 @@ type RequestArgs = {method: string; params?: unknown[] | object};
 export class FakeEthereumProvider
   implements Pick<
     EthereumProviderInstance,
-    'request' | 'enable' | 'connect' | 'disconnect' | 'on' | 'removeListener'
+    'request' | 'enable' | 'connect' | 'disconnect' | 'on' | 'removeListener' | 'session' | 'signer'
   >
 {
+  /**
+   * The two `IKeyValueStorage` methods `walletconnect.ts` reaches through
+   * `signer.client.core.storage` — the SDK's own store, where the WALLETCONNECT_DEEPLINK_CHOICE key
+   * lives (see `recordWalletChoice`). jest.fn-backed so a test can assert the exact key + value
+   * written, and drive a write/removal failure. Declared BEFORE `signer`, which closes over it.
+   */
+  readonly storage = {
+    setItem: jest.fn(async (_key: string, _value: unknown): Promise<void> => undefined),
+    removeItem: jest.fn(async (_key: string): Promise<void> => undefined),
+  };
+
+  /**
+   * WC `signer` — the UniversalProvider. `walletconnect.ts` reaches exactly ONE thing through it
+   * (`client.core.storage`) and a real UniversalProvider cannot be constructed in a test, so the
+   * fake supplies that sub-tree under the REAL member type — the same `as unknown as` shape `on` /
+   * `removeListener` below already use for the members a structural stand-in cannot satisfy. Drift
+   * on the PATH is caught at compile time by walletconnect.ts's own `signer.client.core.storage`
+   * expression; drift on the MEMBER NAME is caught by the `implements Pick<…, 'signer'>` above.
+   */
+  signer = {client: {core: {storage: this.storage}}} as unknown as EthereumProviderInstance['signer'];
+
+  /**
+   * WC `session` — the settled session, `undefined` until a pairing succeeds (the real provider
+   * also restores one from storage at init). Tests assign it, or have `connect` assign it, to drive
+   * the reuse / wrong-chain / nothing-approved branches of `pairWalletConnect`. Typed as the real
+   * `session` member, so an SDK change to the session shape fails `just typecheck` here.
+   */
+  session: EthereumProviderInstance['session'] = undefined;
+
   private readonly handlers = new Map<string, (args: RequestArgs) => unknown>();
   // The listener registry: event name → set of listener fns. `emit` (test helper) fans a payload
   // out to every registered listener for that event, exactly like the real EventEmitter.
@@ -130,3 +163,34 @@ export class FakeEthereumProvider
 export const FAKE_INIT: jest.MockedFunction<
   (opts: EthereumProviderOptions) => Promise<FakeEthereumProvider>
 > = jest.fn(async (_opts: EthereumProviderOptions) => new FakeEthereumProvider());
+
+/**
+ * A settled session whose namespaces approve exactly `accountsByNamespace` — the input a wallet's
+ * approval reduces to. Keyed by namespace so a test can use the bare (`eip155`) or the chain-scoped
+ * (`eip155:1`) form WC v2 both allow, with CAIP-10 accounts (`eip155:<chainId>:<address>`).
+ *
+ * Every other field is filled with an inert placeholder because the REAL `SessionTypes.Struct`
+ * requires it: the return type is the genuine session type (via `walletconnect.ts`), so this is
+ * tsc-checked against the SDK — a new required field breaks the build here instead of letting a
+ * hand-rolled `as` cast drift away from what the SDK actually hands the app.
+ */
+export function fakeSession(accountsByNamespace: Record<string, string[]>): WalletConnectSession {
+  const metadata = {name: 'fake', description: 'fake', url: 'https://fake.invalid', icons: []};
+  const namespaces: WalletConnectSession['namespaces'] = {};
+  for (const [key, accounts] of Object.entries(accountsByNamespace)) {
+    namespaces[key] = {accounts, methods: [], events: []};
+  }
+  return {
+    topic: 'fake-topic',
+    pairingTopic: 'fake-pairing-topic',
+    relay: {protocol: 'irn'},
+    expiry: 0,
+    acknowledged: true,
+    controller: 'fake-controller',
+    namespaces,
+    requiredNamespaces: {},
+    optionalNamespaces: {},
+    self: {publicKey: 'fake-self', metadata},
+    peer: {publicKey: 'fake-peer', metadata},
+  };
+}

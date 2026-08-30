@@ -1,7 +1,7 @@
 import { describe, test, expect, jest } from '@jest/globals';
 import {
   connectWallet, sendTransaction, getChainId, waitForReceipt,
-  ReceiptReverted, ReceiptTimeout, getEthereumProvider, resolveOnrampProvider, pairOnrampWallet,
+  ReceiptReverted, TransactionHashMissing, getEthereumProvider, resolveOnrampProvider, pairOnrampWallet,
   openWalletApp,
   type Eip1193Provider,
 } from '../wallet';
@@ -86,16 +86,28 @@ describe('sendTransaction', () => {
     expect(captured.value).toBe('0xf4240'); // 1_000_000 in hex
   });
 
-  test('throws if the wallet returns no hash', async () => {
+  // An ACCEPTED send that answers without a hash is not a failed send — the wallet may have
+  // broadcast it and only the id is lost. Typed so the caller can say that instead of "not sent",
+  // which would invite depositing the same money twice. The value that came back is named, because
+  // an empty string and a null are different wallet bugs.
+  test('an accepted send with no hash throws TransactionHashMissing, naming what came back', async () => {
     const p = mockProvider({ sendResult: '' });
-    await expect(sendTransaction(p, '0xfrom', { to: '0xto', data: '0x' })).rejects.toThrow(
-      'did not return a transaction hash',
-    );
+    try {
+      await sendTransaction(p, '0xfrom', { to: '0xto', data: '0x' });
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(TransactionHashMissing);
+      expect((e as TransactionHashMissing).received).toBe('""');
+    }
   });
 
-  test('propagates wallet rejection', async () => {
+  test('propagates wallet rejection, and it is NOT a TransactionHashMissing', async () => {
     const p = mockProvider({ rejectSend: 'user rejected' });
+    // The caller branches on the type; a decline and a lost hash must never collapse into one.
     await expect(sendTransaction(p, '0xfrom', { to: '0xto', data: '0x' })).rejects.toThrow('user rejected');
+    await expect(sendTransaction(p, '0xfrom', { to: '0xto', data: '0x' })).rejects.not.toBeInstanceOf(
+      TransactionHashMissing,
+    );
   });
 });
 
@@ -173,6 +185,55 @@ describe('getChainId', () => {
   test('rejects an empty string', async () => {
     await expect(getChainId(chainIdProvider(''))).rejects.toThrow();
   });
+
+  // The OTHER encoding. WalletConnect answers eth_chainId locally as a plain NUMBER (the SDK
+  // evidence is quoted at getChainId); every mock here — and in the deposit-sheet suite — spoke the
+  // injected-wallet dialect ('0x1'), which is exactly how a hex-ONLY parse shipped and then threw
+  // on every single WalletConnect connect, wedging the sheet on its Connect button.
+  test('parses a plain number 11155111 → 11155111 (the WalletConnect encoding, Sepolia)', async () => {
+    expect(await getChainId(chainIdProvider(11155111))).toBe(11155111);
+  });
+
+  test('rejects a fractional number, naming the value received', async () => {
+    await expect(getChainId(chainIdProvider(1.5))).rejects.toThrow('1.5');
+  });
+
+  test('rejects a negative number', async () => {
+    await expect(getChainId(chainIdProvider(-1))).rejects.toThrow();
+  });
+
+  test('rejects NaN and names it readably (JSON would render it as "null")', async () => {
+    await expect(getChainId(chainIdProvider(Number.NaN))).rejects.toThrow('NaN');
+  });
+
+  test('rejects an integer beyond the safe range (parsed back it would be a different chain)', async () => {
+    await expect(getChainId(chainIdProvider(Number.MAX_SAFE_INTEGER + 1))).rejects.toThrow();
+  });
+});
+
+// --- the WalletConnect transport's LOCALLY-answered methods -----------------------------------
+// Over WalletConnect the eip155 provider answers eth_requestAccounts / eth_accounts / eth_chainId
+// ITSELF, from the settled session and from what dpay requested at init — no wallet round-trip (the
+// SDK evidence is quoted at getChainId in wallet.ts). This models that dialect so the connect
+// sequence the deposit sheet runs is exercised against BOTH transports, not just the injected one.
+describe('the connect sequence over a WalletConnect-dialect provider', () => {
+  function walletConnectProvider(chainId: number, accounts: string[]): Eip1193Provider {
+    return {
+      request: async ({ method }) => {
+        // Answered from the settled session — the wallet is never prompted.
+        if (method === 'eth_requestAccounts' || method === 'eth_accounts') return accounts;
+        // A plain NUMBER, not a hex string.
+        if (method === 'eth_chainId') return parseInt(String(chainId), 10);
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+  }
+
+  test('connectWallet then getChainId both succeed (the deposit sheet aborted here before)', async () => {
+    const p = walletConnectProvider(1, ['0xb0bfeed', '0xsecond']);
+    expect(await connectWallet(p)).toBe('0xb0bfeed');
+    expect(await getChainId(p)).toBe(1);
+  });
 });
 
 // --- MC8 U4 — wait for ETH receipts/reverts ---------------------------------------------------
@@ -180,7 +241,7 @@ describe('getChainId', () => {
 // sheet unconditionally setPhase('watching') → a REVERTED approve/deposit lied as "will appear in
 // ~20 min" (never credits). waitForReceipt polls eth_getTransactionReceipt until mined; a 0x0 status
 // throws a typed ReceiptReverted (caller surfaces an honest error) and a no-receipt timeout throws a
-// typed ReceiptTimeout (caller treats SOFT — keeps watching). This pins the typed-error contract.
+// plain Error the caller treats SOFT — keeps watching. This pins that one-typed-error contract.
 describe('waitForReceipt', () => {
   // A provider whose eth_getTransactionReceipt responses are driven by a per-call function (so a test
   // can return null for N polls then a receipt, or always null to drive the timeout).
@@ -218,29 +279,18 @@ describe('waitForReceipt', () => {
     );
   });
 
-  test('no receipt for the full timeout → throws ReceiptTimeout', async () => {
+  // A timeout stays a PLAIN Error: the caller's only receipt branch is "reverted vs not", because a
+  // timed-out poll and a poll whose RPC read threw leave it in the identical position. What must
+  // hold is that a timeout does not answer that branch — and that it still names itself.
+  test('no receipt for the full timeout → throws a plain Error naming the timeout, NOT a ReceiptReverted', async () => {
     const p = receiptProvider(() => null);
-    await expect(waitForReceipt(p, '0xhash', { timeoutMs: 60, pollMs: 10 })).rejects.toBeInstanceOf(
-      ReceiptTimeout,
-    );
-  });
-
-  test('ReceiptReverted and ReceiptTimeout are distinguishable (instanceof)', async () => {
-    const reverted = receiptProvider(() => ({ status: '0x0' }));
-    const timedOut = receiptProvider(() => null);
     try {
-      await waitForReceipt(reverted, '0xh', { timeoutMs: 200, pollMs: 5 });
+      await waitForReceipt(p, '0xhash', { timeoutMs: 60, pollMs: 10 });
       throw new Error('should have thrown');
     } catch (e) {
-      expect(e).toBeInstanceOf(ReceiptReverted);
-      expect(e).not.toBeInstanceOf(ReceiptTimeout);
-    }
-    try {
-      await waitForReceipt(timedOut, '0xh', { timeoutMs: 40, pollMs: 10 });
-      throw new Error('should have thrown');
-    } catch (e) {
-      expect(e).toBeInstanceOf(ReceiptTimeout);
       expect(e).not.toBeInstanceOf(ReceiptReverted);
+      expect((e as Error).message).toContain('0xhash');
+      expect((e as Error).message).toContain('not mined within the timeout');
     }
   });
 

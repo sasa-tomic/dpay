@@ -85,8 +85,18 @@ export const depositEs: DepositMessages = {
     missingErc20Address: 'Los datos del depósito no incluyen la dirección ERC-20.',
     txReverted: 'La transacción se revirtió en la cadena.',
     txUnconfirmed: 'Transacción enviada, aún sin confirmar. Seguimos esperando la emisión.',
+    approveReverted:
+      'La aprobación se revirtió en la cadena: el depósito nunca se envió y no salió dinero de tu billetera. Vuelve a intentarlo; tu billetera pedirá primero la aprobación y después el depósito.',
+    approveUnconfirmed:
+      'La aprobación se envió pero no se confirmó: el depósito nunca se envió y no salió dinero de tu billetera. Espera un momento y vuelve a intentarlo; tu billetera pedirá la aprobación otra vez, es lo normal y solo cuesta gas.',
+    depositHashUnknown:
+      'Tu billetera aceptó el depósito pero no devolvió un identificador de transacción, así que dpay no puede saber si se envió. Revisa la actividad reciente en tu app de billetera antes de volver a intentarlo: si el depósito está ahí, se acreditará en unos 20 minutos, y depositar otra vez enviaría el dinero dos veces.',
+    approveHashUnknown:
+      'Tu billetera aceptó la aprobación pero no devolvió un identificador de transacción, así que dpay no puede saber si se envió. No se hizo ningún depósito y no salió dinero de tu billetera. Revisa la actividad reciente en tu app de billetera y vuelve a intentarlo: pedirá primero la aprobación, es lo normal y solo cuesta gas.',
     txNotSigned: 'La transacción no se firmó.',
     txFailed: 'La transacción falló.',
+    allowanceStands:
+      'Tu aprobación de gasto ya está confirmada en la cadena y no salió dinero de tu billetera. Si lo intentas otra vez, tu billetera pedirá la aprobación y después el depósito, las dos firmas igual que antes.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Envía solo '},
       {t: nativeAsset, em: true},
@@ -99,9 +109,13 @@ export const depositEs: DepositMessages = {
     gasNative: 'La comisión de red se paga en ETH: envía un poco más de lo que quieras depositar.',
     gasErc20: 'Necesitarás un poco de ETH para las comisiones de red de Ethereum.',
     scanToPair: 'Escanea con tu billetera para vincular',
-    openWalletHint: 'Abre una app de billetera instalada en este dispositivo',
-    openWallet: 'Abrir billetera en este dispositivo',
-    walletListPair: 'MetaMask · Trust · Rabby · cualquier billetera WalletConnect',
+    orOpenHere: 'O abre una billetera en este teléfono:',
+    openNamedWallet: name => `Abrir ${name}`,
+    otherWallet: 'Otra billetera',
+    otherWalletHint:
+      'Con «Otra billetera» es tu teléfono quien elige la app. La vinculación funciona, pero después dpay no podrá volver a abrirla por ti: tendrás que cambiar a ella tú mismo para aprobar el depósito.',
+    couldntOpenWallet: name =>
+      `No se pudo abrir ${name}; puede que ya no esté instalada. Elige otra billetera abajo o escanea el QR con una billetera en otro dispositivo.`,
     walletList: 'MetaMask · Trust · Rabby · cualquier billetera compatible con WalletConnect',
     explainNative:
       'Envía ETH directamente al contrato de depósito: una sola transacción que firma tu billetera, con el importe del depósito como valor en ETH.',
@@ -112,6 +126,7 @@ export const depositEs: DepositMessages = {
     amountPlaceholder: '0.00',
     fromAccount: shortAccount => `Desde ${shortAccount}`,
     confirmingLabel: 'Confirmando en tu billetera',
+    switchToWalletApp: 'Tu billetera debería abrirse para aprobar. Si no lo hace, ábrela tú y vuelve aquí.',
     deposit: 'Depositar',
     approveDepositLabel: 'Aprobar y depositar',
     approveDeposit: 'Aprobar y depositar',

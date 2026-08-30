@@ -27,8 +27,15 @@ export const errorsDe: ErrorMessages = {
   ethWallet: {
     receiptReverted: hash => `Transaktion ${hash} wurde on-chain zurückgewiesen`,
     receiptTimeout: hash => `Transaktion ${hash} wurde nicht innerhalb der Frist in einen Block aufgenommen`,
+    hashMissing: received => `Deine Wallet hat die Transaktion angenommen, aber keine Transaktions-ID zurückgegeben (${received})`,
     pairingTimedOut: 'Zeitüberschreitung bei der Kopplung — innerhalb von 5 Min. hat keine Wallet gescannt',
     pairingFailed: detail => `WalletConnect-Kopplung fehlgeschlagen: ${detail}`,
+    invalidChainId: value =>
+      `Deine Wallet hat ein Netzwerk gemeldet, das dpay nicht lesen kann (${value}). Verbinde sie erneut — wenn das weiterhin passiert, nutze eine andere Wallet-App.`,
+    chainNotApproved: (requested, approved) =>
+      approved === ''
+        ? `Deine Wallet hat sich verbunden, aber kein Ethereum-Netzwerk freigegeben. Diese Einzahlung läuft über Netzwerk ${requested} — wechsle in deiner Wallet dorthin und verbinde erneut.`
+        : `Deine Wallet hat Netzwerk ${approved} freigegeben, diese Einzahlung läuft aber über Netzwerk ${requested}. Wechsle das Netzwerk in deiner Wallet und verbinde erneut.`,
   },
 
   tap: {

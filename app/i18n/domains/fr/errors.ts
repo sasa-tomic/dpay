@@ -29,8 +29,15 @@ export const errorsFr: ErrorMessages = {
   ethWallet: {
     receiptReverted: hash => `la transaction ${hash} a échoué sur la chaîne`,
     receiptTimeout: hash => `la transaction ${hash} n’a pas été minée dans le délai imparti`,
+    hashMissing: received => `votre portefeuille a accepté la transaction mais n’a renvoyé aucun identifiant de transaction (${received})`,
     pairingTimedOut: 'délai d’association dépassé — aucun portefeuille scanné en 5 min',
     pairingFailed: detail => `échec de l’association WalletConnect : ${detail}`,
+    invalidChainId: value =>
+      `Votre portefeuille a indiqué un réseau que dpay ne sait pas lire (${value}). Reconnectez-le ; si cela se reproduit, utilisez une autre application de portefeuille.`,
+    chainNotApproved: (requested, approved) =>
+      approved === ''
+        ? `Votre portefeuille s’est connecté sans autoriser aucun réseau Ethereum. Ce dépôt se règle sur le réseau ${requested} — passez-y dans votre portefeuille, puis reconnectez-vous.`
+        : `Votre portefeuille a autorisé le réseau ${approved}, mais ce dépôt se règle sur le réseau ${requested}. Changez de réseau dans votre portefeuille, puis reconnectez-vous.`,
   },
 
   tap: {

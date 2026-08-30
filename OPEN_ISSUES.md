@@ -83,8 +83,26 @@
   pre-pilot confidence checks after the testnet proofs).
 - **ckUSDC live Sepolia withdraw proof** (needs funded ckUSDC + ckETH gas; PocketIC already
   proves the dual-ledger flow).
-- **WalletConnect live pairing** (real wallet + 2nd device over the online WC relay). Contract
-  pinned offline (jest 13 cases); outer-loop sign-off only, NOT a blocker.
+- **WalletConnect round trip with a REAL wallet app installed.** The dApp side is now proven live
+  (2026-08-30, emulator + R8 release APK + the real WC relay, driven by a scripted `sign-client`
+  wallet peer): session settles → the app reaches amount entry, `eth_sendTransaction` carries
+  byte-exact `depositEth` calldata to the live minter's helper (cross-checked against
+  `get_minter_info` on `sv3dd-oaaaa-aaaar-qacoa-cai`), the unknown-outcome state resolves to an
+  honest "watching", a wrong-chain approval is refused, and a stale session tears down and re-pairs.
+  Still UNPROVEN, and only a wallet on the device can prove it: a real wallet's approval UI, whether
+  Trust Wallet honours `metadata.redirect.native` at all (no public primary source says it does —
+  the bounce-back is best-effort), the named-wallet button + whether the recorded deeplink choice
+  foregrounds the wallet for a signing request, and gas estimation (dpay sends no `gas`/`nonce`; a
+  wallet with no ETH may refuse before the user sees a prompt). Calling this "outer-loop sign-off,
+  NOT a blocker" is what let four bugs sit on the only path to a ckETH/ckUSDC deposit — the flow
+  could not complete at all. Do not re-file it as a formality.
+- **WalletConnect Core accumulates across re-inits** (low). Observed live 2026-08-30:
+  `WalletConnect Core is already initialized … Init() was called 2 times` then `3 times`. Every
+  `disconnectWalletConnect()` → `initProvider()` cycle (sheet re-open, and the wrong-chain
+  tear-down) builds a fresh Core while the previous one lingers with its relay socket. Every flow
+  still worked; this is resource hygiene, not correctness. The fix is a pairing-lifecycle change
+  (reuse the instance via `connect({chains})` instead of re-initialising), deliberately NOT bundled
+  with the fixes above so it cannot regress a path that is now proven.
 - **Tier-2 full Testnet4 mint** — externally blocked (faucet captcha + cycle-starved minter);
   optional, proves DFINITY infra, low dpay value.
 - **Play launch ops** (old ###11/###12): pre-launch report + `just play-upload` (upload-key AAB

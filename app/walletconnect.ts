@@ -34,7 +34,7 @@ import {Platform, Linking} from 'react-native';
 import {EthereumProvider} from '@walletconnect/ethereum-provider';
 import '@walletconnect/react-native-compat'; // side-effect: RN polyfills for the WC SDK
 import {WALLETCONNECT_PROJECT_ID} from './config/constants';
-import type {Eip1193Provider} from './wallet';
+import {ChainNotApproved, PairingRejected, type Eip1193Provider, type KnownWallet} from './wallet';
 import {M} from './i18n';
 
 // The real EthereumProvider instance type (the package root exports a `const` value; the instance
@@ -48,13 +48,36 @@ type EthereumProviderInstance = InstanceType<typeof EthereumProvider>;
 // user instead of an infinite spinner. Exported so the test can advance fake timers by exactly this.
 export const PAIR_TIMEOUT_MS = 5 * 60 * 1000;
 
-// PR13 — the Android deep-link back into this app after the wallet signs. MUST stay in lockstep
-// with the `applicationId` in `app/android/app/build.gradle` (currently "org.kalaj.dpay", which is
-// INTENTIONALLY != the java package namespace "com.dpay" — see app/android/app/play-signing/README.md).
-// If the applicationId ever changes and this drifts, the wallet's "return to dpay" deep-link breaks
-// SILENTLY (no error, just a dead tap). A documented named const is the single source here — no
-// build-time injection (the applicationId is a gradle value, not reachable from JS at runtime).
-const ANDROID_DEEP_LINK = 'org.kalaj.dpay://';
+// PR13 — the Android deep link the wallet opens to send the user back to dpay after they approve
+// (passed as WC `metadata.redirect.native`). It MUST be a URL SCHEME this build actually claims;
+// an Android `applicationId` is NOT a URL scheme, so the previous "org.kalaj.dpay://" resolved to
+// nothing on the device and stranded the user in their wallet app. The schemes this build claims
+// are declared in `app/android/app/src/main/AndroidManifest.xml`, and only the private `dpay` one
+// can carry a bare "come back" URL (the other, https, is host- and path-scoped to payment links).
+// Exported so walletconnect.test.ts can pin it AGAINST that manifest — the drift this fixes has to
+// stay impossible, and a literal repeated in a test would only drift alongside it.
+// Landing on it costs nothing: `Wallet.handleUrl` routes a payment link or a `dpay:pay/<blob>`
+// receipt and ignores anything else, so the WC return URL just foregrounds the app.
+export const ANDROID_DEEP_LINK = 'dpay://';
+
+// The storage key `@walletconnect/sign-client` reads before every session request to decide which
+// wallet to foreground (`getDeepLink(core.storage, "WALLETCONNECT_DEEPLINK_CHOICE")` →
+// `handleDeeplinkRedirect`). It is declared by the SDK as a literal
+// (`@walletconnect/sign-client/dist/types/constants/client.d.ts`) but NOT importable here: that
+// package is a transitive dependency, and under jest every `@walletconnect/*` specifier resolves to
+// the stub. So it is written once, here, and walletconnect.test.ts reads the SDK's own declaration
+// and fails if the two ever disagree. Exported for that pin and for the teardown assertions.
+export const WALLETCONNECT_DEEPLINK_CHOICE = 'WALLETCONNECT_DEEPLINK_CHOICE';
+
+// How a USER REJECTION reaches `pairWalletConnect`'s catch, read out of the installed SDK: the
+// wallet answers the proposal with `getSdkError("USER_REJECTED")` = `{code: 5000, message: "User
+// rejected."}` (the CHAINS/METHODS/EVENTS variants are 5001-5003, worded "User rejected …"). That
+// JSON-RPC error travels as a PLAIN OBJECT — `createDelayedPromise`'s reject takes an
+// `ErrorResponse`, not an Error — until `EthereumProvider.connect()` catches it and re-throws
+// `new Error(error.message)`, DROPPING the code. So by the time dpay sees it the code is gone and
+// the message is the only signal left: matching on it is not a shortcut taken for convenience, it
+// is the entire remaining evidence. Done ONCE, here, so callers switch on a type instead.
+const USER_REJECTED = /user rejected/i;
 
 // The single cached init promise. WalletConnect's pairing/session is long-lived; calling
 // `EthereumProvider.init` again would tear down the session and re-pair every time the sheet opens.
@@ -104,9 +127,11 @@ function initProvider(chainId: number = 1): Promise<EthereumProviderInstance> {
  *
  * `chainId` (OPEN_ISSUES #1/#2): the EVM chain the requested ckERC20 currency settles on. The FIRST
  * call wins the cached init promise — its `chains:[chainId]` binds the WC session to that network.
- * A subsequent call for a DIFFERENT chain reuses the cached session (the chain-id gate in
- * CkErc20DepositSheet aborts a wrong-network wallet before any deposit, so this is a UX nuance, not
- * a correctness gap). Default 1 (mainnet) for callers that don't thread the currency's chain_id.
+ * `pairWalletConnect` owns chain correctness from there: it reuses a session that already approved
+ * the requested chain, and TEARS THE PROVIDER DOWN + re-inits when the session covers some other
+ * chain. So a provider handed out by this function before that pairing is DEAD if the tear-down
+ * fires — a caller that pairs must resolve the provider again afterwards.
+ * Default 1 (mainnet) for callers that don't thread the currency's chain_id.
  */
 export async function getWalletConnectProvider(
   chainId: number = 1,
@@ -120,15 +145,46 @@ export async function getWalletConnectProvider(
   return cachedProvider;
 }
 
+/** A settled WalletConnect session, as the SDK's own provider surface types it (no cast, no new dep). */
+export type WalletConnectSession = NonNullable<EthereumProviderInstance['session']>;
+
 /**
- * MC8 U6 capstone — drive a WalletConnect pairing and surface the pairing URI for a custom QR.
+ * The EIP-155 chain ids a settled session APPROVED — i.e. what the WALLET agreed to, deduped, in
+ * the order it returned them. It is the only network check with any meaning on this transport; why
+ * `eth_chainId` is not: `getChainId` in wallet.ts.
  *
- * With `showQrModal:false`, the WC SDK does NOT open its own modal. Instead it emits the pairing URI
- * via the `display_uri` event (payload: a plain `string` — the `wc:` URI the user's wallet scans).
- * This function subscribes BEFORE calling `connect()`, forwards the URI to `onUri` (the sheet renders
- * a custom `<QRCode>`), and clears it (`onUri(null)`) when the `connect` event fires (session
- * established). Listeners are removed on both success and failure so a subsequent pair doesn't
- * double-fire. Throws on pair failure (the caller surfaces an honest error).
+ * A WC v2 session may key `namespaces` by bare namespace (`eip155`) or chain-scoped (`eip155:1`),
+ * so every entry's `accounts` is flattened; each account is CAIP-10 `eip155:<chainId>:<address>`.
+ */
+function approvedChainIds(session: WalletConnectSession): string[] {
+  const ids = new Set<string>();
+  for (const ns of Object.values(session.namespaces)) {
+    for (const account of ns.accounts) {
+      const [namespace, reference] = account.split(':');
+      if (namespace === 'eip155' && reference) ids.add(reference);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * MC8 U6 capstone — establish a WalletConnect session for `chainId`, surfacing the pairing URI for
+ * a custom QR when (and only when) a pairing is actually needed.
+ *
+ * THREE STATES, no fallbacks:
+ *  (a) no session → pair. With `showQrModal:false` the SDK does NOT open its own modal; it emits the
+ *      pairing URI via `display_uri` (payload: a plain `string` — the `wc:` URI the wallet scans).
+ *      This subscribes BEFORE calling `connect()`, forwards the URI to `onUri` (the sheet renders a
+ *      custom `<QRCode>`), and clears it (`onUri(null)`) when the `connect` event fires. Listeners
+ *      are removed on success AND failure so a subsequent pair doesn't double-fire.
+ *  (b) a session that already approved `chainId` → REUSE it: no `connect()`, no URI, and no second
+ *      approval prompt in the wallet. Re-pairing a live session was prompting the user on every
+ *      sheet open.
+ *  (c) a session that does NOT approve `chainId` (e.g. a cached mainnet session while a Sepolia
+ *      deposit is requested) → tear it down and re-init on the requested chain, then pair.
+ *
+ * Then, in every state, the WALLET's own approval is verified against `chainId` — see the check at
+ * the end. Throws on pair failure or a wrong-network approval (the caller surfaces the message).
  *
  * Disabled guard: web Platform / empty projectId → returns immediately (no-op). This mirrors
  * `getWalletConnectProvider()`'s guard and makes `pairOnrampWallet`'s delegation safe.
@@ -143,7 +199,18 @@ export async function pairWalletConnect(
   // Disabled guard — same gate as getWalletConnectProvider (defense-in-depth).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;
   if (!cachedProvider) cachedProvider = initProvider(chainId);
-  const provider = await cachedProvider;
+  let provider = await cachedProvider;
+
+  const restored = provider.session;
+  if (restored) {
+    // (b) the live/restored session already covers this chain — done, nothing to prompt.
+    if (approvedChainIds(restored).includes(String(chainId))) return;
+    // (c) it covers some other chain: the provider was init'd with those `chains`, so the session
+    //     cannot be moved — drop it (this also clears the cache) and init on the requested chain.
+    await disconnectWalletConnect();
+    cachedProvider = initProvider(chainId);
+    provider = await cachedProvider;
+  }
 
   // Subscribe BEFORE connect() so the display_uri event (emitted during connect) is never missed.
   // The display_uri payload is a plain string (the WC pairing URI); the connect payload is
@@ -173,10 +240,11 @@ export async function pairWalletConnect(
     });
     await Promise.race([provider.connect(), timeout]);
   } catch (e) {
-    // Translate to a clear, typed pair-failure error so the sheet can surface friendly copy.
-    throw new Error(
-      M.errors.ethWallet.pairingFailed(e instanceof Error ? e.message : String(e)),
-    );
+    // The ONE place that holds the SDK's own error, so the rejection-vs-other call is made here and
+    // travels as a TYPE (see USER_REJECTED above for what the evidence actually is).
+    const detail = e instanceof Error ? e.message : String(e);
+    if (USER_REJECTED.test(detail)) throw new PairingRejected(detail);
+    throw new Error(M.errors.ethWallet.pairingFailed(detail));
   } finally {
     // Always clean up listeners + the timeout timer (success OR failure) so a re-pair doesn't stack
     // duplicate handlers or leak a dangling timer.
@@ -184,22 +252,28 @@ export async function pairWalletConnect(
     provider.removeListener('display_uri', onDisplayUri);
     provider.removeListener('connect', onConnect);
   }
+
+  // The network check that MEANS something on this transport: what the wallet actually approved.
+  // `connect()` resolving proves a session settled, not that it settled on the chain this deposit
+  // needs — a wallet may approve a subset. No session at all is the same failure with an empty
+  // approval set, so it lands on the same honest error rather than continuing on nothing.
+  const settled = provider.session;
+  const approved = settled === undefined ? [] : approvedChainIds(settled);
+  if (!approved.includes(String(chainId))) throw new ChainNotApproved(chainId, approved);
 }
 
 /**
- * U6.5 — disconnect the cached WalletConnect provider AND clear the cache. Idempotent + safe to call
- * from a fire-and-forget teardown (the sheet's unmount cleanup): swallows any provider.disconnect()
- * failure so a teardown glitch never propagates to a caller that has already torn down its UI.
+ * Same-device pairing for a wallet dpay cannot name — hands the `wc:` URI to the OS intent chooser.
+ * The route for the 200+ WalletConnect wallets outside `KNOWN_WALLETS`; the named route is
+ * `openWalletWithUri` in wallet.ts, which goes through `recordWalletChoice` below.
  *
- * Why clear the cache: the WC pairing/session is bound to a specific provider instance. Leaving a
- * disconnected/stale provider cached would make the next `getWalletConnectProvider()` /
- * `pairWalletConnect()` reuse a dead session. Clearing forces a fresh `EthereumProvider.init` on the
- * next open, so the user gets a clean re-pair rather than errors on a stale provider. The cache is
- * cleared BEFORE awaiting disconnect so even a rejecting disconnect leaves the module in the clean
- * (re-init-next) state.
+ * KNOWN CONSEQUENCE, and it is the correct trade: this path records NOTHING, because the chooser
+ * never tells dpay which app the user picked and a guessed choice would foreground the wrong wallet
+ * for every later request. So pairing works, but the wallet is NOT brought to the front when the
+ * deposit is signed — the user has to switch to it by hand. Callers must say so rather than leave
+ * the user staring at a spinner. (The named route is what avoids this; it exists for that reason.)
  *
- * Disabled guard: web Platform / empty projectId → immediate no-op (mirrors the other exports, so
- * the sheet can call this unconditionally without special-casing the disabled path).
+ * Disabled guard: web Platform / empty projectId → false, mirroring the other exports.
  */
 export async function openWalletApp(uri: string): Promise<boolean> {
   // Disabled guard — same gate as the other exports (defense-in-depth).
@@ -219,6 +293,61 @@ export async function openWalletApp(uri: string): Promise<boolean> {
   }
 }
 
+/**
+ * Record which wallet the user opened, so the SDK foregrounds THAT wallet for every later session
+ * request. Called from `openWalletWithUri` in wallet.ts, across the lazy dynamic-import boundary.
+ *
+ * WHY IT HAS TO EXIST: `@walletconnect/sign-client` only deep-links back into the wallet when it can
+ * read `WALLETCONNECT_DEEPLINK_CHOICE` from its own storage — `handleDeeplinkRedirect` returns
+ * immediately when that value is absent — and its only other writer is `@reown/appkit`, which dpay
+ * deliberately shims out. Without this write an `eth_sendTransaction` sits invisibly in a
+ * backgrounded wallet app and the user watches a spinner.
+ *
+ * THE STORED SHAPE IS THE CONSUMER'S, not a choice: `handleDeeplinkRedirect` JSON-parses the value
+ * and returns unless `.href` is a string, then `formatDeeplinkUrl` appends
+ * `/wc?requestId=…&sessionTopic=…` after stripping ONE trailing slash. So `href` is the BARE scheme
+ * (`trust://` → `trust://wc?requestId=…`), never the pairing link. `name` rides along for
+ * diagnostics. `@walletconnect/keyvaluestorage`'s react-native build JSON-stringifies a non-string
+ * value and applies no key prefix, so handing it the object is exactly right.
+ *
+ * Fails fast when nothing is paired: the write must land in the storage of the provider that owns
+ * the session, and a choice recorded against no session would point the SDK at a wallet dpay never
+ * paired with. Disabled guard: web Platform / empty projectId → no-op, mirroring the other exports.
+ */
+export async function recordWalletChoice(wallet: KnownWallet): Promise<void> {
+  // Disabled guard — same gate as the other exports (defense-in-depth).
+  if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;
+  const cached = cachedProvider;
+  if (!cached) {
+    throw new Error(
+      `recordWalletChoice: no WalletConnect provider — pair before opening ${wallet.name}`,
+    );
+  }
+  const provider = await cached;
+  // The SDK's OWN storage, reached through its own typed path — the same object `getDeepLink` reads
+  // from. Cast-free, so an SDK change to this path fails `just typecheck` right here.
+  await provider.signer.client.core.storage.setItem(WALLETCONNECT_DEEPLINK_CHOICE, {
+    href: wallet.scheme,
+    name: wallet.name,
+  });
+}
+
+/**
+ * U6.5 — disconnect the cached WalletConnect provider AND clear the cache. Idempotent + safe to call
+ * from a fire-and-forget teardown (the sheet's unmount cleanup): a provider.disconnect() failure is
+ * logged rather than propagated, so a teardown glitch never reaches a caller that has already torn
+ * down its UI.
+ *
+ * Why clear the cache: the WC pairing/session is bound to a specific provider instance. Leaving a
+ * disconnected/stale provider cached would make the next `getWalletConnectProvider()` /
+ * `pairWalletConnect()` reuse a dead session. Clearing forces a fresh `EthereumProvider.init` on the
+ * next open, so the user gets a clean re-pair rather than errors on a stale provider. The cache is
+ * cleared BEFORE awaiting disconnect so even a rejecting disconnect leaves the module in the clean
+ * (re-init-next) state.
+ *
+ * Disabled guard: web Platform / empty projectId → immediate no-op (mirrors the other exports, so
+ * the sheet can call this unconditionally without special-casing the disabled path).
+ */
 export async function disconnectWalletConnect(): Promise<void> {
   // Disabled guard — same gate as the other exports (defense-in-depth).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;
@@ -228,9 +357,17 @@ export async function disconnectWalletConnect(): Promise<void> {
   cachedProvider = null;
   try {
     const provider = await cached;
+    // Drop the recorded wallet choice BEFORE disconnecting. It outlives the session otherwise, and
+    // a stale href foregrounds a wallet the user is no longer paired with. Order matters: an
+    // already-dropped session makes `disconnect()` throw routinely, and that must not gate this.
+    await provider.signer.client.core.storage.removeItem(WALLETCONNECT_DEEPLINK_CHOICE);
     await provider.disconnect();
-  } catch {
-    // Swallow — best-effort teardown. The cache is already cleared; a disconnect failure (e.g. the
-    // SDK session already dropped on its own) must not propagate to the fire-and-forget caller.
+  } catch (e) {
+    // Best-effort teardown — the cache is already cleared and this runs fire-and-forget from a React
+    // unmount cleanup, so the failure must not propagate. It is LOGGED, never silently dropped.
+    console.warn(
+      'disconnectWalletConnect: teardown failed:',
+      e instanceof Error ? e.message : String(e),
+    );
   }
 }

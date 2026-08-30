@@ -24,9 +24,12 @@
  * IS `FAKE_INIT`, so NO real WalletConnect code executes and the test asserts on the same typed
  * `jest.fn` instance `walletconnect.ts` captured at import time.
  */
+import {readFileSync} from 'fs';
+import {join} from 'path';
 import {describe, test, expect, jest, afterEach} from '@jest/globals';
-import type {Eip1193Provider} from '../wallet';
-import {FakeEthereumProvider, FAKE_INIT} from './walletconnect-fake';
+import type {Eip1193Provider, KnownWallet} from '../wallet';
+import {M} from '../i18n';
+import {FakeEthereumProvider, FAKE_INIT, fakeSession} from './walletconnect-fake';
 
 // Controllable `Platform.OS`. `jest.mock` is hoisted; the factory reads this at require time
 // (lazy), so a test flips it BEFORE loading the module. Named with the `mock` prefix so jest's
@@ -45,8 +48,8 @@ const PROJECT_ID = 'test-project-id';
 /** The typed init mock shape exported by the stub (a `jest.MockedFunction`, arg = real options). */
 type InitMock = typeof FAKE_INIT;
 
-/** Re-evaluate `walletconnect.ts` with `projectId` baked into constants + `mockPlatformOS` set. */
-function load(id: string): {
+/** The module surface `load()` hands back — declared once, used for both the local and the return. */
+type Loaded = {
   getWalletConnectProvider: (chainId?: number) => Promise<Eip1193Provider | null>;
   pairWalletConnect: (
     onUri: (uri: string | null) => void,
@@ -54,20 +57,32 @@ function load(id: string): {
   ) => Promise<void>;
   disconnectWalletConnect: () => Promise<void>;
   openWalletApp: (uri: string) => Promise<boolean>;
+  recordWalletChoice: (wallet: KnownWallet) => Promise<void>;
   pairTimeoutMs: number;
+  androidDeepLink: string;
+  deepLinkChoiceKey: string;
   init: InitMock;
-} {
-  let out!: {
-    getWalletConnectProvider: (chainId?: number) => Promise<Eip1193Provider | null>;
-    pairWalletConnect: (
-      onUri: (uri: string | null) => void,
-      chainId?: number,
-    ) => Promise<void>;
-    disconnectWalletConnect: () => Promise<void>;
-    openWalletApp: (uri: string) => Promise<boolean>;
-    pairTimeoutMs: number;
-    init: InitMock;
-  };
+  /**
+   * The ISOLATED `wallet.ts` the isolated `walletconnect.ts` imported. `instanceof` compares class
+   * IDENTITY, and each `jest.isolateModules` registry evaluates its own copy of `wallet.ts` — so a
+   * class captured from the outer import would never match the one actually thrown. Typed as the
+   * real module so the error constructors need no restated signature.
+   */
+  wallet: typeof import('../wallet');
+};
+
+/**
+ * A wallet approving `chainId` — the CAIP-10 session `connect()` leaves behind on success, and the
+ * one a restored session carries. `pairWalletConnect` reads exactly this to decide reuse vs re-pair
+ * and to verify the approval, so every pairing test has to leave one.
+ */
+function approve(fake: FakeEthereumProvider, chainId: number, address = '0xb0bfeed'): void {
+  fake.session = fakeSession({eip155: [`eip155:${chainId}:${address}`]});
+}
+
+/** Re-evaluate `walletconnect.ts` with `projectId` baked into constants + `mockPlatformOS` set. */
+function load(id: string): Loaded {
+  let out!: Loaded;
   jest.isolateModules(() => {
     // ALWAYS set the override (even to '') — constants.ts now defaults to the REAL project id, so
     // deleting the override would ENABLE WC. `load('')` → '' disables WC (the disabled-guard test).
@@ -79,15 +94,13 @@ function load(id: string): {
     const stub = require('@walletconnect/ethereum-provider') as {
       EthereumProvider: {init: InitMock};
     };
-    const mod = require('../walletconnect') as {
-      getWalletConnectProvider: (chainId?: number) => Promise<Eip1193Provider | null>;
-      pairWalletConnect: (
-        onUri: (uri: string | null) => void,
-        chainId?: number,
-      ) => Promise<void>;
-      disconnectWalletConnect: () => Promise<void>;
-      openWalletApp: (uri: string) => Promise<boolean>;
+    const mod = require('../walletconnect') as Omit<
+      Loaded,
+      'init' | 'pairTimeoutMs' | 'androidDeepLink' | 'deepLinkChoiceKey' | 'wallet'
+    > & {
       PAIR_TIMEOUT_MS: number;
+      ANDROID_DEEP_LINK: string;
+      WALLETCONNECT_DEEPLINK_CHOICE: string;
     };
     out = {
       init: stub.EthereumProvider.init,
@@ -95,7 +108,13 @@ function load(id: string): {
       pairWalletConnect: mod.pairWalletConnect,
       disconnectWalletConnect: mod.disconnectWalletConnect,
       openWalletApp: mod.openWalletApp,
+      recordWalletChoice: mod.recordWalletChoice,
       pairTimeoutMs: mod.PAIR_TIMEOUT_MS,
+      androidDeepLink: mod.ANDROID_DEEP_LINK,
+      deepLinkChoiceKey: mod.WALLETCONNECT_DEEPLINK_CHOICE,
+      // Same registry as `mod` (walletconnect.ts imports it), so the classes here ARE the ones it
+      // throws — see the `wallet` field's note on `instanceof` and module identity.
+      wallet: require('../wallet') as typeof import('../wallet'),
     };
   });
   return out;
@@ -224,9 +243,11 @@ describe('pairWalletConnect — display_uri + connect event handling', () => {
     // right after connect() is invoked.
     fake.connect.mockImplementation(async () => {
       // The SDK emits display_uri (with the WC pairing URI as a plain string) then connect (with
-      // ProviderInfo {chainId}) when the wallet approves the session.
+      // ProviderInfo {chainId}) when the wallet approves the session, and leaves the settled
+      // session behind (the approved-chain check below reads it).
       fake.emit('display_uri', 'wc:abcdef-1234@2?relay-protocol=…&symKey=…');
       fake.emit('connect', {chainId: '0x1'});
+      approve(fake, 1);
     });
 
     const uris: (string | null)[] = [];
@@ -248,6 +269,7 @@ describe('pairWalletConnect — display_uri + connect event handling', () => {
       // ordering (critical: missing display_uri means no QR shown; missing connect means no clear).
       fake.emit('display_uri', 'wc:test-uri');
       fake.emit('connect', {chainId: '0x1'});
+      approve(fake, 1);
     });
 
     const onUri = jest.fn();
@@ -260,7 +282,9 @@ describe('pairWalletConnect — display_uri + connect event handling', () => {
     const fake = new FakeEthereumProvider();
     const {init, pairWalletConnect} = load(PROJECT_ID);
     init.mockResolvedValue(fake);
-    fake.connect.mockRejectedValue(new Error('user rejected'));
+    // A TRANSPORT failure, deliberately not a user rejection: this case owns the cleanup contract,
+    // and the rejection-vs-other classification is owned by its own describe below.
+    fake.connect.mockRejectedValue(new Error('relay unreachable'));
 
     const onUri = jest.fn();
     await expect(pairWalletConnect(onUri)).rejects.toThrow(/pairing/i);
@@ -277,6 +301,7 @@ describe('pairWalletConnect — display_uri + connect event handling', () => {
     fake.connect.mockImplementation(async () => {
       fake.emit('display_uri', 'wc:uri');
       fake.emit('connect', {chainId: '0x1'});
+      approve(fake, 1);
     });
 
     await pairWalletConnect(jest.fn());
@@ -285,18 +310,223 @@ describe('pairWalletConnect — display_uri + connect event handling', () => {
     expect(fake.removeListener).toHaveBeenCalledWith('connect', expect.any(Function));
   });
 
-  test('no display_uri event (e.g. already-paired session) → onUri never called, still resolves', async () => {
+  test('no display_uri event (a wallet that settles over a deep link) → onUri never called, still resolves', async () => {
     const fake = new FakeEthereumProvider();
     const {init, pairWalletConnect} = load(PROJECT_ID);
     init.mockResolvedValue(fake);
-    // connect() resolves but neither display_uri nor connect fires (an already-paired provider
-    // short-circuits). The function should still resolve cleanly.
-    fake.connect.mockResolvedValue(undefined);
+    // connect() settles the session without either event firing — no QR was ever needed.
+    fake.connect.mockImplementation(async () => approve(fake, 1));
 
     const onUri = jest.fn();
     await pairWalletConnect(onUri);
     expect(onUri).not.toHaveBeenCalled();
     expect(fake.connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- session reuse / re-pair / the approved-chain check ---------------------------------------
+// Two bugs met here. (1) `connect()` was called UNCONDITIONALLY, so a live or restored session
+// produced a fresh approval prompt in the wallet every time the deposit sheet opened. (2) the
+// sheet's network gate reads `eth_chainId`, which checks NOTHING on this transport (why:
+// `getChainId` in wallet.ts). What the wallet approved is in the session's namespaces, and that is
+// what these pin: reuse when it covers the chain, tear down and re-pair when it does not, and an
+// honest refusal when the settled session still does not cover it.
+describe('pairWalletConnect — session states + the approved-chain check', () => {
+  test('(b) a session already approving the chain is reused — no connect(), no QR, no re-init', async () => {
+    const fake = new FakeEthereumProvider();
+    approve(fake, 1); // the session restored at init (or left by an earlier pair)
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+
+    const onUri = jest.fn();
+    await pairWalletConnect(onUri, 1);
+
+    expect(fake.connect).not.toHaveBeenCalled(); // ← the wallet is NOT prompted again
+    expect(fake.disconnect).not.toHaveBeenCalled();
+    expect(onUri).not.toHaveBeenCalled(); // no pairing URI ⇒ the sheet renders no QR
+    expect(init).toHaveBeenCalledTimes(1);
+  });
+
+  test('(b) a chain-scoped namespace key (eip155:11155111) is read like a bare eip155 one', async () => {
+    const fake = new FakeEthereumProvider();
+    // WC v2 permits either keying; only the accounts inside carry the approval.
+    fake.session = fakeSession({'eip155:11155111': ['eip155:11155111:0xb0bfeed']});
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+
+    await pairWalletConnect(jest.fn(), 11155111);
+    expect(fake.connect).not.toHaveBeenCalled();
+  });
+
+  test('(c) a session approving another chain is torn down and re-paired on the requested one', async () => {
+    const stale = new FakeEthereumProvider();
+    approve(stale, 1); // an earlier mainnet ckUSDC deposit
+    const fresh = new FakeEthereumProvider();
+    fresh.connect.mockImplementation(async () => {
+      fresh.emit('display_uri', 'wc:sepolia-pairing');
+      approve(fresh, 11155111);
+    });
+    const {init, getWalletConnectProvider, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValueOnce(stale).mockResolvedValueOnce(fresh);
+
+    await getWalletConnectProvider(1); // prime the cache the way the mainnet deposit did
+    const uris: (string | null)[] = [];
+    await pairWalletConnect((uri) => uris.push(uri), 11155111); // now a Sepolia deposit
+
+    expect(stale.disconnect).toHaveBeenCalledTimes(1); // the mainnet session is dropped…
+    expect(stale.connect).not.toHaveBeenCalled(); // …never re-used for Sepolia
+    expect(init).toHaveBeenNthCalledWith(1, expect.objectContaining({chains: [1]}));
+    expect(init).toHaveBeenNthCalledWith(2, expect.objectContaining({chains: [11155111]}));
+    expect(fresh.connect).toHaveBeenCalledTimes(1);
+    expect(uris).toEqual(['wc:sepolia-pairing']); // a real pairing ⇒ a real QR
+  });
+
+  test('a settled session that approved a DIFFERENT chain is refused, naming both', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    // The wallet approved mainnet while the deposit settles on Sepolia — the state the sheet's
+    // eth_chainId gate cannot see.
+    fake.connect.mockImplementation(async () => approve(fake, 1));
+
+    const err = await pairWalletConnect(jest.fn(), 11155111).catch((e: unknown) => e);
+    // Exact copy, not a substring: it also proves the refusal is NOT wrapped as a pairing failure
+    // (the check runs after the connect try/catch) and that both chain ids reach the message.
+    expect((err as Error).message).toBe(M.errors.ethWallet.chainNotApproved(11155111, '1'));
+  });
+
+  test('connect() that settles no session at all is refused (nothing was approved)', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    fake.connect.mockResolvedValue(undefined); // resolves, but leaves no session behind
+
+    const err = await pairWalletConnect(jest.fn(), 1).catch((e: unknown) => e);
+    expect((err as Error).message).toBe(M.errors.ethWallet.chainNotApproved(1, ''));
+  });
+});
+
+// --- typed pairing failures (the component switches on a TYPE, not on a regex) -----------------
+// The deposit sheet used to classify a pair failure with `/reject|denied|user/i.test(msg)` — a
+// string sniff over copy that is translated into four languages, i.e. a classifier that silently
+// changes meaning whenever a translator edits a sentence. `pairWalletConnect` is the ONE place that
+// holds the SDK's own error, so it decides once and throws a type. Both branches are pinned here.
+describe('pairWalletConnect — typed failures', () => {
+  test('a wallet-side rejection throws PairingRejected carrying the SDK detail', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect, wallet} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    // Verbatim what arrives here: the wallet answers the proposal with getSdkError('USER_REJECTED')
+    // = {code:5000, message:'User rejected.'}, and EthereumProvider.connect() re-throws
+    // `new Error(error.message)` — the code is GONE by this point, the message is all that is left.
+    fake.connect.mockRejectedValue(new Error('User rejected.'));
+
+    const err = await pairWalletConnect(jest.fn(), 1).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(wallet.PairingRejected);
+    expect((err as InstanceType<typeof wallet.PairingRejected>).detail).toBe('User rejected.');
+  });
+
+  test('a transport failure is NOT a rejection — plain Error with the pairing-failed message', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect, wallet} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    fake.connect.mockRejectedValue(new Error('WebSocket connection closed abnormally'));
+
+    const err = await pairWalletConnect(jest.fn(), 1).catch((e: unknown) => e);
+    // The user did NOT decline — telling them they did would be a lie, and it is what the old
+    // regex did for any message containing "user".
+    expect(err).not.toBeInstanceOf(wallet.PairingRejected);
+    expect((err as Error).message).toBe(
+      M.errors.ethWallet.pairingFailed('WebSocket connection closed abnormally'),
+    );
+  });
+
+  test('a wrong-network approval throws ChainNotApproved carrying both chain sets', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, pairWalletConnect, wallet} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    fake.connect.mockImplementation(async () => approve(fake, 1)); // mainnet, for a Sepolia deposit
+
+    const err = await pairWalletConnect(jest.fn(), 11155111).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(wallet.ChainNotApproved);
+    // The fields exist so the caller can build its own copy without re-parsing the message string.
+    const chainErr = err as InstanceType<typeof wallet.ChainNotApproved>;
+    expect(chainErr.requested).toBe(11155111);
+    expect(chainErr.approved).toEqual(['1']);
+    // It is NOT a rejection: the user approved something, just not this network.
+    expect(err).not.toBeInstanceOf(wallet.PairingRejected);
+  });
+});
+
+// --- recordWalletChoice — the deeplink choice sign-client needs to foreground the wallet --------
+// `@walletconnect/sign-client` foregrounds the wallet for a session request only when it can read
+// WALLETCONNECT_DEEPLINK_CHOICE from its own storage (getDeepLink → handleDeeplinkRedirect, which
+// returns immediately when the value is absent). Its only other writer is @reown/appkit, which dpay
+// shims out — so without this write an `eth_sendTransaction` sits invisibly in a backgrounded
+// wallet. These pin the KEY, the STORED SHAPE, and the fail-fast when nothing is paired.
+describe('recordWalletChoice', () => {
+  const TRUST: KnownWallet = {
+    name: 'Trust Wallet',
+    scheme: 'trust://',
+    androidPackage: 'com.wallet.crypto.trustapp',
+  };
+
+  test('writes {href, name} under the deeplink-choice key on the SDK’s own storage', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, getWalletConnectProvider, recordWalletChoice, deepLinkChoiceKey} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    await getWalletConnectProvider(); // the pairing that produced the URI primes this cache
+
+    await recordWalletChoice(TRUST);
+
+    // `href` must be the BARE scheme: the consumer (`formatDeeplinkUrl`) appends
+    // `/wc?requestId=…&sessionTopic=…` after stripping one trailing slash, so `trust://` becomes
+    // `trust://wc?requestId=…`. Storing the pairing link instead would produce a dead URL.
+    expect(fake.storage.setItem).toHaveBeenCalledWith(deepLinkChoiceKey, {
+      href: 'trust://',
+      name: 'Trust Wallet',
+    });
+  });
+
+  test('the key matches the constant the SDK itself reads (drift alarm)', () => {
+    const {deepLinkChoiceKey} = load(PROJECT_ID);
+    // Read from the installed SDK rather than restated: sign-client declares it as a literal type,
+    // so this is the single source the write has to agree with. It cannot be imported — jest's
+    // moduleNameMapper sends every `@walletconnect/*` specifier to the stub.
+    const declared = readFileSync(
+      join(
+        __dirname, '..', 'node_modules', '@walletconnect', 'sign-client',
+        'dist', 'types', 'constants', 'client.d.ts',
+      ),
+      'utf8',
+    );
+    const match = /export declare const WALLETCONNECT_DEEPLINK_CHOICE = "([^"]+)"/.exec(declared);
+    expect(match).not.toBeNull();
+    expect(deepLinkChoiceKey).toBe((match as RegExpExecArray)[1]);
+  });
+
+  test('nothing is paired → fails fast, naming the ordering it needs', async () => {
+    const {init, recordWalletChoice} = load(PROJECT_ID);
+    // A choice recorded against no session would point the SDK at a wallet dpay never paired with.
+    await expect(recordWalletChoice(TRUST)).rejects.toThrow(/recordWalletChoice/);
+    expect(init).not.toHaveBeenCalled(); // and it must NOT init a provider as a side effect
+  });
+
+  test('empty projectId → no write (disabled guard)', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, recordWalletChoice} = load('');
+    init.mockResolvedValue(fake);
+    await expect(recordWalletChoice(TRUST)).resolves.toBeUndefined();
+    expect(fake.storage.setItem).not.toHaveBeenCalled();
+  });
+
+  test('web Platform → no write (disabled guard, even with a projectId set)', async () => {
+    mockPlatformOS = 'web';
+    const fake = new FakeEthereumProvider();
+    const {init, recordWalletChoice} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    await expect(recordWalletChoice(TRUST)).resolves.toBeUndefined();
+    expect(fake.storage.setItem).not.toHaveBeenCalled();
   });
 });
 
@@ -400,15 +630,54 @@ describe('disconnectWalletConnect — U6.5 (clear cache + provider.disconnect)',
     const {init, getWalletConnectProvider, disconnectWalletConnect} = load(PROJECT_ID);
     init.mockResolvedValue(fake);
     await getWalletConnectProvider();
-    // Must NOT throw — the helper is called fire-and-forget from a React unmount cleanup where an
-    // unhandled rejection would be invisible + noisy.
-    await expect(disconnectWalletConnect()).resolves.toBeUndefined();
-    expect(fake.disconnect).toHaveBeenCalledTimes(1);
-    // Cache cleared despite the failure → next get re-inits.
-    init.mockClear();
-    init.mockResolvedValue(new FakeEthereumProvider());
+    // Silenced, not asserted: the teardown log is pinned by its own case below — here it would only
+    // be noise in the suite output.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Must NOT throw — the helper is called fire-and-forget from a React unmount cleanup where an
+      // unhandled rejection would be invisible + noisy.
+      await expect(disconnectWalletConnect()).resolves.toBeUndefined();
+      expect(fake.disconnect).toHaveBeenCalledTimes(1);
+      // Cache cleared despite the failure → next get re-inits.
+      init.mockClear();
+      init.mockResolvedValue(new FakeEthereumProvider());
+      await getWalletConnectProvider();
+      expect(init).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  // The recorded deeplink choice OUTLIVES the session unless teardown removes it: sign-client would
+  // keep foregrounding a wallet the user is no longer paired with on the next request.
+  test('deletes the recorded wallet choice as part of teardown', async () => {
+    const fake = new FakeEthereumProvider();
+    const {init, getWalletConnectProvider, disconnectWalletConnect, deepLinkChoiceKey} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
     await getWalletConnectProvider();
-    expect(init).toHaveBeenCalledTimes(1);
+    await disconnectWalletConnect();
+    expect(fake.storage.removeItem).toHaveBeenCalledWith(deepLinkChoiceKey);
+  });
+
+  test('a rejecting disconnect() still leaves the choice deleted, and logs the cause', async () => {
+    const fake = new FakeEthereumProvider();
+    // The routine teardown failure (the session dropped on its own). It must not gate the deletion,
+    // which is why the removal runs first — and it must not vanish silently either.
+    fake.disconnect.mockRejectedValue(new Error('session already closed'));
+    const {init, getWalletConnectProvider, disconnectWalletConnect, deepLinkChoiceKey} = load(PROJECT_ID);
+    init.mockResolvedValue(fake);
+    await getWalletConnectProvider();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await disconnectWalletConnect();
+      expect(fake.storage.removeItem).toHaveBeenCalledWith(deepLinkChoiceKey);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('disconnectWalletConnect'),
+        expect.stringContaining('session already closed'),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
@@ -441,23 +710,40 @@ describe('openWalletApp — same-device pairing via OS intent', () => {
   });
 });
 
-// --- PR13 — redirect.native deep-link literal pinned to the build.gradle applicationId ---------
-// The wallet's "return to dpay" deep-link depends on redirect.native matching the applicationId. A
-// drift breaks it SILENTLY (no error, just a dead tap). This pins the literal so a future change to
-// ANDROID_DEEP_LINK is visible here (and points the reader at build.gradle to cross-check).
+// --- PR13 — the "return to dpay" redirect must be a scheme the device actually claims -----------
+// It used to be the Android applicationId ("org.kalaj.dpay://"), which is not a URL scheme at all:
+// nothing on the phone answered it, so after approving in the wallet the user was simply stranded
+// there — no error, just a dead tap. The fix is only as good as its link to the manifest, so the
+// scheme is DERIVED from the constant and looked up in the manifest rather than restated here.
 describe('initProvider — PR13 deep-link redirect', () => {
-  test('passes redirect.native = "org.kalaj.dpay://" (the build.gradle applicationId + "://")', async () => {
-    // Cross-reference: app/android/app/build.gradle → applicationId "org.kalaj.dpay".
-    const {init, getWalletConnectProvider} = load(PROJECT_ID);
+  test('passes redirect.native = the exported ANDROID_DEEP_LINK', async () => {
+    const {init, getWalletConnectProvider, androidDeepLink} = load(PROJECT_ID);
     init.mockResolvedValue(new FakeEthereumProvider());
     await getWalletConnectProvider();
     expect(init).toHaveBeenCalledWith(
       expect.objectContaining({
-        metadata: expect.objectContaining({
-          redirect: {native: 'org.kalaj.dpay://'},
-        }),
+        metadata: expect.objectContaining({redirect: {native: androidDeepLink}}),
       }),
     );
+  });
+
+  test('its scheme is declared in AndroidManifest.xml, unrestricted by host or path', async () => {
+    const {androidDeepLink} = load(PROJECT_ID);
+    // A bare `<scheme>://` is the only shape a wallet can open with nothing appended.
+    expect(androidDeepLink).toMatch(/^[a-z][a-z0-9+.-]*:\/\/$/);
+    const scheme = androidDeepLink.slice(0, -'://'.length);
+
+    const manifest = readFileSync(
+      join(__dirname, '..', 'android', 'app', 'src', 'main', 'AndroidManifest.xml'),
+      'utf8',
+    );
+    const claimed = [...manifest.matchAll(/<data\b[^>]*\/>/g)]
+      .map((m) => m[0])
+      .filter((el) => el.includes(`android:scheme="${scheme}"`));
+    expect(claimed).not.toEqual([]);
+    // The app link (https) is host- + path-scoped, so it would NOT catch a bare return URL. At
+    // least one claim on this scheme has to be unrestricted for the wallet's redirect to land.
+    expect(claimed.some((el) => !/android:(host|pathPrefix|pathPattern|path)=/.test(el))).toBe(true);
   });
 });
 

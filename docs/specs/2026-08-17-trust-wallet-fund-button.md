@@ -16,9 +16,9 @@
   (coinId 0), ETH = `c60`, SOL = `c501` (coinId 501), SPL token = `c501_t<mint-base58>` (e.g. USDC
   mainnet mint `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`). **No testnet UAI ids exist** in
   the registry → testnet assets keep the copy/QR status quo.
-- Trust also officially supports **WalletConnect v2 (EVM + Solana)** — dpay's existing WC onramp
-  (`wallet.ts` → `walletconnect.ts`) already pairs with Trust via the `wc:` scheme + intent chooser
-  (`openWalletApp`) and returns via `org.kalaj.dpay://` (PR13). Zero new work for ckETH/ckUSDC.
+- Trust also officially supports **WalletConnect v2 (EVM + Solana)**, which is the rail ckETH/ckUSDC
+  deposits use. What that pairing actually does — and what it took to make it work end to end — is
+  owned by `app/walletconnect.ts`; this document does not restate it.
 - Fire-and-forget: the send link gives NO return callback / no tx hash. Not a gap — deposit polling
   (`/deposit/refresh` for BTC-family; SOL balance refresh) already reconciles the outcome.
 - Do NOT use the `data` param on the send link (unreliable for calldata) — that's why ckETH/ckUSDC

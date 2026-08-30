@@ -9,15 +9,18 @@
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
 
-    <!-- WalletConnect (MC8 U6.4): package visibility for installed EVM wallets so the WC pairing
-         modal can surface a green check + prioritized list. The QR/deep-link fallback still works
-         for any of the 200+ other WC-compatible wallets not listed here. -->
+    <!-- WalletConnect wallet picker: Android 11+ package visibility, without which
+         `Linking.canOpenURL` answers false for an INSTALLED wallet and the picker hides it. This
+         block must list exactly the `KNOWN_WALLETS` rows in `app/wallet.ts` (which carries the
+         source of the values and is where a new wallet is added); `__tests__/wallet-picker.test.ts`
+         fails the build if the two ever disagree. Wallets not on that list still pair through the
+         `wc:` system chooser, which needs no entry here. -->
     <queries>
-        <package android:name="io.metamask" />
         <package android:name="com.wallet.crypto.trustapp" />
+        <package android:name="io.metamask" />
         <package android:name="me.rainbow" />
         <package android:name="io.zerion.android" />
-        <package android:name="io.gnosis.safe" />
+        <package android:name="global.safe.mobileapp" />
         <package android:name="com.uniswap.mobile" />
     </queries>
 

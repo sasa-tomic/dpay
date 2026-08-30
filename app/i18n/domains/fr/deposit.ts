@@ -86,8 +86,18 @@ export const depositFr: DepositMessages = {
     missingErc20Address: 'L’adresse ERC-20 manque dans les paramètres de dépôt.',
     txReverted: 'La transaction a échoué sur la chaîne.',
     txUnconfirmed: 'Transaction envoyée mais pas encore confirmée — nous surveillons toujours l’émission.',
+    approveReverted:
+      'L’approbation a échoué sur la chaîne : le dépôt n’a jamais été envoyé et aucun fonds n’a quitté votre portefeuille. Réessayez — votre portefeuille demandera d’abord l’approbation, puis le dépôt.',
+    approveUnconfirmed:
+      'L’approbation a été envoyée mais pas confirmée : le dépôt n’a jamais été envoyé et aucun fonds n’a quitté votre portefeuille. Patientez un instant, puis réessayez : votre portefeuille redemandera l’approbation, c’est normal et cela ne coûte que des frais de réseau.',
+    depositHashUnknown:
+      'Votre portefeuille a accepté le dépôt mais n’a renvoyé aucun identifiant de transaction : dpay ne peut donc pas savoir s’il a été envoyé. Vérifiez l’activité récente dans votre application de portefeuille avant de réessayer — si le dépôt s’y trouve, il sera crédité dans une vingtaine de minutes, et déposer à nouveau enverrait l’argent deux fois.',
+    approveHashUnknown:
+      'Votre portefeuille a accepté l’approbation mais n’a renvoyé aucun identifiant de transaction : dpay ne peut donc pas savoir si elle a été envoyée. Aucun dépôt n’a été fait et aucun fonds n’a quitté votre portefeuille. Vérifiez l’activité récente dans votre application de portefeuille, puis réessayez — elle redemandera l’approbation, c’est normal et cela ne coûte que des frais de réseau.',
     txNotSigned: 'Transaction non signée.',
     txFailed: 'Échec de la transaction.',
+    allowanceStands:
+      'Votre approbation de dépense est déjà confirmée sur la chaîne et aucun fonds n’a quitté votre portefeuille. Au prochain essai, votre portefeuille redemandera l’approbation puis le dépôt, les deux signatures comme avant.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Envoyez uniquement des '},
       {t: nativeAsset, em: true},
@@ -100,9 +110,13 @@ export const depositFr: DepositMessages = {
     gasNative: 'Les frais de réseau sont payés en ETH — envoyez un peu plus que le montant à déposer.',
     gasErc20: 'Il vous faudra un peu d’ETH pour les frais de réseau Ethereum.',
     scanToPair: 'Scannez avec votre portefeuille pour l’associer',
-    openWalletHint: 'Ouvre une application de portefeuille installée sur cet appareil',
-    openWallet: 'Ouvrir le portefeuille sur cet appareil',
-    walletListPair: 'MetaMask · Trust · Rabby · tout portefeuille WalletConnect',
+    orOpenHere: 'Ou ouvrez un portefeuille sur ce téléphone :',
+    openNamedWallet: name => `Ouvrir ${name}`,
+    otherWallet: 'Un autre portefeuille',
+    otherWalletHint:
+      'Avec « Un autre portefeuille », c’est votre téléphone qui choisit l’application. L’association fonctionne, mais dpay ne pourra pas la rouvrir pour vous ensuite — vous devrez y basculer vous-même pour approuver le dépôt.',
+    couldntOpenWallet: name =>
+      `Impossible d’ouvrir ${name} — l’application n’est peut-être plus installée. Choisissez un autre portefeuille ci-dessous, ou scannez le QR avec un portefeuille sur un autre appareil.`,
     walletList: 'MetaMask · Trust · Rabby · tout portefeuille compatible WalletConnect',
     explainNative:
       'Envoyez des ETH directement au contrat de dépôt — une seule transaction signée par votre portefeuille, avec votre montant comme valeur en ETH.',
@@ -113,6 +127,7 @@ export const depositFr: DepositMessages = {
     amountPlaceholder: '0.00',
     fromAccount: shortAccount => `Depuis ${shortAccount}`,
     confirmingLabel: 'Confirmation dans votre portefeuille',
+    switchToWalletApp: 'Votre portefeuille devrait s’ouvrir pour approuver. Sinon, ouvrez-le vous-même — puis revenez ici.',
     deposit: 'Déposer',
     approveDepositLabel: 'Approuver et déposer',
     approveDeposit: 'Approuver & déposer',

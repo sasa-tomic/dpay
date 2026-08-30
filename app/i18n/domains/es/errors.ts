@@ -28,8 +28,15 @@ export const errorsEs: ErrorMessages = {
   ethWallet: {
     receiptReverted: hash => `la transacción ${hash} se revirtió en la cadena`,
     receiptTimeout: hash => `la transacción ${hash} no se minó dentro del tiempo de espera`,
+    hashMissing: received => `tu billetera aceptó la transacción pero no devolvió ningún identificador de transacción (${received})`,
     pairingTimedOut: 'se agotó el tiempo de vinculación: ninguna billetera escaneó el código en 5 min',
     pairingFailed: detail => `Falló la vinculación con WalletConnect: ${detail}`,
+    invalidChainId: value =>
+      `Tu billetera informó una red que dpay no puede leer (${value}). Vuelve a conectarla y, si sigue pasando, usa otra aplicación de billetera.`,
+    chainNotApproved: (requested, approved) =>
+      approved === ''
+        ? `Tu billetera se conectó, pero no autorizó ninguna red de Ethereum. Este depósito se liquida en la red ${requested}: cambia a ella en tu billetera y vuelve a conectar.`
+        : `Tu billetera autorizó la red ${approved}, pero este depósito se liquida en la red ${requested}. Cambia de red en tu billetera y vuelve a conectar.`,
   },
 
   tap: {

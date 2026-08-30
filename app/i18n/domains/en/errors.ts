@@ -50,8 +50,15 @@ export type ErrorMessages = {
     receiptReverted: (hash: string) => string;
     /** Not mined inside the window — soft, the transaction may still land. */
     receiptTimeout: (hash: string) => string;
+    /** Accepted by the wallet, answered without a hash — possibly broadcast, unpollable either way. */
+    hashMissing: (received: string) => string;
     pairingTimedOut: string;
     pairingFailed: (detail: string) => string;
+    /** `eth_chainId` answered in neither encoding dpay decodes — see `getChainId` in wallet.ts. */
+    invalidChainId: (value: string) => string;
+    /** The WalletConnect session approved other chains than the one the deposit settles on (or
+     *  none at all, which each locale phrases separately). `approved` is a comma-joined list. */
+    chainNotApproved: (requested: number, approved: string) => string;
   };
 
   /**
@@ -109,8 +116,15 @@ export const errorsEn: ErrorMessages = {
   ethWallet: {
     receiptReverted: hash => `transaction ${hash} reverted on chain`,
     receiptTimeout: hash => `transaction ${hash} was not mined within the timeout`,
+    hashMissing: received => `your wallet accepted the transaction but returned no transaction id (${received})`,
     pairingTimedOut: 'pairing timed out — no wallet scanned within 5 min',
     pairingFailed: detail => `WalletConnect pairing failed: ${detail}`,
+    invalidChainId: value =>
+      `Your wallet reported a network dpay can’t read (${value}). Reconnect it, and if that keeps happening use another wallet app.`,
+    chainNotApproved: (requested, approved) =>
+      approved === ''
+        ? `Your wallet connected but approved no Ethereum network. This deposit settles on network ${requested} — switch to it in your wallet, then connect again.`
+        : `Your wallet approved network ${approved}, but this deposit settles on network ${requested}. Switch network in your wallet, then connect again.`,
   },
 
   tap: {

@@ -111,19 +111,54 @@ export type DepositMessages = {
     walletDisconnected: string;
     amountRequired: string;
     missingErc20Address: string;
+    /**
+     * The submit() outcomes, and they are this many because only the DEPOSIT transaction can ever
+     * mint. `txReverted` / `txUnconfirmed` speak about a deposit that IS on chain; the `approve*`
+     * keys speak about the ERC-20 allowance step, after which the deposit was never sent — so they
+     * must never read as "your deposit is on its way".
+     */
     txReverted: string;
+    /** Broadcast, outcome unknown — the receipt timed out OR the receipt read itself failed. */
     txUnconfirmed: string;
+    approveReverted: string;
+    approveUnconfirmed: string;
+    /**
+     * The wallet took the request and answered without a transaction id, so dpay knows neither that
+     * it was sent nor that it was not — the one outcome that is neither "sent" nor "failed". Two
+     * keys because the risk differs: an unattributed DEPOSIT may still credit (retrying can pay
+     * twice), an unattributed APPROVE can never mint anything (retrying is safe).
+     */
+    depositHashUnknown: string;
+    approveHashUnknown: string;
     txNotSigned: string;
     txFailed: string;
+    /**
+     * Appended to whichever "the deposit never went out" line applies when the ERC-20 approval was
+     * already CONFIRMED on chain: the allowance is live, and the retry asks for two signatures.
+     */
+    allowanceStands: string;
     sendOnly: (nativeAsset: string, networkLabel: string) => InstrRun[];
     custody: string;
     /** Who pays gas: native ETH comes out of the sent amount; an ERC-20 needs ETH held separately. */
     gasNative: string;
     gasErc20: string;
     scanToPair: string;
-    openWalletHint: string;
-    openWallet: string;
-    walletListPair: string;
+    /**
+     * The same-device half of the pairing screen (the QR above it is the other-device half).
+     *
+     * WHY NAMED WALLET BUTTONS EXIST AT ALL, stated here once: `@walletconnect/sign-client` brings
+     * a wallet to the foreground for a signing request only when a deeplink choice was recorded for
+     * it, and recording one requires KNOWING which wallet was opened. The phone's own `wc:` chooser
+     * never says which app it launched, so a pairing made through it leaves the later
+     * "Approve & deposit" request sitting invisibly in a backgrounded wallet — which is exactly
+     * what `otherWalletHint` warns about, and why it is a fallback rather than the main route.
+     */
+    orOpenHere: string;
+    openNamedWallet: (name: string) => string;
+    otherWallet: string;
+    otherWalletHint: string;
+    /** A named wallet that would not open — say WHICH, and what is left to try. */
+    couldntOpenWallet: (name: string) => string;
     walletList: string;
     /** Why this rail asks for a wallet instead of showing an address. */
     explainNative: string;
@@ -134,6 +169,15 @@ export type DepositMessages = {
     /** The connected Ethereum account, already shortened by the caller. */
     fromAccount: (shortAccount: string) => string;
     confirmingLabel: string;
+    /**
+     * NATIVE ONLY, and it must hold for BOTH pairing routes: a wallet opened by name reopens itself
+     * for the signing request (that route records the deeplink choice — see `openWalletWithUri` in
+     * wallet.ts), while one paired through the system chooser or a scanned QR does not, leaving
+     * "Confirm in your wallet…" describing a screen the user cannot see. So the line promises
+     * nothing and covers both. The web extension pops up by itself — showing this there would be
+     * the lie in the other direction.
+     */
+    switchToWalletApp: string;
     /** One word for both the button and its a11y label — the native-ETH single-tx path. */
     deposit: string;
     /** The ERC-20 path is two txs: the label spells "and" out loud, the button uses "&". */
@@ -260,8 +304,18 @@ export const depositEn: DepositMessages = {
     missingErc20Address: 'Onramp details missing the ERC-20 address.',
     txReverted: 'Transaction reverted on chain.',
     txUnconfirmed: 'Transaction sent but not yet confirmed — still watching for the mint.',
+    approveReverted:
+      'The approval reverted on chain, so the deposit was never sent and no funds left your wallet. Try again — your wallet will ask you to approve first, then to deposit.',
+    approveUnconfirmed:
+      'Your approval was sent but not confirmed, so the deposit was never sent and no funds left your wallet. Wait a moment, then try again: your wallet will ask you to approve once more, which is expected and only costs gas.',
+    depositHashUnknown:
+      "Your wallet accepted the deposit but didn't return a transaction id, so dpay can't tell whether it was sent. Check the recent activity in your wallet app before you try again — if the deposit is there, it will still credit in about 20 minutes, and depositing again would send the money twice.",
+    approveHashUnknown:
+      "Your wallet accepted the approval but didn't return a transaction id, so dpay can't tell whether it was sent. No deposit was made and no funds left your wallet. Check the recent activity in your wallet app, then try again — it will ask you to approve first, which is expected and only costs gas.",
     txNotSigned: 'Transaction not signed.',
     txFailed: 'Transaction failed.',
+    allowanceStands:
+      'Your spending approval is already confirmed on chain and no funds have left your wallet. Trying again will ask you to approve and then deposit, both signatures as before.',
     sendOnly: (nativeAsset, networkLabel) => [
       {t: 'Send only '},
       {t: nativeAsset, em: true},
@@ -274,9 +328,13 @@ export const depositEn: DepositMessages = {
     gasNative: 'The network fee is paid in ETH — send a little more than you want to deposit.',
     gasErc20: "You'll need a small amount of ETH for Ethereum network gas fees.",
     scanToPair: 'Scan with your wallet to pair',
-    openWalletHint: 'Open an installed wallet app on this device',
-    openWallet: 'Open wallet on this device',
-    walletListPair: 'MetaMask · Trust · Rabby · any WalletConnect wallet',
+    orOpenHere: 'Or open a wallet on this phone:',
+    openNamedWallet: name => `Open ${name}`,
+    otherWallet: 'Another wallet',
+    otherWalletHint:
+      "Another wallet lets your phone pick the app. Pairing works, but dpay can't reopen it for you later — you'll have to switch to it yourself to approve the deposit.",
+    couldntOpenWallet: name =>
+      `Couldn't open ${name} — it may no longer be installed. Pick another wallet below, or scan the QR with a wallet on another device.`,
     walletList: 'MetaMask · Trust · Rabby · any WalletConnect-compatible wallet',
     explainNative:
       'Send ETH directly to the deposit contract — one transaction your wallet signs, with your deposit amount as the ETH value.',
@@ -287,6 +345,7 @@ export const depositEn: DepositMessages = {
     amountPlaceholder: '0.00',
     fromAccount: shortAccount => `From ${shortAccount}`,
     confirmingLabel: 'Confirming in your wallet',
+    switchToWalletApp: 'Your wallet should open to approve this. If it doesn’t, switch to it yourself — then come back here.',
     deposit: 'Deposit',
     approveDepositLabel: 'Approve and deposit',
     approveDeposit: 'Approve & deposit',

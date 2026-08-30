@@ -10,7 +10,12 @@ import type {Identity} from '../lib/types';
 import type {FamilyDisplay} from '../config/catalog';
 import {type CkErc20OnrampParams, ckerc20OnrampParams} from '../services/relay';
 import {encodeApprove, encodeDepositErc20, encodeDepositEth, principalToBytes32} from '../cketh';
-import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, ReceiptTimeout, pairOnrampWallet, openWalletApp} from '../wallet';
+// `ReceiptReverted` is the ONLY receipt outcome branched on here: a broadcast deposit whose receipt
+// timed out and one whose receipt READ failed leave the user in the identical position, so submit()
+// treats every non-revert throw after the deposit went out as the same honest "sent, outcome
+// unknown". This is also the sheet's ONLY import surface for the wallet seam — `walletconnect.ts`
+// (the sole `@walletconnect/*` import site) is never imported statically from here.
+import {resolveOnrampProvider, connectWallet, getChainId, sendTransaction, waitForReceipt, ReceiptReverted, TransactionHashMissing, pairOnrampWallet, PairingRejected, ChainNotApproved, openWalletApp, installedWallets, openWalletWithUri, type KnownWallet} from '../wallet';
 import {loadDeposit, saveDeposit, clearDeposit} from '../services/ckerc20Persist';
 import {railBalanceOf} from '../services/rail';
 import {DpayCore} from '../services/native';
@@ -46,8 +51,8 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
-  // submitted, waiting on the user's wallet to sign) → 'watching' (txs mined, waiting for the mint)
-  // → 'done' (balance grew).
+  // submitted, waiting on the user's wallet to sign) → 'watching' (the DEPOSIT tx is on chain,
+  // waiting for the mint) → 'done' (balance grew).
   //
   // MC8 U5 — the WATCHING phase is RESUMABLE across app restart because the watching poll is a
   // SIGNED /api/v2 ledger query at the user's own principal (not Ethereum), so it needs NO wallet
@@ -73,6 +78,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   // never see a pairing in flight. Updated synchronously every render (no effect needed).
   const wcUriRef = useRef(wcUri);
   wcUriRef.current = wcUri;
+  // The named wallets this phone can actually open, probed once the pairing screen is entered (the
+  // probe needs no URI, but running it earlier would ask the OS a question nobody is looking at).
+  // Empty on web / with WalletConnect disabled, and empty is a legitimate answer — the pairing
+  // screen still offers the QR and the system-chooser route, never a dead end.
+  const [wallets, setWallets] = useState<readonly KnownWallet[]>([]);
   const [params, setParams] = useState<CkErc20OnrampParams | null>(null);
   const [startBal, setStartBal] = useState<string | null>(null);
   // Manual-recheck spinner (parity with the other three deposit sheets, which have always had one).
@@ -103,6 +113,21 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       }
     };
   }, []);
+
+  // Probe the named wallets when the pairing screen is entered (display_uri fired). Keyed on the
+  // BOOLEAN, not on `wcUri`, so a re-emitted URI does not re-probe the OS. `installedWallets`
+  // resolves by contract — a failing per-wallet probe drops only that wallet and logs there — so a
+  // rejection here would be a real defect and must surface as an unhandled rejection, not be caught.
+  const pairing = wcUri !== null;
+  useEffect(() => {
+    if (!pairing) return;
+    let alive = true;
+    (async () => {
+      const found = await installedWallets();
+      if (alive) setWallets(found);
+    })();
+    return () => { alive = false; };
+  }, [pairing]);
 
   // MC8 U5 — RESUME on mount. The watching poll is a signed ledger query at the user principal (not
   // Ethereum), so a watching deposit survives an app restart WITHOUT a wallet reconnect: hydrate
@@ -181,33 +206,43 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
 
   const connect = useCallback(async () => {
     setErr(null);
+    // MC8 U6 capstone — pair via WalletConnect BEFORE eth_requestAccounts. On web this is a no-op
+    // (pairOnrampWallet returns false immediately — never reaches the WC dynamic import). On native
+    // it subscribes to display_uri → renders the pairing QR (wcUri state), calls provider.connect()
+    // (the wallet handshake), and clears the QR when the session is established. A pair failure
+    // surfaces an honest error and aborts (does NOT proceed to connectWallet on a dead session).
+    //
+    // OPEN_ISSUES #1/#2 — thread the requested currency's chain_id so a Sepolia ckERC20 pairs against
+    // Sepolia (not a mainnet-only session). `chainId` is the catalog descriptor's per-currency value;
+    // default 1 preserves the pre-testnet mainnet behavior.
+    setWcUri(null);
+    try {
+      await pairOnrampWallet((uri) => setWcUri(uri), chainId ?? 1);
+    } catch (e: unknown) {
+      setWcUri(null);
+      // The classification travels as a TYPE. Sniffing the message cannot work here: it would be
+      // string-matching copy that is translated into four languages, and a plain pairing failure
+      // whose detail merely mentions a user would be reported as a deliberate decline.
+      if (e instanceof PairingRejected) setErr(M.deposit.erc20.pairRejected);
+      // ChainNotApproved's message already IS the actionable sentence ("switch network in your
+      // wallet, then connect again") — surfaced verbatim, never re-worded into something vaguer.
+      else if (e instanceof ChainNotApproved) setErr(e.message);
+      else setErr((e instanceof Error ? e.message : String(e)) || M.deposit.erc20.pairFailed);
+      return; // stay in 'connect' — the WC session is not established.
+    }
     // MC8 U6.3 — resolve the onramp provider SOURCE via the web-first resolver (wallet.ts). On web
     // this returns `window.ethereum` (the browser wallet / the e2e mock); on native it lazy-loads the
     // WalletConnect provider when WALLETCONNECT_PROJECT_ID is configured. The null path (no source
     // available) surfaces an honest, platform-aware message — NOT a browser-only "install MetaMask"
     // instruction that would lie to a native user.
     //
-    // OPEN_ISSUES #1/#2 — thread the requested currency's chain_id so a Sepolia ckERC20 pairs against
-    // Sepolia (not a mainnet-only session). `chainId` is the catalog descriptor's per-currency value;
-    // default 1 preserves the pre-testnet mainnet behavior.
+    // AFTER pairing, never before: `pairWalletConnect` tears the provider DOWN and re-inits when a
+    // cached session approved a different chain than this deposit needs, so an instance captured
+    // beforehand would be the disconnected one and every call below would run on a dead session.
     const provider = await resolveOnrampProvider(chainId ?? 1);
     if (!provider) {
       setErr(Platform.OS === 'web' ? M.deposit.erc20.noWalletWeb : M.deposit.erc20.noWalletNative);
       return;
-    }
-    // MC8 U6 capstone — pair via WalletConnect BEFORE eth_requestAccounts. On web this is a no-op
-    // (pairOnrampWallet returns false immediately — never reaches the WC dynamic import). On native
-    // it subscribes to display_uri → renders the pairing QR (wcUri state), calls provider.connect()
-    // (the wallet handshake), and clears the QR when the session is established. A pair failure
-    // surfaces an honest error and aborts (does NOT proceed to connectWallet on a dead session).
-    setWcUri(null);
-    try {
-      await pairOnrampWallet((uri) => setWcUri(uri), chainId ?? 1);
-    } catch (e: unknown) {
-      setWcUri(null);
-      const msg = e instanceof Error ? e.message : String(e);
-      setErr(/reject|denied|user/i.test(msg) ? M.deposit.erc20.pairRejected : (msg || M.deposit.erc20.pairFailed));
-      return; // stay in 'connect' — the WC session is not established.
     }
     try {
       const acct = await connectWallet(provider);
@@ -238,13 +273,27 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     } catch (e: unknown) {
       setErr((e instanceof Error ? e.message : String(e)) || M.deposit.erc20.connectFailed);
     }
-  }, [relayUrl, currency, ledger, identity.secretHex, identity.publicHex, chainId, display.networkLabel]);
+  }, [ledger, identity.secretHex, chainId, display.networkLabel]);
 
-  // Same-device pairing — open the OS wallet app with the WC pairing URI (alternative to scanning
-  // the QR with a second device). The URI is non-null only while the pairing QR is shown. On web
+  // Same-device pairing, NAMED wallet — opens it AND records the deeplink choice, which is the only
+  // way a later signing request comes back to the front instead of waiting unseen in a backgrounded
+  // app. The URI is non-null only while the pairing QR is shown.
+  const openNamed = useCallback(async (wallet: KnownWallet) => {
+    if (!wcUri) return;
+    setErr(null);
+    const opened = await openWalletWithUri(wallet, wcUri);
+    // The probe said this wallet was installed; if it will not open now, say WHICH one failed and
+    // what is left to try — never a bare "couldn't open a wallet".
+    if (!opened) setErr(M.deposit.erc20.couldntOpenWallet(wallet.name));
+  }, [wcUri]);
+
+  // Same-device pairing, UNNAMED wallet — hands the `wc:` URI to the OS intent chooser, the route
+  // for the 200+ WalletConnect wallets outside KNOWN_WALLETS. It records nothing (the chooser never
+  // reports which app it launched), which is what `otherWalletHint` tells the user. On web
   // openWalletApp is a no-op (returns false), but the button itself is gated to native below.
   const openInWallet = useCallback(async () => {
     if (!wcUri) return;
+    setErr(null);
     const opened = await openWalletApp(wcUri);
     if (!opened) setErr(M.deposit.erc20.noWalletApp);
   }, [wcUri]);
@@ -274,10 +323,25 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     const principalWord = principalToBytes32(selfPrincipal);
     setErr(null);
     setPhase('sending');
-    // MC8 U5 — accumulate the tx hashes as they're produced so a timeout (soft → watching) still
-    // persists whichever hashes were captured before the throw. The happy path captures both (ERC-20)
-    // or just one (native ETH).
+    // MC8 U5 — accumulate the tx hashes as they're produced so an unknown-outcome deposit (soft →
+    // watching) still persists whichever hashes were captured before the throw.
     const hashes: string[] = [];
+    // The catch block below routes on ONE fact: did the DEPOSIT transaction specifically reach the
+    // network? Only that tx can ever mint — the ERC-20 path's first hash is an allowance, so
+    // `hashes.length` is NOT the question (asking it sent the sheet to 'watching' on a timed-out
+    // approve, waiting forever on a deposit that was never sent). `approveInFlight` covers the other
+    // half: the allowance is broadcast and its outcome is not yet known.
+    let depositSent = false;
+    let approveInFlight = false;
+    // The allowance is MINED and successful, and the deposit has not gone out — so the allowance is
+    // standing on chain. Whatever ends the attempt from here must say so, or the two signature
+    // prompts on the retry arrive unexplained.
+    let approveConfirmed = false;
+    // Which transaction the wallet is being asked for, so a LOST HASH (`TransactionHashMissing` —
+    // accepted, no id returned, possibly broadcast) can be attributed. Neither flag above can be set
+    // when that throws (both are raised only after a hash came back), and the two steps carry
+    // opposite risk, so this is the only thing that tells them apart.
+    let signing: 'approve' | 'deposit' = nativeEth ? 'deposit' : 'approve';
     try {
       if (nativeEth) {
         // Native ETH — ONE payable tx: depositEth(principal) with the ETH `value` (Wei). No approve
@@ -285,6 +349,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         const depositData = encodeDepositEth(principalWord);
         const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData, value: unitBig});
         hashes.push(depositHash);
+        depositSent = true;
         await waitForReceipt(provider, depositHash);
       } else {
         // ERC-20 — TWO txs: approve(helper, amount) on the ERC-20 contract, then depositErc20(...).
@@ -294,36 +359,63 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         const approveData = encodeApprove(params.helper_address, unitBig);
         const approveHash = await sendTransaction(provider, account, {to: erc20Address, data: approveData});
         hashes.push(approveHash);
+        approveInFlight = true;
         // MC8 U4 — wait for each tx to be MINED before proceeding. eth_sendTransaction returning a hash
         // only means the wallet accepted it, NOT that it succeeded. A reverted approve must surface an
         // honest error here, not a false "watching for the mint".
         await waitForReceipt(provider, approveHash);
+        approveInFlight = false;
+        approveConfirmed = true;
+        signing = 'deposit';
         // 2. depositErc20(usdc, amount, principal) on the helper contract (subaccount omitted =
         //    ICRC-1 default — the mint lands at the user's own default account).
         const depositData = encodeDepositErc20(erc20Address, unitBig, principalWord);
         const depositHash = await sendTransaction(provider, account, {to: params.helper_address, data: depositData});
         hashes.push(depositHash);
+        depositSent = true;
         await waitForReceipt(provider, depositHash);
       }
       setTxHashes(hashes);
       setResumed(false);
       setPhase('watching');
     } catch (e: unknown) {
-      if (e instanceof ReceiptReverted) {
-        // Hard fail: the tx was mined but reverted — it will NEVER credit. Stay in 'enter' so the
-        // user can see the error and retry; do NOT transition to a false "watching".
+      if (depositSent && e instanceof ReceiptReverted) {
+        // Hard fail: the deposit was mined and reverted — it will NEVER credit. Stay in 'enter' so
+        // the user can see the error and retry; do NOT transition to a false "watching".
         setErr(M.deposit.erc20.txReverted);
         setPhase('enter');
-      } else if (e instanceof ReceiptTimeout) {
-        // SOFT (Fork-2 resolution): the tx was broadcast but not mined within the timeout. Transition
-        // to watching anyway — the watching poll will catch the eventual mint, or the user can retry.
+      } else if (depositSent) {
+        // SOFT (Fork-2 resolution): the deposit is on chain and its outcome is UNKNOWN — either the
+        // receipt never arrived within the poll budget or the receipt READ itself failed. On the
+        // WalletConnect rail that read is not a wallet method: the eip155 provider routes
+        // eth_getTransactionReceipt to its own HTTP RPC, so a transient third-party failure lands
+        // here as a plain Error. Both say the same true thing to the user, and both must WATCH —
+        // calling a broadcast deposit "failed" invites paying the same money twice.
         setTxHashes(hashes);
         setResumed(false);
         setErr(M.deposit.erc20.txUnconfirmed);
         setPhase('watching');
+      } else if (approveInFlight) {
+        // ERC-20 only, and NOT "nothing happened": the allowance tx is on chain, the deposit was
+        // never sent, so nothing can ever mint — watching would hang forever. A revert is final; an
+        // unknown outcome leaves an allowance that may or may not exist, and the copy warns that the
+        // retry asks for the approval again so the second prompt is not a surprise.
+        setErr(e instanceof ReceiptReverted ? M.deposit.erc20.approveReverted : M.deposit.erc20.approveUnconfirmed);
+        setPhase('enter');
+      } else if (e instanceof TransactionHashMissing) {
+        // The wallet ACCEPTED the request and answered without a transaction id — so it may have
+        // broadcast it, and there is no hash to poll a receipt for or to look up. This is neither
+        // 'watching' (which would promise a credit that may never come) nor "failed" (which invites
+        // paying twice): stay in 'enter' and tell the user exactly what dpay does and does not know.
+        setErr(signing === 'deposit' ? M.deposit.erc20.depositHashUnknown : M.deposit.erc20.approveHashUnknown);
+        setPhase('enter');
       } else {
+        // Nothing reached the network: eth_sendTransaction itself failed or the user declined.
         const msg = e instanceof Error ? e.message : String(e);
-        setErr(/reject|denied|user/i.test(msg) ? M.deposit.erc20.txNotSigned : (msg || M.deposit.erc20.txFailed));
+        const base = /reject|denied|user/i.test(msg) ? M.deposit.erc20.txNotSigned : (msg || M.deposit.erc20.txFailed);
+        // A CONFIRMED approval before a deposit that never went out leaves a live allowance on
+        // chain. "Transaction not signed." alone hides it, and hides why the retry asks twice.
+        setErr(approveConfirmed ? `${base} ${M.deposit.erc20.allowanceStands}` : base);
         setPhase('enter');
       }
     }
@@ -409,12 +501,37 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
           <View style={S.centerAll}>
             <View testID="wc-pair-qr" style={S.qrCard}><QrCode value={wcUri} size={QR_SIZE} ecl="M" /></View>
             <Text style={S.paidSub}>{M.deposit.erc20.scanToPair}</Text>
+            {/* Same-device routes. Native only: on web the QR is the whole story (an injected
+                browser wallet never reaches this branch — wcUri stays null there). */}
             {Platform.OS !== 'web' ? (
-              <Pressable testID="btn-open-wallet" accessibilityRole="button" accessibilityHint={M.deposit.erc20.openWalletHint} style={[S.primaryWide, {marginTop: 12}]} onPress={openInWallet}>
-                <Text style={S.primaryText}>{M.deposit.erc20.openWallet}</Text>
-              </Pressable>
+              <>
+                <Text style={S.dim2}>{M.deposit.erc20.orOpenHere}</Text>
+                {/* One button per wallet actually installed. This is the route that RECORDS the
+                    deeplink choice, so "Approve & deposit" later reopens the same wallet. */}
+                {wallets.map((w) => (
+                  <Pressable
+                    key={w.androidPackage}
+                    testID={`btn-open-wallet-${w.androidPackage}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={M.deposit.erc20.openNamedWallet(w.name)}
+                    style={[S.primaryWide, {marginTop: 12}]}
+                    onPress={() => openNamed(w)}>
+                    <Text style={S.primaryText}>{M.deposit.erc20.openNamedWallet(w.name)}</Text>
+                  </Pressable>
+                ))}
+                {/* Always present, so an empty list above is still a screen with something to do:
+                    the QR, and the chooser for every wallet dpay cannot name. */}
+                <Pressable
+                  testID="btn-other-wallet"
+                  accessibilityRole="button"
+                  accessibilityLabel={M.deposit.erc20.otherWallet}
+                  style={S.ghostBtn}
+                  onPress={openInWallet}>
+                  <Text style={S.ghostBtnText}>{M.deposit.erc20.otherWallet}</Text>
+                </Pressable>
+                <Text style={S.dim2}>{M.deposit.erc20.otherWalletHint}</Text>
+              </>
             ) : null}
-            <Text style={S.dim2}>{M.deposit.erc20.walletListPair}</Text>
           </View>
         ) : (
           <View style={S.centerAll}>
@@ -458,6 +575,13 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
             disabled={phase === 'sending'}>
             <Text style={S.primaryText}>{phase === 'sending' ? M.deposit.erc20.confirming : (nativeEth ? M.deposit.erc20.deposit : M.deposit.erc20.approveDeposit)}</Text>
           </Pressable>
+          {/* Native only: whether the signing request reopens the wallet depends on how the user
+              paired (the copy's own doc in i18n has the why), so "Confirm in your wallet…" above may
+              be describing a screen they have to go find. On web the extension pops up by itself —
+              the same line there would be a lie. */}
+          {phase === 'sending' && Platform.OS !== 'web' ? (
+            <Text testID="ckerc20-switch-wallet" style={S.dim2}>{M.deposit.erc20.switchToWalletApp}</Text>
+          ) : null}
         </>
       ) : phase === 'watching' ? (
         <View style={S.centerAll}>
