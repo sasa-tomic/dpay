@@ -38,7 +38,7 @@ import {M} from '../i18n';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders when depositFamily is non-null OR
@@ -408,6 +408,23 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           right={{label: M.receive.myAddress, value: 'address', testID: 'btn-receive-address'}}
         />
         {addressSheet}
+        {/* Fund-funnel resume — rendered ONCE here rather than threaded into all three deposit
+            sheets, because it is a property of the NAVIGATION (the user came from Pay and the
+            money has since landed), not of any particular deposit rail. The SOL sheet owns its own
+            copy for historical reasons; every IC sheet shares this one. Wallet decides WHEN it
+            appears — only on a known-positive balance. */}
+        {depositReturnLabel && onReturnFromDeposit ? (
+          <Pressable
+            testID="btn-ic-receive-return"
+            style={[S.ghostBtn, S.ghostBtnMuted]}
+            onPress={onReturnFromDeposit}
+            accessibilityRole="button"
+            accessibilityLabel={depositReturnLabel}
+            accessibilityHint={M.deposit.sol.returnHint}
+            accessibilityState={{disabled: false}}>
+            <Text style={S.ghostBtnText}>{depositReturnLabel}</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }

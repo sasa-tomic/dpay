@@ -19,7 +19,7 @@
  *      'Send to address' toggle shows the SAME fund panel ('Add BTC to send') instead of
  *      the withdraw form.
  */
-import {setup, onboardWallet, openBalances, goOffline, setRelay, assert, assertIncludes} from '../harness/lib.mjs';
+import {setup, onboardWallet, openBalances, goOffline, setRelay, assert, assertIncludes, accountOf, faucetAccount} from '../harness/lib.mjs';
 
 export const meta = {
   id: '81',
@@ -74,6 +74,33 @@ export async function run() {
     const sendFormLeak = await driver.eval(() => document.querySelector('[data-testid="send-address-input"]') != null);
     assert(!sendFormLeak, 'send form must NOT be mounted while gated');
     assertIncludes(sendTxt, 'Show my BTC address', 'send panel keeps the deposit primary');
+
+    // (5) Fund-funnel RESUME. The user was sent to the deposit screen from Pay; once the money
+    //     actually lands they must get a one-tap way back to what they were trying to do. The SOL
+    //     rail has had this since the fund-funnel work and the IC rail never did — it recorded no
+    //     origin, so the user had to re-navigate by hand. Note the link appears only AFTER the
+    //     balance goes positive: offered over an unfunded account it would lead straight back to
+    //     the gate it came from.
+    await driver.click('pay-fund-go');
+    await driver.findByTestID('deposit-address', {timeoutMs: 8000});
+    const noLinkYet = await driver.isPresent('btn-ic-receive-return');
+    assert(!noLinkYet, 'no resume link while the balance is still zero — it would return to the gate');
+
+    const identity = await accountOf(driver);
+    const fund = await faucetAccount(env.relayBaseURL, identity.publicHex, 150_000, {currency: 1});
+    assert(fund.ok, `faucet must succeed, got HTTP ${fund.status}`);
+
+    await driver.findByTestID('btn-ic-receive-return', {timeoutMs: 12_000});
+    const label = await driver.readText('btn-ic-receive-return');
+    assertIncludes(label, 'Back to paying', 'the resume link names the action it returns to');
+    assertIncludes(label, 'BTC', 'the resume link names the asset');
+    await driver.click('btn-ic-receive-return');
+
+    // Back on Pay, on the SAME asset, in the SAME sub-mode the funnel started from (send).
+    await driver.findByTestID('send-address-input', {timeoutMs: 8_000});
+    const backLeak = await driver.isPresent('pay-fund');
+    assert(!backLeak, 'the fund gate is gone — the asset is funded now');
+    await driver.screenshot('81-ic-fund-first-pay');
   } finally {
     await env.stop();
   }

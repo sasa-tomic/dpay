@@ -19,7 +19,7 @@
 // Mock provider contract is identical to flow 16 (only provider I/O faked; cketh.ts calldata runs
 // verbatim). Selector contract: `asset-ckusdc-select` (USDC row whole-row select),
 // `btn-receive-address` (Receive → "My address"), `ckerc20-deposit`, `btn-connect-wallet`,
-// `btn-approve`, `ckerc20-amount`, `ckerc20-status`, `btn-ckerc20-new`.
+// `btn-approve`, `ckerc20-amount`, `ckerc20-status`, `btn-ckerc20-new`, `btn-ckerc20-check`.
 import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 
 // Install a recording EIP-1193 mock identical to flow 16's (chainId 0x1 = Ethereum mainnet, receipt
@@ -146,6 +146,19 @@ export async function run() {
     assert(await driver.isPresent('btn-ckerc20-new'),
       'resumed watching must show btn-ckerc20-new (the escape from a stuck watch)');
     console.log('[33-ckerc20-persist] ✓ "Start a new deposit" escape present (btn-ckerc20-new)');
+
+    // The manual recheck. Every other deposit sheet (ckBTC, direct-ICRC, Solana) has always had
+    // one; this sheet left the user with nothing to do but wait out the poll interval, which on a
+    // watching screen reads as "nothing is happening". It shares the cadence poll's comparison, so
+    // tapping it cannot reach a different verdict than waiting would.
+    assert(await driver.isPresent('btn-ckerc20-check'),
+      'the watching state must offer a manual "Check now" like the other deposit sheets');
+    await driver.click('btn-ckerc20-check', { timeoutMs: 5_000 });
+    // Still watching: nothing was deposited, so an honest recheck changes nothing.
+    await driver.findByTestID('ckerc20-status', { timeoutMs: 5_000 });
+    assert(await driver.isPresent('btn-ckerc20-check'),
+      'an unfunded recheck leaves the watch running — it must not fake a completed deposit');
+    console.log('[33-ckerc20-persist] ✓ manual recheck present and honest (still watching)');
 
     // === PHASE 3 (optional): the escape clears the key + returns to 'connect' ===================
     // Clicking the escape clears the persisted watching key and returns to 'connect' so the user can

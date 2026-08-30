@@ -8,7 +8,7 @@ import {C} from '../config/palette';
 import {IconClock, IconScan, IconShare} from './icons';
 import {QR_SIZE} from '../config/constants';
 import type {SolPayGate} from '../config/assets';
-import type {Identity} from '../lib/types';
+import type {Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
@@ -18,6 +18,7 @@ import {isSolReqV2Expired} from '../solana/payments';
 import {signSolPayment, signSplPayment} from '../solana';
 import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
+import {NfcStatusRow} from './NfcStatusRow';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
@@ -43,13 +44,16 @@ import {M} from '../i18n';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onLockChange}: {identity: Identity; nfcReady: boolean; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, nfcStatus, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onLockChange}: {identity: Identity; nfcStatus: NfcStatus; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
+  // The radio is usable only in the 'ready' state; every other state falls through to QR-only,
+  // with the row below explaining which one and what to do about it.
+  const nfcReady = nfcStatus === 'ready';
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
   // Pay-intent gate (founder rule 2026-08-23, same as IC PayMode): the camera and the HCE card
@@ -252,6 +256,7 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
         ) : null}
         {!nfcActive ? (
           <>
+            <NfcStatusRow nfcStatus={nfcStatus} testID="sol-nfc-status" />
             <View testID="sol-pay-scan" style={S.scanWrap}>
               {/* P3 — a leading IconScan on the hint only; the camBox/scanWrap/center nesting is
                   UNTOUCHED (the 0×0 camBox collapse class is gated by `just campreview`). */}
@@ -289,7 +294,6 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
     // for a sign error (reason + Cancel back to the gated scan). NO sign button ever renders.
     return (
       <View style={S.center}>
-        {toggle}
         <Text style={S.label}>{M.pay.paying}</Text>
         <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(req.amt, decimals, unit))}</Text>
         <Text style={S.reviewTo}>{M.pay.toWho(req.name || req.to)}</Text>
@@ -314,7 +318,6 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   if (phase === 'qr' && solpayUri) {
     return (
       <View style={S.center}>
-        {toggle}
         <Text style={S.label}>{M.pay.showThisToMerchant}</Text>
         <View testID="sol-pay-qr" style={S.qrCard}><QrCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
         <Text style={S.amountBig}>{M.pay.amountToWho(fmtAsset(req!.amt, decimals, unit), req!.name || req!.to)}</Text>
@@ -357,7 +360,6 @@ export function SolPayMode({identity, nfcReady, solBalance, usdcBalance, usdcAta
   const paidTo = req ? req.name || req.to : null;
   return (
     <View style={S.center}>
-      {toggle}
       {/* P3 — SVG mark (was a '⋯' text glyph): the SOL pay outcome is ALWAYS the honest pending
           hand-off, so the clock reads on the warn-tinted checkAlready circle. */}
       <View style={[S.check, S.checkAlready]}><IconClock size={44} color={C.brandInk}/></View>

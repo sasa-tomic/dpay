@@ -80,7 +80,7 @@ function mountSolPay(props: Partial<SolPayModeProps> = {}) {
     tree = renderer.create(
       <SolPayMode
         identity={IDENTITY}
-        nfcReady={false}
+        nfcStatus="off"
         solBalance="5000000000"
         usdcBalance="0"
         usdcAtaAbsent={false}
@@ -262,11 +262,11 @@ describe('SolPayMode — pay-intent scan gate', () => {
   }
 
   test('idle: NEITHER rail mounts; sol-pay-scan + CTA render; one tap arms BOTH rails', () => {
-    const tree = mountSolPay({nfcReady: true});
+    const tree = mountSolPay({nfcStatus: 'ready'});
     expect(hasTestID(tree, 'sol-pay-scan')).toBe(true); // idle keeps the container + hint
     expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
     expect(scannerNodes(tree)).toHaveLength(0); // camera rail off
-    expect(cardNodes(tree)).toHaveLength(0); // HCE rail off (nfcReady, but gated)
+    expect(cardNodes(tree)).toHaveLength(0); // HCE rail off (radio ready, but the scan gate has not been tapped)
     pressByTestID(tree, 'btn-sol-start-scan');
     expect(scannerNodes(tree)).toHaveLength(1);
     expect(cardNodes(tree)).toHaveLength(1);
@@ -296,7 +296,7 @@ describe('SolPayMode — pay-intent scan gate', () => {
       tree.update(
         <SolPayMode
           identity={IDENTITY}
-          nfcReady={false}
+          nfcStatus="off"
           solBalance="5000000000"
           usdcBalance="0"
           usdcAtaAbsent={false}
@@ -317,7 +317,7 @@ describe('SolPayMode — pay-intent scan gate', () => {
       tree.update(
         <SolPayMode
           identity={IDENTITY}
-          nfcReady={false}
+          nfcStatus="off"
           solBalance="5000000000"
           usdcBalance="0"
           usdcAtaAbsent={false}

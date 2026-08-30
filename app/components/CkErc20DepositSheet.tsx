@@ -75,6 +75,8 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   wcUriRef.current = wcUri;
   const [params, setParams] = useState<CkErc20OnrampParams | null>(null);
   const [startBal, setStartBal] = useState<string | null>(null);
+  // Manual-recheck spinner (parity with the other three deposit sheets, which have always had one).
+  const [checkBusy, setCheckBusy] = useState(false);
   // Captured during submit() so the persisted watching state can carry the two ETH tx hashes
   // (informational for the resumed UI; never used to send on resume).
   const [txHashes, setTxHashes] = useState<string[]>([]);
@@ -349,30 +351,37 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   // logs on a ~3min heartbeat; credit typically lands within ~20min. Done requires OBSERVED GROWTH
   // from a real baseline: if the connect-time snapshot failed (null startBal), the first successful
   // read SETS the baseline instead of comparing — a pre-existing balance never false-positives done.
+  // ONE check, shared by the cadence poll and the manual "Check now" button — so a user who does
+  // not want to wait out POLL.deposit gets the identical comparison, not a second implementation.
+  // `manual` only drives the button's spinner; the balance logic is the same either way.
+  const checkOnce = useCallback(async (manual: boolean) => {
+    if (manual) setCheckBusy(true);
+    try {
+      const bal = await railBalanceOf(identity.secretHex, ledger);
+      if (bal != null) {
+        if (startBal == null) {
+          // Watch honesty (P2#5): a missing baseline (the connect-time snapshot failed) must
+          // never declare done off a balance the wallet may have had all along. The first
+          // successful read SETS the baseline; the effect re-runs on the new startBal and the
+          // next cadence poll compares against it.
+          setStartBal(bal);
+        } else if (cmpRaw(bal, startBal) > 0) {
+          // MC1 units 2-4: growth via `cmpRaw` (BigInt) — never `>` on strings.
+          setPhase('done');
+        }
+      }
+    } catch (e) { console.warn('ckERC20 balance poll failed:', e instanceof Error ? e.message : String(e)); /* keep watching */ }
+    finally { if (manual) setCheckBusy(false); }
+  }, [identity.secretHex, ledger, startBal]);
+
   useEffect(() => {
     if (phase !== 'watching') return;
     let alive = true;
-    const poll = async () => {
-      try {
-        const bal = await railBalanceOf(identity.secretHex, ledger);
-        if (alive && bal != null) {
-          if (startBal == null) {
-            // Watch honesty (P2#5): a missing baseline (the connect-time snapshot failed) must
-            // never declare done off a balance the wallet may have had all along. The first
-            // successful read SETS the baseline; the effect re-runs on the new startBal and the
-            // next cadence poll compares against it.
-            setStartBal(bal);
-          } else if (cmpRaw(bal, startBal) > 0) {
-            // MC1 units 2-4: growth via `cmpRaw` (BigInt) — never `>` on strings.
-            setPhase('done');
-          }
-        }
-      } catch (e) { console.warn('ckERC20 balance poll failed:', e instanceof Error ? e.message : String(e)); /* keep watching */ }
-    };
+    const poll = () => { if (alive) void checkOnce(false); };
     poll();
     const id = setInterval(poll, POLL.deposit);
     return () => { alive = false; clearInterval(id); };
-  }, [phase, identity.secretHex, ledger, startBal]);
+  }, [phase, checkOnce]);
 
   // The body content is rendered inline in the Receive tab's "My address" sub-mode (the tab body
   // already provides the scroll surface + the overlay chrome).
@@ -462,6 +471,20 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
               MC8 U5 — the RESUMED variant is honest that the wallet isn't connected but the watch
               continues (relay-bound, not Ethereum-bound). */}
           <Text testID="ckerc20-status" style={S.paidSub}>{resumed ? M.deposit.erc20.watchingResumed : M.deposit.erc20.watchingFresh}</Text>
+          {/* Manual recheck — the other three deposit sheets have always offered one; this sheet
+              left the user with nothing to do but wait out the poll interval. */}
+          <Pressable
+            testID="btn-ckerc20-check"
+            accessibilityRole="button"
+            accessibilityLabel={M.deposit.ck.checkNowLabel}
+            accessibilityState={{disabled: checkBusy}}
+            style={[S.checkBtn, checkBusy && S.dim]}
+            disabled={checkBusy}
+            onPress={() => void checkOnce(true)}>
+            {checkBusy
+              ? <ActivityIndicator size="small" color={C.brand} />
+              : <Text style={S.checkBtnText}>{M.deposit.checkNow}</Text>}
+          </Pressable>
           {/* MC8 U5 — escape from a resumed watching state. A deposit that never mints would
               otherwise wedge the sheet in watching on every restart; this clears the key + returns
               to 'connect' so the user can start fresh. Only rendered in the resumed state (a

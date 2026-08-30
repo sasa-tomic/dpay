@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {View, Text, Pressable, Modal, Platform} from 'react-native';
+import {View, Text, Pressable} from 'react-native';
 import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {C} from '../config/palette';
@@ -12,12 +12,11 @@ import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, enve
 import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
-import {NfcIcon} from './NfcIcon';
+import {NfcStatusRow} from './NfcStatusRow';
 import {QrScanner} from './QrScanner';
 import {FundFirstPanel} from './FundFirstPanel';
 import {ModeToggle} from './ModeToggle';
 import {SendSheet} from './SendSheet';
-import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {useJourney, JOURNEY_STAMPS} from '../lib/journey';
@@ -26,7 +25,7 @@ import {shouldShowOfflinePeak} from '../lib/peak';
 import {CoachTip} from './CoachTip';
 import {OfflinePeak} from './OfflinePeak';
 import {PaidStamp} from './tapMotion';
-import {IconCheck, IconClock, IconInfo, IconShare} from './icons';
+import {IconCheck, IconClock, IconShare} from './icons';
 import {M} from '../i18n';
 
 export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
@@ -70,8 +69,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // NFC is usable only when the adapter probe reports 'ready' (on + present). Everything else falls
   // through to the QR-only scan surface, with a per-reason explanation in the info popup below.
   const nfcReady = nfcStatus === 'ready';
-  const [nfcInfoOpen, setNfcInfoOpen] = useState(false);
-  useEscapeToClose(() => setNfcInfoOpen(false));
 
   // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
   // (the paid-screen receipt link + the offline-QR auth code — mutually exclusive phases, so one
@@ -552,7 +549,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // and a single primary CTA arms BOTH rails — until that tap, no camera stream and no HCE card.
   // ARMED: the card arms in the background (if NFC is ready) AND the QR scanner goes live at the
   // same time — the payer taps the merchant's phone OR scans its QR, exactly as before the gate.
-  const nfcInfo: Exclude<NfcStatus, 'ready'> = (nfcStatus === 'ready' ? 'unknown' : nfcStatus);
   return (
     <View style={S.center}>
       {sendCapable ? (
@@ -579,23 +575,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       ) : null}
       {!nfcActive ? (
         <>
-          {Platform.OS !== 'web' && nfcReady ? (
-            <View style={S.nfcStatusRow} testID="pay-scan">
-              <NfcIcon color={C.brand} size={34} />
-              <Text style={S.nfcStatusLabel}>{M.pay.tapOrScanToPay}</Text>
-            </View>
-          ) : Platform.OS !== 'web' ? (
-            <View style={S.nfcStatusRow} testID="pay-scan">
-              <NfcIcon color={C.bad} size={34} off />
-              <Pressable style={S.nfcInfoLink} onPress={() => setNfcInfoOpen(true)} accessibilityRole="button" accessibilityLabel={M.pay.whyNfcUnavailable} accessibilityState={{disabled: false}}>
-                <Text style={S.nfcInfoLinkText}>{M.pay.nfcNotAvailable}</Text>
-                <IconInfo size={15} color={C.sub2}/>
-              </Pressable>
-            </View>
-          ) : (
-            <Text style={[S.nfcStatusLabel, {paddingTop: 16}]} testID="pay-scan">{M.pay.scanToPay}</Text>
-          )}
-          {Platform.OS !== 'web' && !nfcReady ? <Text style={S.dim2}>{M.pay.scanQrToPay}</Text> : null}
+          <NfcStatusRow nfcStatus={nfcStatus} testID="pay-scan" />
           {scanArmed ? (
             <QrScanner onScan={raw => onRequestString(raw)} />
           ) : (
@@ -617,17 +597,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       ) : null}
         </>
       )}
-      <Modal visible={nfcInfoOpen} transparent animationType="fade" onRequestClose={() => setNfcInfoOpen(false)}>
-        <Pressable style={S.pickBackdrop} onPress={() => setNfcInfoOpen(false)}>
-          <View style={S.pickCard} onStartShouldSetResponder={() => true}>
-            <Text style={S.pickTitle}>{M.pay.nfcUnavailableTitle}</Text>
-            <Text style={S.nfcInfoBody}>{M.nfc.reason[nfcInfo]}</Text>
-            <Pressable style={S.nfcInfoClose} onPress={() => setNfcInfoOpen(false)} accessibilityRole="button" accessibilityLabel={M.pay.close} accessibilityState={{disabled: false}}>
-              <Text style={S.nfcInfoCloseText}>{M.pay.close}</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
     </View>
   );
 }
