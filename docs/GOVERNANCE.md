@@ -50,8 +50,8 @@ community to vote on our upgrades is unrealistic until critical mass. Therefore:
 | 1 | Value at USER principals, facade out of the value path (post-cutover) | ✅ done (2026-08-19) |
 | 2 | Per-op exact-amount minter approvals; no standing approvals ever | ✅ done (withdraw paths) |
 | 3 | Faucet mint fixed-amount + rate-limited; admin ops denied without controller (R1) | ✅ done |
-| 4 | **Dedicated Ed25519 faucet controller key** (`DPAY_CONTROLLER_SEED`) ≠ dfx root ≠ IC controller; deploy script arms it; `just faucet-verify` proves the wiring (seed↔controller↔IC-controller legs + optional live mint) | 🔄 in flight (2026-08-20 session) |
-| 5 | Refusal surface pinned verbatim in tests (`live_faucet_refuses_non_controller_identities_verbatim`, `admin_ops_are_gated_by_controller`, `admin_ops_admit_operators_alongside_the_controller`) | 🔄 in flight (2026-08-20 session) |
+| 4 | **Dedicated Ed25519 faucet controller key** (`DPAY_CONTROLLER_SEED`) ≠ dfx root ≠ IC controller; deploy script arms it; `just faucet-verify` proves the wiring (seed↔controller↔IC-controller legs + optional live mint) | ✅ shipped — `just faucet-verify --mint` PASSED against prod 2026-08-30, all 5 legs incl. a live 200 mint |
+| 5 | Refusal surface pinned verbatim in tests (`live_faucet_refuses_non_controller_identities_verbatim`, `admin_ops_are_gated_by_controller`, `admin_ops_admit_operators_alongside_the_controller`) | ✅ shipped — proven live by the same 2026-08-30 `faucet-verify --mint` run (leg 3 readback + leg 5 mint) |
 
 ### P1 — Hardening the online surface (next, pre-pilot)
 

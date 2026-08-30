@@ -21,12 +21,14 @@
    `just apk && just up` — the relay ships the catalog; the facade wasm upgrade is optional and
    carries no registration) + funded mainnet transfer proof. ICPSwap buy/sell stays a separate
    future phase; no automatic conversion.
-2. **Faucet 422 — OPEN-VERIFY, likely already shipped.** Fix landed in-tree 2026-08-20
-   (`6465405`, + `scripts/faucet-verify.sh` + deploy-ic arming; local replica drill passed all
-   legs incl. a live-relay 200 mint). The 2026-08-26/27 founder deploys almost certainly armed the
-   dedicated-key prod cell, but **no recorded `just faucet-verify --mint` PASS exists** — run it
-   once against prod, record the result here, close. (docs/GOVERNANCE.md still says "🔄 in
-   flight (2026-08-20 session)" — update it when this closes.)
+2. ~~**Faucet 422 — OPEN-VERIFY.**~~ **CLOSED 2026-08-30.** The missing evidence now exists:
+   founder ran `just faucet-verify --mint` against prod and all five legs PASSED — seed present and
+   well-formed; seed derives the relay's signing principal
+   (`2lzt4-w4qk5-…-zqe`); the canister's `admin_controller` readback EQUALS that principal (so the
+   relay's mint passes `require_admin`); the deploy identity
+   (`hhwti-hb7f7-…-rqe`) is an IC-level controller; and a LIVE relay faucet mint returned
+   200 `{"balance":"10000"}` for a throwaway account. docs/GOVERNANCE.md rows 4-5 updated from
+   "in flight" to shipped.
 3. **Governance P1/P2 pieces (agent-pickable; the stance itself is DO-NOT-NAG below):**
    module-hash pinning, reconcile runbook wiring (###3's menu). (`lock_catalog` struck
    2026-08-28 — the registry it targeted was removed by founder decision; catalog authority =
@@ -43,31 +45,30 @@
 
 ## Physical / outer-loop gates (NOT autonomous)
 
-- **Android App Link verification — needs the prod relay deploy** (payment links, 2026-08-29).
-  Everything in the chain is proven in-sandbox EXCEPT the one step that requires the live domain:
-  the manifest's `autoVerify` filter is live (Android lists `dpay.kalaj.org` for `org.kalaj.dpay`),
-  the relay serves `/.well-known/assetlinks.json` with all four project certificates, and the
-  emulator's installed APK is signed by one of them (`1E:5C:F5:10:…`, the upload key). But the
-  verifier could not fetch the file — `pm get-app-links` shows no successful verification and a
-  tapped link opened Chrome, because prod does not serve assetlinks.json until the next `just up`.
-  **After deploying, run on a phone:** `adb shell pm verify-app-links --re-verify org.kalaj.dpay`
-  then `adb shell pm get-app-links org.kalaj.dpay` and expect `dpay.kalaj.org: verified`; tapping a
-  `https://dpay.kalaj.org/wallet/pay/…` link must then open the app, not a browser. Until that is
-  recorded, a shared link is web-only on real installs (it still opens the web wallet, which is the
-  designed fallback — no user-facing breakage, just no native hand-off).
+- **Android App Link verification — the SERVER half is now done; the PHONE half is not**
+  (payment links, 2026-08-29; updated 2026-08-30 after the prod deploy).
+  Verified live 2026-08-30: `GET https://dpay.kalaj.org/.well-known/assetlinks.json` returns HTTP
+  200 with one statement for `org.kalaj.dpay` carrying all 4 project cert fingerprints. So the
+  blocker named in the original entry — "prod does not serve assetlinks.json" — is GONE.
+  What remains is on the device, and it is NOT done: the founder's phone (`9cdf67b8`) still runs
+  the APK installed 2026-08-27, which PREDATES the `autoVerify` intent filter, so
+  `pm get-app-links org.kalaj.dpay` returns nothing at all (no declared links to verify — not a
+  failed verification). Steps: install the freshly built APK on the phone, then
+  `adb shell pm verify-app-links --re-verify org.kalaj.dpay` and
+  `adb shell pm get-app-links org.kalaj.dpay`, expecting `dpay.kalaj.org: verified`; a tapped
+  `https://dpay.kalaj.org/wallet/pay/…` link must then open the app, not a browser.
+  Until that is recorded, a shared link is web-only on real installs — the designed fallback, so
+  no user-facing breakage, just no native hand-off.
 - **SOL HCE hardware tap — the only physical gate left** (AID `F06470617902`, `DpaySolNfc`).
   The IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
   (founder-run retest; commit `8940b1d`).
-- **VCHF/ICP go-live — founder relay + APK deploy** (`just apk && just up`; the facade wasm
-  upgrade via `just deploy-ic` is optional — since the 2026-08-28 registry removal there is NO
-  registration step and no catalog on the canister): the relay's compiled catalog
-  (`crates/dpay-relay/src/catalog.rs`) ships ids 7/8 to online wallets with the next `just up`;
-  the APK carries the bundled offline rows. The relay change is built + fully gated in-tree but
-  NOT yet deployed. Pre-deploy state confirmed 2026-08-28: `just verify-relay` = live `81e39b4`
-  ABOVE floor `28cc375`, BEHIND HEAD by exactly 1 commit (`671caad`, ships with this deploy);
-  live ledgers verified (`ly36x` VCHF / `ryjl3` ICP: symbol, decimals 8, fee 10_000; index
-  `qhbym` `ledger_id == ryjl3`). Afterward re-check: `curl -s
-  https://dpay.kalaj.org/api/v1/currencies` shows the `Internet Computer` mainnet rows.
+- ~~**VCHF/ICP go-live — founder relay + APK deploy**~~ **DONE 2026-08-30** (`just apk && just up`).
+  VERIFIED LIVE, not taken on report: `GET https://dpay.kalaj.org/api/v1/currencies` now returns the
+  `Internet Computer` mainnet section with currency 7 (VCHF, ledger `ly36x-wiaaa-aaaai-aqj7q-cai`,
+  decimals 8, fee 10_000) and currency 8 (ICP, ledger `ryjl3-tyaaa-aaaaa-aaaba-cai`, decimals 8,
+  fee 10_000). Online wallets get both rows from the relay's compiled catalog.
+  NOTE: the deploy shipped branch HEAD, so `/api/v1/version` reports commit `3b36585` — the whole
+  2026-08-30 send-to-address work is live in the WEB wallet too, not just the catalog rows.
 - **VCHF/ICP funded mainnet payment proof** — low-value app-signed VCHF + ICP mainnet transfers +
   receiver exact-memo reconciliation. **BLOCKED on mainnet funds (hard external gate)**; production
   payment completeness is not claimed for these assets until recorded.
