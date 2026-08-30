@@ -15,7 +15,7 @@
 // exposes it readably so the test decodes the EXACT bytes a payer would scan — not an OCR guess).
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`.
-import { setup, assert, assertEq, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertEq, onboardWallet, accountOf, railPrincipalText } from '../harness/lib.mjs';
 import { decodeRequest, REQUEST_LEN } from '../harness/wire.mjs';
 
 const EXPIRY_WINDOW_SLACK = 1000; // EXPIRY_WINDOW=900 in constants.ts (U-F3 15-min TTL) + a few seconds of test latency
@@ -27,8 +27,8 @@ export const meta = {
   id: '06',
   name: 'request-qr',
   journey: 'pay',
-  covers: ['request-qr', 'encode', 'merchant', 'to-name', 'memo'],
-  verifies: 'Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo).',
+  covers: ['request-qr', 'encode', 'merchant', 'to-name', 'memo', 'pay-link', 'share'],
+  verifies: 'Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo); Share emits the payment link for the SAME request (own principal, exact asset/chain/amount, ref = the request nonce).',
   timeoutMs: 15000,
 };
 
@@ -85,6 +85,30 @@ export async function run() {
     // decodeRequest already enforces length == REQUEST_LEN; assert explicitly for the contract.
     assertEq(REQUEST_LEN, 132, 'REQUEST_LEN (the frozen request wire size — 132 bytes with to_name + memo)');
     console.log(`[06-request-qr] ✓ decoded 132-byte request: to=${req.toHex.slice(0, 12)}… amount=${req.amount} to_name=${req.toName} expiry=+${req.expiry - now}s currency=${req.currency}`);
+
+    // 6. "Share request link" emits the PAYMENT LINK for this same request — the one URL format a
+    //    merchant hands to a payer who is not standing in front of the QR. Asserted here on the
+    //    REAL app (jest pins the same fields against a MOCKED principal; only this proves the
+    //    running wallet derives its own ICRC-1 account correctly and puts it in the link).
+    //    Captured through the __DPAY_TEST_SHARE seam (shims.ts records Share.share's message),
+    //    the same seam flow 59 uses for the receipt hand-back.
+    await driver.eval(() => { window.__DPAY_TEST_SHARE = ''; });
+    await driver.click('btn-share-request', { timeoutMs: 5_000 });
+    const sharedLink = await driver.eval(() => window.__DPAY_TEST_SHARE);
+    assert(typeof sharedLink === 'string' && sharedLink.length > 0, `the share button must hand a link to Share.share, got "${sharedLink}"`);
+    const shared = new URL(sharedLink, 'https://dpay.invalid');
+    const selfPrincipal = await railPrincipalText(accountHex);
+    assertEq(shared.pathname, `/wallet/pay/${selfPrincipal}`,
+      'the shared link must pay THIS wallet\'s own ICRC-1 account (derived by the real core, not a mock)');
+    assertEq(shared.searchParams.get('asset'), 'DEMO', 'the shared link names the exact asset');
+    assertEq(shared.searchParams.get('network'), 'internet-computer', 'the shared link names the settlement chain');
+    assertEq(shared.searchParams.get('amount'), '42.50', 'the shared link carries the entered amount, unrounded');
+    assertEq(shared.searchParams.get('label'), 'e2e-bob', 'the shared link carries the merchant username as the (claimed) label');
+    // `ref` IS this request's nonce — the on-chain memo — so paying the link reconciles against the
+    // very request whose QR is on screen. Byte-equal to the nonce inside the 132-byte request.
+    assertEq(shared.searchParams.get('ref'), req.nonceHex,
+      'the shared link\'s ref must be this request\'s nonce (one payment, one reconciliation key)');
+    console.log(`[06-request-qr] ✓ shared payment link: ${shared.pathname}?asset=DEMO&network=internet-computer&amount=42.50&ref=${req.nonceHex.slice(0, 8)}…`);
 
     await driver.screenshot('06-request-qr');
 
