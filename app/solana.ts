@@ -57,14 +57,28 @@ export async function getSolanaHistory(address: string, signal?: AbortSignal): P
 
 /** Build, sign, broadcast, and confirm a System Program Transfer of `lamports` to `toAddress`.
  *  Signs LOCALLY with the device-derived key (no relay, no DpayCore — non-custodial). Throws if SOL
- *  is offline, on a network/RPC error, or if the transaction fails on-chain. Returns the signature. */
-export async function sendSol(secretHex: string, toAddress: string, lamports: bigint, signal?: AbortSignal): Promise<string> {
+ *  is offline, on a network/RPC error, or if the transaction fails on-chain. Returns the signature.
+ *
+ *  `onBroadcast` fires the moment the network ACCEPTS the transaction, before confirmation — i.e.
+ *  the first instant at which a throw can no longer mean "nothing happened". A throw after it may
+ *  be a confirmation timeout over a transfer that lands seconds later, so a caller that must tell
+ *  "definitely not sent" from "unknown" (the OpenCryptoPay report is one-shot and irreversible —
+ *  `services/opencryptopay.ts`) needs the signature to survive the failure. Callers that treat any
+ *  throw as a failed send simply omit it. */
+export async function sendSol(
+  secretHex: string,
+  toAddress: string,
+  lamports: bigint,
+  signal?: AbortSignal,
+  onBroadcast?: (signature: string) => void,
+): Promise<string> {
   if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const {getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
   const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
   const raw = buildSignedTransfer(seed, publicKey, toAddress, lamports, base58Decode32(blockhash));
   const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
+  onBroadcast?.(signature);
   await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
   return signature;
 }

@@ -13,15 +13,31 @@
  * succeed and would only delay the honest pending screen.
  */
 import {describe, test, expect, jest, afterEach} from '@jest/globals';
+
+// The IC destination is validated by the REAL core in production; under jest the native module is
+// absent, so the base32-CRC parse is stubbed with the one rule this suite depends on — a principal
+// either parses to its canonical self or throws. `services/opencryptopay.ts` treats the throw as an
+// unusable destination, which is the negative case below.
+jest.mock('../services/native', () => ({
+  DpayCore: {
+    icpValidatePrincipal: (text: string) =>
+      /^[a-z0-9]+(-[a-z0-9]+)+$/.test(text) ? Promise.resolve(text) : Promise.reject(new Error(`bad principal: ${text}`)),
+  },
+}));
+
 import {
   fetchPaymentDetails,
   fetchTransferUri,
+  payAndReport,
+  resolveOcpScan,
   submitProof,
   OCP_READ_TIMEOUT_MS,
   OCP_SUBMIT_TIMEOUT_MS,
-  type OcpDetails,
-  type OcpParseDetails,
+  type OcpQuoteRef,
 } from '../services/opencryptopay';
+import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
+import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {M} from '../i18n';
 
 const realFetch = globalThis.fetch;
 
@@ -89,7 +105,7 @@ const QUOTE_BURNED_404 = {
   error: 'Not Found',
 };
 
-const DETAILS: OcpDetails = {
+const DETAILS: OcpQuoteRef = {
   quoteId: 'plq_ec214dddae51da4d',
   callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
 };
@@ -156,29 +172,27 @@ function calledUrl(mock: FetchMock, i = 0): URL {
   return new URL(mock.mock.calls[i][0]);
 }
 
-/** The pure half's parser, stubbed. Records what it was handed so the round trip is checkable. */
-type ParsedDetails = OcpDetails & {claimedMerchantName: string};
-function parserOk(seen: unknown[]): OcpParseDetails<ParsedDetails> {
-  return json => {
-    seen.push(json);
-    return {ok: true, details: {...DETAILS, claimedMerchantName: 'Test Shop'}};
-  };
-}
-const parserRefusing: OcpParseDetails<ParsedDetails> = () => ({ok: false, reason: 'quote-expired'});
-
 // ---------------------------------------------------------------------------------------------
 // fetchPaymentDetails
 // ---------------------------------------------------------------------------------------------
 
 describe('fetchPaymentDetails', () => {
-  test('a live 200 payload is handed to the injected parser and its details returned verbatim', async () => {
+  test('the VERBATIM recorded 200 body narrows through the real parser — the key names are pinned here', async () => {
+    // This is the ONE place a body recorded from the live provider meets `parsePaymentDetails`, so
+    // it is what proves the field names the parser reads are the ones DFX actually sends. The pure
+    // suite's own cases run on hand-written bodies and cannot establish that.
     const mock = installResponse(200, DETAILS_200);
-    const seen: unknown[] = [];
-    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserOk(seen));
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
 
-    expect(out).toEqual({kind: 'ok', details: {...DETAILS, claimedMerchantName: 'Test Shop'}});
-    // The whole body reaches the parser — this module narrows nothing itself.
-    expect(seen).toEqual([DETAILS_200]);
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.details.quoteId).toBe(DETAILS.quoteId);
+    expect(out.details.callbackUrl).toBe(DETAILS.callbackUrl);
+    expect(out.details.claimedMerchantName).toBe('Test Shop');
+    expect(out.details.quoteExpiresAt).toBe(Date.parse('2026-09-01T14:29:42.646Z'));
+    // The trailing bare decimal point survives the whole round trip, exactly as sent.
+    expect(out.details.transferAmounts.find(t => t.method === 'InternetComputer')?.assets)
+      .toContainEqual({asset: 'VCHF', amount: '1.'});
     // `timeout=0` asks for the charge that exists now instead of long-polling for one.
     expect(calledUrl(mock).searchParams.get('timeout')).toBe('0');
     expect(mock).toHaveBeenCalledTimes(1);
@@ -186,7 +200,7 @@ describe('fetchPaymentDetails', () => {
 
   test('a query already on the scanned URL survives, and timeout is forced to 0', async () => {
     const mock = installResponse(200, DETAILS_200);
-    await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e?timeout=90&lightning=x', parserOk([]));
+    await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e?timeout=90&lightning=x');
     const u = calledUrl(mock);
     expect(u.searchParams.get('timeout')).toBe('0');
     expect(u.searchParams.get('lightning')).toBe('x');
@@ -194,19 +208,19 @@ describe('fetchPaymentDetails', () => {
 
   test('the 404 that still carries the merchant identity is no-pending, with the name marked claimed', async () => {
     installResponse(404, NO_PENDING_404);
-    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserOk([]));
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
     expect(out).toEqual({kind: 'no-pending', claimedMerchantName: 'Test Shop'});
   });
 
   test('the OTHER 404 — an unknown payment link — is an error carrying the provider sentence, not no-pending', async () => {
     installResponse(404, LINK_NOT_FOUND_404);
-    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_0000000000000000', parserOk([]));
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_0000000000000000');
     expect(out).toEqual({kind: 'error', message: 'Payment link not found'});
   });
 
   test('a non-https provider URL is refused BEFORE any request leaves the device', async () => {
     const mock = installResponse(200, DETAILS_200);
-    const out = await fetchPaymentDetails('http://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserOk([]));
+    const out = await fetchPaymentDetails('http://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
     expect(out.kind).toBe('error');
     expect(out.kind === 'error' && out.message).toContain('must be https');
     expect(mock).not.toHaveBeenCalled();
@@ -214,24 +228,27 @@ describe('fetchPaymentDetails', () => {
 
   test('a string that is not a URL at all is refused without a request', async () => {
     const mock = installResponse(200, DETAILS_200);
-    const out = await fetchPaymentDetails('not-a-url', parserOk([]));
+    const out = await fetchPaymentDetails('not-a-url');
     expect(out.kind).toBe('error');
     expect(out.kind === 'error' && out.message).toContain('Not a usable provider address');
     expect(mock).not.toHaveBeenCalled();
   });
 
-  test('a transport failure is an error naming the host (nothing has been paid yet)', async () => {
+  test('a transport failure is the localized "nothing has been paid" instruction, not a transport string', async () => {
+    // NEVER reached the provider ⇒ nothing quoted, nothing paid. The user gets an instruction they
+    // can act on; the transport detail is a console diagnostic, not screen copy.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     installTransportFailure();
-    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserOk([]));
-    expect(out.kind).toBe('error');
-    expect(out.kind === 'error' && out.message).toContain('api.dfx.swiss');
-    expect(out.kind === 'error' && out.message).toContain('Network request failed');
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
+    expect(out).toEqual({kind: 'error', message: M.pay.ocp.providerUnreachable});
+    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('Network request failed');
+    warn.mockRestore();
   });
 
   test('a hung provider aborts at OCP_READ_TIMEOUT_MS and returns an error', async () => {
     jest.useFakeTimers();
     const mock = installHangingFetch();
-    const p = fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserOk([]));
+    const p = fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
     expect(mock).toHaveBeenCalledTimes(1);
     jest.advanceTimersByTime(OCP_READ_TIMEOUT_MS);
     const out = await p;
@@ -240,21 +257,23 @@ describe('fetchPaymentDetails', () => {
 
   test('a 200 whose body is not JSON is an error — never a half-built details object', async () => {
     installUnreadableBody(200);
-    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserOk([]));
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
     expect(out.kind).toBe('error');
     expect(out.kind === 'error' && out.message).toContain('unreadable body');
   });
 
   test('a 5xx with no readable body names the status and the host rather than inventing a reason', async () => {
     installUnreadableBody(502);
-    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserOk([]));
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
     expect(out).toEqual({kind: 'error', message: 'api.dfx.swiss answered HTTP 502 with an unreadable body.'});
   });
 
-  test("the parser's own refusal reason is surfaced unchanged", async () => {
-    installResponse(200, DETAILS_200);
-    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', parserRefusing);
-    expect(out).toEqual({kind: 'error', message: 'quote-expired'});
+  test("a 200 the parser refuses surfaces the parser's own reason, never a half-built payment", async () => {
+    // A body that is JSON and HTTP-fine but has no quote on it: the narrowing refusal is the answer.
+    const {quote: _drop, ...noQuote} = DETAILS_200;
+    installResponse(200, noQuote);
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
+    expect(out).toEqual({kind: 'error', message: 'malformed-details'});
   });
 });
 
@@ -333,11 +352,12 @@ describe('fetchTransferUri', () => {
     expect(mock).not.toHaveBeenCalled();
   });
 
-  test('a transport failure is an error naming the host', async () => {
+  test('a transport failure is the same localized "nothing has been paid" instruction as step 2', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     installTransportFailure();
     const out = await fetchTransferUri(DETAILS, 'InternetComputer', 'VCHF');
-    expect(out.kind).toBe('error');
-    expect(out.kind === 'error' && out.message).toContain('api.dfx.swiss');
+    expect(out).toEqual({kind: 'error', message: M.pay.ocp.providerUnreachable});
+    warn.mockRestore();
   });
 });
 
@@ -458,5 +478,279 @@ describe('submitProof', () => {
     expect(out.kind === 'unknown' && out.message).toContain('must be https');
     expect(out.kind === 'unknown' && out.message).toContain('8168');
     expect(mock).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// resolveOcpScan — everything before the payer approves
+// ---------------------------------------------------------------------------------------------
+
+/** Answer per URL, so one test can serve the payment-details read AND the transfer-details read.
+ *  Routes are matched by substring, first match wins; an unmatched URL fails the test loudly rather
+ *  than silently returning something plausible. */
+function installRoutes(routes: Array<{match: string; status: number; body: unknown}>): FetchMock {
+  const mock = jest.fn((url: string, _init?: RequestInit) => {
+    const route = routes.find(r => url.includes(r.match));
+    if (!route) return Promise.reject(new Error(`unrouted request: ${url}`));
+    return Promise.resolve({
+      ok: route.status >= 200 && route.status < 300,
+      status: route.status,
+      json: () => Promise.resolve(route.body),
+    } as unknown as Response);
+  }) as unknown as FetchMock;
+  (globalThis as unknown as {fetch: FetchMock}).fetch = mock;
+  return mock;
+}
+
+const SCAN = {apiUrl: 'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', host: 'api.dfx.swiss'};
+/** The wallet's REAL shipped rows, so the assets under test are the ones the app actually offers. */
+const WALLET_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
+  showTestnet: false,
+  solanaEnabled: true,
+  solanaUsdc: true,
+});
+const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
+/** Inside the recorded quote's 300s window (it expires at 14:29:42.646Z). */
+const NOW = Date.parse('2026-09-01T14:28:00.000Z');
+
+function assetById(id: string): SelectableAsset {
+  const a = WALLET_ASSETS.find(x => x.id === id);
+  if (a === undefined) throw new Error(`the bundled catalog must carry ${id}`);
+  return a;
+}
+
+function ctx(id: string, nowMs = NOW) {
+  return {selected: assetById(id), assets: WALLET_ASSETS, catalog: CATALOG, nowMs};
+}
+
+describe('resolveOcpScan', () => {
+  test('the recorded till + the selected asset produce the exact transfer the payer will approve', async () => {
+    const mock = installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:7')); // VCHF
+
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.target.method).toBe('InternetComputer');
+    expect(out.target.asset).toBe('VCHF');
+    expect(out.target.assetId).toBe('ic:7');
+    expect(out.target.to).toBe('ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae');
+    // `1.` — the trailing bare decimal point — at VCHF's 8 decimals, converted exactly once.
+    expect(out.target.rawAmount).toBe('100000000');
+    // The EARLIER of the two deadlines the provider stated (here the quote's).
+    expect(out.target.expiresAt).toBe(Date.parse('2026-09-01T14:29:42.646Z'));
+    expect(out.target.host).toBe('api.dfx.swiss');
+    expect(out.target.details.claimedMerchantName).toBe('Test Shop');
+    // The chosen method + asset are echoed back verbatim on the transfer-details call.
+    const cb = new URL(mock.mock.calls[1][0]);
+    expect(cb.searchParams.get('method')).toBe('InternetComputer');
+    expect(cb.searchParams.get('asset')).toBe('VCHF');
+    expect(cb.searchParams.get('quote')).toBe('plq_ec214dddae51da4d');
+  });
+
+  test('a destination on ANOTHER ledger is refused — never paid because the amount looked right', async () => {
+    // ICP is on the till's list and is a wallet asset, but the provider answers with the VCHF
+    // ledger's address. Paying it would send ICP to a VCHF ledger account: a different asset.
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = await resolveOcpScan(SCAN, ctx('ic:8')); // ICP
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.badDestination('api.dfx.swiss')});
+    warn.mockRestore();
+  });
+
+  test('an amount that disagrees with the quoted one is refused, not signed', async () => {
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: {...CB_IC_200, uri: CB_IC_200.uri.replace('amount=1.', 'amount=2')}},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.badDestination('api.dfx.swiss')});
+    // The refusal is diagnosable: both numbers reach the console.
+    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('expected 100000000 raw');
+    warn.mockRestore();
+  });
+
+  test('an unusable destination address is refused by the core validator, before the payer sees it', async () => {
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: {...CB_IC_200, uri: CB_IC_200.uri.replace(/to=[^&]+/, 'to=Not_A_Principal')}},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.badDestination('api.dfx.swiss')});
+    warn.mockRestore();
+  });
+
+  test('a Solana target resolves through the same path, with the amount in lamports', async () => {
+    // The recorded `CB_SOL_200` came from a DIFFERENT quote than `DETAILS_200` (every read mints a
+    // new one), so its amount is a few lamports off. Aligned here to the quoted SOL amount, which
+    // is what a single quote's two reads must agree on.
+    const cb = {...CB_SOL_200, uri: CB_SOL_200.uri.replace('amount=0.01221074', 'amount=0.01221422')};
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: cb},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const out = await resolveOcpScan(SCAN, ctx('solana:SOL'));
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.target.method).toBe('Solana');
+    expect(out.target.to).toBe('2eQ2Somiat63oqSPwzQLrrNiceC8F6TH85dt2qDe3z36');
+    expect(out.target.rawAmount).toBe('12214220');
+  });
+
+  test('an asset the till does not take is refused by name, with the ones it does take', async () => {
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:2')); // ckUSDC — dpay's launch rail, not accepted
+    expect(out).toEqual({
+      kind: 'refused',
+      // Named as the WALLET names them, in the order the till listed them.
+      message: M.pay.ocp.assetNotAccepted('USDC', 'SOL, BTC, VCHF, ICP'),
+    });
+  });
+
+  test('a till whose every asset is unpayable here says so, instead of pointing at Balances', async () => {
+    // "Switch asset in Balances" is only an instruction when there IS one to switch to.
+    const onlyForeign = {
+      ...DETAILS_200,
+      transferAmounts: [{method: 'Solana', assets: [{asset: 'USDT', amount: '1.24'}], available: true}],
+    };
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: onlyForeign}]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.noPayableAsset('USDT')});
+  });
+
+  test('a method the provider marks unavailable is refused as that, with what the till can still take', async () => {
+    // MEASURED: `transferAmounts[].available` is false for methods the provider currently cannot
+    // service. "This till doesn't take VCHF" would be a lie here — it does; the provider just
+    // can't settle it right now — so the copy has to say that and name the way out.
+    const icDown = {
+      ...DETAILS_200,
+      transferAmounts: DETAILS_200.transferAmounts.map((t: {method: string}) =>
+        t.method === 'InternetComputer' ? {...t, available: false} : t,
+      ),
+    };
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: icDown}]);
+    expect(await resolveOcpScan(SCAN, ctx('ic:7'))).toEqual({
+      kind: 'refused',
+      message: M.pay.ocp.methodUnavailable('VCHF', 'SOL'),
+    });
+
+    // With every method down there is nothing to switch to, so the instruction changes: pointing at
+    // Balances would send the payer looking for an asset that cannot help.
+    const allDown = {
+      ...DETAILS_200,
+      transferAmounts: DETAILS_200.transferAmounts.map((t: object) => ({...t, available: false})),
+    };
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: allDown}]);
+    expect(await resolveOcpScan(SCAN, ctx('ic:7'))).toEqual({
+      kind: 'refused',
+      message: M.pay.ocp.methodUnavailable('VCHF', null),
+    });
+  });
+
+  test('an unavailable method is not blamed for an asset the till never offered', async () => {
+    // The refusal must be matched to the SELECTED asset. The live provider marks methods this
+    // wallet has no rail for unavailable on every response, so an unmatched check would tell a
+    // ckUSDC payer their asset was blocked when the till simply does not take it.
+    const solDown = {
+      ...DETAILS_200,
+      transferAmounts: DETAILS_200.transferAmounts.map((t: {method: string}) =>
+        t.method === 'Solana' ? {...t, available: false} : t,
+      ),
+    };
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: solDown}]);
+    expect(await resolveOcpScan(SCAN, ctx('ic:2'))).toEqual({
+      kind: 'refused',
+      message: M.pay.ocp.assetNotAccepted('USDC', 'BTC, VCHF, ICP'),
+    });
+  });
+
+  test('Solana USDC is refused BY NAME rather than dropped from the list', async () => {
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
+    const out = await resolveOcpScan(SCAN, ctx('solana:USDC'));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.solanaUsdcUnsupported});
+  });
+
+  test('an expired quote is the whole story — no per-asset advice on top of it', async () => {
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:7', Date.parse('2026-09-01T14:29:42.646Z')));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.quoteExpired});
+  });
+
+  test('a till with no charge on it names the merchant and what the cashier must do', async () => {
+    installRoutes([{match: '/lnurlp/pl_', status: 404, body: NO_PENDING_404}]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.noPendingCharge('Test Shop')});
+  });
+
+  test('the transfer-details call failing stops the sequence with the provider’s own reason', async () => {
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 400, body: INVALID_ASSET_400},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    expect(out).toEqual({kind: 'refused', message: 'Invalid method or asset'});
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// payAndReport — the binding order
+// ---------------------------------------------------------------------------------------------
+
+describe('payAndReport', () => {
+  const REFERENCE = M.pay.ocp.ref.icBlock('8168');
+  const settled = () => Promise.resolve({kind: 'settled' as const, txId: '8168', reference: REFERENCE});
+
+  test('a confirmed transfer is reported EXACTLY once, and a 2xx is paid', async () => {
+    const mock = installResponse(200, {});
+    const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', settled);
+    expect(out).toEqual({kind: 'paid'});
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(calledUrl(mock).searchParams.get('tx')).toBe('8168');
+  });
+
+  // THE money-critical case. A transfer whose outcome is unknown must not be reported: the provider
+  // grants one submission and binds the transaction id to the quote even when it FAILS, so guessing
+  // costs the payer the ability to claim the payment at all.
+  test('an UNKNOWN transfer is never reported — no request leaves the device', async () => {
+    const mock = installResponse(200, {});
+    const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', () =>
+      Promise.resolve({kind: 'unknown' as const}),
+    );
+    expect(out).toEqual({kind: 'unresolved', message: M.pay.ocp.transferUnknown});
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  test('a transfer that definitively did not happen is not reported either, and stays retryable', async () => {
+    const mock = installResponse(200, {});
+    const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', () =>
+      Promise.resolve({kind: 'refused' as const, message: 'Not enough balance'}),
+    );
+    expect(out).toEqual({kind: 'not-paid', message: 'Not enough balance'});
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  test('a provider refusal AFTER the money moved is unresolved, and hands over the reference', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    installResponse(400, TX_NOT_CONFIRMED_400);
+    const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', settled);
+    expect(out).toEqual({kind: 'unresolved', message: M.pay.ocp.submitRejected(REFERENCE)});
+    // The provider's own sentence is diagnostic, and stays out of the user's instruction.
+    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('not confirmed in blockchain');
+    warn.mockRestore();
+  });
+
+  test('a provider that never answers is unresolved too — neither paid nor failed', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    installTransportFailure();
+    const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', settled);
+    expect(out).toEqual({kind: 'unresolved', message: M.pay.ocp.submitUnknown(REFERENCE)});
+    warn.mockRestore();
   });
 });

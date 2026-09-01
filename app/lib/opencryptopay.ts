@@ -37,14 +37,6 @@ import type {SelectableAsset} from '../config/assets';
 //     catalog, before signing;
 //   • any I/O — the three provider calls are Unit B (`services/opencryptopay.ts`), and the `/tx`
 //     submission there is ONE-SHOT (see the findings doc's loss path).
-//
-// UNVERIFIED ASSUMPTION, recorded here because it lives nowhere else: no raw step-2 response body
-// was captured in the findings, so the JSON KEY NAMES below (`callback`, `quote.id`,
-// `quote.expiration` as an ISO-8601 string, `requestedAmount`, `transferAmounts[].method` /
-// `.assets[].asset` / `.amount`, `displayName`) are the OpenCryptoPay/LUD-06 spelling, not a
-// measured fact. `parsePaymentDetails` fails LOUDLY (`malformed-details`) if any is wrong, so the
-// failure mode is a refusal on screen, never a wrong payment — but confirm them against a recorded
-// body before this ships.
 
 /** Why an OpenCryptoPay string cannot be used. Machine-readable codes — the UI maps each to its own
  *  instruction. Grouped by the stage that can produce it; every function's result type narrows to
@@ -79,6 +71,10 @@ export type OcpRefusal =
   // — which offer this wallet can pay —
   /** The provider named a settlement method this wallet has no rail for. */
   | 'unknown-method'
+  /** The provider itself says it cannot settle this method right now (`transferAmounts[].available`
+   *  is false — measured live on `TaprootAsset`, `Spark` and `Arkade`). Offering it anyway would
+   *  push the failure to the destination call or beyond, i.e. after the payer chose it. */
+  | 'method-unavailable'
   /** USDC on Solana, refused BY NAME: the provider's URI carries no `spl-token` parameter and it is
    *  unresolved whether the address is the owner or the associated token account. */
   | 'solana-usdc-unsupported'
@@ -115,6 +111,11 @@ export interface OcpAssetAmount {
  *  VERBATIM because it goes back on the wire in steps 3 and 4. */
 export interface OcpTransferAmount {
   method: string;
+  /** Whether the PROVIDER says it can settle this method right now. A required boolean: a body that
+   *  omits it is refused rather than read as `true`, because absence is not permission — the field
+   *  is measured present on every live response, so a body without it is a shape this parser does
+   *  not know, and guessing "available" would put an unpayable option in front of the payer. */
+  available: boolean;
   assets: OcpAssetAmount[];
 }
 
@@ -157,6 +158,7 @@ export interface OcpOfferRefusal {
   reason: Extract<
     OcpRefusal,
     | 'unknown-method'
+    | 'method-unavailable'
     | 'solana-usdc-unsupported'
     | 'asset-not-in-wallet'
     | 'ambiguous-asset'
@@ -451,6 +453,7 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
     const e = entry as Record<string, unknown>;
     const method = typeof e.method === 'string' ? e.method.trim() : '';
     if (method.length === 0) return {ok: false, reason: 'malformed-details'};
+    if (typeof e.available !== 'boolean') return {ok: false, reason: 'malformed-details'};
     if (!Array.isArray(e.assets) || e.assets.length === 0) return {ok: false, reason: 'malformed-details'};
     const assets: OcpAssetAmount[] = [];
     for (const a of e.assets) {
@@ -458,10 +461,9 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
       if (parsed === null) return {ok: false, reason: 'malformed-details'};
       assets.push(parsed);
     }
-    transferAmounts.push({method, assets});
+    transferAmounts.push({method, available: e.available, assets});
   }
 
-  const name = typeof j.displayName === 'string' ? j.displayName.trim() : '';
   return {
     ok: true,
     details: {
@@ -469,11 +471,23 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
       quoteId,
       quoteExpiresAt,
       callbackUrl,
-      claimedMerchantName: name.length > 0 ? name : null,
+      claimedMerchantName: claimedMerchantNameOf(json),
       requestedAmount,
       transferAmounts,
     },
   };
+}
+
+/** The merchant name the provider CLAIMS, from ANY of its payload shapes. Extracted here — not
+ *  inline in `parsePaymentDetails` — because the provider sends the same `displayName` on a body
+ *  this parser REFUSES: the "no charge waiting" 404 carries the payment-link payload without a
+ *  quote, and the screen still names the merchant on it (`services/opencryptopay.ts`). One
+ *  extraction rule, two callers; never verified, always rendered as claimed. */
+export function claimedMerchantNameOf(json: unknown): string | null {
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) return null;
+  const name = (json as {displayName?: unknown}).displayName;
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 /** `{asset, amount}` from the provider, with the amount normalised to a plain decimal string. */
@@ -523,6 +537,15 @@ const OCP_METHOD_RAIL: Record<string, SelectableAsset['protocol']> = {
  *  compare an outside party's spelling of a ledger token against `SelectableAsset.linkToken`. */
 const tokenEq = (a: string | null, b: string): boolean => a !== null && a.toLowerCase() === b.toLowerCase();
 
+/** Does a provider offer row — `{method, asset}` in the PROVIDER's spelling — name this wallet
+ *  asset? The (rail, ledger token) pair, matched exactly as `selectPayableOffers` matches it, and
+ *  exported for that reason: a refusal row carries only the provider's spelling, so a screen that
+ *  has to answer "is this refusal about the asset the payer chose?" would otherwise re-derive the
+ *  rule and drift from the one that produced the row. */
+export function offerNamesAsset(offer: {method: string; asset: string}, asset: SelectableAsset): boolean {
+  return OCP_METHOD_RAIL[offer.method] === asset.protocol && tokenEq(asset.linkToken, offer.asset);
+}
+
 /**
  * Split the provider's offers into what this wallet can pay and what it cannot, WITH the reason.
  *
@@ -537,9 +560,10 @@ const tokenEq = (a: string | null, b: string): boolean => a !== null && a.toLowe
  * payable until the till is rescanned, and one honest reason on every row beats a list of options
  * that cannot be taken.
  *
- * Order matters in one place: Solana USDC is refused BEFORE the wallet lookup, because the wallet
- * DOES carry USDC on Solana — matching first would produce a payable offer for the one asset the
- * findings say must not be paid until DFX answers what that address is.
+ * Order matters wherever a later step would otherwise turn a refusal into a payable offer. Solana
+ * USDC is refused BEFORE the wallet lookup, because the wallet DOES carry USDC on Solana — matching
+ * first would produce a payable offer for the one asset the findings say must not be paid until DFX
+ * answers what that address is.
  */
 export function selectPayableOffers(
   details: OcpDetails,
@@ -552,8 +576,9 @@ export function selectPayableOffers(
   for (const entry of details.transferAmounts) {
     const rail = OCP_METHOD_RAIL[entry.method] ?? null;
     for (const offered of entry.assets) {
+      const row = {method: entry.method, asset: offered.asset};
       const refuse = (reason: OcpOfferRefusal['reason']): void => {
-        refused.push({method: entry.method, asset: offered.asset, reason});
+        refused.push({...row, reason});
       };
       if (expired) {
         refuse('quote-expired');
@@ -563,11 +588,19 @@ export function selectPayableOffers(
         refuse('unknown-method');
         continue;
       }
+      // Checked AFTER the rail, before anything per-asset: unavailability is the PROVIDER's own
+      // statement about the whole method, so it disqualifies every asset under it — but only for a
+      // method this wallet could otherwise have used. For a method with no rail here, "we can't pay
+      // that at all" is the permanent, truthful reason and it stays.
+      if (!entry.available) {
+        refuse('method-unavailable');
+        continue;
+      }
       if (rail === 'solana' && tokenEq('USDC', offered.asset)) {
         refuse('solana-usdc-unsupported');
         continue;
       }
-      const matches = assets.filter(a => a.protocol === rail && tokenEq(a.linkToken, offered.asset));
+      const matches = assets.filter(a => offerNamesAsset(row, a));
       if (matches.length === 0) {
         refuse('asset-not-in-wallet');
         continue;

@@ -279,6 +279,46 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     expect(sent[0].length).toBeGreaterThan(250);
   });
 
+  // `onBroadcast` exists for ONE caller: the OpenCryptoPay report is one-shot and irreversible, so
+  // "the network never took it" and "it may still land" must be told apart, and only the signature
+  // separates them (`services/opencryptopay.ts`). These two tests pin exactly that boundary.
+  test('sendSol hands the signature to onBroadcast the moment the network accepts it — before confirming', async () => {
+    const order: string[] = [];
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => { order.push('broadcast'); return 'SigSolBase58'; },
+      getSignatureStatuses: () => { order.push('confirm'); return {value: [{confirmationStatus: 'confirmed'}]}; },
+    };
+    const seen: string[] = [];
+    const sig = await withStubUrl(async () => {
+      const {sendSol} = require('../solana');
+      return (sendSol as (s: string, d: string, a: bigint, sig?: AbortSignal, cb?: (x: string) => void) => Promise<string>)(
+        SEED_HEX, MERCHANT_ADDRESS, 1_000n, undefined, x => { order.push('onBroadcast'); seen.push(x); },
+      );
+    });
+    expect(sig).toBe('SigSolBase58');
+    expect(seen).toEqual(['SigSolBase58']);
+    expect(order).toEqual(['broadcast', 'onBroadcast', 'confirm']);
+  });
+
+  test('a failure AFTER the broadcast still leaves the caller holding the signature', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => 'SigSolBase58',
+      getSignatureStatuses: () => { throw new Error('rpc down'); },
+    };
+    const seen: string[] = [];
+    await expect(withStubUrl(async () => {
+      const {sendSol} = require('../solana');
+      return (sendSol as (s: string, d: string, a: bigint, sig?: AbortSignal, cb?: (x: string) => void) => Promise<string>)(
+        SEED_HEX, MERCHANT_ADDRESS, 1_000n, undefined, x => seen.push(x),
+      );
+    })).rejects.toThrow();
+    // The throw says nothing about whether the transfer landed — but the signature is now known,
+    // which is what lets the caller answer "unknown" instead of "not sent".
+    expect(seen).toEqual(['SigSolBase58']);
+  });
+
   test('builds + broadcasts the SPL transfer when both ATAs exist', async () => {
     const sent: string[] = []; // base64-encoded tx bytes
     let accountChecks = 0;

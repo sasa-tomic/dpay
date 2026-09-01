@@ -66,9 +66,15 @@ export type Req = {toHex: string; amount: string; nonceHex: string; expiry: numb
 //   • 'link' — a shared payment link. It addresses the payee by ICRC-1 principal directly (so it
 //     can pay ANY IC account, not only a dpay user) and has NO request expiry: a link is durable,
 //     and the signed envelope's IC ingress expiry is what bounds the signature.
+//   • 'ocp' — an OpenCryptoPay merchant till. Also principal-addressed and also expiry-less HERE,
+//     but its live quote has its own short deadline, held with the rest of the provider context
+//     next to the intent (`components/PayMode.tsx`) because nothing else in the app has one. It
+//     settles through the provider rather than an offline hand-off: the transfer is reported once,
+//     after it confirms (`services/opencryptopay.ts`).
 // The distinction drives exactly two things: whether the review auto-signs (the camera's "Pay Now"
-// tap was already the deliberate press; a link is a zero-press entry and must never auto-sign) and
-// how the destination is rendered.
+// tap was already the deliberate press; a link and a till are both reviewed, never auto-signed —
+// their amount and destination came from someone the wallet has no relationship with) and how the
+// destination is rendered.
 export type PayIntent = {
   toPrincipal: string;      // the ICRC-1 account owner the transfer targets
   toName: string;           // the payee's CLAIMED display name ('' when the payment names none)
@@ -77,8 +83,8 @@ export type PayIntent = {
   currency: number;
   nonceHex: string;         // the ICRC memo — the reconciliation key the payee watches for
   memo: string;             // display-only note (the on-chain memo is the nonce, never this)
-  expiry: number | null;    // request expiry in seconds; null for a link (none by design)
-  source: 'wire' | 'link';
+  expiry: number | null;    // request expiry in seconds; null for a link and a till (none by design)
+  source: 'wire' | 'link' | 'ocp';
 };
 export type Identity = {secretHex: string; publicHex: string; username: string};
 // One row of the Transactions list, RAIL-AGNOSTIC. The list merges the IC rail

@@ -51,11 +51,21 @@ jest.mock('../components/NfcTap', () => ({
 jest.mock('../components/SendSheet', () => ({
   SendSheet: (_props: {prefillAddress?: string | null}) => null,
 }));
+// The provider calls are exercised for real in opencryptopayClient.test.ts (recorded bodies, no
+// network). Here they are stubbed so this stays a component test: what it pins is the WIRING — that
+// a scanned till code lands on the review without signing, that Approve runs the payment through
+// `payAndReport` exactly once, and that each of its three outcomes renders the right honest screen.
+jest.mock('../services/opencryptopay', () => ({
+  resolveOcpScan: jest.fn(),
+  payAndReport: jest.fn(),
+}));
 
 import {DpayCore} from '../services/native';
 import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, wireRequestToIntent, type RailPrepared} from '../services/rail';
+import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {PayMode} from '../components/PayMode';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {buildSelectableAssets} from '../config/assets';
 import {POLL} from '../config/constants';
 import type {Req, Identity, PayIntent} from '../lib/types';
 import {M} from '../i18n';
@@ -118,6 +128,7 @@ function payElement(props: Partial<PayModeProps> = {}) {
       onOfflinePaid={() => {}}
       shownBalance="10000"
       catalog={[]}
+      assets={[]}
       assetBalances={{}}
       withdrawCurrency={0}
       withdrawDisplay={null}
@@ -602,5 +613,185 @@ describe('PayMode — what the camera does with a code that is not a payment req
     expect(hasTestID(tree, 'pay-send-offline')).toBe(false);
     expect(tree.root.findAll(node => node.props && 'prefillAddress' in node.props)).toHaveLength(1);
     act(() => { tree.unmount(); });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// OpenCryptoPay — a real merchant's till code, scanned with the dpay camera
+// ---------------------------------------------------------------------------------------------
+// The provider sequence itself (quote → destination → one-shot report) is
+// `services/opencryptopay.ts` and is tested there against recorded bodies. What is pinned here is
+// what the Pay screen does with it, and the two rules that make it safe: a till payment is NEVER
+// auto-signed, and an outcome that is neither paid nor failed renders as neither.
+
+/** A scanned till code (the LNURL a DFX till prints, uppercase as a QR encodes it). */
+const TILL_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
+const TILL_PRINCIPAL = 'ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae';
+const OCP_TARGET: OcpTarget = {
+  details: {
+    paymentId: 'pl_beeddb41cd4b6d9e',
+    quoteId: 'plq_ec214dddae51da4d',
+    quoteExpiresAt: Date.now() + 300_000,
+    callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
+    claimedMerchantName: 'Test Shop',
+    requestedAmount: {asset: 'CHF', amount: '1'},
+    transferAmounts: [{method: 'InternetComputer', available: true, assets: [{asset: 'VCHF', amount: '1.'}]}],
+  },
+  host: 'api.dfx.swiss',
+  method: 'InternetComputer',
+  asset: 'VCHF',
+  // The mounted PayMode's selected asset (currency 0) — which asset a till offer resolves TO is
+  // decided in `resolveOcpScan` and tested there; here it only has to match the mount.
+  assetId: 'ic:0',
+  to: TILL_PRINCIPAL,
+  rawAmount: '100',
+  expiresAt: Date.now() + 300_000,
+};
+
+/** The DEMO row, so the mounted PayMode's selected asset (currency 0) is in the list. */
+const DEMO_ASSET = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {showTestnet: false, solanaEnabled: false})
+  .filter(a => a.id === 'ic:0');
+
+/** Scan the till code with the camera. Resolution is async, so the returned tree is already on
+ *  whatever surface the resolution produced. */
+async function scanTill(tree: renderer.ReactTestRenderer) {
+  jest.mocked(DpayCore.decodeRequest).mockRejectedValue(new Error('not a 132-byte request'));
+  pressByTestID(tree, 'btn-start-scan');
+  const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+  await act(async () => {
+    scanner.props.onScan(TILL_QR);
+  });
+  await act(async () => {});
+}
+
+function mountTill(props: Partial<PayModeProps> = {}) {
+  return mountPay({online: true, catalog: icpCatalogOf(BUNDLED_NETWORKS), assets: DEMO_ASSET, ...props});
+}
+
+describe('PayMode — OpenCryptoPay till', () => {
+  beforeEach(() => {
+    jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
+    jest.mocked(payAndReport).mockReset().mockResolvedValue({kind: 'paid'});
+  });
+
+  test('a scanned till lands on a review showing the amount, the FULL destination and the provider host — and signs nothing', async () => {
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(textByTestID(tree, 'pay-amount')).toContain('1.00');
+    // The full account, not a short form: the provider chose it, so it is the checkable part.
+    expect(textByTestID(tree, 'review-payee')).toBe(TILL_PRINCIPAL);
+    expect(textByTestID(tree, 'ocp-host')).toBe(M.pay.ocp.providerHost('api.dfx.swiss'));
+    // The merchant name came out of the provider's JSON — marked as claimed, with the OCP wording
+    // rather than the payment link's.
+    expect(textByTestID(tree, 'review-claimed')).toBe(M.pay.ocp.claimedMerchant);
+    // NEVER auto-signed: the amount and the destination came from a stranger's server.
+    expect(prepareTransfer).not.toHaveBeenCalled();
+    expect(payAndReport).not.toHaveBeenCalled();
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
+  });
+
+  test('Approve runs the payment through the one-shot sequence and shows Paid on acceptance', async () => {
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    expect(payAndReport).toHaveBeenCalledTimes(1);
+    const [details, method, asset] = jest.mocked(payAndReport).mock.calls[0];
+    expect(details).toBe(OCP_TARGET.details);
+    expect(method).toBe('InternetComputer');
+    expect(asset).toBe('VCHF');
+    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('∂1.00'));
+    // A till payment never becomes an offline hand-off — there is no QR for a merchant to scan.
+    expect(hasTestID(tree, 'btn-paid')).toBe(false);
+  });
+
+  test('an outcome that is neither paid nor failed renders as neither, carrying the reference', async () => {
+    const message = M.pay.ocp.submitUnknown(M.pay.ocp.ref.icBlock('8168'));
+    jest.mocked(payAndReport).mockResolvedValue({kind: 'unresolved', message});
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    // The outcome screen, not an error the payer could read as "try again", and not "Paid ✓".
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(message);
+    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('∂1.00'));
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
+  });
+
+  test('a payment that definitively did not happen stays on the review, with the reason and no re-tap', async () => {
+    // Nothing moved, so this is an error rather than an outcome — and the review's existing rule
+    // applies: a shown error disables Approve, so a doomed payment cannot be tapped again.
+    jest.mocked(payAndReport).mockResolvedValue({kind: 'not-paid', message: 'Not enough balance'});
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    expect(textByTestID(tree, 'review-err')).toBe('Not enough balance');
+    const approve = tree.root.findAll(n => n.props && n.props.testID === 'btn-approve')[0];
+    expect(approve.props.disabled).toBe(true);
+    expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+  });
+
+  test('the IC rail reports a CONFIRMED block index, and anything else as unknown', async () => {
+    // The `send` half of the sequence, captured from the call above and exercised directly: it is
+    // the money-critical mapping — only a settled transfer with a real block index may be reported,
+    // because the provider verifies that identifier against the ledger and spends the one attempt.
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    const send = jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>;
+
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '8168'});
+    await expect(send()).resolves.toEqual({
+      kind: 'settled',
+      txId: '8168',
+      reference: M.pay.ocp.ref.icBlock('8168'),
+    });
+
+    // Settled but with NO block index (a duplicate the ledger did not number): nothing the provider
+    // could verify, so it is not reported.
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: ''});
+    await expect(send()).resolves.toEqual({kind: 'unknown'});
+
+    // Not terminal within budget: the transfer may still execute — never a decline, never reported.
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'unknown'});
+    await expect(send()).resolves.toEqual({kind: 'unknown'});
+
+    // A decoded ledger refusal IS definitive: nothing moved, so the payer gets the reason.
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'rejected', reason: 'Not enough balance'});
+    await expect(send()).resolves.toEqual({kind: 'refused', message: 'Not enough balance'});
+
+    // The submit POST itself failing says nothing about whether the envelope reached consensus.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.mocked(submitTransfer).mockRejectedValue(new Error('gateway unreachable'));
+    await expect(send()).resolves.toEqual({kind: 'unknown'});
+    // Signing itself failing is definitive — nothing was submitted.
+    jest.mocked(prepareTransfer).mockRejectedValue(new Error('IC clock unreachable'));
+    await expect(send()).resolves.toEqual({kind: 'refused', message: 'IC clock unreachable'});
+    warn.mockRestore();
+  });
+
+  test('a refusal from the provider sequence is shown on the scan screen, and nothing is signed', async () => {
+    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'refused', message: M.pay.ocp.quoteExpired});
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(texts(tree)).toContain(M.pay.ocp.quoteExpired);
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
+    expect(prepareTransfer).not.toHaveBeenCalled();
+  });
+
+  test('a DAMAGED till code is named as one, without contacting any provider', async () => {
+    const tree = mountTill();
+    jest.mocked(DpayCore.decodeRequest).mockRejectedValue(new Error('not a 132-byte request'));
+    pressByTestID(tree, 'btn-start-scan');
+    const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+    await act(async () => {
+      scanner.props.onScan(`${TILL_QR.slice(0, -1)}Q`); // one scuffed character on the sticker
+    });
+
+    expect(texts(tree)).toContain(M.pay.ocp.badCode);
+    expect(resolveOcpScan).not.toHaveBeenCalled();
   });
 });

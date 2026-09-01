@@ -97,21 +97,42 @@ export type PayMessages = {
   //   • Nothing the provider sends is verified by dpay — the merchant name is CLAIMED and the host
   //     the quote came from is shown, so "why does this say another company's name" is answerable.
   //   • The payer moves irreversible funds BEFORE the provider is told, and gets exactly one chance
-  //     to tell it (docs/specs/2026-09-01-opencryptopay-findings.md, "The loss path"). So the two
-  //     post-transfer keys must say neither "paid" nor "failed", and must hand the payer the block
-  //     index — it is the only thing that ties their money to this sale.
+  //     to tell it (docs/specs/2026-09-01-opencryptopay-findings.md, "The loss path"). So the
+  //     post-transfer keys must say neither "paid" nor "failed", and must hand the payer the
+  //     transfer's reference — it is the only thing that ties their money to this sale.
   ocp: {
     solanaUsdcUnsupported: string;
     assetNotAccepted: (selected: string, accepted: string) => string;
+    /** The till DOES take the selected asset, but its provider says it cannot settle that method
+     *  right now. `alternatives` is null when nothing else the till takes is payable here — there
+     *  is then no "switch in Balances" to point at, so the branch must not pretend there is. */
+    methodUnavailable: (selected: string, alternatives: string | null) => string;
+    /** The till takes nothing this wallet can pay — a true dead end for dpay, said plainly. */
+    noPayableAsset: (accepted: string) => string;
     quoteExpired: string;
+    /** Shown while the two provider reads are in flight — up to half a minute of nothing, on a
+     *  screen the payer just pointed at a QR code. */
+    checkingTill: string;
     badCode: string;
     notHttps: string;
     providerUnreachable: string;
+    /** The provider answered the payment step with something dpay will not sign: a destination on
+     *  another ledger, an unreadable address, or an amount that is not the one quoted. Nothing has
+     *  moved — this is a refusal BEFORE the money, and a red flag worth naming as one. */
+    badDestination: (host: string) => string;
     noPendingCharge: (merchant: string) => string;
+    /** How each rail names the proof of a transfer, composed into the two keys below (the
+     *  `link.part` pattern) so one sentence serves both rails without either being described in
+     *  the other's vocabulary. */
+    ref: {icBlock: (index: string) => string; solTransaction: (signature: string) => string};
     /** Funds moved; the provider never answered. Honest unknown — never rendered as paid or failed. */
-    submitUnknown: (blockIndex: string) => string;
+    submitUnknown: (reference: string) => string;
     /** Funds moved; the provider refused the proof. Definitive, and still costs the payer. */
-    submitRejected: (blockIndex: string) => string;
+    submitRejected: (reference: string) => string;
+    /** The TRANSFER's own outcome is unknown, so the provider was never told (calling it once is
+     *  all we get — see the findings doc's loss path). Neither paid nor failed, and no reference
+     *  exists to hand over yet. */
+    transferUnknown: string;
     claimedMerchant: string;
     providerHost: (host: string) => string;
   };
@@ -233,20 +254,35 @@ export const payEn: PayMessages = {
       'This till takes USDC on Solana, but its code doesn’t say which token account to send to — paying it would risk sending real money to the wrong account. Pay with SOL instead, or switch in Balances to another asset this till takes.',
     assetNotAccepted: (selected, accepted) =>
       `This till doesn’t take ${selected}. It takes ${accepted}. dpay never swaps, so switch to one of those in Balances and scan again.`,
+    methodUnavailable: (selected, alternatives) =>
+      alternatives
+        ? `This till takes ${selected}, but the merchant’s payment provider can’t process ${selected} right now. The till also takes ${alternatives}. dpay never swaps, so switch to one of those in Balances and scan again.`
+        : `This till takes ${selected}, but the merchant’s payment provider can’t process ${selected} right now — and nothing else this till takes can be paid from this wallet. Ask the merchant for another way to pay.`,
+    noPayableAsset: accepted =>
+      `dpay can’t pay this till. It takes ${accepted} — none of which this wallet can pay, and dpay never swaps. Pay this one another way.`,
     quoteExpired:
       'This till’s price has expired — each one lasts about five minutes. Scan the code again for a fresh price.',
+    checkingTill: 'Checking with the merchant’s payment provider…',
     badCode:
       'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check that nothing is covering it.',
     notHttps:
       'This code points to an insecure address, so dpay won’t open it. Ask the merchant to show their own payment code — a sticker placed over the real one looks exactly like this.',
     providerUnreachable:
       'Couldn’t reach the merchant’s payment provider. Nothing has been paid. Check your connection and scan again.',
+    badDestination: host =>
+      `${host} answered with a payment address that doesn’t match what you chose, so dpay stopped. Nothing has been paid — don’t pay this code. Ask the merchant to show their own code again.`,
     noPendingCharge: merchant =>
       `${merchant}’s till has no charge waiting. Ask the cashier to ring up the sale first, then scan the code again.`,
-    submitUnknown: blockIndex =>
-      `Your transfer went through, but the merchant’s payment provider didn’t confirm it — so this is neither paid nor failed. The money has left your wallet, so don’t pay again. Show the merchant ledger block ${blockIndex}: it is the proof of your transfer.`,
-    submitRejected: blockIndex =>
-      `Your transfer went through, but the merchant’s payment provider refused the proof of it, so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ledger block ${blockIndex}.`,
+    ref: {
+      icBlock: index => `ledger block ${index}`,
+      solTransaction: signature => `Solana transaction ${signature}`,
+    },
+    submitUnknown: reference =>
+      `Your transfer went through, but the merchant’s payment provider didn’t confirm it — so this is neither paid nor failed. The money has left your wallet, so don’t pay again. Show the merchant ${reference}: it is the proof of your transfer.`,
+    submitRejected: reference =>
+      `Your transfer went through, but the merchant’s payment provider refused the proof of it, so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}.`,
+    transferUnknown:
+      'dpay couldn’t confirm your transfer, so the merchant hasn’t been told about it — this is neither paid nor failed. Don’t pay again: open Transactions to see whether it went through, and show the merchant that payment if it did.',
     claimedMerchant: 'Name given by the code — dpay doesn’t verify it.',
     providerHost: host => `Price from ${host}`,
   },

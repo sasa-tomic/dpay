@@ -5,7 +5,7 @@ import {InstructionPanel} from './InstructionPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {IconClock, IconScan, IconShare} from './icons';
+import {IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {QR_SIZE} from '../config/constants';
 import type {SolPayGate} from '../config/assets';
 import type {Identity, NfcStatus} from '../lib/types';
@@ -13,16 +13,24 @@ import {fmtAsset, short} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {classifyScan} from '../lib/scan';
+import type {OcpScan} from '../lib/opencryptopay';
+import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import type {SelectableAsset} from '../config/assets';
+import type {CurrencyDescriptor} from '../config/catalog';
+import {withTimeout} from '../lib/timeout';
+import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
 import type {SolReqV2} from '../solana/qr';
 import {isSolReqV2Expired} from '../solana/payments';
-import {signSolPayment, signSplPayment} from '../solana';
+import {sendSol, signSolPayment, signSplPayment} from '../solana';
 import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
 import {NfcStatusRow} from './NfcStatusRow';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
+import {OcpQuoteLines} from './OcpQuoteLines';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
+import {friendlySolError} from '../solana/errors';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {CoachTip} from './CoachTip';
@@ -45,9 +53,15 @@ import {M} from '../i18n';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
-  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
+  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
+  // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
+  // holds (PayMode) — the quote context, and the honest sentence for an outcome that is neither
+  // paid nor failed — because both rails run the identical provider sequence.
+  const [ocp, setOcp] = useState<OcpTarget | null>(null);
+  const [ocpBusy, setOcpBusy] = useState(false);
+  const [ocpDone, setOcpDone] = useState<{amount: string; who: string; note: string | null} | null>(null);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -62,6 +76,11 @@ export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance
   // leaving the scan sub-mode; rail/tab switches unmount this component.
   const [scanArmed, setScanArmed] = useState(false);
   useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
+  // Camera remount key — IC twin: PayMode's `scanKey`, same reason. One code per mount means a
+  // refusal that stays on this screen would otherwise leave a dead camera under copy that says
+  // "scan again".
+  const [scanKey, setScanKey] = useState(0);
+  const refuseScan = (message: string) => { setErr(message); setScanKey(k => k + 1); };
   // A wallet address the camera read instead of a payment code — handed to the send form, which is
   // the one place that knows whether an address is usable on this rail and what it is when it is
   // not. Takes precedence over a link prefill: both fill the same form and the scan is the newer
@@ -72,9 +91,10 @@ export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance
   // sheets leave the label honest.
   const {shared, share} = useShareFeedback();
 
-  // Lock the idle asset selection while a SOL payment is in flight. review/qr/paid hold the
-  // captured, immutable SolReqV2 snapshot the user must not lose to an asset switch.
-  const locked = phase === 'review' || phase === 'qr' || phase === 'paid';
+  // Lock the idle asset selection while a SOL payment is in flight. Every non-scan phase holds a
+  // captured, immutable snapshot the user must not lose to an asset switch (which unmounts this
+  // component): the SolReqV2 of an offline pay, or the live quote of a merchant till.
+  const locked = phase !== 'scan';
   useReportLock(onLockChange, locked);
 
   const toggle = (
@@ -173,7 +193,7 @@ export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance
       const r = decodeSolReq(raw);
       if (isSolReqV2Expired(r)) {
         setReq(null);
-        setErr(M.pay.solRequestExpired);
+        refuseScan(M.pay.solRequestExpired);
         return;
       }
       setReq(r);
@@ -198,13 +218,100 @@ export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance
   function onNotARequest(raw: string) {
     const what = classifyScan(raw);
     if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
+    if (what.kind === 'opencryptopay') { void startOcp(what.ocp); return; }
     if (what.kind === 'address') {
       setErr(null);
       setScannedAddress(raw.trim());
       onSubModeChange('send');
       return;
     }
-    setErr(M.pay.notAPaymentCode);
+    refuseScan(M.pay.notAPaymentCode);
+  }
+
+  // The OPENCRYPTOPAY entry — the IC rail's twin (PayMode.startOcp), running the SAME resolution so
+  // a till code behaves identically whichever asset is selected (CLAUDE.md same-surfaces rule).
+  // Two provider reads, no signature, no funds; the payer then approves an explicit review.
+  //
+  // `catalog` is threaded in only because the resolver checks an IC destination against the ledger
+  // its asset settles on. It is never consulted for a Solana target — SOL is a device-key rail and
+  // never enters the ICRC catalog (CLAUDE.md non-negotiable).
+  async function startOcp(scan: OcpScan) {
+    if (!scan.ok) {
+      refuseScan(scan.reason === 'not-https' ? M.pay.ocp.notHttps : M.pay.ocp.badCode);
+      return;
+    }
+    const id = selectedToken === 'USDC' ? 'solana:USDC' : 'solana:SOL';
+    const selected = assets.find(a => a.id === id) ?? null;
+    if (selected === null) {
+      // Unreachable in a mounted wallet — this component only renders while a Solana row IS the
+      // selection — so it is logged as the inconsistency it would be. The user still gets an action
+      // ("show the code again"), which is what a re-scan needs once the asset list is there.
+      console.warn(`ocp: ${id} missing from the asset list while the Solana rail is mounted`);
+      refuseScan(M.pay.ocp.badCode);
+      return;
+    }
+    setErr(null);
+    setOcpBusy(true);
+    try {
+      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now()});
+      if (out.kind === 'refused') { refuseScan(out.message); return; }
+      // Fail closed on anything but native SOL: the send below is a System Program transfer, so a
+      // token target would move SOL against a token price. The resolver already refuses Solana USDC
+      // by name (its URI does not say which token account to pay); this is the second lock on it.
+      if (out.target.assetId !== 'solana:SOL') { refuseScan(M.pay.ocp.solanaUsdcUnsupported); return; }
+      setOcp(out.target);
+      setPhase('ocp');
+    } finally {
+      setOcpBusy(false);
+    }
+  }
+
+  // The Solana rail's half of an OpenCryptoPay payment: broadcast, confirm, and answer with the
+  // signature — or with a verdict that keeps the provider from ever being called. The order around
+  // it is `payAndReport`'s (services/opencryptopay.ts).
+  //
+  // The `onBroadcast` capture is what makes the answer honest. `sendSol` throws for a dead RPC, a
+  // rejected transaction AND a confirmation timeout alike, but only the last of those can leave
+  // real money in flight: once the network has accepted the transaction, a later failure means
+  // UNKNOWN, and reporting a signature we cannot vouch for would spend the one submission the
+  // provider grants (findings doc, "The loss path"). A holder object rather than a bare `let` so
+  // the value survives control-flow narrowing into the catch.
+  async function sendSolForOcp(target: OcpTarget): Promise<OcpSendResult> {
+    const broadcast: {sig: string | null} = {sig: null};
+    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
+    try {
+      const sig = await sendSol(identity.secretHex, target.to, BigInt(target.rawAmount), signal, s => { broadcast.sig = s; });
+      return {kind: 'settled', txId: sig, reference: M.pay.ocp.ref.solTransaction(sig)};
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('ocp: SOL send failed:', msg);
+      return broadcast.sig === null ? {kind: 'refused', message: friendlySolError(msg)} : {kind: 'unknown'};
+    } finally {
+      cancel();
+    }
+  }
+
+  // Approve on an OpenCryptoPay till: the funds move first and the provider is told exactly once,
+  // afterwards. IC twin: PayMode.approveOcp — same states, same copy, same refusal to retry.
+  async function approveOcp(target: OcpTarget) {
+    // Re-checked at the press: paying against a lapsed quote moves irreversible money the provider
+    // will refuse to credit.
+    if (Date.now() >= target.expiresAt) { setErr(M.pay.ocp.quoteExpired); return; }
+    const who = target.details.claimedMerchantName ?? target.host;
+    const amount = fmtAsset(target.rawAmount, SOL_DECIMALS, SOL_UNIT);
+    setBusy(true);
+    setErr(null);
+    try {
+      const out = await payAndReport(target.details, target.method, target.asset, () => sendSolForOcp(target));
+      if (out.kind === 'not-paid') { setErr(out.message); return; }
+      // 'paid' and 'unresolved' both leave the review: the money is gone either way, so there is no
+      // Approve to press again. The note is what separates them on the outcome screen.
+      onSent();
+      setOcpDone({amount, who, note: out.kind === 'paid' ? null : out.message});
+      setPhase('ocp-done');
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Offline sign (PURE, no RPC) → show the signed solpay:v2: QR. Auto-fired by onScan; a sign
@@ -224,7 +331,7 @@ export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); setErr(null); setScanArmed(false); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpDone(null); setErr(null); setScanArmed(false); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -315,7 +422,7 @@ export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance
                 <Text style={[S.dim2, {marginTop: 0}]}>{M.pay.solScanHint}</Text>
               </View>
               {scanArmed ? (
-                <QrScanner onScan={onScan} />
+                <QrScanner key={scanKey} onScan={onScan} />
               ) : (
             <>
               <Pressable
@@ -331,9 +438,73 @@ export function SolPayMode({identity, online, nfcStatus, solBalance, usdcBalance
                 </>
               )}
             </View>
+            {/* The till lookup is two network reads and can take tens of seconds. IC twin:
+                PayMode's `ocp-checking`. */}
+            {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}
             {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
           </>
         ) : null}
+      </View>
+    );
+  }
+
+  if (phase === 'ocp' && ocp) {
+    // A merchant till: reviewed and approved explicitly, NEVER auto-signed. The one-press rule does
+    // not reach here — it covers a dpay request whose amount and payee came off a dpay QR, while
+    // every value on this screen came from a provider the wallet has no relationship with. Mirrors
+    // the IC rail's till review (PayMode), down to the testIDs.
+    const approveDisabled = busy || !!err;
+    return (
+      <View style={S.center}>
+        <Text style={S.label}>{M.pay.reviewPayment}</Text>
+        <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(ocp.rawAmount, SOL_DECIMALS, SOL_UNIT))}</Text>
+        <Text style={S.reviewTo}>{M.pay.toWho(ocp.details.claimedMerchantName ?? ocp.host)}</Text>
+        {/* The FULL destination address, never shortened: the provider chose it, so it is the one
+            thing on this screen the payer can actually check. */}
+        <Text testID="sol-pay-payee" style={S.dim2}>{ocp.to}</Text>
+        <OcpQuoteLines
+          host={ocp.host}
+          claimedName={ocp.details.claimedMerchantName}
+          expiresAt={ocp.expiresAt}
+          onExpired={() => setErr(M.pay.ocp.quoteExpired)}
+        />
+        {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
+        <Pressable
+          testID="btn-approve"
+          style={[S.primary, approveDisabled && S.disabledFlat]}
+          disabled={approveDisabled}
+          accessibilityRole="button"
+          accessibilityLabel={M.pay.approveA11y}
+          accessibilityHint={M.pay.approveHint}
+          accessibilityState={{disabled: approveDisabled}}
+          onPress={() => void approveOcp(ocp)}>
+          <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
+        </Pressable>
+        <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
+          <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (phase === 'ocp-done' && ocpDone) {
+    // Two outcomes, one surface. A `note` means the money moved and the sale was NOT credited —
+    // shown on the warn-tinted clock, never as a failure and never as paid, with the sentence that
+    // names the transaction and says not to pay again. No retry affordance exists: the quote and
+    // the transaction id are both spent (findings doc, "The loss path").
+    return (
+      <View style={S.center}>
+        <View style={[S.check, ocpDone.note ? S.checkAlready : null]}>
+          {ocpDone.note ? <IconClock size={44} color={C.brandInk}/> : <IconCheck size={44} color={C.brandInk}/>}
+        </View>
+        <Text testID="sol-pay-status" style={[S.paidText, ocpDone.note ? S.alreadyText : null]}>
+          {ocpDone.note ? M.pay.sent(ocpDone.amount) : M.nfc.paidAmount(ocpDone.amount)}
+        </Text>
+        <Text style={S.paidSub}>{M.pay.toWho(ocpDone.who)}</Text>
+        {ocpDone.note ? <Text testID="ocp-outcome" style={S.warnNote}>{ocpDone.note}</Text> : null}
+        <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.pay.newPayment} accessibilityState={{disabled: false}}>
+          <Text style={S.ghostBtnText}>{M.pay.newPayment}</Text>
+        </Pressable>
       </View>
     );
   }

@@ -56,10 +56,10 @@ const WALLET_ASSETS: SelectableAsset[] = buildSelectableAssets(icpCatalogOf(BUND
 });
 
 // A step-2 body. RECORDED: the payment id `pl_beeddb41cd4b6d9e`, the CHF-1 fixed-amount till, the
-// methods `InternetComputer` / `Solana`, the assets each accepts, and the Solana USDC amount
-// 1.246922 (from the recorded destination URI). FIXTURE: the merchant name (never captured), the
-// expiration instant, and every other per-asset amount. The JSON KEY NAMES are the standard's
-// spelling, not a measured fact — see the module header.
+// methods `InternetComputer` / `Solana`, the assets each accepts, the per-method `available` flag,
+// and the Solana USDC amount 1.246922 (from the recorded destination URI). FIXTURE: the merchant
+// name (never captured), the expiration instant, and every other per-asset amount. A VERBATIM
+// recorded body is parsed in `opencryptopayClient.test.ts`, which is what pins the key names.
 const EXPIRATION = '2026-09-01T12:00:00.000Z';
 const EXPIRES_AT_MS = 1788264000000;
 const BEFORE_EXPIRY = EXPIRES_AT_MS - 60_000;
@@ -73,6 +73,7 @@ function detailsBody(overrides: Record<string, unknown> = {}): Record<string, un
     transferAmounts: [
       {
         method: 'InternetComputer',
+        available: true,
         assets: [
           {asset: 'ckBTC', amount: 0.000016},
           {asset: 'VCHF', amount: 1},
@@ -82,6 +83,7 @@ function detailsBody(overrides: Record<string, unknown> = {}): Record<string, un
       },
       {
         method: 'Solana',
+        available: true,
         assets: [
           {asset: 'SOL', amount: 0.006},
           {asset: 'USDC', amount: 1.246922},
@@ -268,7 +270,9 @@ describe('parsePaymentDetails', () => {
     // exponent is expanded here.
     const parsed = parsePaymentDetails(
       detailsBody({
-        transferAmounts: [{method: 'InternetComputer', assets: [{asset: 'ckBTC', amount: 1.6e-7}, {asset: 'VCHF', amount: 1e21}]}],
+        transferAmounts: [
+          {method: 'InternetComputer', available: true, assets: [{asset: 'ckBTC', amount: 1.6e-7}, {asset: 'VCHF', amount: 1e21}]},
+        ],
       }),
     );
     if (!parsed.ok) throw new Error(`expected a parse, got ${parsed.reason}`);
@@ -302,14 +306,27 @@ describe('parsePaymentDetails', () => {
       detailsBody({quote: {id: 'q', expiration: 1788264000}}),
       detailsBody({requestedAmount: undefined}),
       detailsBody({transferAmounts: []}),
-      detailsBody({transferAmounts: [{method: '', assets: [{asset: 'ICP', amount: 1}]}]}),
-      detailsBody({transferAmounts: [{method: 'InternetComputer', assets: []}]}),
+      detailsBody({transferAmounts: [{method: '', available: true, assets: [{asset: 'ICP', amount: 1}]}]}),
+      detailsBody({transferAmounts: [{method: 'InternetComputer', available: true, assets: []}]}),
       detailsBody({callback: 'https:///'}),
     ]) {
       expect(parsePaymentDetails(body)).toEqual({ok: false, reason: 'malformed-details'});
     }
     for (const notAnObject of [null, undefined, 'ok', 7, [detailsBody()]]) {
       expect(parsePaymentDetails(notAnObject)).toEqual({ok: false, reason: 'malformed-details'});
+    }
+  });
+
+  it('refuses a method that omits its availability flag, rather than reading absence as permission', () => {
+    // `available` is measured on every live response and is the provider saying whether it can
+    // settle that method at all. A body without a boolean there is a shape this parser does not
+    // know: defaulting it to "available" would put an option on screen that fails only after the
+    // payer has chosen it and, on the IC rail, after the quote is already being spent.
+    for (const available of [undefined, null, 'true', 1, 'false']) {
+      const body = detailsBody({
+        transferAmounts: [{method: 'InternetComputer', available, assets: [{asset: 'ICP', amount: 1}]}],
+      });
+      expect(parsePaymentDetails(body)).toEqual({ok: false, reason: 'malformed-details'});
     }
   });
 
@@ -327,7 +344,9 @@ describe('parsePaymentDetails', () => {
     // gap — and the missing row might be the only asset the payer holds.
     for (const amount of [null, 'abc', -1, Number.NaN, {}]) {
       const body = detailsBody({
-        transferAmounts: [{method: 'InternetComputer', assets: [{asset: 'ICP', amount: 1}, {asset: 'VCHF', amount}]}],
+        transferAmounts: [
+          {method: 'InternetComputer', available: true, assets: [{asset: 'ICP', amount: 1}, {asset: 'VCHF', amount}]},
+        ],
       });
       expect(parsePaymentDetails(body)).toEqual({ok: false, reason: 'malformed-details'});
     }
@@ -368,8 +387,8 @@ describe('selectPayableOffers', () => {
   it('refuses a settlement method this wallet has no rail for', () => {
     const details = detailsOf({
       transferAmounts: [
-        {method: 'Lightning', assets: [{asset: 'BTC', amount: 0.000016}]},
-        {method: 'Ethereum', assets: [{asset: 'USDC', amount: 1.13}]},
+        {method: 'Lightning', available: true, assets: [{asset: 'BTC', amount: 0.000016}]},
+        {method: 'Ethereum', available: true, assets: [{asset: 'USDC', amount: 1.13}]},
       ],
     });
     const {payable, refused} = selectPayableOffers(details, WALLET_ASSETS, BEFORE_EXPIRY);
@@ -380,10 +399,49 @@ describe('selectPayableOffers', () => {
     ]);
   });
 
+  it('refuses a method the provider itself marked unavailable, by name, instead of offering it', () => {
+    // MEASURED: the live provider returns `available: false` for methods it currently cannot
+    // service. Keeping such an offer payable hands the payer an asset whose failure surfaces only
+    // at the destination call — after they chose it — and the wallet DOES carry both IC assets
+    // here, so this refusal is the provider's statement, not a missing row.
+    const details = detailsOf({
+      transferAmounts: [
+        {
+          method: 'InternetComputer',
+          available: false,
+          assets: [{asset: 'ckBTC', amount: 0.000016}, {asset: 'VCHF', amount: 1}],
+        },
+        {method: 'Solana', available: true, assets: [{asset: 'SOL', amount: 0.006}]},
+      ],
+    });
+    const {payable, refused} = selectPayableOffers(details, WALLET_ASSETS, BEFORE_EXPIRY);
+    expect(payable).toEqual([
+      {method: 'Solana', asset: 'SOL', amount: '0.006', assetId: 'solana:SOL', rawAmount: '6000000'},
+    ]);
+    expect(refused).toEqual([
+      {method: 'InternetComputer', asset: 'ckBTC', reason: 'method-unavailable'},
+      {method: 'InternetComputer', asset: 'VCHF', reason: 'method-unavailable'},
+    ]);
+
+    // A method this wallet has no rail for keeps THAT reason even when the provider also marks it
+    // unavailable: "dpay can't pay this at all" is the permanent, truthful answer, and the live
+    // provider marks exactly such methods (TaprootAsset, Spark, Arkade) unavailable on every read.
+    const noRail = detailsOf({
+      transferAmounts: [{method: 'Spark', available: false, assets: [{asset: 'BTC', amount: 0.000016}]}],
+    });
+    expect(selectPayableOffers(noRail, WALLET_ASSETS, BEFORE_EXPIRY).refused).toEqual([
+      {method: 'Spark', asset: 'BTC', reason: 'unknown-method'},
+    ]);
+  });
+
   it('refuses an amount the asset cannot express, and a zero, instead of rounding either', () => {
     const details = detailsOf({
       transferAmounts: [
-        {method: 'InternetComputer', assets: [{asset: 'ICP', amount: '0.000000001'}, {asset: 'VCHF', amount: 0}]},
+        {
+          method: 'InternetComputer',
+          available: true,
+          assets: [{asset: 'ICP', amount: '0.000000001'}, {asset: 'VCHF', amount: 0}],
+        },
       ],
     });
     const {payable, refused} = selectPayableOffers(details, WALLET_ASSETS, BEFORE_EXPIRY);
@@ -412,7 +470,9 @@ describe('selectPayableOffers', () => {
     const vchf = WALLET_ASSETS.find(a => a.id === 'ic:7');
     if (vchf === undefined || vchf.protocol !== 'ic') throw new Error('the bundled catalog must carry VCHF');
     const twins: SelectableAsset[] = [vchf, {...vchf, id: 'ic:70', currency: 70}];
-    const details = detailsOf({transferAmounts: [{method: 'InternetComputer', assets: [{asset: 'VCHF', amount: 1}]}]});
+    const details = detailsOf({
+      transferAmounts: [{method: 'InternetComputer', available: true, assets: [{asset: 'VCHF', amount: 1}]}],
+    });
     expect(selectPayableOffers(details, twins, BEFORE_EXPIRY)).toEqual({
       payable: [],
       refused: [{method: 'InternetComputer', asset: 'VCHF', reason: 'ambiguous-asset'}],

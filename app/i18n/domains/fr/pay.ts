@@ -81,20 +81,35 @@ export const payFr: PayMessages = {
       'Cette caisse accepte les USDC sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.',
     assetNotAccepted: (selected, accepted) =>
       `Cette caisse n’accepte pas ${selected}. Elle accepte ${accepted}. dpay ne convertit jamais : passez à l’un de ces actifs dans « Soldes », puis scannez à nouveau.`,
+    methodUnavailable: (selected, alternatives) =>
+      alternatives
+        ? `Cette caisse accepte ${selected}, mais le prestataire de paiement du commerçant ne peut pas traiter ${selected} pour le moment. La caisse accepte aussi ${alternatives}. dpay ne convertit jamais : passez à l’un de ces actifs dans « Soldes », puis scannez à nouveau.`
+        : `Cette caisse accepte ${selected}, mais le prestataire de paiement du commerçant ne peut pas traiter ${selected} pour le moment — et ce portefeuille ne peut payer aucun autre actif accepté par cette caisse. Demandez au commerçant un autre moyen de paiement.`,
+    noPayableAsset: accepted =>
+      `dpay ne peut pas payer à cette caisse. Elle accepte ${accepted}, et ce portefeuille ne peut payer aucun de ces actifs — dpay ne convertit jamais. Réglez cet achat autrement.`,
     quoteExpired:
       'Le prix de cette caisse a expiré — chacun tient environ cinq minutes. Scannez le code à nouveau pour obtenir un prix frais.',
+    checkingTill: 'Vérification auprès du prestataire de paiement du commerçant…',
     badCode:
       'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',
     notHttps:
       'Ce code pointe vers une adresse non sécurisée : dpay ne l’ouvre pas. Demandez au commerçant de montrer son propre code de paiement — un autocollant collé par-dessus le vrai ressemble exactement à cela.',
     providerUnreachable:
       'Impossible de joindre le prestataire de paiement du commerçant. Rien n’a été payé. Vérifiez votre connexion et scannez à nouveau.',
+    badDestination: host =>
+      `${host} a répondu avec une adresse de paiement qui ne correspond pas à votre choix : dpay s’est arrêté. Rien n’a été payé — ne payez pas ce code. Demandez au commerçant de montrer son propre code à nouveau.`,
     noPendingCharge: merchant =>
       `La caisse de ${merchant} n’a aucun montant en attente. Demandez que la vente soit enregistrée d’abord, puis scannez le code à nouveau.`,
-    submitUnknown: blockIndex =>
-      `Votre transfert est passé, mais le prestataire de paiement du commerçant ne l’a pas confirmé — ce n’est donc ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant le bloc ${blockIndex} du registre, c’est la preuve de votre transfert.`,
-    submitRejected: blockIndex =>
-      `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui le bloc ${blockIndex} du registre.`,
+    ref: {
+      icBlock: index => `le bloc ${index} du registre`,
+      solTransaction: signature => `la transaction Solana ${signature}`,
+    },
+    submitUnknown: reference =>
+      `Votre transfert est passé, mais le prestataire de paiement du commerçant ne l’a pas confirmé — ce n’est donc ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant ${reference}, c’est la preuve de votre transfert.`,
+    submitRejected: reference =>
+      `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}.`,
+    transferUnknown:
+      'dpay n’a pas pu confirmer votre transfert, le commerçant n’en sait donc rien — ce n’est ni payé ni échoué. Ne payez pas une seconde fois : ouvrez « Transactions » pour voir si le transfert est passé et, si oui, montrez-le au commerçant.',
     claimedMerchant: 'Nom fourni par le code — dpay ne le vérifie pas.',
     providerHost: host => `Prix de ${host}`,
   },

@@ -80,20 +80,35 @@ export const payDe: PayMessages = {
       'Diese Kasse nimmt USDC auf Solana, aber ihr Code nennt kein Token-Konto als Ziel — eine Zahlung könnte echtes Geld auf das falsche Konto schicken. Zahle stattdessen mit SOL oder wechsle unter „Guthaben“ zu einem anderen Wert, den diese Kasse nimmt.',
     assetNotAccepted: (selected, accepted) =>
       `Diese Kasse nimmt kein ${selected}. Sie nimmt ${accepted}. dpay tauscht nie um — wechsle unter „Guthaben“ zu einem davon und scanne erneut.`,
+    methodUnavailable: (selected, alternatives) =>
+      alternatives
+        ? `Diese Kasse nimmt ${selected}, aber der Zahlungsanbieter des Händlers kann ${selected} gerade nicht verarbeiten. Die Kasse nimmt auch ${alternatives}. dpay tauscht nie um — wechsle unter „Guthaben“ zu einem davon und scanne erneut.`
+        : `Diese Kasse nimmt ${selected}, aber der Zahlungsanbieter des Händlers kann ${selected} gerade nicht verarbeiten — und von allem anderen, was diese Kasse nimmt, kann diese Wallet nichts bezahlen. Bitte den Händler um eine andere Zahlungsmöglichkeit.`,
+    noPayableAsset: accepted =>
+      `dpay kann an dieser Kasse nicht zahlen. Sie nimmt ${accepted} — davon kann diese Wallet nichts bezahlen, und dpay tauscht nie um. Bezahle diesen Einkauf anders.`,
     quoteExpired:
       'Der Preis dieser Kasse ist abgelaufen — er gilt jeweils rund fünf Minuten. Scanne den Code erneut für einen frischen Preis.',
+    checkingTill: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
     badCode:
       'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',
     notHttps:
       'Dieser Code verweist auf eine unsichere Adresse, deshalb öffnet dpay ihn nicht. Bitte den Händler, seinen eigenen Zahlungscode zu zeigen — ein über den echten geklebter Aufkleber sieht genau so aus.',
     providerUnreachable:
       'Der Zahlungsanbieter des Händlers war nicht erreichbar. Es wurde nichts bezahlt. Prüfe deine Verbindung und scanne erneut.',
+    badDestination: host =>
+      `${host} hat eine Zahlungsadresse geliefert, die nicht zu deiner Auswahl passt — dpay hat abgebrochen. Es wurde nichts bezahlt. Zahle diesen Code nicht; bitte den Händler, seinen eigenen Code erneut zu zeigen.`,
     noPendingCharge: merchant =>
       `An der Kasse von ${merchant} steht kein Betrag offen. Bitte das Personal, den Verkauf zuerst zu buchen, und scanne dann erneut.`,
-    submitUnknown: blockIndex =>
-      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat sie nicht bestätigt — das ist also weder bezahlt noch fehlgeschlagen. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Zeig dem Händler Ledger-Block ${blockIndex}: das ist der Nachweis deiner Überweisung.`,
-    submitRejected: blockIndex =>
-      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat den Nachweis abgelehnt, der Verkauf wurde also nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm Ledger-Block ${blockIndex}.`,
+    ref: {
+      icBlock: index => `Ledger-Block ${index}`,
+      solTransaction: signature => `Solana-Transaktion ${signature}`,
+    },
+    submitUnknown: reference =>
+      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat sie nicht bestätigt — das ist also weder bezahlt noch fehlgeschlagen. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Zeig dem Händler ${reference}: das ist der Nachweis deiner Überweisung.`,
+    submitRejected: reference =>
+      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat den Nachweis abgelehnt, der Verkauf wurde also nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm ${reference}.`,
+    transferUnknown:
+      'dpay konnte deine Überweisung nicht bestätigen, deshalb weiß der Händler nichts davon — das ist weder bezahlt noch fehlgeschlagen. Zahle nicht erneut: Öffne „Transaktionen“, um zu sehen, ob sie durchging, und zeig dem Händler diese Zahlung, falls ja.',
     claimedMerchant: 'Name aus dem Code — dpay prüft ihn nicht.',
     providerHost: host => `Preis von ${host}`,
   },

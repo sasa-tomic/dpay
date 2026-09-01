@@ -111,6 +111,19 @@ Note the asymmetry: per-asset `amount` values are **strings**, but `requestedAmo
 **number**. Any parser must handle both, and must never let a JSON number reach a decimal parser via
 `String()` — a small value can serialise as `1.6e-7`, a spelling every decimal grammar here rejects.
 
+## Step-2 and step-3 amounts agree within one quote
+
+Measured 2026-09-01 by fetching both reads against the **same** quote id:
+
+    InternetComputer/VCHF   step2=1.           step3=1.           same
+    InternetComputer/ICP    step2=0.50795551   step3=0.50795551   same
+    Solana/SOL              step2=0.01219252   step3=0.01219252   same
+
+So the provider does **not** re-price between the menu and the destination URI inside a quote, and a
+wallet may treat a disagreement as a hard refusal rather than as normal drift. Comparing amounts
+across *different* quotes will of course differ — the price moves — which is a trap when building
+fixtures: two responses captured seconds apart are two quotes, not one.
+
 ## Response envelopes
 
 Measured, not assumed — and **not** what an LNURL implementer would expect.

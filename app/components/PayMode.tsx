@@ -4,8 +4,11 @@ import {QrCode} from './QrCode';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
-import {parseRequestQR} from '../lib/format';
+import {parseRequestQR, randNonceHex} from '../lib/format';
 import {classifyScan} from '../lib/scan';
+import type {OcpScan} from '../lib/opencryptopay';
+import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import type {SelectableAsset} from '../config/assets';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {Identity, PayIntent, NfcStatus} from '../lib/types';
@@ -17,6 +20,7 @@ import {NfcStatusRow} from './NfcStatusRow';
 import {QrScanner} from './QrScanner';
 import {InstructionPanel} from './InstructionPanel';
 import {ModeToggle} from './ModeToggle';
+import {OcpQuoteLines} from './OcpQuoteLines';
 import {SendSheet} from './SendSheet';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
@@ -29,7 +33,7 @@ import {PaidStamp} from './tapMotion';
 import {IconCheck, IconClock, IconShare} from './icons';
 import {M} from '../i18n';
 
-export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -54,7 +58,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // settled). `already` = the rail reported this transfer already executed (idempotent replay).
   // `receipt` = the settlement proof captured on an ONLINE settle: block index + request id (the
   // read_state outcome — honest interim receipt per W3; W6 upgrades to BLS-verified certs).
-  const [paid, setPaid] = useState<{amount: string; currency: number; who: string; already: boolean; pending?: boolean; receipt?: Record<string, unknown> | null} | null>(null);
+  const [paid, setPaid] = useState<{amount: string; currency: number; who: string; already: boolean; pending?: boolean; receipt?: Record<string, unknown> | null; note?: string} | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
@@ -67,6 +71,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // a prefilled payment never needs the camera.
   const [scanArmed, setScanArmed] = useState(false);
   useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
+  // Remount key for the camera. `QrScanner` reads exactly ONE code per mount (`fired` — a real
+  // camera frame fires once), so a refusal that leaves the payer on the scan screen left a DEAD
+  // camera behind: every refusal here ends with "scan again", and that was reachable only by
+  // leaving the tab and coming back. Bumping the key on a refusal remounts a fresh scanner, so the
+  // instruction the screen gives is one the screen can actually honour.
+  const [scanKey, setScanKey] = useState(0);
+  const refuseScan = (message: string) => { setErr(message); setScanKey(k => k + 1); };
   // NFC is usable only when the adapter probe reports 'ready' (on + present). Everything else falls
   // through to the QR-only scan surface, with a per-reason explanation in the info popup below.
   const nfcReady = nfcStatus === 'ready';
@@ -89,6 +100,15 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // prefill (mirrors the SOL rail's link prefill), so the ONE place that knows whether an address
   // is usable for this asset — and what it is when it is not — is the place that says so.
   const [scannedAddress, setScannedAddress] = useState<string | null>(null);
+
+  // An OpenCryptoPay merchant till the camera read. The payment itself rides the SAME `intent` +
+  // review + sign path as every other payment (source 'ocp'); this holds the part no other payment
+  // has — the live quote, the provider host, and the method/asset spelling the submission must echo
+  // back. Non-null exactly while `intent.source === 'ocp'`.
+  const [ocp, setOcp] = useState<OcpTarget | null>(null);
+  // The two provider reads are in flight. Its own flag, not `busy`: `busy` means "a payment is being
+  // signed", and this happens before there is anything to sign.
+  const [ocpBusy, setOcpBusy] = useState(false);
 
   // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
   // (the paid-screen receipt link + the offline-QR auth code — mutually exclusive phases, so one
@@ -147,20 +167,73 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   //   • a wallet ADDRESS — including the principal dpay's own "My address" screen renders. Routed
   //     to the send form with the address prefilled: its status line then names the route and its
   //     fee, or names what the address IS when it cannot be used for this asset.
+  //   • an OPENCRYPTOPAY till code — a real merchant's static QR. Resolved to a live quote and put
+  //     on the same review screen a payment link uses.
   // Anything else keeps the honest "not a payment code" refusal.
   function onNotARequest(raw: string) {
     const what = classifyScan(raw);
     if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
+    if (what.kind === 'opencryptopay') { void startOcp(what.ocp); return; }
     if (what.kind === 'address') {
       // An asset with no route off the wallet (DEMO) has nothing to prefill, so say that instead of
       // opening a form that could only refuse.
-      if (!sendCapable) { setErr(M.pay.scannedAddressNotSendable(gateSymbol)); return; }
+      if (!sendCapable) { refuseScan(M.pay.scannedAddressNotSendable(gateSymbol)); return; }
       setErr(null);
       setScannedAddress(raw.trim());
       onSubModeChange('send');
       return;
     }
-    setErr(M.pay.notAPaymentCode);
+    refuseScan(M.pay.notAPaymentCode);
+  }
+
+  // The OPENCRYPTOPAY entry: a merchant's till code. Two provider reads turn it into a concrete
+  // payment (`resolveOcpScan` owns that sequence and every refusal in it), which then lands on the
+  // SAME review screen as a payment link — including its never-auto-sign rule. Nothing is signed
+  // here and no funds move: the payer approves an explicit review showing the amount, the full
+  // destination, the provider host, and how long the price is good for.
+  //
+  // The SELECTED asset is what pays (spec Unit C). This component only ever mounts for an IC asset,
+  // so the selection is looked up in the shared asset list by the currency the Wallet handed down.
+  async function startOcp(scan: OcpScan) {
+    if (!scan.ok) {
+      // The code IS a till code and it is broken — a different fact from "not a payment code", and
+      // the one the merchant can fix by showing the sticker again.
+      refuseScan(scan.reason === 'not-https' ? M.pay.ocp.notHttps : M.pay.ocp.badCode);
+      return;
+    }
+    const selected = assets.find(a => a.id === `ic:${withdrawCurrency}`) ?? null;
+    // Fails closed on a selection the asset list does not carry (a catalog that has not loaded, or
+    // a hidden row): there is nothing to pay WITH, which is exactly what the unsupported-asset copy
+    // says. The protocol check is the type-level twin — this component only mounts for an IC asset.
+    if (selected === null || selected.protocol !== 'ic') { refuseScan(M.pay.unsupportedAssetBody(withdrawCurrency)); return; }
+    setErr(null);
+    setOcpBusy(true);
+    try {
+      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now()});
+      if (out.kind === 'refused') { refuseScan(out.message); return; }
+      setOcp(out.target);
+      setIntent({
+        toPrincipal: out.target.to,
+        toName: out.target.details.claimedMerchantName ?? '',
+        // The FULL account, never a short form: the provider chose this destination, so it is the
+        // one thing on the screen the payer can actually check (findings: trust model).
+        toAccountText: out.target.to,
+        amount: out.target.rawAmount,
+        currency: selected.currency,
+        // A fresh reconciliation nonce, generated ONCE for this till payment: an Approve after a
+        // refused attempt re-signs the identical transfer, which the ledger dedups instead of
+        // paying twice. The provider never reads it — it verifies the block index.
+        nonceHex: randNonceHex(),
+        memo: '',
+        // A till has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
+        // the review's countdown + the Approve-time check.
+        expiry: null,
+        source: 'ocp',
+      });
+      setPhase('review');
+    } finally {
+      setOcpBusy(false);
+    }
   }
 
   // The LINK entry: a shared `…/wallet/pay/<recipient>?asset=…` URL, already parsed + resolved
@@ -223,9 +296,86 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
      return () => { alive = false; clearInterval(id); };
   }, [phase, prepared, qr, err, onSettled, identity]);
 
+  // The IC rail's half of an OpenCryptoPay payment: sign, submit, and answer with a CONFIRMED block
+  // index — or with a verdict that keeps the provider from ever being called. The order around it is
+  // `payAndReport`'s (services/opencryptopay.ts); this only reports what the rail did.
+  //
+  // The three answers are not interchangeable. 'refused' means nothing left the wallet. 'unknown'
+  // means it may have, so the one submission we are granted must NOT be spent: reporting a block
+  // index that may not exist burns the quote AND binds the transaction id, which is what turns a
+  // recoverable pending payment into an unclaimable one (findings doc, "The loss path").
+  async function sendIcForOcp(r: PayIntent): Promise<OcpSendResult> {
+    let p: RailPrepared;
+    try {
+      p = await prepareTransfer(identity.secretHex, {currencies: catalog}, r);
+    } catch (e: unknown) {
+      // prepareTransfer throws BEFORE anything is submitted (unsupported asset, unreachable/skewed
+      // IC clock), so nothing moved and the user can act on the reason.
+      return {kind: 'refused', message: e instanceof Error ? e.message : String(e)};
+    }
+    let out;
+    try {
+      out = await submitTransfer(p, identity.secretHex, {attempts: 12, intervalMs: 500});
+    } catch (e: unknown) {
+      // The POST itself failed. An identical envelope may already be in consensus, so this is never
+      // a decline — it is the honest unknown.
+      console.warn('ocp: IC submit failed:', e instanceof Error ? e.message : String(e));
+      return {kind: 'unknown'};
+    }
+    if (out.kind === 'rejected') return {kind: 'refused', message: out.reason};
+    // Settled WITH a real block index is the only reportable outcome. A settled-but-indexless
+    // duplicate (the ledger named no block) has nothing the provider could verify against the
+    // chain, and a rejected submission would spend the attempt for nothing.
+    if (out.kind === 'settled' && out.blockIndex !== '') {
+      return {kind: 'settled', txId: out.blockIndex, reference: M.pay.ocp.ref.icBlock(out.blockIndex)};
+    }
+    return {kind: 'unknown'};
+  }
+
+  // Approve on an OpenCryptoPay till. Same consent gesture as a link, different settlement: the
+  // funds move first and the provider is told exactly once, afterwards.
+  async function approveOcp(r: PayIntent, target: OcpTarget) {
+    // Re-checked at the press, not just by the countdown: paying against a lapsed quote moves
+    // irreversible money the provider will refuse to credit.
+    if (Date.now() >= target.expiresAt) { setErr(M.pay.ocp.quoteExpired); return; }
+    const who = r.toName || target.host;
+    setBusy(true);
+    setErr(null);
+    try {
+      const out = await payAndReport(target.details, target.method, target.asset, () => sendIcForOcp(r));
+      if (out.kind === 'not-paid') { setErr(out.message); return; }
+      if (out.kind === 'paid') {
+        onSettled();
+        setPaid({amount: r.amount, currency: r.currency, who, already: false});
+        setPhase('paid');
+        awardPaymentTested(journeyRef.current);
+        return;
+      }
+      // Unresolved: the money moved (or may have) and the sale is not credited. It gets the PENDING
+      // outcome surface — never the paid one, never an error the user could read as "try again" —
+      // carrying the sentence that names the reference and says not to pay twice.
+      onSettled();
+      setPaid({amount: r.amount, currency: r.currency, who, already: false, pending: true, note: out.message});
+      setPhase('paid');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // The sign path (parameterized: the camera path auto-signs the FRESHLY decoded intent before the
   // `intent` state has flushed; the link review's Approve passes the parked intent).
   async function approve(r: PayIntent) {
+    // A till payment settles through the provider, not through an offline hand-off: it has its own
+    // binding order and never reaches the QR/resubmit machinery below. Fails CLOSED if the quote is
+    // somehow gone — signing an unreported transfer to a provider's address is the loss path itself.
+    if (r.source === 'ocp') {
+      if (ocp === null) {
+        console.warn('ocp: approve with no live quote — refusing to sign an unreportable transfer');
+        setErr(M.pay.ocp.quoteExpired);
+        return;
+      }
+      return await approveOcp(r, ocp);
+    }
     // The IC rail has no server-side dpay-request expiry — the payer's app IS the gate. A stale
     // request QR must die here, before any envelope is built (memo/nonce reconciliation only ever
     // sees fresh transfers), with copy that explains the expiry (C1). A payment LINK carries no
@@ -283,7 +433,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setIntent(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
+  function reset() { setIntent(null); setOcp(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -315,6 +465,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             the reading zone (right under the headline it explains); pending is quiet and
             unresolved; this teaches exactly that, once. */}
         {paid.pending ? <CoachTip tipKey="pendingOutcome" /> : null}
+        {/* An OpenCryptoPay outcome that is neither paid nor failed: the funds moved and the sale
+            was not credited. The sentence names the reference that proves the transfer and says
+            not to pay again — it is the only thing standing between the payer and a lost payment,
+            so it renders on the outcome screen itself, not as a transient error. */}
+        {paid.note ? <Text testID="ocp-outcome" style={S.warnNote}>{paid.note}</Text> : null}
         {/* NFC-less receipt hand-back: when the payer settled ONLINE (NFC unavailable) they hold the
             rail proof {ledger, block_index, request_id}. Offer to share it back as a dpay:pay/ link
             so the merchant can open it — format-check it against their open request and confirm
@@ -415,8 +570,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         {intent.toName ? <Text testID="review-payee" style={S.dim2}>{intent.toAccountText}</Text> : null}
       </>
     );
-    if (intent.source === 'link') {
+    if (intent.source === 'link' || intent.source === 'ocp') {
       // Link entry (zero-press): the full review card — the single Approve press IS the consent.
+      // An OpenCryptoPay till lands here too, for the same reason: the amount, the destination and
+      // the name all came from a party the wallet has no relationship with, so it is reviewed and
+      // approved explicitly, never auto-signed. It adds three lines the other entries do not need
+      // (host, claimed name, price countdown) — see OcpQuoteLines.
       // C1: any shown error (insufficient / verify-fail) disables the button so a doomed payment
       // can't be re-tapped.
       const approveDisabled = busy || !!err || blockApprove;
@@ -427,7 +586,19 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           {payeeLine}
           {/* A link's payee name is UNVERIFIED — anyone can write any name into a URL. Say so, once,
               right where the name is read: the account above it is the part that is checkable. */}
-          {intent.toName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.linkNameClaimed}</Text> : null}
+          {intent.source === 'link' && intent.toName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.linkNameClaimed}</Text> : null}
+          {/* The till quote's own three lines. `onExpired` writes the expiry into `err`, which both
+              explains the state and disables Approve through `approveDisabled` — a lapsed quote
+              must never be payable, because the provider would refuse the proof AFTER the money
+              moved. */}
+          {intent.source === 'ocp' && ocp ? (
+            <OcpQuoteLines
+              host={ocp.host}
+              claimedName={intent.toName || null}
+              expiresAt={ocp.expiresAt}
+              onExpired={() => setErr(M.pay.ocp.quoteExpired)}
+            />
+          ) : null}
           {/* The sender-set memo (if any) — shown as a small subtitle so the payer sees the note
               attached to this payment before approving. Empty memo renders nothing. */}
           {intent.memo ? <Text testID="review-memo" style={S.dim2}>{intent.memo}</Text> : null}
@@ -624,7 +795,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <>
           <NfcStatusRow nfcStatus={nfcStatus} testID="pay-scan" />
           {scanArmed ? (
-            <QrScanner onScan={raw => onRequestString(raw)} />
+            <QrScanner key={scanKey} onScan={raw => onRequestString(raw)} />
           ) : (
             <>
               <Pressable
@@ -639,6 +810,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
               </Pressable>
             </>
           )}
+          {/* The till lookup is two network reads and can take tens of seconds — on a screen the
+              payer just pointed at a QR code. Say what is happening rather than freezing. */}
+          {ocpBusy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}

@@ -42,11 +42,22 @@ jest.mock('../solana', () => {
     ...actual,
     signSolPayment: jest.fn(actual.signSolPayment),
     signSplPayment: jest.fn(actual.signSplPayment),
+    // No test may reach a Solana RPC; the OpenCryptoPay suite below drives this directly.
+    sendSol: jest.fn(),
   };
 });
+// The provider sequence is tested for real (recorded bodies, no network) in
+// opencryptopayClient.test.ts. Stubbed here so this stays a component test of the WIRING.
+jest.mock('../services/opencryptopay', () => ({
+  resolveOcpScan: jest.fn(),
+  payAndReport: jest.fn(),
+}));
 
 import {encodeSolReq, type SolReqInput} from '../solana/qr';
-import {signSolPayment} from '../solana';
+import {sendSol, signSolPayment} from '../solana';
+import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import {buildSelectableAssets} from '../config/assets';
+import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {SolPayMode} from '../components/SolPayMode';
 import type {Identity} from '../lib/types';
 import {M} from '../i18n';
@@ -88,6 +99,8 @@ function solPayElement(props: Partial<SolPayModeProps> = {}) {
       identity={IDENTITY}
       online={true}
       nfcStatus="off"
+      assets={[]}
+      catalog={[]}
       solBalance="5000000000"
       usdcBalance="0"
       usdcAtaAbsent={false}
@@ -150,6 +163,11 @@ function texts(tree: renderer.ReactTestRenderer): string[] {
 
 function hasTestID(tree: renderer.ReactTestRenderer, testID: string): boolean {
   return tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
+}
+
+function textByTestID(tree: renderer.ReactTestRenderer, testID: string): string {
+  const node = tree.root.findAll(n => n.props && n.props.testID === testID)[0];
+  return node ? textOf(node.props.children) : '';
 }
 
 function pressByTestID(tree: renderer.ReactTestRenderer, testID: string) {
@@ -394,5 +412,154 @@ describe('SolPayMode — what the camera does with a code that is not a payment 
     expect(hasTestID(tree, 'sol-send-offline')).toBe(false);
     expect(tree.root.findAll(node => node.props && 'prefill' in node.props)).toHaveLength(1);
     act(() => { tree.unmount(); });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// OpenCryptoPay — the same till code, scanned while SOL is the selected asset
+// ---------------------------------------------------------------------------------------------
+// Same camera, same gesture, same review shape as the IC rail (CLAUDE.md's same-surfaces rule);
+// only the settlement differs — a native SOL transfer instead of a signed ICRC envelope. The rules
+// that make it safe are identical and are what these tests pin: never auto-signed, and a transfer
+// whose outcome is unknown is never reported to the provider.
+
+const TILL_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
+const OCP_TARGET: OcpTarget = {
+  details: {
+    paymentId: 'pl_beeddb41cd4b6d9e',
+    quoteId: 'plq_ec214dddae51da4d',
+    quoteExpiresAt: Date.now() + 300_000,
+    callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
+    claimedMerchantName: 'Test Shop',
+    requestedAmount: {asset: 'CHF', amount: '1'},
+    transferAmounts: [{method: 'Solana', available: true, assets: [{asset: 'SOL', amount: '0.01221422'}]}],
+  },
+  host: 'api.dfx.swiss',
+  method: 'Solana',
+  asset: 'SOL',
+  assetId: 'solana:SOL',
+  to: MERCHANT,
+  rawAmount: '12214220',
+  expiresAt: Date.now() + 300_000,
+};
+
+/** The wallet's REAL Solana rows — the selection the till payment is made WITH. */
+const SOL_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
+  showTestnet: false,
+  solanaEnabled: true,
+  solanaUsdc: true,
+});
+
+function mountTill(props: Partial<SolPayModeProps> = {}) {
+  return mountSolPay({assets: SOL_ASSETS, ...props});
+}
+
+async function scanTill(tree: renderer.ReactTestRenderer, code = TILL_QR) {
+  pressByTestID(tree, 'btn-sol-start-scan');
+  const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+  await act(async () => {
+    scanner.props.onScan(code);
+  });
+  await act(async () => {});
+}
+
+describe('SolPayMode — OpenCryptoPay till', () => {
+  beforeEach(() => {
+    jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
+    jest.mocked(payAndReport).mockReset().mockResolvedValue({kind: 'paid'});
+    jest.mocked(sendSol).mockReset().mockResolvedValue('5ig'.repeat(10));
+  });
+
+  test('a scanned till lands on a review with the amount, the full address and the host — nothing is sent', async () => {
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.01221422');
+    expect(textByTestID(tree, 'sol-pay-payee')).toBe(MERCHANT);
+    expect(textByTestID(tree, 'ocp-host')).toBe(M.pay.ocp.providerHost('api.dfx.swiss'));
+    expect(textByTestID(tree, 'review-claimed')).toBe(M.pay.ocp.claimedMerchant);
+    // The one-press rule does NOT reach a till: every value here came from a stranger's server.
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
+    expect(sendSol).not.toHaveBeenCalled();
+    expect(payAndReport).not.toHaveBeenCalled();
+  });
+
+  test('Approve runs the one-shot sequence for the Solana method and shows Paid on acceptance', async () => {
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    expect(payAndReport).toHaveBeenCalledTimes(1);
+    const [details, method, asset] = jest.mocked(payAndReport).mock.calls[0];
+    expect(details).toBe(OCP_TARGET.details);
+    expect(method).toBe('Solana');
+    expect(asset).toBe('SOL');
+    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.012214220 SOL'));
+  });
+
+  test('an outcome that is neither paid nor failed renders as neither, carrying the transaction', async () => {
+    const message = M.pay.ocp.submitUnknown(M.pay.ocp.ref.solTransaction('5ig'.repeat(10)));
+    jest.mocked(payAndReport).mockResolvedValue({kind: 'unresolved', message});
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(message);
+    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('0.012214220 SOL'));
+  });
+
+  test('the Solana rail reports a CONFIRMED signature, and a broadcast it cannot confirm as unknown', async () => {
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    const send = jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Confirmed: the signature is what the provider verifies against the chain.
+    await expect(send()).resolves.toEqual({
+      kind: 'settled',
+      txId: '5ig'.repeat(10),
+      reference: M.pay.ocp.ref.solTransaction('5ig'.repeat(10)),
+    });
+    const [, destination, lamports] = jest.mocked(sendSol).mock.calls[0];
+    expect(destination).toBe(MERCHANT);
+    expect(lamports).toBe(12214220n);
+
+    // Nothing was broadcast — a dead RPC or a rejected transaction. Definitive: nothing moved.
+    jest.mocked(sendSol).mockRejectedValue(new Error('found no record of a prior credit'));
+    await expect(send()).resolves.toEqual({kind: 'refused', message: M.sol.noRecordOfCredit});
+
+    // Broadcast ACCEPTED, then the confirmation failed: the transfer may still land, so the outcome
+    // is unknown and the provider must not be told — reporting it would spend the one attempt on a
+    // transaction that may not exist, and the id would be burned for the real one.
+    jest.mocked(sendSol).mockImplementation(
+      async (_secret: string, _to: string, _lamports: bigint, _signal?: AbortSignal, onBroadcast?: (s: string) => void) => {
+        onBroadcast?.('5ig'.repeat(10));
+        throw new Error('solana confirmation timeout');
+      },
+    );
+    await expect(send()).resolves.toEqual({kind: 'unknown'});
+    warn.mockRestore();
+  });
+
+  test('a refusal from the provider sequence stays on the scan screen, and nothing is sent', async () => {
+    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'refused', message: M.pay.ocp.solanaUsdcUnsupported});
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(texts(tree)).toContain(M.pay.ocp.solanaUsdcUnsupported);
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
+    expect(sendSol).not.toHaveBeenCalled();
+  });
+
+  test('a target that is not native SOL is refused before any transfer is built', async () => {
+    // The System Program transfer below moves SOL, so a token target would pay SOL against a token
+    // price. The resolver already refuses Solana USDC by name; this is the second lock.
+    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'ok', target: {...OCP_TARGET, assetId: 'solana:USDC'}});
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(texts(tree)).toContain(M.pay.ocp.solanaUsdcUnsupported);
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
   });
 });
