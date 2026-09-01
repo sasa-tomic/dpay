@@ -48,7 +48,11 @@ jest.mock('../solana', () => {
 });
 // The provider sequence is tested for real (recorded bodies, no network) in
 // opencryptopayClient.test.ts. Stubbed here so this stays a component test of the WIRING.
+// `ocpTimeRefusal` is NOT stubbed: it is the module's ONE approve deadline, shared by the resolver,
+// the countdown and both rails, and a hand-written copy of it here would be a second rule that can
+// drift from the one under test.
 jest.mock('../services/opencryptopay', () => ({
+  ocpTimeRefusal: jest.requireActual<typeof import('../services/opencryptopay')>('../services/opencryptopay').ocpTimeRefusal,
   resolveOcpScan: jest.fn(),
   payAndReport: jest.fn(),
 }));
@@ -57,6 +61,7 @@ import {encodeSolReq, type SolReqInput} from '../solana/qr';
 import {sendSol, signSolPayment} from '../solana';
 import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {buildSelectableAssets} from '../config/assets';
+import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {SolPayMode} from '../components/SolPayMode';
 import type {Identity} from '../lib/types';
@@ -426,7 +431,7 @@ describe('SolPayMode — what the camera does with a code that is not a payment 
 const TILL_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
 const OCP_TARGET: OcpTarget = {
   details: {
-    paymentId: 'pl_beeddb41cd4b6d9e',
+    submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e',
     quoteId: 'plq_ec214dddae51da4d',
     quoteExpiresAt: Date.now() + 300_000,
     callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
@@ -441,6 +446,9 @@ const OCP_TARGET: OcpTarget = {
   to: MERCHANT,
   rawAmount: '12214220',
   expiresAt: Date.now() + 300_000,
+  // A live price with room to spare. The gap to `expiresAt` is what the countdown shows and what
+  // Approve is gated on — the same deadline the IC rail uses, from the same helper.
+  payableUntil: Date.now() + 180_000,
 };
 
 /** The wallet's REAL Solana rows — the selection the till payment is made WITH. */
@@ -561,5 +569,69 @@ describe('SolPayMode — OpenCryptoPay till', () => {
 
     expect(texts(tree)).toContain(M.pay.ocp.solanaUsdcUnsupported);
     expect(hasTestID(tree, 'btn-approve')).toBe(false);
+  });
+
+  // A transaction the network INCLUDED and then failed is the one post-broadcast outcome the chain
+  // has already decided: no lamports reached the merchant and none ever will. Reporting it as
+  // unknown told the payer "don't pay again" about a purchase they still have to pay for — the
+  // honest-unknown asymmetry pointing the wrong way. The distinguishing fact was in the thrown
+  // message all along (`confirmTransaction` throws `transaction failed: <err>`).
+  test('a transaction the network included and FAILED is a definite failure, not an unknown one', async () => {
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    const send = jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    jest.mocked(sendSol).mockImplementation(
+      async (_secret: string, _to: string, _lamports: bigint, _signal?: AbortSignal, onBroadcast?: (s: string) => void) => {
+        onBroadcast?.('5ig'.repeat(10)); // accepted by the network…
+        throw new Error('transaction failed: {"InstructionError":[0,{"Custom":1}]}'); // …then failed on-chain
+      },
+    );
+    // Definitive AND localized: the raw on-chain error JSON is a console diagnostic, never copy.
+    await expect(send()).resolves.toEqual({kind: 'refused', message: M.pay.ocp.transferFailed});
+    expect(M.pay.ocp.transferFailed).not.toContain('InstructionError');
+    warn.mockRestore();
+  });
+
+  test('a price with too little runway left disables Approve on this rail too, in the same words', async () => {
+    // Same gate, same helper, same sentence as the IC rail (CLAUDE.md's same-surfaces rule): a
+    // price that cannot fit the whole sequence is not payable, and it is not called "expired"
+    // either, because the payer can see it still counting down.
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: Date.now() + 30_000, payableUntil: Date.now() - 1_000},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+    expect(textByTestID(tree, 'sol-pay-err')).toBe(M.pay.ocp.notEnoughTime);
+    expect(tree.root.findAll(n => n.props && n.props.testID === 'btn-approve')[0].props.disabled).toBe(true);
+
+    // And the press re-checks, because the countdown only ticks once a second.
+    await pressByLabel(tree, M.pay.approveA11y);
+    expect(payAndReport).not.toHaveBeenCalled();
+    expect(sendSol).not.toHaveBeenCalled();
+  });
+
+  test('the countdown runs to the payable deadline, not to the quote’s expiry', async () => {
+    const now = Date.now();
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: now + 300_000, payableUntil: now + 185_000},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+    expect(textByTestID(tree, 'ocp-expiry')).toBe(M.receive.validForMin(3));
+    expect(textByTestID(tree, 'ocp-expiry')).not.toBe(M.receive.validForMin(5));
+  });
+
+  test('the runway this rail asks for is the bound its send actually runs under', async () => {
+    // `sendSolForOcp` wraps the WHOLE send — blockhash, broadcast, confirmation — in
+    // `withTimeout(SOL_SEND_TIMEOUT_MS)`, so that constant IS this rail's worst case. Naming it here
+    // rather than a number keeps the deadline moving with the bound it is meant to cover.
+    const tree = mountTill();
+    await scanTill(tree);
+    expect(jest.mocked(resolveOcpScan).mock.calls[0][1].sequenceBudgetMs).toBe(SOL_SEND_TIMEOUT_MS);
   });
 });

@@ -40,6 +40,19 @@ export function friendlySolError(msg: string): string {
   return msg;
 }
 
+/** Did the network INCLUDE this transaction and then fail it? `confirmTransaction` (`solana/rpc.ts`)
+ *  throws `transaction failed: <err>` for exactly that case — a `getSignatureStatuses` entry with a
+ *  non-null `err` — and nothing else in this app throws that prefix.
+ *
+ *  It exists because that outcome is the one post-broadcast failure that is DEFINITE: no lamports
+ *  moved and none ever will, unlike a confirmation timeout over a transaction that may still land.
+ *  A caller that treats every post-broadcast throw the same way tells the payer "don't pay again"
+ *  about a payment they must in fact make again (`SolPayMode.sendSolForOcp` is why this is here).
+ *  Classification only — the copy belongs to the message catalog, like every other class above. */
+export function isSolTransactionFailed(msg: string): boolean {
+  return /^transaction failed:/i.test(msg.trim());
+}
+
 /** NFC-tap variant of `friendlySolError`: NEVER returns the raw string. The tap status view
  *  renders its sub-line verbatim, so an unrecognized exception must map to honest generic copy
  *  (A2 — no raw `e.message` from NFC paths in the UI); the caller console.warn's the raw message

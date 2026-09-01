@@ -14,7 +14,7 @@ import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {classifyScan} from '../lib/scan';
 import type {OcpScan} from '../lib/opencryptopay';
-import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import {ocpTimeRefusal, payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import type {SelectableAsset} from '../config/assets';
 import type {CurrencyDescriptor} from '../config/catalog';
 import {withTimeout} from '../lib/timeout';
@@ -30,7 +30,7 @@ import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
 import {OcpQuoteLines} from './OcpQuoteLines';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
-import {friendlySolError} from '../solana/errors';
+import {friendlySolError, isSolTransactionFailed} from '../solana/errors';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {CoachTip} from './CoachTip';
@@ -253,7 +253,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     setErr(null);
     setOcpBusy(true);
     try {
-      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now()});
+      // The rail's whole worst case from Approve to a confirmed signature is ONE bound here —
+      // `withTimeout(SOL_SEND_TIMEOUT_MS)` in `sendSolForOcp` covers the blockhash fetch, the
+      // broadcast and the confirmation poll together — so the resolver's deadline is derived from
+      // that same constant rather than from a number that could drift away from it.
+      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now(), sequenceBudgetMs: SOL_SEND_TIMEOUT_MS});
       if (out.kind === 'refused') { refuseScan(out.message); return; }
       // Fail closed on anything but native SOL: the send below is a System Program transfer, so a
       // token target would move SOL against a token price. The resolver already refuses Solana USDC
@@ -276,6 +280,12 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   // UNKNOWN, and reporting a signature we cannot vouch for would spend the one submission the
   // provider grants (findings doc, "The loss path"). A holder object rather than a bare `let` so
   // the value survives control-flow narrowing into the catch.
+  //
+  // The asymmetry runs ONE way only. Preferring unknown over a false "paid" is right for an outcome
+  // nobody knows; it is wrong for one the chain has already decided. A transaction the network
+  // INCLUDED and then failed moved no lamports and never will, so calling it unknown would tell the
+  // payer "don't pay again" about a purchase they still have to pay for — which is why that case is
+  // classified out of the catch first, by the same module that owns every other Solana error class.
   async function sendSolForOcp(target: OcpTarget): Promise<OcpSendResult> {
     const broadcast: {sig: string | null} = {sig: null};
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
@@ -285,6 +295,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.warn('ocp: SOL send failed:', msg);
+      if (isSolTransactionFailed(msg)) return {kind: 'refused', message: M.pay.ocp.transferFailed};
       return broadcast.sig === null ? {kind: 'refused', message: friendlySolError(msg)} : {kind: 'unknown'};
     } finally {
       cancel();
@@ -294,9 +305,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   // Approve on an OpenCryptoPay till: the funds move first and the provider is told exactly once,
   // afterwards. IC twin: PayMode.approveOcp — same states, same copy, same refusal to retry.
   async function approveOcp(target: OcpTarget) {
-    // Re-checked at the press: paying against a lapsed quote moves irreversible money the provider
-    // will refuse to credit.
-    if (Date.now() >= target.expiresAt) { setErr(M.pay.ocp.quoteExpired); return; }
+    // Re-checked at the press, not just by the countdown (which ticks once a second): paying with
+    // too little of the price left moves irreversible money the provider will refuse to credit.
+    const late = ocpTimeRefusal(target, Date.now());
+    if (late !== null) { setErr(late); return; }
     const who = target.details.claimedMerchantName ?? target.host;
     const amount = fmtAsset(target.rawAmount, SOL_DECIMALS, SOL_UNIT);
     setBusy(true);
@@ -465,8 +477,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
         <OcpQuoteLines
           host={ocp.host}
           claimedName={ocp.details.claimedMerchantName}
-          expiresAt={ocp.expiresAt}
-          onExpired={() => setErr(M.pay.ocp.quoteExpired)}
+          payableUntil={ocp.payableUntil}
+          onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
         />
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         <Pressable

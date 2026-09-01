@@ -88,6 +88,10 @@ export const payDe: PayMessages = {
       `dpay kann an dieser Kasse nicht zahlen. Sie nimmt ${accepted} — davon kann diese Wallet nichts bezahlen, und dpay tauscht nie um. Bezahle diesen Einkauf anders.`,
     quoteExpired:
       'Der Preis dieser Kasse ist abgelaufen — er gilt jeweils rund fünf Minuten. Scanne den Code erneut für einen frischen Preis.',
+    notEnoughTime:
+      'Dieser Preis läuft zu bald ab, um sicher damit zu zahlen. Dein Geld würde abgehen, bevor der Zahlungsanbieter des Händlers davon erfahren kann, und er würde den Verkauf danach ablehnen. Scanne den Code erneut für einen frischen Preis.',
+    unreportable: host =>
+      `${host} hat dpay keinen Weg genannt, eine Zahlung dorthin zu melden — eine Zahlung hier würde also dein Geld kosten, ohne dass der Verkauf gutgeschrieben wird. Es wurde nichts bezahlt. Erneutes Scannen ändert daran nichts — bitte den Händler um eine andere Zahlungsmöglichkeit.`,
     checkingTill: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
     badCode:
       'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',
@@ -119,8 +123,14 @@ export const payDe: PayMessages = {
       `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat sie nicht bestätigt — das ist also weder bezahlt noch fehlgeschlagen. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Zeig dem Händler ${reference}: das ist der Nachweis deiner Überweisung.`,
     submitRejected: reference =>
       `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat den Nachweis abgelehnt, der Verkauf wurde also nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm ${reference}.`,
+    submitTooLate: reference =>
+      `Deine Überweisung ging durch, aber erst nachdem dieser Preis abgelaufen war — der Verkauf wurde deshalb nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm ${reference}: das ist der Nachweis deiner Überweisung.`,
     transferUnknown:
       'dpay konnte deine Überweisung nicht bestätigen, deshalb weiß der Händler nichts davon — das ist weder bezahlt noch fehlgeschlagen. Zahle nicht erneut: Öffne „Transaktionen“, um zu sehen, ob sie durchging, und zeig dem Händler diese Zahlung, falls ja.',
+    transferRefused: reason =>
+      `Deine Überweisung ging nicht durch, es wurde also nichts bezahlt und dein Geld ist noch in deiner Wallet — ${reason}. Scanne den Code erneut, um an dieser Kasse zu zahlen.`,
+    transferFailed:
+      'Das Solana-Netzwerk hat deine Transaktion abgelehnt, es wurde also nichts bezahlt — der Betrag ist noch in deiner Wallet (eine kleine Netzwerkgebühr wurde berechnet). Scanne den Code erneut und versuche es noch einmal.',
     claimedMerchant: 'Name aus dem Code — dpay prüft ihn nicht.',
     providerHost: host => `Preis von ${host}`,
   },

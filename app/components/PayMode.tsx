@@ -7,12 +7,13 @@ import {POLL, QR_SIZE} from '../config/constants';
 import {parseRequestQR, randNonceHex} from '../lib/format';
 import {classifyScan} from '../lib/scan';
 import type {OcpScan} from '../lib/opencryptopay';
-import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import {ocpTimeRefusal, payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
 import type {SelectableAsset} from '../config/assets';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {Identity, PayIntent, NfcStatus} from '../lib/types';
-import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, type RailPrepared} from '../services/rail';
+import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, type RailOutcome, type RailPrepared} from '../services/rail';
 import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
@@ -32,6 +33,22 @@ import {OfflinePeak} from './OfflinePeak';
 import {PaidStamp} from './tapMotion';
 import {IconCheck, IconClock, IconShare} from './icons';
 import {M} from '../i18n';
+
+// How long this rail waits for a submitted envelope to reach a terminal state: 12 read_state polls,
+// half a second apart. ONE definition — the online pay path, the till path and the till's
+// approve-time deadline below all read it, so the deadline can never fall out of step with the
+// budget it is meant to cover.
+const IC_POLL_BUDGET = {attempts: 12, intervalMs: 500} as const;
+// Worst-case wall clock from the Approve press to a CONFIRMED block index on this rail, composed
+// from the transport's own bounds rather than guessed: the certified-clock read `prepareTransfer`
+// stamps the envelope with, the /call POST, and the full poll budget. `resolveOcpScan` adds the
+// one-shot submission's own timeout and refuses a quote that cannot fit all of it
+// (`OcpTarget.payableUntil`) — approving a till payment that cannot finish inside its price spends
+// irreversible money for nothing.
+const OCP_IC_SEQUENCE_MS =
+  IC_READ_STATE_TIMEOUT_MS
+  + IC_SUBMIT_TIMEOUT_MS
+  + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
 export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
@@ -109,6 +126,16 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // The two provider reads are in flight. Its own flag, not `busy`: `busy` means "a payment is being
   // signed", and this happens before there is anything to sign.
   const [ocpBusy, setOcpBusy] = useState(false);
+  // A till transfer whose outcome the rail could NOT resolve, plus the quote it was made against.
+  // The prepared envelope is the payer's only claim on that money: its request_id is still pollable
+  // and `pollTransfer` is idempotent, so the most likely failure — a flaky connection while the
+  // transfer was already in consensus — is recoverable rather than lost. Set ONLY when the transfer
+  // itself stayed indefinite (so the one submission has NOT been spent), and cleared the moment it
+  // is used, which is what keeps `/tx` to at most one call in total.
+  const [ocpClaim, setOcpClaim] = useState<{prepared: RailPrepared; target: OcpTarget} | null>(null);
+  // One re-poll at a time. The claim's effect below runs on an interval and each tick can outlive
+  // the next, so without this two ticks could both reach a settled transfer and both report it.
+  const ocpChecking = useRef(false);
 
   // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
   // (the paid-screen receipt link + the offline-QR auth code — mutually exclusive phases, so one
@@ -209,7 +236,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     setErr(null);
     setOcpBusy(true);
     try {
-      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now()});
+      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now(), sequenceBudgetMs: OCP_IC_SEQUENCE_MS});
       if (out.kind === 'refused') { refuseScan(out.message); return; }
       setOcp(out.target);
       setIntent({
@@ -304,7 +331,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // means it may have, so the one submission we are granted must NOT be spent: reporting a block
   // index that may not exist burns the quote AND binds the transaction id, which is what turns a
   // recoverable pending payment into an unclaimable one (findings doc, "The loss path").
-  async function sendIcForOcp(r: PayIntent): Promise<OcpSendResult> {
+  async function sendIcForOcp(r: PayIntent, hold: {claim: RailPrepared | null}): Promise<OcpSendResult> {
     let p: RailPrepared;
     try {
       p = await prepareTransfer(identity.secretHex, {currencies: catalog}, r);
@@ -313,19 +340,31 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       // IC clock), so nothing moved and the user can act on the reason.
       return {kind: 'refused', message: e instanceof Error ? e.message : String(e)};
     }
-    let out;
+    let out: RailOutcome;
     try {
-      out = await submitTransfer(p, identity.secretHex, {attempts: 12, intervalMs: 500});
+      out = await submitTransfer(p, identity.secretHex, IC_POLL_BUDGET);
     } catch (e: unknown) {
       // The POST itself failed. An identical envelope may already be in consensus, so this is never
-      // a decline — it is the honest unknown.
+      // a decline — it is the honest unknown, and the envelope is the claim on it.
       console.warn('ocp: IC submit failed:', e instanceof Error ? e.message : String(e));
+      hold.claim = p;
       return {kind: 'unknown'};
     }
+    const sent = icOutcomeToSend(out);
+    // An indefinite transfer is the recoverable case, not the lost one: the request_id below is
+    // still pollable and the block index may be one more poll away. Hand the envelope back to the
+    // caller so the outcome can be resolved instead of discarded.
+    if (sent.kind === 'unknown') hold.claim = p;
+    return sent;
+  }
+
+  /** What the IC rail's verdict means for a till payment. ONE mapping — the first attempt and the
+   *  claim re-poll below must agree, because it decides the money-critical question: only a settled
+   *  transfer WITH a real block index may be reported (the provider verifies that identifier against
+   *  the ledger and spends the one attempt on it). A settled-but-indexless duplicate names nothing
+   *  the provider could check, so it stays indefinite. */
+  function icOutcomeToSend(out: RailOutcome): OcpSendResult {
     if (out.kind === 'rejected') return {kind: 'refused', message: out.reason};
-    // Settled WITH a real block index is the only reportable outcome. A settled-but-indexless
-    // duplicate (the ledger named no block) has nothing the provider could verify against the
-    // chain, and a rejected submission would spend the attempt for nothing.
     if (out.kind === 'settled' && out.blockIndex !== '') {
       return {kind: 'settled', txId: out.blockIndex, reference: M.pay.ocp.ref.icBlock(out.blockIndex)};
     }
@@ -335,14 +374,19 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // Approve on an OpenCryptoPay till. Same consent gesture as a link, different settlement: the
   // funds move first and the provider is told exactly once, afterwards.
   async function approveOcp(r: PayIntent, target: OcpTarget) {
-    // Re-checked at the press, not just by the countdown: paying against a lapsed quote moves
-    // irreversible money the provider will refuse to credit.
-    if (Date.now() >= target.expiresAt) { setErr(M.pay.ocp.quoteExpired); return; }
+    // Re-checked at the press, not just by the countdown (which ticks once a second): paying with
+    // too little of the price left moves irreversible money the provider will refuse to credit.
+    const late = ocpTimeRefusal(target, Date.now());
+    if (late !== null) { setErr(late); return; }
     const who = r.toName || target.host;
+    // Filled by the send below when — and only when — the transfer's own outcome stayed indefinite.
+    // That is exactly the case in which the provider has NOT been told, so the one submission is
+    // still unspent and the claim is worth keeping.
+    const hold: {claim: RailPrepared | null} = {claim: null};
     setBusy(true);
     setErr(null);
     try {
-      const out = await payAndReport(target.details, target.method, target.asset, () => sendIcForOcp(r));
+      const out = await payAndReport(target.details, target.method, target.asset, () => sendIcForOcp(r, hold));
       if (out.kind === 'not-paid') { setErr(out.message); return; }
       if (out.kind === 'paid') {
         onSettled();
@@ -355,12 +399,82 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       // outcome surface — never the paid one, never an error the user could read as "try again" —
       // carrying the sentence that names the reference and says not to pay twice.
       onSettled();
+      if (hold.claim !== null) setOcpClaim({prepared: hold.claim, target});
       setPaid({amount: r.amount, currency: r.currency, who, already: false, pending: true, note: out.message});
       setPhase('paid');
     } finally {
       setBusy(false);
     }
   }
+
+  // Resolve a till transfer the rail left indefinite. SAME re-poll as the offline hand-off's
+  // reconcile above — the same `pollTransfer`, one attempt per tick — because the situation is the
+  // same: an envelope that is already submitted and whose verdict has to be read, not re-signed.
+  // What differs is what a verdict is worth here. The provider has NOT been told yet, so a transfer
+  // that turns out to have settled can still be reported and the sale still credited; a transfer
+  // that turns out to have been refused means nothing moved at all. Either way the claim is spent
+  // once and `/tx` is called at most once in total (findings doc, "The loss path").
+  useEffect(() => {
+    if (phase !== 'paid' || ocpClaim === null) return;
+    let alive = true;
+    const check = async () => {
+      if (ocpChecking.current) return;
+      ocpChecking.current = true;
+      try {
+        let out: RailOutcome;
+        try {
+          out = await pollTransfer(ocpClaim.prepared, identity.secretHex, {attempts: 1, intervalMs: 0});
+        } catch (e) {
+          console.warn('ocp claim re-poll failed:', e instanceof Error ? e.message : String(e));
+          return; // best-effort: the next tick tries again
+        }
+        if (!alive) return;
+        const sent = icOutcomeToSend(out);
+        if (sent.kind === 'unknown') return; // still indefinite — keep looking
+        if (sent.kind === 'refused') {
+          // Definitive: nothing left the wallet. The pending screen was the honest state a moment
+          // ago and is a lie now, so it goes — back to the scanner, with the reason and the one
+          // action that can still pay this till.
+          reset();
+          refuseScan(M.pay.ocp.transferRefused(sent.message));
+          return;
+        }
+        // The transfer DID settle, and the provider still has not heard about it. Report it ONCE —
+        // but only while the price it was quoted against is alive: a submission against a dead
+        // quote is refused AND binds the transaction id to it, which is precisely what would take
+        // away the payer's ability to claim this payment with the merchant.
+        if (Date.now() >= ocpClaim.target.expiresAt) {
+          setPaid(p => (p === null ? p : {...p, note: M.pay.ocp.submitTooLate(sent.reference)}));
+          setOcpClaim(null);
+          return;
+        }
+        const done = await payAndReport(
+          ocpClaim.target.details,
+          ocpClaim.target.method,
+          ocpClaim.target.asset,
+          () => Promise.resolve(sent),
+        );
+        if (!alive) return;
+        if (done.kind === 'paid') {
+          setPaid(p => (p === null ? p : {...p, pending: false, note: undefined}));
+          awardPaymentTested(journeyRef.current);
+        } else {
+          // `done` is the reported outcome's own sentence — 'not-paid' cannot arise from a settled
+          // send, and both remaining shapes carry the message the payer needs.
+          setPaid(p => (p === null ? p : {...p, note: done.message}));
+        }
+        setOcpClaim(null);
+      } finally {
+        ocpChecking.current = false;
+      }
+    };
+    void check();
+    const id = setInterval(() => { void check(); }, POLL.receiptPay);
+    return () => { alive = false; clearInterval(id); };
+    // `reset`/`refuseScan` are stable inline closures over setState; re-running on their identity
+    // would restart the interval on every render (the qr reconcile effect above is shaped the same).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, ocpClaim, identity]);
 
   // The sign path (parameterized: the camera path auto-signs the FRESHLY decoded intent before the
   // `intent` state has flushed; the link review's Approve passes the parked intent).
@@ -433,7 +547,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setIntent(null); setOcp(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
+  function reset() { setIntent(null); setOcp(null); setOcpClaim(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -443,7 +557,14 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     const mark = paid.pending ? <IconClock size={44} color={C.brandInk}/> : <IconCheck size={44} color={C.brandInk}/>;
     const amt = fmtCurrencyAmount(catalog, paid.currency, paid.amount);
     const headline = paid.pending ? M.pay.sent(amt) : paid.already ? M.pay.alreadyPaid : M.nfc.paidAmount(amt);
-    const sub = paid.pending ? M.pay.toWhoAwaiting(paid.who)
+    // A `note` marks an OpenCryptoPay outcome, which is pending for a DIFFERENT reason than an
+    // offline hand-off: no merchant is going to submit anything on the payer's behalf, so it must
+    // not borrow the hand-off's "awaiting the merchant's confirmation" line — the note under it
+    // says the sale was not credited, and the two together contradicted each other on the payer's
+    // only record of a lost payment. These are the exact two lines the Solana rail already shows
+    // for the identical outcome (SolPayMode's 'ocp-done'), per the same-surfaces rule.
+    const sub = paid.note != null ? M.pay.toWho(paid.who)
+      : paid.pending ? M.pay.toWhoAwaiting(paid.who)
       : paid.already ? M.pay.alreadyNotCharged(amt, paid.who)
       : M.pay.toWho(paid.who);
     return (
@@ -460,11 +581,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             pending/already — the honest-money rule keeps the stamp mark off unresolved states).
             One quiet fade-in, consistent with the tap success stamp; additive to the check. */}
         {!warn ? <PaidStamp /> : null}
-        {/* Trip Ready J4 — the honest-pending first-use tip: ONLY on the unresolved outcome view
-            (paid.pending — the offline hand-off state), never on a confirmed settle. Mounted in
-            the reading zone (right under the headline it explains); pending is quiet and
-            unresolved; this teaches exactly that, once. */}
-        {paid.pending ? <CoachTip tipKey="pendingOutcome" /> : null}
+        {/* Trip Ready J4 — the honest-pending first-use tip: ONLY on the offline hand-off state
+            (paid.pending with no note), never on a confirmed settle and never on an
+            OpenCryptoPay outcome — "check back here" would contradict the note right below it,
+            which says the provider definitively refused the proof. */}
+        {paid.pending && paid.note == null ? <CoachTip tipKey="pendingOutcome" /> : null}
         {/* An OpenCryptoPay outcome that is neither paid nor failed: the funds moved and the sale
             was not credited. The sentence names the reference that proves the transfer and says
             not to pay again — it is the only thing standing between the payer and a lost payment,
@@ -587,16 +708,16 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           {/* A link's payee name is UNVERIFIED — anyone can write any name into a URL. Say so, once,
               right where the name is read: the account above it is the part that is checkable. */}
           {intent.source === 'link' && intent.toName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.linkNameClaimed}</Text> : null}
-          {/* The till quote's own three lines. `onExpired` writes the expiry into `err`, which both
-              explains the state and disables Approve through `approveDisabled` — a lapsed quote
-              must never be payable, because the provider would refuse the proof AFTER the money
-              moved. */}
+          {/* The till quote's own three lines. `onTooLate` writes the reason into `err`, which both
+              explains the state and disables Approve through `approveDisabled` — a price with no
+              room left for the whole sequence must never be payable, because the provider would
+              refuse the proof AFTER the money moved. */}
           {intent.source === 'ocp' && ocp ? (
             <OcpQuoteLines
               host={ocp.host}
               claimedName={intent.toName || null}
-              expiresAt={ocp.expiresAt}
-              onExpired={() => setErr(M.pay.ocp.quoteExpired)}
+              payableUntil={ocp.payableUntil}
+              onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
             />
           ) : null}
           {/* The sender-set memo (if any) — shown as a small subtitle so the payer sees the note

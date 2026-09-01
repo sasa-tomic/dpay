@@ -54,8 +54,12 @@ import {M} from '../i18n';
 export type OcpQuoteRef = {
   /** `quote.id` — names the live 300-second quote on every subsequent call. */
   readonly quoteId: string;
-  /** `callback` — the step-3 transfer-details URL. Its `/cb/` segment becomes `/tx/` to submit. */
+  /** `callback` — the step-3 transfer-details URL. */
   readonly callbackUrl: string;
+  /** Where the proof goes. DERIVED AT PARSE TIME (`lib/opencryptopay.ts`), which is what makes an
+   *  unreportable provider a refusal BEFORE the payer consents instead of a discovery after the
+   *  funds are gone. Carried, never re-derived here. */
+  readonly submitUrl: string;
 };
 
 export type OcpDetailsResult =
@@ -204,17 +208,20 @@ export async function fetchPaymentDetails(apiUrl: string): Promise<OcpDetailsRes
 
   const parsed = parsePaymentDetails(body.json);
   if (!parsed.ok) {
-    // The parser's refusal is a CODE, and codes are not copy. `not-https` is its own fact — the
-    // provider's `callback` would have to be called over cleartext — and gets the sentence the
-    // payer already sees for an insecure scanned code; anything else means the answer is not a
-    // payment this wallet can read. The code itself goes to the console, where it is diagnosable.
+    // The parser's refusal is a CODE, and codes are not copy. Three facts, three instructions:
+    // `not-https` — the provider's `callback` would have to be called over cleartext — gets the
+    // sentence the payer already sees for an insecure scanned code; `unreportable-callback` means
+    // this provider could never be told about a payment, so the way out is another payment method
+    // rather than another scan (rescanning yields the same callback); anything else means the
+    // answer is not a payment this wallet can read, and a fresh scan may well fix it. The code
+    // itself goes to the console, where it is diagnosable.
     console.warn(`opencryptopay: ${target.url.host} sent a body this wallet cannot use (${parsed.reason})`);
-    return {
-      kind: 'error',
-      message: parsed.reason === 'not-https'
-        ? M.pay.ocp.notHttps
-        : M.pay.ocp.badAnswer(target.url.host, M.pay.ocp.answerPart.details),
-    };
+    const message = parsed.reason === 'not-https'
+      ? M.pay.ocp.notHttps
+      : parsed.reason === 'unreportable-callback'
+        ? M.pay.ocp.unreportable(target.url.host)
+        : M.pay.ocp.badAnswer(target.url.host, M.pay.ocp.answerPart.details);
+    return {kind: 'error', message};
   }
   return {kind: 'ok', details: parsed.details};
 }
@@ -301,29 +308,20 @@ export async function submitProof(
   asset: string,
   txId: string,
 ): Promise<OcpSubmitResult> {
-  const target = httpsUrl(details.callbackUrl);
+  // The URL was derived and shape-checked at parse time; https is re-checked HERE because this is
+  // the last point before the request leaves the device and `OcpQuoteRef` is a plain structural
+  // input — the same boundary rule the two read calls apply to their own URLs.
+  const target = httpsUrl(details.submitUrl);
   if (!target.ok) {
-    return {kind: 'unknown', detail: `refused the provider callback (${target.reason}): ${details.callbackUrl}; transfer ${txId} is on-chain and unreported`};
+    return {kind: 'unknown', detail: `refused the provider submission URL (${target.reason}): ${details.submitUrl}; transfer ${txId} is on-chain and unreported`};
   }
 
-  // The submission URL is the callback with its `/cb/` segment replaced by `/tx/`. Built as a
-  // string and re-parsed rather than mutated: `URL.pathname` is readonly under this project's TS
-  // lib. An absent `/cb/` segment is refused loudly — silently posting the proof to the callback
-  // itself would spend the one attempt on the wrong endpoint.
-  const path = target.url.pathname;
-  const at = path.lastIndexOf('/cb/');
-  if (at < 0) {
-    return {
-      kind: 'unknown',
-      detail: `${target.url.host} gave a callback with no /cb/ segment (${path}), so transfer ${txId} cannot be reported`,
-    };
-  }
   const q = new URLSearchParams(target.url.search);
   q.set('quote', details.quoteId);
   q.set('method', method);
   q.set('asset', asset);
   q.set('tx', txId);
-  const submitUrl = `${target.url.origin}${path.slice(0, at)}/tx/${path.slice(at + '/cb/'.length)}?${q.toString()}`;
+  const submitUrl = `${target.url.origin}${target.url.pathname}?${q.toString()}`;
 
   // EXACTLY ONE request. No loop, no retry, no second attempt on any outcome.
   let r: Response;
@@ -385,6 +383,12 @@ export type OcpTarget = {
   /** The earlier of the quote's expiry and the transfer instruction's, in epoch ms. Approving
    *  after it would burn the quote AFTER the funds moved, which is the worst outcome there is. */
   expiresAt: number;
+  /** The last instant Approve may be pressed: `expiresAt` minus the WHOLE sequence's worst case —
+   *  the rail's own budget (`ctx.sequenceBudgetMs`) plus `OCP_SUBMIT_TIMEOUT_MS`. "Has it expired
+   *  yet" is the wrong question for a one-shot: the funds move first and the single submission has
+   *  to reach a live quote, so a payment started with 30s left spends everything for nothing. The
+   *  countdown on the review counts down to THIS, because it is the deadline the payer can act on. */
+  payableUntil: number;
 };
 
 export type OcpResolveResult =
@@ -405,10 +409,22 @@ export type OcpResolveResult =
  * selected asset's own ledger (`ledgerToCurrency`), the destination must pass the same core
  * validator every other destination in the app passes, and the amount must be the quoted amount to
  * the raw unit. Any disagreement is refused loudly — never reconciled.
+ *
+ * The last check is TIME: a quote must have room for the whole sequence, not merely be unexpired
+ * (`ocpTimeRefusal`). See `OcpTarget.payableUntil`.
  */
 export async function resolveOcpScan(
   scan: {apiUrl: string; host: string},
-  ctx: {selected: SelectableAsset; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; nowMs: number},
+  ctx: {
+    selected: SelectableAsset;
+    assets: SelectableAsset[];
+    catalog: CurrencyDescriptor[];
+    nowMs: number;
+    /** The caller's rail worst case from Approve to a CONFIRMED on-chain reference, in ms. Passed
+     *  in rather than tabulated here because it is composed of that rail's own timeout constants
+     *  (the IC poll budget, the Solana send bound) and must move when they do. */
+    sequenceBudgetMs: number;
+  },
 ): Promise<OcpResolveResult> {
   const found = await fetchPaymentDetails(scan.apiUrl);
   if (found.kind === 'error') return {kind: 'refused', message: found.message};
@@ -433,6 +449,17 @@ export async function resolveOcpScan(
     return {kind: 'refused', message: M.pay.ocp.badDestination(scan.host)};
   }
 
+  // The EARLIER of the two deadlines the provider stated. They are separate numbers from separate
+  // calls, and signing against the later one would let a payment go out on a quote that has
+  // already lapsed.
+  const expiresAt = Math.min(details.quoteExpiresAt, uri.expiresAt);
+  const payableUntil = expiresAt - ctx.sequenceBudgetMs - OCP_SUBMIT_TIMEOUT_MS;
+  // Checked here as well as on the review, because the two reads above take real time: a quote that
+  // had room when it was minted may have none left by the time it is resolved, and a review the
+  // payer cannot act on is a dead end.
+  const late = ocpTimeRefusal({expiresAt, payableUntil}, ctx.nowMs);
+  if (late !== null) return {kind: 'refused', message: late};
+
   return {
     kind: 'ok',
     target: {
@@ -443,12 +470,24 @@ export async function resolveOcpScan(
       assetId: ctx.selected.id,
       to: dest.to,
       rawAmount: dest.rawAmount,
-      // The EARLIER of the two deadlines the provider stated. They are separate numbers from
-      // separate calls, and signing against the later one would let a payment go out on a quote
-      // that has already lapsed.
-      expiresAt: Math.min(details.quoteExpiresAt, uri.expiresAt),
+      expiresAt,
+      payableUntil,
     },
   };
+}
+
+/**
+ * The refusal a target's remaining time earns, or null when the whole sequence still fits.
+ *
+ * ONE mapping, shared by the resolver, both rails' Approve handlers and the review countdown, so
+ * the screen and the press can never disagree about whether a payment may still start. The two
+ * refusals are genuinely different facts and must not be collapsed: an EXPIRED quote is over, while
+ * a live one with too little runway is a price that is still on screen and still ticking — telling
+ * that payer "expired" would be a lie they can see is false.
+ */
+export function ocpTimeRefusal(target: {expiresAt: number; payableUntil: number}, nowMs: number): string | null {
+  if (nowMs >= target.expiresAt) return M.pay.ocp.quoteExpired;
+  return nowMs >= target.payableUntil ? M.pay.ocp.notEnoughTime : null;
 }
 
 /** Why the selected asset cannot pay this till, in the order the reasons matter to the user. Every

@@ -70,6 +70,12 @@ export type OcpRefusal =
   // — the provider's payment details —
   /** The step-2 body is missing or malforms a field the payment depends on. */
   | 'malformed-details'
+  /** The `callback` is well-formed https but carries no `/cb/` segment, so no submission URL can be
+   *  derived from it — this provider cannot be TOLD about a payment. Its own fact, and refused
+   *  BEFORE consent: discovering it after the transfer would mean irreversible funds moved with no
+   *  request ever issued, which is the loss path at its worst. Also its own INSTRUCTION: rescanning
+   *  yields the same callback, so "scan again" would be a dead end. */
+  | 'unreportable-callback'
   // — which offer this wallet can pay —
   /** The provider named a settlement method this wallet has no rail for. */
   | 'unknown-method'
@@ -100,7 +106,9 @@ export type IcpUriParse =
 export type SolanaUriParse =
   | {ok: true; to: string; amount: string}
   | Refused<'wrong-scheme' | 'malformed-uri' | 'bad-amount' | 'spl-token-unsupported'>;
-export type OcpDetailsParse = {ok: true; details: OcpDetails} | Refused<'malformed-details' | 'not-https'>;
+export type OcpDetailsParse =
+  | {ok: true; details: OcpDetails}
+  | Refused<'malformed-details' | 'not-https' | 'unreportable-callback'>;
 
 /** One asset amount as the provider states it. `amount` is a decimal string in DISPLAY units —
  *  exactly what the provider sent, normalised only in spelling (never rounded, never a `number`). */
@@ -125,10 +133,15 @@ export interface OcpTransferAmount {
  *  consumer can mistake it for something dpay verified — the SAME treatment a payment link's
  *  `label` gets (`lib/deepLink.ts`). */
 export interface OcpDetails {
-  /** The till's payment id — the final path segment of `callbackUrl`, which is the id the
-   *  submission path `/v1/lnurlp/tx/{paymentId}` names. Derived rather than read from a body field
-   *  so there is ONE source for it. */
-  paymentId: string;
+  /** Where the proof of an irreversible transfer will be reported: `callbackUrl` with its `/cb/`
+   *  segment swapped for `/tx/` (both forms are measured accepted; this one is derived from the
+   *  provider's OWN path rather than assembled from a hard-coded `/v1/lnurlp/tx/` prefix, so a
+   *  second OpenCryptoPay provider hosting the standard under a different layout still works).
+   *
+   *  DERIVED HERE, BEFORE CONSENT, ON PURPOSE. It is the one field whose absence cannot be
+   *  discovered late: the payer moves irreversible funds before the provider is told, so a callback
+   *  that yields no submission URL has to refuse the payment while nothing has moved. */
+  submitUrl: string;
   quoteId: string;
   /** Epoch ms. The quote lives 300s; a payment must be signed and submitted inside that window. */
   quoteExpiresAt: number;
@@ -430,9 +443,8 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
     return {ok: false, reason: 'malformed-details'};
   }
   if (cb.protocol !== 'https:') return {ok: false, reason: 'not-https'};
-  const segments = cb.pathname.split('/').filter(s => s.length > 0);
-  const paymentId = segments.length > 0 ? segments[segments.length - 1] : '';
-  if (paymentId.length === 0) return {ok: false, reason: 'malformed-details'};
+  const submitUrl = submissionUrlOf(cb);
+  if (submitUrl === null) return {ok: false, reason: 'unreportable-callback'};
 
   const quote = j.quote;
   if (quote === null || typeof quote !== 'object' || Array.isArray(quote)) return {ok: false, reason: 'malformed-details'};
@@ -469,7 +481,7 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
   return {
     ok: true,
     details: {
-      paymentId,
+      submitUrl,
       quoteId,
       quoteExpiresAt,
       callbackUrl,
@@ -478,6 +490,26 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
       transferAmounts,
     },
   };
+}
+
+/** The segment a provider's transfer-details callback is served under. Swapping it for `/tx/` is
+ *  how the submission URL is derived — measured accepted live, and the derivation is preferred over
+ *  the `hint`'s `/v1/lnurlp/tx/<id>` spelling because it reuses the PROVIDER'S own path instead of
+ *  hard-coding DFX's API layout into a wallet that any provider may serve. */
+const CALLBACK_SEGMENT = '/cb/';
+const SUBMIT_SEGMENT = '/tx/';
+
+/** The URL an on-chain proof will be reported to, or null when this callback cannot produce one.
+ *  Null is a REFUSAL the caller must act on before the payer consents — never a "try the callback
+ *  itself" fallback, which would spend the single submission attempt on the wrong endpoint. The
+ *  callback's own query survives, because it is the provider's and the submission adds to it. */
+function submissionUrlOf(cb: URL): string | null {
+  const path = cb.pathname;
+  const at = path.lastIndexOf(CALLBACK_SEGMENT);
+  if (at < 0) return null;
+  const id = path.slice(at + CALLBACK_SEGMENT.length);
+  if (id.length === 0) return null;
+  return `${cb.origin}${path.slice(0, at)}${SUBMIT_SEGMENT}${id}${cb.search}`;
 }
 
 /** The merchant name the provider CLAIMS, from ANY of its payload shapes. Extracted here — not

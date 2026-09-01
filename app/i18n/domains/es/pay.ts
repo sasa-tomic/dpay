@@ -88,6 +88,10 @@ export const payEs: PayMessages = {
       `dpay no puede pagar en esta caja. Acepta ${accepted}, y esta billetera no puede pagar ninguno de esos activos; dpay nunca convierte. Paga esta compra de otra forma.`,
     quoteExpired:
       'El precio de esta caja ha caducado: cada uno dura unos cinco minutos. Vuelve a escanear el código para obtener un precio nuevo.',
+    notEnoughTime:
+      'Este precio caduca demasiado pronto para pagarlo con seguridad. Tu dinero saldría antes de que se pueda avisar al proveedor de pagos del comercio, y después él rechazaría la venta. Vuelve a escanear el código para obtener un precio nuevo.',
+    unreportable: host =>
+      `${host} no le ha dado a dpay ninguna forma de informarle de un pago, así que pagar aquí te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no cambiará esto: pide al comercio otra forma de pago.`,
     checkingTill: 'Comprobando con el proveedor de pagos del comercio…',
     badCode:
       'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez y comprueba que no lo tape nada.',
@@ -119,8 +123,14 @@ export const payEs: PayMessages = {
       `Tu transferencia se realizó, pero el proveedor de pagos del comercio no la confirmó: no está pagada ni ha fallado. El dinero ha salido de tu billetera, así que no pagues otra vez. Muestra al comercio ${reference}: es la prueba de tu transferencia.`,
     submitRejected: reference =>
       `Tu transferencia se realizó, pero el proveedor de pagos del comercio rechazó la prueba, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale ${reference}.`,
+    submitTooLate: reference =>
+      `Tu transferencia se realizó, pero solo después de que este precio caducara, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale ${reference}: es la prueba de tu transferencia.`,
     transferUnknown:
       'dpay no pudo confirmar tu transferencia, así que el comercio no sabe nada de ella: no está pagada ni ha fallado. No pagues otra vez: abre «Transacciones» para ver si se realizó y, si fue así, muéstrasela al comercio.',
+    transferRefused: reason =>
+      `Tu transferencia no se realizó, así que no se ha pagado nada y tu dinero sigue en tu billetera: ${reason}. Vuelve a escanear el código para pagar en esta caja.`,
+    transferFailed:
+      'La red de Solana rechazó tu transacción, así que no se ha pagado nada: el importe sigue en tu billetera (se ha cobrado una pequeña comisión de red). Vuelve a escanear el código para intentarlo de nuevo.',
     claimedMerchant: 'Nombre indicado por el código: dpay no lo verifica.',
     providerHost: host => `Precio de ${host}`,
   },

@@ -28,6 +28,7 @@ jest.mock('../services/native', () => ({
 import {
   fetchPaymentDetails,
   fetchTransferUri,
+  ocpTimeRefusal,
   payAndReport,
   resolveOcpScan,
   submitProof,
@@ -108,6 +109,9 @@ const QUOTE_BURNED_404 = {
 const DETAILS: OcpQuoteRef = {
   quoteId: 'plq_ec214dddae51da4d',
   callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
+  // Derived by `parsePaymentDetails` from the callback above (proved in `opencryptopay.test.ts`);
+  // carried here as the parser hands it over, never re-derived at submission time.
+  submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e',
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -481,24 +485,23 @@ describe('submitProof', () => {
     expect(out.kind === 'unknown' && out.detail).toContain('HTTP 503');
   });
 
-  test('a callback URL with no /cb/ segment is unknown with the transaction id to quote, and sends nothing', async () => {
+  // This used to pin the DEFECT: the `/cb/` check that decides whether a proof can be reported AT
+  // ALL ran HERE, after the transfer. A provider whose callback carries no `/cb/` therefore made
+  // the funds move irreversibly and then issued no request at all. The check now lives in
+  // `parsePaymentDetails`, before consent (pinned in `opencryptopay.test.ts`, and end to end by
+  // `resolveOcpScan` below); what is left to pin here is that this function submits to the URL it
+  // was HANDED and re-derives nothing.
+  test('the submission goes to the URL the parser derived, and http on it still sends nothing', async () => {
+    // The submission URL is carried, not rebuilt — so a hand-written one is what gets called…
     const mock = installResponse(200, {});
-    const out = await submitProof(
-      {...DETAILS, callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e'},
-      'InternetComputer',
-      'VCHF',
-      '8168',
-    );
-    expect(out.kind).toBe('unknown');
-    expect(out.kind === 'unknown' && out.detail).toContain('no /cb/ segment');
-    expect(out.kind === 'unknown' && out.detail).toContain('8168');
-    expect(mock).not.toHaveBeenCalled();
-  });
+    await submitProof({...DETAILS, submitUrl: 'https://api.dfx.swiss/other/place/tx/xyz'}, 'InternetComputer', 'VCHF', '8168');
+    expect(calledUrl(mock).pathname).toBe('/other/place/tx/xyz');
 
-  test('a non-https callback is unknown with the transaction id to quote, and sends nothing', async () => {
-    const mock = installResponse(200, {});
+    // …and the https rule is still enforced at this boundary, because `OcpQuoteRef` is a plain
+    // structural input and this is the last point before an irreversible transfer is reported.
+    const blocked = installResponse(200, {});
     const out = await submitProof(
-      {...DETAILS, callbackUrl: 'http://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e'},
+      {...DETAILS, submitUrl: 'http://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e'},
       'InternetComputer',
       'VCHF',
       '8168',
@@ -506,7 +509,7 @@ describe('submitProof', () => {
     expect(out.kind).toBe('unknown');
     expect(out.kind === 'unknown' && out.detail).toContain('not-https');
     expect(out.kind === 'unknown' && out.detail).toContain('8168');
-    expect(mock).not.toHaveBeenCalled();
+    expect(blocked).not.toHaveBeenCalled();
   });
 });
 
@@ -539,8 +542,13 @@ const WALLET_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
   solanaUsdc: true,
 });
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
-/** Inside the recorded quote's 300s window (it expires at 14:29:42.646Z). */
+/** Inside the recorded quote's 300s window (it expires at 14:29:42.646Z), with room to spare for
+ *  the whole sequence: 102s of quote left against the 90s budget the tests below use. */
 const NOW = Date.parse('2026-09-01T14:28:00.000Z');
+/** A rail's worst case from Approve to a confirmed on-chain reference. 60s stands in for the SOL
+ *  rail's `SOL_SEND_TIMEOUT_MS`; the real value is the caller's, which is the point of the
+ *  parameter — the resolver adds `OCP_SUBMIT_TIMEOUT_MS` (30s) on top, so 90s is required here. */
+const SEQUENCE_MS = 60_000;
 
 function assetById(id: string): SelectableAsset {
   const a = WALLET_ASSETS.find(x => x.id === id);
@@ -549,7 +557,7 @@ function assetById(id: string): SelectableAsset {
 }
 
 function ctx(id: string, nowMs = NOW) {
-  return {selected: assetById(id), assets: WALLET_ASSETS, catalog: CATALOG, nowMs};
+  return {selected: assetById(id), assets: WALLET_ASSETS, catalog: CATALOG, nowMs, sequenceBudgetMs: SEQUENCE_MS};
 }
 
 describe('resolveOcpScan', () => {
@@ -570,6 +578,9 @@ describe('resolveOcpScan', () => {
     expect(out.target.rawAmount).toBe('100000000');
     // The EARLIER of the two deadlines the provider stated (here the quote's).
     expect(out.target.expiresAt).toBe(Date.parse('2026-09-01T14:29:42.646Z'));
+    // …minus the whole sequence's worst case: the rail's own budget plus the one-shot submission's
+    // timeout. This is the deadline the countdown shows and Approve is gated on.
+    expect(out.target.payableUntil).toBe(out.target.expiresAt - SEQUENCE_MS - OCP_SUBMIT_TIMEOUT_MS);
     expect(out.target.host).toBe('api.dfx.swiss');
     expect(out.target.details.claimedMerchantName).toBe('Test Shop');
     // The chosen method + asset are echoed back verbatim on the transfer-details call.
@@ -712,6 +723,67 @@ describe('resolveOcpScan', () => {
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.quoteExpired});
   });
 
+  // THE money-critical deadline. "Has it expired yet" is the wrong question for a one-shot: the
+  // funds move first and the single submission has to reach a LIVE quote, so a payment started with
+  // less than the sequence's worst case left spends everything and buys nothing. The countdown on
+  // the review invites exactly that press, which is why the runway — not the expiry — is the gate.
+  test('a quote that cannot fit the whole sequence is refused even though it has not expired', async () => {
+    const expiry = Date.parse('2026-09-01T14:29:42.646Z');
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    // Exactly 90s left of a 300s quote: still ticking, but the sequence's worst case would end at
+    // the very instant the price dies, so it is refused rather than started.
+    const out = await resolveOcpScan(SCAN, ctx('ic:7', expiry - SEQUENCE_MS - OCP_SUBMIT_TIMEOUT_MS));
+    // NOT "expired" — the payer can see the price still counting down, so that word would be a
+    // visible lie. Its own sentence, with the same next action.
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.notEnoughTime});
+    expect(M.pay.ocp.notEnoughTime).not.toBe(M.pay.ocp.quoteExpired);
+
+    // One millisecond more of runway and the same quote is payable: the boundary is exact, not a
+    // rounded cushion.
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const ok = await resolveOcpScan(SCAN, ctx('ic:7', expiry - SEQUENCE_MS - OCP_SUBMIT_TIMEOUT_MS - 1));
+    expect(ok.kind).toBe('ok');
+  });
+
+  test('the required runway tracks the rail budget it is given, not a fixed number', async () => {
+    // The whole point of `sequenceBudgetMs`: the IC rail's worst case is minutes longer than the
+    // Solana rail's, so a deadline hard-coded here would be wrong for one of them — and would stay
+    // wrong the day a timeout constant changes.
+    const expiry = Date.parse('2026-09-01T14:29:42.646Z');
+    const at = expiry - 120_000; // two minutes of quote left
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    expect((await resolveOcpScan(SCAN, {...ctx('ic:7', at), sequenceBudgetMs: 60_000})).kind).toBe('ok');
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    expect(await resolveOcpScan(SCAN, {...ctx('ic:7', at), sequenceBudgetMs: 100_000}))
+      .toEqual({kind: 'refused', message: M.pay.ocp.notEnoughTime});
+  });
+
+  test('a till whose callback yields no submission URL never reaches the payer at all', async () => {
+    // Finding 1, end to end: the funds must not move for a provider that could never be told about
+    // them. Refused BEFORE the review, with its own instruction — another scan gets the same
+    // callback, so "scan again" would be a dead end; the way out is another payment method.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    installRoutes([
+      {match: '/lnurlp/pl_', status: 200, body: {...DETAILS_200, callback: 'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e'}},
+    ]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.unreportable('api.dfx.swiss')});
+    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('unreportable-callback');
+    warn.mockRestore();
+  });
+
   test('a till with no charge on it names the merchant and what the cashier must do', async () => {
     installRoutes([{match: '/lnurlp/pl_', status: 404, body: NO_PENDING_404}]);
     const out = await resolveOcpScan(SCAN, ctx('ic:7'));
@@ -725,6 +797,30 @@ describe('resolveOcpScan', () => {
     ]);
     const out = await resolveOcpScan(SCAN, ctx('ic:7'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.providerRefused('api.dfx.swiss', 'Invalid method or asset')});
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// ocpTimeRefusal — the ONE approve gate, shared by the resolver, both rails and the countdown
+// ---------------------------------------------------------------------------------------------
+
+describe('ocpTimeRefusal', () => {
+  const AT = 1_800_000_000_000;
+
+  test('answers null only while the whole sequence still fits, and names which deadline passed', () => {
+    const target = {expiresAt: AT, payableUntil: AT - 90_000};
+    expect(ocpTimeRefusal(target, AT - 90_001)).toBeNull();
+    // The instant the runway is gone the press is refused, one full sequence BEFORE the quote dies.
+    expect(ocpTimeRefusal(target, AT - 90_000)).toBe(M.pay.ocp.notEnoughTime);
+    expect(ocpTimeRefusal(target, AT - 1)).toBe(M.pay.ocp.notEnoughTime);
+    // Past the quote itself, the honest word changes: nothing about this price is live any more.
+    expect(ocpTimeRefusal(target, AT)).toBe(M.pay.ocp.quoteExpired);
+  });
+
+  test('an expired quote is never reported as merely short of time', () => {
+    // Reachable when the provider's transfer instruction expires before the quote does: the two
+    // deadlines come from two different calls, and `expiresAt` is the earlier of them.
+    expect(ocpTimeRefusal({expiresAt: AT, payableUntil: AT - 90_000}, AT + 60_000)).toBe(M.pay.ocp.quoteExpired);
   });
 });
 

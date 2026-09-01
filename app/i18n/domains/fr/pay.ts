@@ -89,6 +89,10 @@ export const payFr: PayMessages = {
       `dpay ne peut pas payer à cette caisse. Elle accepte ${accepted}, et ce portefeuille ne peut payer aucun de ces actifs — dpay ne convertit jamais. Réglez cet achat autrement.`,
     quoteExpired:
       'Le prix de cette caisse a expiré — chacun tient environ cinq minutes. Scannez le code à nouveau pour obtenir un prix frais.',
+    notEnoughTime:
+      'Ce prix expire trop tôt pour être payé sans risque. Votre argent partirait avant que le prestataire de paiement du commerçant puisse en être informé, et il refuserait ensuite la vente. Scannez le code à nouveau pour obtenir un prix frais.',
+    unreportable: host =>
+      `${host} n’a donné à dpay aucun moyen de lui signaler un paiement : payer ici vous coûterait votre argent sans que la vente soit créditée. Rien n’a été payé. Scanner à nouveau n’y changera rien — demandez au commerçant un autre moyen de paiement.`,
     checkingTill: 'Vérification auprès du prestataire de paiement du commerçant…',
     badCode:
       'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',
@@ -120,8 +124,14 @@ export const payFr: PayMessages = {
       `Votre transfert est passé, mais le prestataire de paiement du commerçant ne l’a pas confirmé — ce n’est donc ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant ${reference}, c’est la preuve de votre transfert.`,
     submitRejected: reference =>
       `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}.`,
+    submitTooLate: reference =>
+      `Votre transfert est passé, mais seulement après l’expiration de ce prix : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}, c’est la preuve de votre transfert.`,
     transferUnknown:
       'dpay n’a pas pu confirmer votre transfert, le commerçant n’en sait donc rien — ce n’est ni payé ni échoué. Ne payez pas une seconde fois : ouvrez « Transactions » pour voir si le transfert est passé et, si oui, montrez-le au commerçant.',
+    transferRefused: reason =>
+      `Votre transfert n’est pas passé : rien n’a été payé et votre argent est toujours dans votre portefeuille — ${reason}. Scannez le code à nouveau pour payer à cette caisse.`,
+    transferFailed:
+      'Le réseau Solana a rejeté votre transaction : rien n’a été payé, le montant est toujours dans votre portefeuille (de petits frais de réseau ont été prélevés). Scannez le code à nouveau pour réessayer.',
     claimedMerchant: 'Nom fourni par le code — dpay ne le vérifie pas.',
     providerHost: host => `Prix de ${host}`,
   },

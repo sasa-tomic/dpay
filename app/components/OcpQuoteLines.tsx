@@ -15,25 +15,28 @@ import {M} from '../i18n';
  *     (`docs/specs/2026-09-01-opencryptopay-findings.md`, "Trust model").
  *   • That the merchant name is CLAIMED, not verified — the same posture a payment link's `label`
  *     gets (`lib/deepLink.ts` is the authority for it).
- *   • HOW LONG the price is good for. This is not decoration: approving after the quote lapses
- *     moves irreversible funds against a quote the provider will refuse, which is the single worst
- *     outcome the loss path has. `onExpired` fires once at the deadline so the parent can disable
- *     Approve while the payer is still looking at the screen.
+ *   • HOW LONG the price can still be ACTED ON. This is not decoration: approving too late moves
+ *     irreversible funds against a quote the provider will refuse, which is the single worst
+ *     outcome the loss path has. The countdown therefore runs to `payableUntil` — the last instant
+ *     Approve may be pressed (`OcpTarget.payableUntil`), not the quote's own expiry — because a
+ *     countdown that invites a press it cannot honour is the bug this component exists to prevent.
+ *     `onTooLate` fires once at that deadline so the parent can disable Approve while the payer is
+ *     still looking at the screen.
  *
  * The countdown reuses the request-QR expiry copy (`M.receive.validForMin` / `expiresIn`): the same
- * fact — this thing stops being valid at T — so it gets the same words, not a second set.
+ * fact — this thing stops being usable at T — so it gets the same words, not a second set.
  */
 export function OcpQuoteLines({
   host,
   claimedName,
-  expiresAt,
-  onExpired,
+  payableUntil,
+  onTooLate,
 }: {
   host: string;
   /** The provider's claimed merchant name, or null when it sent none (then nothing is claimed). */
   claimedName: string | null;
-  expiresAt: number;
-  onExpired: () => void;
+  payableUntil: number;
+  onTooLate: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -41,15 +44,15 @@ export function OcpQuoteLines({
     return () => clearInterval(id);
   }, []);
 
-  const remaining = Math.max(0, Math.floor((expiresAt - now) / 1000));
-  const expired = remaining === 0;
+  const remaining = Math.max(0, Math.floor((payableUntil - now) / 1000));
+  const tooLate = remaining === 0;
   useEffect(() => {
-    if (expired) onExpired();
-    // `onExpired` is an inline closure at every call site; the boolean gate is what makes this
+    if (tooLate) onTooLate();
+    // `onTooLate` is an inline closure at every call site; the boolean gate is what makes this
     // fire once, so re-running on a new closure identity would be noise (PayMode's prefill effect
     // takes the same shape for the same reason).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expired]);
+  }, [tooLate]);
 
   const minutes = Math.floor(remaining / 60);
   return (

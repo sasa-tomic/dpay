@@ -55,7 +55,11 @@ jest.mock('../components/SendSheet', () => ({
 // network). Here they are stubbed so this stays a component test: what it pins is the WIRING — that
 // a scanned till code lands on the review without signing, that Approve runs the payment through
 // `payAndReport` exactly once, and that each of its three outcomes renders the right honest screen.
+// `ocpTimeRefusal` is NOT stubbed: it is the module's ONE approve deadline, shared by the resolver,
+// the countdown and both rails, and a hand-written copy of it here would be a second rule that can
+// drift from the one under test.
 jest.mock('../services/opencryptopay', () => ({
+  ocpTimeRefusal: jest.requireActual<typeof import('../services/opencryptopay')>('../services/opencryptopay').ocpTimeRefusal,
   resolveOcpScan: jest.fn(),
   payAndReport: jest.fn(),
 }));
@@ -67,6 +71,7 @@ import {PayMode} from '../components/PayMode';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {buildSelectableAssets} from '../config/assets';
 import {POLL} from '../config/constants';
+import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
 import type {Req, Identity, PayIntent} from '../lib/types';
 import {M} from '../i18n';
 
@@ -225,6 +230,9 @@ beforeEach(() => {
   // identity-shaped so the share assertions can pin the exact payload.
   jest.mocked(prepareTransfer).mockReset().mockResolvedValue(PREPARED);
   jest.mocked(submitTransfer).mockReset().mockResolvedValue({kind: 'unknown'});
+  // Honest pending by default. Reset here rather than only where it is exercised: a value left over
+  // from a previous test would silently settle the NEXT test's hand-off out from under it.
+  jest.mocked(pollTransfer).mockReset().mockResolvedValue({kind: 'unknown'});
   jest.mocked(envelopeToQrPayload).mockReset().mockImplementation((hex: string) => `QR:${hex.slice(0, 8)}`);
 });
 
@@ -629,7 +637,7 @@ const TILL_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLV
 const TILL_PRINCIPAL = 'ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae';
 const OCP_TARGET: OcpTarget = {
   details: {
-    paymentId: 'pl_beeddb41cd4b6d9e',
+    submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e',
     quoteId: 'plq_ec214dddae51da4d',
     quoteExpiresAt: Date.now() + 300_000,
     callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
@@ -646,6 +654,9 @@ const OCP_TARGET: OcpTarget = {
   to: TILL_PRINCIPAL,
   rawAmount: '100',
   expiresAt: Date.now() + 300_000,
+  // A live price with room to spare. The gap to `expiresAt` is what the countdown shows and what
+  // Approve is gated on — see the deadline suite below.
+  payableUntil: Date.now() + 180_000,
 };
 
 /** The DEMO row, so the mounted PayMode's selected asset (currency 0) is in the list. */
@@ -782,6 +793,85 @@ describe('PayMode — OpenCryptoPay till', () => {
     expect(prepareTransfer).not.toHaveBeenCalled();
   });
 
+  // The countdown counts to the last instant Approve can be pressed — NOT to the quote's expiry.
+  // Showing the quote's own countdown invites a press the sequence cannot complete: the funds move
+  // first and the ONE proof submission then lands on a dead quote, spending everything for nothing.
+  test('the countdown runs to the payable deadline, not to the quote’s expiry', async () => {
+    const now = Date.now();
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: now + 300_000, payableUntil: now + 185_000},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+    // ~3 min of runway inside a 5 min quote. Showing the quote's own countdown would invite a press
+    // the sequence cannot complete — the funds move first and the ONE submission then lands on a
+    // dead quote.
+    expect(textByTestID(tree, 'ocp-expiry')).toBe(M.receive.validForMin(3));
+    expect(textByTestID(tree, 'ocp-expiry')).not.toBe(M.receive.validForMin(5));
+  });
+
+  test('the runway this rail asks for covers the poll budget it actually uses', async () => {
+    // Derived from what the component DOES, not from a copy of its arithmetic: whatever poll budget
+    // `submitTransfer` is given, the deadline handed to the resolver has to cover the submit plus
+    // all of those polls. A budget that undercounts them lets a payment start that cannot finish,
+    // which is the whole defect — and this stays true the day a timeout constant moves.
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    const send = jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>;
+    await send();
+
+    const opts = jest.mocked(submitTransfer).mock.calls[0][2];
+    const ctxArg = jest.mocked(resolveOcpScan).mock.calls[0][1];
+    expect(ctxArg.sequenceBudgetMs).toBeGreaterThanOrEqual(
+      IC_SUBMIT_TIMEOUT_MS + opts.attempts * (IC_READ_STATE_TIMEOUT_MS + opts.intervalMs),
+    );
+  });
+
+  test('a price with too little runway left disables Approve and says why — even though it has not expired', async () => {
+    // The exact state the countdown used to invite: still ticking, but no room for the whole
+    // sequence. The refusal must NOT say "expired" — the payer can see it counting down.
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: Date.now() + 30_000, payableUntil: Date.now() - 1_000},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(textByTestID(tree, 'review-err')).toBe(M.pay.ocp.notEnoughTime);
+    expect(tree.root.findAll(n => n.props && n.props.testID === 'btn-approve')[0].props.disabled).toBe(true);
+  });
+
+  test('a press that beats the countdown by a tick is still refused, and nothing is signed', async () => {
+    // The countdown ticks once a second, so the press has to re-check: a payment started in that
+    // window would move irreversible money against a price that can no longer be reported.
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: Date.now() + 30_000, payableUntil: Date.now() - 1_000},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    expect(payAndReport).not.toHaveBeenCalled();
+    expect(prepareTransfer).not.toHaveBeenCalled();
+    expect(textByTestID(tree, 'review-err')).toBe(M.pay.ocp.notEnoughTime);
+  });
+
+  test('a quote that is genuinely past its expiry says THAT, not "not enough time"', async () => {
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: Date.now() - 1, payableUntil: Date.now() - 120_000},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    expect(textByTestID(tree, 'review-err')).toBe(M.pay.ocp.quoteExpired);
+    expect(payAndReport).not.toHaveBeenCalled();
+  });
+
   test('a DAMAGED till code is named as one, without contacting any provider', async () => {
     const tree = mountTill();
     jest.mocked(DpayCore.decodeRequest).mockRejectedValue(new Error('not a 132-byte request'));
@@ -793,5 +883,172 @@ describe('PayMode — OpenCryptoPay till', () => {
 
     expect(texts(tree)).toContain(M.pay.ocp.badCode);
     expect(resolveOcpScan).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// An OpenCryptoPay transfer the IC rail could not resolve — the RECOVERABLE loss
+// ---------------------------------------------------------------------------------------------
+// The likeliest failure of a till payment is not a refusal: it is a flaky connection while the
+// transfer is already in consensus. The money moved, the provider was not told, the quote is still
+// alive and the block index is one more `pollTransfer` away — so throwing the prepared envelope
+// away turns the recoverable case into the unrecoverable one.
+//
+// `payAndReport` is stubbed with its OWN contract (report a settled send, never an unknown one), so
+// "was the provider told?" is answerable by looking at which calls' sends settled — and the
+// one-shot rule is checked by counting them.
+describe('PayMode — an unresolved till transfer stays recoverable', () => {
+  /** Every send verdict `payAndReport` was handed, in order. */
+  let sends: OcpSendResult[];
+
+  beforeEach(() => {
+    sends = [];
+    jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
+    jest.mocked(pollTransfer).mockReset().mockResolvedValue({kind: 'unknown'});
+    jest.mocked(payAndReport).mockReset().mockImplementation(async (_quote, _method, _asset, send) => {
+      const s = await send();
+      sends.push(s);
+      if (s.kind === 'settled') return {kind: 'paid'};
+      if (s.kind === 'refused') return {kind: 'not-paid', message: s.message};
+      return {kind: 'unresolved', message: M.pay.ocp.transferUnknown};
+    });
+  });
+
+  /** Approve a till payment whose submit leaves the outcome indefinite. */
+  async function approveIntoUnknown(tree: renderer.ReactTestRenderer) {
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'unknown'});
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    await act(async () => {}); // the claim's first re-poll tick
+  }
+
+  async function tick(tree: renderer.ReactTestRenderer) {
+    await act(async () => { jest.advanceTimersByTime(POLL.receiptPay); });
+    await act(async () => {});
+    return tree;
+  }
+
+  test('a transfer that turns out to have settled is reported — once — and the sale completes', async () => {
+    const tree = mountTill();
+    await approveIntoUnknown(tree);
+    // Indefinite: the provider was NOT told, so the one submission is still unspent.
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.transferUnknown);
+    expect(sends).toEqual([{kind: 'unknown'}]);
+
+    // One more poll of the SAME request_id — the envelope that used to be discarded — finds it.
+    jest.mocked(pollTransfer).mockResolvedValue({kind: 'settled', blockIndex: '8168'});
+    await tick(tree);
+
+    expect(sends[1]).toEqual({kind: 'settled', txId: '8168', reference: M.pay.ocp.ref.icBlock('8168')});
+    expect(jest.mocked(pollTransfer).mock.calls[0][0]).toEqual(PREPARED); // re-polled, never re-signed
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('∂1.00'));
+    expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+
+    // The claim is SPENT. `/tx` is granted exactly once in total, so no later tick may report again.
+    const reports = jest.mocked(payAndReport).mock.calls.length;
+    await tick(tree);
+    await tick(tree);
+    expect(jest.mocked(payAndReport).mock.calls.length).toBe(reports);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a transfer that turns out to have been REFUSED says nothing was paid, and tells nobody', async () => {
+    const tree = mountTill();
+    jest.mocked(pollTransfer).mockResolvedValue({kind: 'rejected', reason: 'Not enough balance'});
+    await approveIntoUnknown(tree);
+
+    // "Your money may be gone" was honest a moment ago and is a lie now: nothing moved. The screen
+    // says so and puts the payer back where they can actually pay.
+    expect(texts(tree)).toContain(M.pay.ocp.transferRefused('Not enough balance'));
+    expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
+    // The provider was never told about a transfer that never happened.
+    expect(sends).toEqual([{kind: 'unknown'}]);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a transfer that settles only AFTER the price died is not reported — the claim is worth more', async () => {
+    // Submitting against a dead quote is refused AND binds the transaction id to it, which is
+    // exactly what would stop the merchant crediting this payment by hand. So the block index is
+    // handed to the payer instead of being spent.
+    const base = Date.now();
+    let clock = base;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => clock);
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: base + 60_000, payableUntil: base + 30_000},
+    });
+    const tree = mountTill();
+    await approveIntoUnknown(tree);
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.transferUnknown);
+
+    clock = base + 61_000; // the price lapses while the app is still finding out what happened
+    jest.mocked(pollTransfer).mockResolvedValue({kind: 'settled', blockIndex: '8168'});
+    await tick(tree);
+
+    expect(sends).toEqual([{kind: 'unknown'}]); // the submission was NOT spent
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.submitTooLate(M.pay.ocp.ref.icBlock('8168')));
+    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('∂1.00'));
+    nowSpy.mockRestore();
+    act(() => { tree.unmount(); });
+  });
+
+  test('a settled transfer with no block index stays indefinite — there is nothing to report', async () => {
+    // The ledger named no block (an unnumbered duplicate): the provider verifies the identifier
+    // against the chain, so reporting an absent one would spend the attempt for nothing.
+    const tree = mountTill();
+    await approveIntoUnknown(tree);
+    jest.mocked(pollTransfer).mockResolvedValue({kind: 'settled', blockIndex: ''});
+    await tick(tree);
+
+    expect(sends).toEqual([{kind: 'unknown'}]);
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.transferUnknown);
+    act(() => { tree.unmount(); });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The unresolved outcome screen says ONE thing — and the same thing the Solana rail says
+// ---------------------------------------------------------------------------------------------
+describe('PayMode — the till outcome screen does not contradict itself', () => {
+  /** Mounted CoachTip elements for a key (the card itself renders only once the journey loads, so
+   *  the ELEMENT is what pins whether the surface asked for the tip at all). */
+  function tips(tree: renderer.ReactTestRenderer, tipKey: string) {
+    return tree.root.findAll(n => n.props && n.props.tipKey === tipKey);
+  }
+
+  test('an uncredited till payment never claims a merchant is about to confirm it', async () => {
+    // It used to render the offline hand-off's pending surface: "awaiting the merchant's
+    // confirmation" and a "check back here" tip, directly above a note saying the provider refused
+    // the proof and the sale was not credited — two contradictory statements on the payer's only
+    // record of a lost payment. Nobody is going to confirm this one.
+    const message = M.pay.ocp.submitRejected(M.pay.ocp.ref.icBlock('8168'));
+    jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
+    jest.mocked(payAndReport).mockReset().mockResolvedValue({kind: 'unresolved', message});
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(message);
+    // The two lines the Solana rail already shows for this identical outcome, and only those.
+    expect(texts(tree)).toContain(M.pay.sent('∂1.00'));
+    expect(texts(tree)).toContain(M.pay.toWho('Test Shop'));
+    expect(texts(tree)).not.toContain(M.pay.toWhoAwaiting('Test Shop'));
+    expect(tips(tree, 'pendingOutcome')).toHaveLength(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the OFFLINE hand-off keeps its own pending surface — the fix is scoped to the till outcome', async () => {
+    // The guard against over-correcting: a hand-off really is awaiting the merchant, and the
+    // "pending means unknown, check back here" tip is true there.
+    const tree = mountPay({online: false});
+    await scanToSign(tree, REQ); // auto-sign → the offline QR hand-off
+    pressByTestID(tree, 'btn-paid');
+
+    expect(texts(tree)).toContain(M.pay.toWhoAwaiting('Cafe'));
+    expect(tips(tree, 'pendingOutcome')).toHaveLength(1);
+    expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+    act(() => { tree.unmount(); });
   });
 });

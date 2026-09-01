@@ -250,11 +250,14 @@ describe('parseSolanaUri', () => {
 });
 
 describe('parsePaymentDetails', () => {
-  it('narrows the till’s answer and derives the payment id from the callback', () => {
+  it('narrows the till’s answer and derives the submission URL from the callback', () => {
     const parsed = parsePaymentDetails(detailsBody());
     if (!parsed.ok) throw new Error(`expected a parse, got ${parsed.reason}`);
     const d = parsed.details;
-    expect(d.paymentId).toBe('pl_beeddb41cd4b6d9e');
+    // RECORDED: the provider accepts the callback's `/cb/` segment swapped for `/tx/`. Derived here,
+    // at parse time, so a callback that cannot produce one refuses the payment BEFORE the payer
+    // consents — the alternative is irreversible funds moving with no request ever issued.
+    expect(d.submitUrl).toBe('https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e');
     expect(d.quoteId).toBe('q-8f31c2');
     expect(d.quoteExpiresAt).toBe(EXPIRES_AT_MS);
     expect(d.callbackUrl).toBe('https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e');
@@ -328,6 +331,29 @@ describe('parsePaymentDetails', () => {
       });
       expect(parsePaymentDetails(body)).toEqual({ok: false, reason: 'malformed-details'});
     }
+  });
+
+  it('refuses a callback that yields no submission URL — BEFORE anything can be paid', () => {
+    // The loss path's worst shape: a callback with no `/cb/` segment means a payment made against
+    // this till could never be reported. Discovering that after the transfer leaves irreversible
+    // funds on-chain with no request even issued, so it is refused here, at parse time, while
+    // nothing has moved. Its OWN reason, not `malformed-details`: rescanning yields the same
+    // callback, so the two facts do not share an instruction.
+    for (const callback of [
+      'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', // the segment is simply absent
+      'https://api.dfx.swiss/v1/lnurlp/cb/',                 // present, but names no till
+      'https://api.dfx.swiss/cb',                            // not a segment: no trailing slash
+      'https://api.dfx.swiss/',
+    ]) {
+      expect(parsePaymentDetails(detailsBody({callback}))).toEqual({ok: false, reason: 'unreportable-callback'});
+    }
+    // The provider's own query survives onto the submission URL — it belongs to the provider, and
+    // the submission only ADDS its four parameters to it.
+    const parsed = parsePaymentDetails(detailsBody({callback: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_x?tenant=zug'}));
+    expect(parsed).toEqual({
+      ok: true,
+      details: expect.objectContaining({submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_x?tenant=zug'}),
+    });
   });
 
   it('refuses a callback the wallet would have to call over http', () => {

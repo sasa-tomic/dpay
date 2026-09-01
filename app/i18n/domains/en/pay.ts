@@ -110,6 +110,14 @@ export type PayMessages = {
     /** The till takes nothing this wallet can pay — a true dead end for dpay, said plainly. */
     noPayableAsset: (accepted: string) => string;
     quoteExpired: string;
+    /** The price is still live but has too little time left for the whole sequence (move the funds,
+     *  then report them ONCE) to finish inside it. A DIFFERENT fact from `quoteExpired`: the
+     *  countdown is still on screen, so calling it expired would be visibly false. */
+    notEnoughTime: string;
+    /** The provider's `callback` yields no submission URL, so a payment made here could never be
+     *  reported (`unreportable-callback`). Its own instruction, not `badAnswer`'s: rescanning gets
+     *  the same callback, so "scan again" would be a dead end. */
+    unreportable: (host: string) => string;
     /** Shown while the two provider reads are in flight — up to half a minute of nothing, on a
      *  screen the payer just pointed at a QR code. */
     checkingTill: string;
@@ -147,10 +155,23 @@ export type PayMessages = {
     submitUnknown: (reference: string) => string;
     /** Funds moved; the provider refused the proof. Definitive, and still costs the payer. */
     submitRejected: (reference: string) => string;
+    /** The transfer turned out to have settled only AFTER the price expired, so the one submission
+     *  was deliberately not spent on a dead quote — burning it would also bind the transaction id
+     *  and take away the user's ability to claim the payment with the merchant. */
+    submitTooLate: (reference: string) => string;
     /** The TRANSFER's own outcome is unknown, so the provider was never told (calling it once is
      *  all we get — see the findings doc's loss path). Neither paid nor failed, and no reference
      *  exists to hand over yet. */
     transferUnknown: string;
+    /** A transfer that had been indefinite turns out to have DEFINITELY not happened: the ledger
+     *  refused it. Nothing left the wallet, so this is a relief, not a loss — and the payer needs
+     *  to know both that and what to do next. `reason` is the rail's own decoded refusal, which is
+     *  a FRAGMENT with no terminal punctuation (`M.rail.*`) — this sentence supplies its own. */
+    transferRefused: (reason: string) => string;
+    /** Solana included the transaction and it FAILED on-chain: the amount never left the wallet
+     *  (the network fee did). Definitive — the payer must pay again, which is the opposite of what
+     *  the unknown-outcome copy tells them. */
+    transferFailed: string;
     claimedMerchant: string;
     providerHost: (host: string) => string;
   };
@@ -280,6 +301,10 @@ export const payEn: PayMessages = {
       `dpay can’t pay this till. It takes ${accepted} — none of which this wallet can pay, and dpay never swaps. Pay this one another way.`,
     quoteExpired:
       'This till’s price has expired — each one lasts about five minutes. Scan the code again for a fresh price.',
+    notEnoughTime:
+      'This price runs out too soon to pay it safely. Your money would move before the merchant’s payment provider could be told, and it would then refuse the sale. Scan the code again for a fresh price.',
+    unreportable: host =>
+      `${host} gave dpay no way to report a payment back to it, so paying here would take your money without the sale being credited. Nothing has been paid. Scanning again won’t change this — ask the merchant for another way to pay.`,
     checkingTill: 'Checking with the merchant’s payment provider…',
     badCode:
       'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check that nothing is covering it.',
@@ -311,8 +336,14 @@ export const payEn: PayMessages = {
       `Your transfer went through, but the merchant’s payment provider didn’t confirm it — so this is neither paid nor failed. The money has left your wallet, so don’t pay again. Show the merchant ${reference}: it is the proof of your transfer.`,
     submitRejected: reference =>
       `Your transfer went through, but the merchant’s payment provider refused the proof of it, so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}.`,
+    submitTooLate: reference =>
+      `Your transfer went through, but only after this price expired — so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}: it is the proof of your transfer.`,
     transferUnknown:
       'dpay couldn’t confirm your transfer, so the merchant hasn’t been told about it — this is neither paid nor failed. Don’t pay again: open Transactions to see whether it went through, and show the merchant that payment if it did.',
+    transferRefused: reason =>
+      `Your transfer did not go through, so nothing was paid and your money is still in your wallet — ${reason}. Scan the code again to pay this till.`,
+    transferFailed:
+      'The Solana network rejected your transaction, so nothing was paid — the amount is still in your wallet (a small network fee was charged). Scan the code again to try once more.',
     claimedMerchant: 'Name given by the code — dpay doesn’t verify it.',
     providerHost: host => `Price from ${host}`,
   },
