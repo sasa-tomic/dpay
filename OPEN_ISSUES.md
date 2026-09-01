@@ -17,10 +17,10 @@
    relay's compiled catalog, see the spec addendum), 7 new e2e flows (95–101; `FLOWS.md` = 97),
    `just verify` EXIT=0 (96/96 e2e), jest 1160/1160, `just test-relay` 44/44, `just test-live`
    62/62, emulator device gates green, orchestrator-verifier state-matrix audit APPROVED. Two
-   founder tails remain open (moved to "Physical / outer-loop gates" below): the deploy (now
-   `just apk && just up` — the relay ships the catalog; the facade wasm upgrade is optional and
-   carries no registration) + funded mainnet transfer proof. ICPSwap buy/sell stays a separate
-   future phase; no automatic conversion.
+   founder tails are now BOTH closed: the deploy (`just apk && just up` — the relay ships the
+   catalog; the facade wasm upgrade is optional and carries no registration), and the funded
+   mainnet transfer proof, closed 2026-09-01 by a real VCHF round trip on a physical device with
+   real funds. ICPSwap buy/sell stays a separate future phase; no automatic conversion.
 2. ~~**Faucet 422 — OPEN-VERIFY.**~~ **CLOSED 2026-08-30.** The missing evidence now exists:
    founder ran `just faucet-verify --mint` against prod and all five legs PASSED — seed present and
    well-formed; seed derives the relay's signing principal
@@ -76,9 +76,9 @@
   fee 10_000). Online wallets get both rows from the relay's compiled catalog.
   NOTE: the deploy shipped branch HEAD, so `/api/v1/version` reports commit `3b36585` — the whole
   2026-08-30 send-to-address work is live in the WEB wallet too, not just the catalog rows.
-- **VCHF/ICP funded mainnet payment proof** — low-value app-signed VCHF + ICP mainnet transfers +
-  receiver exact-memo reconciliation. **BLOCKED on mainnet funds (hard external gate)**; production
-  payment completeness is not claimed for these assets until recorded.
+- ~~**VCHF/ICP funded mainnet payment proof**~~ **DONE 2026-09-01** — founder ran a real VCHF round
+  trip on a physical device with real funds. Production payment completeness IS claimed for these
+  assets.
 - **ckBTC live mainnet deposit→mint + withdrawal with real BTC** (old ###1/###8, low — final
   pre-pilot confidence checks after the testnet proofs).
 - **ckUSDC live Sepolia withdraw proof** (needs funded ckUSDC + ckETH gas; PocketIC already
