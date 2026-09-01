@@ -1,7 +1,7 @@
 import {parseDecimalToUnits} from './amount';
 import {bytesToUtf8} from './base64url';
 import type {AssetId} from './types';
-import type {SelectableAsset} from '../config/assets';
+import {tokenEq, type SelectableAsset} from '../config/assets';
 
 // --- OpenCryptoPay: the pure half (scanned code → a typed fact, or a NAMED refusal) ---------------
 // Paying a merchant till that shows a static OpenCryptoPay QR. Measured provider behaviour is
@@ -35,6 +35,8 @@ import type {SelectableAsset} from '../config/assets';
 //     everywhere else;
 //   • decide payability of a dpay asset — `isPayableAsset` (`config/catalog.ts`) does, on the
 //     catalog, before signing;
+//   • define when an outside party's token spelling names a wallet asset — `tokenEq`
+//     (`config/assets.ts`) does, beside the `linkToken` field it compares;
 //   • any I/O — the three provider calls are Unit B (`services/opencryptopay.ts`), and the `/tx`
 //     submission there is ONE-SHOT (see the findings doc's loss path).
 
@@ -532,10 +534,6 @@ const OCP_METHOD_RAIL: Record<string, SelectableAsset['protocol']> = {
   InternetComputer: 'ic',
   Solana: 'solana',
 };
-
-/** Case-insensitive token comparison — the same rule payment-link asset resolution uses, since both
- *  compare an outside party's spelling of a ledger token against `SelectableAsset.linkToken`. */
-const tokenEq = (a: string | null, b: string): boolean => a !== null && a.toLowerCase() === b.toLowerCase();
 
 /** Does a provider offer row — `{method, asset}` in the PROVIDER's spelling — name this wallet
  *  asset? The (rail, ledger token) pair, matched exactly as `selectPayableOffers` matches it, and

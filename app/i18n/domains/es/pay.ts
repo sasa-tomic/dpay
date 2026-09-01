@@ -97,6 +97,18 @@ export const payEs: PayMessages = {
       'No se pudo contactar con el proveedor de pagos del comercio. No se ha pagado nada. Comprueba tu conexión y vuelve a escanear.',
     badDestination: host =>
       `${host} respondió con una dirección de pago que no coincide con lo que elegiste, así que dpay se ha detenido. No se ha pagado nada: no pagues este código. Pide al comercio que muestre su propio código otra vez.`,
+    providerRefused: (host, detail) =>
+      `El proveedor de pagos del comercio (${host}) no ha aceptado este pago. No se ha pagado nada. Pide al comercio que registre la venta otra vez y vuelve a escanear el código. Si sigue fallando, muéstrale lo que dijo su proveedor: «${detail}».`,
+    providerFailed: (host, status) =>
+      `El proveedor de pagos del comercio (${host}) respondió con un error (${status}) y no dio ningún motivo. No se ha pagado nada. Espera un momento y vuelve a escanear el código; si sigue fallando, pide al comercio otra forma de pago.`,
+    badAnswer: (host, part) =>
+      `El proveedor de pagos del comercio (${host}) no envió ${part}, así que dpay no puede pagar en esta caja. No se ha pagado nada. Vuelve a escanear el código y avisa al comercio si sigue ocurriendo.`,
+    answerPart: {
+      body: 'una respuesta legible',
+      details: 'los datos de pago completos',
+      destination: 'una dirección de pago',
+      expiry: 'una fecha de caducidad legible',
+    },
     noPendingCharge: merchant =>
       `La caja de ${merchant} no tiene ningún cobro pendiente. Pide que registren la venta primero y vuelve a escanear el código.`,
     ref: {

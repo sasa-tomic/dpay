@@ -28,6 +28,7 @@ import {
   resolvePayLink,
   solanaUsdcAvailable,
   solanaUsdcCoherent,
+  tokenEq,
   type SelectableAsset,
 } from '../config/assets';
 import {assetLinkToken, BUNDLED_NETWORKS, displayName, icpCatalogOf, parseNetworkCatalog} from '../config/catalog';
@@ -584,6 +585,53 @@ describe('linkNetworkOf — the settlement chain a link must name', () => {
   });
   it('Solana rows settle on Solana', () => {
     expect(linkNetworkOf(assets.find(a => a.id === 'solana:USDC')!)).toBe('solana');
+  });
+});
+
+describe('tokenEq — the ONE definition of asset-token identity', () => {
+  // Collapsed 2026-09-01 from two copies (this module's and `lib/opencryptopay.ts`'s). It decides
+  // WHICH ASSET a payment link or a merchant till's offer names, so a second copy free to drift is
+  // a payment matched to the wrong asset. Covered directly here because the two callers reach only
+  // the tokens their own fixtures carry: the null and whitespace edges below are unreachable
+  // through `resolvePayLink`, which is where the drift would have hidden.
+  it('matches a token whatever case either side spells it in', () => {
+    // A link may be hand-typed and a provider spells `ckBTC`/`VCHF` however it likes.
+    expect(tokenEq('ckBTC', 'ckbtc')).toBe(true);
+    expect(tokenEq('ckbtc', 'CKBTC')).toBe(true);
+    expect(tokenEq('VCHF', 'VCHF')).toBe(true);
+  });
+
+  it('refuses a different token, and a token that merely starts the same', () => {
+    // Prefix leniency here would pay ckUSDT against a ckUSDC request.
+    expect(tokenEq('ckUSDC', 'ckUSDT')).toBe(false);
+    expect(tokenEq('ckBTC', 'ckBT')).toBe(false);
+    expect(tokenEq('BTC', 'ckBTC')).toBe(false);
+    expect(tokenEq('ICP', '')).toBe(false);
+  });
+
+  it('never matches an asset that has no link token — not even against an empty string', () => {
+    // `linkToken === null` means "nothing can name this asset in a link" (a row whose only name is
+    // a glyph). Matching it against anything would make an unnameable asset payable by accident.
+    expect(tokenEq(null, 'VCHF')).toBe(false);
+    expect(tokenEq(null, '')).toBe(false);
+    expect(tokenEq(null, 'null')).toBe(false);
+  });
+
+  it('does NOT trim: a token arriving with whitespace is a broken token, not a match', () => {
+    // Both sides are whitespace-free by construction (`assetLinkToken`'s charset gate; the OCP
+    // parser trims the provider's asset first). Repairing one here would hide the breakage
+    // upstream, and the thing being decided is which asset moves.
+    expect(tokenEq('VCHF', ' VCHF')).toBe(false);
+    expect(tokenEq(' VCHF', 'VCHF')).toBe(false);
+    expect(tokenEq('VCHF\n', 'VCHF')).toBe(false);
+  });
+
+  it('gives an out-of-contract `undefined` no silent "no match" branch', () => {
+    // THE edge the two collapsed versions disagreed on: one tested `!= null` (undefined absorbed as
+    // "no match"), the other `!== null`. `undefined` is not in the parameter type and no caller can
+    // produce it — `assetLinkToken` returns `string | null` — so a branch for it would be a
+    // fallback for a state the types forbid, hiding a malformed asset row instead of failing on it.
+    expect(() => tokenEq(undefined as unknown as string | null, 'VCHF')).toThrow(TypeError);
   });
 });
 

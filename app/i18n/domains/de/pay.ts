@@ -97,6 +97,18 @@ export const payDe: PayMessages = {
       'Der Zahlungsanbieter des Händlers war nicht erreichbar. Es wurde nichts bezahlt. Prüfe deine Verbindung und scanne erneut.',
     badDestination: host =>
       `${host} hat eine Zahlungsadresse geliefert, die nicht zu deiner Auswahl passt — dpay hat abgebrochen. Es wurde nichts bezahlt. Zahle diesen Code nicht; bitte den Händler, seinen eigenen Code erneut zu zeigen.`,
+    providerRefused: (host, detail) =>
+      `Der Zahlungsanbieter des Händlers (${host}) hat diese Zahlung nicht angenommen. Es wurde nichts bezahlt. Bitte den Händler, den Verkauf erneut zu buchen, und scanne dann den Code. Wenn es weiter fehlschlägt, zeig ihm, was sein Anbieter gemeldet hat: „${detail}“.`,
+    providerFailed: (host, status) =>
+      `Der Zahlungsanbieter des Händlers (${host}) hat mit einem Fehler geantwortet (${status}) und keinen Grund genannt. Es wurde nichts bezahlt. Warte einen Moment und scanne den Code erneut; wenn es weiter fehlschlägt, bitte den Händler um eine andere Zahlungsmöglichkeit.`,
+    badAnswer: (host, part) =>
+      `Der Zahlungsanbieter des Händlers (${host}) hat ${part} geliefert, deshalb kann dpay an dieser Kasse nicht zahlen. Es wurde nichts bezahlt. Scanne den Code erneut und sag dem Händler Bescheid, wenn es weiter passiert.`,
+    answerPart: {
+      body: 'keine lesbare Antwort',
+      details: 'keine vollständigen Zahlungsdaten',
+      destination: 'keine Zahlungsadresse',
+      expiry: 'keine lesbare Gültigkeitsdauer',
+    },
     noPendingCharge: merchant =>
       `An der Kasse von ${merchant} steht kein Betrag offen. Bitte das Personal, den Verkauf zuerst zu buchen, und scanne dann erneut.`,
     ref: {

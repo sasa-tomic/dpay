@@ -17,6 +17,17 @@
 // are read with the local `readJson` rather than relay.ts's `readJsonOrEmpty`, because that helper
 // answers `{}` on a parse failure — a default this module must never take: an unreadable body is a
 // state the caller has to see, not one to paper over.
+//
+// WHERE THE WORDS COME FROM. Every string that can reach the SCREEN is `M.pay.ocp.*` — the app has
+// four locales and no runtime fallback, so an English sentence returned from here is an English
+// sentence a German payer reads. Two consequences run through the file:
+//   • the provider's own error sentence is never the whole message. It is genuine diagnostic value
+//     (it is what the payer repeats to the merchant) and is therefore kept, QUOTED inside
+//     `M.pay.ocp.providerRefused` — localized framing says what happened and what to do next, the
+//     provider's English stays visibly the provider's;
+//   • an English string is allowed only where it can reach nothing but `console.warn`
+//     (`OcpSubmitResult.detail`, the warnings beside each refusal). Logs are read by whoever is
+//     debugging, and a translated log is a log that cannot be grepped.
 import {
   claimedMerchantNameOf,
   offerNamesAsset,
@@ -56,12 +67,17 @@ export type OcpTransferUriResult =
   | {kind: 'ok'; uri: string; expiresAt: number}
   | {kind: 'error'; message: string};
 
+/** The submission's outcome. `detail` is a DIAGNOSTIC, not copy: `payAndReport` logs it and shows
+ *  the payer `M.pay.ocp.submitRejected` / `submitUnknown` instead, because after the money has moved
+ *  the only useful instruction is "don't pay again, quote this reference" — which is the same
+ *  sentence whichever way the provider failed. It stays English on purpose: it is read in a console
+ *  by whoever is debugging, and a localized log is a log that cannot be grepped. NEVER RENDER IT. */
 export type OcpSubmitResult =
   | {kind: 'accepted'}
   /** A definitive provider refusal: HTTP 4xx carrying a readable body. */
-  | {kind: 'rejected'; message: string}
+  | {kind: 'rejected'; detail: string}
   /** Timeout / transport / unreadable body — the transfer may well have happened. Honest pending. */
-  | {kind: 'unknown'; message: string};
+  | {kind: 'unknown'; detail: string};
 
 /** Read calls happen BEFORE any money moves, so a tight bound is safe: the user can just re-scan. */
 export const OCP_READ_TIMEOUT_MS = 15000;
@@ -105,32 +121,50 @@ function isPaymentLinkBody(json: unknown): boolean {
   return o.tag === 'payRequest' || typeof o.displayName === 'string';
 }
 
+/** Why a provider URL cannot be called. A CODE, not a sentence — the same discipline the pure half
+ *  (`lib/opencryptopay.ts`) applies to every refusal, and the reason this module can hand the payer
+ *  localized copy while handing the console an English diagnostic for the same fact. */
+type ProviderUrlRefusal = 'not-a-url' | 'not-https';
+
 /** Parse a provider URL and refuse anything that is not https. A scanned LNURL names an arbitrary
  *  host and the step-2 body names its own callback, so both are attacker-controlled strings; the
  *  callback in particular is where a transaction id gets reported, and reporting it over cleartext
  *  is a downgrade a wallet must not perform. Enforced here, at this module's own network boundary,
  *  because this is the last point before the request leaves the device. */
-function httpsUrl(raw: string): {ok: true; url: URL} | {ok: false; reason: string} {
+function httpsUrl(raw: string): {ok: true; url: URL} | {ok: false; reason: ProviderUrlRefusal} {
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    return {ok: false, reason: `Not a usable provider address: ${raw}. Re-scan the merchant's code.`};
+    return {ok: false, reason: 'not-a-url'};
   }
-  if (url.protocol !== 'https:') {
-    return {
-      ok: false,
-      reason: `Refused a ${url.protocol}// provider address (${url.host}). OpenCryptoPay must be https — re-scan the merchant's code.`,
-    };
-  }
+  if (url.protocol !== 'https:') return {ok: false, reason: 'not-https'};
   return {ok: true, url};
 }
 
-/** Describe a non-OK response for the user: the provider's own sentence when it gave one, otherwise
- *  the status and the host that produced it. Never a bare "something went wrong". */
+/** The payer's copy for an unusable provider address — the SAME two sentences the Pay screens
+ *  already show when `parseOcpScan` refuses a scanned code for these two exact reasons
+ *  (`M.pay.ocp.notHttps` / `badCode` in PayMode + SolPayMode). One fact, one sentence: whether the
+ *  unusable address came off the sticker or out of the provider's own `callback`, what the payer
+ *  must do is identical — dpay won't open it, so ask the merchant to show their own code again. */
+function providerUrlMessage(reason: ProviderUrlRefusal): string {
+  return reason === 'not-https' ? M.pay.ocp.notHttps : M.pay.ocp.badCode;
+}
+
+/** Describe a non-OK response for the payer: the provider's own sentence QUOTED inside localized
+ *  framing when it gave one, otherwise the localized "it failed and gave no reason". The provider's
+ *  sentence is kept because it is the one thing worth repeating to the merchant, and framed rather
+ *  than shown bare because it is English prose about the provider's internals — not an instruction
+ *  dpay can stand behind, and not something a German payer should meet as the whole message. */
 function failureMessage(host: string, status: number, body: {ok: true; json: unknown} | {ok: false}): string {
-  if (!body.ok) return `${host} answered HTTP ${status} with an unreadable body.`;
-  return providerMessage(body.json) ?? `${host} answered HTTP ${status} without giving a reason.`;
+  const said = body.ok ? providerMessage(body.json) : null;
+  if (said === null) {
+    console.warn(`opencryptopay: ${host} answered HTTP ${status} with no readable reason`);
+    // `String(status)` at the call site, never in the catalog: an HTTP status is an identifier, and
+    // a locale-aware number formatter would spell 502 with a separator in some languages.
+    return M.pay.ocp.providerFailed(host, String(status));
+  }
+  return M.pay.ocp.providerRefused(host, said);
 }
 
 /** Step 2 — the live quote and what the till is charging. `timeout=0` asks for the current charge
@@ -144,7 +178,10 @@ function failureMessage(host: string, status: number, body: {ok: true; json: unk
  *  They are told apart by whether the body is the payment-link payload. */
 export async function fetchPaymentDetails(apiUrl: string): Promise<OcpDetailsResult> {
   const target = httpsUrl(apiUrl);
-  if (!target.ok) return {kind: 'error', message: target.reason};
+  if (!target.ok) {
+    console.warn(`opencryptopay: refusing provider address (${target.reason}): ${apiUrl}`);
+    return {kind: 'error', message: providerUrlMessage(target.reason)};
+  }
   target.url.searchParams.set('timeout', '0');
 
   let r: Response;
@@ -163,10 +200,22 @@ export async function fetchPaymentDetails(apiUrl: string): Promise<OcpDetailsRes
     return {kind: 'no-pending', claimedMerchantName: claimedMerchantNameOf(body.json)};
   }
   if (!r.ok) return {kind: 'error', message: failureMessage(target.url.host, r.status, body)};
-  if (!body.ok) return {kind: 'error', message: `${target.url.host} answered with an unreadable body. Scan again.`};
+  if (!body.ok) return {kind: 'error', message: M.pay.ocp.badAnswer(target.url.host, M.pay.ocp.answerPart.body)};
 
   const parsed = parsePaymentDetails(body.json);
-  if (!parsed.ok) return {kind: 'error', message: parsed.reason};
+  if (!parsed.ok) {
+    // The parser's refusal is a CODE, and codes are not copy. `not-https` is its own fact — the
+    // provider's `callback` would have to be called over cleartext — and gets the sentence the
+    // payer already sees for an insecure scanned code; anything else means the answer is not a
+    // payment this wallet can read. The code itself goes to the console, where it is diagnosable.
+    console.warn(`opencryptopay: ${target.url.host} sent a body this wallet cannot use (${parsed.reason})`);
+    return {
+      kind: 'error',
+      message: parsed.reason === 'not-https'
+        ? M.pay.ocp.notHttps
+        : M.pay.ocp.badAnswer(target.url.host, M.pay.ocp.answerPart.details),
+    };
+  }
   return {kind: 'ok', details: parsed.details};
 }
 
@@ -184,7 +233,10 @@ export async function fetchTransferUri(
   asset: string,
 ): Promise<OcpTransferUriResult> {
   const target = httpsUrl(details.callbackUrl);
-  if (!target.ok) return {kind: 'error', message: target.reason};
+  if (!target.ok) {
+    console.warn(`opencryptopay: refusing provider callback (${target.reason}): ${details.callbackUrl}`);
+    return {kind: 'error', message: providerUrlMessage(target.reason)};
+  }
   target.url.searchParams.set('quote', details.quoteId);
   target.url.searchParams.set('method', method);
   target.url.searchParams.set('asset', asset);
@@ -200,24 +252,26 @@ export async function fetchTransferUri(
 
   const body = await readJson(r);
   if (!r.ok) return {kind: 'error', message: failureMessage(target.url.host, r.status, body)};
-  if (!body.ok) return {kind: 'error', message: `${target.url.host} answered with an unreadable body. Scan again.`};
+  if (!body.ok) return {kind: 'error', message: M.pay.ocp.badAnswer(target.url.host, M.pay.ocp.answerPart.body)};
 
+  const host = target.url.host;
   const o = body.json as {uri?: unknown; expiryDate?: unknown; blockchain?: unknown};
   if (typeof o.blockchain !== 'string' || o.blockchain !== method) {
-    return {
-      kind: 'error',
-      message: `${target.url.host} answered for ${String(o.blockchain)} when ${method} was requested. Refusing — don't pay this code.`,
-    };
+    // Answering for another chain IS answering with a destination the payer did not choose — the
+    // same fact `badDestination` names, and the same red flag. The echo goes to the console.
+    console.warn(`opencryptopay: ${host} answered for ${String(o.blockchain)} when ${method}/${asset} was requested`);
+    return {kind: 'error', message: M.pay.ocp.badDestination(host)};
   }
   if (typeof o.uri !== 'string' || o.uri.length === 0) {
-    return {kind: 'error', message: `${target.url.host} gave no payment address for ${asset} on ${method}. Scan again.`};
+    console.warn(`opencryptopay: ${host} gave no payment address for ${asset} on ${method}`);
+    return {kind: 'error', message: M.pay.ocp.badAnswer(host, M.pay.ocp.answerPart.destination)};
   }
-  if (typeof o.expiryDate !== 'string') {
-    return {kind: 'error', message: `${target.url.host} gave no expiry for this quote. Scan again.`};
-  }
-  const expiresAt = Date.parse(o.expiryDate);
+  // Missing and unreadable are ONE fact for the payer — dpay cannot tell how long this price is
+  // good for, so it will not sign against it. The raw value is a console diagnostic.
+  const expiresAt = typeof o.expiryDate === 'string' ? Date.parse(o.expiryDate) : NaN;
   if (!Number.isFinite(expiresAt)) {
-    return {kind: 'error', message: `${target.url.host} gave an unreadable expiry (${o.expiryDate}). Scan again.`};
+    console.warn(`opencryptopay: ${host} gave no usable expiry for this quote (${String(o.expiryDate)})`);
+    return {kind: 'error', message: M.pay.ocp.badAnswer(host, M.pay.ocp.answerPart.expiry)};
   }
   return {kind: 'ok', uri: o.uri, expiresAt};
 }
@@ -234,8 +288,9 @@ export async function fetchTransferUri(
  *
  *  Consequently the outcome mapping is deliberately asymmetric:
  *   - 2xx with a readable body → accepted.
- *   - 4xx with a readable body → rejected: a definitive refusal, whose sentence the user is shown
- *     alongside the block index so they can claim the payment with the merchant.
+ *   - 4xx with a readable body → rejected: a definitive refusal. Its sentence is a `detail` for the
+ *     console — the payer gets `M.pay.ocp.submitRejected`, which names the reference they can claim
+ *     the payment with, because that is the only thing they can act on once the money has moved.
  *   - anything else — timeout, transport failure, 5xx, an unreadable body on ANY status → unknown.
  *  A 2xx whose body cannot be read is `unknown` rather than `accepted` on purpose: a false
  *  "unknown" costs the user a pending screen they can resolve with the merchant, while a false
@@ -247,7 +302,9 @@ export async function submitProof(
   txId: string,
 ): Promise<OcpSubmitResult> {
   const target = httpsUrl(details.callbackUrl);
-  if (!target.ok) return {kind: 'unknown', message: `${target.reason} The transfer is on-chain — quote your transaction id (${txId}) to the merchant.`};
+  if (!target.ok) {
+    return {kind: 'unknown', detail: `refused the provider callback (${target.reason}): ${details.callbackUrl}; transfer ${txId} is on-chain and unreported`};
+  }
 
   // The submission URL is the callback with its `/cb/` segment replaced by `/tx/`. Built as a
   // string and re-parsed rather than mutated: `URL.pathname` is readonly under this project's TS
@@ -258,7 +315,7 @@ export async function submitProof(
   if (at < 0) {
     return {
       kind: 'unknown',
-      message: `${target.url.host} gave a callback with no /cb/ segment (${path}), so the payment can't be reported. The transfer is on-chain — quote your transaction id (${txId}) to the merchant.`,
+      detail: `${target.url.host} gave a callback with no /cb/ segment (${path}), so transfer ${txId} cannot be reported`,
     };
   }
   const q = new URLSearchParams(target.url.search);
@@ -273,27 +330,24 @@ export async function submitProof(
   try {
     r = await fetchWithTimeout(submitUrl, undefined, OCP_SUBMIT_TIMEOUT_MS);
   } catch (e) {
-    return {
-      kind: 'unknown',
-      message: `Couldn't confirm with ${target.url.host} (${errText(e)}). Your transfer is on-chain — quote transaction ${txId} to the merchant. Don't send it again.`,
-    };
+    return {kind: 'unknown', detail: `${target.url.host} never answered (${errText(e)}); transfer ${txId} is on-chain and unreported`};
   }
 
   const body = await readJson(r);
   if (!body.ok) {
     return {
       kind: 'unknown',
-      message: `${target.url.host} answered HTTP ${r.status} with an unreadable body. Your transfer is on-chain — quote transaction ${txId} to the merchant. Don't send it again.`,
+      detail: `${target.url.host} answered HTTP ${r.status} with an unreadable body; transfer ${txId} is on-chain and unreported`,
     };
   }
   if (r.status >= 400 && r.status < 500) {
-    return {kind: 'rejected', message: providerMessage(body.json) ?? `${target.url.host} refused the payment with HTTP ${r.status} and gave no reason.`};
+    return {
+      kind: 'rejected',
+      detail: providerMessage(body.json) ?? `${target.url.host} refused transfer ${txId} with HTTP ${r.status} and gave no reason`,
+    };
   }
   if (!r.ok) {
-    return {
-      kind: 'unknown',
-      message: `${target.url.host} answered HTTP ${r.status}. Your transfer is on-chain — quote transaction ${txId} to the merchant. Don't send it again.`,
-    };
+    return {kind: 'unknown', detail: `${target.url.host} answered HTTP ${r.status}; transfer ${txId} is on-chain and unreported`};
   }
   return {kind: 'accepted'};
 }
@@ -526,7 +580,7 @@ export async function payAndReport(
   if (reported.kind === 'accepted') return {kind: 'paid'};
   // The provider's own sentence is diagnostic, not instruction: the user needs to know the money is
   // gone and which reference proves it, which is what the copy says.
-  console.warn(`opencryptopay: submission ${reported.kind} for tx ${sent.txId}: ${reported.message}`);
+  console.warn(`opencryptopay: submission ${reported.kind} for tx ${sent.txId}: ${reported.detail}`);
   return {
     kind: 'unresolved',
     message: reported.kind === 'rejected'

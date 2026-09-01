@@ -271,8 +271,29 @@ export function prettyNetwork(slug: string): string {
     .join(' ');
 }
 
-/** Case-insensitive token match (ASCII tokens only — see `assetLinkToken`). */
-const tokenEq = (a: string | null, b: string) => a != null && a.toLowerCase() === b.toLowerCase();
+/**
+ * Does an OUTSIDE party's spelling of a ledger token (`b`) name this wallet asset's `linkToken`
+ * (`a`)? The ONE definition of asset-token identity, owned here because this module owns
+ * `SelectableAsset.linkToken` and `assetLinkToken` produces it — the rule belongs beside the field
+ * it compares. Exported for `lib/opencryptopay.ts`, which matches a merchant provider's asset
+ * spelling against the same field: two definitions of "which asset is this" is two ways to pay the
+ * wrong one, so there is exactly one (collapsed 2026-09-01).
+ *
+ * CASE-INSENSITIVE, because a link may be hand-typed and a provider spells `ckBTC`/`VCHF` however
+ * it likes — ASCII tokens only, guaranteed by `assetLinkToken`'s own charset gate.
+ *
+ * NOT trimmed and not otherwise normalised: both sides are whitespace-free by construction
+ * (`assetLinkToken` rejects anything outside its token charset; the OCP parser trims the provider's
+ * asset before it gets here), so a token arriving with whitespace means something upstream is
+ * broken and must fail its own way out, not be quietly repaired into a match. Leniency here would
+ * be leniency about WHICH ASSET MOVES.
+ *
+ * `a === null` means the asset is not linkable at all, so nothing names it. `undefined` is not in
+ * the contract and gets no branch of its own: the two collapsed versions differed exactly there
+ * (this one tested `!= null`, the OCP one `!== null`), and a defensive `!= null` would silently
+ * absorb a malformed asset row as "no match" — a fallback for a state the types forbid.
+ */
+export const tokenEq = (a: string | null, b: string): boolean => a !== null && a.toLowerCase() === b.toLowerCase();
 
 /** Resolve a parsed payment link against the wallet's visible assets + full catalog. PURE. */
 export function resolvePayLink(

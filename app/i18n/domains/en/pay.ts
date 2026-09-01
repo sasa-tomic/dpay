@@ -117,9 +117,27 @@ export type PayMessages = {
     notHttps: string;
     providerUnreachable: string;
     /** The provider answered the payment step with something dpay will not sign: a destination on
-     *  another ledger, an unreadable address, or an amount that is not the one quoted. Nothing has
-     *  moved — this is a refusal BEFORE the money, and a red flag worth naming as one. */
+     *  another ledger, an unreadable address, an amount that is not the one quoted, or a settlement
+     *  chain other than the one the payer chose. Nothing has moved — this is a refusal BEFORE the
+     *  money, and a red flag worth naming as one. */
     badDestination: (host: string) => string;
+    /** The provider REFUSED and said why, in its own words. That sentence is written by a company
+     *  dpay does not control, in its own language and vocabulary ("Payment link not found",
+     *  "Invalid method or asset"), so it is never spoken as dpay's own instruction — but it is the
+     *  one thing the payer can repeat to the merchant, so it is not thrown away either. The
+     *  localized half says what happened and what to do; `detail` is QUOTED after it. Nothing has
+     *  been paid at this point. */
+    providerRefused: (host: string, detail: string) => string;
+    /** The provider failed with a status and nothing to quote. `status` arrives ALREADY a string
+     *  (the catalog never formats numbers — and an HTTP status must never pick up a locale's
+     *  thousands separator). */
+    providerFailed: (host: string, status: string) => string;
+    /** The provider answered, but the answer is missing or unreadable exactly where the payment
+     *  needs it. `part` names the piece — same "name the broken part" shape as `link.part`, so one
+     *  sentence serves every incomplete answer instead of four near-identical ones. */
+    badAnswer: (host: string, part: string) => string;
+    /** The pieces of a provider answer a payment depends on (composed into `badAnswer`). */
+    answerPart: {body: string; details: string; destination: string; expiry: string};
     noPendingCharge: (merchant: string) => string;
     /** How each rail names the proof of a transfer, composed into the two keys below (the
      *  `link.part` pattern) so one sentence serves both rails without either being described in
@@ -271,6 +289,18 @@ export const payEn: PayMessages = {
       'Couldn’t reach the merchant’s payment provider. Nothing has been paid. Check your connection and scan again.',
     badDestination: host =>
       `${host} answered with a payment address that doesn’t match what you chose, so dpay stopped. Nothing has been paid — don’t pay this code. Ask the merchant to show their own code again.`,
+    providerRefused: (host, detail) =>
+      `The merchant’s payment provider (${host}) wouldn’t take this payment. Nothing has been paid. Ask the merchant to ring the sale up again, then scan the code. If it keeps failing, show them what their provider said: “${detail}”.`,
+    providerFailed: (host, status) =>
+      `The merchant’s payment provider (${host}) answered with an error (${status}) and gave no reason. Nothing has been paid. Wait a moment and scan the code again; if it keeps failing, ask the merchant for another way to pay.`,
+    badAnswer: (host, part) =>
+      `The merchant’s payment provider (${host}) didn’t send ${part}, so dpay can’t pay this till. Nothing has been paid. Scan the code again, and tell the merchant if it keeps happening.`,
+    answerPart: {
+      body: 'a readable answer',
+      details: 'complete payment details',
+      destination: 'a payment address',
+      expiry: 'a readable expiry time',
+    },
     noPendingCharge: merchant =>
       `${merchant}’s till has no charge waiting. Ask the cashier to ring up the sale first, then scan the code again.`,
     ref: {

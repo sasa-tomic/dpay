@@ -98,6 +98,18 @@ export const payFr: PayMessages = {
       'Impossible de joindre le prestataire de paiement du commerçant. Rien n’a été payé. Vérifiez votre connexion et scannez à nouveau.',
     badDestination: host =>
       `${host} a répondu avec une adresse de paiement qui ne correspond pas à votre choix : dpay s’est arrêté. Rien n’a été payé — ne payez pas ce code. Demandez au commerçant de montrer son propre code à nouveau.`,
+    providerRefused: (host, detail) =>
+      `Le prestataire de paiement du commerçant (${host}) n’a pas accepté ce paiement. Rien n’a été payé. Demandez au commerçant d’enregistrer la vente à nouveau, puis scannez le code. Si l’échec persiste, montrez-lui ce que son prestataire a répondu : « ${detail} ».`,
+    providerFailed: (host, status) =>
+      `Le prestataire de paiement du commerçant (${host}) a répondu par une erreur (${status}) sans en donner la raison. Rien n’a été payé. Patientez un instant et scannez le code à nouveau ; si l’échec persiste, demandez au commerçant un autre moyen de paiement.`,
+    badAnswer: (host, part) =>
+      `Le prestataire de paiement du commerçant (${host}) n’a pas envoyé ${part} : dpay ne peut pas payer à cette caisse. Rien n’a été payé. Scannez le code à nouveau, et signalez-le au commerçant si cela se reproduit.`,
+    answerPart: {
+      body: 'de réponse lisible',
+      details: 'de données de paiement complètes',
+      destination: 'd’adresse de paiement',
+      expiry: 'de date d’expiration lisible',
+    },
     noPendingCharge: merchant =>
       `La caisse de ${merchant} n’a aucun montant en attente. Demandez que la vente soit enregistrée d’abord, puis scannez le code à nouveau.`,
     ref: {
