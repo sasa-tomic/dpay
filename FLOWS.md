@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **106 flows**
-> (105 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **107 flows**
+> (106 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (27) · offline (10) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (28) · offline (10) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -65,6 +65,7 @@ wire (1) · onboard (13) · pay (27) · offline (10) · deposit (8) · withdraw 
 | 103 | pay-link-refused | A payment link naming the wrong chain, an unknown asset, or a damaged field is refused with an instruction the payer can act on — never a guessed asset and never a silent dead end. | pay-link, fail-closed, wrong-network, honest-instructions |
 | 108 | sol-transactions | A Solana transaction appears in the Transactions tab: the SOL rail history is polled through the RPC seam, merged with the IC rail by timestamp, and rendered by the one Ledger — SOL row in SOL units with its short counterparty, the IC faucet row still in ∂, and a filter chip per rail. | sol-history, ledger, transactions, mixed-rail, ledger-filter, sol-tab-ia |
 | 109 | scan-link-and-address | The Pay camera classifies what it read: a payment-link QR opens the pre-filled review (no auto-sign), a bare IC account opens Send to address with the destination filled + route disclosed, and unrecognised input keeps the honest "not a payment code" refusal. | scan-fallback, pay-link, send-to-address, error-handling, input-validation |
+| 111 | opencryptopay-till | Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (provider host, full destination, countdown, claimed merchant name) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote. | opencryptopay, scan-fallback, explicit-approve, claimed-name, loss-path, unresolved-outcome, one-shot-submit, honest-instructions, fail-closed |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
@@ -72,7 +73,7 @@ wire (1) · onboard (13) · pay (27) · offline (10) · deposit (8) · withdraw 
 | 28 | ckusdc-request | ckUSDC chip + 0.05 amount → request QR encodes currency 2 + 50000 raw (6-dec); readout '0.050000 USDC' (no $0.05). | ckusdc-merchant-create, request-asset-picker, multi-currency, 6-decimal, byte-exact |
 | 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/signed-envelope/ledger-settle on the IC rail (BigInt codec, uleb128 + u128 ledger, decimal strings). | exact-amount, decimal-transport, u64, bigint-codec |
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review '0.050000 USDC', byte-exact raw, app-signed icrc1_transfer settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
-| 36 | bad-qr | Scanning/pasting garbage (non-base64 + wrong-length) surfaces a friendly 'This isn't't a dpay payment code' error; review never mounts; scan surface re-arms. | bad-qr, malformed, error-handling, input-validation |
+| 36 | bad-qr | Three unpayable codes in a row (non-base64, a bech32-damaged OpenCryptoPay till code, a wrong-length base64) each surface their OWN honest error; the review never mounts; and after every refusal the scanner REMOUNTS (mount counter advances) so the next, different code is genuinely read rather than swallowed. | bad-qr, malformed, error-handling, input-validation, rescan |
 | 43 | decimal-edges | 8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec ckETH (display-TRUNCATED to 6, never rounded) amounts render with exact decimals on the sign surface (no rounding, no sci-notation, no trailing-zero drift). | decimal, format, ckbtc, ckerc20, 18-decimal, display-decimals |
 | 49 | deeplink-request | A shared /wallet/pay/<recipient> link opens the pay review pre-filled with the exact asset, amount and destination account (no auto-approve), and Approve settles it. | pay-link, url-routing, prefill, pay-review |
 | 50 | deeplink-receipt | merchant treats dpay:pay as a trigger; a forged proof before settlement never flips Received — only the exact nonce-bound ledger row does; never routes to Pay. | deeplink, receipt-link, rail-proof, receive, handback, forgery |

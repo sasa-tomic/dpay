@@ -19,6 +19,14 @@ import {useEffect, useRef} from 'react';
 const SCAN_HOOK = '__DPAY_TEST_SCAN';
 type ScanListener = (payload: string) => void;
 const listeners = new Set<ScanListener>();
+// MONOTONIC count of listener REGISTRATIONS — never decremented, so it distinguishes "the same
+// <QrScanner> is still mounted" from "it unmounted and a fresh one took its place". The live
+// `__DPAY_TEST_SCAN_COUNT` cannot: both read 1. That distinction is the whole contract behind
+// scanning a SECOND code after a refusal — QrScanner fires once per mount (`fired.current`), so a
+// payload pushed into an already-fired listener is SILENTLY SWALLOWED and the flow would merely
+// re-read the first error. `36-bad-qr` waits for this number to advance before injecting its next
+// code, which turns "we hope it re-armed" into proof that it did.
+let generation = 0;
 
 function installGlobalHook() {
   if (typeof window === 'undefined') return;
@@ -78,6 +86,7 @@ export function useCodeScanner(opts: { codeTypes: string[]; onCodeScanned: (code
       try { cb.current.onCodeScanned?.([{value: payload}]); } catch { /* app-side error; swallow */ }
     };
     listeners.add(listener);
+    generation += 1;
     installGlobalHook(); // idempotent — re-installs if the page reloaded the global
     // The cleanup contract: remove THIS listener when <QrScanner> unmounts. Without it every mount
     // (and formerly every render) leaked a listener + its closure for the whole session.
@@ -92,3 +101,5 @@ export function useCodeScanner(opts: { codeTypes: string[]; onCodeScanned: (code
 // Test observability: the live count of registered scan listeners. A mount/unmount cycle of
 // <QrScanner> must return to its prior count (cleanup contract) — `17-scan-cleanup` asserts this.
 ;(window as any).__DPAY_TEST_SCAN_COUNT = () => listeners.size;
+// The remount witness (see `generation` above): strictly increasing, one per <QrScanner> mount.
+;(window as any).__DPAY_TEST_SCAN_GEN = () => generation;
