@@ -106,7 +106,6 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   useEffect(() => {
     return () => {
       if (wcUriRef.current !== null) {
-        // eslint-disable-next-line @typescript-eslint/no-floating-promises -- fire-and-forget teardown; disconnectWalletConnect swallows internally
         import('../walletconnect')
           .then(({disconnectWalletConnect}) => disconnectWalletConnect())
           .catch(() => { /* best-effort: a teardown import failure must not crash unmount */ });

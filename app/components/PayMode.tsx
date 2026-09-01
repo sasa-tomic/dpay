@@ -473,7 +473,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     return () => { alive = false; clearInterval(id); };
     // `reset`/`refuseScan` are stable inline closures over setState; re-running on their identity
     // would restart the interval on every render (the qr reconcile effect above is shaped the same).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, ocpClaim, identity]);
 
   // The sign path (parameterized: the camera path auto-signs the FRESHLY decoded intent before the

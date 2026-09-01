@@ -27,7 +27,7 @@ goes wrong, and whether they can recover.
 | 12 | MED-LOW | The Solana OCP review has no balance gate; the IC one does. Fails safe, but is a rail divergence on a money surface. | OPEN |
 | 13 | LOW | Navigating away mid-flight drops the `unresolved` message — the block index that is the user's sole proof — into a no-op `setState`. Pre-existing pattern, materially worse here. | OPEN |
 | 14 | LOW | The review shows the *scanned* host, but the proof is sent to the *callback* host, which is a different string from a different source and may differ. | OPEN |
-| 15 | HIGH | Found after this review, as the mirror of #3: an indefinite **Solana** transfer discarded `sendSol`'s broadcast signature, so a broadcast-then-confirm-timeout — money on chain, provider never told — was unrecoverable on that rail. | fixed — uncommitted at the time of writing; replace with the hash on commit |
+| 15 | HIGH | Found after this review, as the mirror of #3: an indefinite **Solana** transfer discarded `sendSol`'s broadcast signature, so a broadcast-then-confirm-timeout — money on chain, provider never told — was unrecoverable on that rail. | fixed — `3cd0ab7` |
 
 ## Verified clean (do not re-litigate without new evidence)
 

@@ -608,7 +608,6 @@ export const S = buildStyles(LIGHT);
  *  (window.matchMedia). Safe under jest (mocked Appearance → null → light). */
 function initialSchemeIsDark(): boolean {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Appearance = require('react-native').Appearance;
     if (Appearance && typeof Appearance.getColorScheme === 'function') {
       return Appearance.getColorScheme() === 'dark';

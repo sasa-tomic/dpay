@@ -122,7 +122,6 @@ describe('applyLocale — the live switch', () => {
     // beside German separators (or the reverse) is exactly the misreading this prevents.
     applyLocale(null, 'de-DE');
     expect(M.wallet.tab.pay).toBe(de.wallet.tab.pay);
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     expect(require('../lib/format').usd('100000')).toContain('1.000,00');
   });
 });

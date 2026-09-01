@@ -59,7 +59,6 @@ export function useHotkeys(handlers: Record<string, () => void>, opts?: {ignoreI
     g.addEventListener('keydown', onKey);
     return () => { g.removeEventListener?.('keydown', onKey); };
     // Subscribe once; `handlers` + `opts` are read live via refs so inline closures always dispatch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }
 

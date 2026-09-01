@@ -86,7 +86,6 @@ describe('dual theme: applyPalette', () => {
   });
 
   test('glyphFor follows the applied theme', () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const {glyphFor} = require('../components/AssetGlyph');
     // Fixture mirrors config/assets.ts DEMO shape (see __tests__/icons.test.tsx).
     const demo = {
