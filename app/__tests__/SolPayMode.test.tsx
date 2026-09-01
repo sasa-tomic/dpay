@@ -433,6 +433,8 @@ const TILL_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLV
 const OCP_TARGET: OcpTarget = {
   details: {
     submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e',
+    // Equal to the scanned host by construction — see the IC twin in PayMode.test.tsx.
+    proofHost: 'api.dfx.swiss',
     quoteId: 'plq_ec214dddae51da4d',
     quoteExpiresAt: Date.now() + 300_000,
     callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',

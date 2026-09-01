@@ -1,5 +1,6 @@
 import {parseDecimalToUnits} from './amount';
 import {bytesToUtf8} from './base64url';
+import {clampLinkText, sanitiseDisplayText} from './deepLink';
 import type {AssetId} from './types';
 import {tokenEq, type SelectableAsset} from '../config/assets';
 
@@ -61,6 +62,12 @@ export type OcpRefusal =
   | 'wrong-scheme'
   /** Right scheme, wrong shape (missing query, unexpected path, repeated parameter). */
   | 'malformed-uri'
+  /** The URI carries a query parameter this parser does not know. Its OWN reason, and a REFUSAL
+   *  rather than something to ignore: a parameter the wallet drops is an instruction the provider
+   *  gave and the payer never saw. `…?to=<principal>&subaccount=abcd` is the case that costs money
+   *  — ignoring `subaccount` pays the owner's DEFAULT account, i.e. a different account than the
+   *  one the URI named, which is exactly the silent redirect this module refuses everywhere else. */
+  | 'unexpected-parameter'
   /** The amount is missing or is not a decimal number. Never coerced to 0. */
   | 'bad-amount'
   /** A Solana URI naming an SPL token. The Solana leg ships native SOL only, so a token URI is
@@ -102,10 +109,10 @@ export type OcpScan =
   | Refused<'not-lnurl' | 'malformed-lnurl' | 'bad-checksum' | 'not-a-url' | 'not-https'>;
 export type IcpUriParse =
   | {ok: true; ledger: string; to: string; amount: string}
-  | Refused<'wrong-scheme' | 'malformed-uri' | 'bad-amount'>;
+  | Refused<'wrong-scheme' | 'malformed-uri' | 'unexpected-parameter' | 'bad-amount'>;
 export type SolanaUriParse =
   | {ok: true; to: string; amount: string}
-  | Refused<'wrong-scheme' | 'malformed-uri' | 'bad-amount' | 'spl-token-unsupported'>;
+  | Refused<'wrong-scheme' | 'malformed-uri' | 'unexpected-parameter' | 'bad-amount' | 'spl-token-unsupported'>;
 export type OcpDetailsParse =
   | {ok: true; details: OcpDetails}
   | Refused<'malformed-details' | 'not-https' | 'unreportable-callback'>;
@@ -142,6 +149,12 @@ export interface OcpDetails {
    *  discovered late: the payer moves irreversible funds before the provider is told, so a callback
    *  that yields no submission URL has to refuse the payment while nothing has moved. */
   submitUrl: string;
+  /** The host `submitUrl` (and therefore the provider's `callback`) points at: where an irreversible
+   *  transfer's proof gets reported, and where the destination address came from. Carried as its own
+   *  field because a CONSUMER must be able to compare it against the host the code was scanned from
+   *  without re-parsing a URL — the caller refuses a payment whose two hosts differ
+   *  (`services/opencryptopay.ts`), which is what makes the single host the review shows honest. */
+  proofHost: string;
   quoteId: string;
   /** Epoch ms. The quote lives 300s; a payment must be signed and submitted inside that window. */
   quoteExpiresAt: number;
@@ -149,9 +162,15 @@ export interface OcpDetails {
   /** The merchant name the PROVIDER claims. Null when it sent none — a missing name never blocks a
    *  payment (the review screen still shows the provider host and the full destination). */
   claimedMerchantName: string | null;
-  /** What the till asked for in its own unit (e.g. CHF 1) — display context for the review, never
-   *  the thing that moves: the asset amounts in `transferAmounts` are what gets paid. */
-  requestedAmount: OcpAssetAmount;
+  /** What the till asked for in ITS OWN unit (e.g. CHF 1) — the merchant's price tag, and the only
+   *  thing on the review a payer can check against the printed price: `0.0000162 BTC` means nothing
+   *  on its own. It is the PROVIDER's number, shown as claimed and never as dpay's (dpay does not
+   *  quote and does not convert), and it never moves: `transferAmounts` is what gets paid.
+   *
+   *  Null when absent or unreadable, exactly like `claimedMerchantName` and for the same reason —
+   *  it is display context, and display context must never refuse a payment. (It used to: this was
+   *  a hard refusal of the whole payment on a field nothing read.) */
+  requestedAmount: OcpAssetAmount | null;
   transferAmounts: OcpTransferAmount[];
 }
 
@@ -337,14 +356,43 @@ const ICP_URI_SCHEME = 'icp:';
 const ICP_TRANSFER_METHOD = 'transfer';
 const SOLANA_URI_SCHEME = 'solana:';
 
+/** The ONLY query parameters each destination URI may carry. Anything else is refused, never
+ *  ignored — see `unexpected-parameter`, and `hasUnknownParam` for why that is not pedantry.
+ *
+ *  ICP: `to` names the account and `amount` names the value; there is no third field this wallet
+ *  understands, and `subaccount` (the one a real wallet might be tempted to accept) would name an
+ *  account this app's `icrc1_transfer` does not address.
+ *
+ *  Solana: `amount` only. Solana Pay also defines `spl-token`, `reference`, `memo`, `label` and
+ *  `message`, and NONE of them may be silently dropped here:
+ *   • `spl-token` gets its own louder refusal below (it contradicts the selected asset);
+ *   • `reference` is a read-only account the transaction MUST carry for the payee to find the
+ *     payment — a transfer built without it is one the merchant's own tooling cannot match;
+ *   • `memo` demands an SPL Memo instruction this rail does not build, so honouring it is not
+ *     something the wallet can do and ignoring it changes what the provider receives;
+ *   • `label` / `message` are display-only in Solana Pay, but they are stranger-supplied text this
+ *     review does not render — accepting one means the payer approves a URI carrying words they
+ *     were never shown. The measured provider sends none of them (findings doc), so refusing costs
+ *     a conversation while accepting-and-ignoring costs the payment. */
+const ICP_URI_PARAMS = ['to', 'amount'];
+const SOLANA_URI_PARAMS = ['amount'];
+
+/** True when the query carries a parameter outside `allowed`. FAIL-CLOSED on purpose: this module
+ *  advertises that a destination it cannot fully read is refused, and a parser that reads the two
+ *  fields it knows and drops the rest is exactly the fail-open this module says it is not. */
+function hasUnknownParam(params: Map<string, string>, allowed: string[]): boolean {
+  for (const key of params.keys()) if (!allowed.includes(key)) return true;
+  return false;
+}
+
 /**
  * Parse `icp:<ledger>/transfer?to=<principal>&amount=<decimal>`.
  *
  * The path's method segment is checked against `transfer` exactly: the URI tells the wallet which
  * ledger call to make, and anything other than a plain transfer is a call this wallet will not
- * perform on a stranger's say-so. The principal is NOT validated here — the caller runs the core
- * validator, so a mistyped destination is refused by the same code that refuses one from a payment
- * link. Pure, total, never throws.
+ * perform on a stranger's say-so. Likewise the query is closed, not sampled (`ICP_URI_PARAMS`). The
+ * principal is NOT validated here — the caller runs the core validator, so a mistyped destination
+ * is refused by the same code that refuses one from a payment link. Pure, total, never throws.
  */
 export function parseIcpUri(uri: string): IcpUriParse {
   const t = typeof uri === 'string' ? uri.trim() : '';
@@ -358,6 +406,7 @@ export function parseIcpUri(uri: string): IcpUriParse {
   }
   const params = queryParams(rest.slice(q + 1));
   if (params === null) return {ok: false, reason: 'malformed-uri'};
+  if (hasUnknownParam(params, ICP_URI_PARAMS)) return {ok: false, reason: 'unexpected-parameter'};
   const to = params.get('to') ?? '';
   if (to.length === 0) return {ok: false, reason: 'malformed-uri'};
   const amount = params.get('amount') ?? '';
@@ -373,8 +422,10 @@ export function parseIcpUri(uri: string): IcpUriParse {
  * transfer this rail signs, and the live provider omits that parameter even for USDC — so its
  * presence is a contradiction, not an instruction. And a destination containing `/` or `:` is
  * Solana Pay's transaction-REQUEST form (`solana:https://…`), an entirely different interaction
- * that must never be mistaken for a transfer. The address itself is not validated here; the Solana
- * rail's own validator does that. Pure, total, never throws.
+ * that must never be mistaken for a transfer. Every OTHER Solana Pay parameter is refused as well
+ * (`SOLANA_URI_PARAMS` says why each one), because ignoring a field is the provider giving an
+ * instruction the payer never sees. The address itself is not validated here; the Solana rail's own
+ * validator does that. Pure, total, never throws.
  */
 export function parseSolanaUri(uri: string): SolanaUriParse {
   const t = typeof uri === 'string' ? uri.trim() : '';
@@ -386,7 +437,10 @@ export function parseSolanaUri(uri: string): SolanaUriParse {
   if (to.length === 0 || to.includes('/') || to.includes(':')) return {ok: false, reason: 'malformed-uri'};
   const params = queryParams(rest.slice(q + 1));
   if (params === null) return {ok: false, reason: 'malformed-uri'};
+  // Checked BEFORE the generic unknown-parameter refusal: a token URI is a specific contradiction
+  // with its own explanation, and collapsing it into "a parameter I don't know" would lose that.
   if (params.has('spl-token')) return {ok: false, reason: 'spl-token-unsupported'};
+  if (hasUnknownParam(params, SOLANA_URI_PARAMS)) return {ok: false, reason: 'unexpected-parameter'};
   const amount = params.get('amount') ?? '';
   if (!RE_DECIMAL_AMOUNT.test(amount)) return {ok: false, reason: 'bad-amount'};
   return {ok: true, to, amount};
@@ -413,6 +467,50 @@ function queryParams(qs: string): Map<string, string> | null {
   return out;
 }
 
+// --- the provider's deadlines (step 2's quote expiry, step 3's transfer-instruction expiry) -----
+
+/** The ONE spelling this wallet reads a provider deadline in: an RFC 3339 UTC instant, seconds
+ *  mandatory, up to milliseconds optional, `Z` mandatory. Exactly what the live provider sends
+ *  ("2026-09-01T14:50:04.660Z" — findings doc, measured), and nothing else. */
+const RE_UTC_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
+
+/**
+ * A provider deadline as epoch ms, or null when it is not the one spelling above.
+ *
+ * NOT `Date.parse`. `Date.parse` accepts a long, partly implementation-defined list of spellings,
+ * and one of them is the money bug: `"2026-09-01 14:50:04"` (a space, no `Z`) is read by V8 as
+ * DEVICE-LOCAL time, so a phone set to UTC+14 believes a quote that died hours ago is still live —
+ * and this deadline is what decides whether the one-shot submission is spent at all. `+02:00` and a
+ * bare `2026-09-01` are refused for the same reason they were never sent: an unrecognised deadline
+ * is a fact the payer must be told (the screen says the provider gave no readable expiry), never a
+ * number to guess at.
+ *
+ * The instant is computed with `Date.UTC` and then read back, so it is engine-independent (no
+ * fallback to any legacy parser) and rolled-over components are refused rather than accepted:
+ * `2026-02-30T…` would silently become 2 March, which is a different deadline than the one sent.
+ * One implementation, used by both provider deadlines (`services/opencryptopay.ts` reads step 3's
+ * `expiryDate` with it) — the leniency this replaced existed twice. Pure, total, never throws.
+ */
+export function parseProviderInstant(v: unknown): number | null {
+  if (typeof v !== 'string') return null;
+  const m = RE_UTC_INSTANT.exec(v);
+  if (m === null) return null;
+  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number);
+  // "1-3 digits, milliseconds" — `.6` is 600ms, not 6ms. Padded, never truncated.
+  const ms = m[7] === undefined ? 0 : Number(m[7].padEnd(3, '0'));
+  const at = Date.UTC(year, month - 1, day, hour, minute, second, ms);
+  if (!Number.isFinite(at)) return null;
+  const d = new Date(at);
+  const sameInstant =
+    d.getUTCFullYear() === year
+    && d.getUTCMonth() === month - 1
+    && d.getUTCDate() === day
+    && d.getUTCHours() === hour
+    && d.getUTCMinutes() === minute
+    && d.getUTCSeconds() === second;
+  return sameInstant ? at : null;
+}
+
 // --- the provider's payment details (step 2) ----------------------------------------------------
 
 /**
@@ -421,8 +519,9 @@ function queryParams(qs: string): Map<string, string> | null {
  * STRICT AND WHOLE: a body missing the quote, the callback or the transfer amounts — or carrying a
  * single unreadable asset amount — is refused entirely. Keeping the readable half of a payment
  * response would put a shortened list of options on screen with no explanation of what was dropped,
- * which is exactly the silent failure this codebase does not allow. The merchant NAME is the one
- * exception: it is display text, so its absence yields `null` rather than a refusal.
+ * which is exactly the silent failure this codebase does not allow. The two DISPLAY fields are the
+ * exceptions — the merchant name and the till's own price both yield `null` rather than a refusal,
+ * because refusing a payment over a line of context buys the payer nothing.
  *
  * The callback must be `https` for the same reason the scanned code must: it is the URL the wallet
  * will call with the proof of an irreversible transfer.
@@ -451,13 +550,11 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
   const q = quote as Record<string, unknown>;
   const quoteId = typeof q.id === 'string' ? q.id.trim() : '';
   if (quoteId.length === 0) return {ok: false, reason: 'malformed-details'};
-  // ISO-8601 instant → epoch ms. One accepted spelling: guessing between seconds, milliseconds and
-  // a date string is precisely the coercion that turns a live quote into an expired one (or worse).
-  const quoteExpiresAt = typeof q.expiration === 'string' ? Date.parse(q.expiration) : NaN;
-  if (!Number.isFinite(quoteExpiresAt)) return {ok: false, reason: 'malformed-details'};
-
-  const requestedAmount = parseAssetAmount(j.requestedAmount);
-  if (requestedAmount === null) return {ok: false, reason: 'malformed-details'};
+  // ONE accepted spelling, enforced (`parseProviderInstant`) rather than described: guessing between
+  // seconds, milliseconds, a local-time date string and a date is precisely the coercion that turns
+  // a long-expired quote into one this wallet believes is live.
+  const quoteExpiresAt = parseProviderInstant(q.expiration);
+  if (quoteExpiresAt === null) return {ok: false, reason: 'malformed-details'};
 
   const list = j.transferAmounts;
   if (!Array.isArray(list) || list.length === 0) return {ok: false, reason: 'malformed-details'};
@@ -482,11 +579,12 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
     ok: true,
     details: {
       submitUrl,
+      proofHost: cb.host,
       quoteId,
       quoteExpiresAt,
       callbackUrl,
       claimedMerchantName: claimedMerchantNameOf(json),
-      requestedAmount,
+      requestedAmount: parseAssetAmount(j.requestedAmount),
       transferAmounts,
     },
   };
@@ -512,16 +610,34 @@ function submissionUrlOf(cb: URL): string | null {
   return `${cb.origin}${path.slice(0, at)}${SUBMIT_SEGMENT}${id}${cb.search}`;
 }
 
-/** The merchant name the provider CLAIMS, from ANY of its payload shapes. Extracted here — not
- *  inline in `parsePaymentDetails` — because the provider sends the same `displayName` on a body
- *  this parser REFUSES: the "no charge waiting" 404 carries the payment-link payload without a
- *  quote, and the screen still names the merchant on it (`services/opencryptopay.ts`). One
- *  extraction rule, two callers; never verified, always rendered as claimed. */
+/** Marks a name the cap CUT. Without it a truncation is indistinguishable from the whole name, and
+ *  the payer would be told they are paying "Migros Bahnhofstrass" — a different merchant than the
+ *  one the string actually named. Costs 3 bytes past the cap, on the display copy only. */
+const NAME_TRUNCATED_MARK = '…';
+
+/**
+ * The merchant name the provider CLAIMS, from ANY of its payload shapes. Extracted here — not
+ * inline in `parsePaymentDetails` — because the provider sends the same `displayName` on a body
+ * this parser REFUSES: the "no charge waiting" 404 carries the payment-link payload without a
+ * quote, and the screen still names the merchant on it (`services/opencryptopay.ts`). One
+ * extraction rule, two callers; never verified, always rendered as claimed.
+ *
+ * BOUNDED AND SANITISED, because this string is hostile input by construction: a scanned LNURL can
+ * name ANY host (findings doc, "Trust model"), so a sticker over a real till points the wallet at a
+ * server that writes this name. Unbounded, it is a LAYOUT weapon rather than a lie — React Native
+ * `Text` renders newlines, so a name of thirty blank lines pushes the provider host, the countdown
+ * and the full destination account off the screen, deleting precisely the three lines that make the
+ * sticker answerable. `clampLinkText` is the payment link's answer to the identical problem on the
+ * identical kind of string (`lib/deepLink.ts`), so it is reused rather than re-invented: same cap,
+ * same sanitiser, one rule for a payee name wherever it came from.
+ */
 export function claimedMerchantNameOf(json: unknown): string | null {
   if (json === null || typeof json !== 'object' || Array.isArray(json)) return null;
   const name = (json as {displayName?: unknown}).displayName;
-  const trimmed = typeof name === 'string' ? name.trim() : '';
-  return trimmed.length > 0 ? trimmed : null;
+  const clean = sanitiseDisplayText(typeof name === 'string' ? name : '');
+  if (clean.length === 0) return null;
+  const clamped = clampLinkText(clean);
+  return clamped === clean ? clamped : `${clamped}${NAME_TRUNCATED_MARK}`;
 }
 
 /** `{asset, amount}` from the provider, with the amount normalised to a plain decimal string. */

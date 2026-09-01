@@ -199,6 +199,20 @@ describe('clampLinkText', () => {
     expect(clampLinkText('☕'.repeat(11))).toBe('☕'.repeat(10));
     expect([...clampLinkText('☕'.repeat(11))].every(c => c === '☕')).toBe(true);
   });
+  it('neutralises text a stranger wrote before the review screen renders it', () => {
+    // A label is written by whoever wrote the link, and React Native `Text` renders newlines: a
+    // label of blank lines pushes the destination account — the one checkable thing on the review —
+    // off the visible screen. Bidi overrides can display a name reversed and zero-width padding
+    // hides where it ends. Neither is a length problem, so the byte cap alone never caught them.
+    // ONE rule for stranger-supplied display text: an OpenCryptoPay merchant name goes through this
+    // same door (`lib/opencryptopay.ts`).
+    expect(clampLinkText('Cafe\n\n\n\n\nKalaj')).toBe('Cafe Kalaj');
+    expect(clampLinkText('Cafe\u202E\u200B\uFEFF Kalaj')).toBe('Cafe Kalaj');
+    expect(clampLinkText('\u0000\u2028 \u200B')).toBe('');
+    // ZWJ/ZWNJ are KEPT: they join rather than hide, and they are load-bearing in real names and
+    // emoji sequences. Sanitising is not "strip anything unusual".
+    expect(clampLinkText('می‌دان')).toBe('می‌دان');
+  });
 });
 
 // --- payment link: encode + round-trip --------------------------------------------------------

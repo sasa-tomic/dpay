@@ -84,10 +84,47 @@ export function normaliseNetwork(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, '-');
 }
 
-/** Truncate to at most `PAY_LINK_TEXT_BYTES` UTF-8 bytes on a character boundary. The wire applies
- *  the same byte cap to `to_name`/`memo`, so the link and the QR built from one merchant input
- *  carry the same string. Pure + total. */
+/** Characters that are REMOVED outright from display text: they render as nothing, so their only
+ *  effect on a review screen is to hide or reorder what is around them. Zero-width space and BOM
+ *  (pure invisible padding), the bidi marks/embeddings/overrides/isolates (which can display
+ *  "evil.example" as "elpmaxe.live" beside a name the payer is asked to trust), the invisible math
+ *  operators and the deprecated format controls. ZWNJ/ZWJ (U+200C/U+200D) are deliberately KEPT —
+ *  they join, they do not hide, and they are load-bearing in Persian/Indic names and emoji. */
+const RE_INVISIBLE = /[\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g;
+/** Characters that become a SPACE: the C0/C1 controls and the Unicode line/paragraph separators.
+ *  A newline is the dangerous one — React Native `Text` renders it, so a crafted name can push the
+ *  lines BELOW it (the host, the countdown, the destination account) off the visible screen, which
+ *  deletes exactly the evidence that makes a hostile name answerable. Mapped to a space rather than
+ *  dropped so "Cafe\nKalaj" stays two words instead of becoming "CafeKalaj". */
+const RE_CONTROL = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g;
+
+/** Make text a STRANGER supplied safe to render on a review screen: invisibles stripped, controls
+ *  neutralised, whitespace runs collapsed, trimmed. It never rejects — a name is display text and
+ *  must not block a payment — and it never re-orders or invents characters, so what is shown is
+ *  still what was sent, minus what could only have been sent to hide something. Pure + total.
+ *
+ *  ONE rule for every such string, wherever it came from: the `label`/`memo` of a payment link
+ *  (below) and the merchant name an OpenCryptoPay provider claims (`lib/opencryptopay.ts`) are the
+ *  same kind of text with the same threat, so they get the same treatment rather than two. */
+export function sanitiseDisplayText(s: string): string {
+  return s.replace(RE_INVISIBLE, '').replace(RE_CONTROL, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Sanitise (above), then truncate to at most `PAY_LINK_TEXT_BYTES` UTF-8 bytes on a character
+ *  boundary. The wire applies the same byte cap to `to_name`/`memo`, so the link and the QR built
+ *  from one merchant input carry the same string. Pure + total.
+ *
+ *  `sanitiseDisplayText` is IDEMPOTENT (a sanitised string has no invisibles, no controls, no
+ *  whitespace run and no edge whitespace left to change), so a caller that needs to know whether
+ *  the cap cut anything may sanitise first and compare — which is what the OpenCryptoPay merchant
+ *  name does to mark a truncated name with an ellipsis. */
 export function clampLinkText(s: string): string {
+  return clampBytes(sanitiseDisplayText(s));
+}
+
+/** The byte cap alone. Private: display text must never be clamped without being sanitised first,
+ *  and one exported door is what keeps that true. */
+function clampBytes(s: string): string {
   let out = '';
   let bytes = 0;
   for (const ch of s) {

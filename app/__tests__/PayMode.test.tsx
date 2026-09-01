@@ -638,6 +638,10 @@ const TILL_PRINCIPAL = 'ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qx
 const OCP_TARGET: OcpTarget = {
   details: {
     submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e',
+    // Where the proof goes. It equals the scanned host by construction: `fetchPaymentDetails`
+    // refuses a quote whose callback names another host, which is what makes the ONE host this
+    // screen shows the host that actually receives the money's proof.
+    proofHost: 'api.dfx.swiss',
     quoteId: 'plq_ec214dddae51da4d',
     quoteExpiresAt: Date.now() + 300_000,
     callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',

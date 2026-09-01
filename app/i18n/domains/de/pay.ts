@@ -92,6 +92,10 @@ export const payDe: PayMessages = {
       'Dieser Preis läuft zu bald ab, um sicher damit zu zahlen. Dein Geld würde abgehen, bevor der Zahlungsanbieter des Händlers davon erfahren kann, und er würde den Verkauf danach ablehnen. Scanne den Code erneut für einen frischen Preis.',
     unreportable: host =>
       `${host} hat dpay keinen Weg genannt, eine Zahlung dorthin zu melden — eine Zahlung hier würde also dein Geld kosten, ohne dass der Verkauf gutgeschrieben wird. Es wurde nichts bezahlt. Erneutes Scannen ändert daran nichts — bitte den Händler um eine andere Zahlungsmöglichkeit.`,
+    proofElsewhere: (quoteHost, proofHost) =>
+      `Der Preis dieses Codes kommt von ${quoteHost}, aber der Nachweis deiner Zahlung soll stattdessen an ${proofHost} gehen. Eine Zahlung kann nicht zwei verschiedenen Firmen gegenüber gelten, deshalb hat dpay abgebrochen. Es wurde nichts bezahlt — bitte den Händler, seinen eigenen Zahlungscode zu zeigen.`,
+    tillCharging: price =>
+      `Der Händler verlangt ${price}. Sein Zahlungsanbieter hat den Betrag oben festgelegt — dpay rechnet nicht um.`,
     checkingTill: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
     badCode:
       'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',

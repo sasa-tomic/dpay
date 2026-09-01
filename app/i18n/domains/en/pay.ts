@@ -118,6 +118,18 @@ export type PayMessages = {
      *  reported (`unreportable-callback`). Its own instruction, not `badAnswer`'s: rescanning gets
      *  the same callback, so "scan again" would be a dead end. */
     unreportable: (host: string) => string;
+    /** The scanned code's host answered with a `callback` on a DIFFERENT host — so one company
+     *  quotes the price while another receives the destination address and the proof of an
+     *  irreversible transfer. The review can only show one host, so a payment whose two hosts
+     *  disagree is refused instead: that is what keeps the host on screen the host that gets the
+     *  money's proof. Names both, because which two they are is the whole point. */
+    proofElsewhere: (quoteHost: string, proofHost: string) => string;
+    /** What the till is charging in ITS OWN unit ("CHF 1"), on the review beside the asset amount.
+     *  `price` arrives ALREADY FORMATTED (this catalog never formats numbers). It is the MERCHANT's
+     *  figure, said so plainly: dpay neither quotes nor converts, and the provider — not dpay —
+     *  decided how much crypto that fiat price costs. Without it the payer approves "0.0000162 BTC"
+     *  with no way to check it against the price on the till. */
+    tillCharging: (price: string) => string;
     /** Shown while the two provider reads are in flight — up to half a minute of nothing, on a
      *  screen the payer just pointed at a QR code. */
     checkingTill: string;
@@ -311,6 +323,10 @@ export const payEn: PayMessages = {
       'This price runs out too soon to pay it safely. Your money would move before the merchant’s payment provider could be told, and it would then refuse the sale. Scan the code again for a fresh price.',
     unreportable: host =>
       `${host} gave dpay no way to report a payment back to it, so paying here would take your money without the sale being credited. Nothing has been paid. Scanning again won’t change this — ask the merchant for another way to pay.`,
+    proofElsewhere: (quoteHost, proofHost) =>
+      `This code’s price comes from ${quoteHost}, but it asks for the proof of your payment to be sent to ${proofHost} instead. One payment can’t answer to two different companies, so dpay stopped. Nothing has been paid — ask the merchant to show their own payment code.`,
+    tillCharging: price =>
+      `The merchant is charging ${price}. Their payment provider set the amount above — dpay doesn’t convert.`,
     checkingTill: 'Checking with the merchant’s payment provider…',
     badCode:
       'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check that nothing is covering it.',

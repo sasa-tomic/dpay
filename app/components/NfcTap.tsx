@@ -125,7 +125,11 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       ctx.finalize('pending', M.errors.tap.couldntReturnResult);
       return;
     }
-  }, [catalog, identity.publicHex, record, relayUrl, reqInfo, returnResult]);
+    // `record` is NOT a dependency: submitting the bundle is not the settlement moment. The
+    // merchant's `onSettled` fires from `finishReader` below, once the transport has confirmed the
+    // result reached the payer — recording it here would credit a settlement whose result hand-back
+    // may still fail.
+  }, [catalog, identity.publicHex, relayUrl, reqInfo, returnResult]);
 
   const finishReader = useCallback((ctx: TapCtx) => {
     const outcome = readerOutcomeRef.current;

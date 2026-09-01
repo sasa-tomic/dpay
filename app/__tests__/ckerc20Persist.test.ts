@@ -148,7 +148,8 @@ describe('hydrateWatch — pure resume reducer', () => {
 
   it('a v1 record in storage → load returns null (the sheet starts fresh, never resumes a dead watch)', async () => {
     const key = `dpay.ckerc20.deposit.${PUBKEY}.${CURRENCY}`;
-    const {target: _dropped, ...v1} = WATCHING;
+    const v1 = {...WATCHING} as Record<string, unknown>;
+    delete v1.target;
     await AsyncStorage.setItem(key, JSON.stringify(v1));
     expect(await loadDeposit(PUBKEY, CURRENCY)).toBeNull();
   });

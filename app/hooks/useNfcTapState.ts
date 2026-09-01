@@ -223,8 +223,12 @@ export function useNfcTapState<E>(args: {
     };
     // Adapter callbacks are deliberately ABSENT: they're read through adapterRef (see its comment),
     // so inline-arrow identities from NfcTap/SolNfcTap can never re-run this effect mid-tap.
+    // `setPhaseTracked` IS listed: it is a `useCallback([])`, so it is one identity for the whole
+    // mount and adds zero re-runs — and leaving it out is what would let a future edit turn it into
+    // a changing identity without the rule saying so, which is the exact mid-tap teardown the
+    // adapterRef comment above exists to prevent.
   }, [
-    role, readerPayload, eventName, nativeModule, waitsForReceipt, receiptWaitMs, finalize, markActive, clearSettleTimer,
+    role, readerPayload, eventName, nativeModule, waitsForReceipt, receiptWaitMs, finalize, markActive, clearSettleTimer, setPhaseTracked,
   ]);
 
   return {phase, reason, activeRef, advance};

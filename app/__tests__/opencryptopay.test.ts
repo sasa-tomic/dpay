@@ -1,13 +1,16 @@
 import {describe, it, expect} from '@jest/globals';
 import {
+  claimedMerchantNameOf,
   decodeLnurl,
   parseOcpScan,
   parseIcpUri,
+  parseProviderInstant,
   parseSolanaUri,
   parsePaymentDetails,
   selectPayableOffers,
   type OcpDetails,
 } from '../lib/opencryptopay';
+import {PAY_LINK_TEXT_BYTES} from '../lib/deepLink';
 import {parseDecimalToUnits} from '../lib/amount';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
@@ -193,6 +196,29 @@ describe('parseIcpUri', () => {
     expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?amount=1`)).toEqual({ok: false, reason: 'malformed-uri'});
   });
 
+  it('refuses a parameter it does not understand rather than paying the part it does', () => {
+    // THE money case: `subaccount` names an account this app's transfer does not address, so
+    // ignoring it would pay the owner's DEFAULT account — a different account than the URI named,
+    // with no way for the payer to see the difference. A dropped parameter is an instruction the
+    // provider gave and nobody read.
+    expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&subaccount=abcd&amount=1.`)).toEqual({
+      ok: false,
+      reason: 'unexpected-parameter',
+    });
+    expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&amount=1.&memo=42`)).toEqual({
+      ok: false,
+      reason: 'unexpected-parameter',
+    });
+    // …and the two it does understand still parse, in either order: this is a closed set, not a
+    // rejection of anything unfamiliar-looking.
+    expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?amount=1.&to=${ICP_URI_TO}`)).toEqual({
+      ok: true,
+      ledger: VCHF_LEDGER,
+      to: ICP_URI_TO,
+      amount: '1.',
+    });
+  });
+
   it('refuses a repeated parameter rather than picking one of the two amounts', () => {
     expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&amount=1&amount=999`)).toEqual({
       ok: false,
@@ -240,12 +266,112 @@ describe('parseSolanaUri', () => {
     for (const amount of ['', 'abc', '-0.5', '1,25']) {
       expect(parseSolanaUri(`solana:${SOL_ADDR}?amount=${amount}`)).toEqual({ok: false, reason: 'bad-amount'});
     }
-    expect(parseSolanaUri(`solana:${SOL_ADDR}?label=Till`)).toEqual({ok: false, reason: 'bad-amount'});
+  });
+
+  it('refuses every OTHER Solana Pay parameter instead of silently dropping it', () => {
+    // Solana Pay's grammar has five more fields and none of them may be ignored here: `reference`
+    // is an account the transaction must CARRY for the payee to find the payment, `memo` demands an
+    // instruction this rail does not build, and `label`/`message` are stranger-supplied text this
+    // review never renders — accepting one means approving a URI that says something the payer was
+    // not shown. The live provider sends none of them, so refusing costs a real payment nothing.
+    for (const param of ['reference=8Fw45', 'memo=order-12', 'label=Till', 'message=Thanks', 'unknown=1']) {
+      expect(parseSolanaUri(`solana:${SOL_ADDR}?amount=1.246922&${param}`)).toEqual({
+        ok: false,
+        reason: 'unexpected-parameter',
+      });
+    }
+    // `spl-token` keeps its OWN louder reason — it contradicts the selected asset, which is a
+    // different thing to tell the payer than "a field I don't know".
+    expect(parseSolanaUri(`solana:${SOL_ADDR}?amount=1.246922&spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&label=x`)).toEqual({
+      ok: false,
+      reason: 'spl-token-unsupported',
+    });
   });
 
   it('refuses a URI belonging to another scheme', () => {
     expect(parseSolanaUri(ICP_URI)).toEqual({ok: false, reason: 'wrong-scheme'});
     expect(parseSolanaUri('')).toEqual({ok: false, reason: 'wrong-scheme'});
+  });
+});
+
+describe('parseProviderInstant', () => {
+  it('reads the RECORDED spelling exactly, milliseconds and all', () => {
+    // The measured value shape (findings doc): an RFC 3339 UTC instant with milliseconds and a Z.
+    expect(parseProviderInstant('2026-09-01T14:50:04.660Z')).toBe(Date.UTC(2026, 8, 1, 14, 50, 4, 660));
+    expect(parseProviderInstant('2026-09-01T14:50:04Z')).toBe(Date.UTC(2026, 8, 1, 14, 50, 4, 0));
+    // A 1–3 digit fraction is MILLISECONDS: ".6" is 600ms, padded, never read as 6.
+    expect(parseProviderInstant('2026-09-01T14:50:04.6Z')).toBe(Date.UTC(2026, 8, 1, 14, 50, 4, 600));
+  });
+
+  it('refuses the local-time spelling that `Date.parse` would have believed', () => {
+    // THE bug: `Date.parse("2026-09-01 14:50:04")` is engine-defined and V8 reads it as DEVICE-LOCAL
+    // time. On a phone set to UTC+14 that is a quote which died fourteen hours ago being treated as
+    // live — and this deadline is what decides whether the ONE-SHOT submission is spent at all.
+    // The oracle is asserted, not assumed: `Date.parse` really does accept it.
+    expect(Number.isFinite(Date.parse('2026-09-01 14:50:04'))).toBe(true);
+    expect(parseProviderInstant('2026-09-01 14:50:04')).toBeNull();
+    // Every other spelling `Date.parse` would take: no zone at all (also local), an explicit offset,
+    // a bare date (midnight UTC), the legacy formats, and sub-millisecond precision this parser
+    // will not round. None of them is what the provider sends, so each is an expiry dpay cannot
+    // read — which the payer is told, rather than guessed at.
+    for (const s of [
+      '2026-09-01T14:50:04',
+      '2026-09-01T14:50:04+02:00',
+      '2026-09-01',
+      'Tue, 01 Sep 2026 14:50:04 GMT',
+      '2026-09-01T14:50:04.123456Z',
+      '2026-09-01t14:50:04.660z',
+      ' 2026-09-01T14:50:04.660Z',
+    ]) {
+      expect(parseProviderInstant(s)).toBeNull();
+    }
+  });
+
+  it('refuses a date that does not exist instead of rolling it over into another day', () => {
+    // `Date.UTC(2026, 1, 30)` is 2 March — a different deadline than the one sent. Round-tripped
+    // through the UTC fields so the arithmetic cannot quietly repair a nonsense instant.
+    for (const s of ['2026-02-30T00:00:00Z', '2026-13-01T00:00:00Z', '2026-09-01T24:00:00Z', '2026-09-01T14:60:04Z']) {
+      expect(parseProviderInstant(s)).toBeNull();
+    }
+  });
+
+  it('refuses anything that is not a string, without throwing', () => {
+    // A JSON number here would be an epoch in seconds or milliseconds — indistinguishable, and
+    // guessing between them is the same class of coercion.
+    for (const v of [undefined, null, 1788264000, 1788264000000, {}, ['2026-09-01T14:50:04.660Z']]) {
+      expect(parseProviderInstant(v)).toBeNull();
+    }
+  });
+});
+
+describe('claimedMerchantNameOf', () => {
+  it('renders a hostile name harmless instead of letting it own the screen', () => {
+    // The scanned code names the host and the host writes this string, so it is hostile input by
+    // construction. React Native `Text` renders newlines: unbounded, thirty of them push the
+    // provider host, the countdown and the destination account off the visible screen — deleting
+    // exactly the lines that make a sticker-over-the-till answerable. Neutralised, not dropped, so
+    // the name still reads as its own words.
+    expect(claimedMerchantNameOf({displayName: 'Kiosk\n\n\n\n\n\n\n\n\n\nam Bahnhof'})).toBe('Kiosk am Bahnhof');
+    expect(claimedMerchantNameOf({displayName: 'Kiosk  \tam\r\nBahnhof'})).toBe('Kiosk am Bahnhof');
+    // Bidi overrides can display a name (or a host beside it) reversed; zero-width padding hides
+    // where a name really ends. Both are removed outright — they render as nothing anyway.
+    expect(claimedMerchantNameOf({displayName: 'Kiosk\u202E\u200B\uFEFFam Bahnhof'})).toBe('Kioskam Bahnhof');
+    expect(claimedMerchantNameOf({displayName: '\u0000\u202E   \u200B'})).toBeNull();
+  });
+
+  it('caps the name and MARKS it when the cap cut something', () => {
+    // Same cap as a payment link's `label` (`lib/deepLink.ts`) — one payee-name rule wherever the
+    // name came from. The ellipsis is the part that matters: an unmarked truncation would name a
+    // DIFFERENT merchant than the string did, and the payer would have no way to tell.
+    const long = 'Migros Supermarkt Bahnhofstrasse Zürich';
+    const name = claimedMerchantNameOf({displayName: long});
+    expect(name).toBe(`${long.slice(0, PAY_LINK_TEXT_BYTES)}…`);
+    expect(name?.endsWith('…')).toBe(true);
+    // A name that fits is returned whole, with nothing added: the marker means "cut", so it must
+    // never appear on a name that was not.
+    expect(claimedMerchantNameOf({displayName: '  Test Shop  '})).toBe('Test Shop');
+    // Multi-byte names are capped in BYTES on a character boundary — never mid-character.
+    expect(claimedMerchantNameOf({displayName: '☕'.repeat(20)})).toBe(`${'☕'.repeat(10)}…`);
   });
 });
 
@@ -307,7 +433,6 @@ describe('parsePaymentDetails', () => {
       detailsBody({quote: {id: '', expiration: EXPIRATION}}),
       detailsBody({quote: {id: 'q', expiration: 'not a date'}}),
       detailsBody({quote: {id: 'q', expiration: 1788264000}}),
-      detailsBody({requestedAmount: undefined}),
       detailsBody({transferAmounts: []}),
       detailsBody({transferAmounts: [{method: '', available: true, assets: [{asset: 'ICP', amount: 1}]}]}),
       detailsBody({transferAmounts: [{method: 'InternetComputer', available: true, assets: []}]}),
@@ -318,6 +443,38 @@ describe('parsePaymentDetails', () => {
     for (const notAnObject of [null, undefined, 'ok', 7, [detailsBody()]]) {
       expect(parsePaymentDetails(notAnObject)).toEqual({ok: false, reason: 'malformed-details'});
     }
+  });
+
+  it('refuses a quote expiry in any spelling but the provider’s own, including the lenient ones', () => {
+    // Pinned HERE and not only on `parseProviderInstant`, because this is the site that matters:
+    // the quote deadline decides whether the one-shot submission is spent at all. `Date.parse`
+    // accepts all three of these — the first two as DEVICE-LOCAL time, which is up to 14 hours of
+    // skew between a phone and the provider, i.e. a long-dead price the wallet believes is live.
+    // (Under jest the zone is pinned to UTC, so the skew itself cannot be reproduced here; what is
+    // pinned is that the lenient spellings are REFUSED rather than read.)
+    expect(Number.isFinite(Date.parse('2026-09-01 12:00:00'))).toBe(true);
+    for (const expiration of ['2026-09-01 12:00:00', '2026-09-01T12:00:00', '2026-09-01T12:00:00+02:00', '2026-09-01']) {
+      expect(parsePaymentDetails(detailsBody({quote: {id: 'q', expiration}}))).toEqual({
+        ok: false,
+        reason: 'malformed-details',
+      });
+    }
+  });
+
+  it('treats the till’s own price as display context — never as a reason to refuse the payment', () => {
+    // It is the MERCHANT's figure ("CHF 1"), shown beside the asset amount so the payer can check
+    // it against the price on the till. Like the merchant name it is display context, so its
+    // absence yields null and the payment proceeds — a body without it used to refuse the WHOLE
+    // payment on a field nothing read, which is a refusal that buys the payer nothing.
+    for (const requestedAmount of [undefined, null, {asset: 'CHF'}, {asset: '', amount: 1}, {amount: 1}, 'CHF 1']) {
+      expect(parsePaymentDetails(detailsBody({requestedAmount}))).toEqual({
+        ok: true,
+        details: expect.objectContaining({requestedAmount: null}),
+      });
+    }
+    // A JSON NUMBER (measured: `requestedAmount.amount` is a number while asset amounts are
+    // strings) becomes an exact decimal string, the same as everywhere else in this parser.
+    expect(detailsOf({requestedAmount: {asset: 'CHF', amount: 1.5}}).requestedAmount).toEqual({asset: 'CHF', amount: '1.5'});
   });
 
   it('refuses a method that omits its availability flag, rather than reading absence as permission', () => {

@@ -92,6 +92,10 @@ export const payEs: PayMessages = {
       'Este precio caduca demasiado pronto para pagarlo con seguridad. Tu dinero saldría antes de que se pueda avisar al proveedor de pagos del comercio, y después él rechazaría la venta. Vuelve a escanear el código para obtener un precio nuevo.',
     unreportable: host =>
       `${host} no le ha dado a dpay ninguna forma de informarle de un pago, así que pagar aquí te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no cambiará esto: pide al comercio otra forma de pago.`,
+    proofElsewhere: (quoteHost, proofHost) =>
+      `El precio de este código viene de ${quoteHost}, pero pide que el comprobante de tu pago se envíe a ${proofHost}. Un pago no puede responder ante dos empresas distintas, así que dpay se ha detenido. No se ha pagado nada: pide al comercio que muestre su propio código de pago.`,
+    tillCharging: price =>
+      `El comercio cobra ${price}. Su proveedor de pagos fijó el importe de arriba; dpay no convierte.`,
     checkingTill: 'Comprobando con el proveedor de pagos del comercio…',
     badCode:
       'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez y comprueba que no lo tape nada.',

@@ -33,6 +33,7 @@ import {
   offerNamesAsset,
   parseIcpUri,
   parsePaymentDetails,
+  parseProviderInstant,
   parseSolanaUri,
   selectPayableOffers,
   type OcpDetails,
@@ -223,6 +224,19 @@ export async function fetchPaymentDetails(apiUrl: string): Promise<OcpDetailsRes
         : M.pay.ocp.badAnswer(target.url.host, M.pay.ocp.answerPart.details);
     return {kind: 'error', message};
   }
+  // ONE host, or no payment. The scanned code names the host that quotes the price; that host's own
+  // JSON body then names the `callback` host, which is where the destination address comes from and
+  // where the proof of an irreversible transfer is reported — a different string from a different
+  // source (findings doc: "a second, independent hole"). The review shows the SCANNED host, so a
+  // divergence would mean the payer is shown one company while another one gets the money's proof.
+  // Refused rather than reconciled, and refused BEFORE consent: that keeps the shown host honest by
+  // construction, which is the only way a host line is worth showing at all. The measured provider
+  // serves both from `api.dfx.swiss`, so this costs a real payment nothing.
+  const {proofHost} = parsed.details;
+  if (proofHost !== target.url.host) {
+    console.warn(`opencryptopay: ${target.url.host} named ${proofHost} as its callback host (${parsed.details.callbackUrl})`);
+    return {kind: 'error', message: M.pay.ocp.proofElsewhere(target.url.host, proofHost)};
+  }
   return {kind: 'ok', details: parsed.details};
 }
 
@@ -274,9 +288,12 @@ export async function fetchTransferUri(
     return {kind: 'error', message: M.pay.ocp.badAnswer(host, M.pay.ocp.answerPart.destination)};
   }
   // Missing and unreadable are ONE fact for the payer — dpay cannot tell how long this price is
-  // good for, so it will not sign against it. The raw value is a console diagnostic.
-  const expiresAt = typeof o.expiryDate === 'string' ? Date.parse(o.expiryDate) : NaN;
-  if (!Number.isFinite(expiresAt)) {
+  // good for, so it will not sign against it. The raw value is a console diagnostic. Read with the
+  // SAME strict instant parser as the quote's own expiry (`lib/opencryptopay.ts`): both are
+  // provider deadlines that decide whether the one-shot submission is spent, and a lenient read of
+  // either is the same 14-hour skew.
+  const expiresAt = parseProviderInstant(o.expiryDate);
+  if (expiresAt === null) {
     console.warn(`opencryptopay: ${host} gave no usable expiry for this quote (${String(o.expiryDate)})`);
     return {kind: 'error', message: M.pay.ocp.badAnswer(host, M.pay.ocp.answerPart.expiry)};
   }
@@ -548,28 +565,54 @@ async function destinationOf(
 ): Promise<{to: string; rawAmount: string} | null> {
   if (selected.protocol === 'ic') {
     const parsed = parseIcpUri(uri);
-    if (!parsed.ok) return null;
+    if (!parsed.ok) {
+      // The parser's refusal is a CODE and the caller renders one sentence for all of them, so the
+      // distinction only survives if it is logged: `unexpected-parameter` (the provider named a
+      // field this wallet does not implement, e.g. a subaccount) and `bad-amount` are very
+      // different things to read off a support transcript.
+      console.warn(`opencryptopay: unusable IC transfer instruction (${parsed.reason}): ${uri}`);
+      return null;
+    }
     // The URI names the ledger it wants paid. It must be the SELECTED asset's own ledger: paying a
     // different one would be paying a different asset, which dpay never does.
-    if (ledgerToCurrency(catalog, parsed.ledger) !== selected.currency) return null;
-    const raw = parseDecimalToUnits(parsed.amount, selected.decimals);
-    if (!raw.ok) return null;
+    if (ledgerToCurrency(catalog, parsed.ledger) !== selected.currency) {
+      console.warn(`opencryptopay: instruction names ledger ${parsed.ledger}, not ${selected.id}'s own ledger`);
+      return null;
+    }
+    const raw = rawAmountOf(parsed.amount, selected.decimals);
+    if (raw === null) return null;
     try {
       // The same base32-CRC validator every other IC destination goes through. The strict PRINCIPAL
       // form on purpose: the transfer this app signs addresses an owner with the default
       // subaccount, so a `principal.subaccount` destination is refused rather than silently paid to
-      // the owner's main account.
-      return {to: await DpayCore.icpValidatePrincipal(parsed.to), rawAmount: raw.raw};
+      // the owner's main account — and a SIBLING `subaccount=` parameter, which names the same thing
+      // from outside the `to` value, is refused by the parser itself (`unexpected-parameter`).
+      return {to: await DpayCore.icpValidatePrincipal(parsed.to), rawAmount: raw};
     } catch (e) {
       console.warn(`opencryptopay: destination principal rejected: ${errText(e)}`);
       return null;
     }
   }
   const parsed = parseSolanaUri(uri);
-  if (!parsed.ok) return null;
-  if (!isValidSolanaAddress(parsed.to)) return null;
-  const raw = parseDecimalToUnits(parsed.amount, selected.decimals);
-  return raw.ok ? {to: parsed.to, rawAmount: raw.raw} : null;
+  if (!parsed.ok) {
+    console.warn(`opencryptopay: unusable Solana transfer instruction (${parsed.reason}): ${uri}`);
+    return null;
+  }
+  if (!isValidSolanaAddress(parsed.to)) {
+    console.warn(`opencryptopay: destination address rejected: ${parsed.to}`);
+    return null;
+  }
+  const raw = rawAmountOf(parsed.amount, selected.decimals);
+  return raw === null ? null : {to: parsed.to, rawAmount: raw};
+}
+
+/** The instructed amount in the asset's raw units, or null with the reason logged. Shared by both
+ *  rails so the refusal reads the same whichever chain the instruction named. */
+function rawAmountOf(amount: string, decimals: number): string | null {
+  const raw = parseDecimalToUnits(amount, decimals);
+  if (raw.ok) return raw.raw;
+  console.warn(`opencryptopay: amount "${amount}" is not payable at ${decimals} decimals (${raw.err})`);
+  return null;
 }
 
 /** What the caller's rail did with the payer's money. Total: every path a rail can take maps to one

@@ -12,7 +12,12 @@ import {M} from '../i18n';
  *   • WHERE the price came from. A scanned LNURL can name any host on earth, and the host then
  *     supplies the merchant name, the amount and the destination. Showing it is what makes "why
  *     does this say api.evil.example" answerable before the payer approves
- *     (`docs/specs/2026-09-01-opencryptopay-findings.md`, "Trust model").
+ *     (`docs/specs/2026-09-01-opencryptopay-findings.md`, "Trust model"). ONE host is shown and it
+ *     is the whole truth: the proof of the transfer goes to the host named by the provider's own
+ *     `callback` — a different string from a different source — and `fetchPaymentDetails` REFUSES a
+ *     quote whose two hosts differ (`OcpDetails.proofHost`), so the host on this line is also the
+ *     host that receives the money's proof. Without that refusal this line would name the host the
+ *     payer scanned while the payment answered to another one.
  *   • That the merchant name is CLAIMED, not verified — the same posture a payment link's `label`
  *     gets (`lib/deepLink.ts` is the authority for it).
  *   • HOW LONG the price can still be ACTED ON. This is not decoration: approving too late moves

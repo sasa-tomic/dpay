@@ -55,7 +55,9 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, on
     let alive = true;
     DpayCore.icpSelfPrincipal(identity.secretHex)
       .then(p => { if (alive) setIcPrincipal(p); })
-      .catch(() => {});
+      // Omitting the section is the graceful part; omitting the reason is not. Matches the same
+      // derivation's other two call sites (ReceiveMode, CkErc20DepositSheet).
+      .catch((e: unknown) => { console.warn('icpSelfPrincipal failed (no same-ledger receive section):', e instanceof Error ? e.message : String(e)); });
     return () => { alive = false; };
   }, [identity.secretHex]);
 
@@ -83,6 +85,11 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, on
         if (!a) { setErr(M.deposit.ck.addressErr); return; } // unreachable/query-rejected
         setAddress(a);
       } catch (e: unknown) {
+        // The address IS this sheet. Swallowing the reason left one generic line on screen and
+        // nothing at all in logcat, so a timeout, a rejected update and an unreachable boundary all
+        // looked identical while a user waited for somewhere to send real funds. Same contract as
+        // the info + balance catches below.
+        console.warn('deposit address fetch failed:', e instanceof Error ? e.message : String(e));
         if (alive) setErr(M.deposit.ck.addressErr);
       } finally {
         if (alive) setLoading(false);

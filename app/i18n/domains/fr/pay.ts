@@ -93,6 +93,10 @@ export const payFr: PayMessages = {
       'Ce prix expire trop tôt pour être payé sans risque. Votre argent partirait avant que le prestataire de paiement du commerçant puisse en être informé, et il refuserait ensuite la vente. Scannez le code à nouveau pour obtenir un prix frais.',
     unreportable: host =>
       `${host} n’a donné à dpay aucun moyen de lui signaler un paiement : payer ici vous coûterait votre argent sans que la vente soit créditée. Rien n’a été payé. Scanner à nouveau n’y changera rien — demandez au commerçant un autre moyen de paiement.`,
+    proofElsewhere: (quoteHost, proofHost) =>
+      `Le prix de ce code vient de ${quoteHost}, mais il demande que la preuve de votre paiement soit envoyée à ${proofHost}. Un paiement ne peut pas répondre à deux sociétés différentes : dpay s’est arrêté. Rien n’a été payé — demandez au commerçant de montrer son propre code de paiement.`,
+    tillCharging: price =>
+      `Le commerçant demande ${price}. Son prestataire de paiement a fixé le montant ci-dessus — dpay ne convertit pas.`,
     checkingTill: 'Vérification auprès du prestataire de paiement du commerçant…',
     badCode:
       'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',

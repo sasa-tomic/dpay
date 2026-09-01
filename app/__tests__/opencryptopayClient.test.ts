@@ -287,9 +287,35 @@ describe('fetchPaymentDetails', () => {
     warn.mockRestore();
   });
 
+  test('a callback on ANOTHER host is refused: one payment cannot answer to two companies', async () => {
+    // The scanned code names the host that quotes the price. That host's own JSON body then names
+    // the `callback` — a different string from a different source — and the callback host is where
+    // the destination address comes from AND where the proof of an irreversible transfer goes. The
+    // review can only show one host, so a payment whose two hosts differ would show the payer one
+    // company while another one collects the money's proof. Refused BEFORE consent instead, which
+    // is what makes the host on the review the host that matters.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    installResponse(200, {...DETAILS_200, callback: 'https://cb.evil.example/v1/lnurlp/cb/pl_beeddb41cd4b6d9e'});
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
+
+    expect(out).toEqual({kind: 'error', message: M.pay.ocp.proofElsewhere('api.dfx.swiss', 'cb.evil.example')});
+    // BOTH hosts are named on screen — which two they are is the entire content of the warning.
+    expect(out.kind === 'error' && out.message).toContain('api.dfx.swiss');
+    expect(out.kind === 'error' && out.message).toContain('cb.evil.example');
+    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('named cb.evil.example as its callback host');
+    warn.mockRestore();
+
+    // The measured provider serves both from one host, so the rule costs a real payment nothing.
+    installResponse(200, DETAILS_200);
+    const same = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
+    expect(same.kind).toBe('ok');
+    expect(same.kind === 'ok' && same.details.proofHost).toBe('api.dfx.swiss');
+  });
+
   test("a 200 the parser refuses surfaces the parser's own reason, never a half-built payment", async () => {
     // A body that is JSON and HTTP-fine but has no quote on it: the narrowing refusal is the answer.
-    const {quote: _drop, ...noQuote} = DETAILS_200;
+    const noQuote = {...DETAILS_200} as Record<string, unknown>;
+    delete noQuote.quote;
     installResponse(200, noQuote);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
@@ -362,11 +388,34 @@ describe('fetchTransferUri', () => {
     installResponse(200, {...CB_IC_200, expiryDate: 'soon'});
     expect(await fetchTransferUri(DETAILS, 'InternetComputer', 'VCHF')).toEqual(expected);
 
-    const {expiryDate: _drop, ...noExpiry} = CB_IC_200;
+    const noExpiry = {...CB_IC_200} as Record<string, unknown>;
+    delete noExpiry.expiryDate;
     installResponse(200, noExpiry);
     expect(await fetchTransferUri(DETAILS, 'InternetComputer', 'VCHF')).toEqual(expected);
 
     expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('(soon)');
+    warn.mockRestore();
+  });
+
+  test('an expiry without a UTC zone is unreadable, not read as device-local time', async () => {
+    // The transfer instruction's deadline gets the SAME strict parser as the quote's own expiry.
+    // `Date.parse("2026-09-01 14:30:19")` succeeds and V8 reads it in the DEVICE's zone, so a phone
+    // in UTC+14 would believe a dead price is live and spend the one-shot submission on it. The
+    // oracle is asserted rather than assumed.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(Number.isFinite(Date.parse('2026-09-01 14:30:19'))).toBe(true);
+    installResponse(200, {...CB_IC_200, expiryDate: '2026-09-01 14:30:19'});
+    expect(await fetchTransferUri(DETAILS, 'InternetComputer', 'VCHF')).toEqual({
+      kind: 'error',
+      message: M.pay.ocp.badAnswer('api.dfx.swiss', M.pay.ocp.answerPart.expiry),
+    });
+    // The recorded spelling still reads, to the exact millisecond — this is a narrowing, not a ban.
+    installResponse(200, CB_IC_200);
+    expect(await fetchTransferUri(DETAILS, 'InternetComputer', 'VCHF')).toEqual({
+      kind: 'ok',
+      uri: CB_IC_200.uri,
+      expiresAt: Date.UTC(2026, 8, 1, 14, 30, 19, 292),
+    });
     warn.mockRestore();
   });
 
@@ -781,6 +830,21 @@ describe('resolveOcpScan', () => {
     const out = await resolveOcpScan(SCAN, ctx('ic:7'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.unreportable('api.dfx.swiss')});
     expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('unreportable-callback');
+    warn.mockRestore();
+  });
+
+  test('a till whose callback points at another host never reaches the destination call', async () => {
+    // End to end: the divergence stops the sequence at the FIRST read. The `/cb/` route below is
+    // fixtured and must stay untouched — asking that host for a destination address would already
+    // be following the redirect this refusal exists to stop.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const mock = installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: {...DETAILS_200, callback: 'https://cb.evil.example/v1/lnurlp/cb/pl_beeddb41cd4b6d9e'}},
+    ]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.proofElsewhere('api.dfx.swiss', 'cb.evil.example')});
+    expect(mock).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
 

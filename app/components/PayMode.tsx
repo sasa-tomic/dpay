@@ -321,7 +321,16 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
      };
      check(); const id = setInterval(check, POLL.receiptPay);
      return () => { alive = false; clearInterval(id); };
-  }, [phase, prepared, qr, err, onSettled, identity]);
+    // `award` and `handedOffline` belong in the array and cost nothing to keep there, which is why
+    // they are listed rather than silenced: `award` is `useJourney`'s `useCallback([])` — ONE
+    // identity for this mount — and `handedOffline` is only ever written in the same batch as
+    // `phase` (both `approve` hand-off branches and `reset`), so the poll re-arms exactly as often
+    // as it did while they were missing. `journey` itself stays OUT: it changes on every stamp and
+    // WOULD restart the interval, so the settle path reads it fresh through `journeyRef` (see its
+    // declaration). An incomplete array on this effect is not cosmetic — it is the rule that would
+    // have to catch the next dependency added to the branch that decides what the payer is told
+    // about money they have already handed over.
+  }, [phase, prepared, qr, err, onSettled, identity, award, handedOffline]);
 
   // The IC rail's half of an OpenCryptoPay payment: sign, submit, and answer with a CONFIRMED block
   // index — or with a verdict that keeps the provider from ever being called. The order around it is
