@@ -194,13 +194,10 @@ export async function run() {
     console.log('[95-vchf-pay] assert Ledger outgoing row…');
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     await driver.waitForText('RECENT', { timeoutMs: 8_000 });
-    let bodyText = await driver.bodyText();
     const want = (await railPrincipalText(bob.publicHex)).slice(0, 8);
-    for (let i = 0; i < 20 && !bodyText.includes(want); i++) {
-      await new Promise((r) => setTimeout(r, 300));
-      bodyText = await driver.bodyText();
-    }
-    assert(bodyText.includes(want), 'ledger row names the payee counterparty (short principal)');
+    const named = await driver.waitForText(want, { timeoutMs: 10_000 });
+    const bodyText = await driver.bodyText();
+    assert(named, `ledger row names the payee counterparty (short principal ${want}). ledger:\n${bodyText.slice(0, 500)}`);
     assertIncludes(bodyText, '\u22121.00000001 VCHF', 'ledger outgoing row amount (U+2212 minus + exact units)');
     assert(!bodyText.includes(bob.publicHex), 'ledger row shows only the payee SHORT key, never the full hex');
 

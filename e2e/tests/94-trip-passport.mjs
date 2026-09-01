@@ -58,7 +58,9 @@ export async function run() {
     // (The RECOVERY SAVED ink-stamp beat auto-advances to the rehearsal — zero extra taps.)
     await driver.findByTestID('rehearsal', { timeoutMs: 15_000 });
     await driver.findByTestID('rehearsal-step-1', { timeoutMs: 8_000 });
-    await new Promise(r => setTimeout(r, 900)); // entrance rise finish
+    // Entrance rise finish, in FRAMES not milliseconds (flow 90's idiom): `rehearsal-body-3` holds
+    // the longest `Animated` delay on the page, so its coming to rest means the whole rise is over.
+    await driver.waitAtRest('rehearsal-body-3', { timeoutMs: 8_000 });
     // (One-page rehearsal: all 3 steps mounted together — mounting awards flowUnderstood.)
     await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
     await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 }); // "Try with demo funds"
@@ -96,6 +98,11 @@ export async function run() {
     assert(!(await driver.isPresent('btn-passport-done')), 'incomplete passport must have NO Done affordance');
     console.log('[94-trip-passport] ✓ archive: 3 OF 4, payment hint, no Done affordance');
     await driver.click('btn-passport-close', { timeoutMs: 4_000 });
+    // …and wait for the wallet's Pay surface to be BACK before anything tries to arm it. The
+    // archive is a full-screen modal; `armPayScan` below polls for the gate button and gives up
+    // saying "no gate button pressed" — which is true, and says nothing about the Pay tab, because
+    // the archive was still on screen (observed RED, 2026-09-01).
+    await driver.findByTestID('pay-scan', { timeoutMs: 8_000 });
 
     // --- 3. ONE confirmed payment (flow-07 seam: real sign + real settle). -------------------
     console.log('[94-trip-passport] driving one confirmed payment (scan → auto-sign → settled)…');
@@ -123,6 +130,15 @@ export async function run() {
     // (not held open until the capstone was seen — the old collapse-marker rule is gone).
     await driver.waitGone('trip-strip', { timeoutMs: 5_000 });
     assert(!(await driver.isPresent('btn-trip-strip')), 'complete journey must retire the home strip with no Done press');
+    // …but the strip retires on the OPTIMISTIC in-memory award, while the archive below is a
+    // FRESH `useJourney()` that re-reads the PERSISTED store when it mounts. Opening it before
+    // that write lands renders a stale 3-of-4 page which no later notify ever corrects (the live
+    // seam only pushes on a subsequent persist) — a permanent RED for that run, and one the host's
+    // load decides. So the durable fact is what gets waited on, not the disappearance.
+    await driver.waitForFunction(
+      () => (localStorage.getItem('dpay.journey.v1') ?? '').includes('paymentTested'),
+      { timeoutMs: 10_000, label: 'the paymentTested stamp reached the PERSISTED journey store' },
+    );
     await driver.click('btn-settings', { timeoutMs: 5_000 });
     await driver.click('btn-trip-readiness', { timeoutMs: 4_000 });
     await driver.findByTestID('passport-slot-paymentTested-filled', { timeoutMs: 5_000 });

@@ -79,8 +79,10 @@ export async function run() {
     // strip MOUNTED; capturing mid-fade samples a partial opacity, which is why this surface
     // drifted between 0.2% and 0.55% run to run on identical code. Dark surfaces this first — a
     // bright strip against black moves far more per-channel than the same strip on white.
-    // Same idiom as the coach-card settle below.
-    await new Promise((r) => setTimeout(r, 500));
+    // Waited in FRAMES, not milliseconds: `Animated` runs off requestAnimationFrame, so a fixed
+    // 500ms was a bet on the host's frame rate — under pool contention the fade was still moving
+    // when the shutter fired. Same idiom as the coach-card settle below.
+    await driver.waitAtRest('trip-strip', { timeoutMs: 8_000 });
 
     // 2. Capture wallet-Pay surface.
     await driver.screenshot(SURFACES[0].capture);
@@ -91,10 +93,12 @@ export async function run() {
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
     // Trip Ready J4: the first-use receiveRequest coach card mounts with this screen and plays a
-    // ~480ms rise+fade entrance. Capturing mid-animation is nondeterministic frame-to-frame (the
-    // original 3.7%→12% "drift" was just animation state, not layout). Let it settle to rest so
-    // the capture — and the baseline contract — are deterministic.
-    await new Promise((r) => setTimeout(r, 800));
+    // ~480ms rise+fade entrance — the LAST thing on this surface to stop moving. Capturing
+    // mid-animation is nondeterministic frame-to-frame (the original 3.7%→12% "drift" was just
+    // animation state, not layout). Wait for the card's own opacity+transform to stop changing
+    // across a rendered frame, which is true at the same point in the animation on an idle host
+    // and on a loaded one.
+    await driver.waitAtRest('coach-receiveRequest', { timeoutMs: 8_000 });
     // Collect the QR's device-pixel rect for the post-capture mask BEFORE screenshotting (the rect
     // is stable while the element is mounted; capturing then querying in either order is fine, but
     // doing it before keeps the masking self-contained per surface).

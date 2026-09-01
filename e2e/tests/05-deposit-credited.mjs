@@ -80,7 +80,21 @@ export async function run() {
     assert(before === '0', `pre-fund ckBTC balance must be 0, got ${before}`);
 
     // 3. Select ckBTC (makes it the active asset) → Receive → "My address" (the inline deposit body).
+    //    Count the sheet's OWN ledger reads first (installed before it mounts): every
+    //    `railBalanceOf` is a signed `icrc1_balance_of` posted to `/api/v2/canister/<ledger>/query`,
+    //    so the count is a direct, deterministic witness of "the sheet has polled the ledger N
+    //    times" — which is what step 4 needs and what a wall-clock sleep could only guess at.
     console.log('[05-deposit-credited] selecting ckBTC → Receive → My address…');
+    await driver.eval(() => {
+      globalThis.__E2E_IC_QUERIES = [];
+      const real = globalThis.fetch;
+      globalThis.fetch = async function countedFetch(input, init) {
+        const url = typeof input === 'string' ? input : (input && input.url) || String(input);
+        const r = await real.call(this, input, init);
+        if (/\/api\/v2\/canister\/[^/]+\/query$/.test(url)) globalThis.__E2E_IC_QUERIES.push(url);
+        return r;
+      };
+    });
     await selectCurrency(driver, 'ckbtc');
     await openReceiveAddress(driver);
     await driver.findByTestID('deposit-address', { timeoutMs: 10_000 });
@@ -96,11 +110,18 @@ export async function run() {
 
     // 4. Let the sheet's balance recheck capture its WATCHING BASELINE before any funds move. The
     //    sheet polls railBalanceOf every POLL.deposit (150ms in the harness); its first successful
-    //    read is the baseline, and only a strictly-higher LATER read counts as the mint. Waiting out
-    //    several poll ticks here (address visible ⇒ the gateway is answering queries) guarantees the
-    //    baseline is the pre-fund zero — otherwise the credit could be swallowed into the baseline
-    //    and the delta never fires. The "Watching for your deposit" cue confirms the watching state.
-    await new Promise((r) => setTimeout(r, 700));
+    //    read is the baseline, and only a strictly-higher LATER read counts as the mint. If the
+    //    baseline were captured AFTER the faucet credit it would swallow the whole deposit and the
+    //    delta would never fire — so the pre-fund reads are WAITED FOR, not slept through: two
+    //    completed `/query` round trips mean the first one's reply has had a full poll cycle to be
+    //    decoded and stored. (A wall-clock 700ms bought zero reads on a host slow enough, which is
+    //    exactly the load-sensitive failure this replaces. An app-side "baseline captured" signal
+    //    would make it exact; DepositSheet keeps the baseline in a ref that renders nothing, so
+    //    there is none to wait on today — the counted reads are the closest honest witness.)
+    await driver.waitForFunction(
+      () => (globalThis.__E2E_IC_QUERIES?.length ?? 0) >= 2,
+      { timeoutMs: 10_000, label: 'the deposit sheet completed two pre-fund ledger balance reads' },
+    );
     const watching = await driver.bodyText();
     assertIncludes(watching, 'Watching for your deposit', 'the sheet should be in the honest watching state before funding (baseline captured)');
 

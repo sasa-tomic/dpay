@@ -34,25 +34,6 @@ const absent = async (driver, testID) => {
   assert(!found, `testID=${testID} must NOT be present`);
 };
 
-/** Visibility gate: the node must exist AND its fade-in must have COMMITTED (computed
- *  opacity ≥ 0.95). The calm stamp animates 0→1 over 560ms (180ms delay + 380ms); a bare
- *  findByTestID passes at opacity 0, so screenshots could catch it mid-fade — this makes
- *  "the stamp shows" a VISUAL truth, not just a DOM truth. */
-const waitFadedIn = async (driver, testID, timeoutMs = 3_000) => {
-  const t0 = Date.now();
-  for (;;) {
-    const op = await driver.eval((id) => {
-      const el = document.querySelector(`[data-testid="${id}"]`);
-      return el ? Number(getComputedStyle(el).opacity) : null;
-    }, testID);
-    if (op !== null && op >= 0.95) return true;
-    if (Date.now() - t0 > timeoutMs) {
-      assert(false, `testID=${testID} must exist with committed opacity ≥0.95 (last seen ${op})`);
-    }
-    await new Promise((r) => setTimeout(r, 120));
-  }
-};
-
 export async function run() {
   const start = Date.now();
   console.log(`[${meta.name}] one-shot offline peak: first offline confirmed payment`);
@@ -113,8 +94,18 @@ export async function run() {
 
     // Auto-settle (~2s): the wrapper testID persists (mounted-but-settled), the remnant appears,
     // the campaign moment is gone, and Done stays usable (never blocked).
-    await driver.waitForText('paid with no signal', {timeoutMs: 6_000});
-    await driver.findByTestID('first-offline-stamp', {timeoutMs: 3_000});
+    //
+    // The remnant is read through its OWN node rather than through the page text, and that is the
+    // whole point: `S.peakSettledText` is `textTransform: 'uppercase'` while `waitForText` matches
+    // `innerText`, which APPLIES the transform — so a page-wide wait for the lowercase source
+    // string could never match. It never did. The flow used to discard that wait's `false`, burn
+    // its six seconds, and lean on the next selector, which left the settle unverified and the
+    // remaining budget too thin under load (this is what the 2026-09-01 REDs were). `readText`
+    // reads `textContent`, which is the source string, so the assertion is the copy the component
+    // actually renders.
+    await driver.findByTestID('first-offline-stamp', {timeoutMs: 8_000});
+    assertIncludes(await driver.readText('first-offline-stamp'), 'paid with no signal',
+      'the peak must auto-settle into the quiet remnant carrying its settled line');
     assert(!(await driver.bodyText()).includes('No signal the whole time'), 'the moment microcopy must settle away');
     await driver.screenshot('92-offline-peak-settled');
     console.log(`[${meta.name}] ✓ peak settled into the quiet remnant (first-offline-stamp)`);
@@ -148,7 +139,7 @@ export async function run() {
     await absent(driver, 'offline-peak');
     await absent(driver, 'first-offline-stamp');
     assert(!(await driver.bodyText()).includes("Don't need it"), 'second offline paid must NOT re-run the peak');
-    await waitFadedIn(driver, 'paid-stamp');
+    await driver.waitAtRest('paid-stamp', {timeoutMs: 6_000});
     console.log(`[${meta.name}] ✓ second offline payment: quiet (no peak), calm stamp only`);
 
     // --- The ONLINE paid path never peaks — but the calm stamp rides the confirmed card. -------
@@ -163,7 +154,7 @@ export async function run() {
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'online auto-sign settles to Paid ✓ (flow 03-style)');
     await absent(driver, 'offline-peak');
     assert(!(await driver.bodyText()).includes("Don't need it"), 'the ONLINE paid path must NEVER peak');
-    await waitFadedIn(driver, 'paid-stamp');
+    await driver.waitAtRest('paid-stamp', {timeoutMs: 6_000});
     console.log(`[${meta.name}] ✓ online paid: no peak ever, calm stamp only`);
 
     // Ledger truth after all three payments (100 − 25 − 25 − 25).

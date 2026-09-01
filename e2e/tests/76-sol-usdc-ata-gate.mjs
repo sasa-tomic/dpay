@@ -87,8 +87,13 @@ export async function run() {
     console.log('[76-sol-usdc-ata-gate] insufficient SOL: warning + disabled create…');
     await driver.eval(() => { globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 1000000}); });
     await driver.click('btn-receive-request', {timeoutMs: 5_000});
+    // Leave Receive and come back so the balance poll re-fires. The Pay leg is WAITED FOR: while
+    // the Receive tab is still active `setMode('receive')` is a no-op, so a second tab press fired
+    // before the first has taken effect leaves the wallet where it started — no remount, no
+    // re-poll, and the gate below then times out for a reason that has nothing to do with SOL.
     await driver.click('tab-pay', {timeoutMs: 5_000});
-    await driver.click('tab-receive', {timeoutMs: 5_000}); // poll re-fires on focus/interval
+    await driver.waitGone('btn-receive-address', {timeoutMs: 8_000});
+    await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.click('btn-receive-address', {timeoutMs: 5_000});
     await driver.findByTestID('sol-ata-insufficient', {timeoutMs: 10_000});
     const createBtn = await driver.findByTestID('btn-sol-ata-create', {timeoutMs: 5_000});
@@ -109,6 +114,7 @@ export async function run() {
     });
     await driver.click('btn-receive-request', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
+    await driver.waitGone('btn-receive-address', {timeoutMs: 8_000}); // the tab really changed
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.click('btn-receive-address', {timeoutMs: 5_000});
     const btn = await driver.findByTestID('btn-sol-ata-create', {timeoutMs: 10_000});

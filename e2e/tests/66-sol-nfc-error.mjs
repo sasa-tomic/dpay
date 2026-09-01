@@ -167,7 +167,9 @@ export async function run() {
     // the pre-render DOM before the error's effect (if any) could flip the phase. A fixed delay lets
     // React flush any would-be state update, then we snapshot the post-flush DOM. If the bug existed
     // (error overwrites the decided phase), "Confirming" would be gone after the flush.
-    await new Promise((r) => setTimeout(r, 500));
+    // Measured in FRAMES, not milliseconds — ten render opportunities, the same ten on an idle host
+    // and on a saturated one (flow 60's idiom).
+    await driver.settleFrames(10);
     const lateErrBody = await driver.bodyText();
     assert(lateErrBody.includes('Confirming'),
       'a late error after settling must NOT overwrite the receipt path');

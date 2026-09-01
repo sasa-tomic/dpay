@@ -110,7 +110,14 @@ export async function run() {
     const forgedRid = randomBytes(32).toString('hex');
     const forgedBlob = b64urlEncode(Buffer.from(JSON.stringify({ledger, block_index: '0', request_id: forgedRid}), 'utf8'));
     await driver.eval((b) => window.__DPAY_TEST_DEEPLINK(`dpay:pay/${b}`), forgedBlob);
-    await new Promise((r) => setTimeout(r, 6000));
+    // Wait for the app to SPEND its history budget and say so, rather than for a duration. The
+    // receive screen polls `confirmIncomingTransfer` PROOF_POLL_BUDGET times and then renders
+    // "Couldn't confirm this payment yet" — so that sentence is the proof that the wallet really
+    // looked for a matching ledger row and really failed to find one. A 6s sleep could only assert
+    // that nothing had happened YET, which on a slow host is true before the app has looked at all:
+    // it would pass by arriving early, the one way a proof-of-absence can lie.
+    assert(await driver.waitForText('Couldn’t confirm this payment yet', {timeoutMs: 20_000}),
+      'the forged proof must exhaust the history budget and be refused, not silently ignored');
     const body0 = await driver.bodyText();
     assert(!body0.includes('Received'), `a forged proof without a matching ledger row must not show Received; page: ${body0.slice(0, 200)}`);
     assert((await driver.eval(() => !!document.querySelector('[data-testid="request-qr"]'))), 'the open request must still be showing');

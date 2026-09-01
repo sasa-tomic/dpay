@@ -15,7 +15,7 @@
 //     are name-less; memo is the reconciliation key).
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
-import { setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { setup, assert, getBalance, faucetAccount, icpCatalog, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
 
 const PAY_CENTS = 3000; // ∂30.00
@@ -107,13 +107,9 @@ export async function run() {
     // The history hook polls (POLL.history); the transfer row may land after RECENT first paints.
     // Poll for the payer's short principal rather than snapshotting once.
     const shortPayer = alicePrincipal.slice(0, 8);
-    let histBody = '';
-    for (let i = 0; i < 20; i++) {
-      histBody = await driver.bodyText();
-      if (histBody.includes(shortPayer)) break;
-      await new Promise((r) => setTimeout(r, 300));
-    }
-    assertIncludes(histBody, shortPayer, 'B history row should name the payer (short principal text)');
+    const named = await driver.waitForText(shortPayer, { timeoutMs: 10_000 });
+    const histBody = await driver.bodyText();
+    assert(named, `B history row should name the payer (short principal ${shortPayer}). history:\n${histBody.slice(0, 500)}`);
     assert(!histBody.includes(alicePrincipal), 'B history must not dump A\'s full principal text');
     console.log('[08-merchant-settle] ✓ B history shows the incoming payment from A (short principal)');
 

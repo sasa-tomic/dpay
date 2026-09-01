@@ -291,14 +291,39 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
   // before Onboarding decides walkthrough-vs-form), so a single instantaneous isPresent can race
   // the boot and miss the Skip button. Poll until the Skip button OR the create form's username
   // field is in the DOM — one of the two appears on every onboarding path — then skip if seen.
+  //
+  // The press is confirmed by its EFFECT, not by the absence of an exception. Skip unmounts the
+  // walkthrough — i.e. it destroys the very node being clicked — so puppeteer can report the node
+  // as detached for a press that LANDED, and `driver.click`'s blind retry then re-looks for a
+  // button that is correctly gone and fails the whole flow for a successful press. (Two REDs on
+  // 2026-09-01, both `btn-walkthrough-skip not visible within 4000ms` immediately after an
+  // isPresent said it WAS there.) Checking the create form instead tells the two apart; a press
+  // error is only reported if neither surface ever materialises.
+  // Two phases, so the budget covers the work it authorises. `timeoutMs` bounds the DECISION (which
+  // of the two surfaces this page is on); once the answer is "the walkthrough", the press and its
+  // effect get their own budget — the previous single-window version authorised a 4s press and a 4s
+  // effect wait inside one 4s window, which cannot both fit.
   const deadline = Date.now() + timeoutMs;
+  let sawSkip = false;
   while (Date.now() < deadline) {
-    if (await driver.isPresent('btn-walkthrough-skip')) {
-      await driver.click('btn-walkthrough-skip', {timeoutMs});
-      return;
-    }
     if (await driver.isPresent('username-input')) return;
+    if (await driver.isPresent('btn-walkthrough-skip')) { sawSkip = true; break; }
     await new Promise(r => setTimeout(r, 100));
+  }
+  if (!sawSkip) return; // neither surface — the documented no-op (a returning-user page has neither)
+
+  let pressErr = null;
+  try { await driver.click('btn-walkthrough-skip', {timeoutMs}); }
+  catch (e) { pressErr = e; } // may simply mean the press landed and took its own button with it
+  // Skip awards the `walkthroughDone` stamp — an async storage write — BEFORE it flips the gate, so
+  // the create form is not on screen the instant the press returns.
+  try { await driver.findByTestID('username-input', {timeoutMs}); }
+  catch (e) {
+    throw new Error(
+      `[lib] the walkthrough Skip was pressed but the create form never appeared within ${timeoutMs}ms`
+      + `${pressErr ? ` (the press itself reported: ${pressErr.message})` : ''}`
+      + `. On screen: ${JSON.stringify((await driver.bodyText()).slice(0, 300))}`,
+    );
   }
 }
 
@@ -312,14 +337,27 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
  */
 export async function skipRehearsalIfPresent(driver, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  // Same press-confirmed-by-effect rule as `skipWalkthroughIfPresent` above, for the same reason:
+  // Explore-wallet unmounts the rehearsal that carries the button being pressed.
   const deadline = Date.now() + timeoutMs;
+  let sawSkip = false;
   while (Date.now() < deadline) {
-    if (await driver.isPresent('btn-rehearsal-skip')) {
-      await driver.click('btn-rehearsal-skip', {timeoutMs});
-      return;
-    }
     if (await driver.isPresent('balance')) return;
+    if (await driver.isPresent('btn-rehearsal-skip')) { sawSkip = true; break; }
     await new Promise(r => setTimeout(r, 100));
+  }
+  if (!sawSkip) return;
+
+  let pressErr = null;
+  try { await driver.click('btn-rehearsal-skip', {timeoutMs}); }
+  catch (e) { pressErr = e; }
+  try { await driver.findByTestID('balance', {timeoutMs}); }
+  catch (e) {
+    throw new Error(
+      `[lib] the rehearsal Skip was pressed but the wallet never appeared within ${timeoutMs}ms`
+      + `${pressErr ? ` (the press itself reported: ${pressErr.message})` : ''}`
+      + `. On screen: ${JSON.stringify((await driver.bodyText()).slice(0, 300))}`,
+    );
   }
 }
 

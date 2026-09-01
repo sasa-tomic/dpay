@@ -134,13 +134,9 @@ export async function run() {
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     const shortPayer = (await railPrincipalText(payer.publicHex)).slice(0, 8);
-    let histBody = '';
-    for (let i = 0; i < 20; i++) {
-      histBody = await driver.bodyText();
-      if (histBody.includes(shortPayer)) break;
-      await new Promise((r) => setTimeout(r, 300));
-    }
-    assertIncludes(histBody, shortPayer, 'merchant history row names the payer (short principal text)');
+    const named = await driver.waitForText(shortPayer, { timeoutMs: 10_000 });
+    const histBody = await driver.bodyText();
+    assert(named, `merchant history row names the payer (short principal ${shortPayer}). history:\n${histBody.slice(0, 500)}`);
     assertIncludes(histBody, '+1.00000001 VCHF', 'merchant history incoming row amount (+ prefix, exact units)');
     assert(!histBody.includes(payer.publicHex), 'history must not dump the payer full hex');
 

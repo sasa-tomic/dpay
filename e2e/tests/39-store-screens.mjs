@@ -85,8 +85,11 @@ export async function run() {
     // === CAPTURE 4: Ledger — transaction history (faucet credit + payment) ===
     await driver.click('btn-balances-close', { timeoutMs: 4_000 });
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    // Brief settle so the payment lands in history (the poll seam is fast).
-    await new Promise(r => setTimeout(r, 600));
+    // Wait for the payment ITSELF to land in history rather than for a duration — a store shot of
+    // an empty ledger is the failure this guards, and 600ms only avoided it while the host was
+    // idle. The ∂12.50 received above is the row that must be on screen.
+    assert(await driver.waitForText('+∂12.50', { timeoutMs: 10_000 }),
+      'the ledger capture must show the received payment row, not an empty list');
     await driver.screenshot('39-store-ledger');
     console.log('[39-store-screens] ✓ ledger');
 

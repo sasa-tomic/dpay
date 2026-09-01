@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **107 flows**
-> (106 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **108 flows**
+> (107 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (28) · offline (10) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (29) · offline (10) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
 
 ---
 
@@ -66,6 +66,7 @@ wire (1) · onboard (13) · pay (28) · offline (10) · deposit (8) · withdraw 
 | 108 | sol-transactions | A Solana transaction appears in the Transactions tab: the SOL rail history is polled through the RPC seam, merged with the IC rail by timestamp, and rendered by the one Ledger — SOL row in SOL units with its short counterparty, the IC faucet row still in ∂, and a filter chip per rail. | sol-history, ledger, transactions, mixed-rail, ledger-filter, sol-tab-ia |
 | 109 | scan-link-and-address | The Pay camera classifies what it read: a payment-link QR opens the pre-filled review (no auto-sign), a bare IC account opens Send to address with the destination filled + route disclosed, and unrecognised input keeps the honest "not a payment code" refusal. | scan-fallback, pay-link, send-to-address, error-handling, input-validation |
 | 111 | opencryptopay-till | Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (provider host, full destination, countdown, claimed merchant name) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote. | opencryptopay, scan-fallback, explicit-approve, claimed-name, loss-path, unresolved-outcome, one-shot-submit, honest-instructions, fail-closed |
+| 112 | opencryptopay-sol | The Solana rail pays an OpenCryptoPay till: a scanned till with SOL selected resolves a live quote and lands on an explicit review (exact SOL amount, full destination address, provider host, countdown, claimed name) that broadcasts nothing until Approve; Approve sends exactly one Solana transaction and reports that signature to the provider exactly once → paid. With Solana USDC selected the SAME till is refused by name — its URI names no token account — pointing the payer at SOL, costing one provider read, and broadcasting nothing. | opencryptopay, sol-rail, explicit-approve, claimed-name, solana-usdc-refused, one-shot-submit, honest-instructions, fail-closed |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |

@@ -33,8 +33,11 @@ export async function run() {
   const env = await setup();
   try {
     // The tip cards rise+fade in over ~480ms (220ms delay + 260ms entrance). Screenshots fired
-    // straight after findByTestID catch opacity≈0 — settle before shooting.
-    const settle = () => new Promise((r) => setTimeout(r, 700));
+    // straight after findByTestID catch opacity≈0 — wait for the card's own entrance to stop
+    // moving before shooting. `waitAtRest` states that in FRAMES (`Animated` is driven by
+    // requestAnimationFrame), so it is the same point in the animation on a loaded host as on an
+    // idle one; the 700ms sleep it replaces was a bet on the frame rate.
+    const settle = (key) => env.driver.waitAtRest(`coach-${key}`, {timeoutMs: 8_000});
     await onboardWallet(env.driver, 'coach');
     const alice = await accountOf(env.driver);
     const bob = await generateKeypair();
@@ -48,12 +51,18 @@ export async function run() {
     await env.driver.type('amount-input', '42.50', {timeoutMs: 4_000});
     await env.driver.click('btn-request', {timeoutMs: 4_000});
     await env.driver.findByTestID('request-qr', {timeoutMs: 8_000});
-    await settle(); // entrance finish before the shot
+    await settle('receiveRequest'); // entrance finish before the shot
     await env.driver.screenshot('91-coach-receive');
     await env.driver.click('btn-coach-receiveRequest-dismiss', {timeoutMs: 4_000});
     await env.driver.waitGone('coach-receiveRequest', {timeoutMs: 6_000});
     // Re-enter the same phase (unmount + fresh request) → the tip stays dismissed.
+    // The Pay leg is WAITED FOR, not assumed: `setMode('receive')` is a no-op while the Receive
+    // tab is already active, so firing the second tab press before the first one has taken effect
+    // leaves ReceiveMode mounted on its request-QR phase — `amount-input` then never appears and
+    // the flow dies on an opaque selector timeout four lines later (observed RED, 2026-09-01).
+    // Waiting for the Pay surface to actually mount is what makes the round trip a round trip.
     await env.driver.click('tab-pay', {timeoutMs: 4_000});
+    await env.driver.findByTestID('pay-scan', {timeoutMs: 8_000});
     await env.driver.click('tab-receive', {timeoutMs: 4_000});
     await env.driver.type('amount-input', '10.00', {timeoutMs: 4_000});
     await env.driver.click('btn-request', {timeoutMs: 4_000});
@@ -72,7 +81,7 @@ export async function run() {
     await env.driver.waitReady({timeoutMs: 10_000});
     await env.driver.findByTestID('coach-payReview', {timeoutMs: 6_000});
     assert(await env.driver.isPresent('btn-approve'), 'the payment-link review carries its single Approve (zero-press entry)');
-    await settle(); // let the tip's 480ms rise+fade entrance finish before the shot
+    await settle('payReview'); // let the tip's 480ms rise+fade entrance finish before the shot
     await env.driver.screenshot('91-coach-review');
     await env.driver.click('btn-coach-payReview-dismiss', {timeoutMs: 4_000});
     await env.driver.waitGone('coach-payReview', {timeoutMs: 6_000});
@@ -96,7 +105,7 @@ export async function run() {
     await env.driver.waitForText('signed on this device ✓', {timeoutMs: 10_000});
     assert(!(await env.driver.isPresent('coach-payReview')), 'payReview stays dismissed on the offline auto-sign path (no review exists)');
     await env.driver.findByTestID('coach-offlineQr', {timeoutMs: 6_000});
-    await settle(); // entrance finish before the shot
+    await settle('offlineQr'); // entrance finish before the shot
     await env.driver.screenshot('91-coach-offlineqr');
     const payload = await env.driver.eval(() => window.__DPAY_QR_LAST);
     assert(typeof payload === 'string' && payload.length >= 64, 'hand-off QR payload must be the base64url envelope');
@@ -108,7 +117,7 @@ export async function run() {
     await env.driver.click('btn-paid', {timeoutMs: 4_000});
     await env.driver.waitForText('Sent ∂25.00', {timeoutMs: 8_000});
     await env.driver.findByTestID('coach-pendingOutcome', {timeoutMs: 6_000});
-    await settle(); // entrance finish before the shot
+    await settle('pendingOutcome'); // entrance finish before the shot
     await env.driver.screenshot('91-coach-pending');
     await env.driver.click('btn-coach-pendingOutcome-dismiss', {timeoutMs: 4_000});
     await env.driver.waitGone('coach-pendingOutcome', {timeoutMs: 6_000});

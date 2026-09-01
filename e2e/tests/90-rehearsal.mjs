@@ -83,7 +83,11 @@ export async function run() {
     assertEq(await driver.readText('rehearsal-body-1'), rehearsalSteps()[0].body, 'step 1 body verbatim');
     assertEq(await driver.readText('rehearsal-body-2'), rehearsalSteps()[1].body, 'step 2 body verbatim');
     assertEq(await driver.readText('rehearsal-body-3'), rehearsalSteps()[2].body, 'step 3 body verbatim');
-    await new Promise(r => setTimeout(r, 900)); // entrance rise finish
+    // Entrance rise finish, waited in FRAMES rather than milliseconds: every line on this page is
+    // an `Animated` rise+fade driven by requestAnimationFrame, and `rehearsal-body-3` carries the
+    // longest delay (160 + 2×90) so it is the last to stop moving. A 900ms sleep was a bet on the
+    // host's frame rate; this is the same point in the animation whatever the load.
+    await driver.waitAtRest('rehearsal-body-3', { timeoutMs: 8_000 });
     await driver.screenshot('90-rehearsal-page');
     // Explore wallet is available on the page.
     await driver.findByTestID('btn-rehearsal-skip', { timeoutMs: 4_000 });

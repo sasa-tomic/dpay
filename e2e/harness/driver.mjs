@@ -398,6 +398,109 @@ export class Driver {
     }
   }
 
+  /**
+   * Wait until `fn` — evaluated IN THE PAGE, re-run on every rendered frame — returns truthy.
+   *
+   * The generic condition wait, for the states no selector names: a counter the flow installed, a
+   * value in localStorage, a computed style. It exists so a flow that needs "the app has actually
+   * done X" never has to approximate it with a sleep; `label` names the awaited condition so a
+   * timeout reads as a fact about the app, not as an anonymous 5000ms.
+   */
+  async waitForFunction(fn, opts = {}) {
+    this._recordTimeline('waitForFunction', opts.label ?? fn);
+    const timeoutMs = opts.timeoutMs ?? 5_000;
+    try {
+      await this.page.waitForFunction(fn, { timeout: timeoutMs }, ...(opts.args ?? []));
+    } catch (e) {
+      throw new Error(
+        `[driver] condition never held within ${timeoutMs}ms: ${opts.label ?? '(unlabelled)'} `
+        + `— ${e instanceof Error ? e.message : e}`,
+      );
+    }
+  }
+
+  /**
+   * Wait until an animated node has come to REST — the frame-accurate replacement for "sleep long
+   * enough for the entrance to finish".
+   *
+   * FREEZE_CSS kills CSS animations/transitions, but React Native's `Animated` (which is what every
+   * entrance in this app uses) drives inline styles from `requestAnimationFrame` instead, so those
+   * animations really do run — over wall-clock time that stretches with host load. A flow that slept
+   * 500ms for a 260ms fade was therefore asserting on an unloaded machine's frame rate: under
+   * contention the fade is still mid-flight when the screenshot fires, which is the pixel-diff drift
+   * the visual flows kept blaming on "±0.3% noise".
+   *
+   * The condition here is stated in FRAMES, the unit the animation is actually driven in: the node's
+   * computed opacity has reached `minOpacity` AND neither opacity nor transform changed across a
+   * RENDERED frame. That is exactly "Animated has stopped writing to this node", and it is true at
+   * the same point in the animation whether the host is idle or at load 40.
+   *
+   * The sampling loop lives INSIDE the page (one CDP round trip, and each sample is separated by a
+   * real frame boundary — a Node-side poll could take two identical samples inside one frame and
+   * call a mid-flight animation "at rest"). Its own budget is enforced in-page too, so a page that
+   * never paints returns a diagnosable answer instead of hanging.
+   */
+  async waitAtRest(testID, opts = {}) {
+    this._recordTimeline('waitAtRest', testID);
+    const timeoutMs = opts.timeoutMs ?? 8_000;
+    const minOpacity = opts.minOpacity ?? 0.99;
+    const out = await this.page.evaluate((cfg) => new Promise((resolve) => {
+      const deadline = performance.now() + cfg.timeoutMs;
+      let prev = null;
+      let frames = 0;
+      const read = () => {
+        const el = document.querySelector(cfg.sel);
+        if (!el) return null;
+        const cs = getComputedStyle(el);
+        return { opacity: Number(cs.opacity), transform: cs.transform };
+      };
+      const step = () => {
+        frames += 1;
+        const now = read();
+        if (now && now.opacity >= cfg.minOpacity && prev
+            && prev.opacity === now.opacity && prev.transform === now.transform) {
+          resolve({ ok: true, last: now, frames });
+          return;
+        }
+        prev = now;
+        if (performance.now() >= deadline) { resolve({ ok: false, last: now, frames }); return; }
+        requestAnimationFrame(step);
+      };
+      // A page that paints no frames at all would leave the rAF chain dangling; this bounds it so
+      // the flow gets `frames: 1` and a named failure rather than a silent hang.
+      setTimeout(() => resolve({ ok: false, last: prev, frames }), cfg.timeoutMs + 500);
+      requestAnimationFrame(step);
+    }), { sel: `[data-testid="${cssEscape(testID)}"]`, timeoutMs, minOpacity });
+    if (!out.ok) {
+      throw new Error(
+        `[driver] testID=${testID} never came to rest within ${timeoutMs}ms `
+        + `(${out.frames} frame(s) sampled, last ${JSON.stringify(out.last)}; `
+        + `null means the node is not in the DOM)`,
+      );
+    }
+  }
+
+  /**
+   * Resolve once the page has RENDERED `count` more frames. The honest way to say "give React a
+   * chance to act on the event I just dispatched, then snapshot" — a proof-of-absence needs the app
+   * to have had its turn, and a wall-clock sleep buys a load-dependent number of turns (30 frames on
+   * an idle host, possibly 2 on a loaded one) while a frame count buys the same number every time.
+   * Bounded in-page so a page that never paints fails loudly instead of hanging.
+   */
+  async settleFrames(count = 3, opts = {}) {
+    this._recordTimeline('settleFrames', count);
+    const timeoutMs = opts.timeoutMs ?? 5_000;
+    const painted = await this.page.evaluate((cfg) => new Promise((resolve) => {
+      let n = 0;
+      const step = () => { n += 1; if (n >= cfg.count) { resolve(n); return; } requestAnimationFrame(step); };
+      setTimeout(() => resolve(n), cfg.timeoutMs);
+      requestAnimationFrame(step);
+    }), { count, timeoutMs });
+    if (painted < count) {
+      throw new Error(`[driver] the page painted only ${painted} of ${count} frames within ${timeoutMs}ms`);
+    }
+  }
+
   /** Wait until NO element matches `testID` (e.g. a sheet closed and unmounted). */
   async waitGone(testID, opts = {}) {
     this._recordTimeline('waitGone', testID);

@@ -24,21 +24,8 @@
 //      submission, so a second attempt cannot succeed and only destroys the user's ability to claim
 //      the payment. The flow asserts the money really left AND that exactly one /tx call was made.
 //
-// NO TEST MAY CONTACT THE LIVE PROVIDER. The stub below replaces `window.fetch` — the app's single
-// HTTP boundary (`fetchWithTimeout`, `app/services/relay.ts`) — and is FAIL-CLOSED: any request to
-// an origin that is not this harness's own relay/web server is served from the fixture table or
-// REFUSED and recorded, and the flow asserts nothing was ever refused. A typo in a URL therefore
-// fails the test instead of reaching api.dfx.swiss.
-//
-// Fixture provenance. Every field name, envelope and value below is copied from the findings doc's
-// measured recordings: the step-2 field set and the string-vs-number amount asymmetry, the
-// `available` flag, `amount=1.` (a trailing bare decimal point — the spelling naive parsers reject),
-// the `icp:<ledger>/transfer?to=&amount=` URI shape, the `{expiryDate, blockchain, uri, hint}`
-// step-3 answer, the NestJS `{statusCode, message, error}` error envelope, and the 300-second quote.
-// THREE things are deliberately synthetic, because the doc records their SHAPE and not their value:
-// the merchant's claimed name, the destination principal (the doc redacts it), and the accepted-
-// submission body — no payment has ever been made, so no success body exists to copy. Each is
-// marked at its definition.
+// The till fixture and the fail-closed provider stub live in `../harness/ocp.mjs` — one till, shared
+// with flow 112 (the same code paid on the Solana rail). Fixture provenance is documented there.
 //
 // Selector contract: `ocp-checking`, `ocp-host`, `ocp-expiry`, `ocp-outcome`, `review-claimed`,
 // `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `btn-start-scan` (via armPayScan).
@@ -47,21 +34,10 @@ import {
   openBalances, selectCurrency, armPayScan, railPrincipalText,
 } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
-import { encodeLnurl } from '../harness/lnurl.mjs';
-
-// --- the provider, exactly as measured ------------------------------------------------------------
-const PROVIDER_HOST = 'api.dfx.swiss';
-const PROVIDER_ORIGIN = `https://${PROVIDER_HOST}`;
-// The public test till from the findings doc. Its payment id is the last segment of BOTH the API URL
-// the LNURL carries and the callback the provider hands back — which is why `submitProof` can derive
-// `/v1/lnurlp/tx/<id>` from the callback by swapping the `/cb/` segment.
-const PAYMENT_ID = 'pl_beeddb41cd4b6d9e';
-const API_URL = `${PROVIDER_ORIGIN}/v1/lnurlp/${PAYMENT_ID}`;
-const CALLBACK_URL = `${PROVIDER_ORIGIN}/v1/lnurlp/cb/${PAYMENT_ID}`;
-// The QR the till actually prints: an app.dfx.swiss URL carrying the LNURL in a `lightning`
-// parameter, uppercase as QR encoders emit it. Exercises `parseOcpScan`'s URL branch, not just the
-// bare-LNURL one. The encoder is verified against the published LUD-01 vector (harness/lnurl.mjs).
-const TILL_QR = `https://app.dfx.swiss/pl/?lightning=${encodeLnurl(API_URL).toUpperCase()}`;
+import {
+  installTillStub, ocpStubState, setOcpTxMode,
+  CLAIMED_MERCHANT, PAYMENT_ID, PROVIDER_HOST, TILL_QR,
+} from '../harness/ocp.mjs';
 
 // --- the wallet side ------------------------------------------------------------------------------
 const VCHF = 7;               // the asset that pays: a direct-ICRC row, settled by icrc1_transfer
@@ -72,36 +48,6 @@ const PAY_RAW = 100_000_000;   // the till's `1.` VCHF at 8 decimals — the exa
 const CKUSDC = 2;             // the asset the till does NOT take (leg 1); funded so no fund-gate fires
 const CKUSDC_SEED = 5_000_000;
 
-/** The till's menu. Assets + amounts are the live 2026-09-01 recordings; see the doc's tables. */
-const TRANSFER_AMOUNTS = [
-  {
-    method: 'InternetComputer',
-    available: true,
-    assets: [
-      {asset: 'ckBTC', amount: '0.000016'},
-      {asset: 'VCHF', amount: '1.'},          // the trailing bare decimal point, verbatim
-      {asset: 'ICP', amount: '0.50795551'},
-      {asset: 'VEUR', amount: '1.06'},        // amount synthetic; VEUR's presence on the menu is measured
-    ],
-  },
-  {
-    method: 'Solana',
-    available: true,
-    assets: [
-      {asset: 'SOL', amount: '0.01219252'},
-      {asset: 'USDC', amount: '1.246922'},
-      {asset: 'USDT', amount: '1.246922'},    // amount synthetic; USDT's presence is measured
-    ],
-  },
-  // The provider marks methods it cannot settle `available: false` on every response. Its presence
-  // and the flag are measured; the asset row under it is synthetic (the doc records neither).
-  {method: 'Arkade', available: false, assets: [{asset: 'BTC', amount: '0.000016'}]},
-];
-
-// Synthetic (see the header): the doc records that `displayName` is present and UNVERIFIED, not what
-// this till calls itself. The name is what the review must mark as claimed.
-const CLAIMED_MERCHANT = 'Kiosk am Bahnhof';
-
 export const meta = {
   id: '111',
   name: 'opencryptopay-till',
@@ -110,133 +56,6 @@ export const meta = {
   verifies: 'Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (provider host, full destination, countdown, claimed merchant name) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote.',
   timeoutMs: 45000, // 4 legs: 3 provider round trips (one deliberately slow) + 2 real IC settlements
 };
-
-/**
- * Install the provider stub over `window.fetch` — the app's one HTTP boundary.
- *
- * FAIL-CLOSED by construction: only the harness's own relay/web origins pass through. Everything
- * else must match a fixture route or it is recorded in `unexpected` and rejected, so the flow can
- * assert (at the end) that no request ever escaped toward the real provider.
- *
- * The stub is a small state machine rather than a static table because the provider is one: every
- * read of the payment details MINTS A NEW QUOTE (measured), and the callback 404s a quote id it did
- * not just issue. Reproducing that is what makes leg 4 honest — the app must be carrying the live
- * quote through, not replaying a captured one.
- */
-async function installTillStub(driver, cfg) {
-  await driver.eval((c) => {
-    const real = window.fetch.bind(window);
-    const state = {
-      calls: [],        // every provider URL the app requested, in order
-      txUrls: [],       // just the /tx submissions — the ONE-SHOT budget
-      unexpected: [],   // anything the stub refused: must stay empty
-      quoteId: null,    // the quote most recently minted (the provider invalidates the rest)
-      quoteSeq: 0,
-      txMode: 'accept', // 'accept' | 'indefinite' — flipped between legs by the flow
-    };
-    window.__OCP = state;
-
-    const json = (body, status) =>
-      new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
-    // The provider's error envelope is NestJS's, NOT the LNURL `{status,reason}` shape (measured).
-    const err = (status, message) =>
-      json({statusCode: status, message, error: status === 404 ? 'Not Found' : 'Bad Request'}, status);
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const isoIn = (ms) => new Date(Date.now() + ms).toISOString();
-
-    // Step 2 — the payment details. The full top-level field set the doc lists, in its order, with
-    // the string-vs-number amount asymmetry preserved: per-asset amounts are STRINGS while
-    // `requestedAmount.amount` is a JSON NUMBER.
-    const detailsBody = () => {
-      state.quoteSeq += 1;
-      state.quoteId = `q_e2e_${state.quoteSeq}`;
-      return {
-        callback: c.callbackUrl,
-        displayName: c.merchantName,
-        displayQr: true,
-        externalId: null,
-        id: c.paymentId,
-        maxSendable: 100000,
-        metadata: '[["text/plain","OpenCryptoPay"]]',
-        minSendable: 100000,
-        mode: 'Single',
-        possibleStandards: ['OpenCryptoPay', 'FrankencoinPay', 'LightningBolt11'],
-        quote: {id: state.quoteId, expiration: isoIn(c.quoteLifetimeMs)},
-        recipient: {name: c.merchantName},
-        requestedAmount: {asset: 'CHF', amount: 1},
-        route: c.paymentId,
-        standard: 'OpenCryptoPay',
-        tag: 'payRequest',
-        transferAmounts: c.transferAmounts,
-      };
-    };
-
-    window.fetch = async (input, init) => {
-      const url = typeof input === 'string' ? input : (input && input.url) || String(input);
-      // Relative / blob / data URLs and the harness's own servers are the app's real traffic.
-      if (!/^https?:/i.test(url) || c.passOrigins.some((o) => url.startsWith(`${o}/`) || url === o)) {
-        return real(input, init);
-      }
-      state.calls.push(url);
-      if (!url.startsWith(`${c.providerOrigin}/`)) {
-        state.unexpected.push(url);
-        throw new TypeError(`e2e: refused an off-fixture request to ${url}`);
-      }
-      const u = new URL(url);
-
-      // Step 4 — the ONE-SHOT proof submission. Counted, never retried by anyone.
-      if (u.pathname === `/v1/lnurlp/tx/${c.paymentId}`) {
-        state.txUrls.push(url);
-        if (state.txMode === 'accept') {
-          // SYNTHETIC: no payment has ever been made against the live provider, so no accepted-
-          // submission body exists to copy. The client requires only a readable JSON body at 2xx.
-          return json({}, 200);
-        }
-        // The loss path: the submission never comes back. `fetchWithTimeout` aborts it and the
-        // browser rejects with an AbortError — reproduced here without burning the real 30s bound.
-        throw new DOMException('The user aborted a request.', 'AbortError');
-      }
-
-      // Step 3 — the destination for one {method, asset} of the LIVE quote.
-      if (u.pathname === `/v1/lnurlp/cb/${c.paymentId}`) {
-        const quote = u.searchParams.get('quote');
-        if (state.quoteId === null || quote !== state.quoteId) {
-          return err(404, `No actual quote with ID ${quote} found`);
-        }
-        const method = u.searchParams.get('method');
-        const asset = u.searchParams.get('asset');
-        const uri = c.uris[`${method}/${asset}`];
-        if (!uri) return err(400, 'Invalid method or asset');
-        return json({
-          expiryDate: isoIn(c.quoteLifetimeMs),
-          blockchain: method, // the echo — the only integrity signal the answer carries
-          uri,
-          hint: `Send the exact amount, then report the transaction to /v1/lnurlp/tx/${c.paymentId}`,
-        }, 200);
-      }
-
-      // Step 2 — the payment link itself. Deliberately slow: the two provider reads take real time
-      // on a screen the payer just pointed at a QR, and the flow asserts the wallet says so.
-      if (u.pathname === `/v1/lnurlp/${c.paymentId}`) {
-        await sleep(c.detailsDelayMs);
-        return json(detailsBody(), 200);
-      }
-
-      state.unexpected.push(url);
-      return err(404, 'Payment link not found');
-    };
-  }, cfg);
-}
-
-/** Read the stub's recorded state back into Node. */
-const stubState = (driver) => driver.eval(() => ({
-  calls: window.__OCP.calls.slice(),
-  txUrls: window.__OCP.txUrls.slice(),
-  unexpected: window.__OCP.unexpected.slice(),
-}));
-
-/** Flip the submission behaviour between legs. */
-const setTxMode = (driver, mode) => driver.eval((m) => { window.__OCP.txMode = m; }, mode);
 
 /** Point the camera at the till code (arming the pay-intent gate first — the shared choke point). */
 async function scanTill(driver) {
@@ -271,14 +90,9 @@ export async function run() {
     }
 
     await installTillStub(driver, {
-      providerOrigin: PROVIDER_ORIGIN,
       passOrigins: [new URL(relayBaseURL).origin, new URL(webBaseURL).origin],
-      paymentId: PAYMENT_ID,
-      callbackUrl: CALLBACK_URL,
-      merchantName: CLAIMED_MERCHANT,
-      transferAmounts: TRANSFER_AMOUNTS,
-      // The measured quote lifetime, exactly: 300 seconds.
-      quoteLifetimeMs: 300_000,
+      // Deliberately slow: the two provider reads take real time on a screen the payer just pointed
+      // at a QR, and leg 2 asserts the wallet says so instead of freezing.
       detailsDelayMs: 1_000,
       uris: {
         // `icp:<LEDGER>/transfer?to=<PRINCIPAL>&amount=<DECIMAL>` — the live shape, NOT the README's.
@@ -317,7 +131,7 @@ export async function run() {
     assert(!(await driver.isPresent('btn-approve')), 'a refused till must never render an Approve button');
 
     // A refusal must be CHEAP: one read, and no request for a destination the wallet could not pay.
-    let seen = await stubState(driver);
+    let seen = await ocpStubState(driver);
     assertEq(String(seen.calls.length), '1', 'an unpayable till costs exactly one provider read');
     assertIncludes(seen.calls[0], 'timeout=0', 'the details read asks for the current charge, never a long poll');
     assertEq(String(seen.txUrls.length), '0', 'a refusal before any funds move must never touch the submission endpoint');
@@ -371,7 +185,7 @@ export async function run() {
     assertEq(await getBalance(relayBaseURL, accountHex, VCHF), String(VCHF_SEED - PAY_RAW - VCHF_FEE),
       'the payer is debited the till\'s exact amount plus the ledger fee');
 
-    seen = await stubState(driver);
+    seen = await ocpStubState(driver);
     assertEq(String(seen.txUrls.length), '1', 'the proof is reported EXACTLY once — the provider grants one attempt');
     const submitted = new URL(seen.txUrls[0]);
     assertEq(submitted.pathname, `/v1/lnurlp/tx/${PAYMENT_ID}`,
@@ -388,7 +202,7 @@ export async function run() {
     // only remaining asset is the block index — so it must be on screen, with an instruction NOT to
     // pay again (the quote and the transaction id are both spent; a retry cannot succeed).
     console.log('[111-opencryptopay-till] leg 4 — the submission never answers…');
-    await setTxMode(driver, 'indefinite');
+    await setOcpTxMode(driver, 'indefinite');
     await driver.click('btn-new', {timeoutMs: 5_000});
     await scanTill(driver);
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
@@ -405,7 +219,13 @@ export async function run() {
     body = await driver.bodyText();
     assert(!body.includes('Paid ✓'), 'an unresolved payment must NEVER render as paid');
     assertIncludes(body, 'Sent 1.00000000 VCHF', 'the unresolved outcome is the honest pending headline');
-    assertIncludes(body, 'awaiting the merchant’s confirmation', 'the unresolved outcome says what it is waiting on');
+    // …and it says what it is waiting on IN ITS OWN WORDS. The offline hand-off's "awaiting the
+    // merchant's confirmation" line must NOT be borrowed here: that state resolves by waiting, this
+    // one never does — the transfer is final and only the merchant can credit it, which is what the
+    // note above says. Two different pending states, two different instructions.
+    assert(!body.includes('awaiting the merchant’s confirmation'),
+      'an OpenCryptoPay outcome must not borrow the offline hand-off\'s wait-and-see line — nothing here resolves by waiting');
+    assertIncludes(body, `to ${CLAIMED_MERCHANT}`, 'the unresolved outcome still names who the money went to');
     // Not invited to pay again: no Approve, no review, and no receipt to hand back (there is no
     // accepted payment to share). `btn-new` starts a DIFFERENT payment; it does not retry this one.
     assert(!(await driver.isPresent('btn-approve')), 'the unresolved outcome must not offer an Approve to press again');
@@ -416,7 +236,7 @@ export async function run() {
     // one submission was spent, not retried by any caller.
     assertEq(await getBalance(relayBaseURL, accountHex, VCHF), String(VCHF_SEED - 2 * (PAY_RAW + VCHF_FEE)),
       'the unresolved transfer really settled on-chain: the funds left the wallet');
-    seen = await stubState(driver);
+    seen = await ocpStubState(driver);
     assertEq(String(seen.txUrls.length), '2', 'the indefinite submission is attempted ONCE and never retried');
     assertEq(new URL(seen.txUrls[1]).searchParams.get('tx'), ref[1],
       'the block index shown to the payer is the one that was reported');

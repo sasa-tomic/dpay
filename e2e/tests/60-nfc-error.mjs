@@ -134,10 +134,13 @@ export async function run() {
     // Fire the late error — it MUST be ignored (committed=true).
     await dispatch({type: 'error', role: 'card', reason: 'should be ignored'});
     // STALE-ASSERTION FIX: a bare waitForText('Confirming') would resolve on the FIRST poll — catching
-    // the pre-render DOM before the error's effect (if any) could flip the phase. A fixed delay lets
-    // React flush any would-be state update from the error, then we snapshot the post-flush DOM. If the
-    // bug existed (error overwrites the decided phase), "Confirming" would be gone after the flush.
-    await new Promise((r) => setTimeout(r, 500));
+    // the pre-render DOM before the error's effect (if any) could flip the phase. The app is given
+    // its turn in FRAMES, not milliseconds: React commits at most once per rendered frame, so ten
+    // frames is ten chances for the bug to show itself — the same ten whether the host is idle or
+    // saturated, whereas a 500ms sleep bought thirty chances on an idle box and possibly two on a
+    // loaded one. Then we snapshot the post-flush DOM: if the bug existed (error overwrites the
+    // decided phase), "Confirming" would be gone.
+    await driver.settleFrames(10);
     const bodyAfterLate = await driver.bodyText();
     assert(bodyAfterLate.includes('Confirming'), 'a late error after settling must NOT overwrite the settlement path (no false "Tap failed")');
     assert(!bodyAfterLate.includes('should be ignored'), 'the late-error reason must NOT render (the error was ignored)');

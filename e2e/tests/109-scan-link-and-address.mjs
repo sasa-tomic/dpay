@@ -103,6 +103,18 @@ export async function run() {
     await scan(driver, recipient);
 
     await driver.findByTestID('send-address-input', {timeoutMs: 10_000});
+    // The scan fills the field through a state update, so the value is NOT there on the CDP round
+    // trip immediately after the field mounts — a snapshot taken then reads "" and the flow fails
+    // for a render it did not wait for (observed RED under contention, 2026-09-01). Wait for the
+    // value, then pin it.
+    await driver.waitForFunction(
+      (sel, want) => document.querySelector(sel)?.value === want,
+      {
+        timeoutMs: 10_000,
+        args: ['[data-testid="send-address-input"]', recipient],
+        label: `the scanned account reaches the destination field (${recipient})`,
+      },
+    );
     assertEq(await driver.readInputValue('send-address-input'), recipient, 'the scanned account fills the destination field verbatim');
     // The disclosure is the point: the user learns the rail + its fee BEFORE typing an amount, and
     // it is produced by the same resolver a paste goes through (no scan-specific shortcut).

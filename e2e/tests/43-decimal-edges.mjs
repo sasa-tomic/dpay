@@ -157,6 +157,11 @@ export async function run() {
         });
         assert(canceled === true, `case "${c.label}": sign-surface Cancel link should be reachable via aria-label`);
         await driver.waitGone('pay-amount', { timeoutMs: 4_000 });
+        // …and wait for the scan surface to be BACK before the next iteration tries to arm it.
+        // `armPayScan` polls for the gate button and gives up saying "no gate button pressed",
+        // which is true and says nothing useful: PayMode was still between phases (observed RED
+        // under contention, 2026-09-01).
+        await driver.findByTestID('pay-scan', { timeoutMs: 8_000 });
       }
     }
 

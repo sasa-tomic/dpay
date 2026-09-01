@@ -77,8 +77,14 @@ export async function run() {
       const requestQR = buildRequestQR(merchant.publicHex, PAY, nonce, expiry, leg.currency, 'Merchant');
       await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
 
+      // WAIT for the refusal, then snapshot. The scan is injected through a seam; decoding it and
+      // re-rendering the review takes the app a moment, and a `bodyText()` taken on the very next
+      // CDP round trip only happened to catch it because an idle host is fast. Under contention the
+      // snapshot lands on the pre-render DOM and the flow fails for a reason that has nothing to do
+      // with the money rule it is guarding (observed RED, 2026-09-01).
+      const blocked = await driver.waitForText('Not enough balance to cover this payment.', { timeoutMs: 10_000 });
       const body = await driver.bodyText();
-      assertIncludes(body, 'Not enough balance to cover this payment.', `${leg.tag}: review shows the insufficient-balance block`);
+      assert(blocked, `${leg.tag}: review must show the insufficient-balance block. page:\n${body.slice(0, 400)}`);
       assertIncludes(body, `Pay 1.00000001 ${leg.tag}`, `${leg.tag}: blocked review still shows the exact requested amount`);
       assert(!(await driver.isPresent('btn-approve')), `${leg.tag}: no approve button on a doomed payment`);
       assert(!(await driver.isPresent('btn-paid')), `${leg.tag}: no paid button on a doomed payment`);
@@ -100,8 +106,10 @@ export async function run() {
     const ghostQR = buildRequestQR(merchant.publicHex, PAY, nonce, expiry, UNKNOWN_CURRENCY, 'Merchant');
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, ghostQR);
 
+    // Same rule as the insufficient legs above: wait for the refusal, then snapshot it.
+    const refused = await driver.waitForText('Unsupported asset', { timeoutMs: 10_000 });
     const ghostBody = await driver.bodyText();
-    assertIncludes(ghostBody, 'Unsupported asset', 'unknown-currency request hits the unsupported-asset branch');
+    assert(refused, `unknown-currency request must hit the unsupported-asset branch. page:\n${ghostBody.slice(0, 400)}`);
     assertIncludes(ghostBody, 'currency 99', 'unsupported body names the offending currency id');
     assert(!(await driver.isPresent('btn-approve')), 'no approve button for an unsupported asset');
     assert(!(await driver.isPresent('btn-paid')), 'no paid button for an unsupported asset');

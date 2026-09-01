@@ -214,8 +214,14 @@ export async function run() {
     await driver.findByTestID('btn-reset-confirm', { timeoutMs: 4_000 });
     await census('settingsResetConfirm');
     console.log('[41-a11y-census] ✓ census: settings reset confirmation');
-    // Cancel out of the dialog (Esc is NOT wired for this; tap the explicit cancel button).
+    // Cancel out of the dialog (Esc is NOT wired for this; tap the explicit cancel button), and
+    // WAIT for it to actually go: the confirmation replaces the settings body, so the Restore
+    // section below cannot render until this dialog is gone. Without the intermediate wait the two
+    // steps — "the dialog collapses" and "the section renders" — shared one 4s budget, and under
+    // contention the census died on the second while the first was still finishing (observed RED,
+    // 2026-09-01).
     await driver.click('btn-reset-cancel', { timeoutMs: 4_000 });
+    await driver.waitGone('btn-reset-confirm', { timeoutMs: 6_000 });
 
     // 4c. Settings → Restore confirmation form (tapping btn-settings-restore reveals the seed input
     //     + btn-settings-restore-confirm + -cancel). Mirrors the reset-confirm census above for the

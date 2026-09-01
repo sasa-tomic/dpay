@@ -88,8 +88,8 @@ export async function run() {
     // strip MOUNTED; capturing mid-fade samples a partial opacity, which is why this surface
     // drifted between 0.2% and 0.55% run to run on identical code. Dark surfaces this first — a
     // bright strip against black moves far more per-channel than the same strip on white.
-    // Same idiom as the coach-card settle below.
-    await new Promise((r) => setTimeout(r, 500));
+    // Waited in FRAMES, not milliseconds — mirrors flow 40.
+    await driver.waitAtRest('trip-strip', { timeoutMs: 8_000 });
 
     // 2. Capture wallet-Pay surface.
     await driver.screenshot(SURFACES[0].capture);
@@ -101,7 +101,7 @@ export async function run() {
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
     // Trip Ready J4: let the receiveRequest coach card's ~480ms rise+fade entrance settle to rest
     // so the capture (and the baseline contract) are deterministic — mirrors flow 40.
-    await new Promise((r) => setTimeout(r, 800));
+    await driver.waitAtRest('coach-receiveRequest', { timeoutMs: 8_000 });
     masks['request-qr'] = await getTestIDRectDevicePx(driver, 'request-qr');
     await driver.screenshot(SURFACES[1].capture);
 
