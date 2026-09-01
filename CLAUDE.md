@@ -63,6 +63,30 @@ Founder hard rule, verbatim: **"user MUST be given useful practical instructions
 - This rule binds even when the honest answer is "this asset has no fiat ramp": receiving by plain on-chain transfer is still a complete, practical instruction (e.g. VCHF/ICP: send from any Internet Computer wallet to your own ICRC-1 account — QR + copy + fee shown, `IcrcDepositSheet`).
 - If a step genuinely has no instruction that can be given (a true external blocker), surface that to the founder instead of shipping placeholder copy.
 
+## Non-negotiable: the agent test float is REAL money (set 2026-09-01)
+
+Claude holds a funded mainnet key so it can prove things that have no sandbox (the OpenCryptoPay
+provider has none; the VCHF/ICP funded-transfer proof has none). Mechanism, recovery and the spend
+log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context every session.
+
+- **Measure, never assume.** `just agent-balance` is the only statement of what the float holds. A
+  balance from memory, from a doc, or from a previous session is not evidence. `UNREADABLE` is not
+  zero.
+- **Ceiling: CHF 25 equivalent.** Claude never asks for or accepts more than this in the float, and
+  never tops it up itself. Everything below is affordable *because* of the cap.
+- **Spend without asking only when ALL hold:** ≤ CHF 2 equivalent in one operation; the destination
+  was validated by the core (`icp_validate_principal` / `icp_validate_icrc_account`); the purpose is
+  a stated verification that cannot be done offline; and the spend is appended to the log in
+  `docs/AGENT-FUNDS.md`.
+- **Ask the founder first for:** anything above CHF 2, the first payment to any new counterparty
+  (each new merchant/till counts), anything that would empty the float, and any spend whose outcome
+  Claude cannot check afterwards.
+- **Never:** sign anything Claude cannot explain in full; send to an address that failed core
+  validation; reuse this seed as any other identity; put it in an APK, a screenshot, a test fixture,
+  or a subagent prompt; or print the seed except immediately before an approved spend.
+- **Report honestly.** A spend that bought nothing is a spend that bought nothing — record it. Do
+  not spend again to "make it work" without asking.
+
 ## Projects
 
 | Name | What |

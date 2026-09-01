@@ -1,0 +1,13 @@
+# sops encryption rules. The only secrets in this repo are under `secrets/`.
+#
+# The age RECIPIENT below is public — it can only encrypt. The matching identity (private key) lives
+# at `.dev/age/agent-key.txt`, which is gitignored via the `/.dev` rule, so the seed can never be
+# decrypted from a repo clone alone.
+#
+# What this protects against: an encrypted blob committed to git is safe to push, mirror, or share.
+# What it does NOT protect against: anyone with read access to this working copy has BOTH halves on
+# the same disk. Treat `secrets/` as protection from accidental publication, not from local
+# compromise. Operating rules for the funded key: docs/AGENT-FUNDS.md
+creation_rules:
+  - path_regex: ^secrets/.*\.sops\.json$
+    age: age1zqqzr070hwzw5w3dkdwa67t6n258cax6s6xxu307kydjkfcpa5tslpuepx

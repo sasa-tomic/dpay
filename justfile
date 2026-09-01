@@ -506,3 +506,21 @@ cleanup wipe='': stop
     fi
 
     echo "done — ~$((freed / 1024)) MB freed."
+
+# --- agent test float (real mainnet money — rules in CLAUDE.md, mechanism in docs/AGENT-FUNDS.md) ---
+
+# print the funding address for the agent's mainnet test float (no decryption)
+agent-principal:
+    node scripts/agent-key.mjs principal
+
+# measure live mainnet balances of the test float — the ONLY source of truth for what it holds
+agent-balance:
+    node scripts/agent-key.mjs balance
+
+# print the seed hex (DECRYPTS the sops secret). Only immediately before an approved spend.
+agent-seed:
+    node scripts/agent-key.mjs seed
+
+# generate a NEW test-float key. Refuses if one exists — rotating strands any funds still held.
+agent-key-init:
+    node scripts/agent-key.mjs init
