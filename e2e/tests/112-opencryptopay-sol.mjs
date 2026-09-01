@@ -8,7 +8,7 @@
 // System Program transfer signed on the device, with the transaction SIGNATURE as the proof, where
 // the IC rail reports a ledger block index.
 //
-// Two legs, in the order a payer meets them:
+// Three legs, in the order a payer meets them:
 //
 //   1. SOLANA USDC IS REFUSED, BY NAME. The till really does offer `Solana/USDC` (measured), and
 //      dpay really can hold it — so this is not "asset not accepted", it is dpay declining an offer
@@ -24,14 +24,22 @@
 //      from, the countdown, and the merchant name marked as CLAIMED. Proven by the chain, not by
 //      pixels: zero transactions have been broadcast while that review is on screen. Approve → one
 //      broadcast → one proof submission naming that signature → the paid state.
+//   3. A TRANSFER THE CLUSTER WON'T CONFIRM STAYS RECOVERABLE. The network accepts the transaction
+//      and then the status read stops answering: money on chain, provider untold. The wallet keeps
+//      the broadcast signature, says so honestly, reports NOTHING — and when the cluster comes back
+//      it re-reads that same signature, finds it confirmed, and completes the sale itself. One
+//      broadcast, one submission, no action from the payer.
 //
-// The unresolved/loss path is flow 111's job and is rail-independent by construction: `payAndReport`
-// (`app/services/opencryptopay.ts`) owns the order and the one-shot submission for BOTH rails, and
-// only the `send` seam differs. Re-proving it here would duplicate coverage, not add it.
+// The unresolved SUBMISSION path — the provider itself never answering — is flow 111's job and is
+// rail-independent by construction: `payAndReport` (`app/services/opencryptopay.ts`) owns the order
+// and the one-shot submission for BOTH rails, and only the `send` seam differs. The CLAIM is not
+// shared: each rail holds its own handle on a transfer it could not resolve (an IC envelope there, a
+// Solana signature here) and re-reads it against its own chain, so leg 3 belongs to this flow.
 //
 // Selector contract: `asset-sol-select`, `asset-sol-usdc-select`, `sol-pay-scan`, `sol-pay-err`,
 // `ocp-checking`, `sol-pay-amount`, `sol-pay-payee`, `ocp-host`, `ocp-expiry`, `review-claimed`,
-// `btn-approve`, `sol-pay-status`, `ocp-outcome`, `btn-sol-start-scan` (via armPayScan).
+// `btn-approve`, `sol-pay-status`, `ocp-outcome`, `btn-sol-pay-done`, `btn-sol-start-scan`
+// (via armPayScan).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, armPayScan,
 } from '../harness/lib.mjs';
@@ -52,9 +60,9 @@ export const meta = {
   name: 'opencryptopay-sol',
   journey: 'pay',
   covers: ['opencryptopay', 'sol-rail', 'explicit-approve', 'claimed-name', 'solana-usdc-refused',
-    'one-shot-submit', 'honest-instructions', 'fail-closed'],
-  verifies: 'The Solana rail pays an OpenCryptoPay till: a scanned till with SOL selected resolves a live quote and lands on an explicit review (exact SOL amount, full destination address, provider host, countdown, claimed name) that broadcasts nothing until Approve; Approve sends exactly one Solana transaction and reports that signature to the provider exactly once → paid. With Solana USDC selected the SAME till is refused by name — its URI names no token account — pointing the payer at SOL, costing one provider read, and broadcasting nothing.',
-  timeoutMs: 40000, // 2 legs × (2 provider round trips) + a real local sign/broadcast/confirm
+    'one-shot-submit', 'honest-instructions', 'fail-closed', 'loss-path-recovery'],
+  verifies: 'The Solana rail pays an OpenCryptoPay till: a scanned till with SOL selected resolves a live quote and lands on an explicit review (exact SOL amount, full destination address, provider host, countdown, claimed name) that broadcasts nothing until Approve; Approve sends exactly one Solana transaction and reports that signature to the provider exactly once → paid. With Solana USDC selected the SAME till is refused by name — its URI names no token account — pointing the payer at SOL, costing one provider read, and broadcasting nothing. A transfer the cluster accepts but will not confirm is reported to nobody, keeps its signature, and is completed by the wallet itself once the status read comes back — one broadcast, one submission.',
+  timeoutMs: 60000, // 3 legs × (2 provider round trips) + a real local sign/broadcast/confirm
 };
 
 /**
@@ -78,7 +86,13 @@ async function installSolStub(driver) {
         globalThis.__E2E_SOL_SENT.push({signature: sig, raw: Array.isArray(params) ? params[0] : null});
         return sig;
       },
-      getSignatureStatuses: () => ({context: {slot: 250000001}, value: [{confirmationStatus: 'confirmed'}]}),
+      // Flipped by leg 4 to 'unreadable': the status read is the ONLY thing that fails there, so a
+      // transaction the network has already accepted is left with no verdict — the shape that puts
+      // real money on chain with the provider untold.
+      getSignatureStatuses: () => {
+        if (globalThis.__E2E_SOL_STATUS === 'unreadable') throw new Error('solana rpc: status node unavailable');
+        return {context: {slot: 250000001}, value: [{confirmationStatus: 'confirmed'}]};
+      },
       // A funded wallet on both tokens: 5 SOL, and a USDC token account that exists with 2.5 USDC.
       getBalance: () => ({value: 5000000000}),
       getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
@@ -89,6 +103,10 @@ async function installSolStub(driver) {
 
 /** How many Solana transactions the device has actually broadcast. */
 const broadcasts = (driver) => driver.eval(() => globalThis.__E2E_SOL_SENT.map((t) => t.signature));
+
+/** Whether the cluster will answer a signature-status read at all. 'unreadable' throws — the
+ *  broadcast still succeeds, only the verdict is out of reach. */
+const setSolStatus = (driver, mode) => driver.eval((m) => { globalThis.__E2E_SOL_STATUS = m; }, mode);
 
 /** Select an asset in Balances and land on its Pay scan surface. */
 async function selectAndScan(driver, assetKey) {
@@ -202,6 +220,50 @@ export async function run() {
 
     console.log(`[112-opencryptopay-sol] ✓ paid; one broadcast (${sent[0]}) reported once`);
     await driver.screenshot('112-ocp-sol-paid');
+
+    // --- 4. (header leg 3) confirmation fails AFTER the broadcast — still recoverable -----------
+    // The likeliest failure of a till payment is not a refusal: it is losing the network while the
+    // transaction is already landing. Money on chain, provider untold, and the only claim on it is
+    // the signature the broadcast returned. Discarding it is what made this rail's version of the
+    // loss path unrecoverable (review #15); keeping it makes the outcome resolvable without the
+    // payer doing anything. This is rail-SPECIFIC — each rail re-reads its own claim in its own
+    // vocabulary — so it cannot be inherited from flow 111.
+    console.log('[112-opencryptopay-sol] leg 3 — broadcast accepted, confirmation unreadable…');
+    await setSolStatus(driver, 'unreadable');
+    await driver.click('btn-sol-pay-done', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
+    await armPayScan(driver);
+    await driver.eval((qr) => { window.__DPAY_TEST_SCAN(qr); }, TILL_QR);
+    await driver.findByTestID('sol-pay-amount', {timeoutMs: 15_000});
+    await driver.click('btn-approve', {timeoutMs: 5_000});
+
+    const pending = await driver.readText('ocp-outcome', {timeoutMs: 20_000});
+    assertIncludes(pending, 'neither paid nor failed', 'an unconfirmable transfer is stated as neither paid nor failed');
+    assertIncludes(pending, 'Keep this screen open', 'the copy tells the payer what keeps the recovery running');
+    assert(!(await driver.bodyText()).includes(`Paid ✓ ${PAY_DISPLAY}`),
+      'an unconfirmed transfer must NEVER render as paid');
+    // The money moved and the provider was NOT told: spending the one submission on a signature the
+    // wallet cannot vouch for would burn the quote AND bind the id, which is the unrecoverable case.
+    assertEq(String((await broadcasts(driver)).length), '2', 'leg 4 broadcasts exactly one more transaction');
+    assertEq(String((await ocpStubState(driver)).txUrls.length), '1',
+      'an unconfirmed transfer must not be reported — the one submission stays unspent');
+    await driver.screenshot('112-ocp-sol-unconfirmed');
+
+    // The cluster comes back. dpay re-reads the SAME signature — no second broadcast — finds it
+    // confirmed, and spends the submission it was holding.
+    await setSolStatus(driver, 'confirmed');
+    assert(await driver.waitForText(`Paid ✓ ${PAY_DISPLAY}`, {timeoutMs: 20_000}),
+      'a recovered transfer completes the sale on its own, with no action from the payer');
+    assert(!(await driver.isPresent('ocp-outcome')), 'the unresolved note goes when the outcome resolves');
+
+    const recovered = await broadcasts(driver);
+    assertEq(String(recovered.length), '2', 'recovery re-READS the transaction; it never re-broadcasts one');
+    seen = await ocpStubState(driver);
+    assertEq(String(seen.txUrls.length), '2', 'the recovered proof is reported exactly ONCE in total');
+    assertEq(new URL(seen.txUrls[1]).searchParams.get('tx'), recovered[1],
+      'the recovered proof names the signature of the transaction that was actually broadcast');
+    console.log(`[112-opencryptopay-sol] ✓ recovered; ${recovered[1]} reported once, nothing re-sent`);
+    await driver.screenshot('112-ocp-sol-recovered');
 
     // Nothing ever escaped toward the real provider.
     assertEq(JSON.stringify(seen.unexpected), '[]', 'no request may reach an origin outside the fixture table');

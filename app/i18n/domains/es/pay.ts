@@ -126,7 +126,7 @@ export const payEs: PayMessages = {
     submitTooLate: reference =>
       `Tu transferencia se realizó, pero solo después de que este precio caducara, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale ${reference}: es la prueba de tu transferencia.`,
     transferUnknown:
-      'dpay no pudo confirmar tu transferencia, así que el comercio no sabe nada de ella: no está pagada ni ha fallado. No pagues otra vez: abre «Transacciones» para ver si se realizó y, si fue así, muéstrasela al comercio.',
+      'dpay aún no ha podido confirmar tu transferencia, así que el comercio no sabe nada de ella: no está pagada ni ha fallado. Deja esta pantalla abierta: dpay sigue comprobándolo y completará el pago por su cuenta si la transferencia se realizó. Mientras tanto, no pagues otra vez.',
     transferRefused: reason =>
       `Tu transferencia no se realizó, así que no se ha pagado nada y tu dinero sigue en tu billetera: ${reason}. Vuelve a escanear el código para pagar en esta caja.`,
     transferFailed:

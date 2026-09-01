@@ -32,6 +32,9 @@ export {deriveSolanaAddress};
 // Type-only re-export: the history hook consumes these shapes but must reach the network module
 // only through this seam. `export type` is erased, so nothing is pulled into the bundle.
 export type {SolanaHistory, SolanaHistoryRow} from './solana/history';
+// Same reason: `getSolSignatureStatus` hands its caller the chain's verdict verbatim, so the shape
+// of that verdict has to be nameable without importing the network module.
+export type {SolanaSignatureStatus} from './solana/rpc';
 
 // --- existing exports (unchanged) ----------------------------------------------
 
@@ -81,6 +84,29 @@ export async function sendSol(
   onBroadcast?.(signature);
   await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
   return signature;
+}
+
+/** The chain's own verdict on a signature this device already broadcast — null when the cluster has
+ *  never heard of it. History-aware (`searchTransactionHistory:true`), so a transaction that landed
+ *  while the app was not looking is still observable after it drops out of the recent-status cache.
+ *
+ *  It exists for the one caller that must resolve a transfer AFTER `sendSol` threw: the
+ *  OpenCryptoPay report is one-shot and irreversible, so a broadcast whose confirmation failed is
+ *  the payer's only claim on the money and its verdict has to be readable again later
+ *  (`SolPayMode`, findings doc "The loss path"). Reading is safe to repeat — nothing here signs or
+ *  moves anything.
+ *
+ *  Throws when the rail is offline, exactly like `sendSol`: a signature can only exist because a
+ *  broadcast succeeded, so an RPC that has since gone missing is a state the caller must see and
+ *  retry, never one to answer with a silent "not found" (which reads as "it never landed"). */
+export async function getSolSignatureStatus(
+  signature: string,
+  signal?: AbortSignal,
+): Promise<SolanaSignatureStatus | null> {
+  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
+  const {getSignatureStatusesForSig} = await import('./solana/rpc');
+  const {status} = await getSignatureStatusesForSig(SOLANA_RPC_URL, signature, {signal});
+  return status;
 }
 
 /** Phase 6 — Build, sign, broadcast, and confirm an SPL Token `transfer` of `amount` raw USDC (6

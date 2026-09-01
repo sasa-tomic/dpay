@@ -161,7 +161,13 @@ export type PayMessages = {
     submitTooLate: (reference: string) => string;
     /** The TRANSFER's own outcome is unknown, so the provider was never told (calling it once is
      *  all we get — see the findings doc's loss path). Neither paid nor failed, and no reference
-     *  exists to hand over yet. */
+     *  exists to hand over yet.
+     *
+     *  It promises that dpay keeps checking because BOTH rails now do: the transfer is left
+     *  indefinite only where a claim on it survives — the IC envelope, the Solana signature — and
+     *  each outcome screen re-polls that claim and reports it if it resolves in time (PayMode /
+     *  SolPayMode). The promise is bounded to the screen because the claim lives in that
+     *  component's state, which is exactly what "keep this screen open" says. */
     transferUnknown: string;
     /** A transfer that had been indefinite turns out to have DEFINITELY not happened: the ledger
      *  refused it. Nothing left the wallet, so this is a relief, not a loss — and the payer needs
@@ -339,7 +345,7 @@ export const payEn: PayMessages = {
     submitTooLate: reference =>
       `Your transfer went through, but only after this price expired — so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}: it is the proof of your transfer.`,
     transferUnknown:
-      'dpay couldn’t confirm your transfer, so the merchant hasn’t been told about it — this is neither paid nor failed. Don’t pay again: open Transactions to see whether it went through, and show the merchant that payment if it did.',
+      'dpay couldn’t confirm your transfer yet, so the merchant hasn’t been told about it — this is neither paid nor failed. Keep this screen open: dpay is still checking, and will finish the payment itself if the transfer went through. Don’t pay again in the meantime.',
     transferRefused: reason =>
       `Your transfer did not go through, so nothing was paid and your money is still in your wallet — ${reason}. Scan the code again to pay this till.`,
     transferFailed:

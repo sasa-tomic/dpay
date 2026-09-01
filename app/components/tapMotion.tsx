@@ -9,8 +9,19 @@
  * Choreography rules (spec + AGENTS blind-spot hardening):
  *   - Animations are keyed on PHASE TRANSITIONS, never render count — Wallet re-renders on
  *     live balance polls; a re-render must never re-trigger or restart a beat. Each element
- *     below runs its effect on mount/`deps` only and stops its own animations on cleanup.
- *   - Loops run ONLY while mounted in that phase; every `.start()` has a `.stop()` cleanup.
+ *     below runs its effect on mount/`deps` only.
+ *   - Every LOOP is stopped in its effect's cleanup, so it runs only while mounted in that
+ *     phase. That cleanup earns its keep on a deps change (`reduced` flips): the effect re-runs
+ *     while the component stays mounted, and without the stop the previous loop would spin on
+ *     beside the new one forever.
+ *   - FINITE beats need no cleanup and deliberately do not all have one (`TapProgressLine`'s
+ *     segment fills start without a stop — as do TripStrip, Onboarding's recovery stamp and
+ *     Walkthrough's dots). Every animated value here is bound straight to an `Animated.*`
+ *     component, and unmounting one detaches its props down to the value: `AnimatedProps.__detach`
+ *     → `AnimatedStyle.__detach` → `AnimatedValue.__detach`, which calls `stopAnimation()`
+ *     (read in `react-native/Libraries/Animated/nodes/`). So unmount already stops them, and a
+ *     re-run merely retargets the same value. Do NOT "fix" these into having stops — there is no
+ *     leak to fix, and a stop that can never fire is dead code.
  *   - useNativeDriver: false everywhere (RNW collapsable constraint — svg elements are never
  *     wrapped in Animated.createAnimatedComponent; animated fragments draw in LOCAL coords
  *     inside a static-geometry canvas, only opacity/transform animate).

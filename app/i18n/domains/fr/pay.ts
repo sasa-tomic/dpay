@@ -127,7 +127,7 @@ export const payFr: PayMessages = {
     submitTooLate: reference =>
       `Votre transfert est passé, mais seulement après l’expiration de ce prix : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}, c’est la preuve de votre transfert.`,
     transferUnknown:
-      'dpay n’a pas pu confirmer votre transfert, le commerçant n’en sait donc rien — ce n’est ni payé ni échoué. Ne payez pas une seconde fois : ouvrez « Transactions » pour voir si le transfert est passé et, si oui, montrez-le au commerçant.',
+      'dpay n’a pas encore pu confirmer votre transfert, le commerçant n’en sait donc rien — ce n’est ni payé ni échoué. Gardez cet écran ouvert : dpay continue de vérifier et terminera le paiement lui-même si le transfert est passé. Entre-temps, ne payez pas une seconde fois.',
     transferRefused: reason =>
       `Votre transfert n’est pas passé : rien n’a été payé et votre argent est toujours dans votre portefeuille — ${reason}. Scannez le code à nouveau pour payer à cette caisse.`,
     transferFailed:

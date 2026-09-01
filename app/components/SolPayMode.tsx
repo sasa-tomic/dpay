@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
@@ -6,7 +6,7 @@ import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {IconCheck, IconClock, IconScan, IconShare} from './icons';
-import {QR_SIZE} from '../config/constants';
+import {POLL, QR_SIZE} from '../config/constants';
 import type {SolPayGate} from '../config/assets';
 import type {Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short} from '../lib/format';
@@ -22,7 +22,7 @@ import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
 import type {SolReqV2} from '../solana/qr';
 import {isSolReqV2Expired} from '../solana/payments';
-import {sendSol, signSolPayment, signSplPayment} from '../solana';
+import {getSolSignatureStatus, sendSol, signSolPayment, signSplPayment, type SolanaSignatureStatus} from '../solana';
 import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
 import {NfcStatusRow} from './NfcStatusRow';
@@ -62,6 +62,17 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   const [ocp, setOcp] = useState<OcpTarget | null>(null);
   const [ocpBusy, setOcpBusy] = useState(false);
   const [ocpDone, setOcpDone] = useState<{amount: string; who: string; note: string | null} | null>(null);
+  // A till transfer whose outcome this rail could NOT resolve, plus the quote it was made against.
+  // IC twin: PayMode's `ocpClaim`, same reason and same lifecycle. The broadcast signature is the
+  // payer's only claim on that money: the network already accepted the transaction, so its status
+  // stays readable and the confirmation may be one more poll away — the likeliest failure of all is
+  // a flaky connection while the transfer is already landing. Set ONLY when the transfer itself
+  // stayed indefinite (so the one submission has NOT been spent), and cleared the moment it is
+  // used, which is what keeps `/tx` to at most one call in total.
+  const [ocpClaim, setOcpClaim] = useState<{signature: string; target: OcpTarget} | null>(null);
+  // One re-poll at a time. The claim's effect below runs on an interval and each tick can outlive
+  // the next, so without this two ticks could both reach a confirmed transfer and both report it.
+  const ocpChecking = useRef(false);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -96,6 +107,72 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   // component): the SolReqV2 of an offline pay, or the live quote of a merchant till.
   const locked = phase !== 'scan';
   useReportLock(onLockChange, locked);
+
+  // Resolve a till transfer this rail left indefinite. IC twin: PayMode's claim effect — same
+  // shape, same interval, same one-shot discipline; only the question asked of the network differs
+  // (a signature status instead of a read_state poll). The provider has NOT been told yet, so a
+  // transaction that turns out to have confirmed can still be reported and the sale still credited;
+  // one the chain has failed means nothing moved at all. Either way the claim is spent once and
+  // `/tx` is called at most once in total (findings doc, "The loss path").
+  //
+  // Declared up here with the other hooks, ABOVE the sub-mode early return, so the Rules of Hooks
+  // hold across a Send detour — the same reason the `useState` block sits where it does. The
+  // handlers it calls are hoisted function declarations further down.
+  useEffect(() => {
+    if (phase !== 'ocp-done' || ocpClaim === null) return;
+    let alive = true;
+    const check = async () => {
+      if (ocpChecking.current) return;
+      ocpChecking.current = true;
+      try {
+        let status: SolanaSignatureStatus | null;
+        try {
+          status = await getSolSignatureStatus(ocpClaim.signature);
+        } catch (e) {
+          console.warn('ocp claim re-poll failed:', e instanceof Error ? e.message : String(e));
+          return; // best-effort: the next tick tries again
+        }
+        if (!alive) return;
+        const sent = solStatusToSend(status, ocpClaim.signature);
+        if (sent.kind === 'unknown') return; // still indefinite — keep looking
+        if (sent.kind === 'refused') {
+          // Definitive: nothing reached the merchant. The pending screen was the honest state a
+          // moment ago and is a lie now, so it goes — back to the scanner, with the reason and the
+          // one action that can still pay this till.
+          reset();
+          refuseScan(sent.message);
+          return;
+        }
+        // The transaction DID confirm, and the provider still has not heard about it. Report it
+        // ONCE — but only while the price it was quoted against is alive: a submission against a
+        // dead quote is refused AND binds the transaction id to it, which is precisely what would
+        // take away the payer's ability to claim this payment with the merchant.
+        if (Date.now() >= ocpClaim.target.expiresAt) {
+          setOcpDone(d => (d === null ? d : {...d, note: M.pay.ocp.submitTooLate(sent.reference)}));
+          setOcpClaim(null);
+          return;
+        }
+        const done = await payAndReport(
+          ocpClaim.target.details,
+          ocpClaim.target.method,
+          ocpClaim.target.asset,
+          () => Promise.resolve(sent),
+        );
+        if (!alive) return;
+        // `done` is the reported outcome's own sentence — 'not-paid' cannot arise from a settled
+        // send, and both remaining shapes carry what the payer needs (a null note = paid).
+        setOcpDone(d => (d === null ? d : {...d, note: done.kind === 'paid' ? null : done.message}));
+        setOcpClaim(null);
+      } finally {
+        ocpChecking.current = false;
+      }
+    };
+    void check();
+    // `reset`/`refuseScan` are deliberately NOT dependencies: they are stable closures over
+    // setState, and re-running on their identity would restart the interval on every render.
+    const id = setInterval(() => { void check(); }, POLL.receiptPay);
+    return () => { alive = false; clearInterval(id); };
+  }, [phase, ocpClaim]);
 
   const toggle = (
     <ModeToggle
@@ -286,7 +363,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   // INCLUDED and then failed moved no lamports and never will, so calling it unknown would tell the
   // payer "don't pay again" about a purchase they still have to pay for — which is why that case is
   // classified out of the catch first, by the same module that owns every other Solana error class.
-  async function sendSolForOcp(target: OcpTarget): Promise<OcpSendResult> {
+  //
+  // An indefinite outcome hands the signature back through `hold` instead of dropping it. It is the
+  // claim on the money: the network accepted this transaction, so the chain can still be asked what
+  // became of it, and discarding it would turn the recoverable case into the unrecoverable one.
+  async function sendSolForOcp(target: OcpTarget, hold: {claim: string | null}): Promise<OcpSendResult> {
     const broadcast: {sig: string | null} = {sig: null};
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     try {
@@ -296,7 +377,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
       const msg = e instanceof Error ? e.message : String(e);
       console.warn('ocp: SOL send failed:', msg);
       if (isSolTransactionFailed(msg)) return {kind: 'refused', message: M.pay.ocp.transferFailed};
-      return broadcast.sig === null ? {kind: 'refused', message: friendlySolError(msg)} : {kind: 'unknown'};
+      if (broadcast.sig === null) return {kind: 'refused', message: friendlySolError(msg)};
+      hold.claim = broadcast.sig;
+      return {kind: 'unknown'};
     } finally {
       cancel();
     }
@@ -311,14 +394,19 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     if (late !== null) { setErr(late); return; }
     const who = target.details.claimedMerchantName ?? target.host;
     const amount = fmtAsset(target.rawAmount, SOL_DECIMALS, SOL_UNIT);
+    // Filled by the send below when — and only when — the transfer's own outcome stayed indefinite.
+    // That is exactly the case in which the provider has NOT been told, so the one submission is
+    // still unspent and the claim is worth keeping.
+    const hold: {claim: string | null} = {claim: null};
     setBusy(true);
     setErr(null);
     try {
-      const out = await payAndReport(target.details, target.method, target.asset, () => sendSolForOcp(target));
+      const out = await payAndReport(target.details, target.method, target.asset, () => sendSolForOcp(target, hold));
       if (out.kind === 'not-paid') { setErr(out.message); return; }
       // 'paid' and 'unresolved' both leave the review: the money is gone either way, so there is no
       // Approve to press again. The note is what separates them on the outcome screen.
       onSent();
+      if (out.kind !== 'paid' && hold.claim !== null) setOcpClaim({signature: hold.claim, target});
       setOcpDone({amount, who, note: out.kind === 'paid' ? null : out.message});
       setPhase('ocp-done');
     } finally {
@@ -343,7 +431,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpDone(null); setErr(null); setScanArmed(false); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpDone(null); setOcpClaim(null); setErr(null); setScanArmed(false); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -608,4 +696,27 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
       </Pressable>
     </View>
   );
+}
+
+/** What the chain's own verdict on a broadcast signature means for a till payment. IC twin:
+ *  PayMode's `icOutcomeToSend`, and it decides the same money-critical question: only a CONFIRMED
+ *  transaction may be reported, because the provider verifies that identifier against the chain and
+ *  spends the one attempt we get on it.
+ *
+ *  Its three verdicts must agree with what `sendSolForOcp` concludes from `sendSol`'s throw — the
+ *  same facts, read off a status instead of an error string — which is why the definite on-chain
+ *  failure shares that path's copy (`M.pay.ocp.transferFailed`) rather than getting its own. */
+function solStatusToSend(status: SolanaSignatureStatus | null, signature: string): OcpSendResult {
+  // The cluster has never heard of it. NOT proof of anything: a transaction the network accepted
+  // can take slots to become visible, and a dropped one is indistinguishable from a slow one here.
+  if (status === null) return {kind: 'unknown'};
+  // Included and FAILED: the chain has decided, no lamports reached the merchant and none ever
+  // will. Definitive, so the payer is told to pay again rather than warned not to.
+  if (status.err != null) return {kind: 'refused', message: M.pay.ocp.transferFailed};
+  if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') {
+    return {kind: 'settled', txId: signature, reference: M.pay.ocp.ref.solTransaction(signature)};
+  }
+  // 'processed' only — one node, one fork deep. Not a verdict yet, and reporting it would spend the
+  // one attempt on a transaction that can still be rolled back.
+  return {kind: 'unknown'};
 }

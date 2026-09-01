@@ -93,6 +93,21 @@ describe('solana seam — offline (SOLANA_RPC_URL empty)', () => {
     await expect(sendSol('4f'.repeat(16), 'ToAddr', 1000n)).rejects.toThrow('offline');
     expect(called).toBe(false);
   });
+
+  test('getSolSignatureStatus THROWS rather than answering "never seen it"', async () => {
+    // The one caller re-reads a signature it already broadcast to decide whether an irreversible
+    // payment can still be reported (`SolPayMode`), so a null here would read as "it never landed"
+    // — a lost claim, not a missing RPC. Same offline contract as `sendSol`, and for the same
+    // reason: a signature exists only because a broadcast succeeded.
+    let called = false;
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
+      called = true;
+      return Promise.resolve({});
+    });
+    const {getSolSignatureStatus} = require('../solana');
+    await expect(getSolSignatureStatus('5ig'.repeat(10))).rejects.toThrow('offline');
+    expect(called).toBe(false);
+  });
 });
 
 describe('solana seam — configured (RPC URL set) calls through to rpc', () => {
@@ -113,6 +128,37 @@ describe('solana seam — configured (RPC URL set) calls through to rpc', () => 
     expect(b).toBe('2500000000');
     expect(mock).toHaveBeenCalled();
     g.__DPAY_TEST_SOLANA_RPC_URL = '';
+  });
+
+  test('getSolSignatureStatus asks history-aware and hands the verdict back verbatim', async () => {
+    // `searchTransactionHistory` is the point: the claim is re-read minutes after the broadcast,
+    // by which time a landed transaction has dropped out of the node's recent-status cache — and a
+    // status the node has merely forgotten must never come back as "not found".
+    const params: unknown[][] = [];
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignatureStatuses: (p: unknown[]) => {
+        params.push(p);
+        return {context: {slot: 42}, value: [{confirmationStatus: 'finalized', err: null}]};
+      },
+    };
+    const status = await withStubUrl(async () => {
+      const {getSolSignatureStatus} = require('../solana');
+      return (getSolSignatureStatus as (s: string) => Promise<unknown>)('5ig'.repeat(10));
+    });
+    expect(status).toEqual({confirmationStatus: 'finalized', err: null});
+    expect(params[0][0]).toEqual(['5ig'.repeat(10)]);
+    expect(params[0][1]).toEqual({searchTransactionHistory: true});
+  });
+
+  test('getSolSignatureStatus answers null for a signature the cluster does not know', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignatureStatuses: () => ({context: {slot: 7}, value: [null]}),
+    };
+    const status = await withStubUrl(async () => {
+      const {getSolSignatureStatus} = require('../solana');
+      return (getSolSignatureStatus as (s: string) => Promise<unknown>)('5ig'.repeat(10));
+    });
+    expect(status).toBeNull();
   });
 });
 

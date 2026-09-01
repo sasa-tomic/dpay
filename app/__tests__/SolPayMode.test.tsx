@@ -42,8 +42,9 @@ jest.mock('../solana', () => {
     ...actual,
     signSolPayment: jest.fn(actual.signSolPayment),
     signSplPayment: jest.fn(actual.signSplPayment),
-    // No test may reach a Solana RPC; the OpenCryptoPay suite below drives this directly.
+    // No test may reach a Solana RPC; the OpenCryptoPay suite below drives these directly.
     sendSol: jest.fn(),
+    getSolSignatureStatus: jest.fn(),
   };
 });
 // The provider sequence is tested for real (recorded bodies, no network) in
@@ -58,10 +59,10 @@ jest.mock('../services/opencryptopay', () => ({
 }));
 
 import {encodeSolReq, type SolReqInput} from '../solana/qr';
-import {sendSol, signSolPayment} from '../solana';
+import {getSolSignatureStatus, sendSol, signSolPayment, type SolanaSignatureStatus} from '../solana';
 import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {buildSelectableAssets} from '../config/assets';
-import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
+import {POLL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {SolPayMode} from '../components/SolPayMode';
 import type {Identity} from '../lib/types';
@@ -633,5 +634,168 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     const tree = mountTill();
     await scanTill(tree);
     expect(jest.mocked(resolveOcpScan).mock.calls[0][1].sequenceBudgetMs).toBe(SOL_SEND_TIMEOUT_MS);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// An OpenCryptoPay transfer the Solana rail could not resolve — the RECOVERABLE loss
+// ---------------------------------------------------------------------------------------------
+// The IC twin of this suite is PayMode's "an unresolved till transfer stays recoverable", and the
+// situation is the same one: the likeliest failure of a till payment is not a refusal, it is a
+// flaky connection while the transaction is already landing. The network accepted it, the provider
+// was not told, the quote is still alive and the chain can still be asked what became of it — so
+// throwing the broadcast signature away turns the recoverable case into the unrecoverable one.
+//
+// `payAndReport` is stubbed with its OWN contract (report a settled send, never an unknown one), so
+// "was the provider told?" is answerable by looking at which calls' sends settled — and the
+// one-shot rule is checked by counting them.
+describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
+  const SIGNATURE = '5ig'.repeat(10);
+  /** Every send verdict `payAndReport` was handed, in order. */
+  let sends: OcpSendResult[];
+  let warn: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    sends = [];
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
+    // The cluster has not seen it yet. Reset here rather than only where it is exercised: a value
+    // left over from a previous test would silently resolve the NEXT test's claim under it.
+    jest.mocked(getSolSignatureStatus).mockReset().mockResolvedValue(null);
+    // Broadcast ACCEPTED, then the confirmation failed — the one shape that leaves real money in
+    // flight, and the only one that produces a claim.
+    jest.mocked(sendSol).mockReset().mockImplementation(
+      async (_secret: string, _to: string, _lamports: bigint, _signal?: AbortSignal, onBroadcast?: (s: string) => void) => {
+        onBroadcast?.(SIGNATURE);
+        throw new Error('solana confirmation timeout');
+      },
+    );
+    jest.mocked(payAndReport).mockReset().mockImplementation(async (_quote, _method, _asset, send) => {
+      const s = await send();
+      sends.push(s);
+      if (s.kind === 'settled') return {kind: 'paid'};
+      if (s.kind === 'refused') return {kind: 'not-paid', message: s.message};
+      return {kind: 'unresolved', message: M.pay.ocp.transferUnknown};
+    });
+  });
+
+  afterEach(() => { warn.mockRestore(); });
+
+  /** Approve a till payment whose confirmation leaves the outcome indefinite. */
+  async function approveIntoUnknown(tree: renderer.ReactTestRenderer) {
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    await act(async () => {}); // the claim's first re-poll tick
+  }
+
+  async function tick(tree: renderer.ReactTestRenderer) {
+    await act(async () => { jest.advanceTimersByTime(POLL.receiptPay); });
+    await act(async () => {});
+    return tree;
+  }
+
+  test('a transaction that turns out to have CONFIRMED is reported — once — and the sale completes', async () => {
+    const tree = mountTill();
+    await approveIntoUnknown(tree);
+    // Indefinite: the provider was NOT told, so the one submission is still unspent. The first
+    // re-poll already ran and found nothing — a signature the cluster has not seen proves nothing.
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.transferUnknown);
+    expect(sends).toEqual([{kind: 'unknown'}]);
+
+    // One more look at the SAME signature — the one that used to be discarded — finds it confirmed.
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({confirmationStatus: 'confirmed'});
+    await tick(tree);
+
+    expect(sends[1]).toEqual({kind: 'settled', txId: SIGNATURE, reference: M.pay.ocp.ref.solTransaction(SIGNATURE)});
+    expect(jest.mocked(getSolSignatureStatus).mock.calls[0][0]).toBe(SIGNATURE); // re-read, never re-broadcast
+    expect(sendSol).toHaveBeenCalledTimes(1);
+    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.012214220 SOL'));
+    expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+
+    // The claim is SPENT. `/tx` is granted exactly once in total, so no later tick may report again.
+    const reports = jest.mocked(payAndReport).mock.calls.length;
+    await tick(tree);
+    await tick(tree);
+    expect(jest.mocked(payAndReport).mock.calls.length).toBe(reports);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a transaction the chain FAILED says nothing was paid, and tells nobody', async () => {
+    const tree = mountTill();
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({err: {InstructionError: [0, {Custom: 1}]}});
+    await approveIntoUnknown(tree);
+
+    // "Your money may be gone" was honest a moment ago and is a lie now: nothing reached the
+    // merchant. The screen says so and puts the payer back where they can actually pay.
+    expect(texts(tree)).toContain(M.pay.ocp.transferFailed);
+    expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
+    // The provider was never told about a transfer that never happened.
+    expect(sends).toEqual([{kind: 'unknown'}]);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a transaction that confirms only AFTER the price died is not reported — the claim is worth more', async () => {
+    // Submitting against a dead quote is refused AND binds the transaction id to it, which is
+    // exactly what would stop the merchant crediting this payment by hand. So the signature is
+    // handed to the payer instead of being spent.
+    const base = Date.now();
+    let clock = base;
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => clock);
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: base + 60_000, payableUntil: base + 30_000},
+    });
+    const tree = mountTill();
+    await approveIntoUnknown(tree);
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.transferUnknown);
+
+    clock = base + 61_000; // the price lapses while the app is still finding out what happened
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({confirmationStatus: 'finalized'});
+    await tick(tree);
+
+    expect(sends).toEqual([{kind: 'unknown'}]); // the submission was NOT spent
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.submitTooLate(M.pay.ocp.ref.solTransaction(SIGNATURE)));
+    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('0.012214220 SOL'));
+    nowSpy.mockRestore();
+    act(() => { tree.unmount(); });
+  });
+
+  test('a transaction that is only "processed" stays indefinite — one node, one fork deep', async () => {
+    // Not a verdict: a processed transaction can still be rolled back, and the provider verifies
+    // the identifier against the chain, so reporting it would spend the attempt on a maybe.
+    const tree = mountTill();
+    await approveIntoUnknown(tree);
+    jest.mocked(getSolSignatureStatus).mockClear().mockResolvedValue({confirmationStatus: 'processed'});
+    await tick(tree);
+
+    // The claim WAS looked at — and deliberately not acted on.
+    expect(getSolSignatureStatus).toHaveBeenCalledWith(SIGNATURE);
+    expect(sends).toEqual([{kind: 'unknown'}]);
+    expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.transferUnknown);
+    act(() => { tree.unmount(); });
+  });
+
+  test('two overlapping re-polls cannot both report the same transaction', async () => {
+    // Each tick can outlive the next — the status read is a network call and the interval does not
+    // wait for it. Without one-at-a-time serialisation every tick that piled up behind a slow read
+    // would resume together and each would spend the one submission we are granted.
+    let release!: (s: SolanaSignatureStatus) => void;
+    jest.mocked(getSolSignatureStatus).mockReturnValue(new Promise<SolanaSignatureStatus>(r => { release = r; }));
+    const tree = mountTill();
+    await approveIntoUnknown(tree); // the first read starts and hangs
+
+    await tick(tree); // two more ticks fire while it is still in flight
+    await tick(tree);
+    await act(async () => { release({confirmationStatus: 'confirmed'}); });
+    await act(async () => {});
+
+    // ONE report: the approve's own call, plus exactly one from the recovery.
+    expect(payAndReport).toHaveBeenCalledTimes(2);
+    expect(sends).toEqual([
+      {kind: 'unknown'},
+      {kind: 'settled', txId: SIGNATURE, reference: M.pay.ocp.ref.solTransaction(SIGNATURE)},
+    ]);
+    act(() => { tree.unmount(); });
   });
 });

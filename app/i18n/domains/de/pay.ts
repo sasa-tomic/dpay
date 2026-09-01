@@ -126,7 +126,7 @@ export const payDe: PayMessages = {
     submitTooLate: reference =>
       `Deine Überweisung ging durch, aber erst nachdem dieser Preis abgelaufen war — der Verkauf wurde deshalb nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm ${reference}: das ist der Nachweis deiner Überweisung.`,
     transferUnknown:
-      'dpay konnte deine Überweisung nicht bestätigen, deshalb weiß der Händler nichts davon — das ist weder bezahlt noch fehlgeschlagen. Zahle nicht erneut: Öffne „Transaktionen“, um zu sehen, ob sie durchging, und zeig dem Händler diese Zahlung, falls ja.',
+      'dpay konnte deine Überweisung noch nicht bestätigen, deshalb weiß der Händler nichts davon — das ist weder bezahlt noch fehlgeschlagen. Lass diesen Bildschirm offen: dpay prüft weiter und schließt die Zahlung selbst ab, falls die Überweisung durchging. Zahle in der Zwischenzeit nicht erneut.',
     transferRefused: reason =>
       `Deine Überweisung ging nicht durch, es wurde also nichts bezahlt und dein Geld ist noch in deiner Wallet — ${reason}. Scanne den Code erneut, um an dieser Kasse zu zahlen.`,
     transferFailed:
