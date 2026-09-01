@@ -75,6 +75,29 @@ export const payDe: PayMessages = {
       `Das Konto in diesem Link ist kein gültiges ${network}-Konto. Bitte den Absender, es zu prüfen und den Link erneut zu senden.`,
   },
 
+  ocp: {
+    solanaUsdcUnsupported:
+      'Diese Kasse nimmt USDC auf Solana, aber ihr Code nennt kein Token-Konto als Ziel — eine Zahlung könnte echtes Geld auf das falsche Konto schicken. Zahle stattdessen mit SOL oder wechsle unter „Guthaben“ zu einem anderen Wert, den diese Kasse nimmt.',
+    assetNotAccepted: (selected, accepted) =>
+      `Diese Kasse nimmt kein ${selected}. Sie nimmt ${accepted}. dpay tauscht nie um — wechsle unter „Guthaben“ zu einem davon und scanne erneut.`,
+    quoteExpired:
+      'Der Preis dieser Kasse ist abgelaufen — er gilt jeweils rund fünf Minuten. Scanne den Code erneut für einen frischen Preis.',
+    badCode:
+      'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',
+    notHttps:
+      'Dieser Code verweist auf eine unsichere Adresse, deshalb öffnet dpay ihn nicht. Bitte den Händler, seinen eigenen Zahlungscode zu zeigen — ein über den echten geklebter Aufkleber sieht genau so aus.',
+    providerUnreachable:
+      'Der Zahlungsanbieter des Händlers war nicht erreichbar. Es wurde nichts bezahlt. Prüfe deine Verbindung und scanne erneut.',
+    noPendingCharge: merchant =>
+      `An der Kasse von ${merchant} steht kein Betrag offen. Bitte das Personal, den Verkauf zuerst zu buchen, und scanne dann erneut.`,
+    submitUnknown: blockIndex =>
+      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat sie nicht bestätigt — das ist also weder bezahlt noch fehlgeschlagen. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Zeig dem Händler Ledger-Block ${blockIndex}: das ist der Nachweis deiner Überweisung.`,
+    submitRejected: blockIndex =>
+      `Deine Überweisung ging durch, aber der Zahlungsanbieter des Händlers hat den Nachweis abgelehnt, der Verkauf wurde also nicht gutgeschrieben. Das Geld hat deine Wallet verlassen, zahle deshalb nicht erneut. Wende dich an den Händler und nenne ihm Ledger-Block ${blockIndex}.`,
+    claimedMerchant: 'Name aus dem Code — dpay prüft ihn nicht.',
+    providerHost: host => `Preis von ${host}`,
+  },
+
   fundsSymbol: 'Guthaben',
   fundTitle: (symbol, action) => `${symbol} zum ${action === 'pay' ? 'Bezahlen' : 'Senden'} aufladen`,
   fundBody: (symbol, action) =>

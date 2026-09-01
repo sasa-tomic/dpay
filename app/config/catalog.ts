@@ -325,8 +325,10 @@ const FD_CKETH_ERC20: FamilyDisplay = {
 // `withdrawMinRaw` floor mirrors the live ckETH minter's governed `minimum_withdrawal_amount`
 // (sv3dd-oaaaa… / jzenf- Sepolia; see cketh-minter.did) = 0.01 ETH (1e16 Wei), confirmed live. The
 // minter returns AmountTooLow below it; matching it here stops the user from signing an entry the
-// minter will reject. Fits comfortably inside u64 / Number.MAX_SAFE_INTEGER so it stays a plain
-// number like the BTC floor.
+// minter will reject. NOTE it EXCEEDS Number.MAX_SAFE_INTEGER (1e16 > 9.007e15) — unlike the BTC
+// floor — so it survives here only because 1e16 happens to be exactly representable as a double AND
+// every consumer stringifies it (`String(withdrawMinRaw)` into cmpRaw/fmtAsset) rather than doing
+// arithmetic on it. Do arithmetic on this and it silently loses precision; make it a string first.
 const FD_CKETH_NATIVE: FamilyDisplay = {
   networkLabel: 'Ethereum', nativeAsset: 'ETH', amountDecimals: 18, blockMin: 1,
   withdrawMinRaw: 10_000_000_000_000_000, addressPlaceholder: '0x…',
@@ -446,6 +448,26 @@ function isCompleteDirectIcrcRow(a: CurrencyDescriptor): boolean {
 // rows never hit the fund gate (faucet); incomplete rows fail closed.
 export function isDirectIcrcAsset(a: CurrencyDescriptor | null | undefined): boolean {
   return !!a && !a.mintable && a.minter == null && isCompleteDirectIcrcRow(a);
+}
+
+// --- the reverse lookup: an ICRC ledger principal → its currency id -----------------------------
+// Every accessor above indexes BY currency id, because that is the handle dpay's own wire carries.
+// An EXTERNAL counterparty cannot: a third-party payment request names the ICRC LEDGER PRINCIPAL,
+// because the canister is the asset's identity everywhere outside this wallet while the currency id
+// means nothing off it. This helper is the one place that translation runs — so a caller never
+// scatters its own `catalog.find(c => c.ledger === …)` and never grows a second matching rule.
+//
+// Comparison is EXACT-STRING against the canonical principal text form — the form the catalog
+// carries and the form every IC tool prints. No trimming, no case folding, no normalisation: a
+// string that differs is a DIFFERENT canister, and resolving it to a neighbouring asset would point
+// a payment at the wrong ledger. Fail closed instead (mirrors familyDisplay/isPayableAsset): null
+// means "this wallet has no such asset", and the caller must name that refusal rather than guess.
+// An empty query never matches — a wire row with no ledger parses to `''` (parseIcpRow), so
+// matching it would map "no ledger at all" onto a real currency.
+export function ledgerToCurrency(catalog: CurrencyDescriptor[], ledger: string): number | null {
+  if (ledger.length === 0) return null;
+  const a = catalog.find(c => c.ledger === ledger);
+  return a ? a.currency : null;
 }
 
 // MC5 — the "is this currency a PAYABLE asset" predicate. Used as the defense-in-depth gate BEFORE

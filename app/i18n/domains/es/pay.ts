@@ -75,6 +75,29 @@ export const payEs: PayMessages = {
       `La cuenta de este enlace no es una cuenta válida de ${network}. Pide a quien te lo envió que la revise y te mande el enlace otra vez.`,
   },
 
+  ocp: {
+    solanaUsdcUnsupported:
+      'Esta caja acepta USDC en Solana, pero su código no indica a qué cuenta de token enviarlo: pagar así podría mandar dinero real a la cuenta equivocada. Paga con SOL, o cambia en «Saldos» a otro activo que acepte esta caja.',
+    assetNotAccepted: (selected, accepted) =>
+      `Esta caja no acepta ${selected}. Acepta ${accepted}. dpay nunca convierte, así que cambia en «Saldos» a uno de esos activos y vuelve a escanear.`,
+    quoteExpired:
+      'El precio de esta caja ha caducado: cada uno dura unos cinco minutos. Vuelve a escanear el código para obtener un precio nuevo.',
+    badCode:
+      'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez y comprueba que no lo tape nada.',
+    notHttps:
+      'Este código apunta a una dirección insegura, así que dpay no lo abre. Pide al comercio que muestre su propio código de pago: una pegatina encima del código real tiene exactamente este aspecto.',
+    providerUnreachable:
+      'No se pudo contactar con el proveedor de pagos del comercio. No se ha pagado nada. Comprueba tu conexión y vuelve a escanear.',
+    noPendingCharge: merchant =>
+      `La caja de ${merchant} no tiene ningún cobro pendiente. Pide que registren la venta primero y vuelve a escanear el código.`,
+    submitUnknown: blockIndex =>
+      `Tu transferencia se realizó, pero el proveedor de pagos del comercio no la confirmó: no está pagada ni ha fallado. El dinero ha salido de tu billetera, así que no pagues otra vez. Muestra al comercio el bloque ${blockIndex} del registro: es la prueba de tu transferencia.`,
+    submitRejected: blockIndex =>
+      `Tu transferencia se realizó, pero el proveedor de pagos del comercio rechazó la prueba, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale el bloque ${blockIndex} del registro.`,
+    claimedMerchant: 'Nombre indicado por el código: dpay no lo verifica.',
+    providerHost: host => `Precio de ${host}`,
+  },
+
   fundsSymbol: 'fondos',
   fundTitle: (symbol, action) => `Añade ${symbol} para ${action === 'pay' ? 'pagar' : 'enviar'}`,
   fundBody: (symbol, action) =>

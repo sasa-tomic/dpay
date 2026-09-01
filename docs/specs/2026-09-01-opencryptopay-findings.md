@@ -89,6 +89,50 @@ fabricated index returns
 so the handler exists, consumes our identifier, and **verifies against the ledger** rather than
 crediting on assertion.
 
+## Step-2 body: the field names, verified
+
+Confirmed present in a live response (2026-09-01) — these are measured, not inferred from the spec:
+
+    callback                       string, https
+    quote.id                       string
+    quote.expiration               ISO-8601 with Z, e.g. "2026-09-01T14:50:04.660Z"
+    requestedAmount {asset, amount}   asset is a FIAT code (e.g. "CHF"); amount is a JSON NUMBER
+    displayName                    string — claimed merchant name, unverified
+    transferAmounts[].method       string
+    transferAmounts[].available    boolean
+    transferAmounts[].assets[].asset    string
+    transferAmounts[].assets[].amount   JSON STRING, e.g. "0.000016", "1."
+
+Full top level: `callback, displayName, displayQr, externalId, id, maxSendable, metadata,
+minSendable, mode, possibleStandards, quote, recipient, requestedAmount, route, standard, tag,
+transferAmounts`.
+
+Note the asymmetry: per-asset `amount` values are **strings**, but `requestedAmount.amount` is a
+**number**. Any parser must handle both, and must never let a JSON number reach a decimal parser via
+`String()` — a small value can serialise as `1.6e-7`, a spelling every decimal grammar here rejects.
+
+## Response envelopes
+
+Measured, not assumed — and **not** what an LNURL implementer would expect.
+
+- **Errors use NestJS's `{statusCode, message, error}`**, uniformly across every failing status this
+  integration meets: 404 `Payment link not found`, 404 `No actual quote with ID … found`, 400
+  `Invalid method or asset`, 400 `Transaction … already assigned to another quote`. It is **not** the
+  LNURL `{status:"ERROR", reason}` shape.
+- **Two different 404s mean different things and must be told apart.** A 404 whose body is the
+  payment-link payload (carries `tag:"payRequest"` / `displayName`) means *no charge is pending* —
+  tell the user to ask the cashier to ring it up. A 404 carrying the error envelope means the link
+  is unknown — a stale or hostile QR. Collapsing them tells the second user to go talk to a cashier
+  who does not exist.
+- **Step 3 returns `{expiryDate, blockchain, uri, hint}`** at HTTP 200, and `blockchain` echoes the
+  requested `method` exactly (verified for both `InternetComputer` and `Solana`). Since the URI names
+  no asset, that echo is the only integrity signal the response carries — check it and refuse loudly
+  on a mismatch.
+- **The `/tx` URL has two accepted forms.** The provider's own `hint` advertises
+  `/v1/lnurlp/tx/<paymentId>`; deriving it from the callback URL by `/cb/` → `/tx/` (the link id)
+  also works. Both were confirmed live. Pick one and refuse loudly if the expected segment is
+  missing rather than silently constructing a wrong URL.
+
 ## The loss path — the most important finding
 
 The payer sends irreversible funds **before** submitting proof, and gets **exactly one submission
@@ -134,6 +178,11 @@ same way (`app/lib/deepLink.ts` module header is the authority):
   same validator the rest of the app uses.
 - **Verify the bech32 checksum.** It does not stop a crafted hostile LNURL, but it does stop a
   damaged one from silently resolving to a different host.
+- **Require `https` on the `callback` URL too, not just the scanned one.** They are different
+  strings from different sources: the scanned URL is what the user pointed the camera at, while
+  `callback` arrives inside the provider's JSON body and is therefore controlled by whoever answered
+  the first request. It is also the URL the transaction id gets reported to. A hostile or downgraded
+  callback is a second, independent hole.
 
 ## Quote lifetime
 

@@ -76,6 +76,29 @@ export const payFr: PayMessages = {
       `Le compte de ce lien n’est pas un compte ${network} valide. Demandez à l’expéditeur de le vérifier et de renvoyer le lien.`,
   },
 
+  ocp: {
+    solanaUsdcUnsupported:
+      'Cette caisse accepte les USDC sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.',
+    assetNotAccepted: (selected, accepted) =>
+      `Cette caisse n’accepte pas ${selected}. Elle accepte ${accepted}. dpay ne convertit jamais : passez à l’un de ces actifs dans « Soldes », puis scannez à nouveau.`,
+    quoteExpired:
+      'Le prix de cette caisse a expiré — chacun tient environ cinq minutes. Scannez le code à nouveau pour obtenir un prix frais.',
+    badCode:
+      'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',
+    notHttps:
+      'Ce code pointe vers une adresse non sécurisée : dpay ne l’ouvre pas. Demandez au commerçant de montrer son propre code de paiement — un autocollant collé par-dessus le vrai ressemble exactement à cela.',
+    providerUnreachable:
+      'Impossible de joindre le prestataire de paiement du commerçant. Rien n’a été payé. Vérifiez votre connexion et scannez à nouveau.',
+    noPendingCharge: merchant =>
+      `La caisse de ${merchant} n’a aucun montant en attente. Demandez que la vente soit enregistrée d’abord, puis scannez le code à nouveau.`,
+    submitUnknown: blockIndex =>
+      `Votre transfert est passé, mais le prestataire de paiement du commerçant ne l’a pas confirmé — ce n’est donc ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant le bloc ${blockIndex} du registre, c’est la preuve de votre transfert.`,
+    submitRejected: blockIndex =>
+      `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui le bloc ${blockIndex} du registre.`,
+    claimedMerchant: 'Nom fourni par le code — dpay ne le vérifie pas.',
+    providerHost: host => `Prix de ${host}`,
+  },
+
   fundsSymbol: 'fonds',
   fundTitle: (symbol, action) => `Ajouter des ${symbol} pour ${action === 'pay' ? 'payer' : 'envoyer'}`,
   fundBody: (symbol, action) =>

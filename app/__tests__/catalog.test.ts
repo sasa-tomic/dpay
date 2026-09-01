@@ -12,6 +12,7 @@ import {
   assetTestKey,
   isPayableAsset,
   isDirectIcrcAsset,
+  ledgerToCurrency,
   isTestnetCurrency,
   testnetDisplayName,
   catalogCacheKey,
@@ -594,6 +595,54 @@ describe('isPayableAsset — payable predicate (MC5 fail-closed before signing)'
       wrapper_name: 'ETH', backing_symbol: 'ETH', network: 'Ethereum', chain_id: 1,
     });
     expect(isPayableAsset([fakeEth], 11)).toBe(false);
+  });
+});
+
+// --- ledgerToCurrency — the reverse lookup an external counterparty forces ---------------------
+// Every other accessor indexes BY currency id; a third-party payment request cannot, because the
+// currency id means nothing outside this wallet — it names the ICRC LEDGER PRINCIPAL instead. These
+// pin the two properties that make the translation safe to sign against: the match is EXACT-STRING
+// (a near-miss principal is a DIFFERENT canister, never a neighbouring asset) and an unknown ledger
+// fails CLOSED to null, so the caller names the refusal instead of guessing an asset.
+describe('ledgerToCurrency — ICRC ledger principal → currency id', () => {
+  it('resolves every bundled row back to its own currency id, INCLUDING the falsy id 0', () => {
+    // The round trip over the WHOLE shipped catalog, so a newly added row cannot land unreachable.
+    // DEMO's id is 0: a lookup written as `find(…)?.currency || null` would return null for it, and
+    // the round trip is what makes that a RED rather than a plausible-looking pass.
+    for (const c of BUNDLED_CATALOG) {
+      expect(ledgerToCurrency(BUNDLED_CATALOG, c.ledger)).toBe(c.currency);
+    }
+    expect(ledgerToCurrency(BUNDLED_CATALOG, 'td2nx-oaaaa-aaaab-qhdnq-cai')).toBe(0);
+    expect(ledgerToCurrency(BUNDLED_CATALOG, ICP_LEDGER_PRINCIPAL)).toBe(8);
+  });
+
+  it('returns null for a principal the catalog carries in another ROLE (minter ≠ ledger)', () => {
+    // The ckBTC MINTER principal IS in the catalog — as `minter`, never as `ledger`. Matching on the
+    // wrong field would hand a payment the minter canister as its transfer destination.
+    expect(BUNDLED_CATALOG.find(c => c.currency === 1)!.minter).toBe('mqygn-kiaaa-aaaar-qaadq-cai');
+    expect(ledgerToCurrency(BUNDLED_CATALOG, 'mqygn-kiaaa-aaaar-qaadq-cai')).toBeNull();
+  });
+
+  it('returns null for a ledger this wallet does not carry, and for an empty catalog', () => {
+    expect(ledgerToCurrency(BUNDLED_CATALOG, 'aaaaa-aa')).toBeNull();
+    expect(ledgerToCurrency([], ICP_LEDGER_PRINCIPAL)).toBeNull();
+  });
+
+  it('matches the EXACT canonical text only — case, surrounding space and truncation all miss', () => {
+    // Principal text is canonical by construction, so a string that differs names a different
+    // canister. Normalising it here would quietly point a payment at the wrong ledger.
+    expect(ledgerToCurrency(BUNDLED_CATALOG, ICP_LEDGER_PRINCIPAL.toUpperCase())).toBeNull();
+    expect(ledgerToCurrency(BUNDLED_CATALOG, ` ${ICP_LEDGER_PRINCIPAL}`)).toBeNull();
+    expect(ledgerToCurrency(BUNDLED_CATALOG, `${ICP_LEDGER_PRINCIPAL} `)).toBeNull();
+    expect(ledgerToCurrency(BUNDLED_CATALOG, ICP_LEDGER_PRINCIPAL.slice(0, -4))).toBeNull();
+  });
+
+  it('an empty query never matches — not even a row whose ledger parsed to the empty string', () => {
+    // parseIcpRow defaults a missing wire `ledger` to ''. Matching that would map "no ledger at
+    // all" onto a real currency id — the one input where a hit is strictly worse than a miss.
+    const noLedger: CurrencyDescriptor[] = [mk({currency: 4, minter_family: 'CkBtcUtxo'})];
+    expect(noLedger[0].ledger).toBe('');
+    expect(ledgerToCurrency(noLedger, '')).toBeNull();
   });
 });
 

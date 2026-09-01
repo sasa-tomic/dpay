@@ -91,6 +91,31 @@ export type PayMessages = {
     badAccount: (network: string) => string;
   };
 
+  // --- an OpenCryptoPay merchant till -------------------------------------------------------
+  // A static till QR resolves to a live quote at a provider dpay does not control, so every string
+  // here is either a refusal or an honesty marker. Two rules shape the copy:
+  //   • Nothing the provider sends is verified by dpay — the merchant name is CLAIMED and the host
+  //     the quote came from is shown, so "why does this say another company's name" is answerable.
+  //   • The payer moves irreversible funds BEFORE the provider is told, and gets exactly one chance
+  //     to tell it (docs/specs/2026-09-01-opencryptopay-findings.md, "The loss path"). So the two
+  //     post-transfer keys must say neither "paid" nor "failed", and must hand the payer the block
+  //     index — it is the only thing that ties their money to this sale.
+  ocp: {
+    solanaUsdcUnsupported: string;
+    assetNotAccepted: (selected: string, accepted: string) => string;
+    quoteExpired: string;
+    badCode: string;
+    notHttps: string;
+    providerUnreachable: string;
+    noPendingCharge: (merchant: string) => string;
+    /** Funds moved; the provider never answered. Honest unknown — never rendered as paid or failed. */
+    submitUnknown: (blockIndex: string) => string;
+    /** Funds moved; the provider refused the proof. Definitive, and still costs the payer. */
+    submitRejected: (blockIndex: string) => string;
+    claimedMerchant: string;
+    providerHost: (host: string) => string;
+  };
+
   // --- the fund-first gate ------------------------------------------------------------------
   /** Stand-in noun when the selected asset has no display name yet ("Add funds to pay"). */
   fundsSymbol: string;
@@ -201,6 +226,29 @@ export const payEn: PayMessages = {
       `“${amount}” isn’t a valid ${token} amount — it may have more decimal places than ${token} has. Ask the sender for a new link.`,
     badAccount: network =>
       `The account in this link isn’t a valid ${network} account. Ask the sender to check it and send the link again.`,
+  },
+
+  ocp: {
+    solanaUsdcUnsupported:
+      'This till takes USDC on Solana, but its code doesn’t say which token account to send to — paying it would risk sending real money to the wrong account. Pay with SOL instead, or switch in Balances to another asset this till takes.',
+    assetNotAccepted: (selected, accepted) =>
+      `This till doesn’t take ${selected}. It takes ${accepted}. dpay never swaps, so switch to one of those in Balances and scan again.`,
+    quoteExpired:
+      'This till’s price has expired — each one lasts about five minutes. Scan the code again for a fresh price.',
+    badCode:
+      'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check that nothing is covering it.',
+    notHttps:
+      'This code points to an insecure address, so dpay won’t open it. Ask the merchant to show their own payment code — a sticker placed over the real one looks exactly like this.',
+    providerUnreachable:
+      'Couldn’t reach the merchant’s payment provider. Nothing has been paid. Check your connection and scan again.',
+    noPendingCharge: merchant =>
+      `${merchant}’s till has no charge waiting. Ask the cashier to ring up the sale first, then scan the code again.`,
+    submitUnknown: blockIndex =>
+      `Your transfer went through, but the merchant’s payment provider didn’t confirm it — so this is neither paid nor failed. The money has left your wallet, so don’t pay again. Show the merchant ledger block ${blockIndex}: it is the proof of your transfer.`,
+    submitRejected: blockIndex =>
+      `Your transfer went through, but the merchant’s payment provider refused the proof of it, so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ledger block ${blockIndex}.`,
+    claimedMerchant: 'Name given by the code — dpay doesn’t verify it.',
+    providerHost: host => `Price from ${host}`,
   },
 
   fundsSymbol: 'funds',

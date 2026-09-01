@@ -1,0 +1,598 @@
+import {parseDecimalToUnits} from './amount';
+import {bytesToUtf8} from './base64url';
+import type {AssetId} from './types';
+import type {SelectableAsset} from '../config/assets';
+
+// --- OpenCryptoPay: the pure half (scanned code → a typed fact, or a NAMED refusal) ---------------
+// Paying a merchant till that shows a static OpenCryptoPay QR. Measured provider behaviour is
+// `docs/specs/2026-09-01-opencryptopay-findings.md`; the plan this implements is
+// `docs/specs/2026-09-01-opencryptopay-implementation.md` ("Unit A"). Neither is restated here.
+//
+// EVERY string this module reads was supplied by a party the wallet has no relationship with: the
+// QR came off a sticker, and the host it names came out of that QR. So the module's whole job is to
+// turn provider text into either an exact fact or a refusal the screen can act on — it never
+// throws, never guesses, and never coerces. Two rules follow from that and explain most of the code:
+//
+//   1. A REFUSAL IS A CODE, NOT A SENTENCE. Same discipline as `PayLinkErr` in `lib/deepLink.ts`:
+//      the UI owns the copy (`app/i18n`), this module owns the distinctions. Every reason below
+//      maps to its own on-screen instruction (founder rule 2026-08-29) — which is why "damaged
+//      code" and "not our code" are different reasons, and why an unpayable asset is refused BY
+//      NAME instead of being dropped from the list.
+//   2. MONEY IS A DECIMAL STRING, NEVER A `number`. Provider amounts are carried verbatim as text
+//      and converted exactly once, by `parseDecimalToUnits` at the ASSET's own decimals
+//      (`selectPayableOffers`). The one place a JSON `number` is unavoidable — the step-2 body —
+//      is normalised to a plain decimal string immediately, exponent notation expanded, so a
+//      16-sat amount can never reach the ledger as `1.6e-7`.
+//
+// SHAPE vs POLICY, the same two-stage split as `lib/destination.ts`: `parse*` answers "what does
+// this string say", `selectPayableOffers` answers "which of it can this wallet pay, and why not the
+// rest". Keeping them apart is what lets a provider add a method or an asset we have never heard of
+// without the parse failing — an unknown method parses fine and is refused by the policy table.
+//
+// WHAT THIS MODULE DELIBERATELY DOES NOT DO (each already has exactly one home):
+//   • validate the destination account — the core does (`icpValidatePrincipal` /
+//     `icpValidateIcrcAccount`), so a mistyped principal is refused by the same validator as
+//     everywhere else;
+//   • decide payability of a dpay asset — `isPayableAsset` (`config/catalog.ts`) does, on the
+//     catalog, before signing;
+//   • any I/O — the three provider calls are Unit B (`services/opencryptopay.ts`), and the `/tx`
+//     submission there is ONE-SHOT (see the findings doc's loss path).
+//
+// UNVERIFIED ASSUMPTION, recorded here because it lives nowhere else: no raw step-2 response body
+// was captured in the findings, so the JSON KEY NAMES below (`callback`, `quote.id`,
+// `quote.expiration` as an ISO-8601 string, `requestedAmount`, `transferAmounts[].method` /
+// `.assets[].asset` / `.amount`, `displayName`) are the OpenCryptoPay/LUD-06 spelling, not a
+// measured fact. `parsePaymentDetails` fails LOUDLY (`malformed-details`) if any is wrong, so the
+// failure mode is a refusal on screen, never a wrong payment — but confirm them against a recorded
+// body before this ships.
+
+/** Why an OpenCryptoPay string cannot be used. Machine-readable codes — the UI maps each to its own
+ *  instruction. Grouped by the stage that can produce it; every function's result type narrows to
+ *  the ones it can actually return, so callers stay exhaustive without dead branches. */
+export type OcpRefusal =
+  // — the scanned code —
+  /** No LNURL in the string at all: a different kind of QR, not a damaged one. */
+  | 'not-lnurl'
+  /** It IS an `lnurl1…` string but cannot be decoded: bad charset, mixed case, or truncated. */
+  | 'malformed-lnurl'
+  /** Decodable, but the bech32 checksum does not verify — a damaged code that must never be
+   *  allowed to resolve to whatever host the damage happens to spell. */
+  | 'bad-checksum'
+  /** The LNURL decoded to something that is not a URL. */
+  | 'not-a-url'
+  /** A URL, but not `https` — refused loudly, never downgraded. */
+  | 'not-https'
+  // — a destination URI the provider returned —
+  /** The URI is not the scheme this parser owns. */
+  | 'wrong-scheme'
+  /** Right scheme, wrong shape (missing query, unexpected path, repeated parameter). */
+  | 'malformed-uri'
+  /** The amount is missing or is not a decimal number. Never coerced to 0. */
+  | 'bad-amount'
+  /** A Solana URI naming an SPL token. The Solana leg ships native SOL only, so a token URI is
+   *  refused rather than paid as if it were SOL (findings: the provider omits `spl-token` even for
+   *  USDC, so a URI that carries one is a contradiction we must not resolve ourselves). */
+  | 'spl-token-unsupported'
+  // — the provider's payment details —
+  /** The step-2 body is missing or malforms a field the payment depends on. */
+  | 'malformed-details'
+  // — which offer this wallet can pay —
+  /** The provider named a settlement method this wallet has no rail for. */
+  | 'unknown-method'
+  /** USDC on Solana, refused BY NAME: the provider's URI carries no `spl-token` parameter and it is
+   *  unresolved whether the address is the owner or the associated token account. */
+  | 'solana-usdc-unsupported'
+  /** The provider accepts this asset; this wallet does not carry it (VEUR, USDT). */
+  | 'asset-not-in-wallet'
+  /** Two wallet assets answer to the same token on the same chain — which one the provider meant is
+   *  unknowable, so neither is paid. Mirrors `resolvePayLink`'s `ambiguous_asset`. */
+  | 'ambiguous-asset'
+  /** The quote is past its expiry — nothing is payable until the till is rescanned. */
+  | 'quote-expired';
+
+type Refused<R extends OcpRefusal> = {ok: false; reason: R};
+
+export type LnurlDecode = {ok: true; url: string} | Refused<'not-lnurl' | 'malformed-lnurl' | 'bad-checksum'>;
+export type OcpScan =
+  | {ok: true; apiUrl: string; host: string}
+  | Refused<'not-lnurl' | 'malformed-lnurl' | 'bad-checksum' | 'not-a-url' | 'not-https'>;
+export type IcpUriParse =
+  | {ok: true; ledger: string; to: string; amount: string}
+  | Refused<'wrong-scheme' | 'malformed-uri' | 'bad-amount'>;
+export type SolanaUriParse =
+  | {ok: true; to: string; amount: string}
+  | Refused<'wrong-scheme' | 'malformed-uri' | 'bad-amount' | 'spl-token-unsupported'>;
+export type OcpDetailsParse = {ok: true; details: OcpDetails} | Refused<'malformed-details' | 'not-https'>;
+
+/** One asset amount as the provider states it. `amount` is a decimal string in DISPLAY units —
+ *  exactly what the provider sent, normalised only in spelling (never rounded, never a `number`). */
+export interface OcpAssetAmount {
+  asset: string;
+  amount: string;
+}
+
+/** One settlement method the till accepts, with the exact amount per asset. `method` is carried
+ *  VERBATIM because it goes back on the wire in steps 3 and 4. */
+export interface OcpTransferAmount {
+  method: string;
+  assets: OcpAssetAmount[];
+}
+
+/** The provider's step-2 answer, narrowed. Provider-supplied display text is named `claimed*` so no
+ *  consumer can mistake it for something dpay verified — the SAME treatment a payment link's
+ *  `label` gets (`lib/deepLink.ts`). */
+export interface OcpDetails {
+  /** The till's payment id — the final path segment of `callbackUrl`, which is the id the
+   *  submission path `/v1/lnurlp/tx/{paymentId}` names. Derived rather than read from a body field
+   *  so there is ONE source for it. */
+  paymentId: string;
+  quoteId: string;
+  /** Epoch ms. The quote lives 300s; a payment must be signed and submitted inside that window. */
+  quoteExpiresAt: number;
+  callbackUrl: string;
+  /** The merchant name the PROVIDER claims. Null when it sent none — a missing name never blocks a
+   *  payment (the review screen still shows the provider host and the full destination). */
+  claimedMerchantName: string | null;
+  /** What the till asked for in its own unit (e.g. CHF 1) — display context for the review, never
+   *  the thing that moves: the asset amounts in `transferAmounts` are what gets paid. */
+  requestedAmount: OcpAssetAmount;
+  transferAmounts: OcpTransferAmount[];
+}
+
+/** An offer this wallet can pay: the provider's own method/asset spelling (what steps 3+4 must echo
+ *  back), the amount as sent, and the resolved wallet asset with the amount in exact raw units. */
+export interface OcpOffer {
+  method: string;
+  asset: string;
+  amount: string;
+  assetId: AssetId;
+  rawAmount: string;
+}
+
+/** An offer this wallet cannot pay, named. The UI renders every one of these — an asset that simply
+ *  vanished from the list is a dead end, and a dead end is a bug (founder rule 2026-08-29). */
+export interface OcpOfferRefusal {
+  method: string;
+  asset: string;
+  reason: Extract<
+    OcpRefusal,
+    | 'unknown-method'
+    | 'solana-usdc-unsupported'
+    | 'asset-not-in-wallet'
+    | 'ambiguous-asset'
+    | 'bad-amount'
+    | 'quote-expired'
+  >;
+}
+
+// --- bech32 (BIP-173) ------------------------------------------------------------------------
+// Hand-rolled: nothing in the app's dependency set decodes bech32, and this is ~40 lines. The
+// CHECKSUM is the point — it does not stop a hostile sticker (nothing does; that is why the payer
+// approves an explicit review showing the host), but it stops a scuffed or misread QR from
+// resolving to a DIFFERENT host than the one printed on it.
+//
+// LUD-01 profile: hrp is exactly `lnurl`, and bech32's 90-character limit does NOT apply (the real
+// example is 94 chars). A cap is still enforced, at the same 2000 chars `solana/qr.ts` bounds its
+// URIs to, so a pathological QR cannot spin the polymod loop.
+const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BECH32_GENERATORS = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+const LNURL_HRP = 'lnurl';
+const MAX_LNURL_LEN = 2000;
+const BECH32_CHECKSUM_LEN = 6;
+
+/** BIP-173 polymod over the hrp-expanded values + data. Stays inside 30 bits, so JS's signed
+ *  bitwise ops are exact here. */
+function bech32Polymod(values: number[]): number {
+  let chk = 1;
+  for (const v of values) {
+    const top = chk >>> 25;
+    chk = ((chk & 0x1ffffff) << 5) ^ v;
+    for (let i = 0; i < 5; i++) {
+      if ((top >>> i) & 1) chk ^= BECH32_GENERATORS[i];
+    }
+  }
+  return chk;
+}
+
+/** BIP-173 hrp expansion: high bits, separator, low bits. */
+function bech32HrpExpand(hrp: string): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < hrp.length; i++) out.push(hrp.charCodeAt(i) >> 5);
+  out.push(0);
+  for (let i = 0; i < hrp.length; i++) out.push(hrp.charCodeAt(i) & 31);
+  return out;
+}
+
+/** BIP-173 5-bit → 8-bit regrouping. Null when the trailing padding is not the spec's "fewer than
+ *  5 bits, all zero" — accepting sloppy padding would let two different codes decode to one URL. */
+function bech32FromWords(words: number[]): Uint8Array | null {
+  let acc = 0;
+  let bits = 0;
+  const out: number[] = [];
+  for (const w of words) {
+    acc = ((acc << 5) | w) & 0xfff;
+    bits += 5;
+    while (bits >= 8) {
+      bits -= 8;
+      out.push((acc >> bits) & 0xff);
+    }
+  }
+  if (bits >= 5 || ((acc << (8 - bits)) & 0xff) !== 0) return null;
+  return Uint8Array.from(out);
+}
+
+/**
+ * Decode an LNURL (LUD-01) to the URL it carries, verifying the bech32 checksum.
+ *
+ * Damage is separated from foreignness on purpose: `not-lnurl` means "this QR is something else"
+ * (the user should scan the right code), while `malformed-lnurl` / `bad-checksum` mean "this IS an
+ * LNURL and it is broken" (the user should rescan or ask the merchant for a fresh code). Pure,
+ * total, never throws.
+ */
+export function decodeLnurl(s: string): LnurlDecode {
+  const raw = typeof s === 'string' ? s.trim() : '';
+  const lower = raw.toLowerCase();
+  // bech32 separates on the LAST '1', so the hrp is everything before it. Anything but `lnurl` is
+  // simply not our code.
+  const sep = lower.lastIndexOf('1');
+  if (sep < 0 || lower.slice(0, sep) !== LNURL_HRP) return {ok: false, reason: 'not-lnurl'};
+  if (raw.length > MAX_LNURL_LEN) return {ok: false, reason: 'malformed-lnurl'};
+  // Mixed case is invalid bech32: the checksum is defined over one case only, so a mixed-case
+  // string has no well-defined answer at all.
+  if (raw !== lower && raw !== raw.toUpperCase()) return {ok: false, reason: 'malformed-lnurl'};
+  const data = lower.slice(sep + 1);
+  if (data.length < BECH32_CHECKSUM_LEN) return {ok: false, reason: 'malformed-lnurl'};
+  const words: number[] = [];
+  for (const ch of data) {
+    const v = BECH32_CHARSET.indexOf(ch);
+    if (v < 0) return {ok: false, reason: 'malformed-lnurl'};
+    words.push(v);
+  }
+  if (bech32Polymod([...bech32HrpExpand(LNURL_HRP), ...words]) !== 1) return {ok: false, reason: 'bad-checksum'};
+  const bytes = bech32FromWords(words.slice(0, -BECH32_CHECKSUM_LEN));
+  if (bytes === null || bytes.length === 0) return {ok: false, reason: 'malformed-lnurl'};
+  try {
+    return {ok: true, url: bytesToUtf8(bytes)};
+  } catch {
+    // `bytesToUtf8` is strict RFC 3629 — non-text payload ⇒ this is not a usable LNURL.
+    return {ok: false, reason: 'malformed-lnurl'};
+  }
+}
+
+/**
+ * Recognise an OpenCryptoPay code: a bare `LNURL1…` string, or any URL carrying it in a `lightning`
+ * query parameter (the shape the till's QR actually prints,
+ * `https://app.dfx.swiss/pl/?lightning=LNURL1…`).
+ *
+ * `apiUrl` is the decoded string VERBATIM — a provider URL is never rewritten, so what the wallet
+ * calls is exactly what the code said. `host` is returned alongside because the review screen MUST
+ * show which host the quote came from: an LNURL can name any host on earth, and "why does this say
+ * api.evil.example" has to be answerable before the payer approves. It is `host`, not `hostname`,
+ * so a non-default port is part of what the user sees.
+ */
+export function parseOcpScan(raw: string): OcpScan {
+  const t = typeof raw === 'string' ? raw.trim() : '';
+  if (t.length === 0) return {ok: false, reason: 'not-lnurl'};
+  const candidate = t.toLowerCase().startsWith(`${LNURL_HRP}1`) ? t : lightningParamOf(t);
+  if (candidate === null) return {ok: false, reason: 'not-lnurl'};
+  const decoded = decodeLnurl(candidate);
+  if (!decoded.ok) return decoded;
+  let u: URL;
+  try {
+    u = new URL(decoded.url);
+  } catch {
+    return {ok: false, reason: 'not-a-url'};
+  }
+  if (u.protocol !== 'https:') return {ok: false, reason: 'not-https'};
+  return {ok: true, apiUrl: decoded.url, host: u.host};
+}
+
+/** The `lightning` parameter of an absolute URL, or null when the string is not a URL or carries no
+ *  such parameter. `URL` + `searchParams` is the platform path the payment-link parser already
+ *  relies on for https URLs on every runtime this app ships to. */
+function lightningParamOf(text: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(text);
+  } catch {
+    return null;
+  }
+  const v = u.searchParams.get('lightning');
+  return v !== null && v.length > 0 ? v : null;
+}
+
+// --- the destination URIs the provider hands back (step 3) --------------------------------------
+// Hand-parsed rather than fed to `URL`: these are non-special schemes, and the only URL machinery
+// on the phone is a polyfill pulled in transitively by another dependency. The fields decided here
+// name a ledger and move money, so they must parse identically on Hermes, jest/Node and the web
+// bundle — a hand-rolled split does; a polyfill's treatment of opaque paths is not something to
+// discover in production.
+
+// The amount grammar. Mirrors what `lib/amount.ts` accepts (calculator-style: `1.` and `.5` are
+// both numbers) — including the live provider's `amount=1.`, which naive parsers reject. This is a
+// SHAPE gate only, because the asset (and therefore the precision and the u64 bound) is not known
+// until an offer is selected; the exact conversion is `parseDecimalToUnits` in
+// `selectPayableOffers`. Its only job is to make sure an unreadable amount is refused instead of
+// being carried forward toward a 0.
+const RE_DECIMAL_AMOUNT = /^(\d+\.?\d*|\.\d+)$/;
+
+const ICP_URI_SCHEME = 'icp:';
+const ICP_TRANSFER_METHOD = 'transfer';
+const SOLANA_URI_SCHEME = 'solana:';
+
+/**
+ * Parse `icp:<ledger>/transfer?to=<principal>&amount=<decimal>`.
+ *
+ * The path's method segment is checked against `transfer` exactly: the URI tells the wallet which
+ * ledger call to make, and anything other than a plain transfer is a call this wallet will not
+ * perform on a stranger's say-so. The principal is NOT validated here — the caller runs the core
+ * validator, so a mistyped destination is refused by the same code that refuses one from a payment
+ * link. Pure, total, never throws.
+ */
+export function parseIcpUri(uri: string): IcpUriParse {
+  const t = typeof uri === 'string' ? uri.trim() : '';
+  if (!t.toLowerCase().startsWith(ICP_URI_SCHEME)) return {ok: false, reason: 'wrong-scheme'};
+  const rest = t.slice(ICP_URI_SCHEME.length);
+  const q = rest.indexOf('?');
+  if (q < 0) return {ok: false, reason: 'malformed-uri'};
+  const path = rest.slice(0, q).split('/');
+  if (path.length !== 2 || path[0].length === 0 || path[1] !== ICP_TRANSFER_METHOD) {
+    return {ok: false, reason: 'malformed-uri'};
+  }
+  const params = queryParams(rest.slice(q + 1));
+  if (params === null) return {ok: false, reason: 'malformed-uri'};
+  const to = params.get('to') ?? '';
+  if (to.length === 0) return {ok: false, reason: 'malformed-uri'};
+  const amount = params.get('amount') ?? '';
+  // Missing and unreadable are one fact for the payer: there is no amount to pay.
+  if (!RE_DECIMAL_AMOUNT.test(amount)) return {ok: false, reason: 'bad-amount'};
+  return {ok: true, ledger: path[0], to, amount};
+}
+
+/**
+ * Parse `solana:<address>?amount=<decimal>`.
+ *
+ * Two refusals carry the weight here. An `spl-token` parameter means the URI is not the native SOL
+ * transfer this rail signs, and the live provider omits that parameter even for USDC — so its
+ * presence is a contradiction, not an instruction. And a destination containing `/` or `:` is
+ * Solana Pay's transaction-REQUEST form (`solana:https://…`), an entirely different interaction
+ * that must never be mistaken for a transfer. The address itself is not validated here; the Solana
+ * rail's own validator does that. Pure, total, never throws.
+ */
+export function parseSolanaUri(uri: string): SolanaUriParse {
+  const t = typeof uri === 'string' ? uri.trim() : '';
+  if (!t.toLowerCase().startsWith(SOLANA_URI_SCHEME)) return {ok: false, reason: 'wrong-scheme'};
+  const rest = t.slice(SOLANA_URI_SCHEME.length);
+  const q = rest.indexOf('?');
+  if (q < 0) return {ok: false, reason: 'malformed-uri'};
+  const to = rest.slice(0, q);
+  if (to.length === 0 || to.includes('/') || to.includes(':')) return {ok: false, reason: 'malformed-uri'};
+  const params = queryParams(rest.slice(q + 1));
+  if (params === null) return {ok: false, reason: 'malformed-uri'};
+  if (params.has('spl-token')) return {ok: false, reason: 'spl-token-unsupported'};
+  const amount = params.get('amount') ?? '';
+  if (!RE_DECIMAL_AMOUNT.test(amount)) return {ok: false, reason: 'bad-amount'};
+  return {ok: true, to, amount};
+}
+
+/** Split a URI query into its parameters. Null when a parameter is REPEATED (`?amount=1&amount=99`
+ *  has no honest answer, and silently keeping one of them is how a wallet pays the wrong number) or
+ *  when a percent-escape is broken. No `+`-as-space translation: this is a URI query, not an HTML
+ *  form, and no field here can contain a space. */
+function queryParams(qs: string): Map<string, string> | null {
+  const out = new Map<string, string>();
+  for (const pair of qs.split('&')) {
+    if (pair.length === 0) continue;
+    const eq = pair.indexOf('=');
+    try {
+      const k = decodeURIComponent(eq < 0 ? pair : pair.slice(0, eq));
+      const v = eq < 0 ? '' : decodeURIComponent(pair.slice(eq + 1));
+      if (out.has(k)) return null;
+      out.set(k, v);
+    } catch {
+      return null;
+    }
+  }
+  return out;
+}
+
+// --- the provider's payment details (step 2) ----------------------------------------------------
+
+/**
+ * Narrow the provider's step-2 JSON into `OcpDetails`.
+ *
+ * STRICT AND WHOLE: a body missing the quote, the callback or the transfer amounts — or carrying a
+ * single unreadable asset amount — is refused entirely. Keeping the readable half of a payment
+ * response would put a shortened list of options on screen with no explanation of what was dropped,
+ * which is exactly the silent failure this codebase does not allow. The merchant NAME is the one
+ * exception: it is display text, so its absence yields `null` rather than a refusal.
+ *
+ * The callback must be `https` for the same reason the scanned code must: it is the URL the wallet
+ * will call with the proof of an irreversible transfer.
+ *
+ * Unknown methods and unknown assets parse FINE here — they are the policy layer's business
+ * (`selectPayableOffers`), so a provider adding an asset never breaks the parse.
+ */
+export function parsePaymentDetails(json: unknown): OcpDetailsParse {
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) return {ok: false, reason: 'malformed-details'};
+  const j = json as Record<string, unknown>;
+
+  const callbackUrl = typeof j.callback === 'string' ? j.callback.trim() : '';
+  if (callbackUrl.length === 0) return {ok: false, reason: 'malformed-details'};
+  let cb: URL;
+  try {
+    cb = new URL(callbackUrl);
+  } catch {
+    return {ok: false, reason: 'malformed-details'};
+  }
+  if (cb.protocol !== 'https:') return {ok: false, reason: 'not-https'};
+  const segments = cb.pathname.split('/').filter(s => s.length > 0);
+  const paymentId = segments.length > 0 ? segments[segments.length - 1] : '';
+  if (paymentId.length === 0) return {ok: false, reason: 'malformed-details'};
+
+  const quote = j.quote;
+  if (quote === null || typeof quote !== 'object' || Array.isArray(quote)) return {ok: false, reason: 'malformed-details'};
+  const q = quote as Record<string, unknown>;
+  const quoteId = typeof q.id === 'string' ? q.id.trim() : '';
+  if (quoteId.length === 0) return {ok: false, reason: 'malformed-details'};
+  // ISO-8601 instant → epoch ms. One accepted spelling: guessing between seconds, milliseconds and
+  // a date string is precisely the coercion that turns a live quote into an expired one (or worse).
+  const quoteExpiresAt = typeof q.expiration === 'string' ? Date.parse(q.expiration) : NaN;
+  if (!Number.isFinite(quoteExpiresAt)) return {ok: false, reason: 'malformed-details'};
+
+  const requestedAmount = parseAssetAmount(j.requestedAmount);
+  if (requestedAmount === null) return {ok: false, reason: 'malformed-details'};
+
+  const list = j.transferAmounts;
+  if (!Array.isArray(list) || list.length === 0) return {ok: false, reason: 'malformed-details'};
+  const transferAmounts: OcpTransferAmount[] = [];
+  for (const entry of list) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return {ok: false, reason: 'malformed-details'};
+    const e = entry as Record<string, unknown>;
+    const method = typeof e.method === 'string' ? e.method.trim() : '';
+    if (method.length === 0) return {ok: false, reason: 'malformed-details'};
+    if (!Array.isArray(e.assets) || e.assets.length === 0) return {ok: false, reason: 'malformed-details'};
+    const assets: OcpAssetAmount[] = [];
+    for (const a of e.assets) {
+      const parsed = parseAssetAmount(a);
+      if (parsed === null) return {ok: false, reason: 'malformed-details'};
+      assets.push(parsed);
+    }
+    transferAmounts.push({method, assets});
+  }
+
+  const name = typeof j.displayName === 'string' ? j.displayName.trim() : '';
+  return {
+    ok: true,
+    details: {
+      paymentId,
+      quoteId,
+      quoteExpiresAt,
+      callbackUrl,
+      claimedMerchantName: name.length > 0 ? name : null,
+      requestedAmount,
+      transferAmounts,
+    },
+  };
+}
+
+/** `{asset, amount}` from the provider, with the amount normalised to a plain decimal string. */
+function parseAssetAmount(v: unknown): OcpAssetAmount | null {
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const asset = typeof o.asset === 'string' ? o.asset.trim() : '';
+  if (asset.length === 0) return null;
+  const amount = decimalStringOf(o.amount);
+  return amount === null ? null : {asset, amount};
+}
+
+/** A provider amount as an exact decimal string. JSON gives numbers, and `String(1.6e-7)` is
+ *  `"1.6e-7"` — a spelling every decimal parser in this codebase rejects, which would refuse a
+ *  perfectly good 16-sat amount. So exponent notation is EXPANDED (digit shifting, no rounding) and
+ *  anything that is not a plain non-negative decimal is refused. Strings pass through verbatim. */
+function decimalStringOf(v: unknown): string | null {
+  if (typeof v === 'string') {
+    const s = v.trim();
+    return RE_DECIMAL_AMOUNT.test(s) ? s : null;
+  }
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return null;
+  const s = String(v);
+  if (RE_DECIMAL_AMOUNT.test(s)) return s;
+  const m = /^(\d+)(?:\.(\d+))?e([+-]?\d+)$/i.exec(s);
+  if (m === null) return null;
+  const digits = m[1] + (m[2] ?? '');
+  const point = m[1].length + parseInt(m[3], 10);
+  if (point <= 0) return `0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return digits + '0'.repeat(point - digits.length);
+  return `${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+// --- which offers this wallet can pay (the policy table) ----------------------------------------
+
+/** The provider's settlement methods, mapped to the rail that would move the money. Matched exactly
+ *  as the provider spells them, because the same string is echoed back in steps 3 and 4. A method
+ *  that is not in this table is refused by name, never approximated: `Lightning` and `Ethereum` are
+ *  real OpenCryptoPay methods this wallet has no rail for, and paying one of them "close enough" is
+ *  not a thing dpay does. */
+const OCP_METHOD_RAIL: Record<string, SelectableAsset['protocol']> = {
+  InternetComputer: 'ic',
+  Solana: 'solana',
+};
+
+/** Case-insensitive token comparison — the same rule payment-link asset resolution uses, since both
+ *  compare an outside party's spelling of a ledger token against `SelectableAsset.linkToken`. */
+const tokenEq = (a: string | null, b: string): boolean => a !== null && a.toLowerCase() === b.toLowerCase();
+
+/**
+ * Split the provider's offers into what this wallet can pay and what it cannot, WITH the reason.
+ *
+ * `assets` is the wallet's own selectable-asset list (`buildSelectableAssets`) — the one list that
+ * spans both rails and already carries each asset's ledger token and precision, so an offer is
+ * matched on the pair (rail, token) exactly the way a payment link's `?asset=&network=` is. It says
+ * which assets this wallet CARRIES, not what it holds: a zero balance is the funding gate's answer,
+ * on the review screen, in the asset's own units.
+ *
+ * `nowMs` is passed in rather than read from the clock so the function stays pure and the expiry
+ * boundary is testable. An expired quote refuses EVERY offer with `quote-expired`: nothing is
+ * payable until the till is rescanned, and one honest reason on every row beats a list of options
+ * that cannot be taken.
+ *
+ * Order matters in one place: Solana USDC is refused BEFORE the wallet lookup, because the wallet
+ * DOES carry USDC on Solana — matching first would produce a payable offer for the one asset the
+ * findings say must not be paid until DFX answers what that address is.
+ */
+export function selectPayableOffers(
+  details: OcpDetails,
+  assets: SelectableAsset[],
+  nowMs: number,
+): {payable: OcpOffer[]; refused: OcpOfferRefusal[]} {
+  const payable: OcpOffer[] = [];
+  const refused: OcpOfferRefusal[] = [];
+  const expired = nowMs >= details.quoteExpiresAt;
+  for (const entry of details.transferAmounts) {
+    const rail = OCP_METHOD_RAIL[entry.method] ?? null;
+    for (const offered of entry.assets) {
+      const refuse = (reason: OcpOfferRefusal['reason']): void => {
+        refused.push({method: entry.method, asset: offered.asset, reason});
+      };
+      if (expired) {
+        refuse('quote-expired');
+        continue;
+      }
+      if (rail === null) {
+        refuse('unknown-method');
+        continue;
+      }
+      if (rail === 'solana' && tokenEq('USDC', offered.asset)) {
+        refuse('solana-usdc-unsupported');
+        continue;
+      }
+      const matches = assets.filter(a => a.protocol === rail && tokenEq(a.linkToken, offered.asset));
+      if (matches.length === 0) {
+        refuse('asset-not-in-wallet');
+        continue;
+      }
+      if (matches.length > 1) {
+        refuse('ambiguous-asset');
+        continue;
+      }
+      const match = matches[0];
+      // The ONE conversion, at this asset's own precision. An amount with more decimals than the
+      // asset has — or a zero — is refused, never rounded: dpay pays the exact amount asked for or
+      // it pays nothing.
+      const raw = parseDecimalToUnits(offered.amount, match.decimals);
+      if (!raw.ok || raw.raw === '0') {
+        refuse('bad-amount');
+        continue;
+      }
+      payable.push({
+        method: entry.method,
+        asset: offered.asset,
+        amount: offered.amount,
+        assetId: match.id,
+        rawAmount: raw.raw,
+      });
+    }
+  }
+  return {payable, refused};
+}
