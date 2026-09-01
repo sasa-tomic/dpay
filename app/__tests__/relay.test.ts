@@ -113,6 +113,34 @@ describe('relay fetch default timeout (PR8 safety net)', () => {
     expect(signal!.aborted).toBe(true);
     await expect(p).rejects.toThrow('aborted');
   });
+
+  // LEAK REGRESSION: arming the backstop is only half the contract — it must also be DISARMED when
+  // the call settles. `depositInfo`/`ckerc20OnrampParams` used to compose the signal by hand and
+  // throw the composed `cancel` on the floor, so every omitted-signal call left a live 10s timeout
+  // holding its AbortController until it fired a no-op abort (a leaked handle on the phone, and the
+  // open handle jest reported at worker teardown). Both now route through `fetchWithTimeout`, which
+  // cancels in `finally`. Asserted on BOTH exit paths — a 200 and a thrown non-OK — because the
+  // clear lives in `finally` precisely so the throwing path is covered too.
+  const body = (ok: boolean, payload: unknown) =>
+    jest.fn(() => Promise.resolve({ok, status: ok ? 200 : 503, json: () => Promise.resolve(payload)} as unknown as Response));
+  type LeakCase = [name: string, call: (m: any) => Promise<unknown>, ok: unknown, err: string];
+  const leakCases: LeakCase[] = [
+    ['depositInfo', m => m.depositInfo('http://relay.example', 1), {min_confirmations: 4, deposit_fee: '0', deposit_min_amount: null}, 'deposit/info 503'],
+    ['ckerc20OnrampParams', m => m.ckerc20OnrampParams('http://relay.example', 2), {helper_address: '0xhelper', erc20_address: null, kind: 'native_eth'}, 'onramp/ckerc20 503'],
+  ];
+  test.each(leakCases)('%s leaves NO pending backstop timer once the call settles', async (_name, call, ok, err) => {
+    jest.useFakeTimers();
+    const relay = require('../services/relay');
+    const idle = jest.getTimerCount();
+
+    (globalThis as unknown as {fetch: unknown}).fetch = body(true, ok);
+    await expect(call(relay)).resolves.toEqual(ok);
+    expect(jest.getTimerCount()).toBe(idle); // success path: timer cleared, not left to fire
+
+    (globalThis as unknown as {fetch: unknown}).fetch = body(false, {});
+    await expect(call(relay)).rejects.toThrow(err);
+    expect(jest.getTimerCount()).toBe(idle); // throwing path: `finally` clears it too
+  });
 });
 
 /**

@@ -106,7 +106,12 @@ const MERCHANT_HEX = '22'.repeat(32);
 
 let tree: Renderer.ReactTestRenderer | null = null;
 afterEach(async () => {
-  if (tree) { tree.unmount(); tree = null; }
+  // Unmount INSIDE act — React 19 defers passive-effect DESTROY, so a bare `tree.unmount()` leaves
+  // every `useEffect` cleanup unrun until the next act() (i.e. the next test, and never for the
+  // last one). That is how the tap view's motion beats stayed animating past the suite: their
+  // requestAnimationFrame chain kept firing after jest tore the environment down. Matches the
+  // idiom every other component suite here uses.
+  if (tree) { const t = tree; tree = null; await act(async () => { t.unmount(); }); }
   jest.clearAllMocks();
   await AsyncStorage.clear();
 });

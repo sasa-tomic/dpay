@@ -13,13 +13,6 @@ export type DepositInfo = {min_confirmations: number; deposit_fee: string; depos
 // on every RN/Hermes runtime the app targets, so the manual compose is the portable choice.
 const DEFAULT_RELAY_TIMEOUT_MS = 10000;
 
-/** Signal-only view of the shared `composeTimeout` with the relay default backstop (10s). When the
- *  caller passes a signal that signal is returned AS-IS (caller owns the deadline — see
- *  `lib/timeout.ts`); when the caller omits it the backstop arms. */
-function withDefaultTimeout(callerSignal?: AbortSignal, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): AbortSignal {
-  return composeTimeout(callerSignal, timeoutMs).signal;
-}
-
 // `fetch` + a caller-configurable timeout — the single source of truth for the inline
 // `AbortController + setTimeout + fetch + clearTimeout` incantation previously duplicated across
 // Wallet.tsx + the component sheets + catalog.ts. Composes an optional caller signal (first abort
@@ -51,11 +44,13 @@ export async function readJsonOrEmpty(r: Response): Promise<any> {
   });
 }
 
-// Relay deposit client — same fetch style as the inline balance/faucet/pay calls (AbortController
-// optional, errors thrown to the caller). Co-located here to match the existing pattern. The default
-// timeout above is a backstop only — every existing caller passes its own shorter-timeout signal.
+// Relay deposit client — goes through `fetchWithTimeout` (AbortController optional, errors thrown
+// to the caller) so an omitted-signal caller gets the backstop AND the backstop timer is cleared
+// when the fetch settles. Composing the signal by hand here instead leaked the timer: the composed
+// `cancel` was dropped on the floor, so every omitted-signal call left a live 10s timeout holding
+// its AbortController closure until it fired a no-op abort.
 export async function depositInfo(relayUrl: string, currency: number, signal?: AbortSignal): Promise<DepositInfo> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/deposit/info?currency=${currency}`, {signal: withDefaultTimeout(signal)});
+  const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/deposit/info?currency=${currency}`, {signal});
   const j = await readJsonOrEmpty(r);
   if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `deposit/info ${r.status}`);
   return j as DepositInfo;
@@ -70,7 +65,7 @@ export async function depositInfo(relayUrl: string, currency: number, signal?: A
 // Errors throw with the status (503 = no CkEthErc20 onramp for the currency / relay unreachable).
 export type CkErc20OnrampParams = {helper_address: string; erc20_address: string | null; kind: 'erc20' | 'native_eth'};
 export async function ckerc20OnrampParams(relayUrl: string, currency: number, signal?: AbortSignal): Promise<CkErc20OnrampParams> {
-  const r = await fetch(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal: withDefaultTimeout(signal)});
+  const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/onramp/ckerc20?currency=${currency}`, {signal});
   const j = await readJsonOrEmpty(r);
   if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `onramp/ckerc20 ${r.status}`);
   return j as CkErc20OnrampParams;
