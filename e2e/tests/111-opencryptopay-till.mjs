@@ -13,8 +13,9 @@
 //      take in the wallet's own words, and where to change it. It also asks the provider exactly
 //      ONCE and never requests a destination it could not pay: a refusal must not cost a quote.
 //   2. IT NEVER AUTO-SIGNS. A scanned till lands on an explicit review carrying the amount, the FULL
-//      destination account, the provider HOST the price came from, the countdown, and the merchant
-//      name marked as CLAIMED. Proven by money, not by pixels: the payer's ledger balance is
+//      destination account, the provider HOST the price came from, the countdown, the FIAT PRICE the
+//      till is charging ("CHF 1" — the crypto amount alone is uncheckable against the sale), and the
+//      merchant name marked as CLAIMED. Proven by money, not by pixels: the payer's ledger balance is
 //      unchanged while that review is on screen.
 //   3. PAID. Approve → the funds move on the IC rail → the proof is reported once → the paid state.
 //   4. UNRESOLVED — the important one. The transfer settles on-chain and the ONE submission does not
@@ -27,8 +28,9 @@
 // The till fixture and the fail-closed provider stub live in `../harness/ocp.mjs` — one till, shared
 // with flow 112 (the same code paid on the Solana rail). Fixture provenance is documented there.
 //
-// Selector contract: `ocp-checking`, `ocp-host`, `ocp-expiry`, `ocp-outcome`, `review-claimed`,
-// `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `btn-start-scan` (via armPayScan).
+// Selector contract: `ocp-checking`, `ocp-host`, `ocp-expiry`, `ocp-requested`, `ocp-outcome`,
+// `review-claimed`, `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `btn-start-scan`
+// (via armPayScan).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, armPayScan, railPrincipalText,
@@ -53,7 +55,7 @@ export const meta = {
   name: 'opencryptopay-till',
   journey: 'pay',
   covers: ['opencryptopay', 'scan-fallback', 'explicit-approve', 'claimed-name', 'loss-path', 'unresolved-outcome', 'one-shot-submit', 'honest-instructions', 'fail-closed'],
-  verifies: 'Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (provider host, full destination, countdown, claimed merchant name) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote.',
+  verifies: 'Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (provider host, full destination, countdown, the fiat price the till charges, claimed merchant name) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote.',
   timeoutMs: 45000, // 4 legs: 3 provider round trips (one deliberately slow) + 2 real IC settlements
 };
 
@@ -162,6 +164,15 @@ export async function run() {
       'the review names the host the price came from (an LNURL can name any host on earth)');
     assertIncludes(await driver.readText('review-claimed'), 'Name given by the code',
       'the merchant name is marked as claimed, never as verified');
+    // WHAT THE TILL IS CHARGING, in the till's own unit. `1.00000000 VCHF` is uncheckable against a
+    // price tag; "CHF 1" is the number printed on the till and read out by the cashier, and without
+    // it the payer approves an amount they cannot compare against the price of the sale. It is the
+    // PROVIDER's figure and the line says so — dpay neither quotes nor converts.
+    const charging = await driver.readText('ocp-requested');
+    assertIncludes(charging, 'The merchant is charging CHF 1.',
+      'the review must show the till\'s own price, so the payer can check it against the sale');
+    assertIncludes(charging, 'dpay doesn’t convert',
+      'the fiat ask must be attributed to the merchant\'s provider, never presented as a dpay quote');
     const expiry = await driver.readText('ocp-expiry');
     assert(/^Valid for ~\d+ min$/.test(expiry), `the review counts the 300s quote down, got ${JSON.stringify(expiry)}`);
     assertIncludes(await driver.bodyText(), CLAIMED_MERCHANT, 'the review shows the name the till claims');

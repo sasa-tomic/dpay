@@ -787,6 +787,33 @@ describe('PayMode — OpenCryptoPay till', () => {
     warn.mockRestore();
   });
 
+  test('the review shows what the till is charging in ITS OWN unit, as the merchant’s figure', async () => {
+    // `1.00000000 VCHF` is uncheckable on its own: the number on the till and in the cashier's
+    // mouth is "CHF 1", so without this line the payer approves an amount they cannot compare
+    // against the price of the sale. The copy attributes it to the merchant's provider — dpay
+    // neither quotes nor converts (CLAUDE.md non-negotiable) — and it is the PROVIDER's own
+    // `requestedAmount`, never a figure this wallet derived.
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(textByTestID(tree, 'ocp-requested')).toBe(M.pay.ocp.tillCharging('CHF 1'));
+    expect(textByTestID(tree, 'ocp-requested')).toContain('dpay doesn’t convert');
+  });
+
+  test('a till that states no price of its own simply omits the line, and still pays', async () => {
+    // Display context never blocks a payment (the same rule as the claimed merchant name): a
+    // provider that sends no readable `requestedAmount` loses the line, not the Approve button.
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, details: {...OCP_TARGET.details, requestedAmount: null}},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(hasTestID(tree, 'ocp-requested')).toBe(false);
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
+  });
+
   test('a refusal from the provider sequence is shown on the scan screen, and nothing is signed', async () => {
     jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'refused', message: M.pay.ocp.quoteExpired});
     const tree = mountTill();

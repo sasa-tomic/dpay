@@ -74,7 +74,7 @@ const BLOCKHASH = 'GZXyfzSTCBmA7rpeDLrmUbiSA45H5EEwJhoBeR6ZNb3u';
 
 const shareSpy = jest.spyOn(Share, 'share');
 
-function solReqUri(name: string = 'Cafe Sol'): string {
+function solReqUri(name: string = 'Cafe Sol', memo: string = ''): string {
   const iat = Math.floor(Date.now() / 1000) - 30;
   const input: SolReqInput = {
     rid: '0123456789abcdef0123456789abcdef',
@@ -90,7 +90,7 @@ function solReqUri(name: string = 'Cafe Sol'): string {
     mint: null,
     toAta: null,
     name,
-    memo: '',
+    memo,
   };
   return encodeSolReq(input);
 }
@@ -289,6 +289,46 @@ describe('SolPayMode — sign status shows the short destination under a merchan
     expect(texts(tree)).toContain(`to ${MERCHANT}`);
     const payee = tree.root.findAll(node => node.props && node.props.testID === 'sol-pay-payee');
     expect(payee).toHaveLength(0);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  // The scanned solreq is a STRANGER's string: a printed QR, or a phone that tapped this one. The
+  // 32-character cap bounds its length, but length was never the weapon — React Native `Text`
+  // renders newlines, so a name of blank lines pushes the destination address (the ONLY checkable
+  // thing on this screen) out of view, and the payer approves a payment whose payee they cannot
+  // see. Same helper as the IC wire request, a payment link's label/memo and a till's merchant
+  // name: one rule for display text, wherever it came from.
+  test('a name and memo of blank lines are neutralised — the destination stays on screen', async () => {
+    throwOnSign();
+    const tree = mountSolPay();
+    await scanToSign(tree, solReqUri('Cafe\n\n\n\n\n\n\n\n\n\nSol', 'note​\r\n\r\nhere'));
+
+    // Collapsed to single spaces, not deleted: the words the merchant wrote still read as words.
+    expect(texts(tree)).toContain('to Cafe Sol');
+    expect(textByTestID(tree, 'sol-pay-memo')).toBe('note here');
+    // Nothing rendered still carries a line break to push the address off the screen.
+    for (const t of texts(tree)) expect(t).not.toContain('\n');
+    expect(textByTestID(tree, 'sol-pay-payee')).toBe('Ecs89dz8…');
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('the sanitising is DISPLAY only — the signed request keeps the bytes the merchant verifies', async () => {
+    // The payer's signature commits to sha256(encodeSolReq(req)) and the merchant re-derives that
+    // exact URI to verify the payment (`verifySolPayment`). A sanitised name inside the SIGNED
+    // request is a payment the merchant's own verifier rejects — so the codec's canonical bytes
+    // must reach the signer untouched, and only the rendered locals may differ.
+    throwOnSign();
+    const hostileName = 'Cafe\n\n\n\n\n\n\n\n\n\nSol';
+    const tree = mountSolPay();
+    await scanToSign(tree, solReqUri(hostileName, 'note​\r\n\r\nhere'));
+
+    const [, signedReq] = jest.mocked(signSolPayment).mock.calls[0];
+    expect(signedReq.name).toBe(hostileName);
+    expect(signedReq.memo).toBe('note​\r\n\r\nhere');
     act(() => {
       tree.unmount();
     });
@@ -551,6 +591,29 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     );
     await expect(send()).resolves.toEqual({kind: 'unknown'});
     warn.mockRestore();
+  });
+
+  test('the review shows what the till is charging in ITS OWN unit, in the IC rail’s words', async () => {
+    // `0.01221422 SOL` is uncheckable against a price tag; "CHF 1" is what the till prints. One
+    // component renders it for both rails (`OcpQuoteLines`), so the payer meets the same sentence
+    // whichever asset is selected — CLAUDE.md's same-surfaces rule — and it is the MERCHANT's
+    // figure: dpay neither quotes nor converts.
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(textByTestID(tree, 'ocp-requested')).toBe(M.pay.ocp.tillCharging('CHF 1'));
+  });
+
+  test('a till that states no price of its own simply omits the line, and still pays', async () => {
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, details: {...OCP_TARGET.details, requestedAmount: null}},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+
+    expect(hasTestID(tree, 'ocp-requested')).toBe(false);
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
   });
 
   test('a refusal from the provider sequence stays on the scan screen, and nothing is sent', async () => {

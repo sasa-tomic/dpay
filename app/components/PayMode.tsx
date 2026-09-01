@@ -724,6 +724,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             <OcpQuoteLines
               host={ocp.host}
               claimedName={intent.toName || null}
+              requested={ocp.details.requestedAmount}
               payableUntil={ocp.payableUntil}
               onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
             />

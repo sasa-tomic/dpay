@@ -227,6 +227,18 @@ describe('fetchPaymentDetails', () => {
     expect(out.kind === 'error' && out.message).not.toBe('Payment link not found');
   });
 
+  test('the quoted provider sentence cannot scroll dpay’s own instruction off the screen', async () => {
+    // The refusal a scanned code produces is written by whatever host that code named, and it is
+    // rendered — quoted — inside dpay's localized framing. React Native `Text` renders newlines and
+    // honours the bidi overrides, so an unsanitised sentence could push the instruction beside it
+    // out of view or reorder the words around it. Same weapon, same helper as the merchant name.
+    installResponse(400, {statusCode: 400, message: `${'\n'.repeat(60)}Invalid‮ method​ or asset`});
+    const out = await fetchPaymentDetails('https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e');
+    // Kept whole — it is the one thing the payer can repeat to the merchant — only neutralised.
+    expect(out).toEqual({kind: 'error', message: M.pay.ocp.providerRefused('api.dfx.swiss', 'Invalid method or asset')});
+    expect(out.kind === 'error' && out.message).not.toContain('\n');
+  });
+
   test('a non-https provider URL is refused BEFORE any request leaves the device', async () => {
     const mock = installResponse(200, DETAILS_200);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});

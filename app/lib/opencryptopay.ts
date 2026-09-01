@@ -610,10 +610,12 @@ function submissionUrlOf(cb: URL): string | null {
   return `${cb.origin}${path.slice(0, at)}${SUBMIT_SEGMENT}${id}${cb.search}`;
 }
 
-/** Marks a name the cap CUT. Without it a truncation is indistinguishable from the whole name, and
- *  the payer would be told they are paying "Migros Bahnhofstrass" — a different merchant than the
- *  one the string actually named. Costs 3 bytes past the cap, on the display copy only. */
-const NAME_TRUNCATED_MARK = '…';
+/** Marks a piece of provider display text the cap CUT — a merchant name or the till's own price.
+ *  Without it a truncation is indistinguishable from the whole string, and the payer would be told
+ *  they are paying "Migros Bahnhofstrass" — a different merchant than the one the string actually
+ *  named — or a price that is a prefix of the one that was sent. Costs 3 bytes past the cap, on the
+ *  display copy only. */
+const TRUNCATED_MARK = '…';
 
 /**
  * The merchant name the provider CLAIMS, from ANY of its payload shapes. Extracted here — not
@@ -637,7 +639,36 @@ export function claimedMerchantNameOf(json: unknown): string | null {
   const clean = sanitiseDisplayText(typeof name === 'string' ? name : '');
   if (clean.length === 0) return null;
   const clamped = clampLinkText(clean);
-  return clamped === clean ? clamped : `${clamped}${NAME_TRUNCATED_MARK}`;
+  return clamped === clean ? clamped : `${clamped}${TRUNCATED_MARK}`;
+}
+
+/**
+ * One asset amount spelled for a REVIEW LINE ("CHF 1"). Display only, and composed rather than
+ * converted: the only amount rendered through it is the till's own price (`OcpDetails.requestedAmount`),
+ * which is the MERCHANT's figure and never dpay's — dpay does not quote and does not convert.
+ *
+ * The amount's SPELLING is straightened because the grammar this module accepts is deliberately
+ * calculator-style (`RE_DECIMAL_AMOUNT`: the live provider really does send `1.`), and those two
+ * edge spellings read as defects in a sentence — "charging CHF 1.." with the copy's own full stop,
+ * and a leading bare point as a typo. Only the point moves: no digit is added, dropped or rounded,
+ * so the number shown is the number sent.
+ *
+ * BOUNDED AND SANITISED, through the same door as every other stranger-supplied string the review
+ * renders (`claimedMerchantNameOf` above, a payment link's `label`/`memo` in `lib/deepLink.ts`).
+ * Both halves need it: the provider's `asset` is free text this parser only trims, so a ticker of
+ * newlines would push the host line, the countdown and the destination account off the screen — the
+ * exact layout weapon the merchant name already closes — and the `amount` grammar bounds the
+ * CHARACTERS but not the LENGTH, so a thousand-digit price does the same with no control character
+ * at all. A cut is MARKED, because a cut price is a different price and an unmarked truncation
+ * would read as the whole one. Every realistic fiat price is far inside the cap, so the mark only
+ * ever appears on a figure the provider had no business sending.
+ */
+export function ocpPriceText(a: OcpAssetAmount): string {
+  const withUnit = a.amount.startsWith('.') ? `0${a.amount}` : a.amount;
+  const line = `${a.asset} ${withUnit.endsWith('.') ? withUnit.slice(0, -1) : withUnit}`;
+  const clean = sanitiseDisplayText(line);
+  const clamped = clampLinkText(clean);
+  return clamped === clean ? clamped : `${clamped}${TRUNCATED_MARK}`;
 }
 
 /** `{asset, amount}` from the provider, with the amount normalised to a plain decimal string. */

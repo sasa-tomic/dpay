@@ -41,6 +41,7 @@ import {
   type OcpOfferRefusal,
 } from '../lib/opencryptopay';
 import {parseDecimalToUnits} from '../lib/amount';
+import {sanitiseDisplayText} from '../lib/deepLink';
 import {ledgerToCurrency, type CurrencyDescriptor} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {isValidSolanaAddress} from '../solana/identity';
@@ -110,11 +111,21 @@ async function readJson(r: Response): Promise<{ok: true; json: unknown} | {ok: f
 /** The provider's error envelope is NestJS's `{statusCode, message, error}` — recorded live on
  *  2026-09-01 for every failing status this module can meet (400 "Invalid method or asset", 400
  *  "Transaction … already assigned to another quote", 404 "Payment link not found", 404 "No actual
- *  quote with ID … found"). Returns the human sentence, or null when the body carries none. */
+ *  quote with ID … found"). Returns the human sentence, or null when the body carries none.
+ *
+ *  SANITISED, because one of its two consumers puts it ON SCREEN: `failureMessage` quotes it inside
+ *  `M.pay.ocp.providerRefused`, and it is a sentence written by whatever host the scanned code named.
+ *  React Native `Text` renders newlines and honours the bidi overrides, so an unsanitised refusal
+ *  could scroll the instruction beside it out of view or reorder the localized framing it sits in —
+ *  the same weapon `claimedMerchantNameOf` closes on the merchant name, through the same helper.
+ *  NOT capped: unlike a name this is the sentence the payer repeats to the merchant, so cutting it
+ *  costs the one diagnostic they have, and collapsing whitespace runs already removes the layout
+ *  weapon (a thousand newlines become one space). */
 function providerMessage(json: unknown): string | null {
   if (typeof json !== 'object' || json === null) return null;
   const m = (json as {message?: unknown}).message;
-  return typeof m === 'string' && m.length > 0 ? m : null;
+  const clean = sanitiseDisplayText(typeof m === 'string' ? m : '');
+  return clean.length > 0 ? clean : null;
 }
 
 /** Is this body the payment-link payload rather than the error envelope? The payload carries the

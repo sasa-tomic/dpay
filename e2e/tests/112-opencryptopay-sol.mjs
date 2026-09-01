@@ -21,9 +21,10 @@
 //      that actually protects the user — broadcast NOTHING.
 //   2. SOL PAYS, AND NEVER AUTO-SIGNS. A scanned till lands on an explicit review carrying the
 //      amount at SOL's own precision, the FULL destination address, the provider host the price came
-//      from, the countdown, and the merchant name marked as CLAIMED. Proven by the chain, not by
-//      pixels: zero transactions have been broadcast while that review is on screen. Approve → one
-//      broadcast → one proof submission naming that signature → the paid state.
+//      from, the countdown, the FIAT PRICE the till is charging, and the merchant name marked as
+//      CLAIMED. Proven by the chain, not by pixels: zero transactions have been broadcast while that
+//      review is on screen. Approve → one broadcast → one proof submission naming that signature →
+//      the paid state.
 //   3. A TRANSFER THE CLUSTER WON'T CONFIRM STAYS RECOVERABLE. The network accepts the transaction
 //      and then the status read stops answering: money on chain, provider untold. The wallet keeps
 //      the broadcast signature, says so honestly, reports NOTHING — and when the cluster comes back
@@ -37,9 +38,9 @@
 // Solana signature here) and re-reads it against its own chain, so leg 3 belongs to this flow.
 //
 // Selector contract: `asset-sol-select`, `asset-sol-usdc-select`, `sol-pay-scan`, `sol-pay-err`,
-// `ocp-checking`, `sol-pay-amount`, `sol-pay-payee`, `ocp-host`, `ocp-expiry`, `review-claimed`,
-// `btn-approve`, `sol-pay-status`, `ocp-outcome`, `btn-sol-pay-done`, `btn-sol-start-scan`
-// (via armPayScan).
+// `ocp-checking`, `sol-pay-amount`, `sol-pay-payee`, `ocp-host`, `ocp-expiry`, `ocp-requested`,
+// `review-claimed`, `btn-approve`, `sol-pay-status`, `ocp-outcome`, `btn-sol-pay-done`,
+// `btn-sol-start-scan` (via armPayScan).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, armPayScan,
 } from '../harness/lib.mjs';
@@ -61,7 +62,7 @@ export const meta = {
   journey: 'pay',
   covers: ['opencryptopay', 'sol-rail', 'explicit-approve', 'claimed-name', 'solana-usdc-refused',
     'one-shot-submit', 'honest-instructions', 'fail-closed', 'loss-path-recovery'],
-  verifies: 'The Solana rail pays an OpenCryptoPay till: a scanned till with SOL selected resolves a live quote and lands on an explicit review (exact SOL amount, full destination address, provider host, countdown, claimed name) that broadcasts nothing until Approve; Approve sends exactly one Solana transaction and reports that signature to the provider exactly once → paid. With Solana USDC selected the SAME till is refused by name — its URI names no token account — pointing the payer at SOL, costing one provider read, and broadcasting nothing. A transfer the cluster accepts but will not confirm is reported to nobody, keeps its signature, and is completed by the wallet itself once the status read comes back — one broadcast, one submission.',
+  verifies: 'The Solana rail pays an OpenCryptoPay till: a scanned till with SOL selected resolves a live quote and lands on an explicit review (exact SOL amount, full destination address, provider host, countdown, claimed name, and the fiat price the till itself is charging) that broadcasts nothing until Approve; Approve sends exactly one Solana transaction and reports that signature to the provider exactly once → paid. With Solana USDC selected the SAME till is refused by name — its URI names no token account — pointing the payer at SOL, costing one provider read, and broadcasting nothing. A transfer the cluster accepts but will not confirm is reported to nobody, keeps its signature, and is completed by the wallet itself once the status read comes back — one broadcast, one submission.',
   timeoutMs: 60000, // 3 legs × (2 provider round trips) + a real local sign/broadcast/confirm
 };
 
@@ -184,6 +185,11 @@ export async function run() {
       'the review names the host the price came from (an LNURL can name any host on earth)');
     assertIncludes(await driver.readText('review-claimed'), 'Name given by the code',
       'the merchant name is marked as claimed, never as verified');
+    // The till's own price, in the till's own unit — `0.01221422 SOL` is uncheckable against the
+    // number on the till. One component renders this for both rails, so the sentence is identical
+    // to the IC rail's (CLAUDE.md same-surfaces rule) even though the asset amount above it is not.
+    assertIncludes(await driver.readText('ocp-requested'), 'The merchant is charging CHF 1.',
+      'the review must show the till\'s own price on this rail too, in the same words');
     assert(/^Valid for ~\d+ min$/.test(await driver.readText('ocp-expiry')),
       'the review counts the quote down so the payer can see the price is still good');
     assertIncludes(await driver.bodyText(), CLAIMED_MERCHANT, 'the review shows the name the till claims');

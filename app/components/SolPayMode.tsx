@@ -13,6 +13,7 @@ import {fmtAsset, short} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {classifyScan} from '../lib/scan';
+import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpScan} from '../lib/opencryptopay';
 import {ocpTimeRefusal, payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import type {SelectableAsset} from '../config/assets';
@@ -441,6 +442,21 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
 
   const decimals = req?.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS;
   const unit = req?.cur === 'USDC' ? 'USDC' : SOL_UNIT;
+  // The merchant's CLAIMED name and note, from a code a stranger printed or a phone that tapped
+  // this one. Same threat and same helper as the IC wire request (`wireRequestToIntent`), a payment
+  // link's `label`/`memo` (`clampLinkText`) and a till's merchant name (`claimedMerchantNameOf`):
+  // the 32-character cap bounds the length, but React Native `Text` renders newlines, so a name of
+  // blank lines pushes the destination address — the only checkable thing on this screen — out of
+  // view.
+  //
+  // Derived for DISPLAY and never written back into `req`, which is the difference from the IC
+  // rail's seam: the payer's signature commits to `sha256(encodeSolReq(req))`
+  // (`buildCanonicalSolMessage`), and the merchant re-derives that same URI to verify the payment
+  // (`verifySolPayment`). A sanitised `name` in the signed request is a request the merchant's own
+  // verifier rejects — so the codec's canonical bytes stay untouched and only these two locals are
+  // rendered.
+  const claimedName = req ? sanitiseDisplayText(req.name) : '';
+  const claimedMemo = req ? sanitiseDisplayText(req.memo) : '';
 
   if (phase === 'scan') {
     // Zero-funds gate (2026-08-16 UX): when the active asset is KNOWN unfunded the scanner is
@@ -565,6 +581,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
         <OcpQuoteLines
           host={ocp.host}
           claimedName={ocp.details.claimedMerchantName}
+          requested={ocp.details.requestedAmount}
           payableUntil={ocp.payableUntil}
           onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
         />
@@ -617,12 +634,12 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
       <View style={S.center}>
         <Text style={S.label}>{M.pay.paying}</Text>
         <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(req.amt, decimals, unit))}</Text>
-        <Text style={S.reviewTo}>{M.pay.toWho(req.name || req.to)}</Text>
+        <Text style={S.reviewTo}>{M.pay.toWho(claimedName || req.to)}</Text>
         {/* U-F5 twin of PayMode's review-payee: a merchant name alone is not verifiable — show the
             short destination under it. Without a name the primary line already carries the full
             base58 address (more precise than a short form), so no duplicate line. */}
-        {req.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req.to)}</Text> : null}
-        {req.memo ? <Text testID="sol-pay-memo" style={S.dim2}>{req.memo}</Text> : null}
+        {claimedName ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req.to)}</Text> : null}
+        {claimedMemo ? <Text testID="sol-pay-memo" style={S.dim2}>{claimedMemo}</Text> : null}
         <Text style={S.dim2}>{M.pay.signsOffline}</Text>
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         {busy ? (
@@ -641,10 +658,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
       <View style={S.center}>
         <Text style={S.label}>{M.pay.showThisToMerchant}</Text>
         <View testID="sol-pay-qr" style={S.qrCard}><QrCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
-        <Text style={S.amountBig}>{M.pay.amountToWho(fmtAsset(req!.amt, decimals, unit), req!.name || req!.to)}</Text>
+        <Text style={S.amountBig}>{M.pay.amountToWho(fmtAsset(req!.amt, decimals, unit), claimedName || req!.to)}</Text>
         {/* U-F5: the sync auto-sign batch-skips the sign-status surface (straight to qr), so the
             short destination must live HERE — a merchant name alone is not verifiable. */}
-        {req!.name ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req!.to)}</Text> : null}
+        {claimedName ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req!.to)}</Text> : null}
         <Text style={S.badgeOk}>{M.pay.signedOffline}</Text>
         <Text style={S.qrHint}>{M.pay.solOfflineSettles}</Text>
         {/* Trip Ready J4 — the SOL QR hand-off is ALWAYS offline-pending (no online branch), and
@@ -678,7 +695,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   // phase === 'paid'. `req` may be null if the payment was via NFC (the autoSign decoded the
   // request internally; SolPayMode's `req` state is only set on QR scan).
   const paidAmt = req ? fmtAsset(req.amt, decimals, unit) : null;
-  const paidTo = req ? req.name || req.to : null;
+  const paidTo = req ? claimedName || req.to : null;
   return (
     <View style={S.center}>
       {/* P3 — SVG mark (was a '⋯' text glyph): the SOL pay outcome is ALWAYS the honest pending

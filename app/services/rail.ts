@@ -15,6 +15,7 @@ import {DpayCore} from './native';
 import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS, INGRESS_AHEAD_S} from './icp';
 import {hexToBytes, bytesToHex, base, short} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
+import {sanitiseDisplayText} from '../lib/deepLink';
 import {fetchWithTimeout} from './relay';
 import {HISTORY_TIMEOUT_MS} from '../config/constants';
 import type {PayIntent, Req, TransactionsRow} from '../lib/types';
@@ -94,16 +95,28 @@ export const decodeLegacyReply = (replyArgHex: string) => DpayCore.icpDecodeLega
  *  The wire addresses the payee by raw Ed25519 PUBKEY; the ledger account owner is
  *  `self_authenticating(pubkey)` — that derivation is the ONE place the wire's addressing meets the
  *  rail's, and it lives here so a payment link (which already carries a principal) needs no second
- *  conversion. The destination renders as the short pubkey, exactly as a scanned request always has. */
+ *  conversion. The destination renders as the short pubkey, exactly as a scanned request always has.
+ *
+ *  `to_name` and `memo` are STRANGER-SUPPLIED DISPLAY TEXT — the request came off a QR the payer
+ *  pointed a camera at, or off a phone that tapped theirs — so they are sanitised HERE, at the one
+ *  seam where the wire becomes something a screen renders. The wire's 32-byte `NAME_LEN`/`MEMO_LEN`
+ *  bound the LENGTH but not the CONTENT, and length was never the weapon: React Native `Text`
+ *  renders newlines, so ~32 of them in a name push the destination account, the amount and the memo
+ *  off a phone screen — the same attack `clampLinkText` closes on a payment link's `label`/`memo`
+ *  and `claimedMerchantNameOf` closes on a provider's merchant name, so it closes through the same
+ *  helper (`sanitiseDisplayText`) rather than a second rule. NO cap is applied: the wire already
+ *  bounds these to 32 bytes, and a cap that never cuts would make the payment link's truncation
+ *  marker mean nothing here. Nothing signed reads these fields — `prepareTransfer` takes only
+ *  `{toPrincipal, amount, currency, nonceHex}` — so sanitising cannot change what is authorized. */
 export async function wireRequestToIntent(req: Req): Promise<PayIntent> {
   return {
     toPrincipal: await DpayCore.icpPrincipalFromPubkey(req.toHex),
-    toName: req.toName,
+    toName: sanitiseDisplayText(req.toName),
     toAccountText: short(req.toHex),
     amount: req.amount,
     currency: req.currency,
     nonceHex: req.nonceHex,
-    memo: req.memo,
+    memo: sanitiseDisplayText(req.memo),
     expiry: req.expiry,
     source: 'wire',
   };

@@ -34,7 +34,7 @@ jest.mock('../services/icp', () => ({
 }));
 jest.mock('../services/relay', () => ({fetchWithTimeout: jest.fn()}));
 
-import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage} from '../services/rail';
+import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
 import {DpayCore} from '../services/native';
 import {icPollRequestStatus, icPollSignedRequestStatus, icStampExpiry, icSubmit} from '../services/icp';
 import {fetchWithTimeout} from '../services/relay';
@@ -86,6 +86,60 @@ test('a 4xx submit response still polls before any terminal verdict', async () =
   jest.mocked(DpayCore.icpDecodeTransferResult).mockResolvedValue({ok: true, blockIndex: '89'} as never);
   const out = await submitTransfer({...PREPARED, envelopeHex: 'abcd'}, '11'.repeat(32), {attempts: 1, intervalMs: 0});
   expect(out).toEqual({kind: 'settled', blockIndex: '89'});
+});
+
+describe('wireRequestToIntent — the seam where a scanned/tapped request becomes something a screen renders', () => {
+  const WIRE = {
+    toHex: '22'.repeat(32),
+    amount: '1000',
+    nonceHex: 'aa'.repeat(16),
+    expiry: 1_800_000_240,
+    currency: 4,
+    toName: 'Cafe Kalaj',
+    memo: 'table 4',
+  };
+
+  beforeEach(() => {
+    jest.mocked(DpayCore.icpPrincipalFromPubkey).mockReset().mockResolvedValue('payee-principal' as never);
+  });
+
+  test('an ordinary name and memo cross unchanged', async () => {
+    const intent = await wireRequestToIntent(WIRE);
+    expect(intent.toName).toBe('Cafe Kalaj');
+    expect(intent.memo).toBe('table 4');
+    expect(intent.source).toBe('wire');
+  });
+
+  test('a name of blank lines cannot clear the review screen', async () => {
+    // The request came off a QR a stranger printed, or off a phone that tapped this one. The wire's
+    // 32-byte NAME_LEN bounds the LENGTH, but length was never the weapon: React Native `Text`
+    // renders newlines, so ~32 of them push the destination account, the amount and the memo off a
+    // phone screen — deleting exactly the lines that make a hostile payee answerable.
+    const intent = await wireRequestToIntent({...WIRE, toName: 'Cafe\n\n\n\n\n\n\n\n\n\n\n\nKalaj', memo: 'a b\r\nc'});
+    expect(intent.toName).toBe('Cafe Kalaj');
+    expect(intent.memo).toBe('a b c');
+  });
+
+  test('invisible characters that could only be there to hide something are removed', async () => {
+    // Zero-width padding and the bidi overrides — the pair that lets a name read as one merchant
+    // while spelling another. Same rule, same helper as the payment link's label and the
+    // OpenCryptoPay merchant name; ZWJ stays, because it joins rather than hides.
+    const intent = await wireRequestToIntent({...WIRE, toName: '‮Kalaj​﻿', memo: '‍ok'});
+    expect(intent.toName).toBe('Kalaj');
+    expect(intent.memo).toBe('‍ok');
+  });
+
+  test('nothing the payer authorizes reads these fields', async () => {
+    // The safety of sanitising here rests on the name and memo being DISPLAY ONLY on this rail:
+    // `prepareTransfer` signs {toPrincipal, amount, currency, nonceHex} and the ICRC memo is the
+    // nonce, so no cleaned character can change what the payer's signature commits to.
+    const intent = await wireRequestToIntent({...WIRE, toName: '‮Kalaj'});
+    expect(intent.toPrincipal).toBe('payee-principal');
+    expect(intent.amount).toBe(WIRE.amount);
+    expect(intent.currency).toBe(WIRE.currency);
+    expect(intent.nonceHex).toBe(WIRE.nonceHex);
+    expect(intent.expiry).toBe(WIRE.expiry);
+  });
 });
 
 describe('receiver history confirmation', () => {

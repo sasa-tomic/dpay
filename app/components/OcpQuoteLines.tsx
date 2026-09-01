@@ -3,10 +3,11 @@ import {View, Text} from 'react-native';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {IconClock} from './icons';
+import {ocpPriceText, type OcpAssetAmount} from '../lib/opencryptopay';
 import {M} from '../i18n';
 
 /**
- * The three things an OpenCryptoPay review must say that no other review does — rendered ONCE, here,
+ * The four things an OpenCryptoPay review must say that no other review does — rendered ONCE, here,
  * so both rails' review screens say them identically (CLAUDE.md's same-surfaces rule).
  *
  *   • WHERE the price came from. A scanned LNURL can name any host on earth, and the host then
@@ -20,6 +21,12 @@ import {M} from '../i18n';
  *     payer scanned while the payment answered to another one.
  *   • That the merchant name is CLAIMED, not verified — the same posture a payment link's `label`
  *     gets (`lib/deepLink.ts` is the authority for it).
+ *   • WHAT THE TILL IS CHARGING, in the till's own unit. `0.0000162 BTC` is uncheckable on its own:
+ *     the number printed on the till and read out by the cashier is "CHF 1", so without this line
+ *     the payer approves an amount they have no way to compare against the price of the sale. It is
+ *     the PROVIDER's figure and the copy says so — the provider decided how much crypto that price
+ *     costs, and dpay neither quotes nor converts (CLAUDE.md non-negotiable). Absent when the
+ *     provider sent none, exactly like the claimed name: display context never blocks a payment.
  *   • HOW LONG the price can still be ACTED ON. This is not decoration: approving too late moves
  *     irreversible funds against a quote the provider will refuse, which is the single worst
  *     outcome the loss path has. The countdown therefore runs to `payableUntil` — the last instant
@@ -34,12 +41,16 @@ import {M} from '../i18n';
 export function OcpQuoteLines({
   host,
   claimedName,
+  requested,
   payableUntil,
   onTooLate,
 }: {
   host: string;
   /** The provider's claimed merchant name, or null when it sent none (then nothing is claimed). */
   claimedName: string | null;
+  /** What the till asked for in ITS OWN unit (`OcpDetails.requestedAmount`), or null when the
+   *  provider sent none or sent it unreadably. */
+  requested: OcpAssetAmount | null;
   payableUntil: number;
   onTooLate: () => void;
 }) {
@@ -63,6 +74,9 @@ export function OcpQuoteLines({
   return (
     <>
       {claimedName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.ocp.claimedMerchant}</Text> : null}
+      {/* Under the claimed-name marker (which belongs beside the NAME above it) and above the host,
+          so the two provider-supplied facts — what it is charging and who priced it — read together. */}
+      {requested ? <Text testID="ocp-requested" style={S.dim2}>{M.pay.ocp.tillCharging(ocpPriceText(requested))}</Text> : null}
       <Text testID="ocp-host" style={S.dim2}>{M.pay.ocp.providerHost(host)}</Text>
       {minutes >= 1 ? (
         <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>

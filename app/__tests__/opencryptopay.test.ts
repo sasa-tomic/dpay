@@ -2,6 +2,7 @@ import {describe, it, expect} from '@jest/globals';
 import {
   claimedMerchantNameOf,
   decodeLnurl,
+  ocpPriceText,
   parseOcpScan,
   parseIcpUri,
   parseProviderInstant,
@@ -475,6 +476,40 @@ describe('parsePaymentDetails', () => {
     // A JSON NUMBER (measured: `requestedAmount.amount` is a number while asset amounts are
     // strings) becomes an exact decimal string, the same as everywhere else in this parser.
     expect(detailsOf({requestedAmount: {asset: 'CHF', amount: 1.5}}).requestedAmount).toEqual({asset: 'CHF', amount: '1.5'});
+  });
+});
+
+describe('ocpPriceText', () => {
+  it('spells the till’s own price for the review line, without touching a digit', () => {
+    // The ordinary case, from the measured body: a JSON number 1 → "CHF 1".
+    expect(ocpPriceText({asset: 'CHF', amount: '1'})).toBe('CHF 1');
+    // No rounding and no re-precision: a long amount survives whole, which is what makes this a
+    // spelling function and not a formatter (dpay does not quote, and must not restate a price).
+    expect(ocpPriceText({asset: 'EUR', amount: '1234.567890123456789'})).toBe('EUR 1234.567890123456789');
+  });
+
+  it('straightens the two calculator spellings the provider’s grammar admits', () => {
+    // `RE_DECIMAL_AMOUNT` accepts `1.` because the live provider sends exactly that for its VCHF
+    // amount. Rendered raw it collides with the copy's own full stop ("charging CHF 1.."), and a
+    // leading bare point reads as a typo — so the point is straightened and nothing else is.
+    expect(ocpPriceText({asset: 'CHF', amount: '1.'})).toBe('CHF 1');
+    expect(ocpPriceText({asset: 'CHF', amount: '.5'})).toBe('CHF 0.5');
+  });
+
+  it('cannot be used to clear the review screen', () => {
+    // The provider's `asset` is free text this parser only TRIMS — a ticker of newlines would push
+    // the host line, the countdown and the destination account out of view, which is the same
+    // layout weapon the merchant name closes. Same door, same helper.
+    expect(ocpPriceText({asset: '\n'.repeat(40) + 'CHF', amount: '1'})).toBe('CHF 1');
+    expect(ocpPriceText({asset: '‮CHF​', amount: '1'})).toBe('CHF 1');
+    // And the amount grammar bounds the CHARACTERS, not the LENGTH: a thousand-digit price does the
+    // same damage with no control character in it. A cut is MARKED — a cut price is a different
+    // price, and an unmarked truncation would read as the whole one.
+    const long = ocpPriceText({asset: 'CHF', amount: '9'.repeat(1000)});
+    expect(long.endsWith('…')).toBe(true);
+    expect(long.length).toBeLessThan(40);
+    // A cap that never cuts a real price: the mark appears only on a figure no till would send.
+    expect(ocpPriceText({asset: 'CHF', amount: '1234567.89'})).toBe('CHF 1234567.89');
   });
 
   it('refuses a method that omits its availability flag, rather than reading absence as permission', () => {
