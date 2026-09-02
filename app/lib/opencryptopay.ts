@@ -307,20 +307,61 @@ export function decodeLnurl(s: string): LnurlDecode {
  * so a non-default port is part of what the user sees.
  */
 export function parseOcpScan(raw: string): OcpScan {
-  const t = typeof raw === 'string' ? raw.trim() : '';
-  if (t.length === 0) return {ok: false, reason: 'not-lnurl'};
+  const raw0 = typeof raw === 'string' ? raw.trim() : '';
+  if (raw0.length === 0) return {ok: false, reason: 'not-lnurl'};
+  // The `lightning:` URI scheme is how most of the Lightning world hands an LNURL to a wallet, and
+  // a till printed that way used to read as "not a payment code" — a dead end at a checkout with no
+  // way to tell an unsupported sticker from a damaged one. Stripped, not parsed as a URL: the
+  // payload after the scheme is the code itself, and `lightning://` is the same thing with the
+  // authority slashes some encoders add. (`decodeLnurl` still decides whether it IS an LNURL.)
+  const t = stripLightningScheme(raw0);
+  // The provider's OWN endpoint, printed with no LNURL wrapper at all. DFX's `PaymentLinkDto`
+  // carries `url` beside `frontendUrl`, so a sticker made from the wrong field looks exactly like
+  // this. Admitted only for an LNURL-pay endpoint PATH, never for any https URL: dpay's own payment
+  // links are https too and must keep routing to the link parser (`classifyScan`).
+  const direct = lnurlpEndpointOf(t);
+  if (direct !== null) return direct;
   const candidate = t.toLowerCase().startsWith(`${LNURL_HRP}1`) ? t : lightningParamOf(t);
   if (candidate === null) return {ok: false, reason: 'not-lnurl'};
   const decoded = decodeLnurl(candidate);
   if (!decoded.ok) return decoded;
+  return providerUrl(decoded.url);
+}
+
+/** Drop a `lightning:` / `lightning://` / `lnurlp:` scheme prefix, in any case. Anything else is
+ *  returned untouched — this only unwraps, it never decides what the payload is. */
+function stripLightningScheme(t: string): string {
+  const m = /^(?:lightning|lnurlp):(?:\/\/)?/i.exec(t);
+  return m === null ? t : t.slice(m[0].length);
+}
+
+/** An LNURL-pay endpoint given directly (`https://<host>/…/lnurlp/<id>`), or null when the string is
+ *  not one. The `/lnurlp/` path segment is the discriminator: it is the convention every LNURL-pay
+ *  server uses, it is what this provider serves, and it is absent from dpay's own link shape — so a
+ *  payment link and a random https URL both fall through to the callers that own them. */
+function lnurlpEndpointOf(text: string): OcpScan | null {
   let u: URL;
   try {
-    u = new URL(decoded.url);
+    u = new URL(text);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  if (!u.pathname.toLowerCase().includes('/lnurlp/')) return null;
+  return providerUrl(text);
+}
+
+/** The final gate every accepted spelling passes through: it must be an https URL, and the host is
+ *  carried out for the review screen. ONE place, so a new input shape cannot skip the scheme check. */
+function providerUrl(url: string): OcpScan {
+  let u: URL;
+  try {
+    u = new URL(url);
   } catch {
     return {ok: false, reason: 'not-a-url'};
   }
   if (u.protocol !== 'https:') return {ok: false, reason: 'not-https'};
-  return {ok: true, apiUrl: decoded.url, host: u.host};
+  return {ok: true, apiUrl: url, host: u.host};
 }
 
 /** The `lightning` parameter of an absolute URL, or null when the string is not a URL or carries no
@@ -333,8 +374,13 @@ function lightningParamOf(text: string): string | null {
   } catch {
     return null;
   }
-  const v = u.searchParams.get('lightning');
-  return v !== null && v.length > 0 ? v : null;
+  // Case-INSENSITIVE on the parameter name. A QR encoder that picks alphanumeric mode (denser code,
+  // fewer modules) uppercases the entire string, parameter names included — so the same sticker can
+  // arrive as `?LIGHTNING=`. The value's case never mattered: bech32 is case-insensitive.
+  for (const [name, value] of u.searchParams) {
+    if (name.toLowerCase() === 'lightning' && value.length > 0) return value;
+  }
+  return null;
 }
 
 // --- the destination URIs the provider hands back (step 3) --------------------------------------

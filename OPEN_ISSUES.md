@@ -11,9 +11,12 @@
    2026-09-02). Plan, rejected alternatives and open questions:
    [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md).
    Two operational tails from the same session, both founder ops, neither blocking the milestone:
-   - **PROD SERVES A BUILD THAT CANNOT PAY ANY TILL.** `/download/dpay.apk` and the relay are at
-     `7499b30`, before the parser fix (`8912db5`) that made real tills payable at all. Needs
-     `just apk && just up`.
+   - ~~**PROD SERVES A BUILD THAT CANNOT PAY ANY TILL.**~~ **STALE — corrected 2026-09-02.** It was
+     true when written (prod was at `7499b30`, before the parser fix `8912db5`); the founder
+     redeployed the same day. Measured: prod's `/download/dpay.apk` sha256 == the local staged APK
+     (`638a1ac5…`), whose bundle carries the asset-menu string from `41624be`. **The device cannot
+     be checked, only reinstalled** — `versionName` is `1.0` for every build, so there is no way to
+     tell from a phone which build it runs. Any build older than `8912db5` refuses EVERY real till.
    - **The CHF 1 live payment is still unmade** — the one leg no read-only probe can close
      (`just live-ocp` proves everything up to consent). Founder go-ahead required: it is a first
      payment to a new counterparty. Rules: `CLAUDE.md` → `docs/AGENT-FUNDS.md`. To make it: display

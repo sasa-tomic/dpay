@@ -154,6 +154,35 @@ describe('parseOcpScan', () => {
     expect(parseOcpScan(`https://app.dfx.swiss/pl/?lightning=${LNURL_HTTP}`)).toEqual({ok: false, reason: 'not-https'});
   });
 
+  it('accepts the spellings a real till may print, not just the one we developed against', () => {
+    // AUDITED 2026-09-02 against DFX's own frontend (`DFXswiss/services`: the sticker generator
+    // prints `<host>/pl?lightning=<LNURL>`), so the wrapper URL is the shape a SPAR counter shows.
+    // These are the OTHER spellings the wider LNURL world uses, each of which this parser refused
+    // as "not a payment code" — a silent dead end at a checkout, with no way for the payer to tell
+    // a damaged sticker from an unsupported one. Cheap to accept, and none of them is ambiguous.
+    const expected = {ok: true, apiUrl: API_URL, host: 'api.dfx.swiss'};
+    // 1. the `lightning:` URI scheme — the most common LNURL encoding outside this provider.
+    expect(parseOcpScan(`lightning:${LNURL_EXAMPLE}`)).toEqual(expected);
+    expect(parseOcpScan(`LIGHTNING:${LNURL_EXAMPLE}`)).toEqual(expected);
+    expect(parseOcpScan(`lightning://${LNURL_EXAMPLE}`)).toEqual(expected);
+    // 2. an all-uppercase wrapper URL — QR encoders choose alphanumeric mode for a denser code,
+    //    which uppercases the whole string, parameter name included.
+    expect(parseOcpScan(`https://app.dfx.swiss/pl/?LIGHTNING=${LNURL_EXAMPLE}`)).toEqual(expected);
+    // 3. the provider's own endpoint printed directly, with no LNURL wrapper. `PaymentLinkDto`
+    //    carries `url` beside `frontendUrl`, so a sticker made from the wrong field looks like this.
+    expect(parseOcpScan(API_URL)).toEqual(expected);
+  });
+
+  it('does not mistake other https codes for a till just because they are URLs', () => {
+    // The bare-URL branch above is admitted ONLY for an LNURL-pay endpoint path (`/lnurlp/`). dpay's
+    // own payment link is also an https URL and must keep routing to the link parser, and a random
+    // site must stay "not a payment code" rather than becoming a provider this wallet would call.
+    expect(parseOcpScan('https://dpay.kalaj.org/wallet/pay/ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae?asset=ICP')).toEqual({ok: false, reason: 'not-lnurl'});
+    expect(parseOcpScan('https://example.com/pay')).toEqual({ok: false, reason: 'not-lnurl'});
+    // http on the provider endpoint is a downgrade, refused with its own reason (not "not-lnurl").
+    expect(parseOcpScan('http://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e')).toEqual({ok: false, reason: 'not-https'});
+  });
+
   it('refuses a code that decodes to something that is not a URL', () => {
     expect(parseOcpScan(LNURL_NOT_A_URL)).toEqual({ok: false, reason: 'not-a-url'});
   });
