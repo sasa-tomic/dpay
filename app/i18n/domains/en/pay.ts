@@ -102,6 +102,11 @@ export type PayMessages = {
   //     transfer's reference — it is the only thing that ties their money to this sale.
   ocp: {
     solanaUsdcUnsupported: string;
+    /** The till doesn't take the selected asset, but DOES take others this wallet can pay from the
+     *  screen the payer is already on. Heading for that menu. Distinct from `assetNotAccepted`,
+     *  which is the dead end — this one has options under it, so it must not send anyone to
+     *  Balances. Names the declined asset so the switch is never silent. */
+    chooseAsset: (selected: string) => string;
     assetNotAccepted: (selected: string, accepted: string) => string;
     /** The till DOES take the selected asset, but its provider says it cannot settle that method
      *  right now. `alternatives` is null when nothing else the till takes is payable here — there
@@ -309,6 +314,8 @@ export const payEn: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'This till takes USDC on Solana, but its code doesn’t say which token account to send to — paying it would risk sending real money to the wrong account. Pay with SOL instead, or switch in Balances to another asset this till takes.',
+    chooseAsset: selected =>
+      `This till doesn’t take ${selected}, but it takes these — pick one to pay with. dpay never swaps: you pay the asset you choose.`,
     assetNotAccepted: (selected, accepted) =>
       `This till doesn’t take ${selected}. It takes ${accepted}. dpay never swaps, so switch to one of those in Balances and scan again.`,
     methodUnavailable: (selected, alternatives) =>

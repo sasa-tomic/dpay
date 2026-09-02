@@ -29,7 +29,8 @@
 // with flow 112 (the same code paid on the Solana rail). Fixture provenance is documented there.
 //
 // Selector contract: `ocp-checking`, `ocp-host`, `ocp-expiry`, `ocp-requested`, `ocp-outcome`,
-// `review-claimed`, `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `btn-start-scan`
+// `review-claimed`, `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `btn-start-scan`,
+// `ocp-choose`, `ocp-option-<assetId>`, `btn-review-cancel`
 // (via armPayScan).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
@@ -119,26 +120,40 @@ export async function run() {
     assert(!(await driver.isPresent('pay-fund')), 'a funded asset must reach the scan surface, not the fund-first panel');
     await scanTill(driver);
 
-    assert(await driver.waitForText('This till doesn’t take USDC.', {timeoutMs: 12_000}),
-      'the refusal must name the asset the payer chose');
+    assert(await driver.findByTestID('ocp-choose', {timeoutMs: 12_000}) != null,
+      'a till that does not take the selected asset must offer the ones it does');
     let body = await driver.bodyText();
-    // Every offer this wallet could actually pay, named as the WALLET names it (not the provider's
-    // spelling) so "switch in Balances" points at rows the payer can see. SOL is in the list because
-    // the till's Solana offer is payable on the device-key rail; Solana USDC is NOT, and is absent
-    // for the measured reason (its URI names no token account) rather than silently dropped.
-    assertIncludes(body, 'It takes BTC, VCHF, ICP, SOL.', 'the refusal must name what the till takes, in the wallet\'s own asset names');
-    assertIncludes(body, 'dpay never swaps', 'the refusal must state why no substitute is offered');
-    assertIncludes(body, 'switch to one of those in Balances and scan again', 'the refusal must name the next action');
-    assert(!(await driver.isPresent('pay-amount')), 'a refused till must never render a payment review');
-    assert(!(await driver.isPresent('btn-approve')), 'a refused till must never render an Approve button');
+    assertIncludes(body, 'This till doesn’t take USDC', 'the menu names the asset the payer had selected');
+    assertIncludes(body, 'dpay never swaps', 'the menu must state that picking is not a conversion');
+    // Every IC offer this wallet can pay, each with the amount IN ITS OWN UNITS — the price differs
+    // per asset, so a menu of bare names would be a choice made blind. SOL is payable too but is
+    // NOT here: taking it would unmount this rail's Pay screen mid-payment, so it stays a Balances
+    // instruction. Solana USDC is absent for the measured reason (its URI names no token account).
+    for (const [id, amount] of [['ic:1', '0.00001600 BTC'], ['ic:7', '1.00000000 VCHF'], ['ic:8', '0.50795551 ICP']]) {
+      assert(await driver.isPresent(`ocp-option-${id}`), `the menu must offer ${id}`);
+      assertIncludes(await driver.readText(`ocp-option-${id}`), amount, `the ${id} option states its own exact amount`);
+    }
+    assert(!(await driver.isPresent('ocp-option-solana:SOL')), 'the menu must not offer an asset on the other rail');
+    assert(!(await driver.isPresent('pay-amount')), 'the menu must never render a payment review');
+    assert(!(await driver.isPresent('btn-approve')), 'the menu must never render an Approve button');
 
-    // A refusal must be CHEAP: one read, and no request for a destination the wallet could not pay.
+    // Offering a menu must be CHEAP: one read, and no destination requested for an asset the payer
+    // has not chosen — a quote spent on an unchosen asset is a quote the real payment lacks.
     let seen = await ocpStubState(driver);
-    assertEq(String(seen.calls.length), '1', 'an unpayable till costs exactly one provider read');
+    assertEq(String(seen.calls.length), '1', 'offering the menu costs exactly one provider read');
     assertIncludes(seen.calls[0], 'timeout=0', 'the details read asks for the current charge, never a long poll');
-    assertEq(String(seen.txUrls.length), '0', 'a refusal before any funds move must never touch the submission endpoint');
-    console.log('[111-opencryptopay-till] ✓ refused by name, one read, no quote spent');
-    await driver.screenshot('111-ocp-refused');
+    assertEq(String(seen.txUrls.length), '0', 'nothing before the funds move may touch the submission endpoint');
+    await driver.screenshot('111-ocp-choose');
+
+    // PICKING pays the chosen asset, not the one that was selected in Balances.
+    await driver.click('ocp-option-ic:7');
+    await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
+    assertEq(await driver.readText('pay-amount'), 'Pay 1.00000000 VCHF',
+      'picking VCHF off the menu reviews VCHF — never the ckUSDC the payer had selected');
+    assertEq(await driver.readText('review-payee'), merchantPrincipal,
+      'the picked review still shows the FULL destination account');
+    console.log('[111-opencryptopay-till] ✓ menu offered on one read, and picking pays the picked asset');
+    await driver.click('btn-review-cancel');
 
     // --- 2. the review: never auto-signs, and says who priced it -------------------------------
     console.log('[111-opencryptopay-till] leg 2 — scanning the till with VCHF selected…');

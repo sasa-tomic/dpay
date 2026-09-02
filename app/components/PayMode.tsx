@@ -6,8 +6,8 @@ import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
 import {parseRequestQR, randNonceHex} from '../lib/format';
 import {classifyScan} from '../lib/scan';
-import type {OcpScan} from '../lib/opencryptopay';
-import {ocpTimeRefusal, payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
+import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
 import type {SelectableAsset} from '../config/assets';
 import {cmpRaw} from '../lib/amount';
@@ -21,6 +21,7 @@ import {NfcStatusRow} from './NfcStatusRow';
 import {QrScanner} from './QrScanner';
 import {InstructionPanel} from './InstructionPanel';
 import {ModeToggle} from './ModeToggle';
+import {OcpAssetChoice} from './OcpAssetChoice';
 import {OcpQuoteLines} from './OcpQuoteLines';
 import {SendSheet} from './SendSheet';
 import {useReportLock} from '../hooks/useReportLock';
@@ -51,7 +52,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
 export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
-  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid'>('scan');
+  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
   // the wallet at all — see `sendCapable` below; DEMO alone hides it.
@@ -126,6 +127,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // The two provider reads are in flight. Its own flag, not `busy`: `busy` means "a payment is being
   // signed", and this happens before there is anything to sign.
   const [ocpBusy, setOcpBusy] = useState(false);
+  // The till's menu, when the SELECTED asset was not on it. `declined` is that asset's symbol —
+  // the heading names it, so switching what you pay with is never silent.
+  const [ocpChoice, setOcpChoice] = useState<{details: OcpDetails; host: string; options: OcpOffer[]; declined: string} | null>(null);
   // A till transfer whose outcome the rail could NOT resolve, plus the quote it was made against.
   // The prepared envelope is the payer's only claim on that money: its request_id is still pollable
   // and `pollTransfer` is idempotent, so the most likely failure — a flaky connection while the
@@ -237,27 +241,69 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     setOcpBusy(true);
     try {
       const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now(), sequenceBudgetMs: OCP_IC_SEQUENCE_MS});
-      if (out.kind === 'refused') { refuseScan(out.message); return; }
-      setOcp(out.target);
-      setIntent({
-        toPrincipal: out.target.to,
-        toName: out.target.details.claimedMerchantName ?? '',
-        // The FULL account, never a short form: the provider chose this destination, so it is the
-        // one thing on the screen the payer can actually check (findings: trust model).
-        toAccountText: out.target.to,
-        amount: out.target.rawAmount,
-        currency: selected.currency,
-        // A fresh reconciliation nonce, generated ONCE for this till payment: an Approve after a
-        // refused attempt re-signs the identical transfer, which the ledger dedups instead of
-        // paying twice. The provider never reads it — it verifies the block index.
-        nonceHex: randNonceHex(),
-        memo: '',
-        // A till has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
-        // the review's countdown + the Approve-time check.
-        expiry: null,
-        source: 'ocp',
+      landOcp(out, selected.symbol);
+    } finally {
+      setOcpBusy(false);
+    }
+  }
+
+  /** Where BOTH till paths end: the direct one (the selected asset is on the menu) and the chosen
+   *  one (it was not, and the payer picked from the menu). One function so the two cannot drift into
+   *  two different review screens — the second path is the one a checkout queue will actually use. */
+  function landOcp(out: OcpResolveResult, declined: string) {
+    // Back to the scanner on any refusal — including one reached FROM the menu, where the phase is
+    // no longer 'scan' and leaving it would strand the payer on a list they can no longer act on.
+    if (out.kind === 'refused') { setOcpChoice(null); setPhase('scan'); refuseScan(out.message); return; }
+    if (out.kind === 'choose') { setOcpChoice({...out, declined}); setPhase('ocp-choose'); return; }
+    // The asset that PAYS is the target's, not the selection: after a pick they differ, and reading
+    // the selection here would sign the amount of one asset against the ledger of another.
+    // The rail check is not ceremony: this component signs an ICRC transfer and reads `currency`
+    // off the row, which only an IC row carries. A Solana offer reaching here would mean the
+    // resolver's same-rail filter had failed, so it is refused rather than coerced.
+    const paying = assets.find(a => a.id === out.target.assetId) ?? null;
+    if (paying === null || paying.protocol !== 'ic') {
+      console.warn(`ocp: resolved target names ${out.target.assetId}, which is not an IC row in this wallet`);
+      setPhase('scan');
+      refuseScan(M.pay.ocp.badCode);
+      return;
+    }
+    setOcp(out.target);
+    setIntent({
+      toPrincipal: out.target.to,
+      toName: out.target.details.claimedMerchantName ?? '',
+      // The FULL account, never a short form: the provider chose this destination, so it is the
+      // one thing on the screen the payer can actually check (findings: trust model).
+      toAccountText: out.target.to,
+      amount: out.target.rawAmount,
+      currency: paying.currency,
+      // A fresh reconciliation nonce, generated ONCE for this till payment: an Approve after a
+      // refused attempt re-signs the identical transfer, which the ledger dedups instead of
+      // paying twice. The provider never reads it — it verifies the block index.
+      nonceHex: randNonceHex(),
+      memo: '',
+      // A till has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
+      // the review's countdown + the Approve-time check.
+      expiry: null,
+      source: 'ocp',
+    });
+    setPhase('review');
+  }
+
+  /** The payer picked an asset off the till's menu. Resolves that ONE offer (a second provider read
+   *  for its destination) and lands on the same review. `Date.now()` is read again on purpose: the
+   *  quote has been ticking while the menu was on screen, and the deadline check is only honest if
+   *  it is asked about now. */
+  async function chooseOcpOffer(offer: OcpOffer) {
+    const choice = ocpChoice;
+    if (choice === null) return;
+    setErr(null);
+    setOcpBusy(true);
+    try {
+      const out = await resolveOcpOffer(choice.host, choice.details, offer, {
+        assets, catalog, nowMs: Date.now(), sequenceBudgetMs: OCP_IC_SEQUENCE_MS,
       });
-      setPhase('review');
+      setOcpChoice(null);
+      landOcp(out, choice.declined);
     } finally {
       setOcpBusy(false);
     }
@@ -555,7 +601,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
 
-  function reset() { setIntent(null); setOcp(null); setOcpClaim(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
+  function reset() { setIntent(null); setOcp(null); setOcpChoice(null); setOcpClaim(null); setPrepared(null); setQr(null); setPaid(null); setErr(null); setPeakShown(false); setHandedOffline(false); setScanArmed(false); setPhase('scan'); }
 
   if (phase === 'paid' && paid) {
     const warn = paid.already || paid.pending;
@@ -657,6 +703,27 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         )}
         <Pressable style={S.ghostBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel={M.pay.shareAuthCode} accessibilityState={{disabled: false}}><IconShare size={16} color={C.sub}/><Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.copied) : M.pay.shareAuthCode}</Text></Pressable>
       </View>
+    );
+  }
+
+  if (phase === 'ocp-choose' && ocpChoice) {
+    return (
+      <OcpAssetChoice
+        declined={ocpChoice.declined}
+        options={ocpChoice.options}
+        busy={ocpBusy}
+        // Only an IC row carries `currency`, which is what formats an amount at the asset's own
+        // precision. The resolver's same-rail filter means every option here is one; a miss falls
+        // back to the provider's own spelling rather than dropping a payable option off the menu.
+        labelOf={o => {
+          const row = assets.find(a => a.id === o.assetId) ?? null;
+          return row !== null && row.protocol === 'ic'
+            ? fmtCurrencyAmount(catalog, row.currency, o.rawAmount)
+            : `${o.amount} ${o.asset}`;
+        }}
+        onPick={o => void chooseOcpOffer(o)}
+        onCancel={reset}
+      />
     );
   }
 

@@ -30,6 +30,7 @@ import {
   fetchTransferUri,
   ocpTimeRefusal,
   payAndReport,
+  resolveOcpOffer,
   resolveOcpScan,
   submitProof,
   OCP_READ_TIMEOUT_MS,
@@ -705,14 +706,89 @@ describe('resolveOcpScan', () => {
     expect(out.target.rawAmount).toBe('12214220');
   });
 
-  test('an asset the till does not take is refused by name, with the ones it does take', async () => {
-    installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:2')); // ckUSDC — dpay's launch rail, not accepted
+  test('an asset the till does not take offers the ones it does, on the rail the payer is on', async () => {
+    // ckUSDC is dpay's stated launch rail and the live provider does not accept it — the refusal a
+    // real payer hits at a checkout. Sending them to Balances to switch and re-aim a camera is a
+    // round trip a queue does not allow, so the till's own menu is offered instead. Only the IC
+    // offers: SOL is payable, but taking it would mean unmounting this rail's Pay screen.
+    const mock = installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:2'));
+
+    expect(out.kind).toBe('choose');
+    if (out.kind !== 'choose') return;
+    expect(out.host).toBe('api.dfx.swiss');
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
+    // Each option carries the amount IN ITS OWN UNITS — the price differs per asset, so a menu of
+    // bare names would be a choice made blind.
+    expect(out.options.map(o => o.rawAmount)).toEqual(['1596', '100000000', '50885919']);
+    // Offering a menu must cost NOTHING: one read, and no destination requested for an asset the
+    // payer has not chosen. A quote spent on an unchosen asset is a quote the real payment lacks.
+    expect(mock.mock.calls.length).toBe(1);
+  });
+
+  test('an asset the till does not take is refused by name when the menu is on the OTHER rail', async () => {
+    // Nothing on the IC rail here, so there is no menu this Pay screen could offer — and the
+    // instruction goes back to being "switch in Balances", which is the only way to reach SOL.
+    const solOnly = {
+      ...DETAILS_200,
+      transferAmounts: DETAILS_200.transferAmounts.filter((t: {method: string}) => t.method === 'Solana'),
+    };
+    installRoutes([{match: '/lnurlp/pl_', status: 200, body: solOnly}]);
+    const out = await resolveOcpScan(SCAN, ctx('ic:2'));
     expect(out).toEqual({
       kind: 'refused',
       // Named as the WALLET names them, in the order the till listed them.
-      message: M.pay.ocp.assetNotAccepted('USDC', 'SOL, BTC, VCHF, ICP'),
+      message: M.pay.ocp.assetNotAccepted('USDC', 'SOL'),
     });
+  });
+
+  test('a picked offer resolves to that asset’s transfer, not the one the payer had selected', async () => {
+    // The whole point of the menu: the payer had ckUSDC selected, picked VCHF, and must end up
+    // signing VCHF's amount against VCHF's ledger. Reading the standing selection anywhere in here
+    // would sign one asset's amount against another's ledger.
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const menu = await resolveOcpScan(SCAN, ctx('ic:2'));
+    expect(menu.kind).toBe('choose');
+    if (menu.kind !== 'choose') return;
+
+    const vchf = menu.options.find(o => o.assetId === 'ic:7');
+    expect(vchf).toBeDefined();
+    if (vchf === undefined) return;
+    const out = await resolveOcpOffer(menu.host, menu.details, vchf, {
+      assets: WALLET_ASSETS, catalog: CATALOG, nowMs: NOW, sequenceBudgetMs: SEQUENCE_MS,
+    });
+
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.target.assetId).toBe('ic:7');
+    expect(out.target.asset).toBe('VCHF');
+    expect(out.target.rawAmount).toBe('100000000');
+    expect(out.target.to).toBe('ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae');
+  });
+
+  test('a menu picked too late is refused on the deadline, never signed against a dead quote', async () => {
+    // The menu costs real seconds, and they come out of the quote. The deadline is therefore
+    // re-asked at the pick with a FRESH now — a stale one would wave through a price that died
+    // while the payer was reading.
+    installRoutes([
+      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
+    ]);
+    const menu = await resolveOcpScan(SCAN, ctx('ic:2'));
+    if (menu.kind !== 'choose') throw new Error('expected a menu');
+    const vchf = menu.options.find(o => o.assetId === 'ic:7');
+    if (vchf === undefined) throw new Error('expected a VCHF option');
+
+    const out = await resolveOcpOffer(menu.host, menu.details, vchf, {
+      assets: WALLET_ASSETS,
+      catalog: CATALOG,
+      nowMs: Date.parse('2026-09-01T14:29:43.000Z'), // one moment past the quote's expiry
+      sequenceBudgetMs: SEQUENCE_MS,
+    });
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.quoteExpired});
   });
 
   test('a till whose every asset is unpayable here says so, instead of pointing at Balances', async () => {
@@ -766,13 +842,19 @@ describe('resolveOcpScan', () => {
       ),
     };
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: solDown}]);
-    expect(await resolveOcpScan(SCAN, ctx('ic:2'))).toEqual({
-      kind: 'refused',
-      message: M.pay.ocp.assetNotAccepted('USDC', 'BTC, VCHF, ICP'),
-    });
+    const out = await resolveOcpScan(SCAN, ctx('ic:2'));
+    // The till never named ckUSDC, so the answer is its menu — and the down Solana method is simply
+    // absent from it rather than blamed for an asset it never offered.
+    expect(out.kind).toBe('choose');
+    if (out.kind !== 'choose') return;
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
   });
 
-  test('Solana USDC is refused BY NAME rather than dropped from the list', async () => {
+  test('Solana USDC is refused BY NAME rather than buried under a menu', async () => {
+    // The till DOES take USDC on Solana; dpay will not pay it because the provider's URI names no
+    // token account. Offering "pay SOL instead" under a heading that says the till doesn't take
+    // USDC would be false about the till AND would drop the safety reason. The specific refusal
+    // wins over the menu whenever the till's list names the selected asset.
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
     const out = await resolveOcpScan(SCAN, ctx('solana:USDC'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.solanaUsdcUnsupported});

@@ -55,12 +55,13 @@ jest.mock('../solana', () => {
 jest.mock('../services/opencryptopay', () => ({
   ocpTimeRefusal: jest.requireActual<typeof import('../services/opencryptopay')>('../services/opencryptopay').ocpTimeRefusal,
   resolveOcpScan: jest.fn(),
+  resolveOcpOffer: jest.fn(),
   payAndReport: jest.fn(),
 }));
 
 import {encodeSolReq, type SolReqInput} from '../solana/qr';
 import {getSolSignatureStatus, sendSol, signSolPayment, type SolanaSignatureStatus} from '../solana';
-import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import {payAndReport, resolveOcpOffer, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {buildSelectableAssets} from '../config/assets';
 import {POLL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
@@ -518,7 +519,38 @@ describe('SolPayMode — OpenCryptoPay till', () => {
   beforeEach(() => {
     jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
     jest.mocked(payAndReport).mockReset().mockResolvedValue({kind: 'paid'});
+    jest.mocked(resolveOcpOffer).mockReset();
     jest.mocked(sendSol).mockReset().mockResolvedValue('5ig'.repeat(10));
+  });
+
+  test('offers the till’s own menu on this rail too, and pays what was picked', async () => {
+    // RAIL PARITY, not a nice-to-have: CLAUDE.md makes a per-rail divergence on a money surface a
+    // bug, and the IC rail answers a not-taken asset with the till's menu (flow 111). The same
+    // component renders it here, so the payer meets one surface whichever asset they had selected.
+    const offer = {method: 'Solana', asset: 'SOL', amount: '0.01221422', assetId: 'solana:SOL' as const, rawAmount: '12214220'};
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'choose', details: OCP_TARGET.details, host: 'api.dfx.swiss', options: [offer],
+    });
+    jest.mocked(resolveOcpOffer).mockResolvedValue({kind: 'ok', target: OCP_TARGET});
+    // USDC selected: the one asset this rail carries that a till may decline. Funded, so the Pay
+    // tab reaches the scan surface rather than the fund-first panel.
+    const tree = mountTill({selectedToken: 'USDC', usdcBalance: '5000000'});
+    await scanTill(tree);
+
+    expect(textByTestID(tree, 'ocp-choose')).toBe(M.pay.ocp.chooseAsset('USDC'));
+    // The amount is stated in the asset's OWN units — picking blind is not consent.
+    expect(textByTestID(tree, 'ocp-option-solana:SOL')).toContain('0.01221422');
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
+
+    await act(async () => { pressByTestID(tree, 'ocp-option-solana:SOL'); });
+    await act(async () => {});
+    // The pick resolves THAT offer and lands on the normal review — still explicit, still no
+    // auto-sign. The deadline is re-asked with a fresh clock, because the menu costs real seconds.
+    expect(jest.mocked(resolveOcpOffer)).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(resolveOcpOffer).mock.calls[0][1]).toBe(OCP_TARGET.details);
+    expect(jest.mocked(resolveOcpOffer).mock.calls[0][2]).toBe(offer);
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
+    expect(jest.mocked(payAndReport)).not.toHaveBeenCalled();
   });
 
   test('refuses to approve a till the wallet cannot cover, instead of signing a doomed transfer', async () => {

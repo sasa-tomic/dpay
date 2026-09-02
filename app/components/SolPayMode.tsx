@@ -14,8 +14,8 @@ import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {classifyScan} from '../lib/scan';
 import {sanitiseDisplayText} from '../lib/deepLink';
-import type {OcpScan} from '../lib/opencryptopay';
-import {ocpTimeRefusal, payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
+import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import type {SelectableAsset} from '../config/assets';
 import type {CurrencyDescriptor} from '../config/catalog';
 import {withTimeout} from '../lib/timeout';
@@ -29,6 +29,7 @@ import {QrScanner} from './QrScanner';
 import {NfcStatusRow} from './NfcStatusRow';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
+import {OcpAssetChoice} from './OcpAssetChoice';
 import {OcpQuoteLines} from './OcpQuoteLines';
 import {SolanaWithdrawSheet} from './SolanaWithdrawSheet';
 import {friendlySolError, isSolTransactionFailed} from '../solana/errors';
@@ -55,13 +56,15 @@ import {M} from '../i18n';
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
 export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
-  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-done'>('scan');
+  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
   // holds (PayMode) — the quote context, and the honest sentence for an outcome that is neither
   // paid nor failed — because both rails run the identical provider sequence.
   const [ocp, setOcp] = useState<OcpTarget | null>(null);
   const [ocpBusy, setOcpBusy] = useState(false);
+  // IC twin: PayMode's `ocpChoice`. The till's menu, when the selected asset was not on it.
+  const [ocpChoice, setOcpChoice] = useState<{details: OcpDetails; host: string; options: OcpOffer[]; declined: string} | null>(null);
   const [ocpDone, setOcpDone] = useState<{amount: string; who: string; note: string | null} | null>(null);
   // A till transfer whose outcome this rail could NOT resolve, plus the quote it was made against.
   // IC twin: PayMode's `ocpClaim`, same reason and same lifecycle. The broadcast signature is the
@@ -336,13 +339,40 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
       // broadcast and the confirmation poll together — so the resolver's deadline is derived from
       // that same constant rather than from a number that could drift away from it.
       const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now(), sequenceBudgetMs: SOL_SEND_TIMEOUT_MS});
-      if (out.kind === 'refused') { refuseScan(out.message); return; }
-      // Fail closed on anything but native SOL: the send below is a System Program transfer, so a
-      // token target would move SOL against a token price. The resolver already refuses Solana USDC
-      // by name (its URI does not say which token account to pay); this is the second lock on it.
-      if (out.target.assetId !== 'solana:SOL') { refuseScan(M.pay.ocp.solanaUsdcUnsupported); return; }
-      setOcp(out.target);
-      setPhase('ocp');
+      landOcp(out, selected.symbol);
+    } finally {
+      setOcpBusy(false);
+    }
+  }
+
+  /** Where BOTH till paths end — the direct one and the one the payer picked off the menu. IC twin:
+   *  PayMode's `landOcp`, same shape so a till behaves identically on either rail. */
+  function landOcp(out: OcpResolveResult, declined: string) {
+    // Back to the scanner on any refusal, including one reached FROM the menu: leaving the phase on
+    // 'ocp-choose' would strand the payer on a list they can no longer act on.
+    if (out.kind === 'refused') { setOcpChoice(null); setPhase('scan'); refuseScan(out.message); return; }
+    if (out.kind === 'choose') { setOcpChoice({...out, declined}); setPhase('ocp-choose'); return; }
+    // Fail closed on anything but native SOL: the send below is a System Program transfer, so a
+    // token target would move SOL against a token price. The resolver already refuses Solana USDC
+    // by name (its URI does not say which token account to pay); this is the second lock on it.
+    if (out.target.assetId !== 'solana:SOL') { setOcpChoice(null); setPhase('scan'); refuseScan(M.pay.ocp.solanaUsdcUnsupported); return; }
+    setOcp(out.target);
+    setPhase('ocp');
+  }
+
+  /** The payer picked an asset off the till's menu. IC twin: PayMode's `chooseOcpOffer`. `Date.now()`
+   *  is read again on purpose — the quote ticked while the menu was on screen. */
+  async function chooseOcpOffer(offer: OcpOffer) {
+    const choice = ocpChoice;
+    if (choice === null) return;
+    setErr(null);
+    setOcpBusy(true);
+    try {
+      const out = await resolveOcpOffer(choice.host, choice.details, offer, {
+        assets, catalog, nowMs: Date.now(), sequenceBudgetMs: SOL_SEND_TIMEOUT_MS,
+      });
+      setOcpChoice(null);
+      landOcp(out, choice.declined);
     } finally {
       setOcpBusy(false);
     }
@@ -438,7 +468,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpDone(null); setOcpClaim(null); setErr(null); setScanArmed(false); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setErr(null); setScanArmed(false); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -567,6 +597,20 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
           </>
         ) : null}
       </View>
+    );
+  }
+
+  if (phase === 'ocp-choose' && ocpChoice) {
+    return (
+      <OcpAssetChoice
+        declined={ocpChoice.declined}
+        options={ocpChoice.options}
+        busy={ocpBusy}
+        // This rail spends lamports, so every option it can take is denominated in SOL.
+        labelOf={o => fmtAsset(o.rawAmount, SOL_DECIMALS, SOL_UNIT)}
+        onPick={o => void chooseOcpOffer(o)}
+        onCancel={reset}
+      />
     );
   }
 

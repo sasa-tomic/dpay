@@ -421,8 +421,29 @@ export type OcpTarget = {
 
 export type OcpResolveResult =
   | {kind: 'ok'; target: OcpTarget}
+  /** The till does not take the SELECTED asset, but it does take others this wallet carries on the
+   *  SAME rail. An OCP till quotes a MENU (unlike a dpay request, which names one asset the payer
+   *  may not change), so the honest answer is to show that menu rather than send the payer to
+   *  Balances to guess and re-aim a camera at a checkout. Choosing is still explicit: the payer
+   *  picks, then approves a review naming that asset — dpay never substitutes one for them. */
+  | {kind: 'choose'; details: OcpDetails; host: string; options: OcpOffer[]}
   /** Nothing was paid and nothing can be, for a reason the user can act on. */
   | {kind: 'refused'; message: string};
+
+/** What resolving an offer needs, once WHICH offer is settled. Deliberately without `selected`:
+ *  past the choice, the asset that pays is the OFFER's, and reading the selection again is how a
+ *  chosen alternative would silently revert to the asset the payer just declined. */
+type OcpResolveCtx = {
+  assets: SelectableAsset[];
+  catalog: CurrencyDescriptor[];
+  /** Fresh at every call. The picker adds real seconds between the scan and the choice, and the
+   *  deadline check below is only honest if it is asked about NOW, not about when the QR was read. */
+  nowMs: number;
+  /** The caller's rail worst case from Approve to a CONFIRMED on-chain reference, in ms. Passed in
+   *  rather than tabulated here because it is composed of that rail's own timeout constants (the IC
+   *  poll budget, the Solana send bound) and must move when they do. */
+  sequenceBudgetMs: number;
+};
 
 /**
  * Resolve a scanned till code into the exact payment this wallet would make — or into the reason it
@@ -443,16 +464,7 @@ export type OcpResolveResult =
  */
 export async function resolveOcpScan(
   scan: {apiUrl: string; host: string},
-  ctx: {
-    selected: SelectableAsset;
-    assets: SelectableAsset[];
-    catalog: CurrencyDescriptor[];
-    nowMs: number;
-    /** The caller's rail worst case from Approve to a CONFIRMED on-chain reference, in ms. Passed
-     *  in rather than tabulated here because it is composed of that rail's own timeout constants
-     *  (the IC poll budget, the Solana send bound) and must move when they do. */
-    sequenceBudgetMs: number;
-  },
+  ctx: OcpResolveCtx & {selected: SelectableAsset},
 ): Promise<OcpResolveResult> {
   const found = await fetchPaymentDetails(scan.apiUrl);
   if (found.kind === 'error') return {kind: 'refused', message: found.message};
@@ -463,18 +475,64 @@ export async function resolveOcpScan(
 
   const {payable, refused} = selectPayableOffers(details, ctx.assets, ctx.nowMs);
   const offer = payable.find(o => o.assetId === ctx.selected.id) ?? null;
-  if (offer === null) return {kind: 'refused', message: unpayableMessage(details, ctx, payable, refused)};
+  if (offer !== null) return resolveOcpOffer(scan.host, details, offer, ctx);
+
+  // The menu is the right answer only when the till's list simply does NOT NAME the selected asset.
+  // When it does name it and dpay refused it for a specific reason — Solana USDC's ambiguous
+  // destination, a method the provider has switched off, an expired quote — that reason is the
+  // thing the payer needs, and a menu headed "this till doesn't take USDC" would be false about a
+  // till that plainly does. So the specific refusal wins and the menu is not offered.
+  const named = refused.some(r => offerNamesAsset(r, ctx.selected));
+  if (!named) {
+    // Same rail only: the wallet mounts ONE rail's Pay surface at a time, so an offer on the other
+    // rail cannot be taken from here without unmounting this screen mid-payment. Those stay a
+    // Balances instruction; same-rail offers become a choice on the spot.
+    const railOf = (o: OcpOffer): string | null => ctx.assets.find(a => a.id === o.assetId)?.protocol ?? null;
+    const options = payable.filter(o => railOf(o) === ctx.selected.protocol);
+    if (options.length > 0) return {kind: 'choose', details, host: scan.host, options};
+  }
+  return {kind: 'refused', message: unpayableMessage(details, ctx, payable, refused)};
+}
+
+/**
+ * Resolve ONE chosen offer down to the exact transfer this wallet would sign — the half of the
+ * sequence that runs after WHICH asset pays is settled, whether that was the payer's standing
+ * selection or a pick from the till's menu.
+ *
+ * The provider's transfer instruction is checked against what we asked for, because the URI is the
+ * one place a hostile or broken provider could redirect the payment: the LEDGER must be the paying
+ * asset's own ledger (`ledgerToCurrency`), the destination must pass the same core validator every
+ * other destination in the app passes, and the amount must be the quoted amount to the raw unit.
+ * Any disagreement is refused loudly — never reconciled.
+ *
+ * The last check is TIME: a quote must have room for the whole sequence, not merely be unexpired
+ * (`ocpTimeRefusal`). See `OcpTarget.payableUntil`.
+ */
+export async function resolveOcpOffer(
+  host: string,
+  details: OcpDetails,
+  offer: OcpOffer,
+  ctx: OcpResolveCtx,
+): Promise<OcpResolveResult> {
+  // The asset that PAYS is the offer's, looked up in the wallet's own rows for its precision and
+  // rail. `selectPayableOffers` only ever emits an `assetId` it matched against this same list, so
+  // a miss here is an inconsistency rather than a user error — logged as one.
+  const paying = ctx.assets.find(a => a.id === offer.assetId) ?? null;
+  if (paying === null) {
+    console.warn(`opencryptopay: offer names ${offer.assetId}, which this wallet has no row for`);
+    return {kind: 'refused', message: M.pay.ocp.badCode};
+  }
 
   const uri = await fetchTransferUri(details, offer.method, offer.asset);
   if (uri.kind === 'error') return {kind: 'refused', message: uri.message};
 
-  const dest = await destinationOf(uri.uri, ctx.selected, ctx.catalog);
+  const dest = await destinationOf(uri.uri, paying, ctx.catalog);
   if (dest === null || dest.rawAmount !== offer.rawAmount) {
     console.warn(
-      `opencryptopay: ${scan.host} answered ${offer.method}/${offer.asset} with an unusable instruction`
-      + ` (uri=${uri.uri}, expected ${offer.rawAmount} raw on ${ctx.selected.id})`,
+      `opencryptopay: ${host} answered ${offer.method}/${offer.asset} with an unusable instruction`
+      + ` (uri=${uri.uri}, expected ${offer.rawAmount} raw on ${paying.id})`,
     );
-    return {kind: 'refused', message: M.pay.ocp.badDestination(scan.host)};
+    return {kind: 'refused', message: M.pay.ocp.badDestination(host)};
   }
 
   // The EARLIER of the two deadlines the provider stated. They are separate numbers from separate
@@ -482,9 +540,10 @@ export async function resolveOcpScan(
   // already lapsed.
   const expiresAt = Math.min(details.quoteExpiresAt, uri.expiresAt);
   const payableUntil = expiresAt - ctx.sequenceBudgetMs - OCP_SUBMIT_TIMEOUT_MS;
-  // Checked here as well as on the review, because the two reads above take real time: a quote that
-  // had room when it was minted may have none left by the time it is resolved, and a review the
-  // payer cannot act on is a dead end.
+  // Checked here as well as on the review, because the reads above take real time — and when the
+  // payer chose from the menu, their reading time is in here too: a quote that had room when it was
+  // minted may have none left by the time it is resolved, and a review the payer cannot act on is a
+  // dead end.
   const late = ocpTimeRefusal({expiresAt, payableUntil}, ctx.nowMs);
   if (late !== null) return {kind: 'refused', message: late};
 
@@ -492,10 +551,10 @@ export async function resolveOcpScan(
     kind: 'ok',
     target: {
       details,
-      host: scan.host,
+      host,
       method: offer.method,
       asset: offer.asset,
-      assetId: ctx.selected.id,
+      assetId: offer.assetId,
       to: dest.to,
       rawAmount: dest.rawAmount,
       expiresAt,

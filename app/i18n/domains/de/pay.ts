@@ -78,6 +78,8 @@ export const payDe: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'Diese Kasse nimmt USDC auf Solana, aber ihr Code nennt kein Token-Konto als Ziel — eine Zahlung könnte echtes Geld auf das falsche Konto schicken. Zahle stattdessen mit SOL oder wechsle unter „Guthaben“ zu einem anderen Wert, den diese Kasse nimmt.',
+    chooseAsset: selected =>
+      `Diese Kasse akzeptiert ${selected} nicht, aber diese hier — wähle eines zum Bezahlen. dpay tauscht nie um: Du zahlst mit dem gewählten Vermögenswert.`,
     assetNotAccepted: (selected, accepted) =>
       `Diese Kasse nimmt kein ${selected}. Sie nimmt ${accepted}. dpay tauscht nie um — wechsle unter „Guthaben“ zu einem davon und scanne erneut.`,
     methodUnavailable: (selected, alternatives) =>
