@@ -11,7 +11,7 @@ import type {SolPayGate} from '../config/assets';
 import type {Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {classifyScan} from '../lib/scan';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpScan} from '../lib/opencryptopay';
@@ -393,6 +393,12 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     // too little of the price left moves irreversible money the provider will refuse to credit.
     const late = ocpTimeRefusal(target, Date.now());
     if (late !== null) { setErr(late); return; }
+    // The same fee-inclusive gate the review renders, re-asserted at the press: the balance prop
+    // can refresh between render and tap, and this is the last point before irreversible money.
+    if (BigInt(solBalance) < BigInt(target.rawAmount) + SOL_FEE_LAMPORTS) {
+      setErr(M.pay.notEnoughBalance);
+      return;
+    }
     const who = target.details.claimedMerchantName ?? target.host;
     const amount = fmtAsset(target.rawAmount, SOL_DECIMALS, SOL_UNIT);
     // Filled by the send below when — and only when — the transfer's own outcome stayed indefinite.
@@ -569,7 +575,14 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     // not reach here — it covers a dpay request whose amount and payee came off a dpay QR, while
     // every value on this screen came from a provider the wallet has no relationship with. Mirrors
     // the IC rail's till review (PayMode), down to the testIDs.
-    const approveDisabled = busy || !!err;
+    // The wallet must cover the price AND the network fee — a transfer of exactly the balance
+    // cannot pay for itself. Gated on the IC rail since it shipped; the divergence here was review
+    // row 12, and CLAUDE.md's same-surfaces rule makes a money-surface divergence a bug. This
+    // BLOCKS rather than warns: an OCP payer is online by construction (two provider reads got them
+    // to this screen), so the balance behind it is fresh — unlike the offline dpay-request path,
+    // where a stale local balance earns only a warning and the merchant's verify is the real gate.
+    const ocpInsufficient = BigInt(solBalance) < BigInt(ocp.rawAmount) + SOL_FEE_LAMPORTS;
+    const approveDisabled = busy || !!err || ocpInsufficient;
     return (
       <View style={S.center}>
         <Text style={S.label}>{M.pay.reviewPayment}</Text>
@@ -585,6 +598,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
           payableUntil={ocp.payableUntil}
           onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
         />
+        {/* Above the button, like the IC rail's own low-balance line, so it is read before the
+            press rather than after it. */}
+        {ocpInsufficient ? <Text testID="sol-pay-lowbal" style={S.warnNote}>{M.pay.notEnoughBalance}</Text> : null}
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         <Pressable
           testID="btn-approve"

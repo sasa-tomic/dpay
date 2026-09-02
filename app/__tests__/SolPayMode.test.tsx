@@ -521,6 +521,32 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     jest.mocked(sendSol).mockReset().mockResolvedValue('5ig'.repeat(10));
   });
 
+  test('refuses to approve a till the wallet cannot cover, instead of signing a doomed transfer', async () => {
+    // The IC rail has gated a till payment on the selected asset's balance since it shipped; this
+    // rail did not (review row 12), which is a divergence on a money surface — CLAUDE.md's
+    // same-surfaces rule makes that a bug, not an exception. An OCP payer is ONLINE by construction
+    // (two provider reads got them here), so the balance is fresh and the gate BLOCKS rather than
+    // warns — unlike the offline dpay-request path, where a stale local balance only earns a warning.
+    // The fee is included: a transfer of exactly the balance cannot pay for itself.
+    const tree = mountTill({solBalance: '12214220'}); // the amount exactly — short by the fee
+    await scanTill(tree);
+
+    expect(textByTestID(tree, 'sol-pay-lowbal')).toBe(M.pay.notEnoughBalance);
+    expect(tree.root.findByProps({testID: 'btn-approve'}).props.disabled).toBe(true);
+    pressByTestID(tree, 'btn-approve');
+    await act(async () => {});
+    expect(jest.mocked(payAndReport)).not.toHaveBeenCalled();
+  });
+
+  test('approves a till the wallet can cover, with no low-balance warning', async () => {
+    // The positive half: one lamport past amount+fee is enough, and nothing about the gate shows.
+    const tree = mountTill({solBalance: String(12214220 + 5000)});
+    await scanTill(tree);
+
+    expect(hasTestID(tree, 'sol-pay-lowbal')).toBe(false);
+    expect(tree.root.findByProps({testID: 'btn-approve'}).props.disabled).toBe(false);
+  });
+
   test('a scanned till lands on a review with the amount, the full address and the host — nothing is sent', async () => {
     const tree = mountTill();
     await scanTill(tree);
