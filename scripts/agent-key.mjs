@@ -23,6 +23,7 @@
 //   node scripts/agent-key.mjs init        generate the key (once); prints the principal only
 //   node scripts/agent-key.mjs principal   print the funding address (no decryption)
 //   node scripts/agent-key.mjs balance     query live mainnet balances (no decryption)
+//   node scripts/agent-key.mjs history     recent ICP ledger transactions for this key (no decryption)
 //   node scripts/agent-key.mjs seed        print the seed hex — DECRYPTS; only for a spend
 import {readFileSync, writeFileSync, existsSync, mkdirSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
@@ -154,7 +155,62 @@ async function cmdBalance() {
   }
 }
 
-const CMDS = {init: cmdInit, principal: cmdPrincipal, seed: cmdSeed, balance: cmdBalance};
+
+/** The ICP index canister, pinned by the same truth file the relay's adapter pins it from. It is
+ *  the ONLY way to see what a payment actually did: `balance` says how much is left, this says
+ *  where it went, in what amount, and — the part that matters after an OpenCryptoPay payment — at
+ *  which BLOCK INDEX, since that index is the exact proof the wallet reports to the provider.
+ *
+ *  Read-only, no decryption, no cycles. Amounts are e8s (ICP is 8-decimal) and the ledger reports
+ *  legacy ACCOUNT IDENTIFIERS on both sides, so the key's own is derived here to tell an incoming
+ *  transfer from an outgoing one rather than guessing from the sign of a balance change. */
+async function cmdHistory() {
+  const {principal} = readPub();
+  const truth = JSON.parse(readFileSync(TRUTH, 'utf8'));
+  const index = truth.principals.icp_index;
+  if (!index) die('catalog_truth.json is missing principals.icp_index');
+  const self = await accountIdOf(principal);
+  console.log(`principal ${principal}`);
+  console.log(`account   ${self}`);
+  let out;
+  try {
+    out = execFileSync('dfx', [
+      'canister', 'call', '--network', 'ic', '--query', index, 'get_account_transactions',
+      `(record { account = record { owner = principal "${principal}"; subaccount = null }; start = null; max_results = 10 : nat })`,
+    ], {encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 120_000});
+  } catch (e) {
+    // Never print "no transactions" for a query that failed — an unreachable index is not an empty
+    // history, and after a real payment that difference is the whole answer.
+    die(`index UNREADABLE (${e.message.split('\n')[0]})`);
+  }
+  // Candid text, parsed positionally: each record carries an id, then a Transfer with to/from/
+  // amount/fee. Enough to answer "did it move, where to, how much, which block".
+  const txs = [...out.matchAll(/id = ([\d_]+) : nat64;[\s\S]*?Transfer = record \{\s*to = "([0-9a-f]+)";\s*fee = record \{ e8s = ([\d_]+)[\s\S]*?from = "([0-9a-f]+)";\s*amount = record \{ e8s = ([\d_]+)/g)];
+  if (txs.length === 0) { console.log('  (no transfers on this account yet)'); return; }
+  for (const [, id, to, fee, from, amount] of txs) {
+    const num = t => BigInt(t.replace(/_/g, ''));
+    const e8s = v => { const s = v.toString().padStart(9, '0'); return `${s.slice(0, -8)}.${s.slice(-8)}`; };
+    const outgoing = from === self;
+    console.log(`  block ${id.replace(/_/g, '').padEnd(10)} ${outgoing ? 'OUT' : 'IN '} ${e8s(num(amount)).padStart(14)} ICP`
+      + ` ${outgoing ? '->' : '<-'} ${outgoing ? to : from}${outgoing ? ` (fee ${e8s(num(fee))})` : ''}`);
+  }
+}
+
+/** The key's own 64-hex account identifier — what the ICP ledger names it in transaction records.
+ *  Derived through the SAME wasm core the app uses, for the same reason `principalOf` is. */
+async function accountIdOf(principal) {
+  const {instance} = await WebAssembly.instantiate(readFileSync(WASM), {});
+  const ex = instance.exports;
+  const put = t => { const b = new TextEncoder().encode(t); const ptr = ex.w_alloc(b.length); new Uint8Array(ex.memory.buffer).set(b, ptr); return [ptr, b.length]; };
+  const [op, ol] = put(principal);
+  const [sp, sl] = put('');
+  const outPtr = ex.w_alloc(128);
+  const n = ex.w_icp_account_id_from_principal(op, ol, sp, sl, outPtr, 128);
+  if (n <= 3) die('core refused to derive the account identifier');
+  return new TextDecoder().decode(new Uint8Array(ex.memory.buffer, outPtr, n));
+}
+
+const CMDS = {init: cmdInit, principal: cmdPrincipal, seed: cmdSeed, balance: cmdBalance, history: cmdHistory};
 const cmd = process.argv[2];
 if (!CMDS[cmd]) die(`usage: agent-key.mjs <${Object.keys(CMDS).join('|')}>`);
 await CMDS[cmd]();

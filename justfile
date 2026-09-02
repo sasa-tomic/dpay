@@ -527,6 +527,13 @@ agent-principal:
 agent-balance:
     node scripts/agent-key.mjs balance
 
+# what the float's money actually DID: recent ICP ledger transfers, with the BLOCK INDEX of each.
+# `agent-balance` says how much is left; this says where it went and at which block — and that block
+# index is the exact proof an OpenCryptoPay payment reports to the provider, so it is how a payment
+# made on a phone is verified from here, without taking anyone's word for it. Read-only, no decrypt.
+agent-history:
+    node scripts/agent-key.mjs history
+
 # print the seed hex (DECRYPTS the sops secret). Only immediately before an approved spend.
 agent-seed:
     node scripts/agent-key.mjs seed
