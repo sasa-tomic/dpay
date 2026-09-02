@@ -6,6 +6,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import java.io.File
 import java.math.BigInteger
 
 /**
@@ -28,6 +29,10 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     /** Exclusive u64 upper bound (2^64) for [rawU64] range validation — shift form avoids a
      *  typo-prone decimal literal. */
     private val U64_LIMIT = BigInteger.valueOf(1).shiftLeft(64)
+
+    /** The diagnostic log's filename and its per-generation size cap (see [appendLog]). */
+    private val LOG_NAME = "dpay.log"
+    private val LOG_MAX_BYTES = 2L * 1024 * 1024
 
     private fun hex(bytes: ByteArray): String {
         val sb = StringBuilder(bytes.size * 2)
@@ -631,6 +636,44 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
      * physical-device-gated feature; QR always works regardless of this value. A probe failure
      * resolves "unknown" (the chip then hides) rather than rejecting.
      */
+    /**
+     * Append one already-formatted line to the app's on-device diagnostic log.
+     *
+     * WHY THIS EXISTS. Everything this app logs goes to `console.*` → logcat, which lives only in a
+     * rolling in-memory buffer on the device and only while a cable is attached to read it. That is
+     * fine at a desk and useless for the case it matters most: a real payment at a real till,
+     * minutes or hours from any computer, where the ONE thing worth knowing is what the payment
+     * provider actually answered after the money moved. A file survives the walk home.
+     *
+     * Written to the app's EXTERNAL files dir (`/sdcard/Android/data/<pkg>/files/dpay.log`) rather
+     * than internal storage on purpose: a release build is not debuggable, so `adb shell run-as`
+     * cannot reach internal storage, and the log would be unreadable exactly on the builds that go
+     * out. This path is readable over `adb` without root and needs no runtime permission.
+     *
+     * Failures are SWALLOWED, and that is the one place in this codebase where that is correct: a
+     * logger that can throw turns a diagnostic aid into a new crash on the money path. The log is
+     * best-effort by construction, which is why nothing may ever depend on it having been written.
+     */
+    @ReactMethod
+    fun appendLog(line: String, promise: Promise) {
+        try {
+            val dir = reactApplicationContext.getExternalFilesDir(null)
+            if (dir == null) { promise.resolve(false); return }
+            val f = File(dir, LOG_NAME)
+            // Rotate rather than grow without bound: one previous generation is kept, so a session
+            // that fills the cap cannot erase the session before it. Two files, hard ceiling 2×CAP.
+            if (f.length() > LOG_MAX_BYTES) {
+                val prev = File(dir, "$LOG_NAME.1")
+                if (prev.exists()) prev.delete()
+                f.renameTo(prev)
+            }
+            f.appendText(line + "\n")
+            promise.resolve(true)
+        } catch (e: Throwable) {
+            promise.resolve(false)
+        }
+    }
+
     @ReactMethod
     fun nfcStatus(promise: Promise) {
         try {

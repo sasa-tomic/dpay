@@ -111,6 +111,11 @@ export type DpayCoreApi = {
   // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
   nfcStatus?(): Promise<string>;
+  // Append one line to the on-device diagnostic log (`services/log.ts`). Resolves false when the
+  // line could not be written — a logger must never reject and never throw on the money path.
+  // Optional for the same reason as `nfcStatus`: builds without the native method simply have no
+  // file log, and the app must not care. NEVER await this in a payment sequence.
+  appendLog?(line: string): Promise<boolean>;
   // --- IC user-principal rail (dpay-icp via UniFFI). Funds live at
   // Account{owner: self_authenticating(device pubkey)} on the external ICRC ledgers; the app
   // signs full /api/v2 envelopes locally and POSTs them (payer online) or hands them to the

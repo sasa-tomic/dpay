@@ -28,9 +28,16 @@ import {applyLocale} from './i18n';
 import {type LocaleChoice, deviceLocaleTag, localePersistValue, parseLocale} from './i18n/locale';
 import type {Identity} from './lib/types';
 import {DpayCore} from './services/native';
+import {installLogSink} from './services/log';
 import {S, applyPalette} from './styles';
 import {Onboarding} from './components/Onboarding';
 import {Wallet} from './components/Wallet';
+
+// Mirror warnings + errors into an on-device FILE before anything else can log. At module scope on
+// purpose: a payment made half an hour from any computer must have left a record that survives the
+// walk home, and logcat — an in-memory rolling buffer readable only over a cable — does not. See
+// `services/log.ts` for what it does and does not capture.
+installLogSink();
 
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
