@@ -1054,7 +1054,7 @@ describe('PayMode — the till outcome screen does not contradict itself', () =>
     // confirmation" and a "check back here" tip, directly above a note saying the provider refused
     // the proof and the sale was not credited — two contradictory statements on the payer's only
     // record of a lost payment. Nobody is going to confirm this one.
-    const message = M.pay.ocp.submitRejected(M.pay.ocp.ref.icBlock('8168'));
+    const message = M.pay.ocp.submitRejected(M.pay.ocp.ref.icBlock('8168'), 'Transaction 8168 already assigned to another quote');
     jest.mocked(resolveOcpScan).mockReset().mockResolvedValue({kind: 'ok', target: OCP_TARGET});
     jest.mocked(payAndReport).mockReset().mockResolvedValue({kind: 'unresolved', message});
     const tree = mountTill();

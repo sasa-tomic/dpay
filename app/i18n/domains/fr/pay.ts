@@ -128,8 +128,9 @@ export const payFr: PayMessages = {
     },
     submitUnknown: reference =>
       `Votre transfert est passé, mais le prestataire de paiement du commerçant ne l’a pas confirmé — ce n’est donc ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant ${reference}, c’est la preuve de votre transfert.`,
-    submitRejected: reference =>
-      `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}.`,
+    submitRejected: (reference, said) =>
+      `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}.`
+      + (said === null ? '' : ` Le prestataire indique : « ${said} »`),
     submitTooLate: reference =>
       `Votre transfert est passé, mais seulement après l’expiration de ce prix : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}, c’est la preuve de votre transfert.`,
     transferUnknown:

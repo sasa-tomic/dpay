@@ -48,6 +48,7 @@ import {isValidSolanaAddress} from '../solana/identity';
 import type {AssetId} from '../lib/types';
 import {DpayCore} from './native';
 import {fetchWithTimeout} from './relay';
+import {logMoney} from './log';
 import {M} from '../i18n';
 
 /** The two fields every post-quote provider call needs — the live quote and the URL it is served
@@ -80,8 +81,12 @@ export type OcpTransferUriResult =
  *  by whoever is debugging, and a localized log is a log that cannot be grepped. NEVER RENDER IT. */
 export type OcpSubmitResult =
   | {kind: 'accepted'}
-  /** A definitive provider refusal: HTTP 4xx carrying a readable body. */
-  | {kind: 'rejected'; detail: string}
+  /** A definitive provider refusal: HTTP 4xx carrying a readable body. `said` is the provider's OWN
+   *  sentence when it gave one, already sanitised — kept separate from `detail` because it is the
+   *  one part a payer can act on: it is what they repeat to the merchant, and it is the only thing
+   *  that explains WHY a sale went uncredited after the money left. `detail` around it is an
+   *  English diagnostic for the console and must not reach a screen; `said` may, quoted. */
+  | {kind: 'rejected'; detail: string; said: string | null}
   /** Timeout / transport / unreadable body — the transfer may well have happened. Honest pending. */
   | {kind: 'unknown'; detail: string};
 
@@ -367,9 +372,11 @@ export async function submitProof(
     };
   }
   if (r.status >= 400 && r.status < 500) {
+    const said = providerMessage(body.json);
     return {
       kind: 'rejected',
-      detail: providerMessage(body.json) ?? `${target.url.host} refused transfer ${txId} with HTTP ${r.status} and gave no reason`,
+      said,
+      detail: said ?? `${target.url.host} refused transfer ${txId} with HTTP ${r.status} and gave no reason`,
     };
   }
   if (!r.ok) {
@@ -723,20 +730,39 @@ export async function payAndReport(
   asset: string,
   send: () => Promise<OcpSendResult>,
 ): Promise<OcpPayResult> {
+  // BREADCRUMBS, not chatter. This sequence moves irreversible money and gets ONE chance to report
+  // it, so each step is recorded to the on-device log before and after it happens — that file is
+  // the only account of a payment made far from any computer, and "which quote, which transaction,
+  // what did the provider say" is the entire post-mortem. No key material, no amounts beyond the
+  // identifiers already printed on the payer's own screen.
+  logMoney(`ocp submit sequence starting: ${method}/${asset} quote=${quote.quoteId}`);
   const sent = await send();
-  if (sent.kind === 'refused') return {kind: 'not-paid', message: sent.message};
+  if (sent.kind === 'refused') {
+    logMoney(`ocp transfer refused, nothing moved and nobody told: ${sent.message}`);
+    return {kind: 'not-paid', message: sent.message};
+  }
   // Neither paid nor failed, and the provider stays untold — see above.
-  if (sent.kind === 'unknown') return {kind: 'unresolved', message: M.pay.ocp.transferUnknown};
+  if (sent.kind === 'unknown') {
+    logMoney('ocp transfer indefinite — the one submission is deliberately NOT spent');
+    return {kind: 'unresolved', message: M.pay.ocp.transferUnknown};
+  }
 
+  logMoney(`ocp transfer confirmed as ${sent.txId} — spending the one submission now`);
   const reported = await submitProof(quote, method, asset, sent.txId);
+  logMoney(`ocp submission answered ${reported.kind} for ${sent.txId}`);
   if (reported.kind === 'accepted') return {kind: 'paid'};
   // The provider's own sentence is diagnostic, not instruction: the user needs to know the money is
   // gone and which reference proves it, which is what the copy says.
   console.warn(`opencryptopay: submission ${reported.kind} for tx ${sent.txId}: ${reported.detail}`);
   return {
     kind: 'unresolved',
+    // The provider's own sentence is QUOTED into the refusal when it gave one — the same treatment
+    // the pre-payment reads already give it (`failureMessage`). After the money has moved it stops
+    // being a mere diagnostic: it is what the payer repeats to the merchant, and it is the only
+    // statement of WHY the sale went uncredited. Losing it to the console means a payer standing at
+    // a till with money gone and nothing to say about it.
     message: reported.kind === 'rejected'
-      ? M.pay.ocp.submitRejected(sent.reference)
+      ? M.pay.ocp.submitRejected(sent.reference, reported.said)
       : M.pay.ocp.submitUnknown(sent.reference),
   };
 }

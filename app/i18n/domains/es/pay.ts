@@ -127,8 +127,9 @@ export const payEs: PayMessages = {
     },
     submitUnknown: reference =>
       `Tu transferencia se realizó, pero el proveedor de pagos del comercio no la confirmó: no está pagada ni ha fallado. El dinero ha salido de tu billetera, así que no pagues otra vez. Muestra al comercio ${reference}: es la prueba de tu transferencia.`,
-    submitRejected: reference =>
-      `Tu transferencia se realizó, pero el proveedor de pagos del comercio rechazó la prueba, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale ${reference}.`,
+    submitRejected: (reference, said) =>
+      `Tu transferencia se realizó, pero el proveedor de pagos del comercio rechazó la prueba, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale ${reference}.`
+      + (said === null ? '' : ` El proveedor indica: «${said}»`),
     submitTooLate: reference =>
       `Tu transferencia se realizó, pero solo después de que este precio caducara, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale ${reference}: es la prueba de tu transferencia.`,
     transferUnknown:

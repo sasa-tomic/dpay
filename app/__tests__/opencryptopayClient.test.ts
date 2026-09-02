@@ -506,8 +506,11 @@ describe('submitProof', () => {
   test('a 400 is a definitive refusal carrying the provider sentence', async () => {
     installResponse(400, TX_NOT_CONFIRMED_400);
     const out = await submitProof(DETAILS, 'InternetComputer', 'VCHF', '999999999999');
+    // `said` is the provider's OWN sentence and is the part that may reach a screen (quoted);
+    // `detail` is the console diagnostic around it. Here they coincide because the provider spoke.
     expect(out).toEqual({
       kind: 'rejected',
+      said: 'Transaction 999999999999 not confirmed in blockchain InternetComputer',
       detail: 'Transaction 999999999999 not confirmed in blockchain InternetComputer',
     });
   });
@@ -515,13 +518,19 @@ describe('submitProof', () => {
   test('the burned-quote 404 is a refusal too — a 4xx with a body is definitive', async () => {
     installResponse(404, QUOTE_BURNED_404);
     const out = await submitProof(DETAILS, 'InternetComputer', 'VCHF', '999999999999');
-    expect(out).toEqual({kind: 'rejected', detail: QUOTE_BURNED_404.message});
+    expect(out).toEqual({kind: 'rejected', said: QUOTE_BURNED_404.message, detail: QUOTE_BURNED_404.message});
   });
 
   test('a 4xx whose body gives no reason still refuses, and names the status instead of inventing one', async () => {
     installResponse(403, {statusCode: 403});
     const out = await submitProof(DETAILS, 'InternetComputer', 'VCHF', '8168');
-    expect(out).toEqual({kind: 'rejected', detail: 'api.dfx.swiss refused transfer 8168 with HTTP 403 and gave no reason'});
+    // The provider said NOTHING readable, so `said` is null — the screen must not quote an English
+    // diagnostic dpay wrote itself as though the provider had spoken it.
+    expect(out).toEqual({
+      kind: 'rejected',
+      said: null,
+      detail: 'api.dfx.swiss refused transfer 8168 with HTTP 403 and gave no reason',
+    });
   });
 
   test('a 200 whose body cannot be read is unknown, NOT accepted', async () => {
@@ -1023,8 +1032,16 @@ describe('payAndReport', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     installResponse(400, TX_NOT_CONFIRMED_400);
     const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', settled);
-    expect(out).toEqual({kind: 'unresolved', message: M.pay.ocp.submitRejected(REFERENCE)});
-    // The provider's own sentence is diagnostic, and stays out of the user's instruction.
+    // The provider's OWN sentence is quoted into the message, not just logged. After the money has
+    // moved it is the only statement of WHY the sale went uncredited, and it is what the payer
+    // repeats at the till — a payer holding a phone that says only "it was refused" has nothing to
+    // say to the cashier. It is still framed by dpay's localized instruction, never presented bare.
+    expect(out.kind).toBe('unresolved');
+    if (out.kind !== 'unresolved') return;
+    expect(out.message).toContain(TX_NOT_CONFIRMED_400.message);
+    expect(out.message).toEqual(M.pay.ocp.submitRejected(REFERENCE, TX_NOT_CONFIRMED_400.message));
+    expect(out.message).toContain(REFERENCE);
+    // …and it is STILL logged, because a console is where it gets grepped.
     expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('not confirmed in blockchain');
     warn.mockRestore();
   });

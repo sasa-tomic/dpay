@@ -171,7 +171,11 @@ export type PayMessages = {
     /** Funds moved; the provider never answered. Honest unknown — never rendered as paid or failed. */
     submitUnknown: (reference: string) => string;
     /** Funds moved; the provider refused the proof. Definitive, and still costs the payer. */
-    submitRejected: (reference: string) => string;
+    /** The provider REFUSED the proof after the money moved. `said` is the provider's own sentence
+     *  when it gave one, already sanitised — quoted, never presented as dpay's own words. It is the
+     *  only statement of WHY the sale went uncredited, and the thing the payer repeats at the till;
+     *  null when the provider refused without saying anything. */
+    submitRejected: (reference: string, said: string | null) => string;
     /** The transfer turned out to have settled only AFTER the price expired, so the one submission
      *  was deliberately not spent on a dead quote — burning it would also bind the transaction id
      *  and take away the user's ability to claim the payment with the merchant. */
@@ -363,8 +367,9 @@ export const payEn: PayMessages = {
     },
     submitUnknown: reference =>
       `Your transfer went through, but the merchant’s payment provider didn’t confirm it — so this is neither paid nor failed. The money has left your wallet, so don’t pay again. Show the merchant ${reference}: it is the proof of your transfer.`,
-    submitRejected: reference =>
-      `Your transfer went through, but the merchant’s payment provider refused the proof of it, so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}.`,
+    submitRejected: (reference, said) =>
+      `Your transfer went through, but the merchant’s payment provider refused the proof of it, so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}.`
+      + (said === null ? '' : ` The provider said: “${said}”`),
     submitTooLate: reference =>
       `Your transfer went through, but only after this price expired — so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}: it is the proof of your transfer.`,
     transferUnknown:
