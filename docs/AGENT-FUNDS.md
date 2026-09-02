@@ -32,10 +32,12 @@ So the age identity is the single point of failure. **Back up that one line to a
 Without it the encrypted seed is unrecoverable and anything the float holds is gone.
 
 The seed is a plain 32-byte Ed25519 seed and the principal is derived by the same committed wasm
-core the app signs with, so this is a real dpay identity — not a script-only key. It is not
-currently exposed as a 24-word mnemonic (the app's `app/lib/bip39.ts` transitively imports the RN
-i18n module, so it will not load in a plain node script); until that import is untangled the key
-cannot be restored into the phone app. Worth knowing before planning an on-device funded test.
+core the app signs with, so this is a real dpay identity — not a script-only key. A plain node
+script cannot print it as a 24-word mnemonic (`app/lib/bip39.ts` reaches the RN i18n module through
+`app/lib/format.ts`, so it will not load outside the app), but the mnemonic is not the way in:
+Onboarding restores from the **64-hex seed** directly (`restoreMode: 'hex'`, `app/components/
+Onboarding.tsx`), which is exactly what `just agent-seed` prints. So an on-device funded test with
+this float is possible today, with no code change.
 
 ## Known limits of the encryption
 
@@ -51,4 +53,4 @@ a second copy of the balance.
 
 | Date | Asset | Amount | To | Purpose | Result |
 |------|-------|--------|-----|---------|--------|
-| _(none yet — key generated 2026-09-01, unfunded)_ | | | | | |
+| _(none yet — key generated 2026-09-01; nothing has been spent. What it HOLDS is `just agent-balance`, never this table)_ | | | | | |

@@ -68,9 +68,21 @@ Solana returns a standard `solana:<address>?amount=<decimal>`.
 
 For `Solana/USDC` the live URI is `solana:2eQ2Somiat…?amount=1.246922` — with **no `spl-token`
 parameter**, so it is indistinguishable from a native SOL transfer of that amount. A wallet that
-trusts the URI alone sends the wrong asset. The selected `asset` from step 3 is the only
-authority. Also unresolved: whether the address is the owner or the associated token account. **Do
-not implement the Solana leg until DFX answers this.**
+trusts the URI alone sends the wrong asset. The selected `asset` from step 3 is the only authority.
+
+**Owner-vs-ATA: answered by measurement 2026-09-02, without needing DFX.** Two independent reads
+agree that the address is the **owner wallet**, not a token account:
+
+- Within one quote, `Solana/SOL`, `Solana/USDC` and `Solana/USDT` all return the **same** address
+  (`2eQ2Somiat63oqSPwzQLrrNiceC8F6TH85dt2qDe3z36`). An associated token account is derived per mint,
+  so three assets sharing one address cannot be ATAs.
+- `getAccountInfo` on mainnet reports `owner: 11111111111111111111111111111111` (System Program),
+  `space: 0`, no data — a plain wallet. A token account is owned by the SPL Token program and
+  carries 165 bytes.
+
+So a token leg must pay the **ATA derived from that owner and the token's mint**, which is what the
+app already computes for its own USDC sends (`app/solana/spl.ts`). The blocker on implementing the
+Solana token leg is therefore removed; native `Solana/SOL` was never affected.
 
 ## Submission: two options, and which to use
 
@@ -110,6 +122,11 @@ transferAmounts`.
 Note the asymmetry: per-asset `amount` values are **strings**, but `requestedAmount.amount` is a
 **number**. Any parser must handle both, and must never let a JSON number reach a decimal parser via
 `String()` — a small value can serialise as `1.6e-7`, a spelling every decimal grammar here rejects.
+
+**A method it cannot currently settle carries an EMPTY `assets` array.** Measured on every response
+(2026-09-02): `TaprootAsset`, `Spark` and `Arkade` all arrive as `{available: false, assets: []}`.
+This is normal traffic, not a malformed body, and a parser that refuses over it refuses every real
+till — which is exactly what happened (review ledger row 16).
 
 ## Step-2 and step-3 amounts agree within one quote
 
