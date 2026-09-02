@@ -565,7 +565,21 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
     const method = typeof e.method === 'string' ? e.method.trim() : '';
     if (method.length === 0) return {ok: false, reason: 'malformed-details'};
     if (typeof e.available !== 'boolean') return {ok: false, reason: 'malformed-details'};
-    if (!Array.isArray(e.assets) || e.assets.length === 0) return {ok: false, reason: 'malformed-details'};
+    if (!Array.isArray(e.assets)) return {ok: false, reason: 'malformed-details'};
+    // A method the provider advertises but cannot currently settle carries an EMPTY asset list, and
+    // the live provider sends three of them on every single response (measured 2026-09-01:
+    // `TaprootAsset`, `Spark`, `Arkade`). That is coherent — the method exists, it offers nothing
+    // right now — and it names no asset this wallet could ever select, so it is dropped and the
+    // payable methods beside it survive. Refusing the whole body over it made EVERY real till
+    // unpayable on both rails while the suite stayed green, because no fixture carried one.
+    //
+    // `available: true` with nothing to settle is the CONTRADICTORY case and stays malformed: a
+    // method claiming to be settleable must name what it settles, and a parser that shrugs at a
+    // self-contradictory body cannot be trusted about the rest of it.
+    if (e.assets.length === 0) {
+      if (e.available) return {ok: false, reason: 'malformed-details'};
+      continue;
+    }
     const assets: OcpAssetAmount[] = [];
     for (const a of e.assets) {
       const parsed = parseAssetAmount(a);
@@ -574,6 +588,10 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
     }
     transferAmounts.push({method, available: e.available, assets});
   }
+  // A till that named nothing settleable at all is the same fact as one that sent no methods, and
+  // gets the same refusal — so every parsed `OcpDetails` still carries at least one method, and the
+  // "this till takes: …" copy can never be built from an empty list.
+  if (transferAmounts.length === 0) return {ok: false, reason: 'malformed-details'};
 
   return {
     ok: true,

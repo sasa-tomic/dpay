@@ -427,8 +427,31 @@ describe('parsePaymentDetails', () => {
     });
   });
 
+  it('keeps paying a till that advertises methods it cannot currently settle', () => {
+    // MEASURED against the live provider on 2026-09-01: every response carries `TaprootAsset`,
+    // `Spark` and `Arkade` as `{available: false, assets: []}`. Refusing the whole body over them —
+    // which is what this parser did until this test was written — made EVERY real till unpayable
+    // while the entire suite stayed green, because no fixture here or in `e2e/harness/ocp.mjs` ever
+    // carried an empty list. The entry names nothing this wallet could select, so it is dropped and
+    // the payable methods beside it survive.
+    const withDeadMethods = parsePaymentDetails(detailsBody({
+      transferAmounts: [
+        {method: 'TaprootAsset', available: false, assets: []},
+        ...(detailsBody().transferAmounts as unknown[]),
+        {method: 'Spark', available: false, assets: []},
+      ],
+    }));
+    expect(withDeadMethods.ok).toBe(true);
+    if (!withDeadMethods.ok) return;
+    expect(withDeadMethods.details.transferAmounts.map(t => t.method)).toEqual(['InternetComputer', 'Solana']);
+  });
+
   it('refuses a body missing anything the payment depends on', () => {
     for (const body of [
+      // `available: true` with nothing to settle is the CONTRADICTORY case, and stays malformed: a
+      // method claiming to be settleable must name what it settles. The coherent case above is the
+      // only widening — a method the provider itself marks unavailable.
+      detailsBody({transferAmounts: [{method: 'Spark', available: false, assets: []}]}),
       detailsBody({callback: undefined}),
       detailsBody({quote: undefined}),
       detailsBody({quote: {id: '', expiration: EXPIRATION}}),
