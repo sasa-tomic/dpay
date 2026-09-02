@@ -16,10 +16,19 @@ real float is the only instrument that closes those.
 
     just agent-principal   # the funding address (no decryption)
     just agent-balance     # live mainnet balances, measured (no decryption)
+    just agent-history     # what the money DID: transfers + block indexes (no decryption)
     just agent-seed        # the seed hex — DECRYPTS; only immediately before a spend
 
 `agent-balance` is the only source of truth for what the float holds. Never state a balance from
 memory or from this file — measure it. An unreachable ledger prints `UNREADABLE`, never `0`.
+
+`agent-history` is how a spend is VERIFIED rather than reported. A payment made on a phone appears
+here as an outgoing transfer with its amount, its destination and its block index — and for an
+OpenCryptoPay payment that block index is the exact proof the wallet reported to the provider, so
+"it paid" can be checked against the ledger instead of taken on trust. It reads the official ICP
+index pinned in `dfx/catalog_truth.json`, and dies loudly rather than printing an empty history it
+never actually read: after a real payment, "no transactions" and "could not ask" are opposite
+answers.
 
 ## Recovery
 

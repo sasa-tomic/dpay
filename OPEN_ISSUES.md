@@ -16,7 +16,11 @@
      `just apk && just up`.
    - **The CHF 1 live payment is still unmade** — the one leg no read-only probe can close
      (`just live-ocp` proves everything up to consent). Founder go-ahead required: it is a first
-     payment to a new counterparty. Rules: `CLAUDE.md` → `docs/AGENT-FUNDS.md`.
+     payment to a new counterparty. Rules: `CLAUDE.md` → `docs/AGENT-FUNDS.md`. To make it: display
+     `artifacts/spar-test-till-qr.png` (the provider's public CHF-1 test till, generated from the
+     LNURL in the findings doc) and scan it from a funded wallet. Verify it afterwards with
+     `just agent-history`, which shows the outgoing transfer and the block index the wallet
+     reported — the payment is checked against the ledger, not reported by whoever made it.
 1. ~~**Add VCHF + native ICP as complete direct-payment assets.**~~ **DONE (2026-08-28)** —
    [`docs/specs/2026-08-28-vchf-icp-support-spec.md`](docs/specs/2026-08-28-vchf-icp-support-spec.md)
    U1–U8 complete and fully verified: catalog ids 7/8 everywhere (bundled + fake + truth-file drift
