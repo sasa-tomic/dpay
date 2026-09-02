@@ -7,6 +7,16 @@
 
 ## NEXT SESSION — work order (unblocked; do these first)
 
+0. **THE NEXT MILESTONE — dpay as the MERCHANT side of OpenCryptoPay** (founder decision,
+   2026-09-02). Plan, rejected alternatives and open questions:
+   [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md).
+   Two operational tails from the same session, both founder ops, neither blocking the milestone:
+   - **PROD SERVES A BUILD THAT CANNOT PAY ANY TILL.** `/download/dpay.apk` and the relay are at
+     `7499b30`, before the parser fix (`8912db5`) that made real tills payable at all. Needs
+     `just apk && just up`.
+   - **The CHF 1 live payment is still unmade** — the one leg no read-only probe can close
+     (`just live-ocp` proves everything up to consent). Founder go-ahead required: it is a first
+     payment to a new counterparty. Rules: `CLAUDE.md` → `docs/AGENT-FUNDS.md`.
 1. ~~**Add VCHF + native ICP as complete direct-payment assets.**~~ **DONE (2026-08-28)** —
    [`docs/specs/2026-08-28-vchf-icp-support-spec.md`](docs/specs/2026-08-28-vchf-icp-support-spec.md)
    U1–U8 complete and fully verified: catalog ids 7/8 everywhere (bundled + fake + truth-file drift
