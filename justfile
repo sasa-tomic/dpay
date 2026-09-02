@@ -188,6 +188,16 @@ ic-mainnet-probe:
 ic-index-probe:
     bash scripts/icp-index-probe.sh
 
+# OPT-IN live OpenCryptoPay probe (NEEDS NETWORK, never in check/verify): drives the REAL app
+# against the REAL provider's public CHF-1 test till and stops at the review, having signed
+# nothing. Reads only — a quote costs nothing and commits nothing, and the wallet it drives is a
+# throwaway funded by the local relay's faucet, so no real money is reachable. Exists because
+# flows 111/112 run against a fail-closed stub: a wrong belief about the provider's payload is
+# invisible to them BY CONSTRUCTION, and one such belief made every real till unpayable behind a
+# fully green suite (review ledger row 16). Run it after any change to the OCP parser or client.
+live-ocp:
+    node e2e/live-ocp-probe.mjs
+
 # OPT-IN mainnet UPDATE probe (NEEDS NETWORK, never in check/verify): the state-changing twin of
 # ic-mainnet-probe — user-principal signed UPDATES (POST /api/v2/canister/<id>/call) with the full
 # read_state lifecycle, against OUR OWN canisters ONLY (facade ssqti + DUSD play-money ledger

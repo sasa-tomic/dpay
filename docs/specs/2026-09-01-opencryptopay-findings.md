@@ -242,7 +242,14 @@ dpay against dpay, which `e2e/` already does. It proves nothing about third-part
 
 ## What has NOT been proven
 
-No payment has been made. Everything above is read-only probing. Specifically unverified: that a
-**real** confirmed ICP transfer plus its block index is accepted end to end. That costs CHF 1
-(the public test till `pl_beeddb41cd4b6d9e` is fixed-amount, `min == max`, no smaller test exists)
-and is irreversible. Rules for spending the agent float: `CLAUDE.md` → `docs/AGENT-FUNDS.md`.
+No payment has been made. What IS proven, as of 2026-09-02, is everything up to consent: `just
+live-ocp` drives the shipped app against this till and lands on a review carrying the live price,
+the full destination, the provider host and the countdown — so the scan, both provider reads, the
+parser, the destination checks and the review screen are all confirmed against the real thing, not
+against a fixture.
+
+Exactly one leg remains unprovable without spending: that a **real** confirmed ICP transfer plus its
+block index is accepted by `/tx`. Only its failure modes have been observed (a fabricated id is
+refused, which at least proves the handler verifies against the chain). It costs CHF 1 — the public
+test till `pl_beeddb41cd4b6d9e` is fixed-amount, `min == max`, so no smaller test exists — and it is
+irreversible and one-shot. Rules for spending the agent float: `CLAUDE.md` → `docs/AGENT-FUNDS.md`.
