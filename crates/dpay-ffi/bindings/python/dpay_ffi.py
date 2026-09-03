@@ -540,6 +540,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_parse_amount() != 56752:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_till_open_signature() != 61255:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision() != 40082:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_method_fficardsession_decline() != 61902:
@@ -1047,6 +1049,15 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_parse_amount.restype = ctypes.c_uint64
+_UniffiLib.uniffi_dpay_ffi_fn_func_till_open_signature.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_till_open_signature.restype = _UniffiRustBuffer
 _UniffiLib.ffi_dpay_ffi_rustbuffer_alloc.argtypes = (
     ctypes.c_uint64,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1435,6 +1446,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_nfc_result_bytes.restype = ctypes.c_uin
 _UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_parse_amount.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_till_open_signature.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_till_open_signature.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_method_fficardsession_awaiting_decision.restype = ctypes.c_uint16
@@ -3980,6 +3994,38 @@ def parse_amount(human: "str",decimals: "int") -> "int":
         _UniffiConverterUInt8.lower(decimals)))
 
 
+def till_open_signature(secret: "bytes",cents: "int",nonce: "bytes",issued_at: "int",merchant_name: "str") -> "bytes":
+    """
+    Merchant side: the detached signature that proves this device holds the key its OpenCryptoPay
+    till account is derived from, so `POST /api/v1/till` can refuse a ring-up for a key the caller
+    does not own. The public key is DERIVED from `secret` rather than taken as an argument — the
+    signer signs over their own key by construction, so there is no mismatch to get wrong.
+
+    `nonce` is 16 bytes (single-use — the relay records it on acceptance); `issued_at` is unix
+    seconds and must be within `dpay_core::TILL_OPEN_MAX_SKEW_SECS` of the relay's clock;
+    `merchant_name` is the CLAIMED display name and is bound by the signature. Returns the raw
+    64-byte Ed25519 signature. The canonical bytes are `dpay_core::TillOpen::signing_bytes` — the
+    relay rebuilds them and calls `dpay_core::validate_till_open`, so there is ONE encoding.
+    """
+
+    _UniffiConverterBytes.check_lower(secret)
+    
+    _UniffiConverterUInt64.check_lower(cents)
+    
+    _UniffiConverterBytes.check_lower(nonce)
+    
+    _UniffiConverterUInt64.check_lower(issued_at)
+    
+    _UniffiConverterString.check_lower(merchant_name)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_till_open_signature,
+        _UniffiConverterBytes.lower(secret),
+        _UniffiConverterUInt64.lower(cents),
+        _UniffiConverterBytes.lower(nonce),
+        _UniffiConverterUInt64.lower(issued_at),
+        _UniffiConverterString.lower(merchant_name)))
+
+
 __all__ = [
     "InternalError",
     "DpayError",
@@ -4037,6 +4083,7 @@ __all__ = [
     "nfc_request_bytes",
     "nfc_result_bytes",
     "parse_amount",
+    "till_open_signature",
     "FfiCardSession",
     "FfiReaderConductor",
 ]

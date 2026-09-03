@@ -373,5 +373,45 @@ check(d.parse_amount(".5", 2) == 50, "parse_amount('.5', 2) == 50 (calculator-st
 check(d.parse_amount("5.", 2) == 500, "parse_amount('5.', 2) == 500 (calculator-style trailing dot)")
 
 
+# 9) OpenCryptoPay till: the merchant's ring-up proof ------------------------------------------
+# `till_open_signature` is what stops `POST /api/v1/till` from opening a charge for a key the caller
+# does not hold (a probe did exactly that with `deadbeef…deadbeef` on 2026-09-03). The signature
+# covers the SEED's own public key — the app never supplies one — plus the price, nonce, timestamp
+# and the CLAIMED merchant name. Pinned here against the committed golden emitted from the same core
+# by `just wire-layout`, so a green run proves the phone signs what the relay verifies.
+import json, pathlib
+_golden = json.loads(
+    (pathlib.Path(__file__).resolve().parents[2] / "dfx" / "till_open_signing.json").read_text()
+)
+_g = _golden["golden"]
+_sig = d.till_open_signature(
+    bytes.fromhex(_g["secret_hex"]), _g["cents"], bytes.fromhex(_g["nonce_hex"]),
+    _g["issued_at"], _g["merchant_name"],
+)
+check(_sig.hex() == _g["sig_hex"], "till_open_signature reproduces dfx/till_open_signing.json sig_hex")
+check(d.keypair_from_secret(bytes.fromhex(_g["secret_hex"])).public.hex() == _g["merchant_pubkey_hex"],
+      "the signature covers the seed's OWN public key (never a caller-supplied one)")
+# Ed25519 is deterministic, so a differing signature proves the field entered the signed bytes.
+check(d.till_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"] + 1,
+                            bytes.fromhex(_g["nonce_hex"]), _g["issued_at"],
+                            _g["merchant_name"]).hex() != _g["sig_hex"],
+      "till_open_signature binds the price")
+check(d.till_open_signature(bytes.fromhex(_g["secret_hex"]), _g["cents"],
+                            bytes.fromhex(_g["nonce_hex"]), _g["issued_at"],
+                            "Migros").hex() != _g["sig_hex"],
+      "till_open_signature binds the CLAIMED merchant name")
+# Malformed inputs are typed errors, never a silently wrong signature.
+try:
+    d.till_open_signature(b"\x00" * 31, 1, bytes(16), 1, "")
+    raise AssertionError("FAILED: short seed should have raised")
+except d.DpayError.BadSecretLength:
+    check(True, "till_open_signature(short seed) -> DpayError.BadSecretLength")
+try:
+    d.till_open_signature(b"\x00" * 32, 1, bytes(15), 1, "")
+    raise AssertionError("FAILED: short nonce should have raised")
+except d.DpayError.BadNonceLength:
+    check(True, "till_open_signature(short nonce) -> DpayError.BadNonceLength")
+
+
 print(f"\nALL {passed} FFI CHECKS PASSED — Python called the real dpay-core across UniFFI.")
 sys.exit(0)

@@ -12,7 +12,7 @@
 
 use dpay_core::{
     generate_keypair as core_generate_keypair, AmountError, CodecError, Currency, PaymentRequest,
-    NAME_LEN, NONCE_LEN, PUBKEY_LEN,
+    TillOpen, NAME_LEN, NONCE_LEN, PUBKEY_LEN,
 };
 use ed25519_dalek::SigningKey;
 
@@ -261,6 +261,35 @@ pub fn decode_request(qr: String) -> Result<PaymentRequestData, DpayError> {
         to_name: decode_name_field(&req.to_name),
         memo: decode_name_field(&req.memo),
     })
+}
+
+/// Merchant side: the detached signature that proves this device holds the key its OpenCryptoPay
+/// till account is derived from, so `POST /api/v1/till` can refuse a ring-up for a key the caller
+/// does not own. The public key is DERIVED from `secret` rather than taken as an argument — the
+/// signer signs over their own key by construction, so there is no mismatch to get wrong.
+///
+/// `nonce` is 16 bytes (single-use — the relay records it on acceptance); `issued_at` is unix
+/// seconds and must be within `dpay_core::TILL_OPEN_MAX_SKEW_SECS` of the relay's clock;
+/// `merchant_name` is the CLAIMED display name and is bound by the signature. Returns the raw
+/// 64-byte Ed25519 signature. The canonical bytes are `dpay_core::TillOpen::signing_bytes` — the
+/// relay rebuilds them and calls `dpay_core::validate_till_open`, so there is ONE encoding.
+#[uniffi::export]
+pub fn till_open_signature(
+    secret: Vec<u8>,
+    cents: u64,
+    nonce: Vec<u8>,
+    issued_at: u64,
+    merchant_name: String,
+) -> Result<Vec<u8>, DpayError> {
+    let key = signing_key_from_seed(&secret)?;
+    let open = TillOpen {
+        merchant_pubkey: key.verifying_key().to_bytes(),
+        cents,
+        nonce: fixed_nonce(&nonce)?,
+        issued_at,
+        merchant_name,
+    };
+    Ok(dpay_core::sign_till_open(&key, &open).to_bytes().to_vec())
 }
 
 // (encode_qr / decode_qr / verify_wire retired with the 292-byte facade wire — the offline
@@ -712,6 +741,53 @@ mod tests {
         assert_eq!(data.nonce, test_nonce().to_vec());
         assert_eq!(data.to_name, "Bob");
         assert_eq!(data.memo, "invoice-42");
+    }
+
+    /// `till_open_signature` signs under the seed's OWN key and its output validates through the
+    /// core rule — the positive path the relay's `POST /api/v1/till` will accept.
+    #[test]
+    fn till_open_signature_validates_through_the_core_rule() {
+        let secret = vec![0x11u8; 32];
+        let public = keypair_from_secret(secret.clone()).expect("derive keypair").public;
+        let sig = till_open_signature(
+            secret,
+            1_000,
+            test_nonce().to_vec(),
+            1_786_815_398,
+            "Café Bahnhof ☕".to_string(),
+        )
+        .expect("sign a till ring-up");
+        assert_eq!(sig.len(), dpay_core::SIG_LEN);
+
+        let open = dpay_core::TillOpen {
+            merchant_pubkey: public.as_slice().try_into().expect("32-byte pubkey"),
+            cents: 1_000,
+            nonce: test_nonce(),
+            issued_at: 1_786_815_398,
+            merchant_name: "Café Bahnhof ☕".to_string(),
+        };
+        assert_eq!(
+            dpay_core::validate_till_open(
+                &open,
+                &sig.as_slice().try_into().expect("64-byte signature"),
+                open.issued_at,
+                false,
+            ),
+            Ok(())
+        );
+    }
+
+    /// Malformed inputs are typed FFI errors, never a silently wrong signature.
+    #[test]
+    fn till_open_signature_refuses_a_bad_seed_or_nonce_length() {
+        assert!(matches!(
+            till_open_signature(vec![0u8; 31], 1, test_nonce().to_vec(), 1, String::new()),
+            Err(DpayError::BadSecretLength)
+        ));
+        assert!(matches!(
+            till_open_signature(vec![0u8; 32], 1, vec![0u8; 15], 1, String::new()),
+            Err(DpayError::BadNonceLength)
+        ));
     }
 
     /// `nfc_request_bytes` produces the 132-byte request wire with names inside, and

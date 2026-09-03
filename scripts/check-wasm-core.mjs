@@ -26,6 +26,9 @@
 //   - w_receipt_claim: the payer/receipt-side claim assembler — the canonical golden hex (embedded
 //     below; produced by dpay-core's ReceiptClaim::signing_bytes via the crate's HOST test), a
 //     field-for-field rebuild of the wire_layout.json receipt golden, and u64 extremes.
+//   - w_till_open_sig: the merchant's OpenCryptoPay ring-up proof — the canonical signing buffer
+//     rebuilt independently in JS from dfx/till_open_signing.json's own offsets, the golden
+//     signature, field binding, u64 extremes, and the BAD_LEN / BAD_UTF8 error contract.
 //   - w_icp_* (IC user-principal rail): the additive-only export census, the minter_ok reply
 //     golden, and ARG-BUILD/SIGN GOLDENS — w_icp_transfer_arg / w_icp_approve_arg DIDL bytes and
 //     the w_icp_sign_update envelope + request_id, pinned against hex produced by the dpay-wasm
@@ -490,6 +493,77 @@ for (const c of CASES) {
   check('w_icp_decode_read_state(malformed cert) == BAD_UTF8(2)',
     ex.w_icp_decode_read_state(writeBytes(new Uint8Array([0xde, 0xad, 0xbe, 0xef])), 4,
       ex.w_alloc(32 * 8), 0, ex.w_alloc(CAP), CAP) === 2);
+}
+
+// --- w_till_open_sig: the merchant's ring-up proof, against the Rust-emitted golden -------------
+//
+// The till's `POST /api/v1/till` refuses a ring-up unless the caller signs it with the key their
+// merchant account is DERIVED from (`dpay_core::TillOpen`; the relay verifies with
+// `validate_till_open`). This asserts the staged wasm — the core every web/merchant surface loads —
+// produces the exact bytes the Rust core does, so the app cannot sign something the relay rejects.
+//
+// The encoding is rebuilt INDEPENDENTLY here (DataView, from the golden's own declared offsets)
+// rather than taken on trust, so a change to `TillOpen::signing_bytes` cannot pass by regenerating
+// the golden alone — the same discipline as the receipt-claim assembly above.
+{
+  const T = JSON.parse(readFileSync(`${ROOT}dfx/till_open_signing.json`, 'utf8'));
+  const G = T.golden;
+  const nameBytes = enc.encode(G.merchant_name);
+
+  // Independent JS assembly of `domain | pubkey | cents_le | nonce | issued_at_le | name_len_le | name`.
+  const want = new Uint8Array(T.fixed_len + T.name_len_bytes + nameBytes.length);
+  const dv = new DataView(want.buffer);
+  want.set(fromHex(T.domain_hex), T.fields.domain.offset);
+  want.set(fromHex(G.merchant_pubkey_hex), T.fields.merchant_pubkey.offset);
+  dv.setBigUint64(T.fields.cents.offset, BigInt(G.cents), true);
+  want.set(fromHex(G.nonce_hex), T.fields.nonce.offset);
+  dv.setBigUint64(T.fields.issued_at.offset, BigInt(G.issued_at), true);
+  dv.setUint32(T.fields.name_len.offset, nameBytes.length, true);
+  want.set(nameBytes, T.fields.name_len.offset + T.name_len_bytes);
+  check('till_open_signing.json signing_hex == DataView-assembled canonical layout',
+    hexDiff('till-open signing', fromHex(G.signing_hex), want) === undefined,
+    hexDiff('till-open signing', fromHex(G.signing_hex), want));
+  // The claimed name is multi-byte UTF-8 on purpose: the length prefix counts BYTES, not characters.
+  check('till-open name length prefix counts bytes, not characters',
+    nameBytes.length > [...G.merchant_name].length,
+    `name=${JSON.stringify(G.merchant_name)} bytes=${nameBytes.length} chars=${[...G.merchant_name].length}`);
+
+  const signTillOpen = (secretHex, cents, nonceHex, issuedAt, name, outPtr) => {
+    const [clo, chi] = split64(cents), [ilo, ihi] = split64(issuedAt);
+    const nb = enc.encode(name);
+    const out = outPtr ?? ex.w_alloc(64);
+    const rc = ex.w_till_open_sig(writeBytes(fromHex(secretHex)), clo, chi,
+      writeBytes(fromHex(nonceHex)), ilo, ihi, writeBytes(nb), nb.length, out);
+    return [rc, readBytes(out, 64)];
+  };
+  {
+    const [rc, got] = signTillOpen(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name);
+    check('w_till_open_sig(golden) == dfx/till_open_signing.json sig_hex',
+      rc === 0 && hex(got) === G.sig_hex, `rc=${rc}\n    got:  ${hex(got)}\n    want: ${G.sig_hex}`);
+  }
+  // Determinism + field binding: one changed CENT is a different signature (ed25519 is deterministic,
+  // so "same inputs → same bytes, different inputs → different bytes" is a real assertion here).
+  {
+    const [rc, got] = signTillOpen(G.secret_hex, BigInt(G.cents) + 1n, G.nonce_hex, BigInt(G.issued_at), G.merchant_name);
+    check('w_till_open_sig binds the price (one more cent → a different signature)',
+      rc === 0 && hex(got) !== G.sig_hex, `rc=${rc}`);
+  }
+  // u64 extremes through the (lo, hi) halves must not wrap into the golden's signature.
+  {
+    const [rc, got] = signTillOpen(G.secret_hex, 18446744073709551615n, G.nonce_hex, 18446744073709551615n, G.merchant_name);
+    check('w_till_open_sig(u64::MAX cents + issued_at) signs without wrapping',
+      rc === 0 && hex(got) !== G.sig_hex, `rc=${rc}`);
+  }
+  // Error contract: an out-of-bounds output pointer is BAD_LEN, never a wild write.
+  check('w_till_open_sig(out-of-bounds out_sig_ptr) == BAD_LEN(1)',
+    signTillOpen(G.secret_hex, BigInt(G.cents), G.nonce_hex, BigInt(G.issued_at), G.merchant_name, 0xffff0000)[0] === 1);
+  // …and a non-UTF-8 name is BAD_UTF8, never a signature over replacement characters.
+  {
+    const badName = writeBytes(new Uint8Array([0xff, 0xfe]));
+    const rc = ex.w_till_open_sig(writeBytes(fromHex(G.secret_hex)), 1, 0,
+      writeBytes(fromHex(G.nonce_hex)), 1, 0, badName, 2, ex.w_alloc(64));
+    check('w_till_open_sig(non-UTF-8 merchant name) == BAD_UTF8(2)', rc === 2, `rc=${rc}`);
+  }
 }
 
 // --- verdict ------------------------------------------------------------------------------------

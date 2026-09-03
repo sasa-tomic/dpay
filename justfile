@@ -15,9 +15,14 @@ export DPAY_MOCK_MINTER_WASM := root / "target/wasm32-unknown-unknown/release/dp
 default:
     @just --list
 
-# core unit + property tests (native, sub-second)
+# core unit + property tests (native, sub-second). dpay-fixture rides along because its tests ARE
+# the core's golden drift alarms: each rebuilds a signing layout (pay / withdraw / receipt /
+# till-open) from the emitted offsets ALONE and asserts the core still produces those exact bytes,
+# and the till-open one additionally compares the COMMITTED dfx/till_open_signing.json against what
+# today's core emits. They were previously on no recipe at all, so that drift could land green.
 test-core:
     cargo nextest run -p dpay-core --features rng
+    cargo nextest run -p dpay-fixture
 
 # build the canister to wasm (release)
 build-canister:
@@ -53,9 +58,12 @@ test-icp: build-mock-minter
 test-relay: web
     cargo nextest run -p dpay-relay --features test-helpers
 
-# emit the wire-layout JSON (single source of truth for the JS ed25519 signing shim) from the real Rust core
+# emit the committed core goldens from the real Rust core: the wire layout (single source of truth
+# for the JS ed25519 signing shim) and the till-open signing document (the merchant's ring-up proof,
+# read by scripts/check-wasm-core.mjs). `just test-core` fails when the till-open file is stale.
 wire-layout:
     cargo run -p dpay-fixture --release -- wire-layout dfx/wire_layout.json
+    cargo run -p dpay-fixture --release -- till-open dfx/till_open_signing.json
 
 # radical e2e: drive the REAL app (App.tsx via react-native-web) + REAL relay (FakeLedger) + REAL
 # browser (chrome-headless-shell), offline + seconds-fast. The inner-loop UI/flow gate — it BOTH

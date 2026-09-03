@@ -16,9 +16,10 @@
 //!   reproducible. Idempotent: overwrites `OUT.json` (default `dfx/wire_layout.json`).
 
 use dpay_core::{
-    Authorization, PaymentRequest, ReceiptClaim, SignedAuthorization, WithdrawAuth, DEMO_USD,
-    MEMO_LEN, NAME_LEN, NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, REQUEST_LEN, SIG_LEN,
-    SIGNING_LEN, WIRE_LEN,
+    Authorization, PaymentRequest, ReceiptClaim, SignedAuthorization, TillOpen, WithdrawAuth,
+    DEMO_USD, MEMO_LEN, NAME_LEN, NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, REQUEST_LEN, SIG_LEN,
+    SIGNING_LEN, TILL_OPEN_DOMAIN, TILL_OPEN_FIXED_LEN, TILL_OPEN_MAX_SKEW_SECS,
+    TILL_OPEN_NAME_LEN_BYTES, WIRE_LEN,
 };
 use ed25519_dalek::SigningKey;
 use serde::Serialize;
@@ -545,21 +546,157 @@ fn receipt_layout() -> ReceiptLayout {
     }
 }
 
-/// Emit the wire-layout JSON to `out` (idempotent: overwrites). Pretty-printed so a diff is
-/// reviewable. Returns the rendered JSON so `main` can log a short summary.
+// ===========================================================================
+// till-open golden — the merchant's proof that the till account they name is theirs.
+// ===========================================================================
+//
+// `TillOpen::signing_bytes` is variable-length (the claimed merchant name is last), so like
+// `WithdrawAuth` it gets its own document rather than a slot in the fixed layout. Every offset below
+// is expressed in terms of the core consts by name, and the unit test rebuilds the golden struct
+// purely from these offsets — so a change to the core encoding cannot pass unnoticed.
+//
+// The golden name is deliberately MULTI-BYTE UTF-8: it is the only cheap way to prove the length
+// prefix counts bytes rather than characters on both sides of the language boundary.
+
+/// `domain` offset within the till-open signing buffer.
+const T_DOMAIN_OFF: usize = 0;
+const T_PUBKEY_OFF: usize = TILL_OPEN_DOMAIN.len();
+const T_CENTS_OFF: usize = T_PUBKEY_OFF + PUBKEY_LEN;
+const T_NONCE_OFF: usize = T_CENTS_OFF + 8;
+const T_ISSUED_AT_OFF: usize = T_NONCE_OFF + NONCE_LEN;
+const T_NAME_LEN_OFF: usize = TILL_OPEN_FIXED_LEN;
+
+/// One till-open signing-buffer field (offset + len + endian), mirroring [`WithdrawFieldSpec`].
+#[derive(Serialize)]
+struct TillOpenFieldSpec {
+    offset: usize,
+    len: usize,
+    endian: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct TillOpenFields {
+    domain: TillOpenFieldSpec,
+    merchant_pubkey: TillOpenFieldSpec,
+    cents: TillOpenFieldSpec,
+    nonce: TillOpenFieldSpec,
+    issued_at: TillOpenFieldSpec,
+    name_len: TillOpenFieldSpec,
+}
+
+/// The golden signed till-open bytes, every `*_hex` derived from the real `dpay_core::TillOpen`.
+#[derive(Serialize)]
+struct GoldenTillOpen {
+    secret_hex: String,
+    merchant_pubkey_hex: String,
+    cents: u64,
+    nonce_hex: String,
+    issued_at: u64,
+    merchant_name: String,
+    signing_hex: String,
+    sig_hex: String,
+}
+
+#[derive(Serialize)]
+struct TillOpenDoc {
+    #[serde(rename = "_doc")]
+    doc: &'static str,
+    domain: &'static str,
+    domain_hex: String,
+    max_skew_secs: u64,
+    fixed_len: usize,
+    name_len_bytes: usize,
+    sig_len: usize,
+    fields: TillOpenFields,
+    golden: GoldenTillOpen,
+}
+
+/// Build the till-open golden. Pure (no I/O) so the unit test can compare it against the committed
+/// file. Reuses `key(3)` — the same golden signing key as the pay/withdraw/receipt goldens, so a
+/// reader can cross-reference the merchant's key across every document this emitter writes.
+fn till_open_doc() -> TillOpenDoc {
+    let secret = key(3);
+    let merchant_pubkey: [u8; PUBKEY_LEN] = secret.verifying_key().to_bytes();
+
+    // CHF 10.00 — the same price `dfx/till_wire.json` records for its golden charge, so the two
+    // documents describe the same imagined sale. Multi-byte name on purpose (see the note above).
+    const T_CENTS: u64 = 1_000;
+    let nonce = [42u8; NONCE_LEN];
+    const T_ISSUED_AT: u64 = 1_786_815_398; // stable, non-round unix seconds
+    let merchant_name = "Café Bahnhof ☕".to_string();
+
+    let open = TillOpen {
+        merchant_pubkey,
+        cents: T_CENTS,
+        nonce,
+        issued_at: T_ISSUED_AT,
+        merchant_name: merchant_name.clone(),
+    };
+    let signing = open.signing_bytes();
+    let sig = dpay_core::sign_till_open(&secret, &open).to_bytes();
+
+    TillOpenDoc {
+        doc: "The canonical bytes a merchant signs to ring up a charge on dpay's own OpenCryptoPay till, and the ONE statement of that encoding outside dpay_core::TillOpen. Emitted from the real core by `just wire-layout`; read back by crates/dpay-fixture (which rebuilds the golden struct from these offsets alone) and by scripts/check-wasm-core.mjs (which reproduces the buffer field-by-field in JS and checks the committed wasm's w_till_open_sig against sig_hex). The relay verifies with dpay_core::validate_till_open, so it shares the encoding rather than a copy of it. Same convention as dfx/wire_layout.json — regenerated when the encoding deliberately changes, never hand-edited to make a test pass.",
+        domain: "dpay-till-open-v1",
+        domain_hex: hex(TILL_OPEN_DOMAIN),
+        max_skew_secs: TILL_OPEN_MAX_SKEW_SECS,
+        fixed_len: TILL_OPEN_FIXED_LEN,
+        name_len_bytes: TILL_OPEN_NAME_LEN_BYTES,
+        sig_len: SIG_LEN,
+        fields: TillOpenFields {
+            domain: TillOpenFieldSpec { offset: T_DOMAIN_OFF, len: TILL_OPEN_DOMAIN.len(), endian: None },
+            merchant_pubkey: TillOpenFieldSpec { offset: T_PUBKEY_OFF, len: PUBKEY_LEN, endian: None },
+            cents: TillOpenFieldSpec { offset: T_CENTS_OFF, len: 8, endian: Some("le") },
+            nonce: TillOpenFieldSpec { offset: T_NONCE_OFF, len: NONCE_LEN, endian: None },
+            issued_at: TillOpenFieldSpec { offset: T_ISSUED_AT_OFF, len: 8, endian: Some("le") },
+            name_len: TillOpenFieldSpec { offset: T_NAME_LEN_OFF, len: TILL_OPEN_NAME_LEN_BYTES, endian: Some("le") },
+        },
+        golden: GoldenTillOpen {
+            secret_hex: hex(&secret.to_bytes()),
+            merchant_pubkey_hex: hex(&merchant_pubkey),
+            cents: T_CENTS,
+            nonce_hex: hex(&nonce),
+            issued_at: T_ISSUED_AT,
+            merchant_name,
+            signing_hex: hex(&signing),
+            sig_hex: hex(&sig),
+        },
+    }
+}
+
+/// Render the till-open golden as pretty JSON (the exact text the committed file holds). Shared by
+/// the emitter and the drift test, so "what we would write" and "what we compare" are one function.
+fn till_open_json() -> String {
+    serde_json::to_string_pretty(&till_open_doc())
+        .unwrap_or_else(|e| panic!("till-open JSON serialization failed: {e}"))
+}
+
+/// Write a golden document to `out`, creating its directory first (idempotent: overwrites). Shared
+/// by every emitter here so "where the goldens go and how they fail" is stated once. A path with no
+/// parent (`x.json`) or an empty one needs no mkdir — anything else that cannot be created panics
+/// with the path, because a golden that silently failed to write is worse than no golden.
+fn write_golden(out: &Path, contents: &str) {
+    match out.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => fs::create_dir_all(parent)
+            .unwrap_or_else(|e| panic!("mkdir {}: {e}", parent.display())),
+        _ => {}
+    }
+    fs::write(out, contents).unwrap_or_else(|e| panic!("write {}: {e}", out.display()));
+}
+
+/// Emit the till-open golden to `out`.
+fn emit_till_open(out: &Path) {
+    write_golden(out, &format!("{}\n", till_open_json()));
+}
+
+/// Emit the wire-layout JSON to `out`. Pretty-printed so a diff is reviewable. Returns the rendered
+/// JSON so `main` can log a short summary.
 fn emit_wire_layout(out: &Path) -> String {
     let layout = wire_layout();
     let json = serde_json::to_string_pretty(&layout).unwrap_or_else(|e| {
         panic!("wire-layout JSON serialization failed: {e}");
     });
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .unwrap_or_else(|e| panic!("mkdir {}: {e}", parent.display()));
-        }
-    }
-    fs::write(out, &json)
-        .unwrap_or_else(|e| panic!("write {}: {e}", out.display()));
+    write_golden(out, &json);
     json
 }
 
@@ -654,6 +791,23 @@ fn main() {
                 "  golden signing_hex={}… sig_hex={}…",
                 &l.golden.signing_hex.get(..16).unwrap_or(&l.golden.signing_hex),
                 &l.golden.sig_hex.get(..16).unwrap_or(&l.golden.sig_hex),
+            );
+        }
+        Some("till-open") => {
+            // Optional output path; default to `dfx/till_open_signing.json` (idempotent overwrite).
+            let out = args
+                .next()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("dfx/till_open_signing.json"));
+            emit_till_open(&out);
+            let d = till_open_doc();
+            eprintln!(
+                "wrote {} (domain={} fixed={}B skew=±{}s signing={}B)",
+                out.display(),
+                d.domain,
+                d.fixed_len,
+                d.max_skew_secs,
+                d.golden.signing_hex.len() / 2,
             );
         }
         _ => emit_dfx_args(),
@@ -899,6 +1053,92 @@ mod tests {
         assert!(
             dpay_core::verify_receipt(&public, &claim, &sig_arr),
             "golden receipt signature must verify under verify_receipt"
+        );
+    }
+
+    /// Path to the committed till-open golden, resolved from the crate rather than the cwd.
+    const TILL_OPEN_GOLDEN: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../dfx/till_open_signing.json");
+
+    /// The COMMITTED `dfx/till_open_signing.json` is byte-identical to what this emitter produces
+    /// from today's core. This is the drift alarm: change `TillOpen::signing_bytes`, the domain tag,
+    /// or the skew window without regenerating (`just wire-layout`) and the till's proof silently
+    /// stops matching the one the app signs — so it fails here instead.
+    #[test]
+    fn committed_till_open_golden_matches_the_core_this_build_links() {
+        let committed = fs::read_to_string(TILL_OPEN_GOLDEN)
+            .unwrap_or_else(|e| panic!("read {TILL_OPEN_GOLDEN}: {e} — run `just wire-layout`"));
+        assert_eq!(
+            committed,
+            format!("{}\n", till_open_json()),
+            "dfx/till_open_signing.json is stale — regenerate with `just wire-layout`"
+        );
+    }
+
+    /// Rebuild the golden `TillOpen` purely from the EMITTED offsets/lengths/endian, then assert the
+    /// core reproduces the same signing buffer and that the golden signature validates. Catches drift
+    /// between this document's documented layout and `TillOpen::signing_bytes()` — the same guard the
+    /// pay/withdraw/receipt goldens carry, and the reason `check-wasm-core.mjs` may trust the file.
+    #[test]
+    fn golden_till_open_layout_round_trips_through_real_signing_bytes() {
+        let doc = till_open_doc();
+        let g = &doc.golden;
+        let signing = hex::decode(&g.signing_hex).expect("signing_hex decodes");
+        assert_eq!(
+            signing.len(),
+            doc.fixed_len + doc.name_len_bytes + g.merchant_name.len(),
+            "signing buffer = fixed prefix + 4-byte name length + the name's BYTES"
+        );
+
+        // The domain tag sits at its emitted offset — the placement that keeps a signature made for
+        // any other dpay payload out of this verifier.
+        assert_eq!(
+            &signing[doc.fields.domain.offset..][..doc.fields.domain.len],
+            hex::decode(&doc.domain_hex).expect("domain_hex decodes").as_slice()
+        );
+
+        // Re-slice every field at the EMITTED offsets; a disagreement rebuilds a different TillOpen.
+        let merchant_pubkey: [u8; PUBKEY_LEN] = signing[doc.fields.merchant_pubkey.offset..]
+            [..PUBKEY_LEN]
+            .try_into()
+            .unwrap();
+        let cents =
+            u64::from_le_bytes(signing[doc.fields.cents.offset..][..8].try_into().unwrap());
+        let nonce: [u8; NONCE_LEN] =
+            signing[doc.fields.nonce.offset..][..NONCE_LEN].try_into().unwrap();
+        let issued_at =
+            u64::from_le_bytes(signing[doc.fields.issued_at.offset..][..8].try_into().unwrap());
+        let name_len = u32::from_le_bytes(
+            signing[doc.fields.name_len.offset..][..doc.fields.name_len.len].try_into().unwrap(),
+        ) as usize;
+        let name_off = doc.fields.name_len.offset + doc.fields.name_len.len;
+        let merchant_name = String::from_utf8(signing[name_off..][..name_len].to_vec())
+            .expect("the name field is UTF-8");
+
+        let rebuilt = TillOpen { merchant_pubkey, cents, nonce, issued_at, merchant_name };
+        assert_eq!(
+            hex(&rebuilt.signing_bytes()),
+            g.signing_hex,
+            "the emitted offsets must describe TillOpen::signing_bytes()"
+        );
+        assert_eq!(hex(&rebuilt.merchant_pubkey), g.merchant_pubkey_hex);
+        assert_eq!(rebuilt.cents, g.cents);
+        assert_eq!(rebuilt.issued_at, g.issued_at);
+        assert_eq!(rebuilt.merchant_name, g.merchant_name);
+
+        // The golden signature satisfies the acceptance rule the relay runs, at the golden instant.
+        let sig: [u8; SIG_LEN] =
+            hex::decode(&g.sig_hex).expect("sig_hex decodes").try_into().expect("64-byte signature");
+        assert_eq!(dpay_core::validate_till_open(&rebuilt, &sig, rebuilt.issued_at, false), Ok(()));
+        // …and is refused one second past the emitted window — the document's own skew number.
+        assert_eq!(
+            dpay_core::validate_till_open(
+                &rebuilt,
+                &sig,
+                rebuilt.issued_at + doc.max_skew_secs + 1,
+                false,
+            ),
+            Err(dpay_core::TillOpenError::Stale)
         );
     }
 }

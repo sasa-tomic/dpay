@@ -183,6 +183,39 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Merchant side: the detached signature proving this device holds the key its OpenCryptoPay
+     *  till account is derived from, so the relay can refuse a ring-up for a key the caller does not
+     *  own. The merchant pubkey is DERIVED from the seed inside Rust — never passed in, so there is
+     *  no mismatch to get wrong. `cents` is a raw-u64 decimal STRING (MC1); `issuedAt` is unix
+     *  seconds and must be inside the relay's skew window; `merchantName` is the CLAIMED display
+     *  name and is bound by the signature. Resolves the 64-byte signature as hex. */
+    @ReactMethod
+    fun tillOpenSignature(
+        secretHex: String,
+        cents: String,
+        nonceHex: String,
+        issuedAt: Double,
+        merchantName: String,
+        promise: Promise,
+    ) {
+        val centsU = rawU64(cents, "cents", promise) ?: return
+        try {
+            promise.resolve(
+                hex(
+                    uniffi.dpay_ffi.tillOpenSignature(
+                        unhex(secretHex),
+                        centsU,
+                        unhex(nonceHex),
+                        issuedAt.toLong().toULong(),
+                        merchantName,
+                    ),
+                ),
+            )
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     // --- IC user-principal rail (dpay-icp via UniFFI) ------------------------------------------------
     //
     // The rail moves funds at Account{owner: self_authenticating(user Ed25519 pubkey)} directly on

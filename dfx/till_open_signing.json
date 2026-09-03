@@ -1,0 +1,51 @@
+{
+  "_doc": "The canonical bytes a merchant signs to ring up a charge on dpay's own OpenCryptoPay till, and the ONE statement of that encoding outside dpay_core::TillOpen. Emitted from the real core by `just wire-layout`; read back by crates/dpay-fixture (which rebuilds the golden struct from these offsets alone) and by scripts/check-wasm-core.mjs (which reproduces the buffer field-by-field in JS and checks the committed wasm's w_till_open_sig against sig_hex). The relay verifies with dpay_core::validate_till_open, so it shares the encoding rather than a copy of it. Same convention as dfx/wire_layout.json — regenerated when the encoding deliberately changes, never hand-edited to make a test pass.",
+  "domain": "dpay-till-open-v1",
+  "domain_hex": "647061792d74696c6c2d6f70656e2d7631",
+  "max_skew_secs": 120,
+  "fixed_len": 81,
+  "name_len_bytes": 4,
+  "sig_len": 64,
+  "fields": {
+    "domain": {
+      "offset": 0,
+      "len": 17,
+      "endian": null
+    },
+    "merchant_pubkey": {
+      "offset": 17,
+      "len": 32,
+      "endian": null
+    },
+    "cents": {
+      "offset": 49,
+      "len": 8,
+      "endian": "le"
+    },
+    "nonce": {
+      "offset": 57,
+      "len": 16,
+      "endian": null
+    },
+    "issued_at": {
+      "offset": 73,
+      "len": 8,
+      "endian": "le"
+    },
+    "name_len": {
+      "offset": 81,
+      "len": 4,
+      "endian": "le"
+    }
+  },
+  "golden": {
+    "secret_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+    "merchant_pubkey_hex": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+    "cents": 1000,
+    "nonce_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
+    "issued_at": 1786815398,
+    "merchant_name": "Café Bahnhof ☕",
+    "signing_hex": "647061792d74696c6c2d6f70656e2d7631ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1e8030000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2aa6a3806a0000000011000000436166c3a9204261686e686f6620e29895",
+    "sig_hex": "fd7e1ca4eee4f2d7b6996e8debf7fb199602ef3bc3aef9d2adb640623f34d5ff05616742536126532fb88b1da02c0ce4f2ba6c9b52bf21ca39064af1e93e1b08"
+  }
+}

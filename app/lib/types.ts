@@ -111,6 +111,14 @@ export type DpayCoreApi = {
   // Device NFC radio state for the status chip: 'ready' | 'off' | 'unsupported' | 'unknown'.
   // Optional so an app built before the native method exists degrades to 'unknown' (chip hidden).
   nfcStatus?(): Promise<string>;
+  // Merchant side: the detached Ed25519 signature that proves this device holds the key its
+  // OpenCryptoPay till account is derived from, so `POST /api/v1/till` can refuse a ring-up for a
+  // key the caller does not own. The merchant pubkey is derived from `secretHex` inside the core —
+  // never passed in. `cents` is a raw-u64 decimal string; `issuedAt` is unix SECONDS and must be
+  // inside the relay's skew window (`dpay_core::TILL_OPEN_MAX_SKEW_SECS`); `merchantName` is the
+  // CLAIMED display name and is bound by the signature. Canonical bytes + the anti-replay rule:
+  // `dpay_core::TillOpen` (golden `dfx/till_open_signing.json`). Resolves 64-byte hex.
+  tillOpenSignature(secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string): Promise<string>;
   // Append one line to the on-device diagnostic log (`services/log.ts`). Resolves false when the
   // line could not be written — a logger must never reject and never throw on the money path.
   // Optional for the same reason as `nfcStatus`: builds without the native method simply have no
