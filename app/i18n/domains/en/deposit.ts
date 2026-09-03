@@ -484,7 +484,12 @@ export type WithdrawMessages = {
     refuseUnrecognised: (asset: string) => string;
     refuseMistypedIc: string;
     refuseMistypedLegacy: string;
-    /** Sending to yourself is legal and almost always a mistake — warn, never block. */
+    /** A subaccount of the user's OWN principal. Refused, not warned: dpay reads and signs exactly
+     *  one account per asset (owner + default subaccount), so funds parked at another subaccount of
+     *  ours are invisible here and unspendable from here — permanently. A stranger's subaccount is
+     *  paid normally; only our own is a dead end, so this names it and says there is nothing to do. */
+    refuseOwnSubaccount: string;
+    /** Sending to your own MAIN account is legal and almost always a mistake — warn, never block. */
     selfWarning: string;
     /** Amount row. */
     maxLabel: string;
@@ -591,6 +596,8 @@ export const withdrawEn: WithdrawMessages = {
     refuseUnrecognised: asset => `That doesn't look like an address ${asset} can be sent to.`,
     refuseMistypedIc: 'This Internet Computer address is incomplete or mistyped — check you copied all of it.',
     refuseMistypedLegacy: 'This ICP account address is incomplete or mistyped — check you copied all 64 characters.',
+    refuseOwnSubaccount:
+      "That's a subaccount of your own wallet, and dpay only shows and spends your main account — money sent there would stop appearing here. You already hold this asset: paste someone else's address to send it.",
     selfWarning: 'This is your own address. The funds come straight back and you still pay the fee.',
 
     maxLabel: 'Max',

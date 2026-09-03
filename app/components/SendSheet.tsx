@@ -172,11 +172,11 @@ export function SendSheet({
     if (text.length === 0) { setResolved(null); return; }
     let alive = true;
     (async () => {
-      const r = await resolveDestination(text, desc);
+      const r = await resolveDestination(text, desc, selfAccount?.principal ?? null);
       if (alive) setResolved(r);
     })();
     return () => { alive = false; };
-  }, [address, desc]);
+  }, [address, desc, selfAccount]);
 
   const raw = toUnits(amountStr, decimals);
   const overBalance = cmpRaw(raw, balance) > 0;
@@ -197,9 +197,12 @@ export function SendSheet({
     [raw, feeRaw, feeKnown],
   );
   const overTotal = cmpRaw(total ?? raw, balance) > 0;
+  // Our own MAIN account in either namespace. A subaccount of ours never reaches here — the
+  // resolver refuses it outright — so comparing the one destination string against our principal is
+  // the whole test on the ICRC side.
   const isSelf = !!resolved?.ok && !!selfAccount && (
-    (resolved.kind === 'icrc' && resolved.owner === selfAccount.principal && resolved.subaccountHex === '') ||
-    (resolved.kind === 'icp-legacy' && resolved.accountId === selfAccount.accountId)
+    (resolved.kind === 'icrc' && resolved.destination === selfAccount.principal) ||
+    (resolved.kind === 'icp-legacy' && resolved.destination === selfAccount.accountId)
   );
   // The native route is confirmed by WithdrawSheet's own button, not this one.
   const directRoute = resolved?.ok === true && resolved.kind !== 'native';
@@ -253,7 +256,8 @@ export function SendSheet({
       let out: RailOutcome;
       if (resolved.kind === 'icp-legacy') {
         prepared = await prepareLegacyTransfer(identity.secretHex, {
-          ledger: desc.ledger, toAccountId: resolved.accountId, amountE8s: raw, feeE8s: feeRaw ?? '',
+          // Again the one string the screen showed — see `ResolvedDestination`.
+          ledger: desc.ledger, toAccountId: resolved.destination, amountE8s: raw, feeE8s: feeRaw ?? '',
         });
         out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500}, decodeLegacyReply);
       } else {
@@ -261,7 +265,10 @@ export function SendSheet({
         // against; the memo is a fresh random 16 bytes purely to keep two identical sends (same
         // destination, same amount) from colliding under the ledger's duplicate check.
         prepared = await prepareTransfer(identity.secretHex, {currencies: [desc]}, {
-          toPrincipal: resolved.owner, amount: raw, currency: desc.currency, nonceHex: randomMemoHex(),
+          // The SAME string the field showed, the review showed and the address book will save.
+          // The rail parses owner + subaccount out of it, so a `principal.subaccount` destination
+          // is credited to the account the user actually read.
+          toPrincipal: resolved.destination, amount: raw, currency: desc.currency, nonceHex: randomMemoHex(),
         });
         out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500});
       }
@@ -469,10 +476,18 @@ export function SendSheet({
 }
 
 /** What the typed destination resolved to: a usable route with its canonical destination, or the
- *  precise reason it cannot be used with this asset. */
+ *  precise reason it cannot be used with this asset.
+ *
+ *  EVERY usable branch carries exactly ONE address value, `destination`. That is deliberate and it
+ *  is the money invariant of this screen: `destination` is what the field shows, what the review
+ *  shows, what the address book saves AND what the rail signs, so there is no second field a call
+ *  site could sign instead of the one the user read. The ICRC route used to carry a parsed
+ *  `{owner, subaccountHex}` beside the text, and the send passed `owner` — which paid the owner's
+ *  DEFAULT subaccount while the screen displayed the subaccount account the user pasted. The parts
+ *  now stay local to the resolver; `services/rail.ts` re-parses the one string it is given. */
 type ResolvedDestination =
-  | {ok: true; kind: 'icrc'; destination: string; owner: string; subaccountHex: string}
-  | {ok: true; kind: 'icp-legacy'; destination: string; accountId: string}
+  | {ok: true; kind: 'icrc'; destination: string}
+  | {ok: true; kind: 'icp-legacy'; destination: string}
   | {ok: true; kind: 'native'; destination: string; family: MinterFamily}
   | {ok: false; message: string};
 
@@ -483,8 +498,22 @@ type ResolvedDestination =
  *
  * `native` routes never reach here — the Pay tab hands those to WithdrawSheet — so a native route
  * arriving is a wiring bug and is refused rather than silently mishandled.
+ *
+ * `selfPrincipal` is this wallet's own owner principal, used for ONE refusal: a subaccount OF THIS
+ * WALLET. dpay addresses exactly one account per asset — owner + default subaccount — everywhere it
+ * reads (`railBalanceOf`, the relay's balance and history queries) and everywhere it signs (every
+ * transfer goes out with `from_subaccount` empty). So money parked at another subaccount of our own
+ * principal is money this wallet can neither show nor ever spend again, which is why that one
+ * destination fails closed while a STRANGER's subaccount is paid normally: theirs is an account
+ * their wallet can read. `null` (the self-derivation failed — logged by the caller, and the
+ * self-send warning is absent for the same reason) skips the check rather than refusing a
+ * legitimate external subaccount with a message that would be a guess.
  */
-export async function resolveDestination(text: string, desc: CurrencyDescriptor): Promise<ResolvedDestination> {
+export async function resolveDestination(
+  text: string,
+  desc: CurrencyDescriptor,
+  selfPrincipal: string | null,
+): Promise<ResolvedDestination> {
   const assetName = isTestnetCurrency(desc) ? testnetDisplayName(desc) : displayName(desc);
   const shape = detectAddressShape(text);
   const routed = routeForShape(shape, desc);
@@ -502,8 +531,8 @@ export async function resolveDestination(text: string, desc: CurrencyDescriptor)
   }
   if (routed.route.kind === 'icp-legacy') {
     try {
-      const accountId = await DpayCore.icpValidateAccountId(text);
-      return {ok: true, kind: 'icp-legacy', destination: accountId, accountId};
+      // Canonical lowercase from the core — the one spelling shown, saved and signed.
+      return {ok: true, kind: 'icp-legacy', destination: await DpayCore.icpValidateAccountId(text)};
     } catch (e: unknown) {
       console.warn('legacy account id rejected:', e instanceof Error ? e.message : String(e));
       return {ok: false, message: M.withdraw.send.refuseMistypedLegacy};
@@ -512,9 +541,15 @@ export async function resolveDestination(text: string, desc: CurrencyDescriptor)
   if (routed.route.kind === 'icrc') {
     try {
       const parts = await DpayCore.icpValidateIcrcAccount(text);
+      if (parts.subaccountHex !== '' && parts.owner === selfPrincipal) {
+        return {ok: false, message: M.withdraw.send.refuseOwnSubaccount};
+      }
       // The canonical spelling is what gets shown, saved, and signed — one address, one spelling.
+      // The core accepts only the spec-canonical textual account, so the pasted text lowercased IS
+      // the canonical spelling of `{owner, subaccountHex}`; the parts are not carried any further,
+      // so nothing downstream can sign an account other than this string.
       const destination = parts.subaccountHex ? text.trim().toLowerCase() : parts.owner;
-      return {ok: true, kind: 'icrc', destination, owner: parts.owner, subaccountHex: parts.subaccountHex};
+      return {ok: true, kind: 'icrc', destination};
     } catch (e: unknown) {
       console.warn('IC account rejected:', e instanceof Error ? e.message : String(e));
       return {ok: false, message: M.withdraw.send.refuseMistypedIc};

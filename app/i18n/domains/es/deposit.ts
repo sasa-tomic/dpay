@@ -241,6 +241,8 @@ export const withdrawEs: WithdrawMessages = {
     refuseUnrecognised: asset => `Esto no parece una dirección a la que se pueda enviar ${asset}.`,
     refuseMistypedIc: 'Esta dirección de Internet Computer está incompleta o mal escrita: comprueba que la has copiado entera.',
     refuseMistypedLegacy: 'Esta dirección de cuenta ICP está incompleta o mal escrita: comprueba que has copiado los 64 caracteres.',
+    refuseOwnSubaccount:
+      'Esa es una subcuenta de tu propia cartera, y dpay solo muestra y usa tu cuenta principal: el dinero enviado ahí dejaría de aparecer aquí. Ya tienes este activo; pega la dirección de otra persona para enviarlo.',
     selfWarning: 'Esta es tu propia dirección. Los fondos vuelven directamente a ti y aun así pagas la comisión.',
 
     maxLabel: 'Máx.',

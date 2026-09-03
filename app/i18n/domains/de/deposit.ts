@@ -241,6 +241,8 @@ export const withdrawDe: WithdrawMessages = {
     refuseUnrecognised: asset => `Das sieht nicht nach einer Adresse aus, an die ${asset} gesendet werden kann.`,
     refuseMistypedIc: 'Diese Internet-Computer-Adresse ist unvollständig oder vertippt — prüfe, ob du sie ganz kopiert hast.',
     refuseMistypedLegacy: 'Diese ICP-Kontoadresse ist unvollständig oder vertippt — prüfe, ob du alle 64 Zeichen kopiert hast.',
+    refuseOwnSubaccount:
+      'Das ist ein Unterkonto deiner eigenen Wallet, und dpay zeigt und verwendet nur dein Hauptkonto — dorthin gesendetes Geld würde hier nicht mehr auftauchen. Du besitzt dieses Guthaben bereits: füge die Adresse einer anderen Person ein, um zu senden.',
     selfWarning: 'Das ist deine eigene Adresse. Das Geld kommt direkt zurück, und die Gebühr zahlst du trotzdem.',
 
     maxLabel: 'Max',

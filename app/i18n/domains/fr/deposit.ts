@@ -242,6 +242,8 @@ export const withdrawFr: WithdrawMessages = {
     refuseUnrecognised: asset => `Cela ne ressemble pas à une adresse vers laquelle ${asset} peut être envoyé.`,
     refuseMistypedIc: 'Cette adresse Internet Computer est incomplète ou mal saisie — vérifiez que vous l’avez copiée en entier.',
     refuseMistypedLegacy: 'Cette adresse de compte ICP est incomplète ou mal saisie — vérifiez que vous avez bien copié les 64 caractères.',
+    refuseOwnSubaccount:
+      'C’est un sous-compte de votre propre portefeuille, et dpay n’affiche et n’utilise que votre compte principal — les fonds envoyés là n’apparaîtraient plus ici. Vous détenez déjà cet actif : collez l’adresse de quelqu’un d’autre pour l’envoyer.',
     selfWarning: 'C’est votre propre adresse. Les fonds vous reviennent directement et les frais restent à votre charge.',
 
     maxLabel: 'Max',

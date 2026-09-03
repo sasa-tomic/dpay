@@ -41,8 +41,16 @@ export type RailOutcome =
   | {kind: 'unknown'}; // not terminal in budget / unreachable — honest pending
 
 /** Build + sign the icrc1_transfer envelope from a scanned request. Throws with a user-presentable
- *  message on hard local errors (unsupported asset, no ledger, bad clock) — the caller shows the
- *  error and does NOT fall through to any handoff (nothing was signed). */
+ *  message on hard local errors (unsupported asset, no ledger, unreadable destination, bad clock) —
+ *  the caller shows the error and does NOT fall through to any handoff (nothing was signed).
+ *
+ *  `toPrincipal` is the destination as ICRC-1 TEXT: a bare owner principal (which IS the default
+ *  subaccount) or the `owner-checksum.subaccount` form an exchange or a subaccount-using wallet
+ *  hands out. It is parsed HERE, into the `{owner, subaccount}` pair the ledger credits, precisely
+ *  so the ONE string the screen showed, the address book saved and this function signs is the same
+ *  string — an account cannot be displayed and a different one paid. Signing only `owner` and
+ *  discarding the subaccount would credit the owner's DEFAULT account: same wallet, different
+ *  account, and nothing dpay could undo. */
 export async function prepareTransfer(
   secretHex: string,
   catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>},
@@ -50,7 +58,8 @@ export async function prepareTransfer(
 ): Promise<RailPrepared> {
   const desc = catalog.currencies.find(c => c.currency === req.currency);
   if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
-  const argHex = await DpayCore.icpTransferArg(req.toPrincipal, '', '', req.amount, desc.fee ?? '', req.nonceHex);
+  const to = await DpayCore.icpValidateIcrcAccount(req.toPrincipal);
+  const argHex = await DpayCore.icpTransferArg(to.owner, to.subaccountHex, '', req.amount, desc.fee ?? '', req.nonceHex);
   // Clock-gated: refuses to sign when the IC clock is unreachable or skewed vs the device.
   const expiry = await icStampExpiry(secretHex);
   const signed = await DpayCore.icpSignUpdate(secretHex, desc.ledger, 'icrc1_transfer', argHex, expiry);
@@ -133,6 +142,11 @@ export async function prepareNfcTransfer(
   const desc = catalog.currencies.find(c => c.currency === req.currency);
   if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
   const toPrincipal = await DpayCore.icpPrincipalFromPubkey(req.toHex);
+  // The destination subaccount is empty because the 132-byte wire HAS no subaccount field: it
+  // addresses the payee by raw Ed25519 pubkey, and `self_authenticating(pubkey)` names an owner
+  // whose default account is the only one that request could ever mean. This is the wire's own
+  // truth, not a dropped value — unlike a typed/pasted destination, which carries its subaccount
+  // as text and is parsed out of it by `prepareTransfer`.
   const argHex = await DpayCore.icpTransferArg(toPrincipal, '', '', req.amount, desc.fee ?? '', req.nonceHex);
   const updateExpiryNs = (BigInt(req.expiry) * 1_000_000_000n).toString();
   const signed = await DpayCore.icpSignUpdate(secretHex, desc.ledger, 'icrc1_transfer', argHex, updateExpiryNs);

@@ -10,6 +10,9 @@
  *  - `resolveDestination`'s RETURN VALUE — which spelling of the address is what gets shown, saved
  *    and signed. The ICRC-1 subaccount form and a case-significant base58 address are the two ways
  *    this can silently pay the wrong account, and neither appears in any flow.
+ *  - the DESTINATION HANDED TO THE RAIL, asserted against the string the review rendered. The
+ *    resolver's output alone was tested before, and the send passed a different field of it — the
+ *    gap that shipped a subaccount send to the owner's default account.
  *  - the refusal branches no flow types: a Solana address, unparseable text, and a native-namespace
  *    address that its own family validator rejects.
  *  - the Max button, which is untested anywhere, together with the overspend guard it exists to
@@ -163,26 +166,43 @@ describe('resolveDestination — the canonical destination each route commits to
     // The user pastes with stray whitespace and the wrong case; the core is the canonicaliser, and
     // its answer — not the keystrokes — is what gets shown, saved and signed.
     const pasted = `  ${K2.toUpperCase()}\n`;
-    const r = await resolveDestination(pasted, VCHF);
-    expect(r).toEqual({ok: true, kind: 'icrc', destination: K2, owner: K2, subaccountHex: ''});
+    const r = await resolveDestination(pasted, VCHF, OISY);
+    expect(r).toEqual({ok: true, kind: 'icrc', destination: K2});
     expect(DpayCore.icpValidateIcrcAccount).toHaveBeenCalledWith(pasted);
   });
 
-  test('the ICRC-1 subaccount form keeps the WHOLE account text — the owner alone is a different account', async () => {
-    // `principal-checksum.subaccount` names a non-default subaccount. Committing to `owner` here
-    // would silently retarget the transfer at the default subaccount: same wallet, wrong account.
+  test('the ICRC-1 subaccount form resolves to the WHOLE account text, and to nothing else', async () => {
+    // `principal-checksum.subaccount` names a non-default subaccount, and the owner alone is a
+    // DIFFERENT account of the same wallet. The resolved value carries exactly one address field,
+    // so there is no `owner` beside it for a call site to sign instead of what the screen showed —
+    // which is precisely how this shipped paying the default subaccount (fixed 2026-09-04).
     jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: K2, subaccountHex: '01'});
-    const r = await resolveDestination(K2_SUBACCOUNT.toUpperCase(), VCHF);
-    expect(r).toEqual({ok: true, kind: 'icrc', destination: K2_SUBACCOUNT, owner: K2, subaccountHex: '01'});
+    const r = await resolveDestination(K2_SUBACCOUNT.toUpperCase(), VCHF, OISY);
+    expect(r).toEqual({ok: true, kind: 'icrc', destination: K2_SUBACCOUNT});
     if (!r.ok || r.kind !== 'icrc') throw new Error('expected an icrc route');
-    expect(r.destination).not.toBe(r.owner);
+    expect(r.destination).not.toBe(K2);
+  });
+
+  test('a subaccount of OUR OWN principal is refused — this wallet could never see or spend it again', async () => {
+    // dpay reads one account per asset (owner + default subaccount) and signs every transfer with
+    // an empty `from_subaccount`, so our own non-default subaccount is a one-way trip: invisible in
+    // the balance, absent from history, unspendable. A STRANGER's subaccount is fine (the test
+    // above pays one) — theirs is an account their own wallet reads.
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: OISY, subaccountHex: '01'});
+    expect(await resolveDestination(`${OISY}-6cc627i.1`, VCHF, OISY)).toEqual({
+      ok: false,
+      message: M.withdraw.send.refuseOwnSubaccount,
+    });
+    // Our own MAIN account is NOT this refusal — it is the (warned, permitted) self-send.
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: OISY, subaccountHex: ''});
+    expect(await resolveDestination(OISY, VCHF, OISY)).toEqual({ok: true, kind: 'icrc', destination: OISY});
   });
 
   test('a 64-hex account identifier on ICP takes the legacy route, and never touches the ICRC parser', async () => {
     // Disjoint namespaces: an account identifier is a one-way hash, so asking the principal parser
     // about it could only ever produce a wrong answer or a misleading refusal.
-    const r = await resolveDestination(K2_ACCOUNT_ID.toUpperCase(), ICP);
-    expect(r).toEqual({ok: true, kind: 'icp-legacy', destination: K2_ACCOUNT_ID, accountId: K2_ACCOUNT_ID});
+    const r = await resolveDestination(K2_ACCOUNT_ID.toUpperCase(), ICP, OISY);
+    expect(r).toEqual({ok: true, kind: 'icp-legacy', destination: K2_ACCOUNT_ID});
     expect(DpayCore.icpValidateAccountId).toHaveBeenCalledWith(K2_ACCOUNT_ID.toUpperCase());
     expect(DpayCore.icpValidateIcrcAccount).not.toHaveBeenCalled();
   });
@@ -190,7 +210,7 @@ describe('resolveDestination — the canonical destination each route commits to
   test('a native Bitcoin address is kept VERBATIM — base58 case is part of the address', async () => {
     // Trimmed, never re-spelled: lower-casing a base58 address produces a different (invalid, or
     // worse, valid-but-other) destination, and the minter is the final authority on it anyway.
-    const r = await resolveDestination(`  ${BTC_LEGACY}\n`, CKBTC);
+    const r = await resolveDestination(`  ${BTC_LEGACY}\n`, CKBTC, OISY);
     expect(r).toEqual({ok: true, kind: 'native', destination: BTC_LEGACY, family: 'CkBtcUtxo'});
     if (!r.ok) throw new Error('expected a native route');
     expect(r.destination).not.toBe(BTC_LEGACY.toLowerCase());
@@ -204,14 +224,14 @@ describe('resolveDestination — refusals name what the address is', () => {
   test('a Solana address on an IC asset is named as Solana and pointed at the right network', async () => {
     // dpay never swaps, so a base58 Solana address is always a wrong-chain paste — and saying
     // "Solana" is the whole difference between an actionable refusal and a shrug.
-    expect(await resolveDestination(SOL_ADDR, VCHF)).toEqual({
+    expect(await resolveDestination(SOL_ADDR, VCHF, OISY)).toEqual({
       ok: false,
       message: M.withdraw.send.refuseWrongChain('Solana', 'VCHF', 'Internet Computer'),
     });
   });
 
   test('text that belongs to no address namespace refuses by naming the asset it cannot be sent', async () => {
-    expect(await resolveDestination('pay me back please', VCHF)).toEqual({
+    expect(await resolveDestination('pay me back please', VCHF, OISY)).toEqual({
       ok: false,
       message: M.withdraw.send.refuseUnrecognised('VCHF'),
     });
@@ -222,7 +242,7 @@ describe('resolveDestination — refusals name what the address is', () => {
     // Shape routes it to the Bitcoin burn; the family's own validator then rejects it. Before this
     // second stage lived here, a short-but-plausible address opened the burn form and only refused
     // afterwards — one refusal in a different place from every other.
-    expect(await resolveDestination(BTC_TRUNCATED, CKBTC)).toEqual({
+    expect(await resolveDestination(BTC_TRUNCATED, CKBTC, OISY)).toEqual({
       ok: false,
       message: M.withdraw.badAddress('BTC'),
     });
@@ -325,6 +345,56 @@ describe('SendSheet — sending to yourself warns but never blocks', () => {
     await typeAddress(tree, SELF_ACCOUNT_ID);
     expect(field(tree).status).toEqual({text: M.withdraw.send.selfWarning, tone: 'warn'});
     expect(DpayCore.icpAccountIdFromPrincipal).toHaveBeenCalledWith(OISY, '');
+
+    act(() => { tree.unmount(); });
+  });
+});
+
+// --- the destination SIGNED is the destination SHOWN ----------------------------------------------
+
+describe('SendSheet — a subaccount destination is paid, never quietly redirected to the main account', () => {
+  test('the account text on screen is the exact string handed to the rail', async () => {
+    // The shipped defect (fixed 2026-09-04): the field, the review and the receipt all rendered
+    // `principal-checksum.subaccount` while the send passed the OWNER, crediting the same wallet's
+    // DEFAULT account. Nothing asserted the argument, only the resolver, which is why it shipped.
+    // The assertion is deliberately made against the STRING THE SCREEN RENDERED rather than a
+    // constant: that is the invariant — what was read and what is signed are one value.
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: K2, subaccountHex: '01'});
+    jest.mocked(prepareTransfer).mockResolvedValue({
+      ledger: VCHF.ledger!, envelopeHex: 'ab', requestIdHex: 'cd', amount: '100000000', currency: 7, memoHex: 'ef',
+    });
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '77'});
+    const tree = await mountSend();
+    await typeAddress(tree, K2_SUBACCOUNT);
+    await typeAmount(tree, '1.00000000');
+    const shown = textOf(tree, 'send-review-to');
+    await act(async () => { confirm(tree).onPress(); });
+
+    expect(prepareTransfer).toHaveBeenCalledWith(
+      IDENTITY.secretHex,
+      {currencies: [VCHF]},
+      expect.objectContaining({toPrincipal: shown, amount: '100000000', currency: 7}),
+    );
+    expect(shown).toBe(K2_SUBACCOUNT); // …and that one value is the whole account, not the owner
+    expect(textOf(tree, 'send-destination')).toBe(K2_SUBACCOUNT); // the receipt names it too
+
+    act(() => { tree.unmount(); });
+  });
+
+  test('a subaccount of THIS wallet is refused on screen, and nothing is ever signed', async () => {
+    // The one subaccount dpay must not pay: its own. Refused rather than warned — the balance
+    // read, the history filter and every signature this app builds address the default subaccount
+    // only, so the money would be gone from this wallet's point of view for good.
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: OISY, subaccountHex: '01'});
+    const tree = await mountSend();
+    await typeAddress(tree, `${OISY}-6cc627i.1`);
+    await typeAmount(tree, '1.00000000');
+    expect(field(tree).status).toEqual({text: M.withdraw.send.refuseOwnSubaccount, tone: 'bad'});
+    expect(confirm(tree).disabled).toBe(true);
+    expect(present(tree, 'send-review')).toBe(false);
+
+    await act(async () => { confirm(tree).onPress(); }); // the gate holds even if the press lands
+    expect(prepareTransfer).not.toHaveBeenCalled();
 
     act(() => { tree.unmount(); });
   });

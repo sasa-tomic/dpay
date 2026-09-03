@@ -1,5 +1,7 @@
 /**
- * rail.ts — truthful pollTransfer outcomes.
+ * rail.ts — the signed transfer argument, and truthful pollTransfer outcomes.
+ *
+ *  - `prepareTransfer` addresses the ICRC-1 ACCOUNT it was given, subaccount included.
  *
  *  - Duplicate is settled at duplicate_of: the ledger proves the exact transfer already executed.
  *  - Other decoded TransferErrors carry their structured variant for honest UI reasons.
@@ -16,6 +18,7 @@ jest.mock('../services/native', () => ({
     icpDecodeTransferResult: jest.fn(),
     icpDecodeMinterOk: jest.fn(),
     icpPrincipalFromPubkey: jest.fn(),
+    icpValidateIcrcAccount: jest.fn(),
     icpTransferArg: jest.fn(),
     icpSignUpdate: jest.fn(),
     icpSignReadState: jest.fn(),
@@ -34,12 +37,61 @@ jest.mock('../services/icp', () => ({
 }));
 jest.mock('../services/relay', () => ({fetchWithTimeout: jest.fn()}));
 
-import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
+import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, prepareTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
 import {DpayCore} from '../services/native';
 import {icPollRequestStatus, icPollSignedRequestStatus, icStampExpiry, icSubmit} from '../services/icp';
 import {fetchWithTimeout} from '../services/relay';
 
 const PREPARED = {ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', requestIdHex: 'cd'.repeat(32)};
+
+// The ONE assertion that would have caught the 2026-09-04 defect: what the SIGNED transfer argument
+// addresses. Everything above it (the resolver's verdict, the review row, the address book) had
+// tests; the argument did not, so a destination the user read as `owner.subaccount` was signed as
+// `owner` — the same wallet's DEFAULT account — and shipped.
+describe('prepareTransfer — the account signed is the account it was handed', () => {
+  const SECRET = '11'.repeat(32);
+  const NONCE = 'aa'.repeat(16);
+  const CATALOG = {currencies: [{currency: 7, ledger: PREPARED.ledger, fee: '10000'}]};
+  const OWNER = 'k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae';
+  const ACCOUNT = `${OWNER}-6cc627i.1`; // the ICRC-1 textual form naming subaccount 0x…01
+
+  const prepare = (toPrincipal: string) =>
+    prepareTransfer(SECRET, CATALOG, {toPrincipal, amount: '100', currency: 7, nonceHex: NONCE});
+
+  beforeEach(() => {
+    jest.mocked(DpayCore.icpTransferArg).mockReset().mockResolvedValue('arg' as never);
+    jest.mocked(DpayCore.icpSignUpdate).mockReset()
+      .mockResolvedValue({envelopeHex: 'envelope', requestIdHex: PREPARED.requestIdHex} as never);
+    jest.mocked(icStampExpiry).mockReset().mockResolvedValue('1800000000000000000' as never);
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockReset();
+  });
+
+  test('a subaccount destination credits THAT subaccount', async () => {
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: OWNER, subaccountHex: '01'} as never);
+    const prepared = await prepare(ACCOUNT);
+    expect(DpayCore.icpValidateIcrcAccount).toHaveBeenCalledWith(ACCOUNT);
+    // Argument order: (toOwner, toSubaccount, fromSubaccount, amount, fee, memo). The SECOND slot
+    // is the whole defect: it used to be a hardcoded ''.
+    expect(DpayCore.icpTransferArg).toHaveBeenCalledWith(OWNER, '01', '', '100', '10000', NONCE);
+    expect(DpayCore.icpSignUpdate).toHaveBeenCalledWith(SECRET, PREPARED.ledger, 'icrc1_transfer', 'arg', '1800000000000000000');
+    expect(prepared.memoHex).toBe(NONCE);
+  });
+
+  test('a bare owner principal credits the DEFAULT subaccount', async () => {
+    // The other half of the pair: the common case must still address `subaccount: None`, which is
+    // what every dpay-issued receive address, deposit and balance read means.
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockResolvedValue({owner: OWNER, subaccountHex: ''} as never);
+    await prepare(OWNER);
+    expect(DpayCore.icpTransferArg).toHaveBeenCalledWith(OWNER, '', '', '100', '10000', NONCE);
+  });
+
+  test('a destination the core cannot read is thrown, never signed around', async () => {
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockRejectedValue(new Error('bad checksum'));
+    await expect(prepare('k2t6j-nope')).rejects.toThrow('bad checksum');
+    expect(DpayCore.icpTransferArg).not.toHaveBeenCalled();
+    expect(DpayCore.icpSignUpdate).not.toHaveBeenCalled();
+  });
+});
 
 test('offline NFC preparation signs update + reusable read_state without fetching a clock', async () => {
   jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue('receiver-principal' as never);
