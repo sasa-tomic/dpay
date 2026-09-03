@@ -68,6 +68,43 @@ Not estimated in effort here — this is the shape, to be turned into units next
 - **Onboarding = none.** Install, pick the asset, show your own account. Anything more is a
   regression against the whole point.
 
+## Decisions taken 2026-09-03 (founder), and the contract they imply
+
+- **v1 accepts VCHF only, priced 1:1 with CHF.** The merchant enters CHF 10; the payer pays exactly
+  `10.00000000` VCHF. No price feed, no oracle, no rate for dpay to stand behind, and no rounding
+  argument at a checkout — the whole pricing problem is deleted rather than solved. EURC gives the
+  EU the same deal when it lands. Other assets stay out of v1 precisely because they would require
+  quoting a rate.
+- **The provider endpoint is HOSTED ON THE RELAY**, not on the merchant's device. A shop phone
+  behind NAT is unreachable, and the point of implementing an open standard is that a Cake, Phoenix
+  or Binance user can pay a dpay till. The relay never touches funds: it publishes a price and a
+  destination the MERCHANT owns, and verifies arrival. No custody, no new counterparty.
+- **The merchant creates a charge in the dpay app first**, with a relay-served web page later. Both
+  drive the same endpoints, so the second is additive.
+
+### Verification: scan the merchant's own history, never trust a reported index
+
+The one design point worth stating loudly, because today's failure is the argument for it.
+
+DFX verifies by taking the block index the payer reports and looking it up — and it looks it up on
+the wrong ledger, which is why a correct VCHF payment was refused and the money lost. **dpay's
+provider must not accept a reported identifier as the source of truth at all.** It already has the
+right primitive: `transactions_on_ledger` (`crates/dpay-relay/src/ledger/api.rs`), the same
+exact-memo merchant reconciliation the Receive tab uses (flows 97/98). Verification is therefore:
+read the MERCHANT's own incoming transfers on the charge's ledger, and look for one that matches the
+charge's amount, arriving after the charge was created, not already consumed by another charge.
+
+Three properties follow for free, and each is a defect DFX has:
+
+- **Wrong-ledger lookups are impossible** — the ledger is the charge's own, chosen by us, never
+  inferred from a payer-supplied parameter.
+- **The submission is IDEMPOTENT.** Re-reporting a payment re-reads history and reaches the same
+  answer, so a retry is safe and a timeout is not fatal. DFX's one-shot burns both the quote and the
+  transaction id on any failure, which is the loss path the payer side is built around; as the
+  provider, dpay simply does not have to inflict it.
+- **A payer that reports nothing still gets credited**, because arrival is observed rather than
+  announced. The reported `tx` is a hint that lets us answer immediately instead of on the next poll.
+
 ## Open questions to settle before building
 
 - Which assets a merchant may accept, and whether a merchant may accept several at once (the

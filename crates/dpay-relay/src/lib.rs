@@ -22,6 +22,7 @@
 pub mod app;
 pub mod catalog;
 pub mod ledger;
+pub mod till;
 
 /// The agent-build faucet's relay-side cooldown — the resurrection of the old canister faucet's
 /// rate limit (window, granularity and verbatim error text). Compiled whenever the PRODUCTION

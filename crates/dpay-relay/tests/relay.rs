@@ -2245,3 +2245,168 @@ async fn wasm_core_served_and_unknown_path_is_404() {
         "unknown wasm-ish path must 404"
     );
 }
+
+// --- the merchant till: dpay AS an OpenCryptoPay provider ---------------------------------------
+// `crates/dpay-relay/src/till.rs` owns the rules and tests them as pure functions; what is asserted
+// here is the HTTP surface a THIRD-PARTY wallet meets — the paths the standard dictates, the field
+// names it parses, and the two behaviours that distinguish this provider from the measured one:
+// settlement is observed on the ledger rather than announced by the payer, and reporting is safe to
+// retry. The wire body is additionally pinned as a golden that dpay's own payer parser reads
+// (`app/__tests__/tillWire.test.ts`), so the two sides of the seam cannot drift apart.
+
+/// Ring up a charge and return `(id, provider_url)`.
+async fn open_till(state: &AppState, pubkey_hex: &str, cents: u64) -> Value {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/till")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::HOST, "till.example")
+        .body(Body::from(
+            serde_json::json!({"merchant_pubkey": pubkey_hex, "merchant_name": "Test Shop", "cents": cents})
+                .to_string(),
+        ))
+        .unwrap();
+    let (status, body) = call(state, req).await;
+    assert_eq!(status, StatusCode::OK, "ringing up a charge: {body}");
+    body
+}
+
+#[tokio::test]
+async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
+    let fake = FakeIc::from_catalog();
+    let state = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(fake.clone());
+
+    // The merchant is a dpay wallet: their account is DERIVED from their key, so they cannot name
+    // one they could not sign for, and this relay never holds it.
+    let merchant = SigningKey::from_bytes(&[9u8; 32]);
+    let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
+    let merchant_account = Principal::self_authenticating_ed25519(&merchant_pk).to_text();
+
+    let opened = open_till(&state, &hex::encode(merchant_pk), 1_000).await;
+    let id = opened["id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("pl_"), "the link id is the standard's shape: {id}");
+    // CHF 10 is ten francs of a franc-denominated token. No rate anywhere.
+    assert_eq!(opened["amount"], "10.");
+    assert_eq!(opened["asset"], "VCHF");
+    assert_eq!(opened["merchant"], merchant_account);
+    assert_eq!(opened["url"], format!("http://till.example/v1/lnurlp/{id}"));
+
+    // --- step 2: the payment details, at the standard's own path ---------------------------------
+    let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(details["tag"], "payRequest");
+    assert_eq!(details["displayName"], "Test Shop");
+    assert_eq!(details["standard"], "OpenCryptoPay");
+    // The callback MUST carry `/cb/`: a wallet derives the submission URL by swapping it for
+    // `/tx/`, so this segment is protocol, not decoration.
+    let callback = details["callback"].as_str().unwrap().to_string();
+    assert!(callback.contains("/cb/"), "the callback must be swappable to /tx/: {callback}");
+    // The asymmetry the measured provider has and every parser must handle: the fiat ask is a JSON
+    // NUMBER while the per-asset amount is a decimal STRING, trailing bare point and all.
+    assert_eq!(details["requestedAmount"]["asset"], "CHF");
+    assert_eq!(details["requestedAmount"]["amount"], 10.0);
+    let offers = &details["transferAmounts"][0];
+    assert_eq!(offers["method"], "InternetComputer");
+    assert_eq!(offers["available"], true);
+    assert_eq!(offers["assets"][0]["asset"], "VCHF");
+    assert_eq!(offers["assets"][0]["amount"], "10.");
+    let quote = details["quote"]["id"].as_str().unwrap().to_string();
+    // One accepted expiry spelling — ISO-8601 UTC with the Z. A local-time spelling would be read
+    // as device-local by a lenient wallet: up to 14 hours of skew on a 300-second quote.
+    let expiry = details["quote"]["expiration"].as_str().unwrap();
+    assert!(expiry.ends_with('Z') && expiry.contains('T'), "expiry spelling: {expiry}");
+
+    // --- step 3: where to send it ----------------------------------------------------------------
+    let cb = format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=VCHF");
+    let (status, transfer) = call(&state, get_req(&cb)).await;
+    assert_eq!(status, StatusCode::OK);
+    // The echo is the only integrity signal the answer carries, because the URI names no asset.
+    assert_eq!(transfer["blockchain"], "InternetComputer");
+    let uri = transfer["uri"].as_str().unwrap();
+    // The LIVE URI shape, naming the ledger EXPLICITLY — which is exactly what the measured
+    // provider fails to honour on its own verification side.
+    assert!(uri.starts_with("icp:"), "{uri}");
+    assert!(uri.contains(&format!("/transfer?to={merchant_account}&amount=10.")), "{uri}");
+
+    // A pair this till does not serve is refused rather than quoted — quoting it would mean
+    // holding an exchange rate, which v1 deliberately does not.
+    let (status, body) = call(
+        &state,
+        get_req(&format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=ICP")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["message"], "Invalid method or asset");
+
+    // --- step 4: reporting, BEFORE the money exists ----------------------------------------------
+    // The payer claims to have paid and has not. A provider that trusted the report would credit a
+    // sale for nothing; this one reads the ledger and answers an honest, retryable PENDING.
+    let tx = format!("/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF&tx=999999");
+    let (status, body) = call(&state, get_req(&tx)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "a lying payer must not credit a sale: {body}");
+    assert_eq!(body["status"], "PENDING");
+    let (_, status_body) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
+    assert!(status_body["paid"].is_null(), "nothing may be credited before a transfer exists");
+
+    // --- the money actually arrives --------------------------------------------------------------
+    // Credited to the merchant's principal on the VCHF ledger — the same place a signed
+    // icrc1_transfer from any wallet would land it.
+    let merchant_principal = Principal::self_authenticating_ed25519(&merchant_pk);
+    fake.faucet_credit(Currency::from(7u32), &merchant_principal, 1_000_000_000);
+
+    // The payer reports again. Same call, same parameters — a RETRY, which the measured provider
+    // makes fatal and this one makes free.
+    let (status, body) = call(&state, get_req(&tx)).await;
+    assert_eq!(status, StatusCode::OK, "the retry settles: {body}");
+    assert_eq!(body["status"], "OK");
+    assert_eq!(body["paid"]["amount_raw"], "1000000000");
+
+    // …and it is idempotent: reporting a third time answers the same, and never re-credits.
+    let (status, again) = call(&state, get_req(&tx)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(again["paid"], body["paid"]);
+
+    // The merchant's own screen sees it too, re-derived from the ledger rather than from memory.
+    let (_, merchant_view) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
+    assert_eq!(merchant_view["paid"]["amount_raw"], "1000000000");
+    assert_eq!(merchant_view["amount"], "10.");
+}
+
+#[tokio::test]
+async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words() {
+    let state = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(FakeIc::from_catalog());
+
+    // An unknown link is the error envelope, not the payment-link payload — the two DIFFERENT 404s
+    // a wallet must tell apart (one means "ask the cashier", this one means "this code is stale").
+    let (status, body) = call(&state, get_req("/v1/lnurlp/pl_nope?timeout=0")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["message"], "Payment link not found");
+    assert_eq!(body["statusCode"], 404);
+
+    // A quote we never issued cannot buy a destination.
+    let merchant_pk: [u8; 32] = SigningKey::from_bytes(&[11u8; 32]).verifying_key().to_bytes();
+    let opened = open_till(&state, &hex::encode(merchant_pk), 250).await;
+    let id = opened["id"].as_str().unwrap();
+    let (status, body) = call(
+        &state,
+        get_req(&format!("/v1/lnurlp/cb/{id}?quote=plq_invented&method=InternetComputer&asset=VCHF")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["message"], "No actual quote with ID found");
+
+    // A charge of nothing is not a charge.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/till")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::json!({"merchant_pubkey": hex::encode(merchant_pk), "cents": 0}).to_string(),
+        ))
+        .unwrap();
+    let (status, _) = call(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // CHF 2.50 keeps its cents on the wire.
+    assert_eq!(opened["amount"], "2.5");
+}

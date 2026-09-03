@@ -69,6 +69,10 @@ use crate::ledger::{Ledger, LedgerError, TxnRecord, U64String};
 #[derive(Clone)]
 pub struct AppState {
     pub ledger: Arc<dyn Ledger>,
+    /// The merchant tills this relay is serving (`crate::till`). In memory by design: a charge is
+    /// worth less than the hour it lives, and settlement is re-derived from the ledger on every
+    /// read — so a restart costs a cashier a re-ring, never a payment and never a double credit.
+    pub tills: crate::till::SharedTills,
     /// Whether `POST /api/v1/faucet` (which *mints*) is served. Gates the test-helpers faucet
     /// (`DPAY_ENABLE_FAUCET`); defaults to `true` — harmless against the offline fixtures it
     /// ships with. The agent-build faucet is NOT gated by this flag: its rate limit is the
@@ -97,6 +101,7 @@ impl AppState {
     pub fn new(ledger: Arc<dyn Ledger>) -> Self {
         AppState {
             ledger,
+            tills: Arc::new(Mutex::new(crate::till::TillStore::default())),
             faucet_enabled: Arc::new(Mutex::new(true)),
             #[cfg(feature = "agent")]
             faucet_cooldown: Arc::new(Mutex::new(crate::faucet::FaucetCooldown::with_window(
@@ -162,7 +167,10 @@ pub fn app(state: AppState) -> Router {
         .route("/currencies", get(currencies))
         .route("/onramp/ckerc20", get(ckerc20_onramp))
         .route("/health", get(health))
-        .route("/version", get(version));
+        .route("/version", get(version))
+        // The merchant's own surface: ring up a charge, then poll it.
+        .route("/till", axum::routing::post(crate::till::open_charge))
+        .route("/till/{id}", get(crate::till::charge_status));
 
     // Test-only value fixtures (test-helpers, WITHOUT agent — the e2e/test-relay build): the
     // faucet credits the fake-IC gateway at the user's principal, and the single-currency
@@ -207,6 +215,12 @@ pub fn app(state: AppState) -> Router {
         .route("/privacy", get(privacy_page))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/shots/{name}", get(screenshot))
+        // The OpenCryptoPay provider surface, at the paths the STANDARD dictates rather than under
+        // this relay's own namespace: a wallet derives the submission URL from the callback by
+        // swapping `/cb/` for `/tx/`, so these segments are part of the protocol.
+        .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
+        .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
+        .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
         .nest("/api/v1", api);
 
     // Test-only fake-IC /api/v2 gateway (test-helpers): the offline e2e stand-in for icp-api.io,
