@@ -8,8 +8,25 @@
 ## NEXT SESSION — work order (unblocked; do these first)
 
 0. **THE NEXT MILESTONE — dpay as the MERCHANT side of OpenCryptoPay** (founder decision,
-   2026-09-02). Plan, rejected alternatives and open questions:
-   [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md).
+   2026-09-02). Plan, rejected alternatives, the 2026-09-03 scope decisions and the verification
+   design: [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md).
+   **IN PROGRESS.** Done 2026-09-03 (`6ba82b1`): the relay SERVES a till — `crates/dpay-relay/src/till.rs`
+   plus the standard's three routes (`/v1/lnurlp/{id}`, `/cb/{id}`, `/tx/{id}`) and the merchant's
+   two (`POST /api/v1/till`, `GET /api/v1/till/{id}`). VCHF-only at 1:1 with CHF, so no price feed
+   exists anywhere in it; settlement is OBSERVED on the merchant's own ledger history rather than
+   announced by the payer (which is why it cannot repeat the DFX defect), and reporting is
+   idempotent. 11 pure-rule tests + 2 HTTP journey tests, `just verify` EXIT=0.
+   Next, in order:
+   - **A cross-seam golden.** The relay's step-2/step-3 bodies parsed by dpay's OWN payer parser, so
+     the two halves cannot drift. NOT provable through the app in e2e: the payer requires https on
+     the callback and the e2e relay is `http://127.0.0.1`, and weakening that gate to make a test
+     pass would be the wrong trade. A committed golden read by both sides is the way (the shape
+     `dfx/catalog_truth.json` already uses).
+   - **Charge mode in the app** (founder decision: app first, relay web page after). Needs a
+     decision on where LNURL bech32 ENCODE lives — the app has only the decoder today, and a future
+     relay-served page would want it in Rust. Put it in the core if both need it.
+   - **NFC.** The differentiator: the till arms the reader, a dpay payer taps. OCP itself lists NFC
+     terminals as "in development", and the IC rail's HCE hop is already proven on hardware.
    Two operational tails from the same session, both founder ops, neither blocking the milestone:
    - ~~**PROD SERVES A BUILD THAT CANNOT PAY ANY TILL.**~~ **STALE — corrected 2026-09-02.** It was
      true when written (prod was at `7499b30`, before the parser fix `8912db5`); the founder
