@@ -29,6 +29,10 @@
 //!                           DPAY_IC_URL is a loopback/local address. See `AgentLedger::connect_with`.
 //!   DPAY_ENABLE_FAUCET      (test-helpers build only) serve `POST /api/v1/faucet`, which mints
 //!                           demo funds on the fake-IC gateway (default: true on `memory`)
+//!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's five routes (`POST /api/v1/till`,
+//!                           `GET /api/v1/till/{id}`, `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`).
+//!                           Default FALSE, on every build and every ledger — why, and what has
+//!                           to land before it goes back on: the gate in `app.rs`.
 //!   DPAY_CONTROLLER_SEED    (ic, agent build) hex-encoded 32-byte Ed25519 seed of the facade
 //!                           canister's CONTROLLER key. When set, the relay's agent signs its
 //!                           calls with this identity and `POST /api/v1/faucet` is served: the
@@ -65,7 +69,7 @@ async fn main() {
 
     let ledger = build_ledger(&cfg).await;
     let apk = load_apk();
-    let state = AppState::new(ledger.clone()).with_apk(apk);
+    let state = AppState::new(ledger.clone()).with_apk(apk).with_till(cfg.till);
     // IC-rail cutover (test-helpers / memory mode only): attach the fake-IC `/api/v2` gateway.
     // The app signs envelopes and POSTs them HERE instead of icp-api.io; the gateway verifies the
     // real envelope signature and moves principal-keyed balances. Prod (`agent` mode) never builds
@@ -85,6 +89,19 @@ async fn main() {
         );
         #[cfg(not(feature = "test-helpers"))]
         eprintln!("dpay-relay: warn: DPAY_ENABLE_FAUCET is set, but the faucet route only exists in the test-helpers build.");
+    }
+    // The till's state belongs in the log the founder reads (`docker logs`), because "off" is the
+    // whole point of the flag and an image that silently came up serving it would be the incident.
+    if cfg.till {
+        println!(
+            "! OpenCryptoPay till ENABLED (DPAY_ENABLE_TILL) — POST /api/v1/till and /v1/lnurlp/* \
+             are served, and ringing up a charge needs no credential."
+        );
+    } else {
+        println!(
+            "OpenCryptoPay till OFF — /api/v1/till and /v1/lnurlp/* are not registered (404). \
+             Set DPAY_ENABLE_TILL=true to serve them."
+        );
     }
 
     let listener = tokio::net::TcpListener::bind(cfg.addr)
@@ -155,6 +172,7 @@ struct Config {
     addr: SocketAddr,
     ledger: LedgerCfg,
     faucet: bool,
+    till: bool,
 }
 
 impl Config {
@@ -222,10 +240,20 @@ impl Config {
             None => matches!(ledger, LedgerCfg::Memory),
         };
 
+        // The till is served only when asked for, on every ledger and every build — a charge is rung
+        // up with no credential at all, so the default cannot depend on anything (see app.rs). A
+        // malformed value is a config error, not a silent "off": an operator who meant to turn it on
+        // must hear about it.
+        let till = match non_empty("DPAY_ENABLE_TILL") {
+            Some(s) => parse_bool("DPAY_ENABLE_TILL", &s)?,
+            None => false,
+        };
+
         Ok(Config {
             addr,
             ledger,
             faucet,
+            till,
         })
     }
 }

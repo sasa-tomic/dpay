@@ -32,6 +32,7 @@ use dpay_icp::icrc::{
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{decode_read_state_tree, request_status, RequestStatus};
+use dpay_relay::till::{iso8601_utc, QUOTE_TTL_SECS};
 use dpay_relay::{app, ic_gateway::FakeIc, AppState, FakeLedger};
 use ed25519_dalek::SigningKey;
 
@@ -2251,18 +2252,39 @@ async fn wasm_core_served_and_unknown_path_is_404() {
 // here is the HTTP surface a THIRD-PARTY wallet meets — the paths the standard dictates, the field
 // names it parses, and the two behaviours that distinguish this provider from the measured one:
 // settlement is observed on the ledger rather than announced by the payer, and reporting is safe to
-// retry. The wire body is additionally pinned as a golden that dpay's own payer parser reads
-// (`app/__tests__/tillWire.test.ts`), so the two sides of the seam cannot drift apart.
+// retry. The bodies themselves are pinned as a golden: `dfx/till_wire.json`.
 
-/// Ring up a charge and return `(id, provider_url)`.
-async fn open_till(state: &AppState, pubkey_hex: &str, cents: u64) -> Value {
+/// A relay that SERVES the till, with the fake-IC gateway behind it (the merchant's incoming
+/// history is what settles a charge). The `with_till` is explicit and load-bearing: without it the
+/// five routes are not registered at all — see `the_till_is_not_served_unless_the_relay_is_told_to`,
+/// which is the reason the flag exists.
+fn till_state() -> (AppState, Arc<FakeIc>) {
+    let fake = FakeIc::from_catalog();
+    let state = AppState::new(Arc::new(FakeLedger::new()))
+        .with_fake_ic(fake.clone())
+        .with_till(true);
+    (state, fake)
+}
+
+/// Ring up a charge. `host`/`proto` are the pair every absolute URL in the answers is built from —
+/// the `Host` a wallet's request carries and the `X-Forwarded-Proto` the tunnel in front of prod
+/// sets — so a caller can ask for the http origin a local run has or the https one a payer meets.
+async fn open_till(
+    state: &AppState,
+    pubkey_hex: &str,
+    name: &str,
+    cents: u64,
+    host: &str,
+    proto: &str,
+) -> Value {
     let req = Request::builder()
         .method("POST")
         .uri("/api/v1/till")
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::HOST, "till.example")
+        .header(header::HOST, host)
+        .header("x-forwarded-proto", proto)
         .body(Body::from(
-            serde_json::json!({"merchant_pubkey": pubkey_hex, "merchant_name": "Test Shop", "cents": cents})
+            serde_json::json!({"merchant_pubkey": pubkey_hex, "merchant_name": name, "cents": cents})
                 .to_string(),
         ))
         .unwrap();
@@ -2271,10 +2293,20 @@ async fn open_till(state: &AppState, pubkey_hex: &str, cents: u64) -> Value {
     body
 }
 
+/// A GET carrying the same origin pair, for the one provider route that builds absolute URLs.
+fn till_get(uri: &str, host: &str, proto: &str) -> Request<Body> {
+    Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header(header::HOST, host)
+        .header("x-forwarded-proto", proto)
+        .body(Body::empty())
+        .unwrap()
+}
+
 #[tokio::test]
 async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
-    let fake = FakeIc::from_catalog();
-    let state = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(fake.clone());
+    let (state, fake) = till_state();
 
     // The merchant is a dpay wallet: their account is DERIVED from their key, so they cannot name
     // one they could not sign for, and this relay never holds it.
@@ -2282,7 +2314,7 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
     let merchant_account = Principal::self_authenticating_ed25519(&merchant_pk).to_text();
 
-    let opened = open_till(&state, &hex::encode(merchant_pk), 1_000).await;
+    let opened = open_till(&state, &hex::encode(merchant_pk), "Test Shop", 1_000, "till.example", "http").await;
     let id = opened["id"].as_str().unwrap().to_string();
     assert!(id.starts_with("pl_"), "the link id is the standard's shape: {id}");
     // CHF 10 is ten francs of a franc-denominated token. No rate anywhere.
@@ -2374,7 +2406,7 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
 
 #[tokio::test]
 async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words() {
-    let state = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(FakeIc::from_catalog());
+    let (state, _fake) = till_state();
 
     // An unknown link is the error envelope, not the payment-link payload — the two DIFFERENT 404s
     // a wallet must tell apart (one means "ask the cashier", this one means "this code is stale").
@@ -2385,7 +2417,7 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
 
     // A quote we never issued cannot buy a destination.
     let merchant_pk: [u8; 32] = SigningKey::from_bytes(&[11u8; 32]).verifying_key().to_bytes();
-    let opened = open_till(&state, &hex::encode(merchant_pk), 250).await;
+    let opened = open_till(&state, &hex::encode(merchant_pk), "Test Shop", 250, "till.example", "http").await;
     let id = opened["id"].as_str().unwrap();
     let (status, body) = call(
         &state,
@@ -2409,4 +2441,245 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
 
     // CHF 2.50 keeps its cents on the wire.
     assert_eq!(opened["amount"], "2.5");
+}
+
+/// The till is served ONLY by a relay that was told to serve it, and "not served" means the five
+/// routes do not exist — the gate is at registration, so no till handler is reachable at all.
+///
+/// The two halves ride the SAME five requests: a relay with the till on answers every one of them
+/// (which is what makes the requests well-formed, the charge live and the quote real), and a
+/// DEFAULT relay — plain `AppState::new`, the shape `main` builds without `DPAY_ENABLE_TILL` —
+/// refuses all five. The refusal is pinned as a BARE 404: an empty body is axum's own answer for a
+/// path it has no route for, whereas every 404 this till can produce carries the provider's
+/// `{statusCode, message, error}` envelope (the test above pins that). The empty body is therefore
+/// the proof that no handler ran, rather than a handler politely declining.
+#[tokio::test]
+async fn the_till_is_not_served_unless_the_relay_is_told_to() {
+    let merchant_pk: [u8; 32] = SigningKey::from_bytes(&[13u8; 32]).verifying_key().to_bytes();
+
+    // A serving relay, used to mint the exact URLs a wallet and a merchant screen would call.
+    let (serving, _fake) = till_state();
+    let opened = open_till(&serving, &hex::encode(merchant_pk), "Test Shop", 500, "till.example", "http").await;
+    let id = opened["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let (status, details) =
+        call(&serving, till_get(&format!("/v1/lnurlp/{id}?timeout=0"), "till.example", "http")).await;
+    assert_eq!(status, StatusCode::OK, "minting a quote to call the callback with: {details}");
+    let quote = details["quote"]["id"].as_str().expect("a quote carries an id").to_string();
+
+    // The whole till surface, as its two callers reach it: the merchant's ring-up and poll, and the
+    // standard's three payer steps. Rebuilt per call because a `Request` is consumed by the router.
+    let surface = || {
+        vec![
+            (
+                "POST /api/v1/till".to_string(),
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/till")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::HOST, "till.example")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "merchant_pubkey": hex::encode(merchant_pk),
+                            "merchant_name": "Test Shop",
+                            "cents": 500,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            ),
+            (format!("GET /api/v1/till/{id}"), get_req(&format!("/api/v1/till/{id}"))),
+            (
+                format!("GET /v1/lnurlp/{id}"),
+                till_get(&format!("/v1/lnurlp/{id}?timeout=0"), "till.example", "http"),
+            ),
+            (
+                format!("GET /v1/lnurlp/cb/{id}"),
+                get_req(&format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=VCHF")),
+            ),
+            (
+                format!("GET /v1/lnurlp/tx/{id}"),
+                get_req(&format!(
+                    "/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF&tx=9f1c"
+                )),
+            ),
+        ]
+    };
+
+    // Served: each of the five reaches its handler. WHAT each answers is pinned by the journey and
+    // golden tests; all that matters here is that these exact requests are not 404s by construction.
+    for (what, req) in surface() {
+        let (status, _headers, body) = call_raw(&serving, req).await;
+        assert_ne!(status, StatusCode::NOT_FOUND, "{what} must be served when the till is on");
+        assert!(!body.is_empty(), "{what}: a till handler always answers with a body");
+    }
+
+    // Not served: the same five against a relay that never asked for the till.
+    let unserved = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(FakeIc::from_catalog());
+    for (what, req) in surface() {
+        let (status, _headers, body) = call_raw(&unserved, req).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{what} must not exist unless the till is turned on");
+        assert!(
+            body.is_empty(),
+            "{what}: a BARE 404 is the router refusing — a body would mean a till handler ran"
+        );
+    }
+}
+
+// --- the provider half of the wire golden --------------------------------------------------------
+// What the golden is, why it exists and how each half reads it: `dfx/till_wire.json` (`_doc`).
+
+/// The golden. `include_str!` fails the BUILD when it is missing — the loudest failure available.
+const TILL_WIRE: &str = include_str!("../../../dfx/till_wire.json");
+
+/// A value the provider mints fresh on every call, checked against the shape its pinned counterpart
+/// STATES — same prefix through the `_`, same length, lowercase-hex tail — before the golden's own
+/// is substituted for it below. A normalisation that asked nothing of what it replaced would pin
+/// nothing at all: `pl_` could become any string on earth and still compare equal.
+fn assert_minted_like(observed: &str, golden: &str, what: &str) {
+    fn split<'a>(s: &'a str, what: &str, side: &str) -> (&'a str, &'a str) {
+        match s.split_once('_') {
+            Some(parts) => parts,
+            None => panic!("{what}: the {side} id must be `<prefix>_<hex>`, got {s}"),
+        }
+    }
+    let (observed_prefix, observed_tail) = split(observed, what, "observed");
+    let (golden_prefix, golden_tail) = split(golden, what, "golden");
+    assert_eq!(observed_prefix, golden_prefix, "{what}: prefix");
+    assert_eq!(observed_tail.len(), golden_tail.len(), "{what}: length ({observed})");
+    assert!(
+        observed_tail.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+        "{what}: the tail must be lowercase hex, got {observed}"
+    );
+}
+
+/// A deadline the provider states, checked against its own derivation rather than merely its shape:
+/// it must be `iso8601_utc(t + QUOTE_TTL_SECS)` for one of the seconds `t` the request could have
+/// been served in. That pins the VALUE without putting a clock seam in the provider. The golden's
+/// own instant is held to the same spelling by its length here; the payer's strict reader owns the
+/// rest of it (`app/__tests__/tillWire.test.ts`).
+fn assert_deadline(observed: &str, golden: &str, from_secs: u64, to_secs: u64, what: &str) {
+    let expected: Vec<String> = (from_secs..=to_secs).map(|t| iso8601_utc(t + QUOTE_TTL_SECS)).collect();
+    assert!(
+        expected.iter().any(|e| e == observed),
+        "{what}: {observed} must be one of {expected:?}"
+    );
+    assert_eq!(observed.len(), golden.len(), "{what}: the golden must spell an instant the till spells");
+}
+
+/// The observed body with every freshly-minted value replaced by the golden's own, rendered
+/// canonically for comparison. Substituted as TEXT because the payment-link id is embedded in the
+/// `url` and `callback` strings as well as living in its own field, so a field-by-field swap would
+/// leave a second spelling of it behind and the comparison would fail for the wrong reason.
+fn pinned(observed: &Value, subs: &[(&str, &str)]) -> String {
+    let mut text = observed.to_string();
+    for (from, to) in subs {
+        text = text.replace(from, to);
+    }
+    let value: Value = serde_json::from_str(&text).expect("substituting an id must leave valid JSON");
+    serde_json::to_string_pretty(&value).expect("a JSON value renders")
+}
+
+/// The golden's own copy of a body, rendered the same way.
+fn golden_body(golden: &Value, key: &str) -> String {
+    serde_json::to_string_pretty(&golden[key]).expect("a JSON value renders")
+}
+
+#[tokio::test]
+async fn till_wire_matches_the_golden_the_payer_parses() {
+    let golden: Value = serde_json::from_str(TILL_WIRE).expect("dfx/till_wire.json must be valid JSON");
+    let field = |path: &[&str]| -> String {
+        let mut at = &golden;
+        for key in path {
+            at = &at[*key];
+        }
+        at.as_str()
+            .unwrap_or_else(|| panic!("dfx/till_wire.json must carry {} as a string", path.join(".")))
+            .to_string()
+    };
+    let (host, proto) = (field(&["input", "host"]), field(&["input", "forwarded_proto"]));
+    let pubkey_hex = field(&["input", "merchant_pubkey"]);
+    let merchant_name = field(&["input", "merchant_name"]);
+    let cents = golden["input"]["cents"].as_u64().expect("input.cents must be a number");
+    let pk = <[u8; 32]>::try_from(hex::decode(&pubkey_hex).expect("input.merchant_pubkey is hex").as_slice())
+        .expect("input.merchant_pubkey is 32 bytes");
+
+    let (state, fake) = till_state();
+
+    // --- what the merchant's own screen gets, and the URL its QR carries --------------------------
+    let opened = open_till(&state, &pubkey_hex, &merchant_name, cents, &host, &proto).await;
+    let charge_id = opened["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let golden_charge = field(&["open", "id"]);
+    assert_minted_like(&charge_id, &golden_charge, "the payment-link id");
+    assert_eq!(
+        pinned(&opened, &[(charge_id.as_str(), golden_charge.as_str())]),
+        golden_body(&golden, "open"),
+        "the merchant's ring-up answer drifted from dfx/till_wire.json"
+    );
+
+    // --- step 2: the payment details a wallet parses ----------------------------------------------
+    let details_at = now_ns() / 1_000_000_000;
+    let (status, details) =
+        call(&state, till_get(&format!("/v1/lnurlp/{charge_id}?timeout=0"), &host, &proto)).await;
+    assert_eq!(status, StatusCode::OK, "step 2: {details}");
+    let served_at = now_ns() / 1_000_000_000;
+    let quote_id = details["quote"]["id"].as_str().expect("a quote carries an id").to_string();
+    let expiration = details["quote"]["expiration"].as_str().expect("a quote carries an expiry").to_string();
+    let golden_quote = field(&["details", "quote", "id"]);
+    assert_minted_like(&quote_id, &golden_quote, "the quote id");
+    assert_deadline(&expiration, &field(&["details", "quote", "expiration"]), details_at, served_at, "the quote expiry");
+    assert_eq!(
+        pinned(
+            &details,
+            &[
+                (charge_id.as_str(), golden_charge.as_str()),
+                (quote_id.as_str(), golden_quote.as_str()),
+                (expiration.as_str(), &field(&["details", "quote", "expiration"])),
+            ],
+        ),
+        golden_body(&golden, "details"),
+        "the step-2 body drifted from dfx/till_wire.json"
+    );
+
+    // --- step 3: where the money goes -------------------------------------------------------------
+    let called_at = now_ns() / 1_000_000_000;
+    let (status, transfer) = call(
+        &state,
+        get_req(&format!("/v1/lnurlp/cb/{charge_id}?quote={quote_id}&method=InternetComputer&asset=VCHF")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "step 3: {transfer}");
+    let answered_at = now_ns() / 1_000_000_000;
+    let expiry_date = transfer["expiryDate"].as_str().expect("a transfer instruction carries an expiry").to_string();
+    assert_deadline(&expiry_date, &field(&["callback", "expiryDate"]), called_at, answered_at, "the transfer expiry");
+    assert_eq!(
+        pinned(
+            &transfer,
+            &[
+                (charge_id.as_str(), golden_charge.as_str()),
+                (expiry_date.as_str(), &field(&["callback", "expiryDate"])),
+            ],
+        ),
+        golden_body(&golden, "callback"),
+        "the step-3 body drifted from dfx/till_wire.json"
+    );
+
+    // --- step 4: the answer before the transfer has been seen --------------------------------------
+    // Nothing minted here, so the body is compared as served.
+    let submit = format!("/v1/lnurlp/tx/{charge_id}?quote={quote_id}&method=InternetComputer&asset=VCHF&tx=9f1c");
+    let (status, pending) = call(&state, get_req(&submit)).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "step 4: {pending}");
+    assert_eq!(
+        serde_json::to_string_pretty(&pending).expect("a JSON value renders"),
+        golden_body(&golden, "submit_pending"),
+        "the step-4 body drifted from dfx/till_wire.json"
+    );
+
+    // --- the one fact no body on this wire carries -------------------------------------------------
+    // `amount_raw` is what the decimal MEANS: the raw VCHF units the payer's converter has to land
+    // on. Pinned by paying EXACTLY that many to the merchant and watching this charge credit — so
+    // the number in the file is the till's own arithmetic rather than one copied by hand.
+    let raw: u64 = field(&["amount_raw"]).parse().expect("amount_raw is an integer");
+    fake.faucet_credit(Currency::from(7u32), &user_principal(&pk), u128::from(raw));
+    let (status, paid) = call(&state, get_req(&submit)).await;
+    assert_eq!(status, StatusCode::OK, "the golden's raw amount must be what credits this sale: {paid}");
 }

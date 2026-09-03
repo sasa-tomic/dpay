@@ -1,0 +1,63 @@
+{
+  "_doc": "The bodies dpay's own OpenCryptoPay till puts on the wire (crates/dpay-relay/src/till.rs), recorded from the relay's real HTTP surface for the one charge described by `input`, and the SINGLE statement of those bodies anywhere in the tree. It exists because the two halves of this seam cannot be driven against each other: the payer refuses any provider URL that is not https (app/services/opencryptopay.ts) while the offline harness serves the relay at http://127.0.0.1, so no end-to-end run can carry a body from the provider to the parser without weakening a real security property. Both sides read THIS file instead — the provider half is `till_wire_matches_the_golden_the_payer_parses` in crates/dpay-relay/tests/relay.rs (drives the routes with `input`, then substitutes the three kinds of value the provider mints fresh on every call — the payment-link id, the quote id, and the two expiry instants — each checked against the shape and the derivation its pinned counterpart states, before comparing), and the payer half is app/__tests__/tillWire.test.ts (runs dpay's own parsers over these bodies). Change the wire on either side and both go red. `amount_raw` is the one fact no body carries: the raw VCHF units the decimal amount means, which is what the payer's converter must land on and what credits the sale. Same convention as dfx/catalog_truth.json — a committed cross-language pin, regenerated from the relay when the wire deliberately changes, never hand-edited to make a test pass.",
+  "version": 1,
+  "input": {
+    "merchant_pubkey": "197f6b23e16c8532c6abc838facd5ea789be0c76b2920334039bfa8b3d368d61",
+    "merchant_name": "Bahnhof Kiosk",
+    "cents": 1000,
+    "host": "till.example",
+    "forwarded_proto": "https"
+  },
+  "amount_raw": "1000000000",
+  "open": {
+    "amount": "10.",
+    "asset": "VCHF",
+    "id": "pl_0fb592d7d6e7ff98",
+    "merchant": "2ltju-loorm-ztq3h-u32q2-h75yh-ptk3i-rix6u-l7wwi-5imci-z2rpz-pqe",
+    "url": "https://till.example/v1/lnurlp/pl_0fb592d7d6e7ff98"
+  },
+  "details": {
+    "callback": "https://till.example/v1/lnurlp/cb/pl_0fb592d7d6e7ff98",
+    "displayName": "Bahnhof Kiosk",
+    "displayQr": true,
+    "maxSendable": 1000,
+    "metadata": "[[\"text/plain\",\"Bahnhof Kiosk - CHF 10.\"]]",
+    "minSendable": 1000,
+    "possibleStandards": [
+      "OpenCryptoPay"
+    ],
+    "quote": {
+      "expiration": "2026-09-03T21:52:27.000Z",
+      "id": "plq_ec6c70b4b63c14d6"
+    },
+    "requestedAmount": {
+      "amount": 10.0,
+      "asset": "CHF"
+    },
+    "standard": "OpenCryptoPay",
+    "tag": "payRequest",
+    "transferAmounts": [
+      {
+        "assets": [
+          {
+            "amount": "10.",
+            "asset": "VCHF"
+          }
+        ],
+        "available": true,
+        "method": "InternetComputer",
+        "minFee": 0
+      }
+    ]
+  },
+  "callback": {
+    "blockchain": "InternetComputer",
+    "expiryDate": "2026-09-03T21:52:27.000Z",
+    "hint": "Transfer the exact amount to the address in the URI, then report the transaction. Reporting is idempotent: if it fails, retry — the payment is confirmed by reading the ledger, not by this call.",
+    "uri": "icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=2ltju-loorm-ztq3h-u32q2-h75yh-ptk3i-rix6u-l7wwi-5imci-z2rpz-pqe&amount=10."
+  },
+  "submit_pending": {
+    "message": "no matching transfer seen yet — safe to retry",
+    "status": "PENDING"
+  }
+}

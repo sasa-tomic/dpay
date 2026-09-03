@@ -73,6 +73,10 @@ pub struct AppState {
     /// worth less than the hour it lives, and settlement is re-derived from the ledger on every
     /// read — so a restart costs a cashier a re-ring, never a payment and never a double credit.
     pub tills: crate::till::SharedTills,
+    /// Whether the till's five routes are REGISTERED at all — see the gate in [`app`]. Read once,
+    /// while the router is built, so it cannot change under a live request. Set by
+    /// [`AppState::with_till`]; `false` for a state that does not ask.
+    till_enabled: bool,
     /// Whether `POST /api/v1/faucet` (which *mints*) is served. Gates the test-helpers faucet
     /// (`DPAY_ENABLE_FAUCET`); defaults to `true` — harmless against the offline fixtures it
     /// ships with. The agent-build faucet is NOT gated by this flag: its rate limit is the
@@ -102,6 +106,7 @@ impl AppState {
         AppState {
             ledger,
             tills: Arc::new(Mutex::new(crate::till::TillStore::default())),
+            till_enabled: false,
             faucet_enabled: Arc::new(Mutex::new(true)),
             #[cfg(feature = "agent")]
             faucet_cooldown: Arc::new(Mutex::new(crate::faucet::FaucetCooldown::with_window(
@@ -118,6 +123,13 @@ impl AppState {
     #[cfg(feature = "test-helpers")]
     pub fn with_fake_ic(mut self, fake_ic: Arc<crate::ic_gateway::FakeIc>) -> Self {
         self.fake_ic = Some(fake_ic);
+        self
+    }
+
+    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the five routes gated in [`app`].
+    /// Must be set BEFORE the router is built, because that is where the gate is read.
+    pub fn with_till(mut self, enabled: bool) -> Self {
+        self.till_enabled = enabled;
         self
     }
 
@@ -167,10 +179,31 @@ pub fn app(state: AppState) -> Router {
         .route("/currencies", get(currencies))
         .route("/onramp/ckerc20", get(ckerc20_onramp))
         .route("/health", get(health))
-        .route("/version", get(version))
+        .route("/version", get(version));
+
+    // --- the OpenCryptoPay till, OFF unless the operator asks for it -----------------------------
+    //
+    // The five routes below (two here, the standard's three on the root router) are registered only
+    // when `DPAY_ENABLE_TILL` is set — founder decision 2026-09-04, taken against a production probe
+    // of `POST /api/v1/till`. That route is UNAUTHENTICATED: anyone can ring up a charge naming any
+    // ed25519 pubkey and any merchant name, and this relay then serves a full payment page for it on
+    // dpay's own domain under dpay's own certificate. That is a phishing primitive aimed at the exact
+    // control the payer's review relies on — which host served the quote — and the same call takes an
+    // unbounded `merchant_name`, so an hour's worth of them is an OOM that would take the landing
+    // page, `/wallet` and `/.well-known/assetlinks.json` (Android App Links) down with it. Both are
+    // fixed by merchant-signed ring-ups; until that lands the surface does not exist.
+    //
+    // The gate is at REGISTRATION, not inside the handlers: an unregistered route is refused by the
+    // router with an empty 404 and no handler code is reachable, so there is one code path rather
+    // than a live endpoint with a disabled branch inside it. It is read here, once, while the router
+    // is built — the same instant `test-helpers`/`agent` decide their routes just above and below.
+    let api = if state.till_enabled {
         // The merchant's own surface: ring up a charge, then poll it.
-        .route("/till", axum::routing::post(crate::till::open_charge))
-        .route("/till/{id}", get(crate::till::charge_status));
+        api.route("/till", axum::routing::post(crate::till::open_charge))
+            .route("/till/{id}", get(crate::till::charge_status))
+    } else {
+        api
+    };
 
     // Test-only value fixtures (test-helpers, WITHOUT agent — the e2e/test-relay build): the
     // faucet credits the fake-IC gateway at the user's principal, and the single-currency
@@ -214,14 +247,22 @@ pub fn app(state: AppState) -> Router {
         .route("/assets/{*path}", get(web_asset))
         .route("/privacy", get(privacy_page))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
-        .route("/shots/{name}", get(screenshot))
-        // The OpenCryptoPay provider surface, at the paths the STANDARD dictates rather than under
-        // this relay's own namespace: a wallet derives the submission URL from the callback by
-        // swapping `/cb/` for `/tx/`, so these segments are part of the protocol.
-        .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
-        .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
-        .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
-        .nest("/api/v1", api);
+        .route("/shots/{name}", get(screenshot));
+
+    // The payer-facing half of the same till, behind the same gate (see above). These sit at the
+    // paths the STANDARD dictates rather than under this relay's own namespace: a wallet derives the
+    // submission URL from the callback by swapping `/cb/` for `/tx/`, so these segments are part of
+    // the protocol.
+    let router = if state.till_enabled {
+        router
+            .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
+            .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
+            .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
+    } else {
+        router
+    };
+
+    let router = router.nest("/api/v1", api);
 
     // Test-only fake-IC /api/v2 gateway (test-helpers): the offline e2e stand-in for icp-api.io,
     // mounted at the ROOT (the IC API is its own top-level namespace — NOT under /api/v1). Routed

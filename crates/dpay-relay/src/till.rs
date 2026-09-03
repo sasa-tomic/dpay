@@ -51,8 +51,10 @@ const RAW_PER_CENT: u64 = 1_000_000;
 
 /// How long a quote is good for. Matched to the measured provider (300 s) so a wallet written
 /// against DFX meets the timing it already expects. It costs us nothing to honour — the price is
-/// 1:1 and cannot move — but a wallet's countdown and runway maths are calibrated to this.
-const QUOTE_TTL_SECS: u64 = 300;
+/// 1:1 and cannot move — but a wallet's countdown and runway maths are calibrated to this. Public
+/// because it is a stated property of this provider rather than an implementation detail: the wire
+/// golden pins every deadline this module emits against it.
+pub const QUOTE_TTL_SECS: u64 = 300;
 
 /// How long a charge stays payable before the till must ring it up again.
 const CHARGE_TTL_SECS: u64 = 60 * 60;
@@ -579,8 +581,10 @@ fn now_secs() -> u64 {
 ///
 /// Hand-rolled rather than pulling in a date crate for one format, and it is the ONE spelling both
 /// the measured provider emits and dpay's strict reader accepts. Civil-from-days is Howard
-/// Hinnant's algorithm — the standard one, and correct across leap years and centuries.
-fn iso8601_utc(secs: u64) -> String {
+/// Hinnant's algorithm — the standard one, and correct across leap years and centuries. Public for
+/// the same reason [`QUOTE_TTL_SECS`] is: it IS the deadline spelling this provider promises, so the
+/// wire golden pins observed deadlines against it rather than against a second copy of the format.
+pub fn iso8601_utc(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let tod = secs % 86_400;
     let z = days + 719_468;

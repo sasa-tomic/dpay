@@ -1,0 +1,111 @@
+import {describe, it, expect} from '@jest/globals';
+import {readFileSync} from 'fs';
+import {join} from 'path';
+import {parseIcpUri, parseOcpScan, parsePaymentDetails, parseProviderInstant} from '../lib/opencryptopay';
+import {parseDecimalToUnits} from '../lib/amount';
+import {BUNDLED_NETWORKS, icpCatalogOf, ledgerToCurrency} from '../config/catalog';
+
+// dpay's own till, read by dpay's own payer — the PAYER half of the `dfx/till_wire.json` golden,
+// whose `_doc` says what that file is, why it has to be a file, and how each half reads it. Loaded
+// at test time, like the catalog drift alarm in catalog.test.ts, so it is independent of any
+// bundler config — the prod app has no JSON imports.
+//
+// What this suite adds that `opencryptopay.test.ts` cannot: those cases parse bodies recorded from
+// DFX, so they pin the RULES. These parse the bytes dpay's own relay emits, so they pin the two
+// sides against each other — the ledger the relay names against the one this app's catalog calls
+// VCHF, the decimal the relay spells against the integer the relay means by it, the path the relay
+// serves against the submission URL this app derives from it.
+//
+// It does NOT claim this till is payable from this app: `selectPayableOffers` (`lib/opencryptopay.ts`)
+// refuses every Internet Computer asset but native ICP, which includes the only asset this till
+// serves. That refusal and the measurement behind it are that function's business.
+const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8')) as {
+  input: {merchant_name: string; host: string};
+  amount_raw: string;
+  open: {id: string; merchant: string; url: string};
+  details: Record<string, unknown>;
+  callback: {blockchain: string; expiryDate: string; uri: string};
+};
+
+/** The wallet's own IC rows — the bundled catalog it falls back to on a cold start. The relay's URI
+ *  names a ledger; the payer only ever pays it through THIS list, so this is the list that decides
+ *  which asset the relay actually asked for. */
+const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
+
+describe('the dpay till’s wire, read by the dpay payer', () => {
+  it('hands out a URL its own scanner recognises as a provider code, over https', () => {
+    // The `url` the merchant's screen turns into a QR. It is admitted only because of its `/lnurlp/`
+    // path segment (an https URL without one stays a payment link or a plain website), so the route
+    // the relay serves this provider under is load-bearing on the payer side too.
+    expect(parseOcpScan(GOLDEN.open.url)).toEqual({
+      ok: true,
+      apiUrl: GOLDEN.open.url,
+      host: GOLDEN.input.host,
+    });
+  });
+
+  it('narrows the till’s payment details to the exact quote, price and deadline', () => {
+    const parsed = parsePaymentDetails(GOLDEN.details);
+    if (!parsed.ok) throw new Error(`the till’s own step-2 body must parse, got ${parsed.reason}`);
+    const d = parsed.details;
+    // The submission URL is DERIVED from the provider's callback by swapping `/cb/` for `/tx/`, and
+    // what it must land on is the route the relay really serves (`crates/dpay-relay/src/app.rs`).
+    // Composed from the golden's own host and link id so the only literal here is the standard's
+    // path — which is the thing being asserted.
+    expect(d.submitUrl).toBe(`https://${GOLDEN.input.host}/v1/lnurlp/tx/${GOLDEN.open.id}`);
+    expect(d.callbackUrl).toBe(GOLDEN.details.callback);
+    expect(d.proofHost).toBe(GOLDEN.input.host);
+    expect(d.quoteId).toBe((GOLDEN.details.quote as {id: string}).id);
+    expect(d.claimedMerchantName).toBe(GOLDEN.input.merchant_name);
+    // The till prices in francs and settles in VCHF. Both spellings survive the parse: the fiat ask
+    // as a JSON number turned into an exact decimal string, the settlement amount as sent —
+    // trailing bare point and all, which is the spelling naive decimal parsers turn into zero.
+    expect(d.requestedAmount).toEqual({asset: 'CHF', amount: '10'});
+    expect(d.transferAmounts).toEqual([
+      {method: 'InternetComputer', available: true, assets: [{asset: 'VCHF', amount: '10.'}]},
+    ]);
+    // The deadline is read as the exact UTC instant the relay wrote, not as device-local time. The
+    // round trip proves both halves: the relay's spelling is one this reader accepts, and the
+    // instant it accepts is the one the relay meant.
+    expect(new Date(d.quoteExpiresAt).toISOString()).toBe((GOLDEN.details.quote as {expiration: string}).expiration);
+    expect(parseProviderInstant(GOLDEN.callback.expiryDate)).not.toBeNull();
+  });
+
+  it('turns the till’s destination into the exact ledger, account and raw units it means', () => {
+    const parsed = parseIcpUri(GOLDEN.callback.uri);
+    if (!parsed.ok) throw new Error(`the till’s own step-3 URI must parse, got ${parsed.reason}`);
+    // The account is the merchant's own, the same one their ring-up answer named. dpay holds no key
+    // for it and never appears between the two.
+    expect(parsed.to).toBe(GOLDEN.open.merchant);
+    // The instruction and the quote must be the same money — they are separate calls, and a payer
+    // that signed the URI's amount against the quote's price would be paying an unquoted number.
+    const quoted = (GOLDEN.details as {transferAmounts: {assets: {amount: string}[]}[]}).transferAmounts[0].assets[0];
+    expect(parsed.amount).toBe(quoted.amount);
+    // THE MONEY ASSERTION. The relay states the price as a decimal and means an integer number of
+    // raw units; the payer converts that decimal at the precision ITS OWN catalog carries for the
+    // ledger the relay named. A payment is correct exactly when the two land on the same integer.
+    const row = CATALOG.find(c => c.currency === ledgerToCurrency(CATALOG, parsed.ledger));
+    if (row === undefined || row.decimals === null) {
+      throw new Error(`this wallet carries no precision for the ledger the till named (${parsed.ledger})`);
+    }
+    expect(parseDecimalToUnits(parsed.amount, row.decimals)).toEqual({ok: true, raw: GOLDEN.amount_raw});
+  });
+
+  it('resolves a swapped destination ledger to a different asset than the till quoted', () => {
+    // The one redirect neither parser can see: `icp:<ledger>/transfer?…` is well-formed whichever
+    // ledger it names, so a body that quoted VCHF and then instructed a payment on another ICRC
+    // ledger parses perfectly and asks for a different asset. What catches it is the ledger→currency
+    // lookup above, and this is that check with its teeth showing — against the relay's real URI and
+    // against a real second ledger out of the same catalog.
+    const honest = parseIcpUri(GOLDEN.callback.uri);
+    if (!honest.ok) throw new Error(`the till’s own step-3 URI must parse, got ${honest.reason}`);
+    const quoted = ledgerToCurrency(CATALOG, honest.ledger);
+    expect(quoted).not.toBeNull();
+    const other = CATALOG.find(c => c.currency !== quoted && c.ledger.length > 0);
+    if (other === undefined) throw new Error('the bundled catalog must carry a second IC ledger');
+    const swapped = parseIcpUri(GOLDEN.callback.uri.replace(honest.ledger, other.ledger));
+    if (!swapped.ok) throw new Error(`a ledger swap must still parse, got ${swapped.reason}`);
+    expect(ledgerToCurrency(CATALOG, swapped.ledger)).toBe(other.currency);
+    expect(ledgerToCurrency(CATALOG, swapped.ledger)).not.toBe(quoted);
+  });
+});
