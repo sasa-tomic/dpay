@@ -271,7 +271,7 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
     }
     setOcp(out.target);
     setIntent({
-      toPrincipal: out.target.to,
+      toAccount: out.target.to,
       toName: out.target.details.claimedMerchantName ?? '',
       // The FULL account, never a short form: the provider chose this destination, so it is the
       // one thing on the screen the payer can actually check (findings: trust model).

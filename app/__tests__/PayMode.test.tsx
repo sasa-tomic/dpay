@@ -91,7 +91,7 @@ const REQ: Req = {
 const PAYEE_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 // The intent a scanned wire request converts to (rail.wireRequestToIntent is stubbed in this suite).
 const WIRE_INTENT: PayIntent = {
-  toPrincipal: PAYEE_PRINCIPAL,
+  toAccount: PAYEE_PRINCIPAL,
   toName: 'Cafe',
   toAccountText: 'a1b2c3d4…',
   amount: '2500',

@@ -44,7 +44,7 @@ export type RailOutcome =
  *  message on hard local errors (unsupported asset, no ledger, unreadable destination, bad clock) —
  *  the caller shows the error and does NOT fall through to any handoff (nothing was signed).
  *
- *  `toPrincipal` is the destination as ICRC-1 TEXT: a bare owner principal (which IS the default
+ *  `toAccount` is the destination as ICRC-1 TEXT: a bare owner principal (which IS the default
  *  subaccount) or the `owner-checksum.subaccount` form an exchange or a subaccount-using wallet
  *  hands out. It is parsed HERE, into the `{owner, subaccount}` pair the ledger credits, precisely
  *  so the ONE string the screen showed, the address book saved and this function signs is the same
@@ -54,11 +54,11 @@ export type RailOutcome =
 export async function prepareTransfer(
   secretHex: string,
   catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>},
-  req: {toPrincipal: string; amount: string; currency: number; nonceHex: string},
+  req: {toAccount: string; amount: string; currency: number; nonceHex: string},
 ): Promise<RailPrepared> {
   const desc = catalog.currencies.find(c => c.currency === req.currency);
   if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
-  const to = await DpayCore.icpValidateIcrcAccount(req.toPrincipal);
+  const to = await DpayCore.icpValidateIcrcAccount(req.toAccount);
   const argHex = await DpayCore.icpTransferArg(to.owner, to.subaccountHex, '', req.amount, desc.fee ?? '', req.nonceHex);
   // Clock-gated: refuses to sign when the IC clock is unreachable or skewed vs the device.
   const expiry = await icStampExpiry(secretHex);
@@ -116,10 +116,10 @@ export const decodeLegacyReply = (replyArgHex: string) => DpayCore.icpDecodeLega
  *  helper (`sanitiseDisplayText`) rather than a second rule. NO cap is applied: the wire already
  *  bounds these to 32 bytes, and a cap that never cuts would make the payment link's truncation
  *  marker mean nothing here. Nothing signed reads these fields — `prepareTransfer` takes only
- *  `{toPrincipal, amount, currency, nonceHex}` — so sanitising cannot change what is authorized. */
+ *  `{toAccount, amount, currency, nonceHex}` — so sanitising cannot change what is authorized. */
 export async function wireRequestToIntent(req: Req): Promise<PayIntent> {
   return {
-    toPrincipal: await DpayCore.icpPrincipalFromPubkey(req.toHex),
+    toAccount: await DpayCore.icpPrincipalFromPubkey(req.toHex),
     toName: sanitiseDisplayText(req.toName),
     toAccountText: short(req.toHex),
     amount: req.amount,

@@ -62,7 +62,7 @@ export type Req = {toHex: string; amount: string; nonceHex: string; expiry: numb
 // A payment the payer is about to review — the ONE shape both entries produce, so there is a single
 // review/sign path no matter how the payment arrived:
 //   • 'wire' — a scanned/tapped 132-byte request. It addresses the payee by raw Ed25519 pubkey, so
-//     `toPrincipal` is derived (self_authenticating(pubkey)) and `expiry` is the request's own.
+//     `toAccount` is derived (self_authenticating(pubkey)) and `expiry` is the request's own.
 //   • 'link' — a shared payment link. It addresses the payee by ICRC-1 principal directly (so it
 //     can pay ANY IC account, not only a dpay user) and has NO request expiry: a link is durable,
 //     and the signed envelope's IC ingress expiry is what bounds the signature.
@@ -76,7 +76,7 @@ export type Req = {toHex: string; amount: string; nonceHex: string; expiry: numb
 // their amount and destination came from someone the wallet has no relationship with) and how the
 // destination is rendered.
 export type PayIntent = {
-  toPrincipal: string;      // the ICRC-1 account owner the transfer targets
+  toAccount: string;        // the ICRC-1 account the transfer credits, as text (parsed + signed by `prepareTransfer`, services/rail.ts)
   toName: string;           // the payee's CLAIMED display name ('' when the payment names none)
   toAccountText: string;    // the destination as shown to the payer (short pubkey for wire, full principal for a link)
   amount: string;           // raw units (decimal-digit string)

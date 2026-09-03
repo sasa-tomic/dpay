@@ -441,7 +441,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         if (!alive || gen !== linkGenRef.current) return;
         setSelectedAssetId(asset.id);
         setPrefillIntent({
-          toPrincipal: principal,
+          toAccount: principal,
           toName: link.label,
           toAccountText: principal,
           amount: rawAmount,

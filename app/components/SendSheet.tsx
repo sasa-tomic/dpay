@@ -268,7 +268,7 @@ export function SendSheet({
           // The SAME string the field showed, the review showed and the address book will save.
           // The rail parses owner + subaccount out of it, so a `principal.subaccount` destination
           // is credited to the account the user actually read.
-          toPrincipal: resolved.destination, amount: raw, currency: desc.currency, nonceHex: randomMemoHex(),
+          toAccount: resolved.destination, amount: raw, currency: desc.currency, nonceHex: randomMemoHex(),
         });
         out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500});
       }

@@ -716,11 +716,17 @@ async function destinationOf(
     const raw = rawAmountOf(parsed.amount, selected.decimals);
     if (raw === null) return null;
     try {
-      // The same base32-CRC validator every other IC destination goes through. The strict PRINCIPAL
-      // form on purpose: the transfer this app signs addresses an owner with the default
-      // subaccount, so a `principal.subaccount` destination is refused rather than silently paid to
-      // the owner's main account — and a SIBLING `subaccount=` parameter, which names the same thing
-      // from outside the `to` value, is refused by the parser itself (`unexpected-parameter`).
+      // The same base32-CRC validator every other IC destination goes through, in its STRICT
+      // PRINCIPAL form — narrower than the Send path, which signs the whole `owner.subaccount`
+      // account the user pasted (`prepareTransfer`, services/rail.ts). Not a rail limitation: it is
+      // what a one-shot submission costs. A sale is credited only if the provider MATCHES the
+      // transfer dpay reports; every `to` this provider has been measured sending is a bare
+      // principal (`docs/specs/2026-09-01-opencryptopay-findings.md`), and whether its matcher would
+      // recognise a credit to a SUBACCOUNT of that principal is simply unknown — unmeasurable
+      // except by spending a real payment on a real till, which is the loss the same doc records.
+      // So the form is refused BEFORE consent instead of paid on a guess. A SIBLING `subaccount=`
+      // parameter, which names the same thing from outside the `to` value, is refused by the parser
+      // itself (`unexpected-parameter`).
       return {to: await DpayCore.icpValidatePrincipal(parsed.to), rawAmount: raw};
     } catch (e) {
       console.warn(`opencryptopay: destination principal rejected: ${errText(e)}`);

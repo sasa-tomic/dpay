@@ -418,8 +418,8 @@ const SOLANA_URI_SCHEME = 'solana:';
  *  not before: admitting a name without implementing it is precisely the silent drop this refuses.
  *
  *  ICP: `to` names the account and `amount` names the value. `subaccount` — the one a real wallet
- *  might be tempted to accept — stays out, because it would name an account this app's
- *  `icrc1_transfer` does not address.
+ *  might be tempted to accept — stays out, for the reason the `to` value's own `owner.subaccount`
+ *  spelling is refused a step later (`destinationOf`, `services/opencryptopay.ts`).
  *
  *  Solana: `amount` only. Solana Pay also defines `spl-token`, `reference`, `memo`, `label` and
  *  `message`, and NONE of them may be silently dropped here:

@@ -55,8 +55,8 @@ describe('prepareTransfer — the account signed is the account it was handed', 
   const OWNER = 'k2t6j-2nvnp-4zjm3-25dtz-6xhaa-c7boj-5gayf-oj3xs-i43lp-teztq-6ae';
   const ACCOUNT = `${OWNER}-6cc627i.1`; // the ICRC-1 textual form naming subaccount 0x…01
 
-  const prepare = (toPrincipal: string) =>
-    prepareTransfer(SECRET, CATALOG, {toPrincipal, amount: '100', currency: 7, nonceHex: NONCE});
+  const prepare = (toAccount: string) =>
+    prepareTransfer(SECRET, CATALOG, {toAccount, amount: '100', currency: 7, nonceHex: NONCE});
 
   beforeEach(() => {
     jest.mocked(DpayCore.icpTransferArg).mockReset().mockResolvedValue('arg' as never);
@@ -183,10 +183,10 @@ describe('wireRequestToIntent — the seam where a scanned/tapped request become
 
   test('nothing the payer authorizes reads these fields', async () => {
     // The safety of sanitising here rests on the name and memo being DISPLAY ONLY on this rail:
-    // `prepareTransfer` signs {toPrincipal, amount, currency, nonceHex} and the ICRC memo is the
+    // `prepareTransfer` signs {toAccount, amount, currency, nonceHex} and the ICRC memo is the
     // nonce, so no cleaned character can change what the payer's signature commits to.
     const intent = await wireRequestToIntent({...WIRE, toName: '‮Kalaj'});
-    expect(intent.toPrincipal).toBe('payee-principal');
+    expect(intent.toAccount).toBe('payee-principal');
     expect(intent.amount).toBe(WIRE.amount);
     expect(intent.currency).toBe(WIRE.currency);
     expect(intent.nonceHex).toBe(WIRE.nonceHex);

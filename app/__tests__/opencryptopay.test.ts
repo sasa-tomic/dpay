@@ -228,10 +228,9 @@ describe('parseIcpUri', () => {
   });
 
   it('refuses a parameter it does not understand rather than paying the part it does', () => {
-    // THE money case: `subaccount` names an account this app's transfer does not address, so
-    // ignoring it would pay the owner's DEFAULT account — a different account than the URI named,
-    // with no way for the payer to see the difference. A dropped parameter is an instruction the
-    // provider gave and nobody read.
+    // THE money case: ignoring `subaccount` would pay the owner's DEFAULT account — a different
+    // account than the URI named, with no way for the payer to see the difference. A dropped
+    // parameter is an instruction the provider gave and nobody read.
     expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&subaccount=abcd&amount=1.`)).toEqual({
       ok: false,
       reason: 'unexpected-parameter',

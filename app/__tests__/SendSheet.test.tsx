@@ -373,7 +373,7 @@ describe('SendSheet — a subaccount destination is paid, never quietly redirect
     expect(prepareTransfer).toHaveBeenCalledWith(
       IDENTITY.secretHex,
       {currencies: [VCHF]},
-      expect.objectContaining({toPrincipal: shown, amount: '100000000', currency: 7}),
+      expect.objectContaining({toAccount: shown, amount: '100000000', currency: 7}),
     );
     expect(shown).toBe(K2_SUBACCOUNT); // …and that one value is the whole account, not the owner
     expect(textOf(tree, 'send-destination')).toBe(K2_SUBACCOUNT); // the receipt names it too
