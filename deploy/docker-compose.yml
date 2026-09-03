@@ -45,8 +45,9 @@ services:
       # only ever turn it on against a throwaway replica.
       DPAY_ENABLE_FAUCET: ${DPAY_ENABLE_FAUCET:-false}
 
-      # The OpenCryptoPay till (POST /api/v1/till + /v1/lnurlp/*). Its routes are not registered
-      # unless this is true; why, and what has to land first: crates/dpay-relay/src/app.rs.
+      # The OpenCryptoPay till (POST /api/v1/till + /api/v1/till/void + /v1/lnurlp/*). Its routes
+      # are not registered unless this is true, and the merchant routes carry their own signed
+      # authorisation rather than a deploy-time secret: crates/dpay-relay/src/app.rs.
       DPAY_ENABLE_TILL: ${DPAY_ENABLE_TILL:-false}
 
       # The faucet (agent build): hex Ed25519 seed of the canister CONTROLLER key (the same key

@@ -73,7 +73,7 @@ pub struct AppState {
     /// worth less than the hour it lives, and settlement is re-derived from the ledger on every
     /// read — so a restart costs a cashier a re-ring, never a payment and never a double credit.
     pub tills: crate::till::SharedTills,
-    /// Whether the till's five routes are REGISTERED at all — see the gate in [`app`]. Read once,
+    /// Whether the till's six routes are REGISTERED at all — see the gate in [`app`]. Read once,
     /// while the router is built, so it cannot change under a live request. Set by
     /// [`AppState::with_till`]; `false` for a state that does not ask.
     till_enabled: bool,
@@ -126,7 +126,7 @@ impl AppState {
         self
     }
 
-    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the five routes gated in [`app`].
+    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the six routes gated in [`app`].
     /// Must be set BEFORE the router is built, because that is where the gate is read.
     pub fn with_till(mut self, enabled: bool) -> Self {
         self.till_enabled = enabled;
@@ -183,23 +183,31 @@ pub fn app(state: AppState) -> Router {
 
     // --- the OpenCryptoPay till, OFF unless the operator asks for it -----------------------------
     //
-    // The five routes below (two here, the standard's three on the root router) are registered only
+    // The six routes below (three here, the standard's three on the root router) are registered only
     // when `DPAY_ENABLE_TILL` is set — founder decision 2026-09-04, taken against a production probe
-    // of `POST /api/v1/till`. That route is UNAUTHENTICATED: anyone can ring up a charge naming any
-    // ed25519 pubkey and any merchant name, and this relay then serves a full payment page for it on
-    // dpay's own domain under dpay's own certificate. That is a phishing primitive aimed at the exact
-    // control the payer's review relies on — which host served the quote — and the same call takes an
-    // unbounded `merchant_name`, so an hour's worth of them is an OOM that would take the landing
-    // page, `/wallet` and `/.well-known/assetlinks.json` (Android App Links) down with it. Both are
-    // fixed by merchant-signed ring-ups; until that lands the surface does not exist.
+    // of `POST /api/v1/till`. That route was UNAUTHENTICATED: anyone could ring up a charge naming
+    // any ed25519 pubkey and any merchant name, and this relay then served a full payment page for it
+    // on dpay's own domain under dpay's own certificate — a phishing primitive aimed at the exact
+    // control the payer's review relies on, which host served the quote.
+    //
+    // Both merchant routes now require the ring-up to be SIGNED by the very key its destination
+    // account derives from (`crate::till`, rule 0; `dpay_core::validate_till_open`), so a charge
+    // exists only where somebody who can SPEND from that account asked for one, an anonymous caller
+    // can no longer force a cashier to re-ring by voiding their pending charge, and the unbounded
+    // `merchant_name` is both signed and clamped rather than an anonymous way to spend this relay's
+    // memory. The flag stays because "which surfaces does this image serve" is an operator's call to
+    // make per deploy, not because the surface is known-broken.
     //
     // The gate is at REGISTRATION, not inside the handlers: an unregistered route is refused by the
     // router with an empty 404 and no handler code is reachable, so there is one code path rather
     // than a live endpoint with a disabled branch inside it. It is read here, once, while the router
     // is built — the same instant `test-helpers`/`agent` decide their routes just above and below.
     let api = if state.till_enabled {
-        // The merchant's own surface: ring up a charge, then poll it.
+        // The merchant's own surface: ring up a charge, clear the till, and poll. `/till/void` is a
+        // literal segment and `/till/{id}` a parameter, so the router matches the literal first — a
+        // charge id is `pl_<hex>` and can never spell `void` anyway.
         api.route("/till", axum::routing::post(crate::till::open_charge))
+            .route("/till/void", axum::routing::post(crate::till::void_charge))
             .route("/till/{id}", get(crate::till::charge_status))
     } else {
         api
@@ -366,11 +374,10 @@ async fn faucet_agent(State(state): State<AppState>, Json(req): Json<FaucetReque
         );
     }
     // Relay-side rate limit. The lock is NEVER held across the mint await below (check-and-mark
-    // completes synchronously) and is poison-tolerant like every lock in this crate.
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    // completes synchronously) and is poison-tolerant like every lock in this crate. The clock is
+    // the crate's one reading, which STOPS on a pre-epoch host rather than substituting `0` — see
+    // [`crate::now_secs`] for what the `0` this replaces did to this exact cooldown.
+    let now_secs = crate::now_secs();
     if let Err(reason) = state
         .faucet_cooldown
         .lock()

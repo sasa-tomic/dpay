@@ -24,6 +24,24 @@ pub mod catalog;
 pub mod ledger;
 pub mod till;
 
+/// Unix seconds now — the ONE clock reading in this crate, and it stops rather than guesses.
+///
+/// Only a host whose clock is set before 1970 can fail here, and substituting `0` (what the till
+/// and the faucet each used to do) is worse than stopping, in a different way per caller: the till
+/// would time every charge an epoch stale and quietly refuse every sale, while the faucet's
+/// cooldown would record every top-up "at the epoch" and — since the clock never advances past it —
+/// tell every account to "try again in ~1 h" forever after their first. Both are silent, both are
+/// wrong, and neither leaves a caller anything to act on. So it says what happened.
+pub(crate) fn now_secs() -> u64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_secs(),
+        Err(e) => panic!(
+            "dpay-relay: the system clock is before the unix epoch ({e}) — this relay cannot time \
+             a charge, a quote or a faucet cooldown"
+        ),
+    }
+}
+
 /// The agent-build faucet's relay-side cooldown — the resurrection of the old canister faucet's
 /// rate limit (window, granularity and verbatim error text). Compiled whenever the PRODUCTION
 /// faucet route exists (agent — including with test-helpers co-enabled, the live-test config;
