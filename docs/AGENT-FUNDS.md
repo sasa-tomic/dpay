@@ -9,8 +9,8 @@ the rules.
 Some things about dpay's mainnet rails cannot be proven any other way. Verified 2026-09-01: the
 OpenCryptoPay payment provider has **no sandbox** — `dev.api.dfx.swiss` is 502 and every method in a
 live quote is mainnet. Its test till is a fixed CHF 1, `min == max`, so there is no smaller smoke
-test. The same is true of the outstanding funded-transfer proof for VCHF and native ICP. A small
-real float is the only instrument that closes those.
+test. The same was true of the funded-transfer proof for VCHF and native ICP, which the founder
+closed on 2026-09-01. A small real float is the only instrument that closes this class of proof.
 
 ## Commands
 

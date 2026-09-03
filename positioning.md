@@ -1,6 +1,6 @@
 # Positioning — the main pitch
 
-*This is dpay's primary go-to-market story. Lead with it in decks, demos, and marketing. Last updated 2026-08-15; asset-availability facts are dated and should be re-verified before any public promise.*
+*This is dpay's primary go-to-market story. Lead with it in decks, demos, and marketing. Last updated 2026-09-04; every asset-availability fact carries the date it was last measured, and anything older than the current session is re-verified before it goes into a public promise.*
 
 ## One-liner
 
@@ -29,21 +29,51 @@ What dpay must **never** do is bridge a mismatch — e.g. payer holds dollars, m
 
 UI rule (extends the existing one): show the **currency** the user thinks in — `$`, `€`, `CHF` — never the underlying token name (ckUSDC, EURC, …).
 
+### Roadmap, not built: conversion the user authorizes, delegated and itemised
+
+**DRAFT — founder direction taken 2026-09-04, recorded for approval. Nothing in this subsection exists. It is written in roadmap verbs on purpose and must never be quoted in the present tense.**
+
+dpay will want to offer conversion between assets, with the exchange itself performed by a licensed third party. That is the same shape this section already describes for a payer who lacks the merchant's asset — the difference is that it would become a deliberate feature with its own screen instead of an edge case. The frame does not move and is not re-opened here: dpay will not exchange one asset for another on a user's behalf, will not hold the funds while it happens, and will not take price risk (`CLAUDE.md`). What is on the table is the **screen**: dpay showing a licensed provider's offer, and the user authorizing that provider directly.
+
+**"Transparent for the user" is the whole feature, so it has to be checkable.** Before the user authorizes anything, the screen would have to name — in their own language, on one surface, without a tap to reveal it:
+
+- **Who the counterparty is:** the provider's legal name, and that they, not dpay, perform the exchange and owe the user the result.
+- **The rate**, as a number the user can compare, with its source and the instant it was quoted.
+- **Every fee, separately:** the provider's spread or commission, the network fee on each leg, and whether dpay is paid anything for this — and if so, how much.
+- **What the user ends up with**, in the destination asset, after all of the above.
+- **What happens if it fails:** which asset they are left holding, and who to contact, because dpay will not be able to reverse it.
+
+A screen that shows one blended "you get X" and hides the split is not transparent, however accurate X is.
+
+**Founder decisions this needs, none of them taken:**
+
+1. **Quote, or only relay the provider's quote.** Displaying a rate at all is near the line that turns a wallet into a broker. Showing the provider's own rate, attributed and timestamped, is the conservative shape; dpay computing or blending one is not.
+2. **Pick the provider, or let the user pick.** Picking is routing, and routing is the clause with legal weight (`monetization.md`).
+3. **Take a cut, or not** — already open in `monetization.md`. It cannot be decided separately from 1 and 2, or from the itemisation rule above.
+4. **Where the funds sit mid-swap.** The only acceptable answer is "never with dpay". A provider integration that requires depositing to an address dpay controls is refused, not negotiated — that is custody by another name.
+
+**Prep needed now: none, deliberately.** The wallet is already asset-first — the merchant names the settlement asset, the payer pays that exact asset, nothing converts implicitly — so a conversion surface would be additive rather than a rework, and building for an undecided design would be YAGNI. The property to keep true in the meantime is the one that makes any of this possible: dpay stays a screen, never a counterparty.
+
+**The risk to name honestly:** an embedded flow smooth enough to feel like "dpay converted my money" may be judged on that substance rather than on the contract behind it — the same activity test already flagged for the relay under MiCA. Disclosure is the mitigation, which is why it is the requirement and not the polish.
+
 ## Speed & finality
 
 The "seconds" promise comes from settling on the **Internet Computer**, where chain-key token transfers finalize in ~1–2s. Native layer-1 settlement can't match this — real Bitcoin mainnet blocks are ~10 minutes — so **"pay with BTC" means ckBTC on the IC**, not a mainnet Bitcoin transaction. The same holds for other assets: dpay's instant, final tap is an IC-ledger property. (SOL is the exception: it settles natively on Solana, also ~1s, via the device-key rail.)
 
-## Asset availability & roadmap (as of 2026-07)
+## Asset availability & roadmap
 
-| Currency | Asset on IC | Status (Jul 2026) | Notes |
-|----------|-------------|-------------------|-------|
+IC rows re-measured against the production catalog (`GET https://dpay.kalaj.org/api/v1/currencies`)
+on 2026-09-04; the EUR and CHF-issuance rows are desk research from 2026-07 and are NOT re-verified.
+
+| Currency | Asset on IC | Status | Notes |
+|----------|-------------|--------|-------|
 | USD | ckUSDC | **Live** — primary launch rail | The default; tourist lingua franca. (ckUSDT = future ckERC20 candidate.) |
 | BTC | ckBTC | **Live** | Fast & final on IC; not mainnet BTC. |
 | ETH | ckETH | **Live** | Same. |
-| ICP | — | **Not offered** | No ICP rail in the prod catalog (verified 2026-08-15); do not promise. |
+| ICP | native ICP | **Live** — payable, no fiat ramp | Catalog id 8, ledger `ryjl3-tyaaa-aaaaa-aaaba-cai`. In and out by ordinary ICRC-1 transfer from any Internet Computer wallet; no ramp to francs or dollars. |
 | EUR | EURC (→ chain-key ERC-20) | **Near-term** | EURC is EMI/MiCA-licensed and the dominant euro stablecoin. Since the MiCA transitional period closed 30 Jun 2026, only licensed euro stablecoins are legal to offer in the EU — EURC qualifies. Bringing it to the IC as a ck-ERC20 is feasible; **verify ckEURC minting/liquidity before promising**. |
 | SOL | native rail (device-key, direct RPC) | **Shipped in-app** | SOL + USDC-on-Solana settle natively (~1s); mainnet RPC live in the shipped APK. ckSOL-on-IC: no minter exists — not available. |
-| CHF | (none on IC yet) | **Roadmap, nascent** | CHFAU (AllUnity, MiCA-compliant) launched ~Feb 2026 on Ethereum; Safirum CHF-S planned Q3 2026 on Solana; a UBS-led Swiss-bank sandbox runs on Ethereum through 2026 (institutional). No ckCHF exists; liquidity is thin. Treat CHF as "coming as issuance matures." |
+| CHF | VCHF (external ICRC token) | **Live** — payable, no fiat ramp | Catalog id 7, ledger `ly36x-wiaaa-aaaai-aqj7q-cai`. A franc-denominated token issued by a third party: **not** chain-key-backed, and its peg is the issuer's claim, not something dpay verifies — say that whenever it is named. A funded VCHF payment was made on a physical device with real funds on 2026-09-01. Still no **ckCHF** — chain-key CHF does not exist; the wider issuance picture: CHFAU (AllUnity) on Ethereum ~Feb 2026, Safirum CHF-S planned Q3 2026 on Solana, a UBS-led Swiss-bank sandbox on Ethereum through 2026 (institutional). |
 
 ## Why we win where it matters (abroad)
 
@@ -58,4 +88,4 @@ The "seconds" promise comes from settling on the **Internet Computer**, where ch
 
 ## Scope
 
-**Shipped today (2026-08-15):** DEMO $ + mainnet ckBTC/ckUSDC/ckETH + the native SOL rail; NFC tap-to-pay + QR offline fallback; multi-currency is the product, not the roadmap. Nothing here changes the non-custodial or no-swap non-negotiables; it operationalizes them for a multi-currency world.
+**Shipped today:** DEMO $ + mainnet ckBTC/ckUSDC/ckETH + VCHF + native ICP + the native SOL rail; NFC tap-to-pay + QR offline fallback; multi-currency is the product, not the roadmap. Nothing here changes the non-custodial or no-swap non-negotiables; it operationalizes them for a multi-currency world.

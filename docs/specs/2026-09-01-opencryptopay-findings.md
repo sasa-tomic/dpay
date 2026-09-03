@@ -52,6 +52,28 @@ Identity checks, not name matches:
 
 **ckUSDC — dpay's stated launch rail — is not accepted.** Raise it with DFX; do not design around it.
 
+## The standard's reach — which wallets pay which method (measured 2026-09-03, re-measured 2026-09-04)
+
+`GET https://api.dfx.swiss/v1/paymentLink/walletApp` is the provider's own compatibility list — the
+wallets a payer is offered when they scan one of these codes. Both reads return the same shape:
+**29 wallets, and not one of them declares `InternetComputer`.** The complete method set across all
+29 is `Arbitrum, Base, BinancePay, BinanceSmartChain, Bitcoin, Cardano, Citrea, CitreaTestnet,
+Ethereum, Gnosis, Haqq, KucoinPay, Lightning, Monero, Optimism, Polygon, Sepolia, Solana, Tron,
+Zano`.
+
+Reach, in wallets per method: Lightning 21, Ethereum 8, Arbitrum 6, Polygon 6, BinanceSmartChain 5,
+Optimism 5, Base 5, Bitcoin 5, Solana **1** (Unstoppable Wallet). The four wallets `opencryptopay.io`
+puts in its hero row (read 2026-09-04) are narrower than the branding suggests: Cake Wallet is EVM +
+Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is BinancePay only.
+
+- **Measured:** no wallet in the provider's own list can pay any Internet Computer asset — not VCHF,
+  not ckBTC, not native ICP.
+- **Inferred, weaker:** some wallet outside that list could implement the flow, but none is known,
+  and this list is what the payer is actually offered. Treat "a third-party wallet pays an
+  IC-settled till" as false until a specific wallet is measured doing it.
+- It is plausibly why the ledger defect below survived to production: the `InternetComputer` leg has
+  no third-party wallet to exercise it.
+
 ## Stale-README trap #1: the IC URI shape
 
 README says `icp:<canister>?amount=<n>`. The live API returns:
@@ -238,8 +260,6 @@ Consequences, and they are absolute:
 - This also explains the two distinct errors: a *nonexistent* index answers "not confirmed in
   blockchain InternetComputer", while an index that exists **on ICP** but is not their payment
   answers "does not pay any matching activation".
-- Plausibly nobody has ever hit this: DFX's own `GET /v1/paymentLink/walletApp` lists 28 wallets and
-  **none** supports `InternetComputer`, so the leg is production-untested by any third party.
 
 **Report it to DFX** (`mail@ammer.group`, the merchant on the test till, or DFX support). Until it is
 fixed, the ICP-only restriction stands; when it is fixed, remove the refusal and re-verify by
@@ -278,15 +298,15 @@ same way (`app/lib/deepLink.ts` module header is the authority):
 **new** quote id; the previous one stays valid until used or expired. Matches dpay's existing ~5min
 request expiry, so no new timing model is needed.
 
-## Receiving (dpay as merchant) — assessed, not recommended now
+## Receiving through DFX (measured)
 
 A full merchant API exists (`/v1/paymentLink*`), but `POST /v1/paymentLink` requires `bearer` auth
 **and** a `routeId` — a sell route, i.e. a bank IBAN. DFX settles merchant proceeds as **fiat to a
 bank**. So accepting via DFX means merchant onboarding plus KYC, and a self-payment round trip costs
 1.99% sell plus fees and takes days. Not a test loop.
 
-dpay could instead **host its own OCP provider endpoint** (the standard permits it), but that tests
-dpay against dpay, which `e2e/` already does. It proves nothing about third-party acceptance.
+dpay hosting its own provider endpoint instead is the milestone:
+[`2026-09-02-merchant-side-plan.md`](2026-09-02-merchant-side-plan.md).
 
 ## Provider risk
 
@@ -300,14 +320,15 @@ dpay against dpay, which `e2e/` already does. It proves nothing about third-part
 
 ## What has NOT been proven
 
-No payment has been made. What IS proven, as of 2026-09-02, is everything up to consent: `just
-live-ocp` drives the shipped app against this till and lands on a review carrying the live price,
-the full destination, the provider host and the countdown — so the scan, both provider reads, the
-parser, the destination checks and the review screen are all confirmed against the real thing, not
-against a fixture.
+Everything up to consent is proven, as of 2026-09-02: `just live-ocp` drives the shipped app against
+this till and lands on a review carrying the live price, the full destination, the provider host and
+the countdown — so the scan, both provider reads, the parser, the destination checks and the review
+screen are all confirmed against the real thing, not against a fixture.
 
-Exactly one leg remains unprovable without spending: that a **real** confirmed ICP transfer plus its
-block index is accepted by `/tx`. Only its failure modes have been observed (a fabricated id is
-refused, which at least proves the handler verifies against the chain). It costs CHF 1 — the public
-test till `pl_beeddb41cd4b6d9e` is fixed-amount, `min == max`, so no smaller test exists — and it is
-irreversible and one-shot. Rules for spending the agent float: `CLAUDE.md` → `docs/AGENT-FUNDS.md`.
+**`/tx` has never returned an acceptance.** One real payment has been made — VCHF, 2026-09-03 — and
+it was refused for the ledger-resolution reason above; the other observed outcomes are refusals of
+fabricated ids. So the remaining unproven leg is narrower than it was and is the one asset this
+provider can actually verify: that a **real** confirmed **native ICP** transfer plus its block index
+is accepted. It costs CHF 1 — the public test till `pl_beeddb41cd4b6d9e` is fixed-amount,
+`min == max`, so no smaller test exists — and it is irreversible and one-shot. Rules for spending the
+agent float: `CLAUDE.md` → `docs/AGENT-FUNDS.md`.

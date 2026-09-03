@@ -1,17 +1,34 @@
 # dpay as the merchant side of OpenCryptoPay — the next milestone
 
-Founder decision, 2026-09-02: **this is the next milestone.** Written up here, not started. The
-payer-side integration is done and is a separate thing (measured behaviour:
+Founder decision, 2026-09-02: **this is the next milestone.** This file is the design and the
+decisions; what is built, what is not, and what is deployed live in `OPEN_ISSUES.md`. The payer-side
+integration is a separate thing (measured provider behaviour:
 [`2026-09-01-opencryptopay-findings.md`](2026-09-01-opencryptopay-findings.md)).
 
 ## The idea, in one paragraph
 
-Today dpay can PAY an OpenCryptoPay till. This milestone makes dpay BE one. A shop installs dpay,
-shows a code, and gets paid — and because OpenCryptoPay is an open standard with real wallet
-adoption (Cake Wallet, Phoenix, Wallet of Satoshi, Binance, per `opencryptopay.io`), the people
-paying that code do not need dpay. dpay users additionally get NFC, which the standard itself lists
-as "in development". So the merchant side is where dpay's existing NFC work stops being a curiosity
-and becomes the reason to choose it.
+Today dpay can PAY an OpenCryptoPay till. This milestone makes dpay BE one: a shop installs dpay,
+shows a code, and gets paid at its own account.
+
+**Who can pay that code — corrected 2026-09-04, and this correction is load-bearing.** The plan was
+written on the premise that a Cake, Phoenix or Binance user could pay a dpay till, so serving the
+standard would bring merchants payers they would not otherwise have. **That premise is false for
+v1's asset.** Measured twice against the provider's own compatibility list: no wallet on it can pay
+an Internet Computer asset at all ("The standard's reach" in
+[`2026-09-01-opencryptopay-findings.md`](2026-09-01-opencryptopay-findings.md)), and v1 accepts VCHF
+only. So v1 serves **dpay payers paying dpay tills**, and standard conformance is future-proofing —
+the cost of being reachable the day an IC-capable wallet exists — not distribution.
+
+That is not a retreat, because dpay↔dpay is where dpay can be better than every wallet on that list.
+dpay's own wire already lets the **payer be offline** over NFC or QR; OpenCryptoPay cannot, by
+construction — three HTTP calls from the payer's wallet against a 300-second quote — and the standard
+itself lists NFC terminals as "in development". Be exact about the tense: **paying a dpay till
+through these routes keeps the payer online today.** Making the till take an offline tap is the NFC
+item below, and it is where dpay's existing NFC work stops being a curiosity — against dpay's own
+payers, not against a wallet ecosystem that cannot reach this rail at all.
+
+**Do not put third-party wallet reach in a deck, a demo script or an investor email.** It is not
+true today, and it is exactly the kind of claim `CLAUDE.md`'s external-claims rule exists to stop.
 
 ## Why this and not the alternatives
 
@@ -45,7 +62,7 @@ authorizes directly, exactly as `positioning.md` already provides for. dpay neve
 
 ## What it actually takes
 
-Not estimated in effort here — this is the shape, to be turned into units next session.
+The shape, in design voice throughout — no bullet below is a claim about what exists.
 
 - **Serve the standard.** Implement the merchant half of OpenCryptoPay in the relay: a payment-link
   endpoint that answers the step-2 details read (menu + live quote + expiry), the step-3 callback
@@ -75,26 +92,59 @@ Not estimated in effort here — this is the shape, to be turned into units next
   argument at a checkout — the whole pricing problem is deleted rather than solved. EURC gives the
   EU the same deal when it lands. Other assets stay out of v1 precisely because they would require
   quoting a rate.
-- **The provider endpoint is HOSTED ON THE RELAY**, not on the merchant's device. A shop phone
-  behind NAT is unreachable, and the point of implementing an open standard is that a Cake, Phoenix
-  or Binance user can pay a dpay till. The relay never touches funds: it publishes a price and a
+- **The provider endpoint is HOSTED ON THE RELAY**, not on the merchant's device. The payer's wallet
+  must be able to *reach* the provider over https, and a shop phone behind NAT with no certificate
+  cannot be reached — that is the whole reason, and it survives the corrected premise above intact
+  (a dpay payer has to reach it too). The relay never touches funds: it publishes a price and a
   destination the MERCHANT owns, and verifies arrival. No custody, no new counterparty.
 - **The merchant creates a charge in the dpay app first**, with a relay-served web page later. Both
   drive the same endpoints, so the second is additive.
 
-### Verification: scan the merchant's own history, never trust a reported index
+## Decisions taken 2026-09-04, closing the questions this file used to leave open
 
-The one design point worth stating loudly, because today's failure is the argument for it.
+- **Run dpay↔dpay. Serve the standard anyway.** Forced by the measurement in the opening section,
+  not chosen: there is no third-party wallet to publish to. Conformance stays because it costs
+  nothing once written and is the only thing that makes a future IC-capable wallet work on day one.
+  Nothing about the endpoint is secret — it is simply not a distribution channel.
+- **One asset, VCHF, and no multi-asset menu in v1.** The standard's menu shape permits several
+  assets at once; v1 serves exactly one entry, because every additional asset needs a rate somebody
+  has to stand behind — the exact thing the 1:1 decision deletes.
+- **Only someone who can sign for the paid account may ring up a charge.** The ring-up names the
+  ed25519 key whose account every payer is then told to pay; unsigned, that is a stranger's charge
+  on dpay's own domain. The core carries the whole acceptance rule — `validate_till_open`,
+  `dpay-till-open-v1`, bytes pinned by `dfx/till_open_signing.json` — so the relay checks rather
+  than re-derives it. Why the routes ship OFF until the relay enforces this:
+  `crates/dpay-relay/src/app.rs`, at the till gate. Status: `OPEN_ISSUES.md`.
+- **The own-relay trust rule is the whole answer for v1, and is knowingly incomplete.** A dpay payer
+  accepts a VCHF till only from the relay their wallet is already configured to use
+  (`isOwnRelayProvider`, `app/lib/opencryptopay.ts` — that module header is the authority for the
+  rule). With one relay that is complete. The moment a SECOND merchant runs their own relay, that
+  merchant's dpay customers are refused by name — nothing is lost and nothing is silently wrong (the
+  payer is refused, never charged), but the till is unusable to them. **Accepted as a v1 limitation,
+  with the precondition stated: it must be answered before a second relay exists, and the answer may
+  not be "widen the rule to any host that looks like dpay" — that is precisely the claim a hostile
+  provider makes.** What that answer IS remains undecided.
+
+## Verification: scan the merchant's own history, never trust a reported index
+
+The one design point worth stating loudly, because the payment DFX lost on 2026-09-03 is the
+argument for it.
 
 DFX verifies by taking the block index the payer reports and looking it up — and it looks it up on
 the wrong ledger, which is why a correct VCHF payment was refused and the money lost. **dpay's
 provider must not accept a reported identifier as the source of truth at all.** It already has the
 right primitive: `transactions_on_ledger` (`crates/dpay-relay/src/ledger/api.rs`), the same
-exact-memo merchant reconciliation the Receive tab uses (flows 97/98). Verification is therefore:
-read the MERCHANT's own incoming transfers on the charge's ledger, and look for one that matches the
-charge's amount, arriving after the charge was created, not already consumed by another charge.
+exact-memo merchant reconciliation the Receive tab uses (flows 97/98). Verification must therefore
+be: read the MERCHANT's own incoming transfers on the charge's ledger, and look for one that matches
+the charge's amount, arriving at or after the charge was rung up, **and not already consumed by
+another charge**.
 
-Three properties follow for free, and each is a defect DFX has:
+That last clause is a rule in its own right, not a detail of the other two — amount and arrival time
+cannot tell two same-price charges apart, so the matcher must own the consumption. Its mechanism and
+the second half of the same rule (a new ring-up voids the merchant's previous charge) are stated
+where they are enforced: the module header of `crates/dpay-relay/src/till.rs`.
+
+Three properties follow from that rule, and each is a defect DFX has:
 
 - **Wrong-ledger lookups are impossible** — the ledger is the charge's own, chosen by us, never
   inferred from a payer-supplied parameter.
@@ -105,26 +155,10 @@ Three properties follow for free, and each is a defect DFX has:
 - **A payer that reports nothing still gets credited**, because arrival is observed rather than
   announced. The reported `tx` is a hint that lets us answer immediately instead of on the next poll.
 
-## Open questions to settle before building
+## Still open
 
-- Which assets a merchant may accept, and whether a merchant may accept several at once (the
-  standard's menu shape says yes).
-- Whether dpay's provider endpoint is hosted (the relay) or on-device. Hosted is simpler and the
-  relay already exists; on-device is more honest about "no intermediary" and needs the merchant
-  phone reachable, which a shop's wifi does not guarantee.
-- EURC's status as a dpay asset (VCHF's EU twin) — not yet in the catalog.
-- Whether to publish the endpoint for other OCP wallets immediately, or run dpay↔dpay first.
-- **How a payer recognises a dpay till at a relay that is not their own.** The payer refuses every
-  Internet Computer asset but native ICP at a provider it cannot vouch for (`selectPayableOffers`,
-  `app/lib/opencryptopay.ts`), and VCHF — the only asset this till serves — is one of them. The
-  exception shipped 2026-09-03 is the founder's: trust the till served by the relay this wallet is
-  already configured to use for its balances and its history. That is self-configuring and adds no
-  party the payer had not already chosen, and it is complete while there is ONE relay. It is not
-  complete the moment a SECOND merchant runs their own: that merchant's customer is a dpay payer
-  pointed at a different relay, so their till is refused by name. Nothing is lost today (there is no
-  second relay), and nothing is silently wrong (the payer is refused, never charged) — but this must
-  be answered before a second relay exists, and the answer is not "widen the rule to any host that
-  looks like dpay", which is exactly the claim a hostile provider would make.
+- EURC's status as a dpay asset (VCHF's EU twin) — not yet in the catalog, and the only thing that
+  would give the EU the same no-price-feed deal.
 
 ## Related work landed 2026-09-02
 

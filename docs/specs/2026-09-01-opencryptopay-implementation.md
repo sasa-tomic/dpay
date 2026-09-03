@@ -6,18 +6,26 @@ first — the public README is wrong twice and the loss path is non-obvious.
 
 ## Scope
 
-**In:** paying an OpenCryptoPay till from dpay, on the `InternetComputer` method (ckBTC, VCHF, ICP)
-and the `Solana` method for **native SOL only**.
+**In:** paying an OpenCryptoPay till from dpay, on the `InternetComputer` method and the `Solana`
+method for **native SOL only**.
+
+Which IC assets narrowed after this plan was written, and the shipped rule is the authority rather
+than this line: at a provider the wallet cannot vouch for, **native ICP only** — every other IC asset
+is refused by name (`unverifiable-ic-asset`), because the measured provider resolves the reported
+index against the ICP ledger whatever asset it was told. The sole exception is a till served by the
+wallet's own relay. Rule and its reasoning: `app/lib/opencryptopay.ts`; measurement:
+[`2026-09-01-opencryptopay-findings.md`](2026-09-01-opencryptopay-findings.md).
 
 **Deliberately out, with reasons:**
 
-- **Solana USDC.** The provider's URI carries no `spl-token` parameter and it is unresolved whether
-  the address is the owner or the associated token account. Guessing sends real money to a wrong or
-  unspendable account. Blocked pending an answer from DFX — the code must refuse it by name, not
-  silently omit it.
+- **Solana USDC.** Refused by name (`solana-usdc-unsupported`): the provider's URI carries no
+  `spl-token` parameter, so it is indistinguishable from a native SOL transfer. The original blocker
+  — whether that address is the owner or the associated token account — was ANSWERED by measurement
+  on 2026-09-02 (findings doc): it is the owner, so the leg would pay the ATA derived from it. What
+  remains is that nobody has built it. Not blocked on DFX any more.
 - **ckUSDC / ckETH.** Not accepted by the provider. Refuse with the reason.
-- **Receiving** (dpay as an OCP merchant). Needs merchant onboarding and a bank IBAN; assessed in
-  the findings doc.
+- **Receiving** (dpay as an OCP merchant) — its own milestone:
+  [`2026-09-02-merchant-side-plan.md`](2026-09-02-merchant-side-plan.md).
 - **Any offline variant.** Impossible — the payer must be online.
 
 ## Where this lives, and why not in the Rust core
