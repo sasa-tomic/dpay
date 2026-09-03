@@ -91,6 +91,12 @@ struct FakeTxn {
     currency: Currency,
     memo_hex: String,
     timestamp: u64,
+    /// The block this row is — the same `next_block` counter the reply's block index comes from,
+    /// so a caller that reads history sees the SAME identity the transfer's own reply returned.
+    /// Global rather than per-ledger (the counter is), which is a fidelity gap a real replica
+    /// does not have and no reader here depends on: a row is only ever compared with rows from
+    /// the same ledger read.
+    block: u64,
 }
 
 /// The gateway. Shared into relay `AppState` under `test-helpers` only.
@@ -109,7 +115,13 @@ pub struct FakeIc {
 }
 
 fn now_ns() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0)
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_nanos() as u64,
+        // Only a host whose clock is set before 1970 reaches this. Substituting 0 would make every
+        // ingress expiry look expired and every logged row look ancient, silently — so say what
+        // happened instead of quietly answering with a wrong time.
+        Err(e) => panic!("dpay-relay: fake-IC: the system clock is before the unix epoch ({e})"),
+    }
 }
 
 /// Whole seconds since the epoch — the resolution the fake ledger's txn log and the eip-1559
@@ -165,12 +177,23 @@ impl FakeIc {
     /// Credit a fake ledger at the user principal (faucet / test seeding) and record a mint
     /// row in the txn log; returns the resulting balance. Mirrors the relay-era faucet contract
     /// (credit + return balance) on principal-keyed state.
-    fn credit_and_log(&self, s: &mut FakeIcState, ledger_text: &str, owner: &Principal, amount: u128) -> u128 {
-        let currency = s.ledgers.get(ledger_text).map(|l| l.currency).unwrap_or(0);
+    /// `currency` comes from the CALLER, which resolved `ledger_text` out of the ledger map to get
+    /// here — re-looking it up would only add a "not found" case that cannot happen and would file
+    /// the row under currency 0 (DEMO) if it ever did.
+    fn credit_and_log(
+        &self,
+        s: &mut FakeIcState,
+        ledger_text: &str,
+        currency: Currency,
+        owner: &Principal,
+        amount: u128,
+    ) -> u128 {
         let k = bal_key(ledger_text, owner);
         let to = k.1 .0.clone();
         let bal = *s.balances.get(&k).unwrap_or(&0) + amount;
         *s.balances.entry(k).or_insert(0) += amount;
+        let block = s.next_block;
+        s.next_block += 1;
         s.txns.push(FakeTxn {
             kind: "mint",
             from: String::new(),
@@ -179,6 +202,7 @@ impl FakeIc {
             currency,
             memo_hex: String::new(),
             timestamp: now_secs(),
+            block,
         });
         bal
     }
@@ -190,7 +214,7 @@ impl FakeIc {
         let Some(ledger_text) = s.ledgers.iter().find(|(_, l)| l.currency == currency).map(|(t, _)| t.clone()) else {
             return 0;
         };
-        self.credit_and_log(&mut s, &ledger_text, owner, amount)
+        self.credit_and_log(&mut s, &ledger_text, currency, owner, amount)
     }
 
     /// Test seam armer (see `FakeIc::hidden_outcomes`): hide `rid`'s outcome for the next
@@ -248,6 +272,7 @@ impl FakeIc {
                 amount: crate::ledger::U64String(t.amount.min(u64::MAX as u128) as u64),
                 nonce: String::new(),
                 currency: t.currency,
+                block: t.block,
                 timestamp: t.timestamp,
                 from_name: String::new(),
                 to_name: String::new(),
@@ -319,7 +344,9 @@ impl FakeIc {
         // `to` is the per-ledger balance key (canister, account); the txn row wants the
         // PAYEE PRINCIPAL TEXT (to.1.0), not the canister id (to.0).
         let ts = now_secs();
-        let currency = s.ledgers.get(canister).map(|l| l.currency).unwrap_or(0);
+        // The ledger was resolved at the top of this call (`cfg`) — its currency is known, not
+        // guessed; a second lookup could only introduce a "not found" that files the row as DEMO.
+        let currency = cfg.currency;
         s.txns.push(FakeTxn {
             kind: "transfer",
             from: sender.0.clone(),
@@ -328,6 +355,7 @@ impl FakeIc {
             currency,
             memo_hex,
             timestamp: ts,
+            block,
         });
         RequestState::Replied(encode_transfer_ok(block))
     }
@@ -405,6 +433,7 @@ impl FakeIc {
             currency: cfg.currency,
             memo_hex,
             timestamp: now_secs(),
+            block,
         });
         RequestState::Replied(encode_legacy_transfer_ok(block))
     }
@@ -477,7 +506,7 @@ impl FakeIc {
         let Some(home) = s.minters.get(canister).cloned() else {
             return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
         };
-        match burn_approved(s, &home, canister, sender, from_subaccount, amount) {
+        match burn_approved(s, &home, canister, sender, from_subaccount, amount, block) {
             Ok(()) => RequestState::Replied(encode_minter_ok(block)),
             Err(msg) => RequestState::Rejected { code: 5, message: msg },
         }
@@ -500,13 +529,15 @@ impl FakeIc {
             return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
         }
         let amount_ledger = arg.ckerc20_ledger_id.to_text();
-        // Amount leg: the ckERC20 ledger itself, spent by the minter.
-        match burn_approved(s, &amount_ledger, canister, sender, arg.from_ckerc20_subaccount, arg.amount) {
+        // Amount leg: the ckERC20 ledger itself, spent by the minter. Both legs of ONE user
+        // operation carry the same block number: they land on DIFFERENT ledgers, and a block
+        // index only ever identifies a row within the ledger it was read from.
+        match burn_approved(s, &amount_ledger, canister, sender, arg.from_ckerc20_subaccount, arg.amount, block) {
             Ok(()) => {}
             Err(msg) => return RequestState::Rejected { code: 5, message: msg },
         }
         // Gas leg: the minter's home (ckETH) ledger, spent by the minter.
-        match burn_approved(s, &home, canister, sender, arg.from_cketh_subaccount, GAS_FEE_WEI) {
+        match burn_approved(s, &home, canister, sender, arg.from_cketh_subaccount, GAS_FEE_WEI, block) {
             Ok(()) => {}
             Err(msg) => return RequestState::Rejected { code: 5, message: msg },
         }
@@ -645,7 +676,13 @@ fn burn_approved(
     sender: &Principal,
     from_subaccount: Option<[u8; 32]>,
     amount: u128,
+    block: u64,
 ) -> Result<(), String> {
+    // Resolved before anything moves: a burn on a ledger this gateway does not know would
+    // otherwise be filed under currency 0 (DEMO) — a row in the wrong asset's history.
+    let Some(cfg) = s.ledgers.get(ledger_text).cloned() else {
+        return Err(format!("ledger {ledger_text} is not registered on this gateway"));
+    };
     let from = (ledger_text.to_string(), (sender.to_text(), from_subaccount.unwrap_or([0u8; 32])));
     let spender = (spender_text.to_string(), [0u8; 32]);
     let allowed = *s.allowances.get(&(from.clone(), spender.clone())).unwrap_or(&0);
@@ -663,9 +700,10 @@ fn burn_approved(
         from: from.1 .0,
         to: String::new(),
         amount,
-        currency: s.ledgers.get(ledger_text).map(|l| l.currency).unwrap_or(0),
+        currency: cfg.currency,
         memo_hex: String::new(),
         timestamp: now_secs(),
+        block,
     });
     Ok(())
 }

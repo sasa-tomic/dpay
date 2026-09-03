@@ -56,7 +56,8 @@ impl<'de> serde::Deserialize<'de> for U64String {
 /// One transaction row, as the wallet's history list shows it. `from`/`to` are PRINCIPAL TEXTS
 /// (each side's self-authenticating principal; the empty string for mint/burn sentinel rows —
 /// the app renders those with its "Demo funds" label instead of a counterparty). `nonce` is hex,
-/// empty on IC-rail rows (which carry no nonce — the app dedups via a composite key).
+/// empty on IC-rail rows (which carry no nonce — the app dedups via a composite key). `block` is
+/// the row's position on its ledger, the one identity an IC-rail row has.
 /// `from_name`/`to_name`/`memo` are display strings, always present and empty when unset (never
 /// null); `memo` carries hex-encoded bytes when a memo rode the transfer. `timestamp` is unix
 /// seconds. Direction (in/out) is derived by the caller comparing the queried account's principal
@@ -68,6 +69,16 @@ pub struct TxnRecord {
     pub amount: U64String,
     pub nonce: String,
     pub currency: Currency,
+    /// The BLOCK INDEX of this row on the ledger it was read from — `first_index + i` on the icrc3
+    /// walk, the transaction id on the ICP-index walk, the gateway's own counter on the fake.
+    ///
+    /// It is the only STABLE IDENTITY an IC-rail row has (`nonce` is always empty there, and
+    /// `{from, to, amount, timestamp}` repeats the moment a customer buys the same coffee twice),
+    /// which is what lets a reader say "I have already accounted for THIS row rather than one
+    /// that looks like it". [`crate::till`] consumes a block index when it credits a sale, so one
+    /// transfer can never pay two charges. Bounded ≪ 2^53 → crosses JSON as a RAW number, like
+    /// `timestamp` below.
+    pub block: u64,
     /// Unix seconds. Bounded ≪ 2^53 → crosses JSON as a RAW number by design (MONEY `u64` fields
     /// cross as [`U64String`] decimal strings so the full range round-trips above 2^53).
     pub timestamp: u64,

@@ -645,11 +645,12 @@ impl AgentLedger {
         let probe_len = probe.transactions.len() as u64;
         let total = nat_to_u64(&probe.log_length, "log_length")?;
         let mut rows: Vec<TxnRecord> = Vec::new();
-        let probe_served_upto = nat_to_u64(&Nat(probe.first_index.0.clone()), "first_index")?
-            .saturating_add(probe_len);
+        let probe_first = nat_to_u64(&Nat(probe.first_index.0.clone()), "first_index")?;
+        let probe_served_upto = probe_first.saturating_add(probe_len);
         if probe_served_upto >= total {
-            for txn in probe.transactions.iter().rev() {
-                if let Some(record) = map_icrc_txn(txn, &me, currency)
+            for (i, txn) in probe.transactions.iter().enumerate().rev() {
+                // The row's identity: where the LEDGER served it, never where we asked from.
+                if let Some(record) = map_icrc_txn(txn, &me, currency, probe_first + i as u64)
                     .filter(|r| memo.is_none_or(|m| r.memo.eq_ignore_ascii_case(m)))
                 {
                     rows.push(record);
@@ -678,8 +679,8 @@ impl AgentLedger {
 
             let before = rows.len();
             // Serve this page newest→oldest; across pages `rows` stays globally newest-first.
-            for txn in page.transactions.iter().rev() {
-                if let Some(record) = map_icrc_txn(txn, &me, currency)
+            for (i, txn) in page.transactions.iter().enumerate().rev() {
+                if let Some(record) = map_icrc_txn(txn, &me, currency, first_index + i as u64)
                     .filter(|r| memo.is_none_or(|m| r.memo.eq_ignore_ascii_case(m)))
                 {
                     rows.push(record);
@@ -808,8 +809,12 @@ impl AgentLedger {
             }
             let page = fetch(start.clone()).await?;
             for txn in page.transactions.iter() {
+                // The index's transaction id IS the block index on the ICP ledger; a reply that
+                // could not state one is a reply we cannot identify a row from, so it fails the
+                // call rather than serving an unidentifiable row.
+                let block = nat_to_u64(&txn.id, "index transaction id")?;
                 if let Some(record) =
-                    map_icp_index_txn(&txn.transaction, me, my_account_id, currency)
+                    map_icp_index_txn(&txn.transaction, me, my_account_id, currency, block)
                         .filter(|r| memo.is_none_or(|m| r.memo.eq_ignore_ascii_case(m)))
                 {
                     rows.push(record);
@@ -906,6 +911,22 @@ impl AgentLedger {
 
 // ---- icrc3 history helpers --------------------------------------------------------------------
 
+/// An ICRC-3 amount as `u64`, or `None` with a line saying which row was dropped and why. Skipping
+/// one unrepresentable row is better than failing a whole history read — but a row that leaves a
+/// money list without a word is exactly the kind of absence nobody notices.
+fn amount_or_skip(amount: &Nat, kind: &str, block: u64) -> Option<u64> {
+    match amount.0.to_u64() {
+        Some(amount) => Some(amount),
+        None => {
+            eprintln!(
+                "dpay-relay: history: the {kind} at block {block} carries {amount}, which exceeds \
+                 u64 — the row is omitted from this history"
+            );
+            None
+        }
+    }
+}
+
 /// `candid::Nat` → `u64` (history-walk indices/lengths are bounded far below u64).
 fn nat_to_u64(n: &Nat, field: &str) -> Result<u64, LedgerError> {
     n.0.to_u64()
@@ -917,7 +938,12 @@ fn nat_to_u64(n: &Nat, field: &str) -> Result<u64, LedgerError> {
 /// for the filtering rules. Counterparties render as PRINCIPAL TEXT (the app shortens them); a
 /// Mint/Burn's ledger-side account (mint account / burn sink) renders as the empty string, which
 /// the app displays as its mint/burn sentinel label.
-fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<TxnRecord> {
+///
+/// `block` is the row's index on this ledger, which the caller derives from the page's own
+/// `first_index` — it is a PARAMETER rather than something read off the transaction because an
+/// icrc3 transaction does not carry its own position, and a row built without one would be a row
+/// no reader could tell apart from its twin (see [`TxnRecord::block`]).
+fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency, block: u64) -> Option<TxnRecord> {
     let account_text = |a: &Account| a.owner.to_text();
     let memo_hex = |m: &Option<icrc_ledger_types::icrc1::transfer::Memo>| {
         m.as_ref().map(|b| hex::encode(b.0.as_slice())).unwrap_or_default()
@@ -930,15 +956,17 @@ fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<T
         if !from_is_me && !to_is_me {
             return None;
         }
-        let amount = u64::try_from(transfer.amount.0.clone())
-            .map_err(|_| ())
-            .ok()?; // amounts are bounded far below u64; skip rather than fail the whole walk
+        // Amounts are bounded far below u64, so this is unreachable on any real ledger; the row is
+        // skipped rather than failing the whole walk, and it is SAID — a silently vanished row in
+        // a money list is the kind of absence nobody notices until it matters.
+        let amount = amount_or_skip(&transfer.amount, "transfer", block)?;
         return Some(TxnRecord {
             from: account_text(&transfer.from),
             to: account_text(&transfer.to),
             amount: U64String(amount),
             nonce: String::new(), // IC-rail rows carry no dpay nonce
             currency: currency as u32,
+            block,
             timestamp: ts,
             from_name: String::new(),
             to_name: String::new(),
@@ -949,13 +977,14 @@ fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<T
         if mint.to != *me {
             return None;
         }
-        let amount = u64::try_from(mint.amount.0.clone()).map_err(|_| ()).ok()?;
+        let amount = amount_or_skip(&mint.amount, "mint", block)?;
         return Some(TxnRecord {
             from: String::new(), // mint-account side renders as the sentinel label
             to: account_text(&mint.to),
             amount: U64String(amount),
             nonce: String::new(),
             currency: currency as u32,
+            block,
             timestamp: ts,
             from_name: String::new(),
             to_name: String::new(),
@@ -968,13 +997,14 @@ fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency) -> Option<T
         if burn.from != *me {
             return None;
         }
-        let amount = u64::try_from(burn.amount.0.clone()).map_err(|_| ()).ok()?;
+        let amount = amount_or_skip(&burn.amount, "burn", block)?;
         return Some(TxnRecord {
             from: account_text(&burn.from),
             to: String::new(), // burn sink renders as the sentinel label
             amount: U64String(amount),
             nonce: String::new(),
             currency: currency as u32,
+            block,
             timestamp: ts,
             from_name: String::new(),
             to_name: String::new(),
@@ -1017,12 +1047,16 @@ pub fn icp_legacy_account_identifier(owner: &Principal) -> String {
 /// renders (byte-preserving hex); the legacy nat64 `memo` is dropped so it can NEVER satisfy a
 /// 16-byte dpay reconciliation exact-memo match. Amounts flow `e8s: u64` → [`U64String`]
 /// untouched (u64::MAX survives — no JS-number/f64 anywhere). Timestamp: the transaction's ns
-/// timestamp preferred, the operation's `created_at_time` fallback, ÷ 1e9 → unix seconds.
+/// timestamp preferred, the operation's `created_at_time` fallback, ÷ 1e9 → unix seconds. `block`
+/// is the index's own transaction id, passed in by the walk for the same reason the icrc3 mapper
+/// takes one: a row without its position is a row nothing can tell apart from its twin
+/// (see [`TxnRecord::block`]).
 fn map_icp_index_txn(
     txn: &IcpIndexTransaction,
     me: &Principal,
     my_account_id: &str,
     currency: Currency,
+    block: u64,
 ) -> Option<TxnRecord> {
     let side = |acct: &str| {
         if acct.eq_ignore_ascii_case(my_account_id) {
@@ -1048,6 +1082,7 @@ fn map_icp_index_txn(
             amount: U64String(transfer.amount.e8s),
             nonce: String::new(), // IC-rail rows carry no dpay nonce
             currency: currency as u32,
+            block,
             timestamp: ts_secs(transfer.created_at_time),
             from_name: String::new(),
             to_name: String::new(),
@@ -1064,6 +1099,7 @@ fn map_icp_index_txn(
             amount: U64String(mint.amount.e8s),
             nonce: String::new(),
             currency: currency as u32,
+            block,
             timestamp: ts_secs(mint.created_at_time),
             from_name: String::new(),
             to_name: String::new(),
@@ -1080,6 +1116,7 @@ fn map_icp_index_txn(
             amount: U64String(burn.amount.e8s),
             nonce: String::new(),
             currency: currency as u32,
+            block,
             timestamp: ts_secs(burn.created_at_time),
             from_name: String::new(),
             to_name: String::new(),
@@ -1116,6 +1153,11 @@ mod icp_index_tests {
         "1111111111111111111111111111111111111111111111111111111111111111";
 
     const TS_NS: u64 = 1_750_000_000_123_456_789; // a ns timestamp whose seconds are unambiguous
+
+    /// An arbitrary block index for the mapper's own cases: they assert what the mapper makes of a
+    /// row, not where the row sat. That the INDEX's transaction id is what actually reaches
+    /// [`TxnRecord::block`] is pinned by the walk test below, which is the only place that knows.
+    const BLOCK: u64 = 4_242;
 
     fn golden_principal() -> Principal {
         Principal::from_text(GOLDEN_PRINCIPAL).unwrap()
@@ -1259,6 +1301,7 @@ mod icp_index_tests {
             &me,
             &me_id,
             cur,
+            BLOCK,
         )
         .unwrap();
         assert_eq!(tin.from, COUNTER_ACCOUNT);
@@ -1272,19 +1315,20 @@ mod icp_index_tests {
             &me,
             &me_id,
             cur,
+            BLOCK,
         )
         .unwrap();
         assert_eq!(tout.from, me.to_text(), "my account-identifier side → my principal text");
         assert_eq!(tout.to, COUNTER_ACCOUNT);
 
         // Mint TO me: empty `from` (the app's mint sentinel), `to` = my principal text.
-        let m = map_icp_index_txn(&mint_txn(&me_id, 10_000, TS_NS), &me, &me_id, cur).unwrap();
+        let m = map_icp_index_txn(&mint_txn(&me_id, 10_000, TS_NS), &me, &me_id, cur, BLOCK).unwrap();
         assert_eq!(m.from, "");
         assert_eq!(m.to, me.to_text());
         assert_eq!(m.amount.0, 10_000);
 
         // Burn BY me: `from` = my principal text, empty `to` (the burn-sink sentinel).
-        let b = map_icp_index_txn(&burn_txn(&me_id, 5, TS_NS), &me, &me_id, cur).unwrap();
+        let b = map_icp_index_txn(&burn_txn(&me_id, 5, TS_NS), &me, &me_id, cur, BLOCK).unwrap();
         assert_eq!(b.from, me.to_text());
         assert_eq!(b.to, "");
 
@@ -1296,17 +1340,17 @@ mod icp_index_tests {
             transfer: None,
             timestamp: TS_NS,
         };
-        assert!(map_icp_index_txn(&approve, &me, &me_id, cur).is_none());
+        assert!(map_icp_index_txn(&approve, &me, &me_id, cur, BLOCK).is_none());
 
         // Rows that do not concern me: dropped (transfer, mint-to-other, burn-by-other).
         let other = "2222222222222222222222222222222222222222222222222222222222222222";
         assert!(map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, other, 1, None, None, TS_NS),
-            &me, &me_id, cur
+            &me, &me_id, cur, BLOCK
         )
         .is_none());
-        assert!(map_icp_index_txn(&mint_txn(other, 1, TS_NS), &me, &me_id, cur).is_none());
-        assert!(map_icp_index_txn(&burn_txn(other, 1, TS_NS), &me, &me_id, cur).is_none());
+        assert!(map_icp_index_txn(&mint_txn(other, 1, TS_NS), &me, &me_id, cur, BLOCK).is_none());
+        assert!(map_icp_index_txn(&burn_txn(other, 1, TS_NS), &me, &me_id, cur, BLOCK).is_none());
     }
 
     #[test]
@@ -1319,7 +1363,7 @@ mod icp_index_tests {
         let bytes = vec![0x00, 0x01, 0xfe, 0xff, 0x7f, 0x80, 0xaa, 0x55];
         let row = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, Some(bytes.clone()), None, TS_NS),
-            &me, &me_id, cur,
+            &me, &me_id, cur, BLOCK,
         )
         .unwrap();
         assert_eq!(row.memo, hex::encode(&bytes), "memo is the exact bytes, hex-encoded");
@@ -1328,7 +1372,7 @@ mod icp_index_tests {
         // reconciliation exact-memo match (the walk filter compares against row.memo).
         let legacy = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, Some(42), TS_NS),
-            &me, &me_id, cur,
+            &me, &me_id, cur, BLOCK,
         )
         .unwrap();
         assert_eq!(legacy.memo, "", "legacy nat64 memo is dropped, not rendered");
@@ -1343,7 +1387,7 @@ mod icp_index_tests {
         // …created_at_time as the fallback when the transaction timestamp is 0/absent.
         let fallback = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, None, 0),
-            &me, &me_id, cur,
+            &me, &me_id, cur, BLOCK,
         )
         .unwrap();
         assert_eq!(
@@ -1351,7 +1395,7 @@ mod icp_index_tests {
             "created_at_time ns → seconds fallback"
         );
         // No timestamp anywhere (mint with ts 0 and created_at_time None): 0, no panic.
-        let nowhere = map_icp_index_txn(&mint_txn(&me_id, 1, 0), &me, &me_id, cur).unwrap();
+        let nowhere = map_icp_index_txn(&mint_txn(&me_id, 1, 0), &me, &me_id, cur, BLOCK).unwrap();
         assert_eq!(nowhere.timestamp, 0);
     }
 
@@ -1361,7 +1405,7 @@ mod icp_index_tests {
         let me_id = icp_legacy_account_identifier(&me);
         let row = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, u64::MAX, None, None, TS_NS),
-            &me, &me_id, 7,
+            &me, &me_id, 7, BLOCK,
         )
         .unwrap();
         assert_eq!(row.amount.0, u64::MAX, "u64::MAX e8s survives untouched (no f64)");
@@ -1411,6 +1455,12 @@ mod icp_index_tests {
             rows.iter().map(|r| r.amount.0).collect::<Vec<_>>(),
             vec![100, 250, 10_000],
             "rows stay globally newest-first ACROSS pages"
+        );
+        assert_eq!(
+            rows.iter().map(|r| r.block).collect::<Vec<_>>(),
+            vec![1002, 1001, 1000],
+            "each row carries the index's OWN transaction id as its block — the identity a reader \
+             tells two look-alike rows apart by"
         );
         assert_eq!(
             *starts.borrow(),

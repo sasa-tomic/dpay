@@ -12,49 +12,49 @@
   "open": {
     "amount": "10.",
     "asset": "VCHF",
-    "id": "pl_0fb592d7d6e7ff98",
+    "id": "pl_cc6d77a2826416c4",
     "merchant": "2ltju-loorm-ztq3h-u32q2-h75yh-ptk3i-rix6u-l7wwi-5imci-z2rpz-pqe",
-    "url": "https://till.example/v1/lnurlp/pl_0fb592d7d6e7ff98"
+    "url": "https://till.example/v1/lnurlp/pl_cc6d77a2826416c4"
   },
   "details": {
-    "callback": "https://till.example/v1/lnurlp/cb/pl_0fb592d7d6e7ff98",
+    "tag": "payRequest",
+    "callback": "https://till.example/v1/lnurlp/cb/pl_cc6d77a2826416c4",
+    "minSendable": 0,
+    "maxSendable": 0,
+    "metadata": "[[\"text/plain\",\"Bahnhof Kiosk - CHF 10\"]]",
     "displayName": "Bahnhof Kiosk",
-    "displayQr": true,
-    "maxSendable": 1000,
-    "metadata": "[[\"text/plain\",\"Bahnhof Kiosk - CHF 10.\"]]",
-    "minSendable": 1000,
+    "standard": "OpenCryptoPay",
     "possibleStandards": [
       "OpenCryptoPay"
     ],
+    "displayQr": true,
     "quote": {
-      "expiration": "2026-09-03T21:52:27.000Z",
-      "id": "plq_ec6c70b4b63c14d6"
+      "id": "plq_3410746e1ac635f6",
+      "expiration": "2026-09-03T22:58:35.000Z"
     },
     "requestedAmount": {
-      "amount": 10.0,
-      "asset": "CHF"
+      "asset": "CHF",
+      "amount": 10.0
     },
-    "standard": "OpenCryptoPay",
-    "tag": "payRequest",
     "transferAmounts": [
       {
+        "method": "InternetComputer",
+        "minFee": 0,
+        "available": true,
         "assets": [
           {
-            "amount": "10.",
-            "asset": "VCHF"
+            "asset": "VCHF",
+            "amount": "10."
           }
-        ],
-        "available": true,
-        "method": "InternetComputer",
-        "minFee": 0
+        ]
       }
     ]
   },
   "callback": {
+    "expiryDate": "2026-09-03T22:58:35.000Z",
     "blockchain": "InternetComputer",
-    "expiryDate": "2026-09-03T21:52:27.000Z",
-    "hint": "Transfer the exact amount to the address in the URI, then report the transaction. Reporting is idempotent: if it fails, retry — the payment is confirmed by reading the ledger, not by this call.",
-    "uri": "icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=2ltju-loorm-ztq3h-u32q2-h75yh-ptk3i-rix6u-l7wwi-5imci-z2rpz-pqe&amount=10."
+    "uri": "icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=2ltju-loorm-ztq3h-u32q2-h75yh-ptk3i-rix6u-l7wwi-5imci-z2rpz-pqe&amount=10.",
+    "hint": "Transfer the exact amount to the address in the URI, then report the transaction. Reporting is idempotent: if it fails, retry — the payment is confirmed by reading the ledger, not by this call."
   },
   "submit_pending": {
     "message": "no matching transfer seen yet — safe to retry",

@@ -577,8 +577,10 @@ async fn signed_legacy_transfer_pays_an_account_identifier() {
         legacy_transfer_arg(to.as_bytes(), None, 250, ICP_FEE_E8S, 0, None),
     )
     .await;
-    // Block 0: the first call this gateway executes. The index rides the ledger's own Ok encoding.
-    assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(0));
+    // Block 2: the two faucet credits above took blocks 0 and 1 — a mint IS a block on a real
+    // ledger, and the gateway numbers them like one so a minted row and a transferred row can
+    // never claim the same identity. The index rides the ledger's own Ok encoding.
+    assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(2));
     assert_eq!(fake.balance_for(ICP, &merch_owner), 1 + 250, "payee credited");
     assert_eq!(
         fake.balance_for(ICP, &payer_owner),
@@ -596,7 +598,7 @@ async fn signed_legacy_transfer_pays_an_account_identifier() {
         legacy_transfer_arg(external.as_bytes(), None, 400, ICP_FEE_E8S, 0xdeadbeef, None),
     )
     .await;
-    assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(1));
+    assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(3));
     assert_eq!(
         fake.balance_for(ICP, &payer_owner),
         100_000_000 - 250 - 400 - 2 * ICP_FEE_E8S,
@@ -2386,6 +2388,24 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     let merchant_principal = Principal::self_authenticating_ed25519(&merchant_pk);
     fake.faucet_credit(Currency::from(7u32), &merchant_principal, 1_000_000_000);
 
+    // Waiting out the observation window, which is a real property and not a test convenience: a
+    // charge is walked at most once every couple of seconds however hard it is polled, so a
+    // just-arrived transfer is seen by the NEXT walk rather than instantly. The sleep therefore
+    // also pins that the window CLOSES — a cache that never expired would be a till that never
+    // sees the money.
+    tokio::time::sleep(std::time::Duration::from_millis(2_100)).await;
+
+    // The step-3 instruction is re-read after that wait, against the SAME quote. Its deadline must
+    // not have moved: it is the quote's own death, not a fresh five minutes minted per call, so a
+    // wallet that waited is never told a dead price is still good.
+    let (status, transfer_again) = call(&state, get_req(&cb)).await;
+    assert_eq!(status, StatusCode::OK, "{transfer_again}");
+    assert_eq!(
+        transfer_again["expiryDate"], expiry,
+        "the transfer instruction dies with its quote, not {QUOTE_TTL_SECS} seconds after whenever \
+         it was asked for"
+    );
+
     // The payer reports again. Same call, same parameters — a RETRY, which the measured provider
     // makes fatal and this one makes free.
     let (status, body) = call(&state, get_req(&tx)).await;
@@ -2398,10 +2418,126 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(again["paid"], body["paid"]);
 
-    // The merchant's own screen sees it too, re-derived from the ledger rather than from memory.
+    // The merchant's own screen sees it too, re-derived from the ledger rather than from memory —
+    // including WHICH ledger row credited them, which is the only thing that makes a settlement
+    // checkable against the chain afterwards.
     let (_, merchant_view) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
     assert_eq!(merchant_view["paid"]["amount_raw"], "1000000000");
     assert_eq!(merchant_view["amount"], "10.");
+    assert_eq!(merchant_view["state"], "paid");
+    assert!(
+        merchant_view["paid"]["block"].is_u64(),
+        "the merchant is told which block paid them: {merchant_view}"
+    );
+
+    // A settled charge is not quoted again: doing so invites a second payment for a sale that is
+    // already credited, and nothing would ever credit that money.
+    let (status, refused) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(
+        refused["message"].as_str().unwrap_or_default().contains("already been paid"),
+        "the refusal says what happened and what to do: {refused}"
+    );
+}
+
+/// ONE TRANSFER, ONE SALE — the money bug, over the real HTTP surface.
+///
+/// Two charges for the same price at the same till and exactly one payment. Before the ledger row
+/// was consumed, both read as paid off that single transfer and the shop handed over the goods
+/// twice; the timestamp clause the old comment credited for preventing this cannot, because the
+/// payment is newer than both charges.
+#[tokio::test]
+async fn one_transfer_credits_exactly_one_sale() {
+    let (state, fake) = till_state();
+    let merchant_pk: [u8; 32] = SigningKey::from_bytes(&[21u8; 32]).verifying_key().to_bytes();
+    let hex_pk = hex::encode(merchant_pk);
+
+    // Ring up CHF 4.50, then ring up CHF 4.50 again — the customer fumbled, the cashier re-rang.
+    let first = open_till(&state, &hex_pk, "Test Shop", 450, "till.example", "http").await;
+    let second = open_till(&state, &hex_pk, "Test Shop", 450, "till.example", "http").await;
+    let (first_id, second_id) = (first["id"].as_str().unwrap(), second["id"].as_str().unwrap());
+    assert_ne!(first_id, second_id, "two ring-ups are two charges, not one");
+
+    // ONE payment of exactly CHF 4.50 lands at the merchant.
+    fake.faucet_credit(
+        Currency::from(7u32),
+        &Principal::self_authenticating_ed25519(&merchant_pk),
+        450_000_000,
+    );
+
+    let status_of = |id: &str| format!("/api/v1/till/{id}");
+    let (_, a) = call(&state, get_req(&status_of(first_id))).await;
+    let (_, b) = call(&state, get_req(&status_of(second_id))).await;
+    let paid: Vec<&Value> = [&a, &b].into_iter().filter(|v| !v["paid"].is_null()).collect();
+    assert_eq!(
+        paid.len(),
+        1,
+        "one transfer may credit exactly one sale — first={a}, second={b}"
+    );
+    assert_eq!(paid[0]["paid"]["amount_raw"], "450000000");
+
+    // Which one takes it is not a coin toss: the first charge polled claims the row, and the
+    // second is left honestly open. A VOIDED charge is still observed — that is deliberate, and
+    // it is why a payer holding the old code a heartbeat before the cashier re-rang does not lose
+    // their money.
+    assert_eq!(a["state"], "paid");
+    assert_eq!(b["paid"], Value::Null);
+    assert_eq!(b["state"], "open");
+
+    // Polling again does not change any of that: a row that paid is spent, not re-offered.
+    let (_, a2) = call(&state, get_req(&status_of(first_id))).await;
+    let (_, b2) = call(&state, get_req(&status_of(second_id))).await;
+    assert_eq!((a2["paid"].clone(), b2["paid"].clone()), (a["paid"].clone(), b["paid"].clone()));
+
+    // Nobody new may be sent to pay a settled charge, and the refusal names the next move.
+    let (status, refused) = call(&state, get_req(&format!("/v1/lnurlp/{first_id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert!(
+        refused["message"].as_str().unwrap_or_default().contains("already been paid"),
+        "{refused}"
+    );
+
+    // …and a code the cashier has rung past is a DIFFERENT kind of dead, told apart out loud: the
+    // third ring-up voids the second, which was never paid.
+    let third = open_till(&state, &hex_pk, "Test Shop", 450, "till.example", "http").await;
+    assert_ne!(third["id"], second["id"]);
+    let (status, replaced) = call(&state, get_req(&format!("/v1/lnurlp/{second_id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{replaced}");
+    assert!(
+        replaced["message"].as_str().unwrap_or_default().contains("ask the cashier"),
+        "a superseded code sends the payer to the counter for the current one: {replaced}"
+    );
+    let (_, second_view) = call(&state, get_req(&status_of(second_id))).await;
+    assert_eq!(second_view["state"], "superseded");
+}
+
+/// A merchant's name is a STRANGER'S STRING pasted into a JSON document that lives inside a JSON
+/// string. Built with `format!` (what this used to do), a name of `X"],["image/png;base64,…`
+/// closed the entry and opened a second one — a syntactically valid LUD-06 document with an
+/// injected image entry that wallets parse and render. Proven against this till on prod.
+#[tokio::test]
+async fn a_merchant_name_cannot_forge_a_second_metadata_entry() {
+    let (state, _fake) = till_state();
+    let merchant_pk: [u8; 32] = SigningKey::from_bytes(&[23u8; 32]).verifying_key().to_bytes();
+    // Short enough to fit the name cap, so what is being tested is the ESCAPING and not the clamp.
+    let attack = r#"X"],["a"#;
+    let opened = open_till(&state, &hex::encode(merchant_pk), attack, 100, "till.example", "http").await;
+    let id = opened["id"].as_str().unwrap();
+    let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::OK, "{details}");
+
+    let metadata = details["metadata"].as_str().expect("metadata is a JSON string");
+    let parsed: Value = serde_json::from_str(metadata).expect("metadata is a JSON document");
+    let entries = parsed.as_array().expect("LUD-06 metadata is an array of entries");
+    assert_eq!(entries.len(), 1, "one entry, whatever the name tried to open: {metadata}");
+    assert_eq!(entries[0][0], "text/plain");
+    assert_eq!(
+        entries[0][1],
+        format!("{attack} - CHF 1"),
+        "the name survives INSIDE the entry, escaped — the till does not censor it, it contains it"
+    );
+    // And the human text is a human's spelling: `CHF 1`, never the wire's bare `CHF 1.`.
+    assert!(!metadata.contains("CHF 1."), "the wire's trailing point must not leak into a receipt");
 }
 
 #[tokio::test]
@@ -2468,6 +2604,12 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
 
     // The whole till surface, as its two callers reach it: the merchant's ring-up and poll, and the
     // standard's three payer steps. Rebuilt per call because a `Request` is consumed by the router.
+    //
+    // The ring-up names a DIFFERENT merchant than the charge the other four requests are about,
+    // because ringing one up voids that merchant's previous charge — the other four would then be
+    // asking about a superseded code and meet a handler's honest 404 instead of its answer, which
+    // is not what this test is measuring.
+    let ring_up_pk: [u8; 32] = SigningKey::from_bytes(&[17u8; 32]).verifying_key().to_bytes();
     let surface = || {
         vec![
             (
@@ -2479,7 +2621,7 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
                     .header(header::HOST, "till.example")
                     .body(Body::from(
                         serde_json::json!({
-                            "merchant_pubkey": hex::encode(merchant_pk),
+                            "merchant_pubkey": hex::encode(ring_up_pk),
                             "merchant_name": "Test Shop",
                             "cents": 500,
                         })
@@ -2676,10 +2818,25 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
 
     // --- the one fact no body on this wire carries -------------------------------------------------
     // `amount_raw` is what the decimal MEANS: the raw VCHF units the payer's converter has to land
-    // on. Pinned by paying EXACTLY that many to the merchant and watching this charge credit — so
-    // the number in the file is the till's own arithmetic rather than one copied by hand.
+    // on. Pinned by paying EXACTLY that many to the merchant and watching a charge for the golden's
+    // own price credit — so the number in the file is the till's own arithmetic rather than one
+    // copied by hand.
+    //
+    // A FRESH charge, rung up after the money lands, rather than the one above: that charge was
+    // just walked, and a charge is walked at most once every couple of seconds however hard it is
+    // polled (the amplification bound). Ringing up again is what a cashier does anyway, and it
+    // keeps this test free of a sleep it would otherwise have to spend.
     let raw: u64 = field(&["amount_raw"]).parse().expect("amount_raw is an integer");
     fake.faucet_credit(Currency::from(7u32), &user_principal(&pk), u128::from(raw));
-    let (status, paid) = call(&state, get_req(&submit)).await;
+    let reopened = open_till(&state, &pubkey_hex, &merchant_name, cents, &host, &proto).await;
+    let reopened_id = reopened["id"].as_str().expect("a rung-up charge carries an id");
+    let (status, paid) = call(
+        &state,
+        get_req(&format!(
+            "/v1/lnurlp/tx/{reopened_id}?method=InternetComputer&asset=VCHF&tx=9f1c"
+        )),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "the golden's raw amount must be what credits this sale: {paid}");
+    assert_eq!(paid["paid"]["amount_raw"], field(&["amount_raw"]));
 }
