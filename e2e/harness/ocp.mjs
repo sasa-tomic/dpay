@@ -1,7 +1,11 @@
-// The OpenCryptoPay merchant till, as a fixture — shared by every OCP flow (111 pays it on the
-// Internet Computer rail, 112 on the Solana rail). One till, one stub, one set of measured values:
-// two rails paying the same code is the point, and a second copy of the fixture would be a second
-// thing to drift.
+// The OpenCryptoPay merchant tills, as fixtures — shared by every OCP flow. ONE stub serves both,
+// because the app's behaviour differs by WHO answers and by nothing else:
+//   • a stranger's till (DFX's public test till, everything down to `installTillStub`), paid on the
+//     Internet Computer rail by flow 111 and on the Solana rail by flow 112 — two rails paying the
+//     same code is the point, and a second copy of that fixture would be a second thing to drift;
+//   • dpay's OWN till (`DPAY_TILL` / `dpayTillAt`), served from the host the wallet is configured to
+//     talk to, paid by flow 113. Its values are READ from `dfx/till_wire.json` rather than authored
+//     here, for the same no-second-copy reason.
 //
 // NO TEST MAY CONTACT THE LIVE PROVIDER. `installTillStub` replaces `window.fetch` — the app's
 // single HTTP boundary (`fetchWithTimeout`, `app/services/relay.ts`) — and is FAIL-CLOSED: any
@@ -24,6 +28,7 @@
 // merchant's claimed name, the destination accounts (the doc redacts the principal), and the
 // accepted-submission body — no payment has ever been made, so no success body exists to copy. Each
 // is marked at its definition.
+import { readFileSync } from 'node:fs';
 import { encodeLnurl } from './lnurl.mjs';
 
 /** The live provider. Treated as configuration, not a constant, exactly as the findings doc says. */
@@ -75,6 +80,77 @@ export const TRANSFER_AMOUNTS = [
   {method: 'Arkade', available: false, assets: [{asset: 'BTC', amount: '0.000016'}]},
 ];
 
+/** What the DFX till is charging, in its own unit — a JSON NUMBER, as measured. */
+export const REQUESTED_AMOUNT = {asset: 'CHF', amount: 1};
+
+// --- dpay's OWN till ----------------------------------------------------------------------------
+// A SECOND till shape, because the two differ in the one way that decides whether a payment is
+// possible at all: who serves it. Everything above is a stranger's provider; everything below is the
+// relay this wallet is already configured to use, which is the only provider dpay will pay a
+// non-ICP Internet Computer asset at (`selectPayableOffers`).
+//
+// Its wire is not re-authored here. `dfx/till_wire.json` is the committed statement of what
+// `crates/dpay-relay/src/till.rs` puts on the wire, checked from the relay's own HTTP surface on one
+// side and parsed by the app's own parsers on the other; this file READS it, so a till that changes
+// shape changes this fixture with it instead of drifting away from it.
+const TILL_WIRE = JSON.parse(readFileSync(new URL('../../dfx/till_wire.json', import.meta.url), 'utf8'));
+const TILL_LEDGER = /^icp:([^/]+)\/transfer\?/.exec(TILL_WIRE.callback.uri);
+if (TILL_LEDGER === null) throw new Error(`till_wire.json's callback URI is not an icp: transfer: ${TILL_WIRE.callback.uri}`);
+
+/** dpay's own till, as the golden states it: ONE method, ONE asset, and the raw units its decimal
+ *  amount means (`amount_raw` — the integer the payer's converter has to land on). */
+export const DPAY_TILL = {
+  merchant: TILL_WIRE.input.merchant_name,
+  paymentId: TILL_WIRE.open.id,
+  transferAmounts: TILL_WIRE.details.transferAmounts,
+  requestedAmount: TILL_WIRE.details.requestedAmount,
+  method: TILL_WIRE.details.transferAmounts[0].method,
+  asset: TILL_WIRE.details.transferAmounts[0].assets[0].asset,
+  amount: TILL_WIRE.details.transferAmounts[0].assets[0].amount,
+  amountRaw: TILL_WIRE.amount_raw,
+  ledger: TILL_LEDGER[1],
+  /** What the till answers a submission with while it has not yet seen the transfer in the
+   *  merchant's ledger history. `202 {"status":"PENDING"}` — reported, not credited. */
+  pendingBody: TILL_WIRE.submit_pending,
+};
+
+/**
+ * The stub config + QR for dpay's own till, served from the HOST the wallet is configured to talk
+ * to. That host is the whole point: the payer's trust rule compares it against the relay setting,
+ * so a fixture on any other host would exercise the refusal instead of the payment.
+ *
+ * Served over https while the harness relay itself is http — deliberately, and it weakens nothing:
+ * the app refuses a provider address that is not https (`parseOcpScan`, `httpsUrl`), and that gate
+ * stays exactly where it is. The stub simply answers the https address the app insists on.
+ *
+ * The QR is the endpoint URL itself, with no LNURL wrapper, because that is what dpay's merchant
+ * screen has to show: `till.rs`'s ring-up answer hands back a `url` and nothing else. It is admitted
+ * by the `/lnurlp/` path segment (`parseOcpScan`), which is the branch a bech32 fixture never
+ * reaches.
+ */
+export function dpayTillAt(relayBaseURL, destination) {
+  const host = new URL(relayBaseURL).host;
+  const origin = `https://${host}`;
+  const apiUrl = `${origin}/v1/lnurlp/${DPAY_TILL.paymentId}`;
+  return {
+    host,
+    qr: apiUrl,
+    cfg: {
+      providerOrigin: origin,
+      paymentId: DPAY_TILL.paymentId,
+      callbackUrl: `${origin}/v1/lnurlp/cb/${DPAY_TILL.paymentId}`,
+      merchantName: DPAY_TILL.merchant,
+      transferAmounts: DPAY_TILL.transferAmounts,
+      requestedAmount: DPAY_TILL.requestedAmount,
+      pendingBody: DPAY_TILL.pendingBody,
+      uris: {
+        [`${DPAY_TILL.method}/${DPAY_TILL.asset}`]:
+          `icp:${DPAY_TILL.ledger}/transfer?to=${destination}&amount=${DPAY_TILL.amount}`,
+      },
+    },
+  };
+}
+
 /**
  * Install the provider stub over `window.fetch`. See the module header for the fail-closed contract.
  *
@@ -91,7 +167,10 @@ export async function installTillStub(driver, cfg) {
       unexpected: [],   // anything the stub refused: must stay empty
       quoteId: null,    // the quote most recently minted (the provider invalidates the rest)
       quoteSeq: 0,
-      txMode: 'accept', // 'accept' | 'indefinite' — flipped between legs by the flow
+      // 'accept' | 'pending' | 'indefinite' — flipped between legs by the flow. 'pending' is the
+      // answer dpay's own till gives while it has not yet seen the transfer on the ledger: a 2xx
+      // that explicitly says the sale is NOT credited yet.
+      txMode: 'accept',
     };
     window.__OCP = state;
 
@@ -122,7 +201,7 @@ export async function installTillStub(driver, cfg) {
         possibleStandards: ['OpenCryptoPay', 'FrankencoinPay', 'LightningBolt11'],
         quote: {id: state.quoteId, expiration: isoIn(c.quoteLifetimeMs)},
         recipient: {name: c.merchantName},
-        requestedAmount: {asset: 'CHF', amount: 1},
+        requestedAmount: c.requestedAmount,
         route: c.paymentId,
         standard: 'OpenCryptoPay',
         tag: 'payRequest',
@@ -150,6 +229,11 @@ export async function installTillStub(driver, cfg) {
           // SYNTHETIC: no payment has ever been made against the live provider, so no accepted-
           // submission body exists to copy. The client requires only a readable JSON body at 2xx.
           return json({}, 200);
+        }
+        if (state.txMode === 'pending') {
+          // MEASURED, on dpay's own relay: a 202 whose body says the transfer has not been matched
+          // yet. A 2xx that must NOT read as paid.
+          return json(c.pendingBody, 202);
         }
         // The loss path: the submission never comes back. `fetchWithTimeout` aborts it and the
         // browser rejects with an AbortError — reproduced here without burning the real 30s bound.
@@ -190,6 +274,8 @@ export async function installTillStub(driver, cfg) {
     callbackUrl: CALLBACK_URL,
     merchantName: CLAIMED_MERCHANT,
     transferAmounts: TRANSFER_AMOUNTS,
+    requestedAmount: REQUESTED_AMOUNT,
+    pendingBody: DPAY_TILL.pendingBody,
     quoteLifetimeMs: QUOTE_LIFETIME_MS,
     detailsDelayMs: 0,
     ...cfg,

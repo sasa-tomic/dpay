@@ -41,7 +41,7 @@
      isolated for free afterwards: **it resolves the reported block index against the ICP ledger for
      every Internet Computer asset**, so nothing but native ICP can ever be matched. Full evidence:
      `docs/specs/2026-09-01-opencryptopay-findings.md`. dpay now refuses the unverifiable assets by
-     name (`provider-checks-icp-ledger`). ~CHF 1 lost, buying the one fact no probe could.
+     name (`unverifiable-ic-asset`). ~CHF 1 lost, buying the one fact no probe could.
    - **REPORT THE BUG TO DFX** (founder action). `mail@ammer.group` is the merchant on the test
      till; DFX support is the other route. Quote block 81001 and the bracketing table in the
      findings doc. Two asks: credit or refund that payment, and fix the ledger resolution.

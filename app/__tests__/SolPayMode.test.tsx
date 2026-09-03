@@ -104,6 +104,7 @@ function solPayElement(props: Partial<SolPayModeProps> = {}) {
   return (
     <SolPayMode
       identity={IDENTITY}
+      relayUrl="https://relay.test"
       online={true}
       nfcStatus="off"
       assets={[]}
@@ -748,6 +749,14 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     await scanTill(tree);
     expect(textByTestID(tree, 'ocp-expiry')).toBe(M.receive.validForMin(3));
     expect(textByTestID(tree, 'ocp-expiry')).not.toBe(M.receive.validForMin(5));
+  });
+
+  test('this rail forwards the same configured relay the IC rail does — one trust anchor, both rails', async () => {
+    // CLAUDE.md's same-surfaces rule applied to the till trust rule: a payer must not get a
+    // different answer about the same till because of which asset was selected when they scanned it.
+    const tree = mountTill({relayUrl: 'https://relay.chosen.example'});
+    await scanTill(tree);
+    expect(jest.mocked(resolveOcpScan).mock.calls[0][1].relayUrl).toBe('https://relay.chosen.example');
   });
 
   test('the runway this rail asks for is the bound its send actually runs under', async () => {

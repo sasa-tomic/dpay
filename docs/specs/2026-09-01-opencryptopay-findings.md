@@ -232,7 +232,9 @@ Consequences, and they are absolute:
 - **Only native ICP can ever be paid at this provider on the `InternetComputer` method.** For any
   other ICRC asset the index is looked up on the wrong ledger, so the match cannot succeed — the
   payer loses the money every time. dpay therefore refuses them by name
-  (`provider-checks-icp-ledger`); a menu that offered them would be offering to lose money.
+  (`unverifiable-ic-asset`, and at every provider it cannot vouch for — nothing on the wire tells
+  one that does this from one that does not); a menu that offered them would be offering to lose
+  money.
 - This also explains the two distinct errors: a *nonexistent* index answers "not confirmed in
   blockchain InternetComputer", while an index that exists **on ICP** but is not their payment
   answers "does not pay any matching activation".

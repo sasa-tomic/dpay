@@ -40,8 +40,18 @@ import {
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {M, applyLocale} from '../i18n';
+import {readFileSync} from 'fs';
+import {join} from 'path';
 
 const realFetch = globalThis.fetch;
+
+/** dpay's OWN till answers step 4 while it has not yet seen the transfer in the merchant's ledger
+ *  history. READ from the committed golden rather than copied into a literal here — that file is the
+ *  single statement of what this relay puts on the wire (`dfx/till_wire.json`), and a copy is a
+ *  place for the two to drift. Loaded at test time exactly as `tillWire.test.ts` loads it. */
+const TILL_PENDING_BODY = (JSON.parse(
+  readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8'),
+) as {submit_pending: Record<string, unknown>}).submit_pending;
 
 afterEach(() => {
   (globalThis as unknown as {fetch: unknown}).fetch = realFetch;
@@ -85,7 +95,7 @@ const CB_IC_200 = {
 /** Same call with `asset=ICP` — the NATIVE ICP ledger (`ryjl3-…`), recorded 2026-09-03. Native ICP
  *  is the only Internet Computer asset this provider can actually verify: it resolves the reported
  *  block index against the ICP ledger whatever asset was declared, so it is the only one whose index
- *  it looks up in the right place (`provider-checks-icp-ledger`). The amount matches DETAILS_200's
+ *  it looks up in the right place (`unverifiable-ic-asset`). The amount matches DETAILS_200's
  *  ICP quote — the provider does not re-price inside a quote, and a disagreement is a hard refusal. */
 const CB_ICP_200 = {
   expiryDate: '2026-09-01T14:30:19.292Z',
@@ -515,6 +525,30 @@ describe('submitProof', () => {
     expect(u.searchParams.get('tx')).toBe('8168');
   });
 
+  test('a provider that says PENDING is not accepted — its own verdict outranks the 2xx', async () => {
+    // The body is dpay's own till's (`dfx/till_wire.json`): it TOOK the report and has not yet seen
+    // the transfer in the merchant's ledger history. Reading the 202 alone would put "Paid ✓" on
+    // screen on the strength of an answer that says the opposite.
+    const mock = installResponse(202, TILL_PENDING_BODY);
+    const out = await submitProof(DETAILS, 'InternetComputer', 'VCHF', '81001');
+    expect(out.kind).toBe('pending');
+    if (out.kind !== 'pending') return;
+    // The diagnostic carries the transfer AND what the provider said, because that is the whole
+    // post-mortem for a payment made far from any computer.
+    expect(out.detail).toContain('81001');
+    expect(out.detail).toContain(String(TILL_PENDING_BODY.message));
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  test('a 2xx that reports a SETTLED status is accepted — only the pending verdict is special', async () => {
+    // The other direction, and the reason the check reads the FIELD instead of distrusting 2xx as a
+    // class: dpay's till answers `{"status":"OK","paid":<block>}` once it has seen the transfer, and
+    // that is a credited sale. (A 2xx with no status at all is the case above this describe's
+    // earlier test — DFX's shape — and stays accepted for the same reason.)
+    installResponse(200, {status: 'OK', paid: 81001});
+    expect(await submitProof(DETAILS, 'InternetComputer', 'VCHF', '81001')).toEqual({kind: 'accepted'});
+  });
+
   test('a 400 is a definitive refusal carrying the provider sentence', async () => {
     installResponse(400, TX_NOT_CONFIRMED_400);
     const out = await submitProof(DETAILS, 'InternetComputer', 'VCHF', '999999999999');
@@ -639,8 +673,14 @@ function assetById(id: string): SelectableAsset {
   return a;
 }
 
+/** The relay this wallet is configured to talk to. NOT the scanned host: every case in this file is
+ *  DFX's provider, which is exactly the party the wallet cannot vouch for. The trust rule itself is
+ *  `selectPayableOffers`' business (`opencryptopay.test.ts`); what this constant does here is keep
+ *  every case below on the untrusted side of it, which is where a stranger's till belongs. */
+const RELAY_URL = 'https://dpay.kalaj.org';
+
 function ctx(id: string, nowMs = NOW) {
-  return {selected: assetById(id), assets: WALLET_ASSETS, catalog: CATALOG, nowMs, sequenceBudgetMs: SEQUENCE_MS};
+  return {selected: assetById(id), assets: WALLET_ASSETS, catalog: CATALOG, relayUrl: RELAY_URL, nowMs, sequenceBudgetMs: SEQUENCE_MS};
 }
 
 describe('resolveOcpScan', () => {
@@ -675,7 +715,7 @@ describe('resolveOcpScan', () => {
   test('a destination on ANOTHER ledger is refused — never paid because the amount looked right', async () => {
     // ICP is on the till's list and is a wallet asset, but the provider answers with the VCHF
     // ledger's address. Paying it would send ICP to a VCHF ledger account: a different asset.
-    // (VCHF itself is no longer payable here at all — `provider-checks-icp-ledger`.)
+    // (VCHF itself is no longer payable here at all — `unverifiable-ic-asset`.)
     installRoutes([
       {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
@@ -740,7 +780,7 @@ describe('resolveOcpScan', () => {
     expect(out.host).toBe('api.dfx.swiss');
     // ONLY native ICP: the till also lists ckBTC and VCHF, but this provider verifies every
     // Internet Computer payment against the ICP ledger, so those two would be paid and never
-    // credited (`provider-checks-icp-ledger`). A menu must never offer an option that loses money.
+    // credited (`unverifiable-ic-asset`). A menu must never offer an option that loses money.
     expect(out.options.map(o => o.assetId)).toEqual(['ic:8']);
     // The amount is IN ITS OWN UNITS — the price differs per asset, so a menu of bare names would
     // be a choice made blind.
@@ -1058,6 +1098,21 @@ describe('payAndReport', () => {
     expect(out.message).toContain(REFERENCE);
     // …and it is STILL logged, because a console is where it gets grepped.
     expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('not confirmed in blockchain');
+    warn.mockRestore();
+  });
+
+  test('a PENDING answer is unresolved with the wait-for-it instruction — never paid', async () => {
+    // The truthfulness case. The transfer IS on-chain and the provider HAS the report, so the sale
+    // will credit; what it is not is credited now, and a screen may only assert what was observed.
+    // It must not borrow the never-answered sentence either: that one sends the payer to chase the
+    // merchant with a reference, which is the wrong instruction when the provider already has it.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const mock = installResponse(202, TILL_PENDING_BODY);
+    const out = await payAndReport(DETAILS, 'InternetComputer', 'VCHF', settled);
+    expect(out).toEqual({kind: 'unresolved', message: M.pay.ocp.submitPending(REFERENCE)});
+    expect(out.kind === 'unresolved' && out.message).not.toBe(M.pay.ocp.submitUnknown(REFERENCE));
+    // Still exactly one submission: a pending answer is not an invitation to report again from here.
+    expect(mock).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
 

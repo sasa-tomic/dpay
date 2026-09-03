@@ -114,6 +114,17 @@ Three properties follow for free, and each is a defect DFX has:
   phone reachable, which a shop's wifi does not guarantee.
 - EURC's status as a dpay asset (VCHF's EU twin) — not yet in the catalog.
 - Whether to publish the endpoint for other OCP wallets immediately, or run dpay↔dpay first.
+- **How a payer recognises a dpay till at a relay that is not their own.** The payer refuses every
+  Internet Computer asset but native ICP at a provider it cannot vouch for (`selectPayableOffers`,
+  `app/lib/opencryptopay.ts`), and VCHF — the only asset this till serves — is one of them. The
+  exception shipped 2026-09-03 is the founder's: trust the till served by the relay this wallet is
+  already configured to use for its balances and its history. That is self-configuring and adds no
+  party the payer had not already chosen, and it is complete while there is ONE relay. It is not
+  complete the moment a SECOND merchant runs their own: that merchant's customer is a dpay payer
+  pointed at a different relay, so their till is refused by name. Nothing is lost today (there is no
+  second relay), and nothing is silently wrong (the payer is refused, never charged) — but this must
+  be answered before a second relay exists, and the answer is not "widen the rule to any host that
+  looks like dpay", which is exactly the claim a hostile provider would make.
 
 ## Related work landed 2026-09-02
 

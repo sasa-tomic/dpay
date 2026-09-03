@@ -106,10 +106,12 @@ export type PayMessages = {
      *  screen the payer is already on. Heading for that menu. Distinct from `assetNotAccepted`,
      *  which is the dead end — this one has options under it, so it must not send anyone to
      *  Balances. Names the declined asset so the switch is never silent. */
-    /** An IC asset the provider lists but cannot verify: it reads the reported block index off the
-     *  ICP ledger whatever asset was declared (measured 2026-09-03), so anything but native ICP is
-     *  paid and never credited. Names the asset and the one that does work. */
-    providerChecksIcpLedger: (selected: string) => string;
+    /** An IC asset a provider lists that this wallet cannot vouch for — only a till served by the
+     *  relay this wallet already uses is exempt (`lib/opencryptopay.ts`). Names the asset AND the
+     *  host it is about, because the refusal is about that provider and not about the asset.
+     *  `alternatives` is null when nothing else on the till is payable here, same as
+     *  `methodUnavailable`: there is then no "switch in Balances" to point at. */
+    unverifiableIcAsset: (selected: string, host: string, alternatives: string | null) => string;
     chooseAsset: (selected: string) => string;
     assetNotAccepted: (selected: string, accepted: string) => string;
     /** The till DOES take the selected asset, but its provider says it cannot settle that method
@@ -174,6 +176,11 @@ export type PayMessages = {
     ref: {icBlock: (index: string) => string; solTransaction: (signature: string) => string};
     /** Funds moved; the provider never answered. Honest unknown — never rendered as paid or failed. */
     submitUnknown: (reference: string) => string;
+    /** Funds moved, the provider TOOK the report, and its own answer says it has not matched the
+     *  transfer yet. Distinct from `submitUnknown`, and the difference is what the payer should do:
+     *  there the provider never answered at all, here it answered "not yet" — so waiting is right
+     *  and there is nothing to chase. Never rendered as paid; never as failed either. */
+    submitPending: (reference: string) => string;
     /** Funds moved; the provider refused the proof. Definitive, and still costs the payer. */
     /** The provider REFUSED the proof after the money moved. `said` is the provider's own sentence
      *  when it gave one, already sanitised — quoted, never presented as dpay's own words. It is the
@@ -322,8 +329,10 @@ export const payEn: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'This till takes USDC on Solana, but its code doesn’t say which token account to send to — paying it would risk sending real money to the wrong account. Pay with SOL instead, or switch in Balances to another asset this till takes.',
-    providerChecksIcpLedger: selected =>
-      `This till lists ${selected}, but its payment provider can only confirm payments made in ICP — it checks the wrong ledger for anything else, so your money would leave and the sale would not be credited. Pay with ICP instead: select it in Balances and scan again.`,
+    unverifiableIcAsset: (selected, host, alternatives) =>
+      alternatives
+        ? `This till lists ${selected}, but dpay can’t confirm that ${host} would credit a payment made in it — the only provider dpay has tested checked the ICP ledger for every Internet Computer asset, so real money left and the sale was never credited. This till also takes ${alternatives}. dpay never swaps, so switch to one of those in Balances and scan again.`
+        : `This till lists ${selected}, but dpay can’t confirm that ${host} would credit a payment made in it — the only provider dpay has tested checked the ICP ledger for every Internet Computer asset, so real money left and the sale was never credited. Nothing else this till takes can be paid from this wallet, so ask the merchant for another way to pay.`,
     chooseAsset: selected =>
       `This till doesn’t take ${selected}, but it takes these — pick one to pay with. dpay never swaps: you pay the asset you choose.`,
     assetNotAccepted: (selected, accepted) =>
@@ -373,6 +382,8 @@ export const payEn: PayMessages = {
     },
     submitUnknown: reference =>
       `Your transfer went through, but the merchant’s payment provider didn’t confirm it — so this is neither paid nor failed. The money has left your wallet, so don’t pay again. Show the merchant ${reference}: it is the proof of your transfer.`,
+    submitPending: reference =>
+      `Your transfer went through and the merchant’s payment provider has been told — it just hasn’t matched it to this sale yet. It credits as soon as it sees the transfer, so there is nothing more to do. The money has left your wallet: don’t pay again. If the till still doesn’t show it, give the merchant ${reference}.`,
     submitRejected: (reference, said) =>
       `Your transfer went through, but the merchant’s payment provider refused the proof of it, so the sale wasn’t credited. The money has left your wallet, so don’t pay again. Contact the merchant and give them ${reference}.`
       + (said === null ? '' : ` The provider said: “${said}”`),

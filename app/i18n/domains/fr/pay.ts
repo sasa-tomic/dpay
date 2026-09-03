@@ -79,8 +79,10 @@ export const payFr: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'Cette caisse accepte les USDC sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.',
-    providerChecksIcpLedger: selected =>
-      `Cette caisse propose ${selected}, mais son prestataire de paiement ne sait confirmer que les paiements en ICP — pour le reste il consulte le mauvais registre : votre argent partirait sans que la vente soit créditée. Payez plutôt en ICP : sélectionnez-le dans Soldes et scannez à nouveau.`,
+    unverifiableIcAsset: (selected, host, alternatives) =>
+      alternatives
+        ? `Cette caisse propose ${selected}, mais dpay ne peut pas confirmer que ${host} créditerait un paiement dans cet actif — le seul prestataire testé par dpay consultait le registre ICP pour tous les actifs Internet Computer : de l’argent réel est parti et la vente n’a jamais été créditée. Cette caisse accepte aussi ${alternatives}. dpay ne convertit jamais : passez à l’un de ces actifs dans « Soldes », puis scannez à nouveau.`
+        : `Cette caisse propose ${selected}, mais dpay ne peut pas confirmer que ${host} créditerait un paiement dans cet actif — le seul prestataire testé par dpay consultait le registre ICP pour tous les actifs Internet Computer : de l’argent réel est parti et la vente n’a jamais été créditée. Ce portefeuille ne peut payer aucun autre actif accepté par cette caisse : demandez au commerçant un autre moyen de paiement.`,
     chooseAsset: selected =>
       `Cette caisse n’accepte pas ${selected}, mais elle accepte ceux-ci — choisis avec lequel payer. dpay ne convertit jamais : tu paies l’actif que tu choisis.`,
     assetNotAccepted: (selected, accepted) =>
@@ -130,6 +132,8 @@ export const payFr: PayMessages = {
     },
     submitUnknown: reference =>
       `Votre transfert est passé, mais le prestataire de paiement du commerçant ne l’a pas confirmé — ce n’est donc ni payé ni échoué. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Montrez au commerçant ${reference}, c’est la preuve de votre transfert.`,
+    submitPending: reference =>
+      `Votre transfert est passé et le prestataire de paiement du commerçant en a été informé — il ne l’a simplement pas encore rattaché à cette vente. Il sera crédité dès qu’il verra le transfert : vous n’avez rien d’autre à faire. L’argent a quitté votre portefeuille : ne payez pas une seconde fois. Si la caisse ne l’affiche toujours pas, donnez ${reference} au commerçant.`,
     submitRejected: (reference, said) =>
       `Votre transfert est passé, mais le prestataire de paiement du commerçant a refusé la preuve : la vente n’a pas été créditée. L’argent a quitté votre portefeuille — ne payez pas une seconde fois. Contactez le commerçant et donnez-lui ${reference}.`
       + (said === null ? '' : ` Le prestataire indique : « ${said} »`),

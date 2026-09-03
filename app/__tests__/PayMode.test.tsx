@@ -127,6 +127,7 @@ function payElement(props: Partial<PayModeProps> = {}) {
   return (
     <PayMode
       identity={IDENTITY}
+      relayUrl="https://relay.test"
       online={false}
       nfcStatus="unknown"
       onSettled={() => {}}
@@ -840,6 +841,16 @@ describe('PayMode — OpenCryptoPay till', () => {
     // dead quote.
     expect(textByTestID(tree, 'ocp-expiry')).toBe(M.receive.validForMin(3));
     expect(textByTestID(tree, 'ocp-expiry')).not.toBe(M.receive.validForMin(5));
+  });
+
+  test('the resolver is told which relay this wallet trusts — the setting, not a compiled-in host', async () => {
+    // The till trust rule compares the provider's host against THIS string (`OcpProvider` in
+    // lib/opencryptopay.ts). If the screen stopped forwarding the configured relay — or forwarded a
+    // baked constant instead — the rule would still be correct and would trust the wrong party, so
+    // what is pinned here is that the payer's own setting is what reaches it.
+    const tree = mountTill({relayUrl: 'https://relay.chosen.example'});
+    await scanTill(tree);
+    expect(jest.mocked(resolveOcpScan).mock.calls[0][1].relayUrl).toBe('https://relay.chosen.example');
   });
 
   test('the runway this rail asks for covers the poll budget it actually uses', async () => {

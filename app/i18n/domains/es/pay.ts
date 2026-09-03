@@ -78,8 +78,10 @@ export const payEs: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'Esta caja acepta USDC en Solana, pero su código no indica a qué cuenta de token enviarlo: pagar así podría mandar dinero real a la cuenta equivocada. Paga con SOL, o cambia en «Saldos» a otro activo que acepte esta caja.',
-    providerChecksIcpLedger: selected =>
-      `Esta caja ofrece ${selected}, pero su proveedor de pagos solo puede confirmar pagos en ICP: para lo demás consulta el libro mayor equivocado, así que tu dinero saldría y la venta no se abonaría. Paga con ICP: selecciónalo en Saldos y vuelve a escanear.`,
+    unverifiableIcAsset: (selected, host, alternatives) =>
+      alternatives
+        ? `Esta caja ofrece ${selected}, pero dpay no puede confirmar que ${host} vaya a abonar un pago en ese activo: el único proveedor que dpay ha probado consultaba el libro mayor de ICP para todos los activos de Internet Computer, salió dinero real y la venta nunca se abonó. Esta caja también acepta ${alternatives}. dpay nunca convierte, así que cambia en «Saldos» a uno de esos activos y vuelve a escanear.`
+        : `Esta caja ofrece ${selected}, pero dpay no puede confirmar que ${host} vaya a abonar un pago en ese activo: el único proveedor que dpay ha probado consultaba el libro mayor de ICP para todos los activos de Internet Computer, salió dinero real y la venta nunca se abonó. Esta billetera no puede pagar ningún otro activo que acepte esta caja: pide al comercio otra forma de pago.`,
     chooseAsset: selected =>
       `Esta caja no acepta ${selected}, pero sí estos: elige con cuál pagar. dpay nunca convierte: pagas el activo que elijas.`,
     assetNotAccepted: (selected, accepted) =>
@@ -129,6 +131,8 @@ export const payEs: PayMessages = {
     },
     submitUnknown: reference =>
       `Tu transferencia se realizó, pero el proveedor de pagos del comercio no la confirmó: no está pagada ni ha fallado. El dinero ha salido de tu billetera, así que no pagues otra vez. Muestra al comercio ${reference}: es la prueba de tu transferencia.`,
+    submitPending: reference =>
+      `Tu transferencia se realizó y se ha informado al proveedor de pagos del comercio: solo que aún no la ha asociado a esta venta. Se abonará en cuanto vea la transferencia, así que no tienes que hacer nada más. El dinero ha salido de tu billetera: no pagues otra vez. Si la caja sigue sin mostrarla, indica ${reference} al comercio.`,
     submitRejected: (reference, said) =>
       `Tu transferencia se realizó, pero el proveedor de pagos del comercio rechazó la prueba, así que la venta no se ha abonado. El dinero ha salido de tu billetera, así que no pagues otra vez. Contacta con el comercio e indícale ${reference}.`
       + (said === null ? '' : ` El proveedor indica: «${said}»`),

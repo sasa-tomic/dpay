@@ -16,9 +16,10 @@ import {BUNDLED_NETWORKS, icpCatalogOf, ledgerToCurrency} from '../config/catalo
 // VCHF, the decimal the relay spells against the integer the relay means by it, the path the relay
 // serves against the submission URL this app derives from it.
 //
-// It does NOT claim this till is payable from this app: `selectPayableOffers` (`lib/opencryptopay.ts`)
-// refuses every Internet Computer asset but native ICP, which includes the only asset this till
-// serves. That refusal and the measurement behind it are that function's business.
+// It does NOT decide whether this till is payable from this app: whether VCHF — the only asset it
+// serves — may be paid at all turns on WHO served it, and that rule is `selectPayableOffers`'
+// business (`lib/opencryptopay.ts`, exercised in `opencryptopay.test.ts` and end to end by e2e flow
+// 113). What is pinned here is the wire, on both sides of it.
 const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8')) as {
   input: {merchant_name: string; host: string};
   amount_raw: string;

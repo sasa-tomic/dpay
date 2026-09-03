@@ -87,6 +87,13 @@ export type OcpSubmitResult =
    *  that explains WHY a sale went uncredited after the money left. `detail` around it is an
    *  English diagnostic for the console and must not reach a screen; `said` may, quoted. */
   | {kind: 'rejected'; detail: string; said: string | null}
+  /** The provider TOOK the report and its own body says it has not matched the transfer yet.
+   *  MEASURED on dpay's own till, which answers `202 {"status":"PENDING", …}` until it sees the
+   *  transfer in the merchant's ledger history (`dfx/till_wire.json`, `submit_pending`). Neither
+   *  accepted nor refused, and it must never be collapsed into either: rendering it as accepted
+   *  claims a completed sale on the strength of an answer that says the opposite, and rendering it
+   *  as refused would alarm a payer whose payment is simply a moment from being credited. */
+  | {kind: 'pending'; detail: string}
   /** Timeout / transport / unreadable body — the transfer may well have happened. Honest pending. */
   | {kind: 'unknown'; detail: string};
 
@@ -132,6 +139,19 @@ function providerMessage(json: unknown): string | null {
   const clean = sanitiseDisplayText(typeof m === 'string' ? m : '');
   return clean.length > 0 ? clean : null;
 }
+
+/** The provider's OWN verdict on a submission, as it spells it in the body's `status` field, or null
+ *  when it sent none. Case-normalised, which can only ever make a refusal reachable: an unrecognised
+ *  status leaves the answer accepted (below), so tolerating `Pending` alongside `PENDING` widens the
+ *  honest branch and never the optimistic one. */
+function providerStatus(json: unknown): string | null {
+  if (typeof json !== 'object' || json === null) return null;
+  const s = (json as {status?: unknown}).status;
+  return typeof s === 'string' && s.trim().length > 0 ? s.trim().toUpperCase() : null;
+}
+
+/** The one status spelling that means "reported, not yet matched" — measured, not guessed. */
+const STATUS_PENDING = 'PENDING';
 
 /** Is this body the payment-link payload rather than the error envelope? The payload carries the
  *  LNURL `tag` and the merchant's `displayName`; the error envelope carries neither. This is what
@@ -327,7 +347,9 @@ export async function fetchTransferUri(
  *  Measured; see the findings doc's "The loss path".
  *
  *  Consequently the outcome mapping is deliberately asymmetric:
- *   - 2xx with a readable body → accepted.
+ *   - 2xx whose body reports the provider's own PENDING verdict → pending (it took the report and
+ *     has not matched the transfer yet).
+ *   - any other 2xx with a readable body → accepted.
  *   - 4xx with a readable body → rejected: a definitive refusal. Its sentence is a `detail` for the
  *     console — the payer gets `M.pay.ocp.submitRejected`, which names the reference they can claim
  *     the payment with, because that is the only thing they can act on once the money has moved.
@@ -381,6 +403,21 @@ export async function submitProof(
   }
   if (!r.ok) {
     return {kind: 'unknown', detail: `${target.url.host} answered HTTP ${r.status}; transfer ${txId} is on-chain and unreported`};
+  }
+  // THE PROVIDER'S VERDICT, NOT THE HTTP CODE. A 2xx says the report was taken, not that the sale
+  // was credited: dpay's own till answers `202 {"status":"PENDING"}` while it has yet to see the
+  // transfer in the merchant's ledger history, and reading that as "paid" would put a completed sale
+  // on screen on the strength of an answer that says the opposite. Only the MEASURED spelling is
+  // special-cased — inventing verdicts for providers nobody has recorded would be the same class of
+  // guess in the other direction, so an unrecognised (or absent) status stays accepted, which is
+  // what the standard's 2xx has always meant here.
+  if (providerStatus(body.json) === STATUS_PENDING) {
+    const said = providerMessage(body.json);
+    return {
+      kind: 'pending',
+      detail: `${target.url.host} took the report of transfer ${txId} but has not matched it yet (HTTP ${r.status})`
+        + (said === null ? '' : `: ${said}`),
+    };
   }
   return {kind: 'accepted'};
 }
@@ -471,7 +508,7 @@ type OcpResolveCtx = {
  */
 export async function resolveOcpScan(
   scan: {apiUrl: string; host: string},
-  ctx: OcpResolveCtx & {selected: SelectableAsset},
+  ctx: OcpResolveCtx & {selected: SelectableAsset; relayUrl: string},
 ): Promise<OcpResolveResult> {
   const found = await fetchPaymentDetails(scan.apiUrl);
   if (found.kind === 'error') return {kind: 'refused', message: found.message};
@@ -480,7 +517,13 @@ export async function resolveOcpScan(
   }
   const details = found.details;
 
-  const {payable, refused} = selectPayableOffers(details, ctx.assets, ctx.nowMs);
+  // `scan.host` — the host the quote was just fetched from over https — and NOT `details.proofHost`,
+  // which the provider wrote. `fetchPaymentDetails` has already refused any body whose callback host
+  // differs from the fetched one, so the two are equal here; passing the fetched one keeps the trust
+  // input a fact the wallet established rather than one it was told. `relayUrl` reaches this
+  // function and not `resolveOcpOffer`, which has no trust decision to make.
+  const provider = {host: scan.host, relayUrl: ctx.relayUrl};
+  const {payable, refused} = selectPayableOffers(details, ctx.assets, ctx.nowMs, provider);
   const offer = payable.find(o => o.assetId === ctx.selected.id) ?? null;
   if (offer !== null) return resolveOcpOffer(scan.host, details, offer, ctx);
 
@@ -498,7 +541,7 @@ export async function resolveOcpScan(
     const options = payable.filter(o => railOf(o) === ctx.selected.protocol);
     if (options.length > 0) return {kind: 'choose', details, host: scan.host, options};
   }
-  return {kind: 'refused', message: unpayableMessage(details, ctx, payable, refused)};
+  return {kind: 'refused', message: unpayableMessage(scan.host, details, ctx, payable, refused)};
 }
 
 /**
@@ -587,6 +630,7 @@ export function ocpTimeRefusal(target: {expiresAt: number; payableUntil: number}
 /** Why the selected asset cannot pay this till, in the order the reasons matter to the user. Every
  *  branch names what to do next (founder rule 2026-08-29); none of them silently drops an asset. */
 function unpayableMessage(
+  host: string,
   details: OcpDetails,
   ctx: {selected: SelectableAsset; assets: SelectableAsset[]; nowMs: number},
   payable: OcpOffer[],
@@ -600,11 +644,17 @@ function unpayableMessage(
     return M.pay.ocp.solanaUsdcUnsupported;
   }
   // The IC twin of the case above, and the more expensive one: the till LISTS this asset, so silence
-  // would read as dpay being unable to pay it. The provider cannot verify it (it reads the block
-  // index off the ICP ledger whatever asset was declared), so paying would move money that is never
-  // credited — proven at the cost of a real payment, 2026-09-03.
-  if (refused.some(r => r.reason === 'provider-checks-icp-ledger' && offerNamesAsset(r, ctx.selected))) {
-    return M.pay.ocp.providerChecksIcpLedger(ctx.selected.symbol);
+  // would read as dpay being unable to pay it. This provider is not one this wallet can vouch for,
+  // and the only one ever measured credited nothing but native ICP — so the message NAMES the host
+  // it is about, and offers the alternatives this wallet could actually pay (null when there are
+  // none, exactly like `methodUnavailable`: a "switch in Balances" with nothing to switch to would
+  // be a dead end).
+  if (refused.some(r => r.reason === 'unverifiable-ic-asset' && offerNamesAsset(r, ctx.selected))) {
+    return M.pay.ocp.unverifiableIcAsset(
+      ctx.selected.symbol,
+      host,
+      payable.length > 0 ? walletAssetList(payable, ctx.assets) : null,
+    );
   }
   // The till DOES take the selected asset, but the provider says it cannot settle that method right
   // now. Matched against the selected asset, never "some method was unavailable": the live provider
@@ -715,8 +765,12 @@ export type OcpPayResult =
   | {kind: 'paid'}
   /** Nothing moved. The user can act on it and try again. */
   | {kind: 'not-paid'; message: string}
-  /** The money moved (or may have) and the sale is not credited. NEVER render as paid or as failed,
-   *  and never offer a retry — the quote and the transaction id are both spent. */
+  /** The money moved (or may have) and the sale is not credited YET, or will not be. NEVER render as
+   *  paid or as failed, and never offer a retry — against the measured one-shot provider the quote
+   *  and the transaction id are both spent. The `message` is what separates the cases the payer must
+   *  act on differently (`unresolvedMessage`); the outcome SURFACE is deliberately one, because what
+   *  the screen must not do — claim a sale, or invite a second payment — is the same for all of
+   *  them. */
   | {kind: 'unresolved'; message: string};
 
 /**
@@ -761,15 +815,25 @@ export async function payAndReport(
   // The provider's own sentence is diagnostic, not instruction: the user needs to know the money is
   // gone and which reference proves it, which is what the copy says.
   console.warn(`opencryptopay: submission ${reported.kind} for tx ${sent.txId}: ${reported.detail}`);
-  return {
-    kind: 'unresolved',
-    // The provider's own sentence is QUOTED into the refusal when it gave one — the same treatment
-    // the pre-payment reads already give it (`failureMessage`). After the money has moved it stops
-    // being a mere diagnostic: it is what the payer repeats to the merchant, and it is the only
-    // statement of WHY the sale went uncredited. Losing it to the console means a payer standing at
-    // a till with money gone and nothing to say about it.
-    message: reported.kind === 'rejected'
-      ? M.pay.ocp.submitRejected(sent.reference, reported.said)
-      : M.pay.ocp.submitUnknown(sent.reference),
-  };
+  return {kind: 'unresolved', message: unresolvedMessage(reported, sent.reference)};
+}
+
+/** The sentence for a submission that did not come back accepted. Three genuinely different facts,
+ *  three instructions — collapsing any two would tell the payer to do the wrong thing:
+ *   - REJECTED: the sale will not be credited, and the provider's own sentence is QUOTED (the same
+ *     treatment the pre-payment reads give it in `failureMessage`). After the money has moved it
+ *     stops being a mere diagnostic: it is what the payer repeats to the merchant, and it is the
+ *     only statement of WHY the sale went uncredited.
+ *   - PENDING: the provider HAS the report and has not matched it yet, so waiting is correct and
+ *     there is nothing to chase.
+ *   - UNKNOWN: the provider never answered at all, so nobody knows and the reference is all the
+ *     payer has. */
+function unresolvedMessage(
+  reported: Exclude<OcpSubmitResult, {kind: 'accepted'}>,
+  reference: string,
+): string {
+  if (reported.kind === 'rejected') return M.pay.ocp.submitRejected(reference, reported.said);
+  return reported.kind === 'pending'
+    ? M.pay.ocp.submitPending(reference)
+    : M.pay.ocp.submitUnknown(reference);
 }

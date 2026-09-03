@@ -93,14 +93,15 @@ export type OcpRefusal =
   /** USDC on Solana, refused BY NAME: the provider's URI carries no `spl-token` parameter and it is
    *  unresolved whether the address is the owner or the associated token account. */
   | 'solana-usdc-unsupported'
-  /** An Internet Computer asset that is NOT native ICP. MEASURED 2026-09-03, at the cost of one real
-   *  payment: the provider resolves the reported block index against the ICP LEDGER whatever `asset`
-   *  says, so a transfer on any other ICRC ledger can never be matched and the sale is never
-   *  credited — while the money is already gone. Proven by bracketing: indices past the VCHF tip
-   *  (81_001) and past the ckBTC tip (4_593_555) are still "found", and the found/not-found boundary
-   *  falls exactly on the ICP ledger's tip (38_148_321). Refused BY NAME rather than dropped,
-   *  because the payer must be told why an asset the till plainly lists cannot be paid. */
-  | 'provider-checks-icp-ledger'
+  /** An Internet Computer asset that is NOT native ICP, offered by a provider this wallet has no way
+   *  to check (`isOwnRelayProvider`). One provider has been measured, at the cost of one real
+   *  payment: it resolves the reported block index against the ICP LEDGER whatever `asset` says, so
+   *  a transfer on any other ICRC ledger is never matched and the sale is never credited while the
+   *  money is already gone (`docs/specs/2026-09-01-opencryptopay-findings.md`). Nothing on the wire
+   *  distinguishes a provider that does this from one that does not, so the refusal is the default
+   *  and trust is the exception. Refused BY NAME rather than dropped, because the payer must be told
+   *  why an asset the till plainly lists cannot be paid. */
+  | 'unverifiable-ic-asset'
   /** The provider accepts this asset; this wallet does not carry it (VEUR, USDT). */
   | 'asset-not-in-wallet'
   /** Two wallet assets answer to the same token on the same chain — which one the provider meant is
@@ -202,7 +203,7 @@ export interface OcpOfferRefusal {
     | 'unknown-method'
     | 'method-unavailable'
     | 'solana-usdc-unsupported'
-    | 'provider-checks-icp-ledger'
+    | 'unverifiable-ic-asset'
     | 'asset-not-in-wallet'
     | 'ambiguous-asset'
     | 'bad-amount'
@@ -411,12 +412,14 @@ const ICP_URI_SCHEME = 'icp:';
 const ICP_TRANSFER_METHOD = 'transfer';
 const SOLANA_URI_SCHEME = 'solana:';
 
-/** The ONLY query parameters each destination URI may carry. Anything else is refused, never
- *  ignored — see `unexpected-parameter`, and `hasUnknownParam` for why that is not pedantry.
+/** The query parameters each destination URI may carry: the ones this wallet ACTS ON. Anything else
+ *  is refused, never ignored — see `unexpected-parameter`, and `hasUnknownParam` for why that is not
+ *  pedantry. The lists are data, so a parameter joins one the day the code that honours it lands and
+ *  not before: admitting a name without implementing it is precisely the silent drop this refuses.
  *
- *  ICP: `to` names the account and `amount` names the value; there is no third field this wallet
- *  understands, and `subaccount` (the one a real wallet might be tempted to accept) would name an
- *  account this app's `icrc1_transfer` does not address.
+ *  ICP: `to` names the account and `amount` names the value. `subaccount` — the one a real wallet
+ *  might be tempted to accept — stays out, because it would name an account this app's
+ *  `icrc1_transfer` does not address.
  *
  *  Solana: `amount` only. Solana Pay also defines `spl-token`, `reference`, `memo`, `label` and
  *  `message`, and NONE of them may be silently dropped here:
@@ -787,6 +790,52 @@ const OCP_METHOD_RAIL: Record<string, SelectableAsset['protocol']> = {
   Solana: 'solana',
 };
 
+/** Who answered the quote, and who this wallet already trusts. BOTH FIELDS ARE THE WALLET'S OWN
+ *  FACTS — no part of a provider's body may reach either one, which is what makes the trust decision
+ *  below unspoofable:
+ *   • `host` is the host the wallet ACTUALLY fetched the quote from, over https
+ *     (`services/opencryptopay.ts`). A scanned LNURL can NAME any host on earth, but naming one is
+ *     not becoming one: the request goes to that name over TLS, so only its certificate holder can
+ *     answer. The body's own `callback` host (`OcpDetails.proofHost`) is deliberately NOT used here
+ *     — a provider writes that string — and it is already required to equal `host` before these
+ *     details exist at all, so a diverted proof cannot follow a granted trust.
+ *   • `relayUrl` is the relay this wallet is configured to use for balances and history
+ *     (`RELAY_STORAGE_KEY`, editable in Settings). Provider text cannot change it. */
+export type OcpProvider = {
+  host: string;
+  relayUrl: string;
+};
+
+/**
+ * Is this quote being served by the very relay this wallet already trusts with its money view?
+ *
+ * THE ONE EXCEPTION to `unverifiable-ic-asset`, and the reason it is safe: a relay that serves a
+ * till confirms the payment by reading the MERCHANT's own history on the charge's own ledger
+ * (`crates/dpay-relay/src/till.rs`), so the defect that refusal exists for cannot occur there.
+ * dpay cannot detect that property from outside, so it does not try to — it trusts exactly one
+ * party, the one the payer has already pointed this wallet at for every balance and every
+ * transaction it shows. Trusting it with a till adds no party the payer had not already chosen.
+ *
+ * Host equality, not origin: the SCHEME is settled elsewhere and more strictly (a provider URL that
+ * is not https is refused outright), so comparing schemes here would only make a payer whose relay
+ * setting is a plaintext dev endpoint unable to pay their own till.
+ *
+ * The case this rule cannot serve — a payer at a DIFFERENT dpay merchant's relay — is an open
+ * question in `docs/specs/2026-09-02-merchant-side-plan.md`.
+ */
+function isOwnRelayProvider(provider: OcpProvider): boolean {
+  let relay: URL;
+  try {
+    relay = new URL(provider.relayUrl);
+  } catch {
+    // Fail closed and say so: with no readable relay URL there is no host to compare, so NO provider
+    // can be this wallet's own — which is the safe answer, but a surprising one to debug in silence.
+    console.warn(`opencryptopay: the configured relay URL is not a URL (${provider.relayUrl}); no till can be trusted as this wallet's own`);
+    return false;
+  }
+  return relay.host.length > 0 && relay.host === provider.host;
+}
+
 /** Does a provider offer row — `{method, asset}` in the PROVIDER's spelling — name this wallet
  *  asset? The (rail, ledger token) pair, matched exactly as `selectPayableOffers` matches it, and
  *  exported for that reason: a refusal row carries only the provider's spelling, so a screen that
@@ -810,6 +859,9 @@ export function offerNamesAsset(offer: {method: string; asset: string}, asset: S
  * payable until the till is rescanned, and one honest reason on every row beats a list of options
  * that cannot be taken.
  *
+ * `provider` decides ONE thing: whether the till is this wallet's own relay (`isOwnRelayProvider`),
+ * which is the sole exception to `unverifiable-ic-asset`.
+ *
  * Order matters wherever a later step would otherwise turn a refusal into a payable offer. Solana
  * USDC is refused BEFORE the wallet lookup, because the wallet DOES carry USDC on Solana — matching
  * first would produce a payable offer for the one asset the findings say must not be paid until DFX
@@ -819,10 +871,14 @@ export function selectPayableOffers(
   details: OcpDetails,
   assets: SelectableAsset[],
   nowMs: number,
+  provider: OcpProvider,
 ): {payable: OcpOffer[]; refused: OcpOfferRefusal[]} {
   const payable: OcpOffer[] = [];
   const refused: OcpOfferRefusal[] = [];
   const expired = nowMs >= details.quoteExpiresAt;
+  // Asked ONCE, before any offer is judged: it is a property of who answered, not of what they
+  // offered, and re-asking it per asset would invite a per-asset exception.
+  const ownRelay = isOwnRelayProvider(provider);
   for (const entry of details.transferAmounts) {
     const rail = OCP_METHOD_RAIL[entry.method] ?? null;
     for (const offered of entry.assets) {
@@ -850,14 +906,16 @@ export function selectPayableOffers(
         refuse('solana-usdc-unsupported');
         continue;
       }
-      // The provider verifies an Internet Computer payment by reading the reported block index off
-      // the ICP LEDGER, whichever asset was declared — so only native ICP can ever be matched. Every
-      // other ICRC asset on this menu takes the payer's money and leaves the sale uncredited, which
-      // is the worst outcome this integration has and the one thing it may not walk into knowingly.
+      // An Internet Computer asset other than native ICP is only ever payable at a provider this
+      // wallet can vouch for. The measured provider verifies such a payment by reading the reported
+      // block index off the ICP LEDGER whichever asset was declared, so nothing else can be matched
+      // and the payer's money is gone with the sale uncredited — the worst outcome this integration
+      // has, and the one thing it may not walk into knowingly. Nothing on the wire tells the two
+      // kinds of provider apart, so the refusal is the default and `ownRelay` is the only exception.
       // Refused here, BEFORE the wallet lookup and by name, for the same reason Solana USDC is: the
       // till lists these assets, so silence would read as dpay being unable to pay them.
-      if (rail === 'ic' && !tokenEq('ICP', offered.asset)) {
-        refuse('provider-checks-icp-ledger');
+      if (rail === 'ic' && !tokenEq('ICP', offered.asset) && !ownRelay) {
+        refuse('unverifiable-ic-asset');
         continue;
       }
       const matches = assets.filter(a => offerNamesAsset(row, a));

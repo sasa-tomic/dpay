@@ -46,7 +46,7 @@ import {
 // NATIVE ICP is the asset that pays, and it is the ONLY Internet Computer asset that can: measured
 // 2026-09-03 at the cost of one real payment, this provider resolves the reported block index
 // against the ICP ledger whatever `asset` says, so a transfer on any other ICRC ledger is never
-// matched and the sale is never credited (`provider-checks-icp-ledger`).
+// matched and the sale is never credited (`unverifiable-ic-asset`).
 const ICP = 8;
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // == the OCP menu's ICP ledger (findings, identity check)
 const ICP_SEED = 500_000_001; // 5.00000001 ICP — covers two payments and their fees. The odd last
