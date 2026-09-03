@@ -79,6 +79,8 @@ export const payFr: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'Cette caisse accepte les USDC sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.',
+    providerChecksIcpLedger: selected =>
+      `Cette caisse propose ${selected}, mais son prestataire de paiement ne sait confirmer que les paiements en ICP — pour le reste il consulte le mauvais registre : votre argent partirait sans que la vente soit créditée. Payez plutôt en ICP : sélectionnez-le dans Soldes et scannez à nouveau.`,
     chooseAsset: selected =>
       `Cette caisse n’accepte pas ${selected}, mais elle accepte ceux-ci — choisis avec lequel payer. dpay ne convertit jamais : tu paies l’actif que tu choisis.`,
     assetNotAccepted: (selected, accepted) =>

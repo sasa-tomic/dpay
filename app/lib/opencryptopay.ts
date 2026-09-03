@@ -93,6 +93,14 @@ export type OcpRefusal =
   /** USDC on Solana, refused BY NAME: the provider's URI carries no `spl-token` parameter and it is
    *  unresolved whether the address is the owner or the associated token account. */
   | 'solana-usdc-unsupported'
+  /** An Internet Computer asset that is NOT native ICP. MEASURED 2026-09-03, at the cost of one real
+   *  payment: the provider resolves the reported block index against the ICP LEDGER whatever `asset`
+   *  says, so a transfer on any other ICRC ledger can never be matched and the sale is never
+   *  credited — while the money is already gone. Proven by bracketing: indices past the VCHF tip
+   *  (81_001) and past the ckBTC tip (4_593_555) are still "found", and the found/not-found boundary
+   *  falls exactly on the ICP ledger's tip (38_148_321). Refused BY NAME rather than dropped,
+   *  because the payer must be told why an asset the till plainly lists cannot be paid. */
+  | 'provider-checks-icp-ledger'
   /** The provider accepts this asset; this wallet does not carry it (VEUR, USDT). */
   | 'asset-not-in-wallet'
   /** Two wallet assets answer to the same token on the same chain — which one the provider meant is
@@ -194,6 +202,7 @@ export interface OcpOfferRefusal {
     | 'unknown-method'
     | 'method-unavailable'
     | 'solana-usdc-unsupported'
+    | 'provider-checks-icp-ledger'
     | 'asset-not-in-wallet'
     | 'ambiguous-asset'
     | 'bad-amount'
@@ -839,6 +848,16 @@ export function selectPayableOffers(
       }
       if (rail === 'solana' && tokenEq('USDC', offered.asset)) {
         refuse('solana-usdc-unsupported');
+        continue;
+      }
+      // The provider verifies an Internet Computer payment by reading the reported block index off
+      // the ICP LEDGER, whichever asset was declared — so only native ICP can ever be matched. Every
+      // other ICRC asset on this menu takes the payer's money and leaves the sale uncredited, which
+      // is the worst outcome this integration has and the one thing it may not walk into knowingly.
+      // Refused here, BEFORE the wallet lookup and by name, for the same reason Solana USDC is: the
+      // till lists these assets, so silence would read as dpay being unable to pay them.
+      if (rail === 'ic' && !tokenEq('ICP', offered.asset)) {
+        refuse('provider-checks-icp-ledger');
         continue;
       }
       const matches = assets.filter(a => offerNamesAsset(row, a));

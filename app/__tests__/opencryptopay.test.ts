@@ -626,12 +626,26 @@ describe('ocpPriceText', () => {
 describe('selectPayableOffers', () => {
   it('pays exactly what the wallet carries, in exact raw units', () => {
     const {payable} = selectPayableOffers(detailsOf(), WALLET_ASSETS, BEFORE_EXPIRY);
+    // Native ICP and SOL only. ckBTC and VCHF are on the till's list and in this wallet, but the
+    // provider verifies every Internet Computer payment against the ICP LEDGER whatever asset was
+    // declared — measured 2026-09-03 at the cost of one real payment — so paying either would move
+    // money the sale is never credited for. They are refused by name below, never silently dropped.
     expect(payable).toEqual([
-      {method: 'InternetComputer', asset: 'ckBTC', amount: '0.000016', assetId: 'ic:1', rawAmount: '1600'},
-      {method: 'InternetComputer', asset: 'VCHF', amount: '1', assetId: 'ic:7', rawAmount: '100000000'},
       {method: 'InternetComputer', asset: 'ICP', amount: '0.19', assetId: 'ic:8', rawAmount: '19000000'},
       {method: 'Solana', asset: 'SOL', amount: '0.006', assetId: 'solana:SOL', rawAmount: '6000000'},
     ]);
+  });
+
+  it('refuses every IC asset but native ICP, by name, because the provider cannot verify them', () => {
+    // The expensive lesson, pinned. The provider reads the reported block index off the ICP ledger
+    // for every `InternetComputer` asset, so only native ICP is ever looked up on the right ledger.
+    // Proven by bracketing the provider's found/not-found boundary: it falls on the ICP ledger's
+    // tip (38_148_321), not on VCHF's (81_001) or ckBTC's (4_593_555).
+    const {payable, refused} = selectPayableOffers(detailsOf(), WALLET_ASSETS, BEFORE_EXPIRY);
+    for (const asset of ['ckBTC', 'VCHF', 'VEUR']) {
+      expect(refused).toContainEqual({method: 'InternetComputer', asset, reason: 'provider-checks-icp-ledger'});
+    }
+    expect(payable.filter(o => o.method === 'InternetComputer').map(o => o.asset)).toEqual(['ICP']);
   });
 
   it('refuses Solana USDC by name even though the wallet carries that exact asset', () => {
@@ -647,7 +661,8 @@ describe('selectPayableOffers', () => {
 
   it('names the offered assets this wallet does not carry', () => {
     const {refused} = selectPayableOffers(detailsOf(), WALLET_ASSETS, BEFORE_EXPIRY);
-    expect(refused).toContainEqual({method: 'InternetComputer', asset: 'VEUR', reason: 'asset-not-in-wallet'});
+    // VEUR is an IC asset, so it is now refused for the provider reason BEFORE the wallet lookup is
+    // reached — the same precedence Solana USDC has. USDT still exercises the not-carried branch.
     expect(refused).toContainEqual({method: 'Solana', asset: 'USDT', reason: 'asset-not-in-wallet'});
     // ckUSDC and ckETH are dpay assets the PROVIDER does not accept: they are simply absent from
     // its offers, so nothing about them appears on either side of this split.
@@ -710,15 +725,18 @@ describe('selectPayableOffers', () => {
         {
           method: 'InternetComputer',
           available: true,
-          assets: [{asset: 'ICP', amount: '0.000000001'}, {asset: 'VCHF', amount: 0}],
+          assets: [{asset: 'ICP', amount: '0.000000001'}],
         },
+        // The zero goes on the Solana rail: an IC asset other than native ICP never reaches the
+        // amount check any more, because the provider cannot verify it (`provider-checks-icp-ledger`).
+        {method: 'Solana', available: true, assets: [{asset: 'SOL', amount: 0}]},
       ],
     });
     const {payable, refused} = selectPayableOffers(details, WALLET_ASSETS, BEFORE_EXPIRY);
     expect(payable).toEqual([]);
     expect(refused).toEqual([
       {method: 'InternetComputer', asset: 'ICP', reason: 'bad-amount'},
-      {method: 'InternetComputer', asset: 'VCHF', reason: 'bad-amount'},
+      {method: 'Solana', asset: 'SOL', reason: 'bad-amount'},
     ]);
   });
 
@@ -731,21 +749,22 @@ describe('selectPayableOffers', () => {
     expect(refused).toHaveLength(7);
     expect(refused.every(r => r.reason === 'quote-expired')).toBe(true);
     // One millisecond earlier the same quote is still live.
-    expect(selectPayableOffers(details, WALLET_ASSETS, EXPIRES_AT_MS - 1).payable).toHaveLength(4);
+    expect(selectPayableOffers(details, WALLET_ASSETS, EXPIRES_AT_MS - 1).payable).toHaveLength(2);
   });
 
   it('refuses a token two wallet rows both answer to, rather than guessing which was meant', () => {
     // A malformed catalog could ship two rows with the same ledger token on the same chain; paying
     // "one of them" would be paying an asset the payer never chose.
-    const vchf = WALLET_ASSETS.find(a => a.id === 'ic:7');
-    if (vchf === undefined || vchf.protocol !== 'ic') throw new Error('the bundled catalog must carry VCHF');
-    const twins: SelectableAsset[] = [vchf, {...vchf, id: 'ic:70', currency: 70}];
+    // Native ICP, because it is the one IC asset that still reaches the wallet lookup at all.
+    const icp = WALLET_ASSETS.find(a => a.id === 'ic:8');
+    if (icp === undefined || icp.protocol !== 'ic') throw new Error('the bundled catalog must carry ICP');
+    const twins: SelectableAsset[] = [icp, {...icp, id: 'ic:80', currency: 80}];
     const details = detailsOf({
-      transferAmounts: [{method: 'InternetComputer', available: true, assets: [{asset: 'VCHF', amount: 1}]}],
+      transferAmounts: [{method: 'InternetComputer', available: true, assets: [{asset: 'ICP', amount: 1}]}],
     });
     expect(selectPayableOffers(details, twins, BEFORE_EXPIRY)).toEqual({
       payable: [],
-      refused: [{method: 'InternetComputer', asset: 'VCHF', reason: 'ambiguous-asset'}],
+      refused: [{method: 'InternetComputer', asset: 'ICP', reason: 'ambiguous-asset'}],
     });
   });
 

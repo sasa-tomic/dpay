@@ -82,6 +82,18 @@ const CB_IC_200 = {
   hint: 'Approve the address from the URI for the required amount plus transfer fee using icrc2_approve. Then send your Principal ID as the sender parameter via the endpoint https://api.dfx.swiss/v1/lnurlp/tx/plp_f1ba466e2f1c0a4e.',
 };
 
+/** Same call with `asset=ICP` — the NATIVE ICP ledger (`ryjl3-…`), recorded 2026-09-03. Native ICP
+ *  is the only Internet Computer asset this provider can actually verify: it resolves the reported
+ *  block index against the ICP ledger whatever asset was declared, so it is the only one whose index
+ *  it looks up in the right place (`provider-checks-icp-ledger`). The amount matches DETAILS_200's
+ *  ICP quote — the provider does not re-price inside a quote, and a disagreement is a hard refusal. */
+const CB_ICP_200 = {
+  expiryDate: '2026-09-01T14:30:19.292Z',
+  blockchain: 'InternetComputer',
+  uri: 'icp:ryjl3-tyaaa-aaaaa-aaaba-cai/transfer?to=ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae&amount=0.50885919',
+  hint: 'Approve the address from the URI for the required amount plus transfer fee using icrc2_approve.',
+};
+
 /** Same call with `method=Solana&asset=SOL` → HTTP 200, verbatim. */
 const CB_SOL_200 = {
   expiryDate: '2026-09-01T14:33:09.348Z',
@@ -634,19 +646,18 @@ function ctx(id: string, nowMs = NOW) {
 describe('resolveOcpScan', () => {
   test('the recorded till + the selected asset produce the exact transfer the payer will approve', async () => {
     const mock = installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:7')); // VCHF
+    const out = await resolveOcpScan(SCAN, ctx('ic:8')); // native ICP — the only verifiable IC asset
 
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
     expect(out.target.method).toBe('InternetComputer');
-    expect(out.target.asset).toBe('VCHF');
-    expect(out.target.assetId).toBe('ic:7');
+    expect(out.target.asset).toBe('ICP');
+    expect(out.target.assetId).toBe('ic:8');
     expect(out.target.to).toBe('ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae');
-    // `1.` — the trailing bare decimal point — at VCHF's 8 decimals, converted exactly once.
-    expect(out.target.rawAmount).toBe('100000000');
+    expect(out.target.rawAmount).toBe('50885919');
     // The EARLIER of the two deadlines the provider stated (here the quote's).
     expect(out.target.expiresAt).toBe(Date.parse('2026-09-01T14:29:42.646Z'));
     // …minus the whole sequence's worst case: the rail's own budget plus the one-shot submission's
@@ -657,13 +668,14 @@ describe('resolveOcpScan', () => {
     // The chosen method + asset are echoed back verbatim on the transfer-details call.
     const cb = new URL(mock.mock.calls[1][0]);
     expect(cb.searchParams.get('method')).toBe('InternetComputer');
-    expect(cb.searchParams.get('asset')).toBe('VCHF');
+    expect(cb.searchParams.get('asset')).toBe('ICP');
     expect(cb.searchParams.get('quote')).toBe('plq_ec214dddae51da4d');
   });
 
   test('a destination on ANOTHER ledger is refused — never paid because the amount looked right', async () => {
     // ICP is on the till's list and is a wallet asset, but the provider answers with the VCHF
     // ledger's address. Paying it would send ICP to a VCHF ledger account: a different asset.
+    // (VCHF itself is no longer payable here at all — `provider-checks-icp-ledger`.)
     installRoutes([
       {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
@@ -676,24 +688,24 @@ describe('resolveOcpScan', () => {
 
   test('an amount that disagrees with the quoted one is refused, not signed', async () => {
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: {...CB_IC_200, uri: CB_IC_200.uri.replace('amount=1.', 'amount=2')}},
+      {match: '/lnurlp/cb/', status: 200, body: {...CB_ICP_200, uri: CB_ICP_200.uri.replace('amount=0.50885919', 'amount=2')}},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.badDestination('api.dfx.swiss')});
     // The refusal is diagnosable: both numbers reach the console.
-    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('expected 100000000 raw');
+    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('expected 50885919 raw');
     warn.mockRestore();
   });
 
   test('an unusable destination address is refused by the core validator, before the payer sees it', async () => {
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: {...CB_IC_200, uri: CB_IC_200.uri.replace(/to=[^&]+/, 'to=Not_A_Principal')}},
+      {match: '/lnurlp/cb/', status: 200, body: {...CB_ICP_200, uri: CB_ICP_200.uri.replace(/to=[^&]+/, 'to=Not_A_Principal')}},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.badDestination('api.dfx.swiss')});
     warn.mockRestore();
   });
@@ -726,10 +738,13 @@ describe('resolveOcpScan', () => {
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
     expect(out.host).toBe('api.dfx.swiss');
-    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
-    // Each option carries the amount IN ITS OWN UNITS — the price differs per asset, so a menu of
-    // bare names would be a choice made blind.
-    expect(out.options.map(o => o.rawAmount)).toEqual(['1596', '100000000', '50885919']);
+    // ONLY native ICP: the till also lists ckBTC and VCHF, but this provider verifies every
+    // Internet Computer payment against the ICP ledger, so those two would be paid and never
+    // credited (`provider-checks-icp-ledger`). A menu must never offer an option that loses money.
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:8']);
+    // The amount is IN ITS OWN UNITS — the price differs per asset, so a menu of bare names would
+    // be a choice made blind.
+    expect(out.options.map(o => o.rawAmount)).toEqual(['50885919']);
     // Offering a menu must cost NOTHING: one read, and no destination requested for an asset the
     // payer has not chosen. A quote spent on an unchosen asset is a quote the real payment lacks.
     expect(mock.mock.calls.length).toBe(1);
@@ -756,25 +771,25 @@ describe('resolveOcpScan', () => {
     // signing VCHF's amount against VCHF's ledger. Reading the standing selection anywhere in here
     // would sign one asset's amount against another's ledger.
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
     const menu = await resolveOcpScan(SCAN, ctx('ic:2'));
     expect(menu.kind).toBe('choose');
     if (menu.kind !== 'choose') return;
 
-    const vchf = menu.options.find(o => o.assetId === 'ic:7');
-    expect(vchf).toBeDefined();
-    if (vchf === undefined) return;
-    const out = await resolveOcpOffer(menu.host, menu.details, vchf, {
+    const icp = menu.options.find(o => o.assetId === 'ic:8');
+    expect(icp).toBeDefined();
+    if (icp === undefined) return;
+    const out = await resolveOcpOffer(menu.host, menu.details, icp, {
       assets: WALLET_ASSETS, catalog: CATALOG, nowMs: NOW, sequenceBudgetMs: SEQUENCE_MS,
     });
 
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    expect(out.target.assetId).toBe('ic:7');
-    expect(out.target.asset).toBe('VCHF');
-    expect(out.target.rawAmount).toBe('100000000');
+    expect(out.target.assetId).toBe('ic:8');
+    expect(out.target.asset).toBe('ICP');
+    expect(out.target.rawAmount).toBe('50885919');
     expect(out.target.to).toBe('ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae');
   });
 
@@ -783,15 +798,15 @@ describe('resolveOcpScan', () => {
     // re-asked at the pick with a FRESH now — a stale one would wave through a price that died
     // while the payer was reading.
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
     const menu = await resolveOcpScan(SCAN, ctx('ic:2'));
     if (menu.kind !== 'choose') throw new Error('expected a menu');
-    const vchf = menu.options.find(o => o.assetId === 'ic:7');
-    if (vchf === undefined) throw new Error('expected a VCHF option');
+    const icp = menu.options.find(o => o.assetId === 'ic:8');
+    if (icp === undefined) throw new Error('expected an ICP option');
 
-    const out = await resolveOcpOffer(menu.host, menu.details, vchf, {
+    const out = await resolveOcpOffer(menu.host, menu.details, icp, {
       assets: WALLET_ASSETS,
       catalog: CATALOG,
       nowMs: Date.parse('2026-09-01T14:29:43.000Z'), // one moment past the quote's expiry
@@ -807,7 +822,7 @@ describe('resolveOcpScan', () => {
       transferAmounts: [{method: 'Solana', assets: [{asset: 'USDT', amount: '1.24'}], available: true}],
     };
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: onlyForeign}]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.noPayableAsset('USDT')});
   });
 
@@ -822,9 +837,9 @@ describe('resolveOcpScan', () => {
       ),
     };
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: icDown}]);
-    expect(await resolveOcpScan(SCAN, ctx('ic:7'))).toEqual({
+    expect(await resolveOcpScan(SCAN, ctx('ic:8'))).toEqual({
       kind: 'refused',
-      message: M.pay.ocp.methodUnavailable('VCHF', 'SOL'),
+      message: M.pay.ocp.methodUnavailable('ICP', 'SOL'),
     });
 
     // With every method down there is nothing to switch to, so the instruction changes: pointing at
@@ -834,9 +849,9 @@ describe('resolveOcpScan', () => {
       transferAmounts: DETAILS_200.transferAmounts.map((t: object) => ({...t, available: false})),
     };
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: allDown}]);
-    expect(await resolveOcpScan(SCAN, ctx('ic:7'))).toEqual({
+    expect(await resolveOcpScan(SCAN, ctx('ic:8'))).toEqual({
       kind: 'refused',
-      message: M.pay.ocp.methodUnavailable('VCHF', null),
+      message: M.pay.ocp.methodUnavailable('ICP', null),
     });
   });
 
@@ -856,7 +871,7 @@ describe('resolveOcpScan', () => {
     // absent from it rather than blamed for an asset it never offered.
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
-    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:8']);
   });
 
   test('Solana USDC is refused BY NAME rather than buried under a menu', async () => {
@@ -871,7 +886,7 @@ describe('resolveOcpScan', () => {
 
   test('an expired quote is the whole story — no per-asset advice on top of it', async () => {
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:7', Date.parse('2026-09-01T14:29:42.646Z')));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8', Date.parse('2026-09-01T14:29:42.646Z')));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.quoteExpired});
   });
 
@@ -882,12 +897,12 @@ describe('resolveOcpScan', () => {
   test('a quote that cannot fit the whole sequence is refused even though it has not expired', async () => {
     const expiry = Date.parse('2026-09-01T14:29:42.646Z');
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
     // Exactly 90s left of a 300s quote: still ticking, but the sequence's worst case would end at
     // the very instant the price dies, so it is refused rather than started.
-    const out = await resolveOcpScan(SCAN, ctx('ic:7', expiry - SEQUENCE_MS - OCP_SUBMIT_TIMEOUT_MS));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8', expiry - SEQUENCE_MS - OCP_SUBMIT_TIMEOUT_MS));
     // NOT "expired" — the payer can see the price still counting down, so that word would be a
     // visible lie. Its own sentence, with the same next action.
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.notEnoughTime});
@@ -896,10 +911,10 @@ describe('resolveOcpScan', () => {
     // One millisecond more of runway and the same quote is payable: the boundary is exact, not a
     // rounded cushion.
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
-    const ok = await resolveOcpScan(SCAN, ctx('ic:7', expiry - SEQUENCE_MS - OCP_SUBMIT_TIMEOUT_MS - 1));
+    const ok = await resolveOcpScan(SCAN, ctx('ic:8', expiry - SEQUENCE_MS - OCP_SUBMIT_TIMEOUT_MS - 1));
     expect(ok.kind).toBe('ok');
   });
 
@@ -910,15 +925,15 @@ describe('resolveOcpScan', () => {
     const expiry = Date.parse('2026-09-01T14:29:42.646Z');
     const at = expiry - 120_000; // two minutes of quote left
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
-    expect((await resolveOcpScan(SCAN, {...ctx('ic:7', at), sequenceBudgetMs: 60_000})).kind).toBe('ok');
+    expect((await resolveOcpScan(SCAN, {...ctx('ic:8', at), sequenceBudgetMs: 60_000})).kind).toBe('ok');
     installRoutes([
-      {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
+      {match: '/lnurlp/cb/', status: 200, body: CB_ICP_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
-    expect(await resolveOcpScan(SCAN, {...ctx('ic:7', at), sequenceBudgetMs: 100_000}))
+    expect(await resolveOcpScan(SCAN, {...ctx('ic:8', at), sequenceBudgetMs: 100_000}))
       .toEqual({kind: 'refused', message: M.pay.ocp.notEnoughTime});
   });
 
@@ -930,7 +945,7 @@ describe('resolveOcpScan', () => {
     installRoutes([
       {match: '/lnurlp/pl_', status: 200, body: {...DETAILS_200, callback: 'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e'}},
     ]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.unreportable('api.dfx.swiss')});
     expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('unreportable-callback');
     warn.mockRestore();
@@ -945,7 +960,7 @@ describe('resolveOcpScan', () => {
       {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
       {match: '/lnurlp/pl_', status: 200, body: {...DETAILS_200, callback: 'https://cb.evil.example/v1/lnurlp/cb/pl_beeddb41cd4b6d9e'}},
     ]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.proofElsewhere('api.dfx.swiss', 'cb.evil.example')});
     expect(mock).toHaveBeenCalledTimes(1);
     warn.mockRestore();
@@ -953,7 +968,7 @@ describe('resolveOcpScan', () => {
 
   test('a till with no charge on it names the merchant and what the cashier must do', async () => {
     installRoutes([{match: '/lnurlp/pl_', status: 404, body: NO_PENDING_404}]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.noPendingCharge('Test Shop')});
   });
 
@@ -962,7 +977,7 @@ describe('resolveOcpScan', () => {
       {match: '/lnurlp/cb/', status: 400, body: INVALID_ASSET_400},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
     ]);
-    const out = await resolveOcpScan(SCAN, ctx('ic:7'));
+    const out = await resolveOcpScan(SCAN, ctx('ic:8'));
     expect(out).toEqual({kind: 'refused', message: M.pay.ocp.providerRefused('api.dfx.swiss', 'Invalid method or asset')});
   });
 });

@@ -187,6 +187,62 @@ chargeback.
   "failed" and never "paid". Record the block index so the user can claim it with the merchant.
   This is the same outcome-honesty discipline as `RailOutcome`'s `unknown` in `app/services/rail.ts`.
 
+## The provider verifies every IC payment against the ICP LEDGER — measured 2026-09-03
+
+**This is the most expensive finding here: it cost a real payment, and it makes every Internet
+Computer asset except native ICP unpayable at this provider.**
+
+A real CHF 1 payment was made in **VCHF** on 2026-09-03. dpay did everything correctly — VCHF ledger
+block **81001**, exactly `1.00000000` VCHF, to exactly the principal the provider's own URI named
+(`ygf2v-…-4ae`, verified by decoding the block). The submission two seconds later was refused:
+
+    Failed to handle hex payment pl_beeddb41cd4b6d9e:
+    Transaction 81001 does not pay any matching activation
+
+The money is gone and the sale was never credited. The cause was then isolated with free probes, by
+bracketing which block indexes the provider considers to exist:
+
+| reported `tx` | exists on VCHF (tip 81 001) | exists on ckBTC (tip 4 593 555) | exists on ICP (tip 38 148 321) | provider says |
+|---|---|---|---|---|
+| 82 000 | no | yes | yes | found |
+| 91 000 | no | yes | yes | found |
+| 10 000 001 | no | no | yes | found |
+| 37 000 001 | no | no | yes | found |
+| 39 000 001 | no | no | no | **not found** |
+
+The found/not-found boundary falls on the **ICP ledger's tip**, not on VCHF's and not on ckBTC's —
+and the result is identical for `asset=VCHF`, `asset=ckBTC` and `asset=ICP`. So the provider reads
+the reported index off the native ICP ledger regardless of the `asset` it was given.
+
+**"Did dpay send a bad `asset`, so the provider fell back to a default?"** — the first thing to
+suspect, and it is ruled out twice over:
+
+- A wrong asset is **rejected, not defaulted**: an asset this provider does not offer answers
+  `400 "Invalid method or asset"` (measured with ckUSDC). There is no silent fallback path.
+- A **valid, provider-listed** asset is ignored anyway. `asset=ckBTC` with indexes 10 000 001 and
+  37 000 001 — both far past the ckBTC ledger's 4 593 555 tip — still answer "found". If the asset
+  selected the ledger, those would be "not found".
+
+And dpay echoes the provider's own spelling verbatim: the submission sends the `asset` string copied
+from their step-2 menu, which flow 111 pins. So the parameter is accepted and validated by the
+provider, and then not used to choose the ledger it verifies against.
+
+Consequences, and they are absolute:
+
+- **Only native ICP can ever be paid at this provider on the `InternetComputer` method.** For any
+  other ICRC asset the index is looked up on the wrong ledger, so the match cannot succeed — the
+  payer loses the money every time. dpay therefore refuses them by name
+  (`provider-checks-icp-ledger`); a menu that offered them would be offering to lose money.
+- This also explains the two distinct errors: a *nonexistent* index answers "not confirmed in
+  blockchain InternetComputer", while an index that exists **on ICP** but is not their payment
+  answers "does not pay any matching activation".
+- Plausibly nobody has ever hit this: DFX's own `GET /v1/paymentLink/walletApp` lists 28 wallets and
+  **none** supports `InternetComputer`, so the leg is production-untested by any third party.
+
+**Report it to DFX** (`mail@ammer.group`, the merchant on the test till, or DFX support). Until it is
+fixed, the ICP-only restriction stands; when it is fixed, remove the refusal and re-verify by
+measurement, never by their say-so.
+
 ## Trust model — read before writing the parser
 
 Verified: the example QR's `lightning` parameter bech32-decodes (hrp `lnurl`) to exactly

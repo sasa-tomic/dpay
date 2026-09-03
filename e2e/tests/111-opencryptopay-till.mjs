@@ -43,11 +43,17 @@ import {
 } from '../harness/ocp.mjs';
 
 // --- the wallet side ------------------------------------------------------------------------------
-const VCHF = 7;               // the asset that pays: a direct-ICRC row, settled by icrc1_transfer
-const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai'; // == the OCP menu's VCHF ledger (findings, identity check)
-const VCHF_SEED = 500_000_000; // 5.00000000 VCHF — covers two 1.— payments and their fees
-const VCHF_FEE = 10_000;       // the VCHF catalog fee, charged to the sender
-const PAY_RAW = 100_000_000;   // the till's `1.` VCHF at 8 decimals — the exact amount that must move
+// NATIVE ICP is the asset that pays, and it is the ONLY Internet Computer asset that can: measured
+// 2026-09-03 at the cost of one real payment, this provider resolves the reported block index
+// against the ICP ledger whatever `asset` says, so a transfer on any other ICRC ledger is never
+// matched and the sale is never credited (`provider-checks-icp-ledger`).
+const ICP = 8;
+const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // == the OCP menu's ICP ledger (findings, identity check)
+const ICP_SEED = 500_000_001; // 5.00000001 ICP — covers two payments and their fees. The odd last
+                              // digit is deliberate: the header trims trailing zeros, so a round seed
+                              // renders as a prefix of other numbers and the wait below could pass early.
+const ICP_FEE = 10_000;       // the ICP catalog fee, charged to the sender
+const PAY_RAW = 50_795_551;   // the till's 0.50795551 ICP at 8 decimals — the exact amount that must move
 const CKUSDC = 2;             // the asset the till does NOT take (leg 1); funded so no fund-gate fires
 const CKUSDC_SEED = 5_000_000;
 
@@ -87,7 +93,7 @@ export async function run() {
     const merchantPrincipal = await railPrincipalText(merchant.publicHex);
     console.log(`[111-opencryptopay-till] till destination: ${merchantPrincipal}`);
 
-    for (const [currency, amount] of [[VCHF, VCHF_SEED], [CKUSDC, CKUSDC_SEED]]) {
+    for (const [currency, amount] of [[ICP, ICP_SEED], [CKUSDC, CKUSDC_SEED]]) {
       const fund = await faucetAccount(relayBaseURL, accountHex, amount, {currency});
       assert(fund.ok, `faucet funding of currency ${currency} must succeed, got HTTP ${fund.status}: ${JSON.stringify(fund.body)}`);
     }
@@ -101,7 +107,7 @@ export async function run() {
         // `icp:<LEDGER>/transfer?to=<PRINCIPAL>&amount=<DECIMAL>` — the live shape, NOT the README's.
         // The amount is the same `1.` the menu quoted: the provider does not re-price inside a quote,
         // so the wallet treats any disagreement as a hard refusal.
-        'InternetComputer/VCHF': `icp:${VCHF_LEDGER}/transfer?to=${merchantPrincipal}&amount=1.`,
+        'InternetComputer/ICP': `icp:${ICP_LEDGER}/transfer?to=${merchantPrincipal}&amount=0.50795551`,
       },
     });
 
@@ -129,9 +135,12 @@ export async function run() {
     // per asset, so a menu of bare names would be a choice made blind. SOL is payable too but is
     // NOT here: taking it would unmount this rail's Pay screen mid-payment, so it stays a Balances
     // instruction. Solana USDC is absent for the measured reason (its URI names no token account).
-    for (const [id, amount] of [['ic:1', '0.00001600 BTC'], ['ic:7', '1.00000000 VCHF'], ['ic:8', '0.50795551 ICP']]) {
-      assert(await driver.isPresent(`ocp-option-${id}`), `the menu must offer ${id}`);
-      assertIncludes(await driver.readText(`ocp-option-${id}`), amount, `the ${id} option states its own exact amount`);
+    // ONLY native ICP. The till also lists ckBTC and VCHF and this wallet carries both, but the
+    // provider cannot verify them, so offering either would be offering to lose money.
+    assert(await driver.isPresent('ocp-option-ic:8'), 'the menu must offer native ICP');
+    assertIncludes(await driver.readText('ocp-option-ic:8'), '0.50795551 ICP', 'the option states its own exact amount');
+    for (const id of ['ic:1', 'ic:7']) {
+      assert(!(await driver.isPresent(`ocp-option-${id}`)), `the menu must NOT offer ${id} — the provider cannot verify it`);
     }
     assert(!(await driver.isPresent('ocp-option-solana:SOL')), 'the menu must not offer an asset on the other rail');
     assert(!(await driver.isPresent('pay-amount')), 'the menu must never render a payment review');
@@ -146,20 +155,20 @@ export async function run() {
     await driver.screenshot('111-ocp-choose');
 
     // PICKING pays the chosen asset, not the one that was selected in Balances.
-    await driver.click('ocp-option-ic:7');
+    await driver.click('ocp-option-ic:8');
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
-    assertEq(await driver.readText('pay-amount'), 'Pay 1.00000000 VCHF',
-      'picking VCHF off the menu reviews VCHF — never the ckUSDC the payer had selected');
+    assertEq(await driver.readText('pay-amount'), 'Pay 0.50795551 ICP',
+      'picking ICP off the menu reviews ICP — never the ckUSDC the payer had selected');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the picked review still shows the FULL destination account');
     console.log('[111-opencryptopay-till] ✓ menu offered on one read, and picking pays the picked asset');
     await driver.click('btn-review-cancel');
 
     // --- 2. the review: never auto-signs, and says who priced it -------------------------------
-    console.log('[111-opencryptopay-till] leg 2 — scanning the till with VCHF selected…');
+    console.log('[111-opencryptopay-till] leg 2 — scanning the till with ICP selected…');
     await openBalances(driver);
-    await selectCurrency(driver, 'vchf');
-    assert(await driver.waitForText('5.00 VCHF', {timeoutMs: 10_000}), 'the app must see the VCHF seed before the Pay tab can scan');
+    await selectCurrency(driver, 'icp');
+    assert(await driver.waitForText('5.00000001 ICP', {timeoutMs: 10_000}), 'the app must see the ICP seed before the Pay tab can scan');
     await driver.click('tab-pay');
     assert(!(await driver.isPresent('pay-fund')), 'a funded asset must reach the scan surface, not the fund-first panel');
     await scanTill(driver);
@@ -171,15 +180,15 @@ export async function run() {
       'the waiting message names who is being asked');
 
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
-    assertEq(await driver.readText('pay-amount'), 'Pay 1.00000000 VCHF',
-      'the review shows the till\'s exact quoted amount, converted at VCHF\'s own precision');
+    assertEq(await driver.readText('pay-amount'), 'Pay 0.50795551 ICP',
+      'the review shows the till\'s exact quoted amount, converted at ICP\'s own precision');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the review shows the FULL destination account — the one thing on screen the payer can check');
     assertEq(await driver.readText('ocp-host'), `Price from ${PROVIDER_HOST}`,
       'the review names the host the price came from (an LNURL can name any host on earth)');
     assertIncludes(await driver.readText('review-claimed'), 'Name given by the code',
       'the merchant name is marked as claimed, never as verified');
-    // WHAT THE TILL IS CHARGING, in the till's own unit. `1.00000000 VCHF` is uncheckable against a
+    // WHAT THE TILL IS CHARGING, in the till's own unit. `0.50795551 ICP` is uncheckable against a
     // price tag; "CHF 1" is the number printed on the till and read out by the cashier, and without
     // it the payer approves an amount they cannot compare against the price of the sale. It is the
     // PROVIDER's figure and the line says so — dpay neither quotes nor converts.
@@ -196,7 +205,7 @@ export async function run() {
     // payer's ledger balance has not moved. (A scanned dpay REQUEST does auto-sign, by design; this
     // code came from a stranger, so it may not.)
     assert(await driver.isPresent('btn-approve'), 'a scanned till must still require an explicit Approve press');
-    assertEq(await getBalance(relayBaseURL, accountHex, VCHF), String(VCHF_SEED),
+    assertEq(await getBalance(relayBaseURL, accountHex, ICP), String(ICP_SEED),
       'nothing may leave the wallet before the payer approves');
     await driver.screenshot('111-ocp-review');
     console.log('[111-opencryptopay-till] ✓ explicit review, host + claimed name + countdown, no auto-sign');
@@ -204,11 +213,11 @@ export async function run() {
     // --- 3. paid ------------------------------------------------------------------------------
     console.log('[111-opencryptopay-till] leg 3 — approving…');
     await driver.click('btn-approve', {timeoutMs: 5_000});
-    assert(await driver.waitForText('Paid ✓ 1.00000000 VCHF', {timeoutMs: 20_000}),
+    assert(await driver.waitForText('Paid ✓ 0.50795551 ICP', {timeoutMs: 20_000}),
       'an accepted submission renders the paid state with the exact amount');
     assert(!(await driver.isPresent('ocp-outcome')),
       'a clean payment carries no unresolved note — that surface is for the loss path alone');
-    assertEq(await getBalance(relayBaseURL, accountHex, VCHF), String(VCHF_SEED - PAY_RAW - VCHF_FEE),
+    assertEq(await getBalance(relayBaseURL, accountHex, ICP), String(ICP_SEED - PAY_RAW - ICP_FEE),
       'the payer is debited the till\'s exact amount plus the ledger fee');
 
     seen = await ocpStubState(driver);
@@ -217,7 +226,7 @@ export async function run() {
     assertEq(submitted.pathname, `/v1/lnurlp/tx/${PAYMENT_ID}`,
       'the submission goes to the /tx path derived from the callback\'s /cb/ segment');
     assertEq(submitted.searchParams.get('method'), 'InternetComputer', 'the submission echoes the provider\'s method spelling');
-    assertEq(submitted.searchParams.get('asset'), 'VCHF', 'the submission echoes the provider\'s asset spelling');
+    assertEq(submitted.searchParams.get('asset'), 'ICP', 'the submission echoes the provider\'s asset spelling');
     assert(/^\d+$/.test(submitted.searchParams.get('tx') ?? ''),
       `the submission reports a real ledger block index, got ${submitted.searchParams.get('tx')}`);
     console.log(`[111-opencryptopay-till] ✓ paid; proof reported once as block ${submitted.searchParams.get('tx')}`);
@@ -244,7 +253,7 @@ export async function run() {
 
     body = await driver.bodyText();
     assert(!body.includes('Paid ✓'), 'an unresolved payment must NEVER render as paid');
-    assertIncludes(body, 'Sent 1.00000000 VCHF', 'the unresolved outcome is the honest pending headline');
+    assertIncludes(body, 'Sent 0.50795551 ICP', 'the unresolved outcome is the honest pending headline');
     // …and it says what it is waiting on IN ITS OWN WORDS. The offline hand-off's "awaiting the
     // merchant's confirmation" line must NOT be borrowed here: that state resolves by waiting, this
     // one never does — the transfer is final and only the merchant can credit it, which is what the
@@ -260,7 +269,7 @@ export async function run() {
 
     // The money REALLY left — that is what makes "don't pay again" the honest instruction — and the
     // one submission was spent, not retried by any caller.
-    assertEq(await getBalance(relayBaseURL, accountHex, VCHF), String(VCHF_SEED - 2 * (PAY_RAW + VCHF_FEE)),
+    assertEq(await getBalance(relayBaseURL, accountHex, ICP), String(ICP_SEED - 2 * (PAY_RAW + ICP_FEE)),
       'the unresolved transfer really settled on-chain: the funds left the wallet');
     seen = await ocpStubState(driver);
     assertEq(String(seen.txUrls.length), '2', 'the indefinite submission is attempted ONCE and never retried');

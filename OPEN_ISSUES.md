@@ -17,13 +17,20 @@
      (`638a1ac5…`), whose bundle carries the asset-menu string from `41624be`. **The device cannot
      be checked, only reinstalled** — `versionName` is `1.0` for every build, so there is no way to
      tell from a phone which build it runs. Any build older than `8912db5` refuses EVERY real till.
-   - **The CHF 1 live payment is still unmade** — the one leg no read-only probe can close
-     (`just live-ocp` proves everything up to consent). Founder go-ahead required: it is a first
-     payment to a new counterparty. Rules: `CLAUDE.md` → `docs/AGENT-FUNDS.md`. To make it: display
-     `artifacts/spar-test-till-qr.png` (the provider's public CHF-1 test till, generated from the
-     LNURL in the findings doc) and scan it from a funded wallet. Verify it afterwards with
-     `just agent-history`, which shows the outgoing transfer and the block index the wallet
-     reported — the payment is checked against the ledger, not reported by whoever made it.
+   - ~~**The CHF 1 live payment is still unmade.**~~ **DONE 2026-09-03 — and it FAILED, which is
+     what it was for.** The founder paid the public test till with 1.00000000 VCHF from their own
+     phone. dpay did everything right (VCHF block 81001, exact amount, exact destination — verified
+     by decoding the block); the provider refused the proof and the sale was never credited. Cause
+     isolated for free afterwards: **it resolves the reported block index against the ICP ledger for
+     every Internet Computer asset**, so nothing but native ICP can ever be matched. Full evidence:
+     `docs/specs/2026-09-01-opencryptopay-findings.md`. dpay now refuses the unverifiable assets by
+     name (`provider-checks-icp-ledger`). ~CHF 1 lost, buying the one fact no probe could.
+   - **REPORT THE BUG TO DFX** (founder action). `mail@ammer.group` is the merchant on the test
+     till; DFX support is the other route. Quote block 81001 and the bracketing table in the
+     findings doc. Two asks: credit or refund that payment, and fix the ledger resolution.
+   - **RE-TEST WITH NATIVE ICP** — still open, and now the cheap one. The same one-shot `/tx` leg is
+     unproven for the asset that *should* work, and it can be done from a desk in a minute with
+     `artifacts/spar-test-till-qr.png`. If it succeeds, the integration is proven end to end.
 1. ~~**Add VCHF + native ICP as complete direct-payment assets.**~~ **DONE (2026-08-28)** —
    [`docs/specs/2026-08-28-vchf-icp-support-spec.md`](docs/specs/2026-08-28-vchf-icp-support-spec.md)
    U1–U8 complete and fully verified: catalog ids 7/8 everywhere (bundled + fake + truth-file drift

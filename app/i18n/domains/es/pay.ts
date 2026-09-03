@@ -78,6 +78,8 @@ export const payEs: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'Esta caja acepta USDC en Solana, pero su código no indica a qué cuenta de token enviarlo: pagar así podría mandar dinero real a la cuenta equivocada. Paga con SOL, o cambia en «Saldos» a otro activo que acepte esta caja.',
+    providerChecksIcpLedger: selected =>
+      `Esta caja ofrece ${selected}, pero su proveedor de pagos solo puede confirmar pagos en ICP: para lo demás consulta el libro mayor equivocado, así que tu dinero saldría y la venta no se abonaría. Paga con ICP: selecciónalo en Saldos y vuelve a escanear.`,
     chooseAsset: selected =>
       `Esta caja no acepta ${selected}, pero sí estos: elige con cuál pagar. dpay nunca convierte: pagas el activo que elijas.`,
     assetNotAccepted: (selected, accepted) =>

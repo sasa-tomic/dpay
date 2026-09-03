@@ -599,6 +599,13 @@ function unpayableMessage(
   if (ctx.selected.id === 'solana:USDC' && refused.some(r => r.reason === 'solana-usdc-unsupported')) {
     return M.pay.ocp.solanaUsdcUnsupported;
   }
+  // The IC twin of the case above, and the more expensive one: the till LISTS this asset, so silence
+  // would read as dpay being unable to pay it. The provider cannot verify it (it reads the block
+  // index off the ICP ledger whatever asset was declared), so paying would move money that is never
+  // credited — proven at the cost of a real payment, 2026-09-03.
+  if (refused.some(r => r.reason === 'provider-checks-icp-ledger' && offerNamesAsset(r, ctx.selected))) {
+    return M.pay.ocp.providerChecksIcpLedger(ctx.selected.symbol);
+  }
   // The till DOES take the selected asset, but the provider says it cannot settle that method right
   // now. Matched against the selected asset, never "some method was unavailable": the live provider
   // marks methods this wallet has no rail for unavailable on every response, so an unmatched check
