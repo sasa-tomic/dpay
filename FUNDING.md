@@ -3,14 +3,19 @@
 How money gets **into** a dpay account. Companion to the non-custodial and monetization docs; read
 those non-negotiables first (`CLAUDE.md` → "dpay never holds, swaps, or can move user funds").
 
-> **Status.** The **ckBTC deposit/top-up path is implemented** as a facade-proxy surface:
-> `dpay-canister` exposes `deposit_address` / `refresh_deposit` / `deposit_info` (+ admin
-> `register_minter`), the relay serves `/api/v1/deposit/*`, and the app renders a `DepositSheet`.
-> The browser app also has an initial ckUSDC helper-contract submission path, but chain enforcement,
-> receipt/revert tracking, durable pending state, Android handoff, and authoritative balance freshness
-> remain open. Everything below describes the intended production shape. Build contract:
-> `deposit-integration-plan.md`; risk posture:
-> `CODEBASE_ANALYSIS.md`.
+> **STATUS: this file is PRE-CUTOVER and its custody model is FALSE.** Flagged 2026-09-04 without
+> being rewritten, because the rewrite is a piece of work in its own right and a silent half-fix
+> would be worse. Everything below that says user funds live at
+> `Account{owner: facade, subaccount: pubkey}`, that the facade proxies the minter and `pay()` reads
+> that subaccount, or that the wallet displays a facade `BAL_CACHE`, describes the world before the
+> 2026-08-19/20 user-principal cutover. Since then funds sit at the **user's own principal** on the
+> external ICRC ledgers, the deposit owner is encoded by the app rather than by the facade, balances
+> are direct `icrc1_balance_of` reads, and `register_minter` / `/api/v1/deposit/address` /
+> `/api/v1/deposit/refresh` no longer exist. **`docs/CANISTERS.md` is the authority for all of it;
+> prefer it over any sentence in this file.** What remains useful here is the *intent* — the shape of
+> Add money and the partner-vs-direct split — not the mechanism. Also absent and now the funding path
+> for the asset the till settles in: assets with no minter and no ramp (VCHF, native ICP), where
+> adding money is a plain transfer to your own ICRC-1 account.
 
 ## The one principle
 

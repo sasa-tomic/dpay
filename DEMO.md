@@ -72,9 +72,8 @@ dot next to the balance means the wallet can see the ledger.
    > Say it as "the same slip, handed over twice, settles once" — NOT as a ledger nonce. On this
    > rail the request id rides as the ICRC memo and the ledger does not key on it
    > (`dpay_core::PaymentRequest`). Do not promise an "Already paid" screen: that copy renders only
-   > on a ledger `Duplicate`, which this rail cannot produce. Drive this step once before showing
-   > it — the invariant is proven in tests, the exact screen has not been re-checked since the
-   > facade cutover.
+   > on a ledger `Duplicate`, which this rail cannot produce. **Drive this step once before showing
+   > it** — it is an open gate in `OPEN_ISSUES.md`, not a formality.
 
 Amount + payee are chosen by the **merchant** (the request) and **bound by the payer's signature**,
 so neither side can alter them and the payer approves the exact amount before signing.

@@ -89,3 +89,10 @@ on 2026-09-04; the EUR and CHF-issuance rows are desk research from 2026-07 and 
 ## Scope
 
 **Shipped today:** DEMO $ + mainnet ckBTC/ckUSDC/ckETH + VCHF + native ICP + the native SOL rail; NFC tap-to-pay + QR offline fallback; multi-currency is the product, not the roadmap. Nothing here changes the non-custodial or no-swap non-negotiables; it operationalizes them for a multi-currency world.
+
+**Built 2026-09-04, not yet live — the merchant side.** dpay's relay can *be* an OpenCryptoPay provider: a shop rings a price up in francs on its own phone and is paid VCHF at its own account, with no licence, no bank, no signup and no POS hardware. Two things go with that sentence every time it is used.
+
+- **It ships off by default and is not on production yet.** Deployment state: `OPEN_ISSUES.md`.
+- **Only a dpay wallet can pay it.** No wallet on the standard's own compatibility list settles any Internet Computer asset — measured twice against the provider's own list — so serving the standard is future-proofing, not distribution, and third-party wallet reach must never appear in a deck, a demo script, a video or an investor email.
+
+The asymmetry underneath it is worth stating exactly, because it is where dpay beats the standard it conforms to: **a dpay payer can be offline** over NFC or QR, and **an OpenCryptoPay payer cannot** — that standard makes its payer fetch the quote, fetch the destination and report the proof over https.

@@ -2,7 +2,7 @@
 
 Collaboration targets for ∂pay — researched via 5 parallel agents (East / West / Southern+North Africa, forums+events, ICP+Solana ecosystems), emails verified in a second 5-agent pass (every email below was seen printed on a cited page — none guessed; confidence marked). Founder contact: sato.dpay@kalaj.org.
 
-**One-liner for outreach:** ∂pay is an Android wallet where the payer's phone has ZERO connectivity (airplane mode, dead zone, foreign SIM) and still pays via NFC tap or QR scan; the online merchant (any phone with wifi) submits and gets final settlement in seconds. Non-custodial, no swaps, settles the exact asset the merchant requests (USDC/ckBTC/ckETH on IC + native SOL). Merchants need no POS hardware.
+**One-liner for outreach:** ∂pay is an Android wallet where the payer's phone has ZERO connectivity (airplane mode, dead zone, foreign SIM) and still pays via NFC tap or QR scan; the online merchant (any phone with wifi) submits and gets final settlement in seconds. Non-custodial, no swaps, settles the exact asset the merchant requests (ckUSDC/ckBTC/ckETH/VCHF/native ICP on the Internet Computer + native SOL and USDC on Solana). Merchants need no POS hardware.
 
 **Dropped 2026-08-28:** Kotani Pay — founder-checked, website dead.
 

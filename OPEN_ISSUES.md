@@ -7,44 +7,63 @@
 
 ## NEXT SESSION — work order (unblocked; do these first)
 
-0. **THE NEXT MILESTONE — dpay as the MERCHANT side of OpenCryptoPay** (founder decision,
-   2026-09-02). **IN PROGRESS.** Design, rejected alternatives and every decision taken since:
+0. **THE MERCHANT SIDE OF OpenCryptoPay — dpay serves its own till** (founder decision, 2026-09-02).
+   **The v1 build is COMPLETE in-tree at `702c359`**; what remains is outer-loop, founder ops, and
+   the additive items below.
+   Design, rejected alternatives and every founder decision:
    [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md).
-   Measured provider behaviour:
-   [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md).
-   Read the plan's opening paragraph before quoting this milestone's value to anyone — the
-   third-party-wallet premise it was written on was measured false on 2026-09-04.
-   **Landed:** the relay serves a till — `crates/dpay-relay/src/till.rs` plus the standard's three
-   routes (`/v1/lnurlp/{id}`, `/cb/{id}`, `/tx/{id}`) and the merchant's two (`POST /api/v1/till`,
-   `GET /api/v1/till/{id}`), VCHF-only at 1:1, settlement OBSERVED on the merchant's own ledger,
-   idempotent reporting (`6ba82b1`); the routes ship **OFF unless `DPAY_ENABLE_TILL` is set**
-   (`23c4ebe`; why, at the till gate in `crates/dpay-relay/src/app.rs`) together with the
-   `dfx/till_wire.json` cross-seam golden that both halves parse; the core carries the merchant's
-   ring-up signature (`0e206dc`); dpay's payer accepts the till dpay itself serves (`eddb32a`); one
-   ledger row credits at most one sale, with the prod-probe and review sweep that came with it
-   (`bfe18bd`).
-   Next, in order:
-   - **The gate's release condition: the relay must CHECK the ring-up signature.** The core half is
-     in (`0e206dc` — `validate_till_open`, bytes pinned by `dfx/till_open_signing.json`); as of
-     `bfe18bd` `till.rs` has no call site, so a stranger can still ring up against someone else's key
-     and void that merchant's pending charge. The routes stay off until it does.
-   - **Charge mode in the app** (founder decision: app first, relay web page after). Needs a
-     decision on where LNURL bech32 ENCODE lives — the app has only the decoder today, and a future
-     relay-served page would want it in Rust. Put it in the core if both need it.
-   - **NFC.** The differentiator: the till arms the reader, a dpay payer taps. OCP itself lists NFC
-     terminals as "in development", and the IC rail's HCE hop is already proven on hardware.
-   Founder ops, none blocking the milestone:
-   - **PROD SERVES THE TILL RIGHT NOW, UNAUTHENTICATED.** Measured 2026-09-04: `/api/v1/version`
-     reports `425eb97`, which predates the gate, and `GET https://dpay.kalaj.org/v1/lnurlp/nope`
-     answers the till's own `{"statusCode":404,"message":"Payment link not found"}` while an
-     unregistered path answers an empty 404 — so all five routes are live. A `just up` from `23c4ebe`
-     or later, with `DPAY_ENABLE_TILL` unset, removes them.
+   Measured provider behaviour, including which wallets can pay a till on this rail:
+   [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md)
+   — read it before quoting this milestone's value to anyone. The rules live where they are enforced
+   and are not restated here: `crates/dpay-relay/src/till.rs` (the provider), `app/services/till.ts`
+   + `app/components/TillCharge.tsx` (the counter), `dpay_core::validate_till_open` (the ring-up).
+   **Landed 2026-09-04**, in dependency order; each commit message is its own record:
+   - `23c4ebe` — the till's **seven** routes register only under `DPAY_ENABLE_TILL`, and
+     `dfx/till_wire.json` pins the wire both halves parse.
+   - `eddb32a` — dpay's payer accepts the till dpay itself serves; a `202 PENDING` is no longer
+     reported to the payer as a completed sale.
+   - `bfe18bd` — the defect sweep: one transfer credits one sale, the clock race, LUD-06 metadata
+     injection, unbounded growth, CSPRNG charge ids, log injection, and the rest.
+   - `0e206dc` (core) + `516aac4` (relay) — a ring-up, and a cancellation, must be SIGNED by the key
+     whose account gets paid.
+   - `dd51eee` — a real bech32 LNURL, the `/pl/` page a generic phone camera lands on, and a
+     per-charge `ref` credited as the ICRC-1 memo.
+   - `d623d4c` + `1155921` — the counter in the app: every asset, named refusals, 4-state NFC row.
+   - `702c359` — the ring-up answers with the charge's `reference`, so the counter arms the reader
+     with it and a TAP pays the same charge a scan would.
+   `DPAY_ENABLE_TILL` still defaults **off** on every build. That is now an operator's choice about
+   which surfaces an image serves, not a quarantine: the condition it was gated on — the relay
+   verifying the ring-up signature — is met (`TillStore::authorize` calls `validate_till_open`).
+   **Opened by this work and NOT closed:**
+   - **The till tap has never crossed a radio.** Flow 117 delivers the DPN2 bundle through the
+     harness's session seam, which is neither antenna coupling nor Android AID routing. Two physical
+     handsets are the only proof. It reuses the IC rail's HCE hop with no protocol change and that
+     hop is proven on hardware (2026-08-26), so this is a confirmation rather than a design risk —
+     but it is not proven. Filed with the other physical gates below.
+   - **The charge id is a bearer read token.** `GET /api/v1/till/{id}` is unauthenticated, so anyone
+     holding an id reads the merchant's name, price and payer. Worked through and accepted at
+     `ChargeStatus` in `till.rs` (which is why the `reference` is deliberately kept off that body).
+     Revisit before the till serves a merchant who is not the founder.
+   - **The own-relay trust rule breaks the day a SECOND merchant runs a relay** — accepted as a v1
+     limitation, with the precondition its answer must satisfy stated in the plan. Undecided.
+   - **EURC** — the last item the plan itself lists as open.
+   - A relay-served merchant page (the plan's "web page later") is additive and unstarted.
+   Founder ops:
+   - **PROD IS AT `425eb97` AND SERVES AN UNGATED, UNSIGNED TILL.** Re-measured 2026-09-04:
+     `/api/v1/version` reports that commit, and `GET https://dpay.kalaj.org/v1/lnurlp/nope` answers
+     the till's own `{"statusCode":404,"message":"Payment link not found"}` while an unregistered
+     path answers an empty 404. That build predates the gate (`23c4ebe`), the signature check
+     (`516aac4`) and the defect sweep (`bfe18bd`), so a stranger can still open a charge on dpay's
+     own domain naming a key nobody holds. `just apk && just up` from HEAD with `DPAY_ENABLE_TILL`
+     unset removes the routes and ships everything else this session landed — including `e5d43ac`,
+     without which the APK now on prod (`/download/dpay.apk` sha256 `f0e9890a…`, == the staged
+     `deploy/dist/dpay.apk`, measured 2026-09-04) signs a Send-to-address transfer to an account
+     other than the one it displayed.
    - ~~**PROD SERVES A BUILD THAT CANNOT PAY ANY TILL.**~~ **STALE — corrected 2026-09-02.** It was
      true when written (prod was at `7499b30`, before the parser fix `8912db5`); the founder
-     redeployed the same day. Measured: prod's `/download/dpay.apk` sha256 == the local staged APK
-     (`638a1ac5…`), whose bundle carries the asset-menu string from `41624be`. **The device cannot
-     be checked, only reinstalled** — `versionName` is `1.0` for every build, so there is no way to
-     tell from a phone which build it runs. Any build older than `8912db5` refuses EVERY real till.
+     redeployed the same day. **The device cannot be checked, only reinstalled** — `versionName` is
+     `1.0` for every build, so there is no way to tell from a phone which build it runs. Any build
+     older than `8912db5` refuses EVERY real till.
    - ~~**The CHF 1 live payment is still unmade.**~~ **DONE 2026-09-03 — and it FAILED, which is
      what it was for.** The founder paid the public test till with 1.00000000 VCHF from their own
      phone; dpay did everything right, the provider refused the proof, and the sale was never
@@ -116,16 +135,23 @@
   throughout; the link did NOT auto-sign (explicit Approve, per the security invariant); and the
   online-insufficient-balance gate fired correctly — "Dein Guthaben reicht für diese Zahlung nicht
   aus." with Freigeben (Approve) DISABLED against a 0 VCHF balance.
-- **SOL HCE hardware tap — the only physical gate left** (AID `F06470617902`, `DpaySolNfc`).
+- **SOL HCE hardware tap** (AID `F06470617902`, `DpaySolNfc`) — never tapped on hardware.
   The IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
   (founder-run retest; commit `8940b1d`).
+- **Till tap on two physical handsets** — the merchant counter arming the reader from a live charge
+  (`702c359`). Rides the IC rail's proven HCE hop unchanged; the radio hop for this use has not been
+  run. Detail and why it is a confirmation rather than a design risk: item 0.
+- **DEMO.md step 4 has never been driven.** `118e122` replaced a step that promised an "Already
+  paid" screen the shipped rail cannot produce; the invariant behind the replacement copy is proven
+  in tests, the screen the operator will point at is not. Drive it once before the next live demo.
 - ~~**VCHF/ICP go-live — founder relay + APK deploy**~~ **DONE 2026-08-30** (`just apk && just up`).
   VERIFIED LIVE, not taken on report: `GET https://dpay.kalaj.org/api/v1/currencies` now returns the
   `Internet Computer` mainnet section with currency 7 (VCHF, ledger `ly36x-wiaaa-aaaai-aqj7q-cai`,
   decimals 8, fee 10_000) and currency 8 (ICP, ledger `ryjl3-tyaaa-aaaaa-aaaba-cai`, decimals 8,
   fee 10_000). Online wallets get both rows from the relay's compiled catalog.
-  NOTE: the deploy shipped branch HEAD, so `/api/v1/version` reports commit `3b36585` — the whole
-  2026-08-30 send-to-address work is live in the WEB wallet too, not just the catalog rows.
+  NOTE: that deploy shipped branch HEAD (`3b36585`), so the whole 2026-08-30 send-to-address work
+  went live in the WEB wallet too, not just the catalog rows. Prod has moved since — item 0 carries
+  the current commit.
 - ~~**VCHF/ICP funded mainnet payment proof**~~ **DONE 2026-09-01** — founder ran a real VCHF round
   trip on a physical device with real funds. Production payment completeness IS claimed for these
   assets.
@@ -236,6 +262,21 @@
   fontTools cmap-verified; renders acceptably on MIUI/Android today). If a device ever shows a
   fallback artifact, swap to an in-font covered glyph (`○`/`●` basics covered; `Δ Ω`
   grotesk-only). Low, visual-only.
+- **(medium) Doc rot found by the 2026-09-04 sweep and deliberately NOT fixed in it.** Each is
+  stale or false, each predates that session, and each is bigger than a reconciliation commit.
+  `FUNDING.md` — the whole mechanism half is pre-cutover and its custody model is false; flagged at
+  the top of that file, and it needs a rewrite against `docs/CANISTERS.md`.
+  `CODEBASE_ANALYSIS.md` — the app module tree is months behind (line counts, a deleted
+  `RailSelector`, ~28 unlisted components, no `services/opencryptopay.ts`/`till.ts`, no `app/i18n/`),
+  and two passages still describe `app/payments.ts` / `app/services/receipt.ts` in the present tense
+  while the same file records them as deleted.
+  `genai-video-brief.md` — every model name, price and availability claim is dated Jul 2026 and must
+  be re-verified before any spend; its "the QR flow is two scans (matches the real protocol)" is now
+  one of two protocols and not the default.
+  `docs/REACHOUT.md` — the 2026 event calendar has run past today.
+- **(low) `deploy/.env.example` says the till gate turns off "all six" routes; there are seven.**
+  A comment, no runtime effect, and left untouched only because the sweep that found it was
+  docs-only. `/pl/` (`dd51eee`) is the one it is missing.
 - **Campaign line is dual-sourced** — `app/config/education.ts` + the `landing.html` literal,
   pinned byte-identical by relay test `landing_page_tells_the_offline_payment_story`; edit both
   together.

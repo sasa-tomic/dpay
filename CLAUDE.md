@@ -243,6 +243,31 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   copy calls it an *account identifier*. Verified: e2e 102/102 (new flows 104-107), jest 67
   suites/1244, dpay-relay 49/49, dpay-icp 40+27, emulator device gate + `just campreview` green.
 
+- **OpenCryptoPay — dpay pays a merchant till, and now SERVES one (2026-09-01 → 2026-09-04).** A shop
+  rings a price up in francs on its own dpay phone, shows a code, and is paid VCHF at its OWN
+  account; the relay is the provider endpoint and never holds a key that could move that money.
+  **The till ships OFF: its seven routes register only when `DPAY_ENABLE_TILL` is set, and the
+  default is false on every build and every ledger** — an operator's choice about which surfaces an
+  image serves. A ring-up, and a cancellation, must be SIGNED by the key whose account gets paid
+  (`dpay_core::validate_till_open`, domain `dpay-till-open-v1`, bytes pinned by
+  `dfx/till_open_signing.json`). The counter sits inside Receive ▸ Request payment on every asset
+  and arms the NFC reader with the charge's own reference, so a TAP pays the same charge a scan
+  would — no new AID, no protocol change. Authority, each for its own half and none of it restated
+  here: `crates/dpay-relay/src/till.rs`, `app/services/till.ts`, `app/components/TillCharge.tsx`,
+  and `app/lib/opencryptopay.ts` for the payer side (incl. `unverifiable-ic-asset` and its one
+  own-relay exception); founder decisions `docs/specs/2026-09-02-merchant-side-plan.md`; measured
+  provider behaviour `docs/specs/2026-09-01-opencryptopay-findings.md`.
+  **Who can pay a dpay till: a dpay wallet, and only a dpay wallet.** No wallet on the standard's
+  own compatibility list settles any Internet Computer asset (measured twice — the findings doc), so
+  serving the standard is future-proofing, not distribution. **Never put third-party wallet reach in
+  a deck, a demo script, a video or an investor email.** State the asymmetry exactly: a dpay payer
+  can be OFFLINE over NFC or QR, and an OpenCryptoPay payer cannot — that standard makes its payer
+  fetch the quote, fetch the destination and report the proof over https.
+  Verified at `702c359`: `just verify` EXIT=0 with 112/112 e2e (flows 113–117), `just test-relay`
+  88/88, `just test-live` 106/106, jest 83 suites/1682, `just ondevice` 10/10 and `just app` green on
+  the emulator. What is NOT yet proven on hardware, and what production is actually serving:
+  `OPEN_ISSUES.md`.
+
 **Device gate — now built and runnable in-sandbox** (this environment has `/dev/kvm`, the Android SDK/NDK, an x86_64 emulator, and `dfx`; see [[sandbox-can-run-device-gate]]):
 - **real dfx deploy** (`just deploy`, `scripts/dfx-deploy.sh`) — a live local replica settles the *exact* offline-signed 292-byte wire via `dfx canister call` (built by `dpay-fixture` from the shared core); funds move, replay refused. `dfx.json` + extracted candid in `dfx/`.
 - **NDK build** (`just ndk`, `scripts/ndk-build-ffi.sh`) — `libdpay_ffi.so` for arm64-v8a + x86_64, **16 KB-page-aligned** (Android 15 / Play); auto-detects the newest installed NDK.
@@ -252,12 +277,12 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
 
 Recipes: `just verify` (core+canister+relay+e2e), `just test-live` (relay↔live canister via ic-agent), `just ffi` (UniFFI), `just sim` (demo), `just deploy` / `just ndk` / `just ondevice` / `just app` (device gate), `just apk` (signed APK+AAB), `just play-upload` (verify + exact signed AAB upload to Play internal testing; one-time credentials documented in `app/android/app/play-signing/README.md`). (The old `just ui` parallel-component harness is removed — `just e2e` drives the real app + screenshots every flow state.) Pinned: ic-cdk 0.19, pocket-ic 14.0.0, ic-agent 0.48.1, uniffi 0.29.5, dfx 0.32.0, RN 0.86.2 (AGP 8.12.0 from the bundled `@react-native/gradle-plugin`; New Arch enabled), Gradle 8.13, Kotlin 2.1.20, compile/target SDK 36, build-tools 36.1.0, AGP 8.7.3 for the standalone `android/` device gate, NDK 27.3.13750724, Gradle Play Publisher 3.13.0 (release path only).
 
-The IC rail is proven on two physical phones (2026-08-26): the **NFC radio hop** (HCE↔reader), the payer's airplane-mode gesture, and the real-camera QR scan all work. The SOL rail's independent HCE transport has not been tapped on hardware — the remaining physical gate is tracked in `OPEN_ISSUES.md`.
+The IC rail is proven on two physical phones (2026-08-26): the **NFC radio hop** (HCE↔reader), the payer's airplane-mode gesture, and the real-camera QR scan all work. Two taps have never crossed a radio: the SOL rail's independent HCE transport, and the till counter arming that IC reader from a live charge. Both are tracked as physical gates in `OPEN_ISSUES.md`.
 
 ## Scope
 
 - **In:** Android app (Pay + Receive), on-device key, QR generate/scan, offline signing, relay, canister ledger, two pre-funded demo accounts, single `$` unit, the airplane-mode flow.
-- **Out (deferred):** iOS, login/KYC, fiat on/off-ramp, funding flow, secure-element hardening, contacts/P2P discovery, multi-merchant, real onboarding. Software keys are fine for the demo.
+- **Out (deferred):** iOS, login/KYC, **fiat** on/off-ramp, secure-element hardening (the seed lives in plain AsyncStorage under `dpay.identity.v1`), contacts/P2P discovery, multi-merchant. Software keys are fine for the demo. (Corrected 2026-09-04: "funding flow" and "real onboarding" were still listed here while "What's built" above documents both — crypto deposit/withdraw on every family, and a name→backup→walkthrough first run. The FIAT ramp is what remains deferred.)
 - **Out (permanently, by design — not "later"):** custody of user funds, swaps/conversion, holding user exchange credentials, taking price risk. See the non-custodial non-negotiable above.
 
 ## Preferences

@@ -113,8 +113,8 @@ The shape, in design voice throughout — no bullet below is a claim about what 
   ed25519 key whose account every payer is then told to pay; unsigned, that is a stranger's charge
   on dpay's own domain. The core carries the whole acceptance rule — `validate_till_open`,
   `dpay-till-open-v1`, bytes pinned by `dfx/till_open_signing.json` — so the relay checks rather
-  than re-derives it. Why the routes ship OFF until the relay enforces this:
-  `crates/dpay-relay/src/app.rs`, at the till gate. Status: `OPEN_ISSUES.md`.
+  than re-derives it. The routes are separately gated off by default, and why they are:
+  `crates/dpay-relay/src/app.rs`, at the till gate. Status of both: `OPEN_ISSUES.md`.
 - **The own-relay trust rule is the whole answer for v1, and is knowingly incomplete.** A dpay payer
   accepts a VCHF till only from the relay their wallet is already configured to use
   (`isOwnRelayProvider`, `app/lib/opencryptopay.ts` — that module header is the authority for the

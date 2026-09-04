@@ -5,9 +5,18 @@
 Solo founder & engineer (contact: sato.dpay@kalaj.org). Pre-seed stage.
 Build estimate: ~1 month solo, or ~2 weeks with two people (one on canister + relay, one on the app).
 
-## Tech stack (PoC)
+## Tech stack (PoC) — the ORIGINAL plan, kept as the record of what was intended
 
-| Layer | Choice |
+**Read this table as history, not as fact** (marked 2026-09-04). Several rows were decided otherwise
+once the thing was built: the relay is Rust + axum and settles nothing, the canister is Rust and is
+off the value path, signing is `ed25519-dalek` in `dpay-core` through UniFFI/wasm rather than a JS
+library, and money is multi-asset rather than a single `$`. What actually shipped:
+`CLAUDE.md` → "What's built", and `docs/CANISTERS.md` for the canister side.
+**One row is a security claim and is corrected rather than left standing: key at rest is NOT the
+Android Keystore.** The identity persists in plain AsyncStorage under `dpay.identity.v1`
+(`app/config/constants.ts`); hardening it is listed as deferred in `CLAUDE.md` → Scope.
+
+| Layer | Choice (as planned) |
 |-------|--------|
 | Mobile app | React Native, **Android only** |
 | QR generate | `react-native-qrcode-svg` |
@@ -35,9 +44,9 @@ The relay is the only online dependency during the demo, so it must be rock soli
 3. Week 3 — Reliability + polish: relay hardening, airplane-mode flow, error states, rehearsal.
 4. Week 4 — Buffer: optional real ckUSDC on testnet, bug fixes, dry run.
 
-## Explicitly deferred
+## Explicitly deferred (as of the original plan)
 
-iOS, login/KYC, fiat on/off-ramp, funding flow, secure-element hardening, contacts/P2P discovery, multi-merchant, real onboarding.
+iOS, login/KYC, fiat on/off-ramp, funding flow, secure-element hardening, contacts/P2P discovery, multi-merchant, real onboarding. Some of these were built anyway — the live scope line is `CLAUDE.md` → Scope, and this list is not maintained against it.
 
 ## Related
 

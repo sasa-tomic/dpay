@@ -17,7 +17,9 @@ provider, but anyone may host one under their own domain.
 
 **It is an ONLINE-payer standard.** The payer's wallet makes three HTTP calls (fetch quote, fetch
 transaction details, report proof) and the quote is a live 300-second FX quote. This does not and
-cannot extend dpay's offline-payer feature. It is distribution — real merchants — not a new rail.
+cannot extend dpay's offline-payer feature. Its value would be distribution — reaching real
+merchants — not a new rail; how much of that has actually been proven is "What has NOT been proven"
+at the end of this file.
 
 ## The flow
 

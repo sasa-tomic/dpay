@@ -1,6 +1,9 @@
 # dpay canister topology
 
-> **Two dpay-owned canisters + four external IC chain-key dependencies.** This is the authoritative
+> **Two dpay-owned canisters live on mainnet, plus the external ones they depend on.** For how many
+> external ones, read the table under "External IC chain-key dependencies" — a count here rotted
+> once already (it said four; the table grew on 2026-08-30, and VCHF, ICP and the ICP index are not
+> chain-key at all), so it is not restated. This is the authoritative
 > map of which canisters exist on mainnet (`ic`), who owns them, and what each is for. The tracked
 > `canister_ids.json` (repo root) holds the durable mainnet ids of the two owned canisters; the
 > per-replica local ids live in the gitignored `.dfx/local/canister_ids.json`.

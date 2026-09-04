@@ -1,5 +1,12 @@
 # [Working name] — a digital-dollar payment app you can use offline
 
+> **SUPERSEDED, kept as the July-2026 pre-build pitch.** The primary go-to-market story is
+> `positioning.md` — lead with that, not this. Two things below are simply out of date and are left
+> in place because rewriting the original pitch is not a correction: the product is multi-asset now,
+> not digital-dollars-only, and the status line is years behind. What was **false about the money**
+> has been deleted rather than annotated (2026-09-04): there is no spending cap, and no ledger on the
+> shipped rail refuses a second payment.
+
 **As simple to use as Venmo or Alipay, but it moves digital dollars instead of bank balances — and the payer can pay even with no phone signal, as long as the merchant is online.**
 
 ## The problem
@@ -13,9 +20,9 @@ A consumer wallet with the look and feel of Venmo that settles in digital dollar
 ## How it works
 
 - **Settlement:** built on a fast, decentralized ledger (the Internet Computer). Payments are denominated in digital dollars, finalize in seconds with negligible fees, and run on decentralized infrastructure rather than a company-owned server.
-- **Offline payer:** the app holds an on-device key scoped to a user-set spending cap — like cash in a pocket. It signs a payment authorization with no connectivity needed.
-- **Online merchant:** scans the signed authorization by QR and submits it to the ledger, which is the single source of truth. Validation is instant and double-spending is impossible, so the merchant sees a definitive "paid" on a trusted device.
-- **Custody by code, not by us:** funds are controlled by on-chain logic, and non-sensitive systems (analytics, telemetry) are kept fully separate from the money ledger.
+- **Offline payer:** the app holds an on-device key — like cash in a pocket. It signs a payment authorization with no connectivity needed.
+- **Online merchant:** scans the signed authorization by QR and submits it to the ledger, which is the single source of truth. Validation is instant, and handing the same signed bytes over twice settles once, so the merchant sees a definitive "paid" on a trusted device.
+- **Custody by code, not by us:** funds sit at the user's own account on a public ledger and move only under the user's own signature — dpay holds no key that can move them. Non-sensitive systems (analytics, telemetry) are kept fully separate from the money ledger.
 
 ## Why it's different
 

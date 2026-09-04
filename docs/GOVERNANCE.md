@@ -1,9 +1,9 @@
 # dpay canister governance
 
 > **Who can upgrade the canister, and who can call its privileged ops, is a money-critical design
-> question — not ops trivia.** Whoever controls the canister can change its behavior (including, in a
-> future version, the fee schedule), so "we can't touch your funds" is only a *property* (not a
-> promise) when control is governed. This doc is the operator-facing path to make it one.
+> question — not ops trivia.** Whoever controls the canister can change its behavior, so "we can't
+> touch your funds" is only a *property* (not a promise) when control is governed. This doc is the
+> operator-facing path to make it one.
 
 ## Stance (founder-set 2026-08-20): govern IN PLACE, no NNS/SNS handoff
 
@@ -122,9 +122,11 @@ the other.
 2. **IC-level canister (code) controller** — the principal that can `install_code` / upgrade /
    uninstall the canister's wasm. This is set by `dfx`/the management canister at deploy and is
    **distinct** from layer 1: it controls *code upgrades*, not admin methods. It starts as your
-   deploy identity and **must be rotated to an SNS/governance principal or a blackhole** before any
-   pilot — otherwise whoever holds the deploy key can upgrade the canister to a version that ignores
-   layer 1 entirely.
+   deploy identity, and whoever holds that key can upgrade the canister to a version that ignores
+   layer 1 entirely — which is the whole reason the Stance section's least-authority and cold-storage
+   discipline exists. (This paragraph used to say the key **must** be rotated to an SNS principal or
+   a blackhole before any pilot. That contradicted the founder stance above, which is explicit that
+   those are not pre-pilot gates, and the stance wins.)
 
 `provision_ledger_canister` and `transfer_cycles` are separately gated by the fixed `ADMIN_CALLERS`
 operator allowlist (an ops/cycles function); rotate that list to a governed principal before
@@ -173,12 +175,12 @@ dfx canister call dpay_canister set_controller '(opt principal "'${NEW_GOV}'")' 
 
 After install, the canister's **code controller** is your deploy identity. Rotate it to governance:
 
-### Option A — SNS-governed (recommended for a revenue-generating canister)
+### Option A — SNS-governed
 
 Hand the canister to an SNS via the standard SNS `dapp_canister` ownership transfer (an NNS proposal
 that lists this canister id). After the proposal executes, the SNS **root** canister is the code
-controller; upgrades then require an SNS proposal (the community votes). This is what makes the fee
-schedule and "we can't touch your funds" a *governed property* — see `CLAUDE.md` §Monetization.
+controller; upgrades then require an SNS proposal (the community votes). Reference for the
+critical-mass end-state, per the Stance section — not a recommendation for now.
 
 See the SNS lifecycle docs: <https://internetcomputer.org/docs/current/developer-docs/defi/sns>
 
@@ -212,15 +214,18 @@ dfx canister status dpay_canister --network ic | grep controller
       repoint ceased to exist with the 2026-08-28 registry removal).
 - [ ] Module hash of the deployed facade is pinned/published (relay health surface) so upgrades are
       user-detectable; upgrades ship with a changelog.
-- [ ] `receipt_pubkey()` is fetched and the app verifies receipt signatures (R2) before "Paid ✓".
+- ~~[ ] `receipt_pubkey()` is fetched and the app verifies receipt signatures (R2) before "Paid ✓".~~
+  **Struck 2026-09-04 — retired by the cutover, not done.** `/receipt/{nonce}` and `/receipt_pubkey`
+  are deleted; "Paid ✓" comes from the app's own `read_state` poll of the envelope it submitted.
 - [ ] `reconcile(currency)` is wired into ops runbooks (run after any suspected trap / on a schedule).
 
-## Reference: the eventual governed end-state (NOT a near-term gate)
-
-## Non-custodial invariant (unchanged)
+## Non-custodial invariant
 
 None of this changes dpay's core posture: the canister **never holds user funds it can move at will**.
-User balances live on external ICRC ledgers at `Account{owner: facade, subaccount: pubkey}`; the
-facade moves them only under a user's offline-signed authorization (`pay`), or the self-service
-faucet's fixed-amount demo mint. Governing the controller closes the "can the operator change the
-rules" question — it does not give the operator a new ability to move user funds.
+**Corrected 2026-09-04** — this paragraph still described the pre-cutover facade, which held user
+balances at `Account{owner: facade, subaccount: pubkey}` and moved them under an offline-signed
+`pay`. Since the 2026-08-19/20 cutover the property is stronger and simpler: user funds sit at the
+**user's own principal** on the external ICRC ledgers and move only under the user's own signature,
+with no dpay canister on the value path at all (`docs/CANISTERS.md` is the authority). Governing the
+controller closes the "can the operator change the rules" question — it never was, and still is not,
+a way for the operator to move user funds.

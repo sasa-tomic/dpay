@@ -77,28 +77,42 @@ That is *why* they're anti-sybil, and it means we are not selling a feature chec
 
 Build later; **do not price on them**, because splitting doesn't hurt them:
 
-- **Static counter QR** ("the sign at the till"). Note the payer enters the amount, so consent gets *stronger*, not weaker — the payer's signature still binds amount+payee, with a payer-generated nonce. This is the dominant small-merchant form factor on UPI/Alipay.
+- **Static counter QR** ("the sign at the till"). Note the payer enters the amount, so consent gets *stronger*, not weaker — the payer's signature still binds amount+payee, with a payer-generated nonce. This is the dominant small-merchant form factor on UPI/Alipay. Still unbuilt, and **not** the merchant counter that shipped 2026-09-04, which is its inverse: there the merchant keys the price and the charge's own reference is the nonce (`OPEN_ISSUES.md`).
 - Webhooks / POS integration
 - Tips
 - Invoices / recurring
 
-## How the fee is collected — no protocol change
+## How the fee is collected — OPEN; the old answer died with the cutover
 
-The payer signs exactly what they sign today: `{from, to, amount, nonce, expiry}`.
+**Superseded 2026-08-19/20, corrected here 2026-09-04.** This section used to say the canister credits
+the merchant `amount - fee` and dpay `fee` from a public fee schedule held in canister state — an
+ordinary ledger fee, no protocol change. That answer depended on the facade sitting on the value
+path, and it does not: a payment is an app-signed `icrc1_transfer` straight to the asset's own
+ledger, with no dpay canister in the path at all (`docs/CANISTERS.md`). A canister that never sees
+the transfer cannot take a cut of it.
 
-The canister credits the merchant `amount - fee` and dpay `fee`, per a **public fee schedule held in canister state**. That's it. It's an ordinary ledger fee, the same shape every ICRC ledger already has.
+So **how an add-on fee is collected is open, and nothing here is decided.** Three constraints from
+the old design survive the cutover and bind whatever replaces it:
 
-- The **payer is indifferent to the split** — they authorized `amount` leaving their account, to that payee, for that request. Where the credit lands afterward is not their consent question.
-- The **merchant is online** and consents by enabling add-ons.
-- **Do not add a `fee` field to `Authorization`.** It would bind a value the offline payer cannot know, and would wreck the offline path for zero gain in consent.
-- The offline path is **completely untouched**. This is the main reason to prefer this design.
+- **The payer never pays and never signs a fee.** Do not add a `fee` field to the signed
+  authorization: it would bind a value an offline payer cannot know, and buys nothing in consent.
+- **The offline path stays untouched.** A mechanism that changes what the offline payer signs is
+  refused on that ground alone.
+- **The merchant is online and consents by enabling add-ons**, so collection can be a merchant-side
+  arrangement rather than a payer-side one. That is a direction to evaluate against the
+  no-custody non-negotiable, not a plan.
 
-## Consequence: the canister controller is load-bearing
+## Consequence: whoever holds the keys is load-bearing
 
-If the fee is computed by the canister rather than signed by the user, then **whoever can upgrade the canister can set `fee = 100%`.** The revenue model and the "we can't touch your funds" claim are therefore *the same question*.
+**Rewritten 2026-09-04.** The old argument ran: the canister computes the fee, so whoever can upgrade
+it can set `fee = 100%` — therefore blackhole the controller or hand it to SNS/NNS. Both halves are
+now wrong. The canister is off the value path (above), and the conclusion contradicts the founder's
+standing posture, which is no NNS/SNS handoff until critical mass and safety *without* one. That
+stance and the strategy behind it live in `docs/GOVERNANCE.md`; they are not re-derived here.
 
-- **Blackhole the controller, or put it under SNS/NNS governance.** Otherwise "we can't touch your funds" is a promise, not a property.
-- **The fee schedule must be a governed *parameter*, not a hardcoded constant.** Otherwise blackholing the controller freezes our pricing forever, and any re-pricing becomes a code upgrade — i.e. a trust event. Cheap to get right now; expensive later.
+What survives is the shape of the question: a rate any single party can change unilaterally is a
+trust event, so whatever mechanism replaces the one above has to make its rate publicly checkable
+rather than merely promised.
 
 ## Pricing sanity
 
