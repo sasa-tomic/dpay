@@ -25,6 +25,7 @@ import {withTimeout} from '../lib/timeout';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
 import {ModeToggle} from './ModeToggle';
+import {TillCharge} from './TillCharge';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
@@ -58,7 +59,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  */
-export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubModeChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcReady, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; relayUrl: string; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void}) {
   const solRpc = isSolanaRpcAvailable();
@@ -434,6 +435,30 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
   return (
     <View style={S.center}>
       {toggle}
+      {/* The code-form selector, on the SOL rail exactly as on the IC one — the same-surfaces hard
+          rule: a control that appeared only where it can succeed would be a per-rail special case,
+          and the merchant would be left guessing whether their phone can do it at all. Here it
+          always lands on the honest closed branch (a till code is paid in VCHF on the Internet
+          Computer, and this request is on Solana) with the one tap that fixes it. No `onLiveChange`:
+          a charge can never go live from this rail, so a live-state reporter would be dead code. */}
+      <Text style={S.dim2}>{M.receive.till.codeForm}</Text>
+      <ModeToggle
+        testID="receive-code-form"
+        value={codeForm}
+        onChange={(v) => onCodeFormChange(v as 'dpay' | 'till')}
+        left={{label: M.receive.till.dpayCode, value: 'dpay', testID: 'btn-code-dpay'}}
+        right={{label: M.receive.till.tillCode, value: 'till', testID: 'btn-code-till'}}
+      />
+      {codeForm === 'till' ? (
+        <TillCharge
+          identity={identity}
+          relayUrl={relayUrl}
+          asset={assets.find(a => a.id === selectedAssetId) ?? null}
+          assets={assets}
+          onSelectAsset={onSelectAsset}
+        />
+      ) : (
+        <>
       {/* Trip Ready J4 (UX hardening 2026-08-23) — entry-form mount, same one-time marker as the
           IC ReceiveMode (was: only visible after pressing Request). */}
       <CoachTip tipKey="receiveRequest" />
@@ -522,6 +547,8 @@ export function SolReceiveMode({identity, nfcReady, solAddress, subMode, onSubMo
         onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
         onClose={() => setPickOpen(false)}
       />
+        </>
+      )}
     </View>
   );
 }

@@ -61,7 +61,8 @@ export async function run() {
 
     // --- B's payment link: pay 25 DEMO on the Internet Computer to B's own ICRC-1 account, with
     //     B's name as the (unverified) label and a `ref` — the reconciliation nonce that becomes
-    //     the on-chain memo, making this link a single invoice rather than a reusable tip jar. ---
+    //     the on-chain memo, so every payment of it reconciles to this one request (not a dedup
+    //     guard: a second payment would pay again). ---
     const ref = randNonceHex();
     const link = `/wallet/pay/${bobPrincipal}`
       + `?asset=DEMO&network=internet-computer&amount=${PAY_AMOUNT}`

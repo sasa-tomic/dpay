@@ -17,6 +17,7 @@ import {NfcTap} from './NfcTap';
 import {QrScanner} from './QrScanner';
 import {NfcIcon} from './NfcIcon';
 import {ModeToggle} from './ModeToggle';
+import {TillCharge} from './TillCharge';
 import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {IcrcDepositSheet} from './IcrcDepositSheet';
@@ -38,7 +39,7 @@ import {M} from '../i18n';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, codeForm, onCodeFormChange, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders when depositFamily is non-null OR
@@ -94,10 +95,17 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
     return () => { alive = false; };
   }, [identity.secretHex]);
 
+  // A till charge is LIVE on the relay: a code is out there that a customer can pay. Reported by
+  // TillCharge (which owns the charge) and folded into the lock below, because everything that is
+  // true of an open request QR is true of it — plus one thing that is not: the charge outlives this
+  // screen, so navigating away leaves money payable with nobody watching. That is why the toggles
+  // above it are hidden while it is live, exactly as they are while a request QR is up.
+  const [tillLive, setTillLive] = useState(false);
+
   // Phase 5 — lock the idle asset selection while a request QR is showing or a settlement result is
   // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is the
   // encoded request a payer is scanning; the result is the settled outcome). The idle form is free.
-  const locked = !!reqQr || !!result;
+  const locked = !!reqQr || !!result || tillLive;
   useReportLock(onLockChange, locked);
 
   // Tick the display clock only while a request QR is shown (not after settlement) — display-only,
@@ -127,19 +135,22 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // below matches, so a link payment reconciles exactly like a scanned one. Null (and the button
   // hidden) when the asset cannot be named in a link or the principal has not derived yet — a link
   // that cannot name its destination or its asset must never be produced.
-  const linkAsset = assets.find(a => a.id === selectedAssetId) ?? null;
+  // The asset this whole tab is about — the merchant's chosen settlement asset. Read once and used
+  // by both code forms: the dpay link names it, and the till answers whether a charge can be rung
+  // up in it at all.
+  const activeAsset = assets.find(a => a.id === selectedAssetId) ?? null;
   const payLink = useMemo(() => {
-    if (!reqQr || selfPrincipal == null || linkAsset == null || linkAsset.linkToken == null) return null;
+    if (!reqQr || selfPrincipal == null || activeAsset == null || activeAsset.linkToken == null) return null;
     return encodePayLink(shareOrigin(), {
       recipient: selfPrincipal,
-      asset: linkAsset.linkToken,
-      network: linkNetworkOf(linkAsset),
+      asset: activeAsset.linkToken,
+      network: linkNetworkOf(activeAsset),
       amount: amount.trim(),
       label: identity.username,
       memo: memo.trim(),
       ref: reqQr.nonce,
     });
-  }, [reqQr, selfPrincipal, linkAsset, amount, identity.username, memo]);
+  }, [reqQr, selfPrincipal, activeAsset, amount, identity.username, memo]);
 
   async function makeRequest() {
     const rawAmount = toUnits(amount, reqDecimals);
@@ -326,8 +337,9 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
             {/* Share this request as a PAYMENT LINK so a payer far away (no camera, over a messaging
                 app) can open it and land on a pre-filled review — the payer still taps Approve. The
                 link names this wallet's own ICRC-1 account, the exact asset + settlement chain, and
-                carries the request nonce as `ref`, so paying it twice replays one transfer the
-                ledger dedups and THIS request screen reconciles it like any other payment. */}
+                carries the request nonce as `ref`, so a payment of it reconciles on THIS request
+                screen. Paying it twice pays twice — the ledger has no duplicate check here
+                (`icp_transfer_arg` in dpay-ffi). */}
             {payLink ? (
             <Pressable
               testID="btn-share-request"
@@ -431,7 +443,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
 
   return (
     <View style={S.center}>
-      {depositFamily || directIcrc ? (
+      {(depositFamily || directIcrc) && !tillLive ? (
         <ModeToggle
           testID="receive-mode-toggle"
           value={subMode}
@@ -440,6 +452,36 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
           right={{label: M.receive.myAddress, value: 'address', testID: 'btn-receive-address'}}
         />
       ) : null}
+      {/* WHICH CODE, i.e. who can pay it — the same request, two audiences. A dpay code is the
+          132-byte signed request another dpay wallet scans; a till code is this merchant's own
+          OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
+          It is a code FORM and not a third tab because a till charge is not a third kind of
+          receiving; the only reason it is a control at all is that two QR payloads cannot share one
+          frame. Hidden while a charge is LIVE, exactly as the toggle above is while a request QR is
+          up: flipping away would abandon a code a customer can still pay. */}
+      {!tillLive ? (
+        <>
+          <Text style={S.dim2}>{M.receive.till.codeForm}</Text>
+          <ModeToggle
+            testID="receive-code-form"
+            value={codeForm}
+            onChange={(v) => onCodeFormChange(v as 'dpay' | 'till')}
+            left={{label: M.receive.till.dpayCode, value: 'dpay', testID: 'btn-code-dpay'}}
+            right={{label: M.receive.till.tillCode, value: 'till', testID: 'btn-code-till'}}
+          />
+        </>
+      ) : null}
+      {codeForm === 'till' ? (
+        <TillCharge
+          identity={identity}
+          relayUrl={relayUrl}
+          asset={activeAsset}
+          assets={assets}
+          onSelectAsset={onSelectAsset}
+          onLiveChange={setTillLive}
+        />
+      ) : (
+        <>
       {/* Trip Ready J4 (UX hardening 2026-08-23) — the coach card ALSO mounts at the ENTRY form
           (was: only after pressing Request, so first-time receivers never saw it). Same one-time
           seen marker — whichever surface shows it first wins; the card never returns after. */}
@@ -476,6 +518,8 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
         onClose={() => setPickOpen(false)}
       />
+        </>
+      )}
     </View>
   );
 }

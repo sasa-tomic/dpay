@@ -255,4 +255,80 @@ export const receiveDe: ReceiveMessages = {
     'Eine Übertragung wurde unterbrochen. Die Zahlung kann abgewickelt worden sein — versuche es erneut, um das zu prüfen.',
   retryBroadcast: 'Übertragung erneut versuchen',
   broadcasting: 'Übertragung auf Solana — das kann bis zu einer Minute dauern.',
+
+  till: {
+    codeForm: 'Wer diesen Code bezahlen kann',
+    dpayCode: 'dpay-Code',
+    tillCode: 'Kassen-Code',
+
+    chargeLabel: 'Zu belastender Betrag',
+    chargeHint: 'In Franken ausgezeichnet, in VCHF bezahlt — ein Franken, ein VCHF, kein Umtausch.',
+    ringUp: 'Buchen',
+    ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen bezahlbaren Code zeigen',
+    ringingUp: 'Wird gebucht…',
+    badAmount: reason =>
+      reason === 'too-precise'
+        ? 'Ein Kassenbetrag geht auf ganze Rappen — buche 10.50 statt 10.505.'
+        : reason === 'too-large'
+        ? 'Dieser Betrag ist zu gross für eine Kassenbuchung. Gib ein, was diese Kundschaft schuldet.'
+        : 'Gib den zu belastenden Betrag ein, zum Beispiel 10.50.',
+
+    wrongAssetTitle: 'Ein Kassen-Code wird in VCHF bezahlt',
+    wrongAsset: (selected, network) =>
+      `Ein Kassen-Code wird immer in VCHF auf dem Internet Computer bezahlt — eine Kasse nimmt einen Wert an, und dpay tauscht nie um. Diese Anforderung lautet auf ${selected}${network ? ` auf ${network}` : ''}. Wechsle zu VCHF, um zu buchen — oder bleib beim dpay-Code: den kann jede dpay-Wallet in ${selected} bezahlen.`,
+    noTillAsset:
+      'Diese Wallet führt kein VCHF, also gibt es kein Konto, auf das eine Kassenbuchung bezahlt werden könnte. Nimm den dpay-Code — den kann jede dpay-Wallet in dem gewählten Wert bezahlen.',
+    switchTo: asset => `Zu ${asset} wechseln`,
+
+    failedTitle: 'Der Betrag wurde nicht gebucht',
+    notServed: host =>
+      `${host} bietet keine Kassen-Codes an; es wurde nichts gebucht und nichts ist bezahlbar. Bitte die Person, die dieses Relay betreibt, die Kasse einzuschalten — oder nimm den dpay-Code, der braucht keine Kasse.`,
+    unreachable: host =>
+      `dpay hat ${host} nicht erreicht, es wurde nichts gebucht. Ein Kassen-Code entsteht online. Prüfe die Verbindung und buche erneut — oder nimm den dpay-Code, den dieses Telefon selbst erzeugt und auch offline zeigen kann.`,
+    refused: said =>
+      `Die Kasse hat diese Buchung abgelehnt: „${said}“ Nichts ist bezahlbar. Bring das in Ordnung und buche erneut.`,
+    refusedNoReason: status =>
+      `Die Kasse hat diese Buchung ohne Begründung abgelehnt (HTTP ${status}); nichts ist bezahlbar. Buche erneut — lehnt sie zweimal ab, sag der Person Bescheid, die das Relay betreibt.`,
+    mispriced: (rung, quoted) =>
+      `Du hast ${rung} gebucht, die Kasse hat ${quoted} zurückgemeldet. dpay zeigt keinen Code, der einen Betrag verlangt, den hier niemand gewählt hat — nichts ist bezahlbar. Buche erneut, und wenn es wieder passiert, sag der Person Bescheid, die das Relay betreibt, bevor du Geld annimmst.`,
+    unsigned:
+      'Dieses Telefon konnte die Buchung nicht signieren; es wurde nichts gebucht und nichts ist bezahlbar. Schliesse dpay, öffne es neu und buche erneut.',
+    tryAgain: 'Erneut buchen',
+
+    settlesAs: amount => `${amount} auf dem Internet Computer`,
+    showToCustomer: 'Zeig das der Kundschaft — ihre dpay-Wallet scannt und bezahlt.',
+    waiting: 'Warten auf die Zahlung…',
+    cantCheck:
+      'Diese Buchung lässt sich gerade nicht prüfen — die Kasse ist nicht erreichbar. Das heisst NICHT, dass sie unbezahlt ist. Lass den Code stehen: sobald die Kasse wieder erreichbar ist, steht es hier.',
+    expiredWatching:
+      'Dieser Code ist abgelaufen, neu bezahlen kann ihn niemand mehr. Falls die Kundschaft das Geld schon geschickt hat, kann es noch eintreffen — es wird noch einen Moment beobachtet.',
+    cancel: 'Buchung stornieren',
+    cancelHint: 'Diese Buchung löschen, damit der Code kein Geld mehr annimmt',
+    cancelling: 'Wird storniert…',
+    cancelFailed: said =>
+      `Die Buchung wurde NICHT storniert: „${said}“ Sie kann weiterhin bezahlbar sein — lies das und entscheide dann, ob du etwas herausgibst.`,
+    cancelFailedNoReason: status =>
+      `Die Buchung wurde ohne Begründung NICHT storniert (HTTP ${status}) — behandle sie als weiterhin bezahlbar. Versuch es erneut und gib auf diesen Code nichts heraus, bis er storniert ist oder abläuft.`,
+    cancelUnreachable:
+      'Die Kasse war nicht erreichbar, diese Buchung wurde also NICHT storniert — sie bleibt bezahlbar, bis sie abläuft. Versuch es erneut, sobald die Verbindung steht.',
+
+    endedTitle: reason =>
+      reason === 'expired' ? 'Dieser Code ist abgelaufen'
+      : reason === 'cancelled' ? 'Buchung storniert'
+      : reason === 'superseded' ? 'Durch eine neuere Buchung ersetzt'
+      : 'Die Kasse kennt diese Buchung nicht mehr',
+    endedBody: reason =>
+      reason === 'expired'
+        ? 'Es ist nichts eingegangen, und bezahlen kann ihn jetzt niemand mehr. Buche erneut und zeig der Kundschaft einen frischen Code.'
+        : reason === 'cancelled'
+        ? 'Darauf ist nichts geschuldet, und bezahlen kann sie niemand. Buche erneut, wenn die nächste Kundschaft dran ist.'
+        : reason === 'superseded'
+        ? 'Auf dieser Kasse wurde eine neuere Buchung erfasst, dieser Code nimmt kein Geld mehr an. Buche erneut und zeig einen frischen Code.'
+        : 'Das Relay hat sie nicht mehr — höchstwahrscheinlich wurde es neu gestartet. Hier wurde nichts gutgeschrieben. Buche erneut; sagt die Kundschaft, sie habe bezahlt, prüfe erst deinen VCHF-Bestand und die Transaktionen, bevor sie ein zweites Mal zahlt.',
+    ringUpNext: 'Nächste Kundschaft buchen',
+
+    paidAmount: price => `Bezahlt ${price}`,
+    paidBlock: block => `Ledger-Block ${block}`,
+    paidLate: 'Das kam nach Ablauf des Codes an — angenommen, das Geld liegt im Ledger.',
+  },
 };

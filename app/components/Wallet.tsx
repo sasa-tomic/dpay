@@ -105,6 +105,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // Balances per-row buttons + the overlay sheets). Owned here so deeplinks (?screen=deposit, the
   // auto-open-ckERC20 effect) can land the user directly on the right sub-mode + asset.
   const [receiveSubMode, setReceiveSubMode] = useState<'request' | 'address'>('request');
+  // Which CODE the Request-payment form is making: the dpay request (default — the 132-byte signed
+  // request another dpay wallet scans) or this merchant's own till charge. Owned HERE, beside the
+  // sub-mode, for the reason every cross-rail selection is: a merchant who picks "Till code" on the
+  // Solana rail is told to switch to VCHF, and that switch re-mounts the OTHER Receive form — a
+  // choice held inside either form would be lost exactly at the moment it was acted on.
+  const [receiveCodeForm, setReceiveCodeForm] = useState<'dpay' | 'till'>('dpay');
   const [paySubMode, setPaySubMode] = useState<'scan' | 'send'>('scan');
   const [nfc, setNfc] = useState<NfcStatus>('unknown');
   // Demo top-up: a single click adds $100 of demo currency via /api/v1/faucet. The button sits next
@@ -446,9 +452,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           toAccountText: principal,
           amount: rawAmount,
           currency: asset.currency,
-          // `ref` present ⇒ the sender's own reconciliation nonce: paying twice replays the identical
-          // transfer, which the ledger dedups (an invoice). Absent ⇒ a fresh nonce per payment, so
-          // one reusable link can be paid again (a tip jar).
+          // `ref` present ⇒ every payment of this link carries the SAME memo, so the payee can tell
+          // which invoice a transfer settles. It does NOT stop a second payment — the ledger dedups
+          // nothing (`icp_transfer_arg` in dpay-ffi). Absent ⇒ a fresh nonce per payment (a tip jar).
           nonceHex: link.ref ?? randNonceHex(),
           memo: link.memo,
           expiry: null,
@@ -860,8 +866,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           : mode === 'receive'
           ? (activeSol && solAddress
               ? <SolReceiveMode
-                  identity={identity} nfcReady={nfc === 'ready'} solAddress={solAddress}
+                  identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} solAddress={solAddress}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
+                  codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
                   selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'}
                   assets={assets}
                   selectedAssetId={effectiveSelectedId}
@@ -899,6 +906,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                     depositDisplay={depositDisplay} depositChainId={depositChainId}
                     depositNativeEth={depositNativeEth} depositFamily={depositFamily}
                     subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
+                    codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
                     depositReturnLabel={
                       // Same rule as the SOL rail: the resume link appears ONLY once the deposit
                       // actually landed (a known-positive balance on the asset being funded), never

@@ -92,6 +92,10 @@ function fullProps(over: Partial<ReceiveModeProps> = {}): ReceiveModeProps {
     depositFamily: null,
     subMode: 'request',
     onSubModeChange: () => {},
+    // The code form this suite is about is the dpay one (the share affordance lives on its request
+    // QR). The till form's own behaviour is `TillCharge.test.tsx`.
+    codeForm: 'dpay',
+    onCodeFormChange: () => {},
     selectedCurrency: 0,
     assets: [DEMO_ASSET],
     selectedAssetId: 'ic:0',

@@ -249,4 +249,80 @@ export const receiveEs: ReceiveMessages = {
   broadcastInterrupted: 'Se interrumpió un envío a la red. Puede que el pago se haya confirmado: reintenta para saberlo.',
   retryBroadcast: 'Reintentar el envío',
   broadcasting: 'Enviando a la red de Solana: puede tardar hasta un minuto.',
+
+  till: {
+    codeForm: 'Quién puede pagar este código',
+    dpayCode: 'Código dpay',
+    tillCode: 'Código de caja',
+
+    chargeLabel: 'Importe a cobrar',
+    chargeHint: 'Se marca en francos y se paga en VCHF: un franco, un VCHF, sin conversión.',
+    ringUp: 'Cobrar',
+    ringUpHint: 'Abrir este importe en tu caja y mostrar al cliente un código que pueda pagar',
+    ringingUp: 'Abriendo…',
+    badAmount: reason =>
+      reason === 'too-precise'
+        ? 'Un importe de caja llega hasta el céntimo: pon 10.50 en lugar de 10.505.'
+        : reason === 'too-large'
+        ? 'Ese importe es demasiado alto para una caja. Escribe lo que debe este cliente.'
+        : 'Escribe el importe a cobrar, por ejemplo 10.50.',
+
+    wrongAssetTitle: 'Un código de caja se paga en VCHF',
+    wrongAsset: (selected, network) =>
+      `Un código de caja se paga siempre en VCHF en Internet Computer: un mostrador acepta un solo activo y dpay nunca convierte. Esta solicitud está en ${selected}${network ? ` en ${network}` : ''}. Cambia a VCHF para cobrar, o quédate con el código dpay: cualquier monedero dpay puede pagarlo en ${selected}.`,
+    noTillAsset:
+      'Este monedero no tiene VCHF, así que no hay ninguna cuenta donde se pueda pagar un cobro de caja. Usa el código dpay: cualquier monedero dpay puede pagarlo en el activo que has elegido.',
+    switchTo: asset => `Cambiar a ${asset}`,
+
+    failedTitle: 'El importe no se abrió',
+    notServed: host =>
+      `${host} no sirve códigos de caja: no se abrió nada y no hay nada que pagar. Pide a quien gestiona ese relay que active la caja, o usa el código dpay, que no necesita caja alguna.`,
+    unreachable: host =>
+      `dpay no pudo contactar con ${host}, así que no se abrió nada. Un código de caja se crea en línea. Comprueba la conexión y vuelve a cobrar, o usa el código dpay: este teléfono lo crea por su cuenta y puede mostrarlo sin conexión.`,
+    refused: said =>
+      `La caja rechazó este importe: «${said}» No hay nada que pagar. Corrígelo y vuelve a cobrar.`,
+    refusedNoReason: status =>
+      `La caja rechazó este importe (HTTP ${status}) sin decir por qué, así que no hay nada que pagar. Vuelve a cobrar; si lo rechaza dos veces, avisa a quien gestiona el relay.`,
+    mispriced: (rung, quoted) =>
+      `Cobraste ${rung} y la caja respondió con ${quoted}. dpay no muestra un código que cobre una cifra que aquí no ha elegido nadie, así que no hay nada que pagar. Vuelve a cobrar y, si ocurre otra vez, avisa a quien gestiona el relay antes de aceptar dinero.`,
+    unsigned:
+      'Este teléfono no pudo firmar el importe, así que no se abrió nada y no hay nada que pagar. Cierra dpay, ábrelo otra vez y vuelve a cobrar.',
+    tryAgain: 'Volver a cobrar',
+
+    settlesAs: amount => `${amount} en Internet Computer`,
+    showToCustomer: 'Enséñaselo al cliente: su monedero dpay lo escanea y paga.',
+    waiting: 'Esperando el pago…',
+    cantCheck:
+      'Ahora mismo no se puede comprobar este importe: la caja está incomunicada. Eso NO significa que esté sin pagar. Deja el código a la vista: esta pantalla lo dirá en cuanto pueda contactar con la caja.',
+    expiredWatching:
+      'Este código ha caducado, así que ya nadie puede pagarlo. Si el cliente ya envió el dinero, todavía puede llegar: se sigue vigilando un momento más.',
+    cancel: 'Anular el cobro',
+    cancelHint: 'Borrar este cobro para que el código deje de aceptar dinero',
+    cancelling: 'Anulando…',
+    cancelFailed: said =>
+      `El cobro NO se anuló: «${said}» Puede seguir siendo pagable: léelo y decide antes de entregar nada.`,
+    cancelFailedNoReason: status =>
+      `El cobro NO se anuló (HTTP ${status}) y no se dio ningún motivo, así que trátalo como pagable. Inténtalo otra vez y no entregues nada con este código hasta que se anule o caduque.`,
+    cancelUnreachable:
+      'No se pudo contactar con la caja, así que este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo otra vez cuando vuelva la conexión.',
+
+    endedTitle: reason =>
+      reason === 'expired' ? 'Este código ha caducado'
+      : reason === 'cancelled' ? 'Cobro anulado'
+      : reason === 'superseded' ? 'Sustituido por un cobro más reciente'
+      : 'La caja ya no tiene este cobro',
+    endedBody: reason =>
+      reason === 'expired'
+        ? 'No llegó nada y ya nadie puede pagarlo. Vuelve a cobrar para enseñar al cliente un código nuevo.'
+        : reason === 'cancelled'
+        ? 'No se debe nada por él y nadie puede pagarlo. Vuelve a cobrar cuando esté listo el siguiente cliente.'
+        : reason === 'superseded'
+        ? 'En esta caja se abrió un cobro más reciente, así que este código ya no acepta dinero. Vuelve a cobrar para enseñar uno nuevo.'
+        : 'El relay ya no lo tiene, casi seguro porque se reinició. Aquí no se abonó nada. Vuelve a cobrar; si el cliente dice que pagó, mira tu saldo de VCHF y las Transacciones antes de pedirle que pague dos veces.',
+    ringUpNext: 'Cobrar al siguiente cliente',
+
+    paidAmount: price => `Pagado ${price}`,
+    paidBlock: block => `Bloque del registro ${block}`,
+    paidLate: 'Llegó después de que caducara el código: se acepta, y el dinero está en el registro.',
+  },
 };

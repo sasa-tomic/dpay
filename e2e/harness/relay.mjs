@@ -219,6 +219,12 @@ async function spawnOnce(opts = {}) {
     DPAY_RELAY_ADDR: addr,
     DPAY_LEDGER: 'memory',
     DPAY_ENABLE_FAUCET: 'true',
+    // The OpenCryptoPay till is OFF by default in a shipped relay (founder decision 2026-09-04) and
+    // ON here, because the merchant half of the app is driven against these very routes: flows
+    // 114-116 ring up a real signed charge on `POST /api/v1/till`, pay it with a real signed VCHF
+    // transfer, and watch `GET /api/v1/till/{id}` credit it. Enabling it costs the other flows
+    // nothing — the till's payer-facing routes are shadowed by each OCP flow's own fetch stub.
+    DPAY_ENABLE_TILL: 'true',
     // Marker so a future relay feature can detect the e2e harness (no behavior change today).
     DPAY_E2E: '1',
     // Clamp noisy logs (the binary's banner is enough).

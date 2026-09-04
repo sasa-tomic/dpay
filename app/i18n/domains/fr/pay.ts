@@ -250,4 +250,80 @@ export const receiveFr: ReceiveMessages = {
   broadcastInterrupted: 'Un envoi a été interrompu. Le paiement a peut-être été réglé — réessayez pour vérifier.',
   retryBroadcast: 'Réessayer l’envoi',
   broadcasting: 'Envoi sur Solana — cela peut prendre jusqu’à une minute.',
+
+  till: {
+    codeForm: 'Qui peut payer ce code',
+    dpayCode: 'Code dpay',
+    tillCode: 'Code de caisse',
+
+    chargeLabel: 'Montant à encaisser',
+    chargeHint: 'Affiché en francs, payé en VCHF — un franc, un VCHF, sans conversion.',
+    ringUp: 'Encaisser',
+    ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code qu’il peut payer',
+    ringingUp: 'Ouverture…',
+    badAmount: reason =>
+      reason === 'too-precise'
+        ? 'Un montant de caisse s’arrête au centime — saisissez 10.50 plutôt que 10.505.'
+        : reason === 'too-large'
+        ? 'Ce montant est trop élevé pour une caisse. Saisissez ce que ce client doit.'
+        : 'Saisissez le montant à encaisser, par exemple 10.50.',
+
+    wrongAssetTitle: 'Un code de caisse se paie en VCHF',
+    wrongAsset: (selected, network) =>
+      `Un code de caisse se paie toujours en VCHF sur l’Internet Computer — un comptoir accepte un seul actif, et dpay ne convertit jamais. Cette demande est en ${selected}${network ? ` sur ${network}` : ''}. Passez à VCHF pour encaisser, ou gardez le code dpay : n’importe quel portefeuille dpay peut le payer en ${selected}.`,
+    noTillAsset:
+      'Ce portefeuille ne détient pas de VCHF : il n’y a donc aucun compte où un encaissement pourrait être payé. Utilisez le code dpay — n’importe quel portefeuille dpay peut le payer dans l’actif choisi.',
+    switchTo: asset => `Passer à ${asset}`,
+
+    failedTitle: 'Le montant n’a pas été encaissé',
+    notServed: host =>
+      `${host} ne sert pas de codes de caisse : rien n’a été ouvert et rien n’est payable. Demandez à la personne qui exploite ce relais d’activer la caisse, ou utilisez le code dpay — il n’a besoin d’aucune caisse.`,
+    unreachable: host =>
+      `dpay n’a pas pu joindre ${host} : rien n’a été ouvert. Un code de caisse se crée en ligne. Vérifiez la connexion et recommencez — ou utilisez le code dpay, que ce téléphone fabrique seul et peut afficher hors ligne.`,
+    refused: said =>
+      `La caisse a refusé ce montant : « ${said} » Rien n’est payable. Corrigez cela, puis recommencez.`,
+    refusedNoReason: status =>
+      `La caisse a refusé ce montant (HTTP ${status}) sans dire pourquoi : rien n’est payable. Recommencez ; si elle refuse deux fois, prévenez la personne qui exploite le relais.`,
+    mispriced: (rung, quoted) =>
+      `Vous avez encaissé ${rung} et la caisse a répondu ${quoted}. dpay n’affiche pas un code qui réclame un montant que personne n’a choisi ici : rien n’est payable. Recommencez — et si cela se reproduit, prévenez la personne qui exploite le relais avant d’accepter le moindre paiement.`,
+    unsigned:
+      'Ce téléphone n’a pas pu signer le montant : rien n’a été ouvert et rien n’est payable. Fermez puis rouvrez dpay, et recommencez.',
+    tryAgain: 'Encaisser à nouveau',
+
+    settlesAs: amount => `${amount} sur l’Internet Computer`,
+    showToCustomer: 'Montrez ceci au client — son portefeuille dpay le scanne et paie.',
+    waiting: 'En attente du paiement…',
+    cantCheck:
+      'Impossible de vérifier ce montant pour l’instant — la caisse est injoignable. Cela ne veut PAS dire qu’il est impayé. Laissez le code affiché : cet écran le dira dès qu’il pourra joindre la caisse.',
+    expiredWatching:
+      'Ce code a expiré : plus personne ne peut le payer. Si le client a déjà envoyé l’argent, il peut encore arriver — surveillance encore un instant.',
+    cancel: 'Annuler le montant',
+    cancelHint: 'Effacer ce montant pour que le code n’accepte plus de paiement',
+    cancelling: 'Annulation…',
+    cancelFailed: said =>
+      `Le montant n’a PAS été annulé : « ${said} » Il peut rester payable — lisez cela avant de remettre quoi que ce soit.`,
+    cancelFailedNoReason: status =>
+      `Le montant n’a PAS été annulé (HTTP ${status}) et aucune raison n’a été donnée : considérez-le comme toujours payable. Réessayez, et ne remettez rien sur ce code tant qu’il n’est pas annulé ou expiré.`,
+    cancelUnreachable:
+      'La caisse était injoignable : ce montant n’a donc PAS été annulé — il reste payable jusqu’à son expiration. Réessayez dès que la connexion revient.',
+
+    endedTitle: reason =>
+      reason === 'expired' ? 'Ce code a expiré'
+      : reason === 'cancelled' ? 'Montant annulé'
+      : reason === 'superseded' ? 'Remplacé par un montant plus récent'
+      : 'La caisse n’a plus ce montant',
+    endedBody: reason =>
+      reason === 'expired'
+        ? 'Rien n’est arrivé pour lui et plus personne ne peut le payer. Recommencez pour montrer au client un code tout neuf.'
+        : reason === 'cancelled'
+        ? 'Rien n’est dû dessus et personne ne peut le payer. Recommencez quand le client suivant est prêt.'
+        : reason === 'superseded'
+        ? 'Un montant plus récent a été ouvert sur cette caisse : ce code n’accepte plus de paiement. Recommencez pour en montrer un tout neuf.'
+        : 'Le relais ne l’a plus — très probablement parce qu’il a redémarré. Rien n’a été crédité ici. Recommencez ; si le client dit avoir payé, vérifiez votre solde VCHF et vos Transactions avant de lui demander de payer une deuxième fois.',
+    ringUpNext: 'Encaisser le client suivant',
+
+    paidAmount: price => `Payé ${price}`,
+    paidBlock: block => `Bloc du registre ${block}`,
+    paidLate: 'C’est arrivé après l’expiration du code — accepté, l’argent est sur le registre.',
+  },
 };

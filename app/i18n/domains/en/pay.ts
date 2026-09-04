@@ -507,6 +507,81 @@ export type ReceiveMessages = {
   broadcastInterrupted: string;
   retryBroadcast: string;
   broadcasting: string;
+
+  // --- the till: the merchant's own OpenCryptoPay charge -------------------------------------
+  /**
+   * The counter (`components/TillCharge.tsx`). A till charge is the SAME request with a wider
+   * audience, so it lives inside "Request payment" as a second code FORM rather than a third tab —
+   * which is why the first two keys read as two kinds of CODE and not two kinds of screen.
+   *
+   * Almost everything here is a dead end, on purpose: a code that expired, a till that was never
+   * turned on, a relay that cannot be reached, a price the till answered differently. Each one must
+   * say what happened AND the merchant's next move (founder rule 2026-08-29) — and none of them may
+   * ever imply a payment did or did not arrive, because only the relay's own ledger read can say
+   * that (`services/till.ts`).
+   */
+  till: {
+    /** The selector above the amount: which code is being made, i.e. who can pay it. */
+    codeForm: string;
+    dpayCode: string;
+    tillCode: string;
+
+    chargeLabel: string;
+    chargeHint: string;
+    ringUp: string;
+    ringUpHint: string;
+    ringingUp: string;
+    /** Why the typed total cannot be a till charge. Three causes, three different corrections. */
+    badAmount: (reason: 'too-precise' | 'not-a-number' | 'too-large') => string;
+
+    /** The selected asset is not the one a till code is paid in. `network` is the chain's proper
+     *  noun (null for an asset that has none), so the refusal names the rail as well as the asset. */
+    wrongAssetTitle: string;
+    wrongAsset: (selected: string, network: string | null) => string;
+    /** …and this wallet carries no till asset at all, so there is no switch to offer. */
+    noTillAsset: string;
+    switchTo: (asset: string) => string;
+
+    /** The ring-up did not happen. Nothing is payable in any of these — say so, then say what next. */
+    failedTitle: string;
+    notServed: (host: string) => string;
+    unreachable: (host: string) => string;
+    /** The till's OWN sentence, quoted: it already names the fix (the price bound, the clock skew,
+     *  the reused nonce), and it is what the merchant repeats to whoever runs the relay. */
+    refused: (said: string) => string;
+    refusedNoReason: (status: number) => string;
+    /** The till answered with a price that is not the one that was rung up. */
+    mispriced: (rung: string, quoted: string) => string;
+    unsigned: string;
+    tryAgain: string;
+
+    /** The code is up. `settlesAs` states what the customer's wallet will actually move. */
+    settlesAs: (amount: string) => string;
+    showToCustomer: string;
+    waiting: string;
+    /** The till is out of contact. NEVER "unpaid" — the whole reason this string exists. */
+    cantCheck: string;
+    /** Expired, and still watching: an offline payer's transfer can land after the deadline. */
+    expiredWatching: string;
+    cancel: string;
+    cancelHint: string;
+    cancelling: string;
+    /** A cancellation that did not clear the till — the charge is still payable in every case. */
+    cancelFailed: (said: string) => string;
+    cancelFailedNoReason: (status: number) => string;
+    cancelUnreachable: string;
+
+    /** The four ways a charge stops being payable without being paid. They are told apart because
+     *  they send the cashier — and the customer standing there — to do different things. */
+    endedTitle: (reason: 'expired' | 'cancelled' | 'superseded' | 'gone') => string;
+    endedBody: (reason: 'expired' | 'cancelled' | 'superseded' | 'gone') => string;
+    ringUpNext: string;
+
+    paidAmount: (price: string) => string;
+    /** The ledger row that paid — the merchant's proof, and the reason no other charge can claim it. */
+    paidBlock: (block: number) => string;
+    paidLate: string;
+  };
 };
 
 export const receiveEn: ReceiveMessages = {
@@ -574,4 +649,80 @@ export const receiveEn: ReceiveMessages = {
   broadcastInterrupted: 'A broadcast was interrupted. The payment may have settled — retry to check.',
   retryBroadcast: 'Retry broadcast',
   broadcasting: 'Broadcasting on Solana — this can take up to a minute.',
+
+  till: {
+    codeForm: 'Who can pay this code',
+    dpayCode: 'dpay code',
+    tillCode: 'Till code',
+
+    chargeLabel: 'Total to charge',
+    chargeHint: 'Priced in francs, paid in VCHF — one franc, one VCHF, no conversion.',
+    ringUp: 'Ring up',
+    ringUpHint: 'Open this charge on your till and show the customer a code they can pay',
+    ringingUp: 'Ringing up…',
+    badAmount: reason =>
+      reason === 'too-precise'
+        ? 'A till charge is in whole rappen — ring up 10.50 rather than 10.505.'
+        : reason === 'too-large'
+        ? 'That total is too large to ring up. Enter what this customer owes.'
+        : 'Enter the total to charge, like 10.50.',
+
+    wrongAssetTitle: 'A till code is paid in VCHF',
+    wrongAsset: (selected, network) =>
+      `A till code is always paid in VCHF on the Internet Computer — a counter takes one asset, and dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to ring one up, or keep the dpay code: any dpay wallet can pay that in ${selected}.`,
+    noTillAsset:
+      'This wallet carries no VCHF, so there is no account for a till charge to be paid into. Use the dpay code instead — any dpay wallet can pay it in the asset you have chosen.',
+    switchTo: asset => `Switch to ${asset}`,
+
+    failedTitle: 'The charge was not rung up',
+    notServed: host =>
+      `${host} does not serve till codes, so nothing was rung up and nothing is payable. Ask whoever runs that relay to turn the till on, or use the dpay code — it needs no till.`,
+    unreachable: host =>
+      `dpay could not reach ${host}, so nothing was rung up. A till code is created online. Check the connection and ring up again — or use the dpay code, which this phone makes on its own and can show while offline.`,
+    refused: said =>
+      `The till refused this charge: “${said}” Nothing is payable. Put that right, then ring up again.`,
+    refusedNoReason: status =>
+      `The till refused this charge (HTTP ${status}) without saying why, so nothing is payable. Ring up again; if it refuses twice, tell whoever runs the relay.`,
+    mispriced: (rung, quoted) =>
+      `You rang up ${rung} and the till answered with ${quoted}. dpay will not show a code that charges a number nobody at this counter chose, so nothing is payable. Ring up again — and if it happens twice, tell whoever runs the relay before taking any money.`,
+    unsigned:
+      'This phone could not sign the charge, so nothing was rung up and nothing is payable. Close and reopen dpay, then ring up again.',
+    tryAgain: 'Ring up again',
+
+    settlesAs: amount => `${amount} on the Internet Computer`,
+    showToCustomer: 'Show this to the customer — their dpay wallet scans it and pays.',
+    waiting: 'Waiting for the payment…',
+    cantCheck:
+      'Can’t check this charge right now — the till is out of contact. That does NOT mean it is unpaid. Keep the code up: this screen says so the moment it can reach the till again.',
+    expiredWatching:
+      'This code has expired, so nobody new can pay it. If the customer already sent the money it can still land — watching a moment longer.',
+    cancel: 'Cancel charge',
+    cancelHint: 'Clear this charge so the code stops taking money',
+    cancelling: 'Cancelling…',
+    cancelFailed: said =>
+      `The charge was NOT cancelled: “${said}” It may still be payable — read that, then decide whether to hand anything over.`,
+    cancelFailedNoReason: status =>
+      `The charge was NOT cancelled (HTTP ${status}) and no reason was given, so treat it as still payable. Try again, and don’t hand anything over on this code until it clears or expires.`,
+    cancelUnreachable:
+      'The till could not be reached, so this charge was NOT cancelled — it stays payable until it expires. Try again once the connection is back.',
+
+    endedTitle: reason =>
+      reason === 'expired' ? 'This code expired'
+      : reason === 'cancelled' ? 'Charge cancelled'
+      : reason === 'superseded' ? 'Replaced by a newer charge'
+      : 'The till no longer has this charge',
+    endedBody: reason =>
+      reason === 'expired'
+        ? 'Nothing arrived for it, and nobody can pay it now. Ring up again to show the customer a fresh code.'
+        : reason === 'cancelled'
+        ? 'Nothing is owed on it and nobody can pay it. Ring up again when the next customer is ready.'
+        : reason === 'superseded'
+        ? 'Another charge was rung up on this till, so this code no longer takes money. Ring up again to show a fresh one.'
+        : 'The relay does not have it any more — most likely it restarted. Nothing was credited here. Ring up again; if the customer says they paid, check your VCHF balance and Transactions before asking them to pay twice.',
+    ringUpNext: 'Ring up the next customer',
+
+    paidAmount: price => `Paid ${price}`,
+    paidBlock: block => `Ledger block ${block}`,
+    paidLate: 'This landed after the code expired — accepted, and the money is on the ledger.',
+  },
 };
