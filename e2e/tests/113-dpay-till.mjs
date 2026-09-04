@@ -2,19 +2,13 @@
 //
 // dpay's relay serves its own OpenCryptoPay till, and it offers exactly one pair —
 // `InternetComputer` / `VCHF` (`crates/dpay-relay/src/till.rs`; the bytes it puts on the wire are
-// pinned in `dfx/till_wire.json`). The payer, meanwhile, refuses every Internet Computer asset but
-// native ICP at a provider it cannot vouch for, because the one provider ever measured resolves the
-// reported block index against the ICP ledger whatever asset was declared
-// (`docs/specs/2026-09-01-opencryptopay-findings.md`). Applied to every provider alike, that rule
-// made dpay's own till unpayable BY DPAY: nothing payable, and one refusal naming the only asset the
-// till takes.
-//
-// The exception is narrow, and proving it end to end is what this flow is for: the till is served by
-// the very relay this wallet is already configured to use for its balances and its history, so no
-// party is trusted that the payer had not already chosen. The rule itself — and that a stranger
-// cannot talk their way into it — is `selectPayableOffers`' own business
-// (`app/__tests__/opencryptopay.test.ts`); flow 111 keeps proving the same asset REFUSED at DFX's
-// host, in the app, with money on the line.
+// pinned in `dfx/till_wire.json`). So this is the flow where a NON-ICP Internet Computer asset is
+// paid at a till and the proof is reported — which makes it the end-to-end guard for the identifier
+// that cost a real payment on 2026-09-03: an index on any ledger but the native ICP one has to be
+// reported `<ledger>:<index>`, or the provider looks it up on the ICP ledger and the sale is never
+// credited (`docs/specs/2026-09-01-opencryptopay-findings.md`, measured again 2026-09-04). Leg 1
+// asserts the exact string that goes on the wire; flow 111 asserts the BARE spelling native ICP
+// still requires, so the two flows together pin both halves of the rule.
 //
 // Two legs:
 //
@@ -51,8 +45,8 @@ export const meta = {
   id: '113',
   name: 'dpay-till',
   journey: 'pay',
-  covers: ['opencryptopay', 'own-relay-trust', 'vchf', 'explicit-approve', 'claimed-name', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'settle'],
-  verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer accepts it BECAUSE the till is served by the relay this wallet is configured to use — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name and the CHF price, and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) carrying the till\'s per-charge `ref` as the transfer\'s on-chain memo, then reports the proof exactly once → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
+  covers: ['opencryptopay', 'tx-ledger-spelling', 'vchf', 'explicit-approve', 'claimed-name', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'settle'],
+  verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer pays it — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name and the CHF price, and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) carrying the till\'s per-charge `ref` as the transfer\'s on-chain memo, then reports the proof exactly once — as `<vchf ledger>:<block index>`, the spelling a non-ICP ICRC ledger requires and the one whose absence cost a real payment — → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
   timeoutMs: 45000, // 2 legs: 4 provider round trips + 2 real IC settlements
 };
 
@@ -164,9 +158,13 @@ export async function run() {
       'the submission goes to the /tx path derived from the callback\'s /cb/ segment');
     assertEq(submitted.searchParams.get('method'), DPAY_TILL.method, 'the submission echoes the till\'s method');
     assertEq(submitted.searchParams.get('asset'), DPAY_TILL.asset, 'the submission echoes the till\'s asset');
-    assert(/^\d+$/.test(submitted.searchParams.get('tx') ?? ''),
-      `the submission reports a real ledger block index, got ${submitted.searchParams.get('tx')}`);
-    console.log(`[113-dpay-till] ✓ paid; block ${submitted.searchParams.get('tx')} reported once`);
+    // THE IDENTIFIER, in full. Not a shape check: the LEDGER has to be this till's own, because a
+    // bare index here is exactly the 2026-09-03 defect — the provider would resolve it against the
+    // native ICP ledger, find something that is not this sale, and the payer's VCHF would be gone.
+    const reportedTx = submitted.searchParams.get('tx') ?? '';
+    assert(new RegExp(`^${DPAY_TILL.ledger}:\\d+$`).test(reportedTx),
+      `the submission must name the till's own ledger beside the block index, got ${JSON.stringify(reportedTx)}`);
+    console.log(`[113-dpay-till] ✓ paid; ${reportedTx} reported once`);
     await driver.screenshot('113-dpay-till-paid');
 
     // --- 2. the till says PENDING: reported, not credited ------------------------------------
@@ -194,6 +192,9 @@ export async function run() {
     assert(!(await driver.isPresent('btn-approve')), 'the pending outcome must not offer an Approve to press again');
     seen = await ocpStubState(driver);
     assertEq(String(seen.txUrls.length), '2', 'a pending answer is reported once and never retried from here');
+    // …and the second submission spells the identifier the same way. One rule, every submission.
+    assert(new RegExp(`^${DPAY_TILL.ledger}:\\d+$`).test(new URL(seen.txUrls[1]).searchParams.get('tx') ?? ''),
+      'a pending submission names the ledger too — the spelling is the rule, not a happy-path detail');
     await driver.screenshot('113-dpay-till-pending');
     console.log('[113-dpay-till] ✓ pending rendered as sent-and-waiting, not as paid');
 

@@ -127,7 +127,6 @@ function payElement(props: Partial<PayModeProps> = {}) {
   return (
     <PayMode
       identity={IDENTITY}
-      relayUrl="https://relay.test"
       online={false}
       nfcStatus="unknown"
       onSettled={() => {}}
@@ -636,6 +635,9 @@ describe('PayMode — what the camera does with a code that is not a payment req
 /** A scanned till code (the LNURL a DFX till prints, uppercase as a QR encodes it). */
 const TILL_QR = 'LNURL1DP68GURN8GHJ7CTSDYHXGENC9EEHW6TNWVHHVVF0D3H82UNVWQHHQMZLVFJK2ERYVG6RZCMYX33RVEPEV5YEJ9WT';
 const TILL_PRINCIPAL = 'ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae';
+/** The VCHF ledger (== `vchf_ledger` in dfx/catalog_truth.json) — the ledger this till's own URI
+ *  names, and therefore the one a settled index is reported against. */
+const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
 const OCP_TARGET: OcpTarget = {
   details: {
     submitUrl: 'https://api.dfx.swiss/v1/lnurlp/tx/pl_beeddb41cd4b6d9e',
@@ -656,6 +658,9 @@ const OCP_TARGET: OcpTarget = {
   // The mounted PayMode's selected asset (currency 0) — which asset a till offer resolves TO is
   // decided in `resolveOcpScan` and tested there; here it only has to match the mount.
   assetId: 'ic:0',
+  // The VCHF ledger, as the provider's own URI named it. It is what decides how a settled block
+  // index is SPELLED back to the provider (`ocpIcTxId`), which is what the reporting tests pin.
+  ledger: VCHF_LEDGER,
   to: TILL_PRINCIPAL,
   rawAmount: '100',
   // No reference: DFX's measured URI names none, so this fixture is the provider that gives the
@@ -781,7 +786,7 @@ describe('PayMode — OpenCryptoPay till', () => {
     expect(minted).not.toBe(REF);
   });
 
-  test('the IC rail reports a CONFIRMED block index, and anything else as unknown', async () => {
+  test('the IC rail reports a CONFIRMED block index, ON ITS OWN LEDGER, and anything else as unknown', async () => {
     // The `send` half of the sequence, captured from the call above and exercised directly: it is
     // the money-critical mapping — only a settled transfer with a real block index may be reported,
     // because the provider verifies that identifier against the ledger and spends the one attempt.
@@ -793,7 +798,12 @@ describe('PayMode — OpenCryptoPay till', () => {
     jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '8168'});
     await expect(send()).resolves.toEqual({
       kind: 'settled',
-      txId: '8168',
+      // The VCHF ledger's own index, spelled the way that ledger requires (`ocpIcTxId`). A BARE
+      // '8168' here is the 2026-09-03 defect exactly: the provider would look 8168 up on the native
+      // ICP ledger, and the payer's VCHF would be gone with the sale uncredited.
+      txId: `${VCHF_LEDGER}:8168`,
+      // The REFERENCE stays the bare index: it is what the payer reads out to the merchant, not
+      // what goes on the wire, and the merchant already knows which asset they were paid in.
       reference: M.pay.ocp.ref.icBlock('8168'),
     });
 
@@ -817,6 +827,24 @@ describe('PayMode — OpenCryptoPay till', () => {
     // Signing itself failing is definitive — nothing was submitted.
     jest.mocked(prepareTransfer).mockRejectedValue(new Error('IC clock unreachable'));
     await expect(send()).resolves.toEqual({kind: 'refused', message: 'IC clock unreachable'});
+    warn.mockRestore();
+  });
+
+  test('a settled transfer whose till named no ledger is NOT reported, and says why', async () => {
+    // The negative half of the spelling rule. `OcpTarget.ledger` is null only on Solana, so an IC
+    // target without one is an inconsistency — and the safe answer to "which ledger do I report
+    // this index against?" being unanswerable is to not report it. Reporting a bare index on a
+    // guess is the 2026-09-03 loss; a warn keeps the impossible case debuggable instead of silent.
+    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'ok', target: {...OCP_TARGET, ledger: null}});
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    const send = jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>;
+
+    jest.mocked(submitTransfer).mockResolvedValue({kind: 'settled', blockIndex: '8168'});
+    await expect(send()).resolves.toEqual({kind: 'unknown'});
+    expect(warn.mock.calls.map(c => String(c[0])).join('\n')).toContain('named no ledger');
     warn.mockRestore();
   });
 
@@ -873,16 +901,6 @@ describe('PayMode — OpenCryptoPay till', () => {
     // dead quote.
     expect(textByTestID(tree, 'ocp-expiry')).toBe(M.receive.validForMin(3));
     expect(textByTestID(tree, 'ocp-expiry')).not.toBe(M.receive.validForMin(5));
-  });
-
-  test('the resolver is told which relay this wallet trusts — the setting, not a compiled-in host', async () => {
-    // The till trust rule compares the provider's host against THIS string (`OcpProvider` in
-    // lib/opencryptopay.ts). If the screen stopped forwarding the configured relay — or forwarded a
-    // baked constant instead — the rule would still be correct and would trust the wrong party, so
-    // what is pinned here is that the payer's own setting is what reaches it.
-    const tree = mountTill({relayUrl: 'https://relay.chosen.example'});
-    await scanTill(tree);
-    expect(jest.mocked(resolveOcpScan).mock.calls[0][1].relayUrl).toBe('https://relay.chosen.example');
   });
 
   test('the runway this rail asks for covers the poll budget it actually uses', async () => {
@@ -1013,7 +1031,7 @@ describe('PayMode — an unresolved till transfer stays recoverable', () => {
     jest.mocked(pollTransfer).mockResolvedValue({kind: 'settled', blockIndex: '8168'});
     await tick(tree);
 
-    expect(sends[1]).toEqual({kind: 'settled', txId: '8168', reference: M.pay.ocp.ref.icBlock('8168')});
+    expect(sends[1]).toEqual({kind: 'settled', txId: `${VCHF_LEDGER}:8168`, reference: M.pay.ocp.ref.icBlock('8168')});
     expect(jest.mocked(pollTransfer).mock.calls[0][0]).toEqual(PREPARED); // re-polled, never re-signed
     expect(prepareTransfer).toHaveBeenCalledTimes(1);
     expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('∂1.00'));

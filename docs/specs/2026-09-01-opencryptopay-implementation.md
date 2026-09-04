@@ -9,11 +9,10 @@ first — the public README is wrong twice and the loss path is non-obvious.
 **In:** paying an OpenCryptoPay till from dpay, on the `InternetComputer` method and the `Solana`
 method for **native SOL only**.
 
-Which IC assets narrowed after this plan was written, and the shipped rule is the authority rather
-than this line: at a provider the wallet cannot vouch for, **native ICP only** — every other IC asset
-is refused by name (`unverifiable-ic-asset`), because the measured provider resolves the reported
-index against the ICP ledger whatever asset it was told. The sole exception is a till served by the
-wallet's own relay. Rule and its reasoning: `app/lib/opencryptopay.ts`; measurement:
+Every IC asset the provider lists and the wallet carries, at any provider. That was briefly narrowed
+to native ICP on a wrong diagnosis of the 2026-09-03 loss, and reopened on 2026-09-04 once the real
+cause — the spelling of the reported transaction id — was measured. Which assets are payable is
+decided by `selectPayableOffers` (`app/lib/opencryptopay.ts`) and by nothing here; the measurement is
 [`2026-09-01-opencryptopay-findings.md`](2026-09-01-opencryptopay-findings.md).
 
 **Deliberately out, with reasons:**

@@ -252,9 +252,9 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   and arms the NFC reader with the charge's own reference, so a TAP pays the same charge a scan
   would — no new AID, no protocol change. Authority, each for its own half and none of it restated
   here: `crates/dpay-relay/src/till.rs`, `app/services/till.ts`, `app/components/TillCharge.tsx`,
-  and `app/lib/opencryptopay.ts` for the payer side (incl. `unverifiable-ic-asset` and its one
-  own-relay exception); founder decisions `docs/specs/2026-09-02-merchant-side-plan.md`; measured
-  provider behaviour `docs/specs/2026-09-01-opencryptopay-findings.md`.
+  and `app/lib/opencryptopay.ts` for the payer side; founder decisions
+  `docs/specs/2026-09-02-merchant-side-plan.md`; measured provider behaviour
+  `docs/specs/2026-09-01-opencryptopay-findings.md`.
   **Who can pay a dpay till: a dpay wallet, and only a dpay wallet.** No wallet on the standard's
   own compatibility list settles any Internet Computer asset (measured twice — the findings doc), so
   serving the standard is future-proofing, not distribution. **Never put third-party wallet reach in

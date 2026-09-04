@@ -106,12 +106,6 @@ export type PayMessages = {
      *  screen the payer is already on. Heading for that menu. Distinct from `assetNotAccepted`,
      *  which is the dead end — this one has options under it, so it must not send anyone to
      *  Balances. Names the declined asset so the switch is never silent. */
-    /** An IC asset a provider lists that this wallet cannot vouch for — only a till served by the
-     *  relay this wallet already uses is exempt (`lib/opencryptopay.ts`). Names the asset AND the
-     *  host it is about, because the refusal is about that provider and not about the asset.
-     *  `alternatives` is null when nothing else on the till is payable here, same as
-     *  `methodUnavailable`: there is then no "switch in Balances" to point at. */
-    unverifiableIcAsset: (selected: string, host: string, alternatives: string | null) => string;
     chooseAsset: (selected: string) => string;
     assetNotAccepted: (selected: string, accepted: string) => string;
     /** The till DOES take the selected asset, but its provider says it cannot settle that method
@@ -329,10 +323,6 @@ export const payEn: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'This till takes USDC on Solana, but its code doesn’t say which token account to send to — paying it would risk sending real money to the wrong account. Pay with SOL instead, or switch in Balances to another asset this till takes.',
-    unverifiableIcAsset: (selected, host, alternatives) =>
-      alternatives
-        ? `This till lists ${selected}, but dpay can’t confirm that ${host} would credit a payment made in it — the only provider dpay has tested checked the ICP ledger for every Internet Computer asset, so real money left and the sale was never credited. This till also takes ${alternatives}. dpay never swaps, so switch to one of those in Balances and scan again.`
-        : `This till lists ${selected}, but dpay can’t confirm that ${host} would credit a payment made in it — the only provider dpay has tested checked the ICP ledger for every Internet Computer asset, so real money left and the sale was never credited. Nothing else this till takes can be paid from this wallet, so ask the merchant for another way to pay.`,
     chooseAsset: selected =>
       `This till doesn’t take ${selected}, but it takes these — pick one to pay with. dpay never swaps: you pay the asset you choose.`,
     assetNotAccepted: (selected, accepted) =>

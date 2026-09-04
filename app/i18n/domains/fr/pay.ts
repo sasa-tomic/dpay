@@ -79,10 +79,6 @@ export const payFr: PayMessages = {
   ocp: {
     solanaUsdcUnsupported:
       'Cette caisse accepte les USDC sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.',
-    unverifiableIcAsset: (selected, host, alternatives) =>
-      alternatives
-        ? `Cette caisse propose ${selected}, mais dpay ne peut pas confirmer que ${host} créditerait un paiement dans cet actif — le seul prestataire testé par dpay consultait le registre ICP pour tous les actifs Internet Computer : de l’argent réel est parti et la vente n’a jamais été créditée. Cette caisse accepte aussi ${alternatives}. dpay ne convertit jamais : passez à l’un de ces actifs dans « Soldes », puis scannez à nouveau.`
-        : `Cette caisse propose ${selected}, mais dpay ne peut pas confirmer que ${host} créditerait un paiement dans cet actif — le seul prestataire testé par dpay consultait le registre ICP pour tous les actifs Internet Computer : de l’argent réel est parti et la vente n’a jamais été créditée. Ce portefeuille ne peut payer aucun autre actif accepté par cette caisse : demandez au commerçant un autre moyen de paiement.`,
     chooseAsset: selected =>
       `Cette caisse n’accepte pas ${selected}, mais elle accepte ceux-ci — choisis avec lequel payer. dpay ne convertit jamais : tu paies l’actif que tu choisis.`,
     assetNotAccepted: (selected, accepted) =>

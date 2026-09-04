@@ -58,9 +58,13 @@ export const WALLET_ORIGIN = 'https://dpay.kalaj.org';
 export const PRIVACY_URL = `${WALLET_ORIGIN}/privacy`;
 
 // The NATIVE ICP ledger canister. Pinned here — not merely read off the selected catalog row —
-// because the send rail asks a question only an identity can answer: "does this ledger expose the
-// LEGACY `transfer` method?", i.e. can it be paid at a 64-hex account identifier. That method
-// exists on this canister and on no other ICRC-1 ledger, so the principal IS the capability.
+// because two rails ask questions only an identity can answer, and in both the principal IS the
+// capability:
+//   • the send rail — "does this ledger expose the LEGACY `transfer` method?", i.e. can it be paid
+//     at a 64-hex account identifier. That method exists on this canister and on no other ICRC-1
+//     ledger;
+//   • the OpenCryptoPay submission — this ledger's block indexes are reported BARE and every other
+//     ledger's are reported `<ledger>:<index>` (`ocpIcTxId`, `lib/opencryptopay.ts`).
 // The relay pins its own copy (`crates/dpay-relay/src/catalog.rs` ICP_LEDGER_PRINCIPAL) and both
 // sides are drift-checked against `dfx/catalog_truth.json` (`principals.icp_ledger`) by tests.
 export const ICP_LEDGER_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';

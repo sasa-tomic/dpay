@@ -115,24 +115,28 @@ The shape, in design voice throughout — no bullet below is a claim about what 
   `dpay-till-open-v1`, bytes pinned by `dfx/till_open_signing.json` — so the relay checks rather
   than re-derives it. The routes are separately gated off by default, and why they are:
   `crates/dpay-relay/src/app.rs`, at the till gate. Status of both: `OPEN_ISSUES.md`.
-- **The own-relay trust rule is the whole answer for v1, and is knowingly incomplete.** A dpay payer
-  accepts a VCHF till only from the relay their wallet is already configured to use
-  (`isOwnRelayProvider`, `app/lib/opencryptopay.ts` — that module header is the authority for the
-  rule). With one relay that is complete. The moment a SECOND merchant runs their own relay, that
-  merchant's dpay customers are refused by name — nothing is lost and nothing is silently wrong (the
-  payer is refused, never charged), but the till is unusable to them. **Accepted as a v1 limitation,
-  with the precondition stated: it must be answered before a second relay exists, and the answer may
-  not be "widen the rule to any host that looks like dpay" — that is precisely the claim a hostile
-  provider makes.** What that answer IS remains undecided.
+- **The own-relay trust rule is GONE, and nothing replaced it.** It existed to carve dpay's own till
+  out of a blanket refusal of non-ICP Internet Computer assets, and that refusal was built on a
+  wrong diagnosis of the 2026-09-03 loss — the real cause was the spelling of the reported
+  transaction id, measured and fixed on 2026-09-04 (`docs/specs/2026-09-01-opencryptopay-findings.md`).
+  With the refusal removed the exception had nothing to except, so `isOwnRelayProvider` and its
+  plumbing were deleted rather than left as an inert privilege. The open question it carried — what a
+  dpay payer should do at a SECOND dpay merchant's relay — is answered by there being no distinction:
+  every provider is treated alike, and none is trusted for anything beyond what the payer approves on
+  an explicit review.
 
 ## Verification: scan the merchant's own history, never trust a reported index
 
-The one design point worth stating loudly, because the payment DFX lost on 2026-09-03 is the
-argument for it.
+The one design point worth stating loudly, because the payment lost on 2026-09-03 is the argument
+for it.
 
-DFX verifies by taking the block index the payer reports and looking it up — and it looks it up on
-the wrong ledger, which is why a correct VCHF payment was refused and the money lost. **dpay's
-provider must not accept a reported identifier as the source of truth at all.** It already has the
+DFX verifies by taking the transaction identifier the payer reports and looking it up. Which LEDGER
+it looks it up on is decided by the SHAPE of that string, and that rule is documented nowhere — dpay
+reported a bare block index for a VCHF payment, the provider dutifully searched the native ICP
+ledger, and a correct payment was refused with the money already gone (the rule, and the measurement
+that established it: `docs/specs/2026-09-01-opencryptopay-findings.md`). **dpay's provider must not
+accept a reported identifier as the source of truth at all** — then there is no format for a payer
+to get wrong, and no undocumented rule for dpay to have to publish. It already has the
 right primitive: `transactions_on_ledger` (`crates/dpay-relay/src/ledger/api.rs`), the same
 exact-memo merchant reconciliation the Receive tab uses (flows 97/98). Verification must therefore
 be: read the MERCHANT's own incoming transfers on the charge's ledger, and look for one that matches
@@ -144,10 +148,10 @@ cannot tell two same-price charges apart, so the matcher must own the consumptio
 the second half of the same rule (a new ring-up voids the merchant's previous charge) are stated
 where they are enforced: the module header of `crates/dpay-relay/src/till.rs`.
 
-Three properties follow from that rule, and each is a defect DFX has:
+Three properties follow from that rule, and each is something DFX's design cannot offer:
 
 - **Wrong-ledger lookups are impossible** — the ledger is the charge's own, chosen by us, never
-  inferred from a payer-supplied parameter.
+  inferred from a payer-supplied string.
 - **The submission is IDEMPOTENT.** Re-reporting a payment re-reads history and reaches the same
   answer, so a retry is safe and a timeout is not fatal. DFX's one-shot burns both the quote and the
   transaction id on any failure, which is the loss path the payer side is built around; as the

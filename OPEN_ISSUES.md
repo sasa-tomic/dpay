@@ -44,8 +44,11 @@
      holding an id reads the merchant's name, price and payer. Worked through and accepted at
      `ChargeStatus` in `till.rs` (which is why the `reference` is deliberately kept off that body).
      Revisit before the till serves a merchant who is not the founder.
-   - **The own-relay trust rule breaks the day a SECOND merchant runs a relay** — accepted as a v1
-     limitation, with the precondition its answer must satisfy stated in the plan. Undecided.
+   - ~~**The own-relay trust rule breaks the day a SECOND merchant runs a relay.**~~ **CLOSED
+     2026-09-04 by deletion, not by an answer.** The rule existed only to except dpay's own till from
+     a blanket refusal of non-ICP Internet Computer assets, and that refusal rested on a wrong
+     diagnosis of the CHF 1 loss. With the real cause fixed, the refusal and its exception are both
+     gone, so there is no second-relay case left to decide.
    - **EURC** — the last item the plan itself lists as open.
    - A relay-served merchant page (the plan's "web page later") is additive and unstarted.
    Founder ops:
@@ -64,16 +67,23 @@
      older than `8912db5` refuses EVERY real till.
    - ~~**The CHF 1 live payment is still unmade.**~~ **DONE 2026-09-03 — and it FAILED, which is
      what it was for.** The founder paid the public test till with 1.00000000 VCHF from their own
-     phone; dpay did everything right, the provider refused the proof, and the sale was never
-     credited. ~CHF 1 lost, buying the one fact no probe could — the cause, the free probes that
-     isolated it, and the refusal dpay now applies are all in
+     phone; dpay moved the money correctly and then reported it under an identifier the provider
+     resolves against the wrong ledger, so the sale was never credited. ~CHF 1 lost, buying the one
+     fact no probe could. Cause, rule and measurement:
      `docs/specs/2026-09-01-opencryptopay-findings.md`.
-   - **REPORT THE BUG TO DFX** (founder action). `mail@ammer.group` is the merchant on the test
-     till; DFX support is the other route. Quote block 81001 and the bracketing table in the
-     findings doc. Two asks: credit or refund that payment, and fix the ledger resolution.
-   - **RE-TEST WITH NATIVE ICP** — still open, and now the cheap one. The same one-shot `/tx` leg is
-     unproven for the asset that *should* work, and it can be done from a desk in a minute with
-     `artifacts/spar-test-till-qr.png`. If it succeeds, the integration is proven end to end.
+   - ~~**REPORT THE BUG TO DFX.**~~ **DONE — and it was not their bug.** DFX's engineering team
+     answered 2026-09-04 with the `tx` grammar: the string's SHAPE picks the ledger, and an ICRC
+     token must be reported `<ledgerCanisterId>:<blockIndex>`. Re-measured independently before
+     believing it (`just ocp-ledger-probe`) and fixed in `ocpIcTxId`. **Still open on their side:
+     the CHF 1.** DFX say the VCHF reached their payment address and they are checking what they can
+     do; nothing to build, but do not write it off or count it recovered until it lands.
+   - **PROVE AN ACCEPTANCE — the one leg `/tx` has never returned.** Every outcome ever observed
+     from that endpoint is a refusal. The identifier fix makes acceptance *possible*, not *proven*,
+     and until a real transfer is credited "dpay can pay an OpenCryptoPay till" is a claim about the
+     code, not about a completed purchase. **This is the LAST check, deliberately** — the gateway to
+     use, why, and the rule that it runs only once everything else is green: `docs/AGENT-FUNDS.md`.
+     Note for whoever runs it: the float holds ICP but no VCHF, and those exercise DIFFERENT halves
+     of the fix (bare vs prefixed `tx`), so which asset pays decides what the payment proves.
 1. ~~**Add VCHF + native ICP as complete direct-payment assets.**~~ **DONE (2026-08-28)** —
    [`docs/specs/2026-08-28-vchf-icp-support-spec.md`](docs/specs/2026-08-28-vchf-icp-support-spec.md)
    U1–U8 complete and fully verified: catalog ids 7/8 everywhere (bundled + fake + truth-file drift

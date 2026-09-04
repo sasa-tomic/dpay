@@ -206,6 +206,16 @@ ic-index-probe:
 live-ocp:
     node e2e/live-ocp-probe.mjs
 
+# OPT-IN live OpenCryptoPay LEDGER-SELECTION probe (NEEDS NETWORK, never in check/verify): asks the
+# REAL provider which ledger it resolves a reported `tx` against, by bracketing which block indexes
+# it agrees exist. FREE and commits nothing — every index is fabricated, so no funds move and no
+# transfer is claimed. This is the measurement that diagnosed the payment lost on 2026-09-03 (the
+# spelling of the reported id, not the `asset` parameter, picks the ledger — findings doc). The rule
+# it establishes reached dpay by EMAIL and is in no documentation the provider publishes, so re-run
+# this before trusting `ocpIcTxId` after any provider-side change.
+ocp-ledger-probe:
+    bash e2e/ocp-ledger-probe.sh
+
 # OPT-IN mainnet UPDATE probe (NEEDS NETWORK, never in check/verify): the state-changing twin of
 # ic-mainnet-probe — user-principal signed UPDATES (POST /api/v2/canister/<id>/call) with the full
 # read_state lifecycle, against OUR OWN canisters ONLY (facade ssqti + DUSD play-money ledger

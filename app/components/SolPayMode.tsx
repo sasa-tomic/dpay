@@ -55,7 +55,7 @@ import {M} from '../i18n';
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
  */
-export function SolPayMode({identity, relayUrl, online, nfcStatus, assets, catalog, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
@@ -338,9 +338,7 @@ export function SolPayMode({identity, relayUrl, online, nfcStatus, assets, catal
       // `withTimeout(SOL_SEND_TIMEOUT_MS)` in `sendSolForOcp` covers the blockhash fetch, the
       // broadcast and the confirmation poll together — so the resolver's deadline is derived from
       // that same constant rather than from a number that could drift away from it.
-      // `relayUrl` is passed for ONE decision, identically to the IC rail: whether this till is
-      // served by the relay this wallet already trusts (`lib/opencryptopay.ts`, `OcpProvider`).
-      const out = await resolveOcpScan(scan, {selected, assets, catalog, relayUrl, nowMs: Date.now(), sequenceBudgetMs: SOL_SEND_TIMEOUT_MS});
+      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now(), sequenceBudgetMs: SOL_SEND_TIMEOUT_MS});
       landOcp(out, selected.symbol);
     } finally {
       setOcpBusy(false);

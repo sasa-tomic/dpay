@@ -8,9 +8,35 @@ the rules.
 
 Some things about dpay's mainnet rails cannot be proven any other way. Verified 2026-09-01: the
 OpenCryptoPay payment provider has **no sandbox** — `dev.api.dfx.swiss` is 502 and every method in a
-live quote is mainnet. Its test till is a fixed CHF 1, `min == max`, so there is no smaller smoke
-test. The same was true of the funded-transfer proof for VCHF and native ICP, which the founder
-closed on 2026-09-01. A small real float is the only instrument that closes this class of proof.
+live quote is mainnet. The same was true of the funded-transfer proof for VCHF and native ICP, which
+the founder closed on 2026-09-01. A small real float is the only instrument that closes this class
+of proof.
+
+## The OpenCryptoPay payment test — use the €0.01 gateway (founder direction, 2026-09-04)
+
+**`https://dfx.shop/produkt/dfx-testing-product/` — €0.01 — is the route to use.** Not the CHF 1
+public test till (`artifacts/spar-test-till-qr.png`), which is fixed-amount and 100× the price. The
+till stays as the fallback for the day the shop route turns out not to work.
+
+Measured 2026-09-04, so the route is known to be real before anyone spends on it:
+
+- the shop's own OpenCryptoPay code decodes to `https://api.dfx.swiss/v1/lnurlp/pl_3e6fe374fbc7dcb0`
+  — the SAME provider and standard as the test till, so what it proves transfers;
+- that link is a **Donation** link in `Public` mode with no pending charge, and the payer cannot
+  supply the amount (`?amount=…` in four spellings all answer `404 No pending payment found`). A
+  payable charge exists only after a real order is placed;
+- so the test is a WooCommerce checkout — cart → checkout details → the OpenCryptoPay code — and
+  **Claude drives the whole round trip in the browser**, order included, then pays the resulting
+  charge from this float and verifies it with `just agent-history`.
+- The operator is the **DFX Merch Association**, not DFX AG. A separate counterparty from the one
+  answering `api.dfx.swiss`, which is what the "ask before the first payment to a new counterparty"
+  rule is about.
+
+**Run it only when everything else is implemented and verified and this is the last pending check.**
+Founder direction, and the reason is the loss path itself: the submission is one-shot, so every
+attempt costs a real order at a real merchant and buys exactly one observation. An attempt spent
+while something else is still broken is an attempt that proves nothing and cannot be repeated for
+free. Green gates first (`just verify`, the device gate), then this.
 
 ## Commands
 

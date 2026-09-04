@@ -73,8 +73,8 @@ Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is B
 - **Inferred, weaker:** some wallet outside that list could implement the flow, but none is known,
   and this list is what the payer is actually offered. Treat "a third-party wallet pays an
   IC-settled till" as false until a specific wallet is measured doing it.
-- It is plausibly why the ledger defect below survived to production: the `InternetComputer` leg has
-  no third-party wallet to exercise it.
+- It is plausibly why the `tx` spelling below is documented nowhere: the `InternetComputer` leg has
+  no third-party wallet to have needed it written down.
 
 ## Stale-README trap #1: the IC URI shape
 
@@ -112,18 +112,20 @@ Solana token leg is therefore removed; native `Solana/SOL` was never affected.
 
     GET /v1/lnurlp/tx/{paymentId}?quote={id}&method={method}&asset={asset}&…proof
 
-- **Option A (their `hint` recommends it):** `icrc2_approve` the provider, then report
-  `sender=<principal>`; they pull with `icrc2_transfer_from`.
-- **Option B:** transfer directly with `icrc1_transfer`, then report `tx=<block index>`.
+- **Option A (their `hint` recommends it, and DFX's engineering team calls it preferred):**
+  `icrc2_approve` the provider, then report `sender=<principal>` and no `tx`; they pull with
+  `icrc2_transfer_from`.
+- **Option B:** transfer directly with `icrc1_transfer`, then report the transaction id. The id's
+  spelling is the next section, and getting it wrong is what cost a real payment.
 
-**Use Option B. Never Option A.** Option A grants DFX a spending allowance against the user's ledger
-account — custody-adjacent, and gratuitous when B exists. Verified that B is really implemented: a
-fabricated index returns
+**Use Option B. Never Option A.** Option A grants DFX a standing spending allowance against the
+user's ledger account — control over funds dpay must never arrange (`CLAUDE.md`'s non-custodial
+non-negotiable), and it survives a failed submission, so a payment that goes wrong leaves the
+allowance behind. It also costs two ledger fees instead of one. B's handler exists, consumes our
+identifier, and **verifies against the ledger** rather than crediting on assertion: a fabricated
+index returns
 
     400 "Transaction 999999999999 not confirmed in blockchain InternetComputer"
-
-so the handler exists, consumes our identifier, and **verifies against the ledger** rather than
-crediting on assertion.
 
 ## Step-2 body: the field names, verified
 
@@ -211,61 +213,72 @@ chargeback.
   "failed" and never "paid". Record the block index so the user can claim it with the merchant.
   This is the same outcome-honesty discipline as `RailOutcome`'s `unknown` in `app/services/rail.ts`.
 
-## The provider verifies every IC payment against the ICP LEDGER — measured 2026-09-03
+## The reported `tx` selects the ledger — the `asset` parameter does not
 
-**This is the most expensive finding here: it cost a real payment, and it makes every Internet
-Computer asset except native ICP unpayable at this provider.**
+**The most expensive finding here: getting this wrong cost a real payment.** It is a WIRE FORMAT,
+not a provider defect, and dpay had it wrong for one payment.
 
-A real CHF 1 payment was made in **VCHF** on 2026-09-03. dpay did everything correctly — VCHF ledger
-block **81001**, exactly `1.00000000` VCHF, to exactly the principal the provider's own URI named
-(`ygf2v-…-4ae`, verified by decoding the block). The submission two seconds later was refused:
+### What it cost
+
+A real CHF 1 payment was made in **VCHF** on 2026-09-03. dpay did everything correctly except the
+identifier — VCHF ledger block **81001**, exactly `1.00000000` VCHF, to exactly the principal the
+provider's own URI named (`ygf2v-…-4ae`, verified by decoding the block) — and reported it as a bare
+`81001`. Two seconds later:
 
     Failed to handle hex payment pl_beeddb41cd4b6d9e:
     Transaction 81001 does not pay any matching activation
 
-The money is gone and the sale was never credited. The cause was then isolated with free probes, by
-bracketing which block indexes the provider considers to exist:
+The money left and the sale was not credited. DFX say the VCHF did reach their payment address and
+they are looking at recovering it; **treat that as unresolved until it lands.**
 
-| reported `tx` | exists on VCHF (tip 81 001) | exists on ckBTC (tip 4 593 555) | exists on ICP (tip 38 148 321) | provider says |
-|---|---|---|---|---|
-| 82 000 | no | yes | yes | found |
-| 91 000 | no | yes | yes | found |
-| 10 000 001 | no | no | yes | found |
-| 37 000 001 | no | no | yes | found |
-| 39 000 001 | no | no | no | **not found** |
+### The rule
 
-The found/not-found boundary falls on the **ICP ledger's tip**, not on VCHF's and not on ckBTC's —
-and the result is identical for `asset=VCHF`, `asset=ckBTC` and `asset=ICP`. So the provider reads
-the reported index off the native ICP ledger regardless of the `asset` it was given.
+Stated by DFX's engineering team on 2026-09-04 and **re-measured here before it was implemented**.
+Three accepted `tx` spellings, and the SHAPE of the string is what picks the ledger:
 
-**"Did dpay send a bad `asset`, so the provider fell back to a default?"** — the first thing to
-suspect, and it is ruled out twice over:
+| `tx` form | resolved against |
+|---|---|
+| 64-hex Rosetta hash | the native ICP ledger |
+| bare block index | the native ICP ledger |
+| `<ledgerCanisterId>:<blockIndex>` | that ICRC ledger |
 
-- A wrong asset is **rejected, not defaulted**: an asset this provider does not offer answers
-  `400 "Invalid method or asset"` (measured with ckUSDC). There is no silent fallback path.
-- A **valid, provider-listed** asset is ignored anyway. `asset=ckBTC` with indexes 10 000 001 and
-  37 000 001 — both far past the ckBTC ledger's 4 593 555 tip — still answer "found". If the asset
-  selected the ledger, those would be "not found".
+So a bare index for a VCHF payment was always going to be looked up on the ICP ledger. The `asset`
+parameter is validated (an asset the provider does not offer answers `400 "Invalid method or
+asset"` — measured with ckUSDC) and then plays no part in choosing the ledger.
 
-And dpay echoes the provider's own spelling verbatim: the submission sends the `asset` string copied
-from their step-2 menu, which flow 111 pins. So the parameter is accepted and validated by the
-provider, and then not used to choose the ledger it verifies against.
+### The measurement (`just ocp-ledger-probe`, free — every index fabricated, no funds move)
 
-Consequences, and they are absolute:
+Each probe mints its own quote and reports a distinct index, since a failed submission burns both.
+Indexes chosen so the two hypotheses — "the prefix selects the ledger" vs "everything resolves
+against ICP" — predict DIFFERENT answers. Tips read live off each ledger's `icrc3_get_blocks`
+(`log_length`): VCHF 81 023, ckBTC 4 596 115.
 
-- **Only native ICP can ever be paid at this provider on the `InternetComputer` method.** For any
-  other ICRC asset the index is looked up on the wrong ledger, so the match cannot succeed — the
-  payer loses the money every time. dpay therefore refuses them by name
-  (`unverifiable-ic-asset`, and at every provider it cannot vouch for — nothing on the wire tells
-  one that does this from one that does not); a menu that offered them would be offering to lose
-  money.
-- This also explains the two distinct errors: a *nonexistent* index answers "not confirmed in
-  blockchain InternetComputer", while an index that exists **on ICP** but is not their payment
-  answers "does not pay any matching activation".
+| reported `tx` | on that ledger? | on ICP? | provider said |
+|---|---|---|---|
+| `ly36x-…-cai:12345678` | no | yes | **not confirmed** |
+| `12345679` (bare, control) | — | yes | does not pay any matching activation |
+| `ly36x-…-cai:80017` | yes | yes | does not pay any matching activation |
+| `ly36x-…-cai:81023` (one past VCHF's tip) | no | yes | **not confirmed** |
+| `mxzaz-…-cai:9999998` (ckBTC) | no | yes | **not confirmed** |
+| `ryjl3-…-cai:12345680` (ICP ledger, PREFIXED) | yes | yes | **not confirmed** |
 
-**Report it to DFX** (`mail@ammer.group`, the merchant on the test till, or DFX support). Until it is
-fixed, the ICP-only restriction stands; when it is fixed, remove the refusal and re-verify by
-measurement, never by their say-so.
+Two things fall out, and both are load-bearing:
+
+1. The found/not-found boundary moved from the ICP ledger's tip (~38.1 M) to **VCHF's own tip**, and
+   the same holds for ckBTC. The prefix genuinely selects the ledger.
+2. **The prefixed form does NOT work for native ICP.** An index that plainly exists on the ICP ledger
+   answers "not confirmed" once prefixed — so the two spellings are both required and neither
+   generalises. dpay encodes exactly this in `ocpIcTxId` (`app/lib/opencryptopay.ts`), and the two
+   e2e flows assert one spelling each on the wire (111 bare ICP, 113 prefixed VCHF).
+
+It also explains the two distinct errors: a *nonexistent* index answers "not confirmed in blockchain
+InternetComputer", while an index that *exists on the ledger being consulted* but is not their
+payment answers "does not pay any matching activation".
+
+### What is still not known
+
+That the right spelling produces an **acceptance**. Every observation above is a refusal — of
+fabricated ids, by design, because that is what is free. See "What has NOT been proven".
 
 ## Trust model — read before writing the parser
 
@@ -316,7 +329,9 @@ dpay hosting its own provider endpoint instead is the milestone:
   open source" is stale.
 - The swagger (`https://api.dfx.swiss/swagger-json`, 194 paths) declares **no query parameters** for
   `/v1/lnurlp/tx/{id}`, so there is no machine-readable contract for the submission call. The README
-  is the only documentation and it is wrong twice.
+  is the only documentation and it is wrong twice — and it does not mention the `tx` spelling at all,
+  which is the one undocumented detail that has actually cost money here. That rule reached dpay by
+  email, so it can change by email too: re-measure with the free probe before trusting it again.
 - The standard is open; in practice DFX is the only provider. Treat provider identity as
   configuration, not a constant.
 
@@ -328,9 +343,12 @@ the countdown — so the scan, both provider reads, the parser, the destination 
 screen are all confirmed against the real thing, not against a fixture.
 
 **`/tx` has never returned an acceptance.** One real payment has been made — VCHF, 2026-09-03 — and
-it was refused for the ledger-resolution reason above; the other observed outcomes are refusals of
-fabricated ids. So the remaining unproven leg is narrower than it was and is the one asset this
-provider can actually verify: that a **real** confirmed **native ICP** transfer plus its block index
-is accepted. It costs CHF 1 — the public test till `pl_beeddb41cd4b6d9e` is fixed-amount,
-`min == max`, so no smaller test exists — and it is irreversible and one-shot. Rules for spending the
-agent float: `CLAUDE.md` → `docs/AGENT-FUNDS.md`.
+it was refused because dpay reported the wrong identifier spelling; every other observed outcome is
+a refusal of a fabricated id. So the unproven leg is the same one it has always been, and the
+identifier fix does not shrink it: that a **real** confirmed transfer, reported in the spelling its
+ledger requires, is **accepted** and the sale credited. Until that is seen, "dpay can pay an
+OpenCryptoPay till" is a claim about the code, not about a completed purchase — say so exactly that
+way in anything outward-facing.
+
+Buying that proof costs money and is one-shot. Which gateway to use, what it was measured to be, and
+when it may be attempted: `docs/AGENT-FUNDS.md`.

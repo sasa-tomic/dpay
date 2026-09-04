@@ -448,6 +448,12 @@ export type OcpTarget = {
   asset: string;
   /** The wallet asset that pays it — the user's SELECTED asset, never a substitution. */
   assetId: AssetId;
+  /** The IC ledger the provider's own transfer URI named, or null on Solana. Carried because the
+   *  SUBMISSION needs it: which spelling a settled transfer is reported in is decided by the ledger,
+   *  not by the asset (`ocpIcTxId`, `lib/opencryptopay.ts`). Kept in the provider's own words for
+   *  the same reason `method` and `asset` are — and it is already checked to be the paying asset's
+   *  own ledger (`destinationOf`), so echoing it back cannot name a chain the payer did not choose. */
+  ledger: string | null;
   /** The destination account, as validated by the rail's own validator (canonical spelling). */
   to: string;
   /** The exact amount in the asset's raw units, converted once at its own precision. */
@@ -515,7 +521,7 @@ type OcpResolveCtx = {
  */
 export async function resolveOcpScan(
   scan: {apiUrl: string; host: string},
-  ctx: OcpResolveCtx & {selected: SelectableAsset; relayUrl: string},
+  ctx: OcpResolveCtx & {selected: SelectableAsset},
 ): Promise<OcpResolveResult> {
   const found = await fetchPaymentDetails(scan.apiUrl);
   if (found.kind === 'error') return {kind: 'refused', message: found.message};
@@ -524,13 +530,7 @@ export async function resolveOcpScan(
   }
   const details = found.details;
 
-  // `scan.host` — the host the quote was just fetched from over https — and NOT `details.proofHost`,
-  // which the provider wrote. `fetchPaymentDetails` has already refused any body whose callback host
-  // differs from the fetched one, so the two are equal here; passing the fetched one keeps the trust
-  // input a fact the wallet established rather than one it was told. `relayUrl` reaches this
-  // function and not `resolveOcpOffer`, which has no trust decision to make.
-  const provider = {host: scan.host, relayUrl: ctx.relayUrl};
-  const {payable, refused} = selectPayableOffers(details, ctx.assets, ctx.nowMs, provider);
+  const {payable, refused} = selectPayableOffers(details, ctx.assets, ctx.nowMs);
   const offer = payable.find(o => o.assetId === ctx.selected.id) ?? null;
   if (offer !== null) return resolveOcpOffer(scan.host, details, offer, ctx);
 
@@ -548,7 +548,7 @@ export async function resolveOcpScan(
     const options = payable.filter(o => railOf(o) === ctx.selected.protocol);
     if (options.length > 0) return {kind: 'choose', details, host: scan.host, options};
   }
-  return {kind: 'refused', message: unpayableMessage(scan.host, details, ctx, payable, refused)};
+  return {kind: 'refused', message: unpayableMessage(details, ctx, payable, refused)};
 }
 
 /**
@@ -612,6 +612,7 @@ export async function resolveOcpOffer(
       method: offer.method,
       asset: offer.asset,
       assetId: offer.assetId,
+      ledger: dest.ledger,
       to: dest.to,
       rawAmount: dest.rawAmount,
       reference: dest.ref,
@@ -638,7 +639,6 @@ export function ocpTimeRefusal(target: {expiresAt: number; payableUntil: number}
 /** Why the selected asset cannot pay this till, in the order the reasons matter to the user. Every
  *  branch names what to do next (founder rule 2026-08-29); none of them silently drops an asset. */
 function unpayableMessage(
-  host: string,
   details: OcpDetails,
   ctx: {selected: SelectableAsset; assets: SelectableAsset[]; nowMs: number},
   payable: OcpOffer[],
@@ -650,19 +650,6 @@ function unpayableMessage(
   // whose destination account is ambiguous in the provider's own URI.
   if (ctx.selected.id === 'solana:USDC' && refused.some(r => r.reason === 'solana-usdc-unsupported')) {
     return M.pay.ocp.solanaUsdcUnsupported;
-  }
-  // The IC twin of the case above, and the more expensive one: the till LISTS this asset, so silence
-  // would read as dpay being unable to pay it. This provider is not one this wallet can vouch for,
-  // and the only one ever measured credited nothing but native ICP — so the message NAMES the host
-  // it is about, and offers the alternatives this wallet could actually pay (null when there are
-  // none, exactly like `methodUnavailable`: a "switch in Balances" with nothing to switch to would
-  // be a dead end).
-  if (refused.some(r => r.reason === 'unverifiable-ic-asset' && offerNamesAsset(r, ctx.selected))) {
-    return M.pay.ocp.unverifiableIcAsset(
-      ctx.selected.symbol,
-      host,
-      payable.length > 0 ? walletAssetList(payable, ctx.assets) : null,
-    );
   }
   // The till DOES take the selected asset, but the provider says it cannot settle that method right
   // now. Matched against the selected asset, never "some method was unavailable": the live provider
@@ -702,12 +689,13 @@ function walletAssetList(payable: OcpOffer[], assets: SelectableAsset[]): string
  *  it. Null on ANY disagreement — the caller refuses; there is no partial answer worth keeping.
  *
  *  `ref` is the provider's on-chain reference where the rail can carry one, and null on Solana,
- *  which has no such field in a `solana:` URI and no memo instruction this integration builds. */
+ *  which has no such field in a `solana:` URI and no memo instruction this integration builds.
+ *  `ledger` is likewise IC-only — see `OcpTarget.ledger` for what the submission does with it. */
 async function destinationOf(
   uri: string,
   selected: SelectableAsset,
   catalog: CurrencyDescriptor[],
-): Promise<{to: string; rawAmount: string; ref: string | null} | null> {
+): Promise<{to: string; rawAmount: string; ref: string | null; ledger: string | null} | null> {
   if (selected.protocol === 'ic') {
     const parsed = parseIcpUri(uri);
     if (!parsed.ok) {
@@ -738,7 +726,7 @@ async function destinationOf(
       // So the form is refused BEFORE consent instead of paid on a guess. A SIBLING `subaccount=`
       // parameter, which names the same thing from outside the `to` value, is refused by the parser
       // itself (`unexpected-parameter`).
-      return {to: await DpayCore.icpValidatePrincipal(parsed.to), rawAmount: raw, ref: parsed.ref};
+      return {to: await DpayCore.icpValidatePrincipal(parsed.to), rawAmount: raw, ref: parsed.ref, ledger: parsed.ledger};
     } catch (e) {
       console.warn(`opencryptopay: destination principal rejected: ${errText(e)}`);
       return null;
@@ -754,7 +742,7 @@ async function destinationOf(
     return null;
   }
   const raw = rawAmountOf(parsed.amount, selected.decimals);
-  return raw === null ? null : {to: parsed.to, rawAmount: raw, ref: null};
+  return raw === null ? null : {to: parsed.to, rawAmount: raw, ref: null, ledger: null};
 }
 
 /** The instructed amount in the asset's raw units, or null with the reason logged. Shared by both

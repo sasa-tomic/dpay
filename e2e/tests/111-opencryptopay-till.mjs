@@ -43,10 +43,10 @@ import {
 } from '../harness/ocp.mjs';
 
 // --- the wallet side ------------------------------------------------------------------------------
-// NATIVE ICP is the asset that pays, and it is the ONLY Internet Computer asset that can: measured
-// 2026-09-03 at the cost of one real payment, this provider resolves the reported block index
-// against the ICP ledger whatever `asset` says, so a transfer on any other ICRC ledger is never
-// matched and the sale is never credited (`unverifiable-ic-asset`).
+// NATIVE ICP is the asset that pays here, and it is the one whose block index is reported BARE:
+// measured 2026-09-04, the prefixed `<ledger>:<index>` spelling resolves nothing on the ICP ledger,
+// while every other ICRC ledger requires it (`ocpIcTxId`; findings doc). Flow 113 pays VCHF and pins
+// the other half — between them both spellings are asserted on the wire.
 const ICP = 8;
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // == the OCP menu's ICP ledger (findings, identity check)
 const ICP_SEED = 500_000_001; // 5.00000001 ICP — covers two payments and their fees. The odd last
@@ -134,14 +134,12 @@ export async function run() {
     // Every IC offer this wallet can pay, each with the amount IN ITS OWN UNITS — the price differs
     // per asset, so a menu of bare names would be a choice made blind. SOL is payable too but is
     // NOT here: taking it would unmount this rail's Pay screen mid-payment, so it stays a Balances
-    // instruction. Solana USDC is absent for the measured reason (its URI names no token account).
-    // ONLY native ICP. The till also lists ckBTC and VCHF and this wallet carries both, but the
-    // provider cannot verify them, so offering either would be offering to lose money.
-    assert(await driver.isPresent('ocp-option-ic:8'), 'the menu must offer native ICP');
-    assertIncludes(await driver.readText('ocp-option-ic:8'), '0.50795551 ICP', 'the option states its own exact amount');
-    for (const id of ['ic:1', 'ic:7']) {
-      assert(!(await driver.isPresent(`ocp-option-${id}`)), `the menu must NOT offer ${id} — the provider cannot verify it`);
+    // instruction. Solana USDC is absent for the measured reason (its URI names no token account),
+    // and VEUR because this wallet carries no row for it.
+    for (const id of ['ic:1', 'ic:7', 'ic:8']) {
+      assert(await driver.isPresent(`ocp-option-${id}`), `the menu must offer ${id} — the till lists it and this wallet carries it`);
     }
+    assertIncludes(await driver.readText('ocp-option-ic:8'), '0.50795551 ICP', 'the option states its own exact amount');
     assert(!(await driver.isPresent('ocp-option-solana:SOL')), 'the menu must not offer an asset on the other rail');
     assert(!(await driver.isPresent('pay-amount')), 'the menu must never render a payment review');
     assert(!(await driver.isPresent('btn-approve')), 'the menu must never render an Approve button');
@@ -227,8 +225,11 @@ export async function run() {
       'the submission goes to the /tx path derived from the callback\'s /cb/ segment');
     assertEq(submitted.searchParams.get('method'), 'InternetComputer', 'the submission echoes the provider\'s method spelling');
     assertEq(submitted.searchParams.get('asset'), 'ICP', 'the submission echoes the provider\'s asset spelling');
+    // BARE, with no ledger prefix — the spelling the NATIVE ICP ledger requires and the only one it
+    // answers to (measured 2026-09-04; the prefixed form resolves nothing there). Flow 113 pins the
+    // prefixed spelling every other ICRC ledger requires.
     assert(/^\d+$/.test(submitted.searchParams.get('tx') ?? ''),
-      `the submission reports a real ledger block index, got ${submitted.searchParams.get('tx')}`);
+      `a native ICP index is reported bare, got ${submitted.searchParams.get('tx')}`);
     console.log(`[111-opencryptopay-till] ✓ paid; proof reported once as block ${submitted.searchParams.get('tx')}`);
     await driver.screenshot('111-ocp-paid');
 

@@ -6,7 +6,7 @@ import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
 import {parseRequestQR, randNonceHex} from '../lib/format';
 import {classifyScan} from '../lib/scan';
-import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
+import {ocpIcTxId, type OcpDetails, type OcpOffer, type OcpScan} from '../lib/opencryptopay';
 import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
 import type {SelectableAsset} from '../config/assets';
@@ -51,7 +51,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_SUBMIT_TIMEOUT_MS
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
-export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -240,9 +240,7 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
     setErr(null);
     setOcpBusy(true);
     try {
-      // `relayUrl` is passed for ONE decision: whether this till is served by the relay this wallet
-      // already trusts with its balances and history (`lib/opencryptopay.ts`, `OcpProvider`).
-      const out = await resolveOcpScan(scan, {selected, assets, catalog, relayUrl, nowMs: Date.now(), sequenceBudgetMs: OCP_IC_SEQUENCE_MS});
+      const out = await resolveOcpScan(scan, {selected, assets, catalog, nowMs: Date.now(), sequenceBudgetMs: OCP_IC_SEQUENCE_MS});
       landOcp(out, selected.symbol);
     } finally {
       setOcpBusy(false);
@@ -395,7 +393,7 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
   // means it may have, so the one submission we are granted must NOT be spent: reporting a block
   // index that may not exist burns the quote AND binds the transaction id, which is what turns a
   // recoverable pending payment into an unclaimable one (findings doc, "The loss path").
-  async function sendIcForOcp(r: PayIntent, hold: {claim: RailPrepared | null}): Promise<OcpSendResult> {
+  async function sendIcForOcp(r: PayIntent, target: OcpTarget, hold: {claim: RailPrepared | null}): Promise<OcpSendResult> {
     let p: RailPrepared;
     try {
       p = await prepareTransfer(identity.secretHex, {currencies: catalog}, r);
@@ -414,7 +412,7 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
       hold.claim = p;
       return {kind: 'unknown'};
     }
-    const sent = icOutcomeToSend(out);
+    const sent = icOutcomeToSend(out, target);
     // An indefinite transfer is the recoverable case, not the lost one: the request_id below is
     // still pollable and the block index may be one more poll away. Hand the envelope back to the
     // caller so the outcome can be resolved instead of discarded.
@@ -426,11 +424,25 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
    *  claim re-poll below must agree, because it decides the money-critical question: only a settled
    *  transfer WITH a real block index may be reported (the provider verifies that identifier against
    *  the ledger and spends the one attempt on it). A settled-but-indexless duplicate names nothing
-   *  the provider could check, so it stays indefinite. */
-  function icOutcomeToSend(out: RailOutcome): OcpSendResult {
+   *  the provider could check, so it stays indefinite.
+   *
+   *  The index is REPORTED in the spelling the paid ledger requires (`ocpIcTxId`), which is why the
+   *  target is threaded in: a bare index on any ledger but the native ICP one is looked up on the
+   *  ICP ledger instead, which is what cost a real VCHF payment on 2026-09-03. A target with no
+   *  ledger cannot be spelled at all, so it stays indefinite too — never reported on a guess, since
+   *  a wrong identifier does not merely fail, it burns the payer's only claim to the money. */
+  function icOutcomeToSend(out: RailOutcome, target: OcpTarget): OcpSendResult {
     if (out.kind === 'rejected') return {kind: 'refused', message: out.reason};
     if (out.kind === 'settled' && out.blockIndex !== '') {
-      return {kind: 'settled', txId: out.blockIndex, reference: M.pay.ocp.ref.icBlock(out.blockIndex)};
+      if (target.ledger === null) {
+        console.warn(`ocp: settled at block ${out.blockIndex} but the till named no ledger — not reporting it`);
+        return {kind: 'unknown'};
+      }
+      return {
+        kind: 'settled',
+        txId: ocpIcTxId(target.ledger, out.blockIndex),
+        reference: M.pay.ocp.ref.icBlock(out.blockIndex),
+      };
     }
     return {kind: 'unknown'};
   }
@@ -450,7 +462,7 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
     setBusy(true);
     setErr(null);
     try {
-      const out = await payAndReport(target.details, target.method, target.asset, () => sendIcForOcp(r, hold));
+      const out = await payAndReport(target.details, target.method, target.asset, () => sendIcForOcp(r, target, hold));
       if (out.kind === 'not-paid') { setErr(out.message); return; }
       if (out.kind === 'paid') {
         onSettled();
@@ -493,7 +505,7 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
           return; // best-effort: the next tick tries again
         }
         if (!alive) return;
-        const sent = icOutcomeToSend(out);
+        const sent = icOutcomeToSend(out, ocpClaim.target);
         if (sent.kind === 'unknown') return; // still indefinite — keep looking
         if (sent.kind === 'refused') {
           // Definitive: nothing left the wallet. The pending screen was the honest state a moment

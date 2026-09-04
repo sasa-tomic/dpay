@@ -92,11 +92,10 @@ const CB_IC_200 = {
   hint: 'Approve the address from the URI for the required amount plus transfer fee using icrc2_approve. Then send your Principal ID as the sender parameter via the endpoint https://api.dfx.swiss/v1/lnurlp/tx/plp_f1ba466e2f1c0a4e.',
 };
 
-/** Same call with `asset=ICP` — the NATIVE ICP ledger (`ryjl3-…`), recorded 2026-09-03. Native ICP
- *  is the only Internet Computer asset this provider can actually verify: it resolves the reported
- *  block index against the ICP ledger whatever asset was declared, so it is the only one whose index
- *  it looks up in the right place (`unverifiable-ic-asset`). The amount matches DETAILS_200's
- *  ICP quote — the provider does not re-price inside a quote, and a disagreement is a hard refusal. */
+/** Same call with `asset=ICP` — the NATIVE ICP ledger (`ryjl3-…`), recorded 2026-09-03. That ledger
+ *  is the one whose block indexes are reported BARE, so a fixture naming it is also the fixture that
+ *  keeps the other half of `ocpIcTxId` honest. The amount matches DETAILS_200's ICP quote — the
+ *  provider does not re-price inside a quote, and a disagreement is a hard refusal. */
 const CB_ICP_200 = {
   expiryDate: '2026-09-01T14:30:19.292Z',
   blockchain: 'InternetComputer',
@@ -714,8 +713,9 @@ describe('resolveOcpScan', () => {
 
   test('a destination on ANOTHER ledger is refused — never paid because the amount looked right', async () => {
     // ICP is on the till's list and is a wallet asset, but the provider answers with the VCHF
-    // ledger's address. Paying it would send ICP to a VCHF ledger account: a different asset.
-    // (VCHF itself is no longer payable here at all — `unverifiable-ic-asset`.)
+    // ledger's address. Paying it would send ICP to a VCHF ledger account: a different asset —
+    // and, since the reported identifier is spelled from the URI's ledger, it would also be
+    // reported as a VCHF block. Refused at the URI, long before either could happen.
     installRoutes([
       {match: '/lnurlp/cb/', status: 200, body: CB_IC_200},
       {match: '/lnurlp/pl_', status: 200, body: DETAILS_200},
@@ -778,13 +778,12 @@ describe('resolveOcpScan', () => {
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
     expect(out.host).toBe('api.dfx.swiss');
-    // ONLY native ICP: the till also lists ckBTC and VCHF, but this provider verifies every
-    // Internet Computer payment against the ICP ledger, so those two would be paid and never
-    // credited (`unverifiable-ic-asset`). A menu must never offer an option that loses money.
-    expect(out.options.map(o => o.assetId)).toEqual(['ic:8']);
+    // Every IC asset the till lists and this wallet carries — ckBTC, VCHF and native ICP. VEUR is
+    // on the till's list too and is absent here, because this wallet has no row for it.
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
     // The amount is IN ITS OWN UNITS — the price differs per asset, so a menu of bare names would
     // be a choice made blind.
-    expect(out.options.map(o => o.rawAmount)).toEqual(['50885919']);
+    expect(out.options.map(o => o.rawAmount)).toEqual(['1596', '100000000', '50885919']);
     // Offering a menu must cost NOTHING: one read, and no destination requested for an asset the
     // payer has not chosen. A quote spent on an unchosen asset is a quote the real payment lacks.
     expect(mock.mock.calls.length).toBe(1);
@@ -911,7 +910,7 @@ describe('resolveOcpScan', () => {
     // absent from it rather than blamed for an asset it never offered.
     expect(out.kind).toBe('choose');
     if (out.kind !== 'choose') return;
-    expect(out.options.map(o => o.assetId)).toEqual(['ic:8']);
+    expect(out.options.map(o => o.assetId)).toEqual(['ic:1', 'ic:7', 'ic:8']);
   });
 
   test('Solana USDC is refused BY NAME rather than buried under a menu', async () => {
