@@ -44,7 +44,10 @@ export const errorsFr: ErrorMessages = {
     couldntConfirmOffline: 'Impossible de confirmer — vérifiez votre solde une fois de retour en ligne',
     couldntVerifyRequest: 'Impossible de vérifier cette demande',
     couldntReturnResult: 'Impossible de renvoyer le résultat du paiement — gardez les téléphones l’un contre l’autre et réessayez',
-    stillConfirming: 'Confirmation en cours — vérifiez le solde dans un instant',
+    merchantRefusalUnverified:
+      'D’après la réponse du registre, ce transfert n’est pas passé, mais dpay n’a pas pu vérifier cette réponse sur ce téléphone. Ne remettez pas la marchandise. Vérifiez dans un instant votre solde et vos transactions — si l’argent est bien arrivé, il y figure.',
+    merchantNothingArrived:
+      'Aucun paiement reçu. Ne remettez pas la marchandise. Un transfert peut encore arriver après le contact ; il apparaîtra alors dans votre solde et vos transactions. Demandez au client de recommencer seulement si rien n’apparaît.',
     unsupportedAsset: currency => `Actif non pris en charge (monnaie ${currency})`,
     cannotConfirmAsset: currency => `Impossible de confirmer l’actif (monnaie ${currency})`,
     couldntReadRequest: 'Impossible de lire la demande de paiement',

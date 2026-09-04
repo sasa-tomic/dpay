@@ -462,7 +462,7 @@ def _uniffi_check_contract_api_version(lib):
 def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_decode_request() != 40068:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_dpay_ffi_checksum_func_encode_request() != 42219:
+    if lib.uniffi_dpay_ffi_checksum_func_encode_request() != 10328:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_format_amount() != 44035:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -3355,7 +3355,8 @@ def decode_request(qr: "str") -> "PaymentRequestData":
 def encode_request(to: "bytes",amount: "int",nonce: "bytes",expiry: "int",currency: "int",to_name: "str",memo: "str") -> "str":
     """
     Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
-    request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
+    request_id — what it does and does not enforce, per rail, is documented on
+    `dpay_core::PaymentRequest` and is not restated here.
     `to_name` is the merchant's own display name and `memo` is an optional merchant-set note; both
     are UTF-8 NUL-padded into the 132-byte request by [`name_field`] and copied verbatim by the payer
     into their authorization. Param order matches the web shim's `encodeRequest(toHex, amount,

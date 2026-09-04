@@ -46,6 +46,7 @@ import {confirmIncomingTransfer} from '../services/rail';
 import {ReceiveMode} from '../components/ReceiveMode';
 import {NfcTap} from '../components/NfcTap';
 import {receiptShareBlob} from '../lib/deepLink';
+import {M} from '../i18n';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {S} from '../styles';
 import type {CurrencyDescriptor} from '../config/catalog';
@@ -82,7 +83,7 @@ function fullProps(over: Partial<ReceiveModeProps> = {}): ReceiveModeProps {
     identity: IDENTITY,
     relayUrl: 'http://relay.test',
     online: true,
-    nfcReady: false,
+    nfcStatus: 'unsupported',
     onReceived: () => {},
     catalog: [],
     depositCurrency: 0,
@@ -174,7 +175,7 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
   test('NFC request uses a certified short ingress expiry while QR keeps its 15-minute expiry', async () => {
     jest.mocked(icStampExpiry).mockResolvedValue('1800000240123456789');
     jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
-    const tree = mountReceive({nfcReady: true});
+    const tree = mountReceive({nfcStatus: 'ready'});
     await makeRequest(tree);
     expect(DpayNfc.buildRequest).toHaveBeenCalledWith(
       IDENTITY.publicHex, '2500', expect.any(String), 1_800_000_240, 0, IDENTITY.username, '',
@@ -189,7 +190,7 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
     const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
     jest.mocked(icStampExpiry).mockResolvedValue('1800000002000000000');
     jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
-    const tree = mountReceive({nfcReady: true});
+    const tree = mountReceive({nfcStatus: 'ready'});
     await makeRequest(tree);
     expect(texts(tree).join(' ')).toContain('or let them tap');
 
@@ -207,7 +208,7 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
     const dateSpy = jest.spyOn(Date, 'now').mockImplementation(() => nowMs);
     jest.mocked(icStampExpiry).mockResolvedValue('1800000002000000000');
     jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
-    const tree = mountReceive({nfcReady: true});
+    const tree = mountReceive({nfcStatus: 'ready'});
     await makeRequest(tree);
 
     const props = jest.mocked(NfcTap).mock.calls.at(-1)?.[0];
@@ -420,5 +421,36 @@ describe('ReceiveMode — VCHF/ICP amount prefix (U2 honest textual units)', () 
     const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 7});
     expect(prefixText(tree)).toBe('VCHF');
     act(() => { tree.unmount(); });
+  });
+});
+
+/**
+ * WHICH NFC LINE THE COUNTER SEES. The merchant screen answers two different questions with one
+ * line, and the pre-2026-09-04 prop (`nfcReady: boolean`) could only answer the first: with the
+ * radio working, whether THIS code can be tapped; with it not working, WHY and what to do instead.
+ * The second question is `NfcStatusRow`'s (its own suite pins the four states); what is pinned here
+ * is the routing — that a merchant with the radio off is not left with a mute "Show this to the
+ * payer" that names no problem and no fix.
+ */
+describe('ReceiveMode — the request screen routes the NFC line by the 4-state status', () => {
+  test('radio off: the actionable status row replaces the mute per-request hint', async () => {
+    jest.mocked(icStampExpiry).mockResolvedValue('1800000240123456789');
+    const tree = mountReceive({nfcStatus: 'off'});
+    await makeRequest(tree);
+    expect(hasTestID(tree, 'receive-nfc')).toBe(true);
+    const shown = texts(tree).join(' ');
+    expect(shown).toContain(M.pay.nfcNotAvailable);
+    expect(shown).not.toContain('Show this to the payer');
+    // The code itself is unaffected — a radio problem never withholds the payable QR.
+    expect(hasTestID(tree, 'request-qr')).toBe(true);
+  });
+
+  test('radio ready: the per-request hint owns the line and the status row stays away', async () => {
+    jest.mocked(icStampExpiry).mockResolvedValue('1800000240123456789');
+    jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
+    const tree = mountReceive({nfcStatus: 'ready'});
+    await makeRequest(tree);
+    expect(hasTestID(tree, 'receive-nfc')).toBe(false);
+    expect(texts(tree).join(' ')).toContain('Show this to the payer');
   });
 });

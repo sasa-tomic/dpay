@@ -866,7 +866,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           : mode === 'receive'
           ? (activeSol && solAddress
               ? <SolReceiveMode
-                  identity={identity} relayUrl={relayUrl} nfcReady={nfc === 'ready'} solAddress={solAddress}
+                  identity={identity} relayUrl={relayUrl} nfcStatus={nfc} solAddress={solAddress}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
                   selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'}
@@ -900,7 +900,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                      AssetPicker; selecting any row (IC or SOL) flips the rail via Wallet's
                      reconcileSelectedAsset + re-mounts the right Receive form. ONE selection state. */
                   <ReceiveMode
-                    identity={identity} relayUrl={relayUrl} online={online} nfcReady={nfc === 'ready'}
+                    identity={identity} relayUrl={relayUrl} online={online} nfcStatus={nfc}
                     onReceived={onActivity} catalog={catalog}
                     depositCurrency={selectedCurrency}
                     depositDisplay={depositDisplay} depositChainId={depositChainId}

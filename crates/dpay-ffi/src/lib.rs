@@ -218,14 +218,9 @@ pub struct PaymentRequestData {
     pub memo: String,
 }
 
-// NB: the `request_id → ledger nonce` line in the doc below is STALE — that was the facade rail;
-// the shipped app-signed rail keys on the envelope's own request id, not on this value. It is not
-// corrected in place because UniFFI hashes an exported function's docstring into its ABI checksum
-// (measured: editing it moves `encode_request` 42219 → 59479), which would desync the committed
-// Android binding from the `.so` and force a `just ndk` rebuild for a documentation fix. Truth,
-// per rail: `dpay_core::PaymentRequest`.
 /// Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
-/// request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
+/// request_id — what it does and does not enforce, per rail, is documented on
+/// `dpay_core::PaymentRequest` and is not restated here.
 /// `to_name` is the merchant's own display name and `memo` is an optional merchant-set note; both
 /// are UTF-8 NUL-padded into the 132-byte request by [`name_field`] and copied verbatim by the payer
 /// into their authorization. Param order matches the web shim's `encodeRequest(toHex, amount,

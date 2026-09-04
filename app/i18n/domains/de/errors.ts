@@ -43,7 +43,10 @@ export const errorsDe: ErrorMessages = {
     couldntVerifyRequest: 'Diese Anfrage konnte nicht geprüft werden',
     couldntReturnResult:
       'Das Zahlungsergebnis konnte nicht zurückgegeben werden — halte die Handys zusammen und versuche es erneut',
-    stillConfirming: 'Wird noch bestätigt — prüfe gleich das Guthaben',
+    merchantRefusalUnverified:
+      'Laut Antwort des Ledgers ist diese Überweisung nicht durchgegangen, aber dpay konnte diese Antwort auf diesem Handy nicht verifizieren. Gib die Ware nicht heraus. Prüfe gleich dein Guthaben und die Transaktionen — wenn das Geld doch angekommen ist, steht es dort.',
+    merchantNothingArrived:
+      'Es ist keine Zahlung eingegangen. Gib die Ware nicht heraus. Eine Überweisung kann auch nach dem Tap noch ankommen und erscheint dann in deinem Guthaben und in den Transaktionen. Bitte den Kunden nur dann, erneut zu tappen, wenn nichts auftaucht.',
     unsupportedAsset: currency => `Asset nicht unterstützt (Währung ${currency})`,
     cannotConfirmAsset: currency => `Asset kann nicht bestätigt werden (Währung ${currency})`,
     couldntReadRequest: 'Die Zahlungsanfrage konnte nicht gelesen werden',

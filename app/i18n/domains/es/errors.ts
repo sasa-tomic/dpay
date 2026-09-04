@@ -43,7 +43,10 @@ export const errorsEs: ErrorMessages = {
     couldntConfirmOffline: 'No se pudo confirmar: revisa tu saldo cuando vuelvas a tener conexión',
     couldntVerifyRequest: 'No se pudo verificar esta solicitud',
     couldntReturnResult: 'No se pudo devolver el resultado del pago: mantén los teléfonos juntos e inténtalo de nuevo',
-    stillConfirming: 'Aún se está confirmando: revisa el saldo en breve',
+    merchantRefusalUnverified:
+      'Según la respuesta del libro mayor, esta transferencia no se realizó, pero dpay no pudo verificar esa respuesta en este teléfono. No entregues la mercancía. Revisa en un momento tu saldo y tus transacciones: si el dinero sí llegó, aparecerá ahí.',
+    merchantNothingArrived:
+      'No se recibió ningún pago. No entregues la mercancía. Una transferencia todavía puede llegar después del contacto y aparecerá en tu saldo y en tus transacciones. Pide al cliente que vuelva a acercar el teléfono solo si no aparece nada.',
     unsupportedAsset: currency => `Activo no admitido (moneda ${currency})`,
     cannotConfirmAsset: currency => `No se puede confirmar el activo (moneda ${currency})`,
     couldntReadRequest: 'No se pudo leer la solicitud de pago',

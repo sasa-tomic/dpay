@@ -7,7 +7,6 @@ import {
   confirmIncomingTransfer,
   prepareNfcTransfer,
   submitNfcTransfer,
-  type RailOutcome,
   type RailPrepared,
 } from '../services/rail';
 import {DpayNfc} from '../services/native';
@@ -20,6 +19,27 @@ const HISTORY_POLL = {attempts: 8, intervalMs: 500};
 const RESULT_SETTLED = 0;
 const RESULT_REJECTED = 1;
 const RESULT_UNKNOWN = 2;
+
+/**
+ * EVERYTHING THE MERCHANT MAY CLAIM ABOUT A TAP, and nothing more.
+ *
+ * There are exactly three, and the two that are not `settled` are different dead ends for the person
+ * at the counter, which is why they are told apart here rather than collapsed into one "pending":
+ *
+ *  * `settled` — an exact row in the merchant's own durable ledger history. The only state that
+ *    hands over goods.
+ *  * `refused-unverified` — the ledger's own answer said the transfer did not execute (a payer with
+ *    no VCHF, or too little, arrives here), AND no history row appeared. That answer is NOT
+ *    promoted to a decline: `read_state` trees are structurally decoded but not BLS-verified on
+ *    device, so this phone cannot prove the refusal is the ledger's. It is a stronger reason to
+ *    doubt than silence, and still only doubt.
+ *  * `nothing-seen` — no exact row inside the poll budget, and nothing said otherwise. Honest
+ *    absence, never a decline: the transfer may still be in flight.
+ *
+ * Both non-settled verdicts return `RESULT_UNKNOWN` to the payer — a false decline on the payer's
+ * phone would be worse than an honest unknown, and the payer's own wallet is not the ledger either.
+ */
+type MerchantVerdict = 'settled' | 'refused-unverified' | 'nothing-seen';
 
 /**
  * IC NFC v2 has one settlement owner. The offline payer signs an update plus a reusable read_state
@@ -58,7 +78,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   // exists as a binding). Assigned right after the hook call below.
   const approveRef = useRef<(req: Extract<NfcEvent, {type: 'request'}>, ctx: TapCtx) => Promise<void>>(async () => {});
   const preparedRef = useRef<(RailPrepared & {readStateEnvelopeHex: string}) | null>(null);
-  const readerOutcomeRef = useRef<RailOutcome | null>(null);
+  const readerVerdictRef = useRef<MerchantVerdict | null>(null);
   const recordedRef = useRef(false);
   const deductedRef = useRef(false);
 
@@ -86,9 +106,9 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       ctx.finalize('pending', M.errors.tap.couldntVerifyRequest);
       return;
     }
-    let outcome: RailOutcome = {kind: 'unknown'};
+    let verdict: MerchantVerdict = 'nothing-seen';
     try {
-      outcome = await submitNfcTransfer({
+      const submitted = await submitNfcTransfer({
         ledger,
         envelopeHex: event.envelopeHex,
         requestIdHex: event.requestIdHex,
@@ -98,6 +118,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       // Durable exact history is authoritative for settlement even if a status endpoint claimed
       // rejection. read_state trees are structurally decoded but not yet BLS-verified, so absence of
       // a row within this finite poll cannot safely become a decline; it remains honest unknown.
+      // What the refusal DOES survive as is which unknown this is — see `MerchantVerdict`.
       const settled = await confirmIncomingTransfer({
         relayUrl,
         receiverPublicHex: identity.publicHex,
@@ -105,22 +126,20 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
         amount: reqInfo.amount,
         memoHex: reqInfo.nonce,
       }, HISTORY_POLL);
-      outcome = settled
-        ? {kind: 'settled', blockIndex: outcome.kind === 'settled' ? outcome.blockIndex : ''}
-        : {kind: 'unknown'};
+      verdict = settled ? 'settled' : submitted.kind === 'rejected' ? 'refused-unverified' : 'nothing-seen';
     } catch (e: unknown) {
       console.warn('NfcTap merchant settlement failed:', e instanceof Error ? e.message : String(e));
-      outcome = {kind: 'unknown'};
+      verdict = 'nothing-seen';
     }
     if (!ctx.isCurrent()) return;
 
-    const status = outcome.kind === 'settled' ? RESULT_SETTLED : RESULT_UNKNOWN;
+    const status = verdict === 'settled' ? RESULT_SETTLED : RESULT_UNKNOWN;
     // Publish before native can emit `confirmed`; C6 may complete before the Promise resumes.
-    readerOutcomeRef.current = outcome;
+    readerVerdictRef.current = verdict;
     try {
       await returnResult(status, event.requestIdHex);
     } catch (e: unknown) {
-      readerOutcomeRef.current = null;
+      readerVerdictRef.current = null;
       console.warn('NfcTap result return failed:', e instanceof Error ? e.message : String(e));
       ctx.finalize('pending', M.errors.tap.couldntReturnResult);
       return;
@@ -131,18 +150,23 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     // may still fail.
   }, [catalog, identity.publicHex, relayUrl, reqInfo, returnResult]);
 
+  // The merchant's terminal screen. Both non-settled verdicts land on `pending` ("Not confirmed"),
+  // never `declined`: this phone cannot prove a refusal, so it must not show one to the person
+  // deciding whether to hand over goods. The two REASONS differ because the counter's next move
+  // does — one has an answer to weigh, the other has silence to wait out — and both are written for
+  // a cashier rather than for a payer (founder rule 2026-08-29: a dead end states the next action).
   const finishReader = useCallback((ctx: TapCtx) => {
-    const outcome = readerOutcomeRef.current;
-    if (!outcome) return;
-    if (outcome.kind === 'settled') {
+    const verdict = readerVerdictRef.current;
+    if (!verdict) return;
+    if (verdict === 'settled') {
       record();
       awardPaymentTested(journeyRef.current); // receiving a confirmed NFC payment counts ("pay or receive")
       ctx.finalize('success');
-    } else if (outcome.kind === 'rejected') {
-      ctx.finalize('declined', outcome.reason);
-    } else {
-      ctx.finalize('pending', M.errors.tap.stillConfirming);
+      return;
     }
+    ctx.finalize('pending', verdict === 'refused-unverified'
+      ? M.errors.tap.merchantRefusalUnverified
+      : M.errors.tap.merchantNothingArrived);
   }, [record]);
 
   // Request arrival: validate → AUTO-SIGN (the tap is the CHANNEL, not the consent — the "Pay

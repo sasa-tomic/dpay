@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {View, Text, Pressable, TextInput, type TextStyle} from 'react-native';
+import {View, Text, Pressable, TextInput, Platform, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
@@ -9,11 +9,12 @@ import {encodePayLink, shareOrigin, decodeReceiptDeeplink, parseRailProof} from 
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol, isDirectIcrcAsset} from '../config/catalog';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
-import type {Identity, AssetId} from '../lib/types';
+import type {Identity, AssetId, NfcStatus} from '../lib/types';
 import {qrPayloadToEnvelopeHex, submitAndConfirmIncomingTransfer, confirmIncomingTransfer} from '../services/rail';
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {NfcTap} from './NfcTap';
+import {NfcStatusRow} from './NfcStatusRow';
 import {QrScanner} from './QrScanner';
 import {NfcIcon} from './NfcIcon';
 import {ModeToggle} from './ModeToggle';
@@ -39,7 +40,7 @@ import {M} from '../i18n';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
 
-export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, codeForm, onCodeFormChange, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcReady: boolean; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, codeForm, onCodeFormChange, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders when depositFamily is non-null OR
@@ -52,6 +53,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
   // NO local `reqCurrency` state anymore. The amount-prefix picker opens the unified `AssetPicker`,
   // whose `onSelect(id)` is Wallet's `handleSelect` (the same dispatch Balances uses). Selecting a
   // SOL/USDC asset flips the rail via Wallet's reconcileSelectedAsset + re-mounts SolReceiveMode.
+
+  // WHY THE 4-STATE STATUS AND NOT A BOOLEAN. The radio is either usable or it is not, but the
+  // three ways it can be unusable send the merchant to three different places — turn NFC on in
+  // settings, accept that this phone has no NFC hardware, or find out why the probe failed. This
+  // screen takes the whole state and hands it to `NfcStatusRow`, which owns those instructions for
+  // every surface in the app; the boolean below is only the local "is a tap possible" gate.
+  const nfcReady = nfcStatus === 'ready';
   const [amount, setAmount] = useState('');
   // Trip Ready J5b — paymentTested: awarded once at the FIRST confirmed Received (either
   // confirmed setResult branch). journeyRef keeps the award reading the FRESH journey without
@@ -296,10 +304,24 @@ export function ReceiveMode({identity, relayUrl, online, nfcReady, onReceived, c
         ) : null}
         {!nfcActive ? (
           <>
-            <View style={S.nfcHintRow}>
-              {nfcUsable ? <NfcIcon color={C.brand} size={18} /> : null}
-              <Text style={S.nfcHintLabel}>{M.receive.showToPayer(nfcUsable ? 'tap' : reqQr.nfcHex ? 'expired' : 'none')}</Text>
-            </View>
+            {/* TWO DIFFERENT QUESTIONS, one line. With a working radio the only thing left to say
+                is whether THIS code can be tapped — live, lapsed, or never built (the certified
+                expiry stamp needs the network, so an offline request is a QR-only code). With a
+                radio that is off, absent or unreadable the question is about the PHONE, and each of
+                those three has a different instruction attached, which is the whole reason
+                `NfcStatusRow` takes the 4-state status instead of the boolean this screen used to
+                be handed. WEB IS NEITHER: there is no radio to report on and nothing the operator
+                could switch on, and the row's own web branch is a PAY-screen label ("Scan to pay")
+                that would replace the merchant's instruction with the customer's on the merchant's
+                own screen. So the desktop wallet keeps the per-request line. */}
+            {nfcReady || Platform.OS === 'web' ? (
+              <View style={S.nfcHintRow}>
+                {nfcUsable ? <NfcIcon color={C.brand} size={18} /> : null}
+                <Text style={S.nfcHintLabel}>{M.receive.showToPayer(nfcUsable ? 'tap' : reqQr.nfcHex ? 'expired' : 'none')}</Text>
+              </View>
+            ) : (
+              <NfcStatusRow nfcStatus={nfcStatus} testID="receive-nfc" />
+            )}
             <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.value} size={QR_SIZE} ecl="M" /></View>
         <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
         {(() => {

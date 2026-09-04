@@ -72,8 +72,17 @@ export type ErrorMessages = {
     couldntVerifyRequest: string;
     /** IC merchant: settled or not, the result never made it back over the still-open channel. */
     couldntReturnResult: string;
-    /** IC merchant: submitted, no exact history row inside the poll budget — honest pending. */
-    stillConfirming: string;
+    /** IC MERCHANT DEAD ENDS — the two ways a tap ends without a settlement, written for the person
+     *  at the counter rather than for the payer. Both render under the "Not confirmed" title, so
+     *  neither repeats it; both must name the next move, and neither may claim a decline (this
+     *  phone cannot verify one — see `MerchantVerdict` in `components/NfcTap.tsx`).
+     *
+     *  `merchantRefusalUnverified`: the ledger's answer said the transfer did not execute (a payer
+     *  short of the asset lands here) and no history row appeared — an unverifiable answer, so it
+     *  is reported as doubt and never as a cause. */
+    merchantRefusalUnverified: string;
+    /** …and the plain absence: nothing observed inside the poll budget. */
+    merchantNothingArrived: string;
     /** IC payer, fail-closed: the request names an asset this wallet cannot pay. */
     unsupportedAsset: (currency: number) => string;
     /** IC payer, fail-closed: the asset is known but its disclosure cannot be resolved. */
@@ -131,7 +140,10 @@ export const errorsEn: ErrorMessages = {
     couldntConfirmOffline: 'Couldn’t confirm — check your balance when back online',
     couldntVerifyRequest: 'Couldn’t verify this request',
     couldntReturnResult: 'Couldn’t return the payment result — keep the phones together and try again',
-    stillConfirming: 'Still confirming — check the balance shortly',
+    merchantRefusalUnverified:
+      'The ledger’s answer says this transfer did not go through, but dpay could not verify that answer on this phone. Do not hand over the goods. Check your balance and Transactions in a moment — if the money did arrive, it shows there.',
+    merchantNothingArrived:
+      'No payment arrived. Do not hand over the goods. A transfer can still land after the tap, and it will show in your balance and Transactions. Ask the customer to tap again only if nothing appears.',
     unsupportedAsset: currency => `Unsupported asset (currency ${currency})`,
     cannotConfirmAsset: currency => `Cannot confirm the asset (currency ${currency})`,
     couldntReadRequest: 'Couldn’t read the payment request',

@@ -9,13 +9,16 @@ import type {NfcStatus} from '../lib/types';
 import {M} from '../i18n';
 
 /**
- * The Pay screen's NFC availability row — green "tap or scan" when the radio is ready, red with a
- * tappable reason when it is not, and a plain scan label on web where there is no radio at all.
+ * The NFC availability row — green "tap or scan" when the radio is ready, red with a tappable reason
+ * when it is not, and a plain scan label on web where there is no radio at all.
  *
- * ONE implementation for BOTH rails. It lived inline in `PayMode` (the IC rail) while `SolPayMode`
- * had nothing: the SOL payer got no indication of whether tapping would work, and no explanation
- * when it would not — the founder's "useful practical instructions on every step, especially the
- * error path" rule applied unevenly across two screens that do the same job.
+ * ONE implementation for BOTH rails and BOTH SIDES OF THE COUNTER. It lived inline in `PayMode` (the
+ * IC rail) while `SolPayMode` had nothing: the SOL payer got no indication of whether tapping would
+ * work, and no explanation when it would not — the founder's "useful practical instructions on every
+ * step, especially the error path" rule applied unevenly across two screens that do the same job.
+ * The Receive screens (2026-09-04) took the same fix from the other direction: they were passed a
+ * boolean, so a merchant whose radio was off saw a line that named neither the problem nor the fix.
+ * The row says the same thing on every surface because it is the same device fact.
  *
  * `testID` is a parameter because the two rails' scan surfaces are already distinguished by it
  * (`pay-scan` / `sol-pay-scan`) and a large number of e2e flows select on those exact strings.

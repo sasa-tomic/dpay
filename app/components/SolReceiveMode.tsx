@@ -1,5 +1,5 @@
 import {useState, useEffect, useMemo, useRef} from 'react';
-import {View, Text, Pressable, TextInput, ActivityIndicator, type TextStyle} from 'react-native';
+import {View, Text, Pressable, TextInput, ActivityIndicator, Platform, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import bs58 from 'bs58';
 import {C, FONT} from '../config/palette';
@@ -9,7 +9,7 @@ import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
-import type {Identity, AssetId} from '../lib/types';
+import type {Identity, AssetId, NfcStatus} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {decodeSolPay} from '../solana/qr';
@@ -24,6 +24,7 @@ import {DpaySolNfc} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {QrScanner} from './QrScanner';
 import {SolNfcTap} from './SolNfcTap';
+import {NfcStatusRow} from './NfcStatusRow';
 import {ModeToggle} from './ModeToggle';
 import {TillCharge} from './TillCharge';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
@@ -59,9 +60,12 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  */
-export function SolReceiveMode({identity, relayUrl, nfcReady, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; relayUrl: string; nfcReady: boolean; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void}) {
+  // The 4-state radio status, and the local "is a tap possible" gate derived from it — see the
+  // same pair in ReceiveMode for why the state travels whole rather than as a boolean.
+  const nfcReady = nfcStatus === 'ready';
   const solRpc = isSolanaRpcAvailable();
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
@@ -359,9 +363,17 @@ export function SolReceiveMode({identity, relayUrl, nfcReady, solAddress, subMod
             ) : null}
             {!scanning && !busy ? (
               <>
-                <View style={S.nfcHintRow}>
-                  <Text style={S.nfcHintLabel}>{M.receive.showToPayer(nfcReady ? 'tap' : 'none')}</Text>
-                </View>
+                {/* Same three-way split as the IC rail, and for the same reasons: a working
+                    radio leaves only "this code is tappable" to say, a radio that is off, absent
+                    or unreadable leaves an instruction (`NfcStatusRow`), and the web wallet has no
+                    radio to report on at all. */}
+                {nfcReady || Platform.OS === 'web' ? (
+                  <View style={S.nfcHintRow}>
+                    <Text style={S.nfcHintLabel}>{M.receive.showToPayer('tap')}</Text>
+                  </View>
+                ) : (
+                  <NfcStatusRow nfcStatus={nfcStatus} testID="sol-receive-nfc" />
+                )}
                 <View testID="sol-req-qr" style={S.qrCard}><QrCode value={reqUri} size={QR_SIZE_SMALL} ecl="M" /></View>
                 <Text style={S.amountBig}>{fmtAsset(reqSnapshot!.amt, decimals, unit)}</Text>
                 {(() => {
