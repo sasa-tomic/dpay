@@ -8,6 +8,7 @@ import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
+import type {CurrencyDescriptor} from '../config/catalog';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId, NfcStatus} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
@@ -60,7 +61,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  */
-export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; catalog: CurrencyDescriptor[]; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void}) {
   // The 4-state radio status, and the local "is a tap possible" gate derived from it — see the
@@ -467,6 +468,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           relayUrl={relayUrl}
           asset={assets.find(a => a.id === selectedAssetId) ?? null}
           assets={assets}
+          catalog={catalog}
+          nfcStatus={nfcStatus}
           onSelectAsset={onSelectAsset}
         />
       ) : (

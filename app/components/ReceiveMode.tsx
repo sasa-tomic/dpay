@@ -499,6 +499,8 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           relayUrl={relayUrl}
           asset={activeAsset}
           assets={assets}
+          catalog={catalog}
+          nfcStatus={nfcStatus}
           onSelectAsset={onSelectAsset}
           onLiveChange={setTillLive}
         />

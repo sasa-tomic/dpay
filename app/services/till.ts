@@ -57,11 +57,19 @@ const CHF_DECIMALS = 2;
 /** A charge as the ring-up answered it. `cents` is what THIS device signed (the open response does
  *  not echo it), `qr` is the string that belongs in a QR — the `?lightning=` wrapper a generic
  *  phone camera opens as a web page — and the two instants are the charge's own clock, so the
- *  cashier's countdown needs no copy of the relay's lifetime constant. */
+ *  cashier's countdown needs no copy of the relay's lifetime constant.
+ *
+ *  `reference` is THIS CHARGE'S NAME ON THE LEDGER: the relay credits only a transfer whose ICRC-1
+ *  memo carries it (`match_payment`, `crates/dpay-relay/src/till.rs`). A payer scanning the code
+ *  learns it from the till's step-3 instruction; the MERCHANT learns it here, which is what lets
+ *  this app collect the same sale over a channel the standard has no part in — an NFC tap, whose
+ *  request nonce becomes that memo (`prepareNfcTransfer`, `services/rail.ts`). A tap built with any
+ *  other nonce would move the customer's money and credit nothing. */
 export type TillCharge = {
   id: string;
   cents: string;
   qr: string;
+  reference: string;
   createdSecs: number;
   expiresAt: number;
 };
@@ -264,10 +272,16 @@ export async function openTillCharge(
   const id = str(o, 'id');
   const qr = str(o, 'qr');
   const amount = str(o, 'amount');
+  // The reference is checked for its exact SHAPE, not merely for being present: it becomes the
+  // memo of a transfer this app will build (see `TillCharge`), and a memo the relay cannot match is
+  // money moved for a sale that stays open. 16 bytes of lowercase hex is what the till mints and
+  // what `match_payment` compares against.
+  const reference = str(o, 'reference');
   const createdSecs = whole(o, 'created_secs');
   const expiresAt = whole(o, 'expires_at');
-  if (id === null || qr === null || amount === null || createdSecs === null || expiresAt === null) {
-    const detail = `ring-up answered without {id, qr, amount, created_secs, expires_at}: ${JSON.stringify(o).slice(0, 200)}`;
+  if (id === null || qr === null || amount === null || createdSecs === null || expiresAt === null
+      || reference === null || !/^[0-9a-f]{32}$/.test(reference)) {
+    const detail = `ring-up answered without {id, qr, amount, reference, created_secs, expires_at}: ${JSON.stringify(o).slice(0, 200)}`;
     console.warn(`till: ${detail}`);
     return {kind: 'unreachable', detail};
   }
@@ -279,7 +293,7 @@ export async function openTillCharge(
     console.warn(`till: rang up ${cents} cents, the till answered "${amount}" — refusing to show it`);
     return {kind: 'mispriced', quoted: amount};
   }
-  return {kind: 'open', charge: {id, cents, qr, createdSecs, expiresAt}};
+  return {kind: 'open', charge: {id, cents, qr, reference, createdSecs, expiresAt}};
 }
 
 /** `GET /api/v1/till/{id}` — what the merchant's screen polls. The relay re-derives settlement from

@@ -296,7 +296,12 @@ export const receiveDe: ReceiveMessages = {
     tryAgain: 'Erneut buchen',
 
     settlesAs: amount => `${amount} auf dem Internet Computer`,
-    showToCustomer: 'Zeig das der Kundschaft — ihre dpay-Wallet scannt und bezahlt.',
+    showToCustomer: nfc =>
+      nfc === 'tap'
+        ? 'Zeig das der Kundschaft — ihre dpay-Wallet hält dagegen oder scannt, ganz wie sie mag.'
+        : nfc === 'expired'
+        ? 'Zeig das der Kundschaft — ihre dpay-Wallet scannt es. Das Dagegenhalten ist bei diesem Code abgelaufen; buch neu, wenn sie halten möchte.'
+        : 'Zeig das der Kundschaft — ihre dpay-Wallet scannt und bezahlt.',
     waiting: 'Warten auf die Zahlung…',
     cantCheck:
       'Diese Buchung lässt sich gerade nicht prüfen — die Kasse ist nicht erreichbar. Das heisst NICHT, dass sie unbezahlt ist. Lass den Code stehen: sobald die Kasse wieder erreichbar ist, steht es hier.',

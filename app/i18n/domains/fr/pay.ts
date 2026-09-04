@@ -291,7 +291,12 @@ export const receiveFr: ReceiveMessages = {
     tryAgain: 'Encaisser à nouveau',
 
     settlesAs: amount => `${amount} sur l’Internet Computer`,
-    showToCustomer: 'Montrez ceci au client — son portefeuille dpay le scanne et paie.',
+    showToCustomer: nfc =>
+      nfc === 'tap'
+        ? 'Montrez ceci au client — son portefeuille dpay approche le téléphone ou scanne, comme il préfère.'
+        : nfc === 'expired'
+        ? 'Montrez ceci au client — son portefeuille dpay le scanne. Le paiement sans contact a expiré sur ce code ; ressaisissez le montant s’il veut approcher son téléphone.'
+        : 'Montrez ceci au client — son portefeuille dpay le scanne et paie.',
     waiting: 'En attente du paiement…',
     cantCheck:
       'Impossible de vérifier ce montant pour l’instant — la caisse est injoignable. Cela ne veut PAS dire qu’il est impayé. Laissez le code affiché : cet écran le dira dès qu’il pourra joindre la caisse.',

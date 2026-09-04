@@ -1,14 +1,20 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, TextInput, ActivityIndicator} from 'react-native';
+import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
+import {NfcTap} from './NfcTap';
+import {NfcStatusRow} from './NfcStatusRow';
+import {NfcIcon} from './NfcIcon';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
+import {NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {fmtAsset, fmtAssetCompact, nowSecs, short} from '../lib/format';
 import {offerNamesAsset} from '../lib/opencryptopay';
+import type {CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
-import type {AssetId, Identity} from '../lib/types';
+import type {AssetId, Identity, NfcStatus} from '../lib/types';
+import {DpayNfc} from '../services/native';
+import {icStampExpiry} from '../services/icp';
 import {
   TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillRawUnits,
   type TillCharge as Charge, type TillOpenOutcome, type TillSettled, type TillVoidOutcome,
@@ -42,12 +48,32 @@ const CHF = 'CHF';
  * THE PAID LIGHT IS THE RELAY'S ANSWER, NEVER THIS SCREEN'S INFERENCE. A charge settles when the
  * relay OBSERVES money arriving on the merchant's own ledger — including from a payer who never
  * touched the OpenCryptoPay endpoints — so nothing here may conclude anything from a countdown, a
- * scan, or the absence of an answer. The status route deliberately exposes no quote count and no
- * "scanned" signal, so this screen cannot claim the customer is looking at it, and an unreadable
+ * scan, a TAP, or the absence of an answer. The status route deliberately exposes no quote count and
+ * no "scanned" signal, so this screen cannot claim the customer is looking at it, and an unreadable
  * poll says "can't check" rather than "unpaid" (`services/till.ts`, rule 2).
+ *
+ * A DPAY PAYER CAN ALSO TAP IT, and that costs the standard nothing. While a charge is up this
+ * screen ALSO arms the IC reader with a 132-byte request built from the charge itself — the price in
+ * VCHF, this wallet's own account, and `charge.reference` as the request NONCE. `prepareNfcTransfer`
+ * puts that nonce on the transfer as its ICRC-1 memo, which is exactly the value the relay's
+ * `match_payment` credits this sale on, so a tap settles the SAME charge a scan would with no second
+ * crediting path, no new AID and no protocol change. The tap is not the settlement: `onSettled` is
+ * deliberately NOT passed to `NfcTap`, so nothing the radio does can turn this light green — the
+ * relay's poll is the only thing that can. And a tap in flight OWNS the screen (the `nfcActive`
+ * branch below, the same rule `ReceiveMode` applies), because a tap's own "not confirmed" beside the
+ * till's "paid" would be two answers to one question and the cashier would learn to trust neither.
+ *
+ * The tap window is SHORTER than the code's life and says so. The request carries a certified IC
+ * ingress expiry (`NFC_UPDATE_AHEAD_S`, minutes) while a charge stays payable for the relay's own
+ * hour, so a code outlives its own tappability — stated on screen rather than left to fail silently,
+ * with the next action named (scan it, or ring up again).
  */
 
 type EndReason = 'expired' | 'cancelled' | 'superseded' | 'gone';
+
+/** The armed reader, built from a live charge. `expiry` is the request's own certified deadline —
+ *  held beside the hex because it is what decides whether a NEW tap can still start. */
+type Tap = {requestHex: string; reqInfo: {amount: string; nonce: string; who: string; currency: number}; expiry: number};
 
 /** The counter's state machine. Every one of these tells the cashier what to do next; that is the
  *  founder rule (2026-08-29) applied to a surface whose whole job is dead ends. */
@@ -66,12 +92,19 @@ type Phase =
    *  failed — the four causes send the merchant to do four different things. */
   | {k: 'failed'; outcome: Exclude<TillOpenOutcome, {kind: 'open'}>};
 
-export function TillCharge({identity, relayUrl, asset, assets, onSelectAsset, onLiveChange}: {
+export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatus, onSelectAsset, onLiveChange}: {
   identity: Identity;
   relayUrl: string;
   /** The asset the wallet is currently on — the one the whole Receive tab is about. */
   asset: SelectableAsset | null;
   assets: SelectableAsset[];
+  /** The IC currency rows. Needed for the same reason the dpay-code form needs them: the reader
+   *  resolves the request's currency to the LEDGER it submits the payer's envelope to. */
+  catalog: CurrencyDescriptor[];
+  /** The radio's 4-state answer, not a boolean — "off", "unsupported" and "unknown" send the
+   *  cashier to three different places, and `NfcStatusRow` owns those instructions for every
+   *  surface in the app. */
+  nfcStatus: NfcStatus;
   onSelectAsset: (id: AssetId) => void;
   /** Fires while a charge exists that a customer could pay, so the parent can lock the asset
    *  selection and hide the code-form selector — flipping away from a live code would leave a
@@ -91,11 +124,29 @@ export function TillCharge({identity, relayUrl, asset, assets, onSelectAsset, on
   const [err, setErr] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [now, setNow] = useState(() => nowSecs());
+  /** The reader armed for the live charge, or null when this phone could not build one (no radio,
+   *  or the certified clock the request's expiry needs was unreachable). Null is QR-only, said out
+   *  loud — never a tap that silently does nothing. */
+  const [tap, setTap] = useState<Tap | null>(null);
+  /** A tap is mid-exchange. It owns the screen while it is — see the component doc. */
+  const [nfcActive, setNfcActive] = useState(false);
+  /** Remounts the reader: after a completed exchange its state machine is terminal, so a customer
+   *  re-tapping a charge that is still open needs a fresh one. */
+  const [nfcKey, setNfcKey] = useState(0);
+
+  // The radio is either usable or it is not; the three ways it can be unusable are `NfcStatusRow`'s
+  // business, and this boolean is only the local "can a tap happen at all" gate.
+  const nfcReady = nfcStatus === 'ready';
 
   // The asset a till code is paid in, matched by the SAME rule the payer half matches a provider's
   // offer with (`offerNamesAsset`) — one statement of "does this row name that asset", not two.
   const tillAsset = assets.find(a => offerNamesAsset(TILL_OFFER, a)) ?? null;
-  const payable = asset != null && offerNamesAsset(TILL_OFFER, asset);
+  // The till's own row, narrowed to the IC variant. `offerNamesAsset` already decides the rail
+  // (TILL_OFFER's method IS the Internet Computer one), so the protocol test beside it asserts
+  // nothing new — it is what tells TYPESCRIPT this is the row that carries a `currency`, which is
+  // the field a tap request has to name.
+  const tillRow = asset !== null && asset.protocol === 'ic' && offerNamesAsset(TILL_OFFER, asset) ? asset : null;
+  const payable = tillRow !== null;
 
   // Reported to the parent through the SAME hook every other engine reports its selection lock
   // with: the contract is identical (report each change, reset on unmount, parent's setter is a
@@ -155,24 +206,55 @@ export function TillCharge({identity, relayUrl, asset, assets, onSelectAsset, on
     return () => { alive = false; clearInterval(id); };
   }, [chargeId, relayUrl]);
 
+  /** The 132-byte reader request for a live charge, or null when this phone cannot serve one — no
+   *  radio, or the certified IC instant its expiry needs was out of reach. Null is a QR-only code
+   *  and is said out loud on screen; it is never a tap that quietly does nothing.
+   *
+   *  THE NONCE IS THE CHARGE'S REFERENCE, and that single line is what makes a tap credit a sale:
+   *  `prepareNfcTransfer` writes the request's nonce onto the payer's transfer as its ICRC-1 memo,
+   *  and the relay credits only a transfer whose memo is this charge's reference. A tap built with
+   *  a nonce of this wallet's own would move the customer's money and leave the sale open. */
+  async function armReader(charge: Charge, row: Extract<SelectableAsset, {protocol: 'ic'}>): Promise<Tap | null> {
+    if (!nfcReady || !DpayNfc) return null;
+    const amountRaw = tillRawUnits(charge.cents, row.decimals);
+    try {
+      const expiryNs = await icStampExpiry(identity.secretHex, NFC_UPDATE_AHEAD_S);
+      const expiry = Number(BigInt(expiryNs) / 1_000_000_000n);
+      const requestHex = await DpayNfc.buildRequest(
+        identity.publicHex, amountRaw, charge.reference, expiry, row.currency, identity.username, '',
+      );
+      return {
+        requestHex,
+        reqInfo: {amount: amountRaw, nonce: charge.reference, who: M.receive.payer, currency: row.currency},
+        expiry,
+      };
+    } catch (e) {
+      console.warn(`till: could not arm a tap for ${charge.id} — the code still scans: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
   async function ringUp() {
-    // `payable` narrows `asset` to the till's own row (an aliased-condition narrowing), which is
-    // what makes `asset.decimals` below the precision of the asset this charge settles in.
-    if (!payable) return;
+    // The till's own row is what makes a charge both priceable and tappable: its precision turns
+    // rappen into raw units, and its currency is what the tap request names.
+    if (tillRow === null) return;
     const parsed = chfCents(amount);
     if (!parsed.ok) { setErr(M.receive.till.badAmount(parsed.reason)); return; }
     setErr(null);
     setUnchecked(null);
     setWatchingLate(false);
+    setTap(null);
+    setNfcActive(false);
+    setNfcKey(k => k + 1);
     setRung(parsed.cents);
     setPhase({k: 'opening'});
-    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, asset.decimals);
-    if (outcome.kind === 'open') {
-      setNow(nowSecs());
-      setPhase({k: 'showing', charge: outcome.charge});
-      return;
-    }
-    setPhase({k: 'failed', outcome});
+    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, tillRow.decimals);
+    if (outcome.kind !== 'open') { setPhase({k: 'failed', outcome}); return; }
+    setNow(nowSecs());
+    setPhase({k: 'showing', charge: outcome.charge});
+    // The code goes up FIRST and the reader is armed after it: building the request needs a
+    // certified IC instant, and a customer must never wait on the radio for a code they can scan.
+    setTap(await armReader(outcome.charge, tillRow));
   }
 
   async function cancel() {
@@ -194,6 +276,11 @@ export function TillCharge({identity, relayUrl, asset, assets, onSelectAsset, on
     setUnchecked(null);
     setWatchingLate(false);
     setErr(null);
+    // The reader was armed for the charge that just ended. Dropping it (and remounting on the next
+    // ring-up) is what stops a tap arriving against a request whose reference names a dead sale.
+    setTap(null);
+    setNfcActive(false);
+    setNfcKey(k => k + 1);
   }
 
   if (!payable) {
@@ -211,6 +298,31 @@ export function TillCharge({identity, relayUrl, asset, assets, onSelectAsset, on
         onPrimary={tillAsset ? () => onSelectAsset(tillAsset.id) : undefined}
       />
     );
+  }
+
+  // The armed reader. Mounted while a charge is up and its request is still inside its certified
+  // expiry, and KEPT mounted through an exchange that has already started (`nfcActive`) — including
+  // across the poll flipping the charge to paid underneath it, because the merchant still owes the
+  // payer's phone its signed result. It renders nothing until a real tap begins.
+  //
+  // NO `onSettled`. The tap must not be able to turn the paid light green; only the relay's own
+  // answer may (see the component doc).
+  const tapLive = tap !== null && now < tap.expiry;
+  const tapNode = tap !== null && (tapLive || nfcActive) && DpayNfc ? (
+    <NfcTap
+      key={nfcKey} role="reader" identity={identity} relayUrl={relayUrl}
+      requestHex={tap.requestHex} reqInfo={tap.reqInfo} catalog={catalog}
+      onActive={() => setNfcActive(true)}
+      onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}
+    />
+  ) : null;
+
+  // A tap in flight OWNS the screen. Two settlement surfaces at once — the tap's own "not
+  // confirmed" beside the till's "waiting" or "paid" — would be two answers to one question, and a
+  // cashier who is shown that learns to distrust both. Placed BEFORE every phase branch so the
+  // exchange survives the charge settling underneath it.
+  if (nfcActive && tapNode) {
+    return <View style={S.center}>{tapNode}</View>;
   }
 
   if (phase.k === 'failed') {
@@ -261,13 +373,30 @@ export function TillCharge({identity, relayUrl, asset, assets, onSelectAsset, on
   if (phase.k === 'showing') {
     const {charge} = phase;
     const remaining = charge.expiresAt - now;
-    // `payable` above proves `asset` is the till's own row; this reads its precision for the
+    // `payable` above narrows `tillRow` to the till's own row; this reads its precision for the
     // settlement line, which is the only place the asset is needed once a charge exists.
     const settles = fmtAssetCompact(
-      tillRawUnits(charge.cents, asset.decimals), asset.decimals, asset.symbol, undefined, asset.minFractionDigits,
+      tillRawUnits(charge.cents, tillRow.decimals), tillRow.decimals, tillRow.symbol, undefined, tillRow.minFractionDigits,
     );
     return (
       <View style={S.center}>
+        {tapNode}
+        {/* TWO DIFFERENT QUESTIONS, one line — the same split the dpay-code form makes. With a
+            working radio the only thing left to say is whether THIS code can be tapped: live, past
+            its certified expiry (the code still scans for the rest of its hour), or never built at
+            all. With a radio that is off, absent or unreadable the question is about the PHONE, and
+            `NfcStatusRow` owns those three instructions for every surface in the app. Web is
+            neither — no radio to report on — so it keeps the per-code line. */}
+        {nfcReady || Platform.OS === 'web' ? (
+          <View style={S.nfcHintRow}>
+            {tapLive ? <NfcIcon color={C.brand} size={18} /> : null}
+            <Text testID="till-tap-hint" style={S.nfcHintLabel}>
+              {M.receive.till.showToCustomer(tapLive ? 'tap' : tap ? 'expired' : 'none')}
+            </Text>
+          </View>
+        ) : (
+          <NfcStatusRow nfcStatus={nfcStatus} testID="till-nfc" />
+        )}
         <View testID="till-qr" style={S.qrCard}><QrCode value={charge.qr} size={QR_SIZE} ecl="M" /></View>
         <Text testID="till-amount" style={S.amountBig}>{fmtAsset(charge.cents, 2, CHF)}</Text>
         <Text style={S.qrHint}>{M.receive.till.settlesAs(settles)}</Text>
@@ -290,7 +419,6 @@ export function TillCharge({identity, relayUrl, asset, assets, onSelectAsset, on
             ? M.receive.till.cantCheck
             : watchingLate ? M.receive.till.expiredWatching : M.receive.till.waiting}
         </Text>
-        <Text style={S.dim2}>{M.receive.till.showToCustomer}</Text>
         {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
         {cancelling ? <ActivityIndicator color={C.brand} /> : null}
         <Pressable

@@ -23,7 +23,7 @@ import {BUNDLED_NETWORKS, icpCatalogOf, ledgerToCurrency} from '../config/catalo
 const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8')) as {
   input: {merchant_name: string; host: string};
   amount_raw: string;
-  open: {id: string; merchant: string; url: string; lnurl: string; qr: string; created_secs: number; expires_at: number};
+  open: {id: string; merchant: string; url: string; lnurl: string; qr: string; reference: string; created_secs: number; expires_at: number};
   details: Record<string, unknown>;
   callback: {blockchain: string; expiryDate: string; uri: string};
 };
@@ -117,6 +117,12 @@ describe('the dpay till’s wire, read by the dpay payer', () => {
     // if this parsed to null the payment would go out with a nonce of the wallet's own and the
     // sale would never be credited, with the money already gone.
     expect(parsed.ref).toMatch(/^[0-9a-f]{32}$/);
+    // …and it is the SAME value the ring-up handed the merchant. This file holds both halves of the
+    // recording, so it is the one place that can state it: a customer who scans the code and a
+    // customer who taps the merchant's phone put the same memo on the ledger, because the merchant's
+    // own tap request is built from `open.reference` (`components/TillCharge.tsx`). Two references
+    // would mean one of those two customers pays and is never credited.
+    expect(parsed.ref).toBe(GOLDEN.open.reference);
     // The instruction and the quote must be the same money — they are separate calls, and a payer
     // that signed the URI's amount against the quote's price would be paying an unquoted number.
     const quoted = (GOLDEN.details as {transferAmounts: {assets: {amount: string}[]}[]}).transferAmounts[0].assets[0];

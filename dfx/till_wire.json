@@ -6,9 +6,9 @@
     "merchant_pubkey": "66be7e332c7a453332bd9d0a7f7db055f5c5ef1a06ada66d98b39fb6810c473a",
     "merchant_name": "Bahnhof Kiosk",
     "cents": 1000,
-    "nonce": "1fc036b8061c9fd2a5db48e5273844a7",
-    "issued_at": 1788479954,
-    "signature": "276d4f857e5e1be619ec12df8da62fae6c0852f76b448fa9e463bb67ef6bd9a3284a8a9fdd9b3ac4f5a481077d569979784c30b1790213bd82058965636a8202",
+    "nonce": "44837591c6adcf62b359a67fda167935",
+    "issued_at": 1788491003,
+    "signature": "17839d23acef8dd4e0853c46ce0a9d0df821deed87766b9e2e37e14af8871dea7669668a2ab87e69ce367dba646c2d76a9b8858acb53304dc59419b0899b7d09",
     "host": "till.example",
     "forwarded_proto": "https"
   },
@@ -16,17 +16,18 @@
   "open": {
     "amount": "10.",
     "asset": "VCHF",
-    "created_secs": 1788479954,
-    "expires_at": 1788483554,
-    "id": "pl_ecd765908f264957",
-    "lnurl": "LNURL1DP68GURN8GHJ7ARFD3KZUETCV9KHQMR99AMRZTMVDE6HYMRS9ACXCHM9VDJRWD348YCRSE3JXC6RJDFH4T2XF7",
+    "created_secs": 1788491003,
+    "expires_at": 1788494603,
+    "id": "pl_1490fd40ca3744b0",
+    "lnurl": "LNURL1DP68GURN8GHJ7ARFD3KZUETCV9KHQMR99AMRZTMVDE6HYMRS9ACXCHE3XSUNQENYXSCXXCFNXU6RGC3SKU8CXW",
     "merchant": "snzff-yj2qd-fjns7-lqhvw-rsgq7-tohk2-fjnw4-uq3d6-wtk56-pxgry-mqe",
-    "qr": "https://till.example/pl/?lightning=LNURL1DP68GURN8GHJ7ARFD3KZUETCV9KHQMR99AMRZTMVDE6HYMRS9ACXCHM9VDJRWD348YCRSE3JXC6RJDFH4T2XF7",
-    "url": "https://till.example/v1/lnurlp/pl_ecd765908f264957"
+    "qr": "https://till.example/pl/?lightning=LNURL1DP68GURN8GHJ7ARFD3KZUETCV9KHQMR99AMRZTMVDE6HYMRS9ACXCHE3XSUNQENYXSCXXCFNXU6RGC3SKU8CXW",
+    "reference": "828116bcad7fc45edbfb90372b81c8b9",
+    "url": "https://till.example/v1/lnurlp/pl_1490fd40ca3744b0"
   },
   "details": {
     "tag": "payRequest",
-    "callback": "https://till.example/v1/lnurlp/cb/pl_ecd765908f264957",
+    "callback": "https://till.example/v1/lnurlp/cb/pl_1490fd40ca3744b0",
     "minSendable": 0,
     "maxSendable": 0,
     "metadata": "[[\"text/plain\",\"Bahnhof Kiosk - CHF 10\"]]",
@@ -37,8 +38,8 @@
     ],
     "displayQr": true,
     "quote": {
-      "id": "plq_68e9d394519a2e97",
-      "expiration": "2026-09-04T00:04:14.000Z"
+      "id": "plq_b7794ee7646f2890",
+      "expiration": "2026-09-04T03:08:23.000Z"
     },
     "requestedAmount": {
       "asset": "CHF",
@@ -59,9 +60,9 @@
     ]
   },
   "callback": {
-    "expiryDate": "2026-09-04T00:04:14.000Z",
+    "expiryDate": "2026-09-04T03:08:23.000Z",
     "blockchain": "InternetComputer",
-    "uri": "icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=snzff-yj2qd-fjns7-lqhvw-rsgq7-tohk2-fjnw4-uq3d6-wtk56-pxgry-mqe&amount=10.&ref=19ff3250469370d21a04c100ad5ab8bb",
+    "uri": "icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=snzff-yj2qd-fjns7-lqhvw-rsgq7-tohk2-fjnw4-uq3d6-wtk56-pxgry-mqe&amount=10.&ref=828116bcad7fc45edbfb90372b81c8b9",
     "hint": "Transfer the exact amount to the address in the URI, carrying `ref` as the transfer's memo, then report the transaction. Reporting is idempotent: if it fails, retry — the payment is confirmed by reading the ledger, not by this call."
   },
   "submit_pending": {

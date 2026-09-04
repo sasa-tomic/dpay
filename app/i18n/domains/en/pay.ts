@@ -557,7 +557,10 @@ export type ReceiveMessages = {
 
     /** The code is up. `settlesAs` states what the customer's wallet will actually move. */
     settlesAs: (amount: string) => string;
-    showToCustomer: string;
+    /** How the customer can pay THIS code. `tap` = the reader is armed; `expired` = the tap
+     *  request's certified expiry has passed while the code itself is still payable (it scans for
+     *  the rest of its hour); `none` = this phone could not build a tap request at all. */
+    showToCustomer: (nfc: 'tap' | 'expired' | 'none') => string;
     waiting: string;
     /** The till is out of contact. NEVER "unpaid" — the whole reason this string exists. */
     cantCheck: string;
@@ -690,7 +693,12 @@ export const receiveEn: ReceiveMessages = {
     tryAgain: 'Ring up again',
 
     settlesAs: amount => `${amount} on the Internet Computer`,
-    showToCustomer: 'Show this to the customer — their dpay wallet scans it and pays.',
+    showToCustomer: nfc =>
+      nfc === 'tap'
+        ? 'Show this to the customer — their dpay wallet taps or scans it, whichever they reach for.'
+        : nfc === 'expired'
+        ? 'Show this to the customer — their dpay wallet scans it. Tapping has timed out on this code; ring up again if they want to tap.'
+        : 'Show this to the customer — their dpay wallet scans it and pays.',
     waiting: 'Waiting for the payment…',
     cantCheck:
       'Can’t check this charge right now — the till is out of contact. That does NOT mean it is unpaid. Keep the code up: this screen says so the moment it can reach the till again.',

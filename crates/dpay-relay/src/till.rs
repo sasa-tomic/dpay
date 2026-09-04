@@ -51,6 +51,9 @@
 //!    a transfer whose ICRC-1 memo carries it. That turns "a transfer that looks like this sale"
 //!    into "the transfer for this sale", and it is what a till serving many customers at once needs
 //!    before it can serve them — matching on amount alone cannot tell two identical prices apart.
+//!    The MERCHANT is told it too, on the ring-up they signed ([`open_charge`]) and nowhere else —
+//!    without that, a payment the merchant collects any other way than through the payer routes
+//!    (a tap, which never touches them) moves the money and credits no sale.
 //!
 //! NO CUSTODY, and it is structural rather than promised: the destination in every response is the
 //! merchant's own account, supplied by the merchant, and this relay never holds a key that could
@@ -177,6 +180,10 @@ pub struct Charge {
     /// rather than a second one invented here. Unguessable for the same reason a charge id is: it
     /// is handed to exactly one payer, and a party who does not hold it cannot aim a transfer at
     /// this sale.
+    ///
+    /// SERVED TO THE MERCHANT ON THE RING-UP, and to nobody else on the merchant's own routes —
+    /// see [`open_charge`] for what it unlocks and [`ChargeStatus`] for why the poll does not
+    /// repeat it.
     pub reference: String,
     pub created_secs: u64,
     /// Quote ids issued for this charge and still live, with their expiries.
@@ -838,6 +845,19 @@ pub(crate) struct TransferBody {
 /// What the merchant's own app polls. `state` is the answer `paid` alone cannot give: a charge
 /// that was superseded by the next ring-up and one that is still waiting look identical through a
 /// null `paid`, and the cashier's screen has to tell a customer which of those it is.
+///
+/// NO [`Charge::reference`] HERE, deliberately, and the reason is least authority rather than
+/// secrecy. `GET /api/v1/till/{id}` is UNAUTHENTICATED — the charge id is a bearer read token, so
+/// anybody who photographed the code holds it — while the ring-up that does carry the reference is
+/// signed by the merchant. Working the disclosure through the matching rule, an id-holder who
+/// learned the reference could do exactly one thing with it: send the merchant a transfer of the
+/// exact price naming this charge, i.e. PAY the shop. It authorises nothing, moves nothing of the
+/// merchant's, and cannot re-aim a sale — `consumed` is derived from this store's own settlements,
+/// not from anything a stranger writes. (An id-holder can in fact already read it: step 2 then step
+/// 3 hand the same value to any caller, because that is the payer's path.) So the field would
+/// neither leak nor help — and the merchant does not need it here, having been told it on the
+/// ring-up and holding it for as long as the code is up. This body is also the CANCELLATION's
+/// reply, so a field only one of two callers could use would be minted onto both.
 #[derive(Debug, Serialize)]
 pub(crate) struct ChargeStatus {
     pub id: String,
@@ -1993,6 +2013,13 @@ pub(crate) async fn open_charge(
             "url": url,
             "lnurl": lnurl,
             "qr": format!("{origin}{TILL_CODE_PATH}?lightning={lnurl}"),
+            // THIS CHARGE'S NAME ON THE LEDGER, told to the one party who signed for it. Until it
+            // was here the merchant could not learn it without walking their own till's payer
+            // routes as a fake customer, so any payment they collected THEMSELVES — a tap, which
+            // uses no OpenCryptoPay endpoint at all — carried some other memo, moved the money and
+            // credited no sale (`match_payment`). The merchant's own app now builds its tap around
+            // this value; the payer keeps learning it from step 3, which is unchanged.
+            "reference": charge.reference,
             // The charge's own clock, stated rather than implied, so a cashier's screen can count
             // it down without a copy of this module's lifetime — see `ChargeStatus`.
             "created_secs": charge.created_secs,

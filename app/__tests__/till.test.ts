@@ -49,8 +49,9 @@ const GOLDEN = JSON.parse(
 ) as {
   input: {cents: number};
   amount_raw: string;
-  open: {id: string; qr: string; amount: string; merchant: string; created_secs: number; expires_at: number};
+  open: {id: string; qr: string; amount: string; merchant: string; reference: string; created_secs: number; expires_at: number};
   details: {transferAmounts: {method: string; assets: {asset: string}[]}[]};
+  callback: {uri: string};
 };
 
 /** VCHF's precision — read from the wallet's own catalog rather than typed here, because the whole
@@ -163,10 +164,17 @@ describe('ringing up a charge', () => {
         id: GOLDEN.open.id,
         cents: String(GOLDEN.input.cents),
         qr: GOLDEN.open.qr,
+        reference: GOLDEN.open.reference,
         createdSecs: GOLDEN.open.created_secs,
         expiresAt: GOLDEN.open.expires_at,
       },
     });
+    // THE FIELD THE MERCHANT'S OWN COLLECTION HANGS ON. The relay credits only a transfer whose
+    // memo is this value, and until it was on the ring-up the merchant could not learn it without
+    // walking their own till's payer routes. Pinned against the step-3 instruction in the SAME
+    // recording, so the memo this app will put on a tap is the memo a scanned payer is told to use.
+    expect(GOLDEN.open.reference).toMatch(/^[0-9a-f]{32}$/);
+    expect(GOLDEN.callback.uri).toContain(`&ref=${GOLDEN.open.reference}`);
     // ONE request, to the merchant route.
     expect(requests).toHaveLength(1);
     expect(requests[0].url).toBe(`${RELAY}/api/v1/till`);
@@ -235,9 +243,20 @@ describe('ringing up a charge', () => {
   });
 
   test('answers unreachable rather than inventing a charge from a half-formed body', async () => {
-    serve(200, {id: GOLDEN.open.id, amount: '10.'}); // no qr, no clock
+    serve(200, {id: GOLDEN.open.id, amount: '10.'}); // no qr, no reference, no clock
     const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS);
     expect(outcome.kind).toBe('unreachable');
+  });
+
+  test('refuses a reference this wallet could not turn into a matchable memo', async () => {
+    // A charge whose reference is the wrong WIDTH or the wrong alphabet is worse than a missing
+    // one: the code would go up, a customer would pay it, and the memo the app attached could never
+    // match — money moved, sale still open. So the shape is checked, not just the presence.
+    for (const reference of ['', 'not-hex', 'ABCDEF0123456789ABCDEF0123456789', '0123456789abcdef']) {
+      serve(200, {...GOLDEN.open, reference});
+      expect((await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS)).kind)
+        .toBe('unreachable');
+    }
   });
 });
 

@@ -290,7 +290,12 @@ export const receiveEs: ReceiveMessages = {
     tryAgain: 'Volver a cobrar',
 
     settlesAs: amount => `${amount} en Internet Computer`,
-    showToCustomer: 'Enséñaselo al cliente: su monedero dpay lo escanea y paga.',
+    showToCustomer: nfc =>
+      nfc === 'tap'
+        ? 'Enséñaselo al cliente: su monedero dpay lo acerca o lo escanea, como prefiera.'
+        : nfc === 'expired'
+        ? 'Enséñaselo al cliente: su monedero dpay lo escanea. Acercar el teléfono ha caducado en este código; vuelve a marcar el importe si quiere acercarlo.'
+        : 'Enséñaselo al cliente: su monedero dpay lo escanea y paga.',
     waiting: 'Esperando el pago…',
     cantCheck:
       'Ahora mismo no se puede comprobar este importe: la caja está incomunicada. Eso NO significa que esté sin pagar. Deja el código a la vista: esta pantalla lo dirá en cuanto pueda contactar con la caja.',

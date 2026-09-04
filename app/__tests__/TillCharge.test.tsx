@@ -11,6 +11,13 @@
  * The rail-parity case (`the control refuses a Solana asset by name`) is the same-surfaces hard
  * rule with teeth: this control renders on BOTH Receive forms for EVERY asset, so the only thing
  * that may differ between rails is the sentence, never the presence of the control.
+ *
+ * THE TAP CASES pin what the reader is armed WITH, not what the reader then does: `NfcTap` is a
+ * double here, and its own three verdicts are `nfc-merchant-verdict.test.tsx`'s business while a
+ * real tap settling a real charge is e2e flow 117's. What only this suite can state is the join —
+ * that the request the counter arms carries the CHARGE's reference as its nonce, because that nonce
+ * becomes the ICRC-1 memo the relay credits the sale on, and that nothing about the tap is allowed
+ * to turn the paid light green.
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
@@ -27,13 +34,31 @@ jest.mock('../services/till', () => {
   };
 });
 
+// The radio and the certified clock, at their module boundaries. `buildRequest` is the REAL core's
+// job on a device; what matters here is the ARGUMENTS it is handed.
+const mockBuildRequest = jest.fn(async (..._args: unknown[]) => 'de'.repeat(66));
+const mockStampExpiry = jest.fn(async (..._args: unknown[]) => '0');
+jest.mock('../services/native', () => ({DpayNfc: {buildRequest: (...a: unknown[]) => mockBuildRequest(...a)}}));
+jest.mock('../services/icp', () => ({icStampExpiry: (...a: unknown[]) => mockStampExpiry(...a)}));
+
+// The reader itself is a double: this suite asserts what it is MOUNTED with, and drives its two
+// callbacks to check who owns the screen. (The `mock` prefix is jest's allowlist for a value a
+// hoisted factory may close over; the props are only read at render time, never at factory time.)
+const mockTap: {props: Record<string, unknown> | null} = {props: null};
+jest.mock('../components/NfcTap', () => ({
+  NfcTap: (props: Record<string, unknown>) => {
+    mockTap.props = props;
+    return null;
+  },
+}));
+
 import {TillCharge} from '../components/TillCharge';
 import {openTillCharge, tillChargeStatus, cancelTillCharge, type TillStatus} from '../services/till';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
-import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
-import {POLL, PROOF_POLL_BUDGET} from '../config/constants';
+import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
+import {NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET} from '../config/constants';
 import {M} from '../i18n';
-import type {AssetId, Identity} from '../lib/types';
+import type {AssetId, Identity, NfcStatus} from '../lib/types';
 
 const IDENTITY: Identity = {secretHex: '0b'.repeat(32), publicHex: '66'.repeat(32), username: 'Bahnhof Kiosk'};
 const RELAY = 'https://till.example';
@@ -41,7 +66,8 @@ const RELAY = 'https://till.example';
 // The wallet's REAL selectable rows, both rails — the same list the Receive forms hand this
 // component in production, so "which asset can ring one up" is decided against the shipping
 // catalog rather than a hand-made fixture that could disagree with it.
-const ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {showTestnet: false, solanaEnabled: true});
+const CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
+const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true});
 const assetOf = (predicate: (a: SelectableAsset) => boolean): SelectableAsset => {
   const found = ASSETS.find(predicate);
   if (!found) throw new Error('the bundled catalog must carry this row');
@@ -51,7 +77,12 @@ const VCHF = assetOf(a => a.linkToken === 'VCHF');
 const CKBTC = assetOf(a => a.linkToken === 'ckBTC');
 const SOL = assetOf(a => a.protocol === 'solana' && a.token === 'SOL');
 
-const CHARGE = {id: 'pl_ecd765908f264957', cents: '1050', qr: 'https://till.example/pl/?lightning=LNURL1XYZ', createdSecs: 1_788_479_954, expiresAt: 1_788_483_554};
+/** The charge's own name on the ledger — 16 bytes of hex, the width the relay mints and the width
+ *  the wire's nonce field holds. A tap request built with anything else credits nothing. */
+const REFERENCE = '19ff3250469370d21a04c100ad5ab8bb';
+const CHARGE = {id: 'pl_ecd765908f264957', cents: '1050', qr: 'https://till.example/pl/?lightning=LNURL1XYZ', reference: REFERENCE, createdSecs: 1_788_479_954, expiresAt: 1_788_483_554};
+/** 1050 rappen at VCHF's eight decimals — what the customer's wallet actually moves. */
+const PAY_RAW = '1050000000';
 
 /** A status body as the relay would answer for the charge above. */
 function status(over: Partial<TillStatus> = {}): TillStatus {
@@ -82,7 +113,11 @@ async function flush() {
   for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
-function mount(asset: SelectableAsset, onSelectAsset: (id: AssetId) => void = () => {}) {
+function mount(
+  asset: SelectableAsset,
+  onSelectAsset: (id: AssetId) => void = () => {},
+  nfcStatus: NfcStatus = 'ready',
+) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
@@ -91,6 +126,8 @@ function mount(asset: SelectableAsset, onSelectAsset: (id: AssetId) => void = ()
         relayUrl={RELAY}
         asset={asset}
         assets={ASSETS}
+        catalog={CATALOG}
+        nfcStatus={nfcStatus}
         onSelectAsset={onSelectAsset}
       />,
     );
@@ -111,6 +148,12 @@ beforeEach(() => {
   jest.mocked(openTillCharge).mockResolvedValue({kind: 'open', charge: CHARGE});
   jest.mocked(tillChargeStatus).mockResolvedValue({kind: 'status', status: status()});
   jest.mocked(cancelTillCharge).mockReset();
+  mockTap.props = null;
+  mockBuildRequest.mockClear();
+  // A certified instant comfortably ahead of the wall clock, so a freshly armed tap is LIVE. The
+  // stamp is nanoseconds, exactly as `icStampExpiry` returns it.
+  mockStampExpiry.mockReset();
+  mockStampExpiry.mockResolvedValue(String((BigInt(Math.floor(Date.now() / 1000)) + BigInt(NFC_UPDATE_AHEAD_S)) * 1_000_000_000n));
 });
 
 afterEach(() => {
@@ -198,6 +241,98 @@ describe('ringing up', () => {
     const tree = mount(VCHF);
     await ringUp(tree);
     expect(visible(tree)).toContain('Re-sync the device clock');
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('a customer who taps instead of scanning', () => {
+  test('arms the reader with the CHARGE’s reference as the request nonce', async () => {
+    const tree = mount(VCHF);
+    await ringUp(tree);
+
+    // THE JOIN THIS WHOLE SURFACE TURNS ON. `prepareNfcTransfer` writes the request's nonce onto the
+    // payer's transfer as its ICRC-1 memo, and the relay credits only a transfer whose memo is this
+    // charge's reference — so a request built with a nonce of this wallet's own would move the
+    // customer's money and leave the sale open.
+    expect(mockBuildRequest).toHaveBeenCalledTimes(1);
+    const [toHex, amount, nonce, expiry, currency, toName, memo] = mockBuildRequest.mock.calls[0];
+    expect(toHex).toBe(IDENTITY.publicHex);           // paid to the shop's own account, never dpay's
+    expect(amount).toBe(PAY_RAW);                     // the franc price at VCHF's own precision
+    expect(nonce).toBe(REFERENCE);
+    expect(currency).toBe(7);                         // VCHF, the one asset a dpay till takes
+    expect(toName).toBe(IDENTITY.username);
+    expect(memo).toBe('');
+    expect(typeof expiry).toBe('number');
+    expect(mockStampExpiry).toHaveBeenCalledWith(IDENTITY.secretHex, NFC_UPDATE_AHEAD_S);
+
+    // …and the reader is mounted with exactly that request, told the same amount/nonce/currency it
+    // will later match ledger history on.
+    expect(mockTap.props?.role).toBe('reader');
+    expect(mockTap.props?.requestHex).toBe(await mockBuildRequest.mock.results[0].value);
+    expect(mockTap.props?.reqInfo).toMatchObject({amount: PAY_RAW, nonce: REFERENCE, currency: 7});
+    // NO `onSettled`: nothing the radio does may turn the paid light green — only the relay's poll.
+    expect(mockTap.props?.onSettled).toBeUndefined();
+
+    // The code is up and tappable, and says so in one line rather than two.
+    expect(has(tree, 'till-qr')).toBe(true);
+    expect(visible(tree)).toContain(M.receive.till.showToCustomer('tap'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('a phone that cannot tap still shows a code, and names what is wrong with the phone', async () => {
+    const tree = mount(VCHF, () => {}, 'off');
+    await ringUp(tree);
+    // Nothing is armed and nothing is claimed: no request was built at all.
+    expect(mockBuildRequest).not.toHaveBeenCalled();
+    expect(mockTap.props).toBeNull();
+    // The radio's own row takes the line, because the fix is about the PHONE (turn NFC on) rather
+    // than about this code — and the code itself is still up and still scannable.
+    expect(has(tree, 'till-nfc')).toBe(true);
+    expect(has(tree, 'till-tap-hint')).toBe(false);
+    expect(has(tree, 'till-qr')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a tap request that could not be built leaves a scannable code and says only that', async () => {
+    // The certified IC instant the request's expiry needs is a network read; without it there is no
+    // honest expiry to sign, so no reader is armed. The code must not silently lose its QR over it.
+    mockStampExpiry.mockRejectedValue(new Error('certified time unreachable'));
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    expect(mockTap.props).toBeNull();
+    expect(has(tree, 'till-qr')).toBe(true);
+    expect(visible(tree)).toContain(M.receive.till.showToCustomer('none'));
+    expect(visible(tree)).not.toContain(M.receive.till.showToCustomer('tap'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('a tap in flight owns the screen, and the paid light is still the relay’s answer', async () => {
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    const onActive = mockTap.props?.onActive as () => void;
+    const onClose = mockTap.props?.onClose as () => void;
+
+    // The exchange starts: the counter's own body goes away rather than sitting beside a tap that
+    // is mid-flight. Two settlement surfaces at once is the thing a cashier learns to distrust.
+    act(() => { onActive(); });
+    expect(has(tree, 'till-qr')).toBe(false);
+    expect(has(tree, 'till-tap-hint')).toBe(false);
+
+    // The relay observes the transfer WHILE the tap is still returning its result to the payer. The
+    // charge is credited underneath, and the tap keeps the screen — it still owes that result.
+    jest.mocked(tillChargeStatus).mockResolvedValue({
+      kind: 'status',
+      status: status({state: 'paid', paid: {from: 'lrdna-ain6m-ja6ko', amountRaw: PAY_RAW, atSecs: CHARGE.createdSecs + 8, block: 91}}),
+    });
+    await act(async () => { jest.advanceTimersByTime(POLL.receiptRcv); await flush(); });
+    expect(has(tree, 'till-paid')).toBe(false);
+    expect(mockTap.props).not.toBeNull();
+
+    // Only when the tap is done does the till's own answer take the screen — and it is the RELAY's
+    // answer, with the ledger block that paid.
+    act(() => { onClose(); });
+    expect(has(tree, 'till-paid')).toBe(true);
+    expect(visible(tree)).toContain(M.receive.till.paidBlock(91));
     act(() => { tree.unmount(); });
   });
 });

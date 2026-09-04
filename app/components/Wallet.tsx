@@ -869,6 +869,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   identity={identity} relayUrl={relayUrl} nfcStatus={nfc} solAddress={solAddress}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
+                  catalog={catalog}
                   selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'}
                   assets={assets}
                   selectedAssetId={effectiveSelectedId}

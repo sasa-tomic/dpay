@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **112 flows**
-> (111 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **113 flows**
+> (112 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (33) · offline (10) · deposit (8) · withdraw (11) · nfc (9) · system (21) · tour (6)
+wire (1) · onboard (13) · pay (33) · offline (10) · deposit (8) · withdraw (11) · nfc (10) · system (21) · tour (6)
 
 ---
 
@@ -138,6 +138,7 @@ wire (1) · onboard (13) · pay (33) · offline (10) · deposit (8) · withdraw 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
 | 11 | nfc | NFC transport phases render via the RNW event bus; a request AUTO-SIGNS on arrival (one-press rule) — the wire exists with no Approve click. | nfc-phases, event-bus, auto-sign |
+| 117 | till-tap | A shop rings up CHF 4.50 on its own dpay wallet and the counter ALSO arms the NFC reader from that charge: the 132-byte request it serves names the shop’s own account, the exact raw VCHF, and the CHARGE’s reference as its nonce. A payer’s offline-signed bundle delivered over that reader settles a real icrc1_transfer whose ICRC-1 memo is therefore the charge’s reference, so `GET /api/v1/till/{id}` — which reads the merchant’s own ledger history and knows nothing about taps — flips to paid, names the block, and the shop is credited the exact VCHF. The paid light is the relay’s answer: the tap is given no onSettled, and the merchant’s tap screen is dismissed before the till’s own verdict is read off the counter. | till, merchant-till, nfc, charge-reference, observed-settlement, vchf, settle |
 | 32 | nfc-disclosure | NFC auto-sign exchanging status discloses honest asset + amount ("Paying 0.00050000 BTC on Bitcoin") + hold-to-send; the wire exists on arrival (one-press rule). | nfc-disclosure, consent, asset-name, auto-sign |
 | 47 | sol-nfc | SOL v2 NFC tap: arm card → request AUTO-SIGNS (one-press rule → offline sign) → receipt (rid+sig match) → Paid ✓ | sol-nfc, sol-v2-receipt, event-bus, auto-sign |
 | 60 | nfc-error | NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); an unsupported-asset request auto-declines "Declined" + honest reason (fail-closed, no sign); a late error after settling is ignored (no false failure over a decided outcome). | nfc-error, nfc-declined, nfc-phases, error-handling, no-fake-paid, terminal-escape, fail-closed |
