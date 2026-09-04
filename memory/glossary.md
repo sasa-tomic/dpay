@@ -20,9 +20,9 @@
 | relay | Tiny Node + Express + `@dfinity/agent` service. Relays the merchant's submission to the canister so the merchant app only does QR + HTTPS. Only online dependency in the demo. |
 | dfx | ICP SDK / CLI used to build and deploy the canister. |
 | ckUSDC | Chain-key USDC on ICP — the real USD stablecoin dpay would settle in beyond the internal demo ledger. |
-| nonce | Unique per-payment value; the idempotency key. Prevents replay and double-charge. |
+| nonce | Unique per-payment value the merchant mints once. On the shipped rail it is the payee's reconciliation handle (it rides as the ICRC memo), NOT the thing that stops a replay; on the facade/DEMO rail it is the ledger nonce. Per-rail truth: `dpay_core::PaymentRequest`. |
 | Ed25519 | Signature scheme used to sign/verify authorizations (`@noble/ed25519` / `tweetnacl` on device; `ed25519-dalek` in a Rust canister). |
-| idempotency | Submitting the same authorization twice returns the same receipt, never double-charges. |
+| idempotency | Submitting the same signed ENVELOPE twice settles once — the IC admits a request id once. Re-SIGNING the same authorization is a second payment, not a replay. |
 | safe-mode | Demo fallback that runs the full visual flow locally if venue wifi dies. |
 
 ## UI conventions

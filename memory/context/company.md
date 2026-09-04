@@ -22,7 +22,7 @@ Build estimate: ~1 month solo, or ~2 weeks with two people (one on canister + re
 
 The relay is the only online dependency during the demo, so it must be rock solid:
 
-- **Idempotency:** authorization nonce is the key; same nonce → same receipt, never double-charge (enforced in canister, de-duped in relay).
+- **Idempotency:** the signed envelope's request id is the key; the same bytes resubmitted settle once (enforced by the IC — settlement left the relay in the 2026-08-19 cutover, so nothing is de-duped there any more). Re-signing is a second payment, not a replay: `dpay_core::PaymentRequest`.
 - **Retries + timeouts:** bounded retry with backoff on transient errors; clean "tap again" state, never a hanging spinner.
 - **Pre-flight health check:** merchant app pings relay before the demo, shows a green dot.
 - **Demo safe-mode:** local fallback runs the full visual flow if venue wifi dies.

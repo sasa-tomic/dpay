@@ -201,7 +201,8 @@ pub fn format_amount(raw: u64, decimals: u8) -> String {
 // envelope via `icp_sign_update`; see src/icp.rs.)
 
 /// The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
-/// pay, how much (minor units), the single-use `nonce` (the merchant's request_id → ledger nonce),
+/// pay, how much (minor units), the single-use `nonce` (the merchant's request_id — what it does
+/// and does not enforce is documented on `dpay_core::PaymentRequest`),
 /// an `expiry`, the payee's display name (`to_name`), and an optional `memo` — both decoded back
 /// from their 32-byte NUL-padded wire fields to `String` by [`decode_name_field`].
 #[derive(uniffi::Record, Clone)]
@@ -217,6 +218,12 @@ pub struct PaymentRequestData {
     pub memo: String,
 }
 
+// NB: the `request_id → ledger nonce` line in the doc below is STALE — that was the facade rail;
+// the shipped app-signed rail keys on the envelope's own request id, not on this value. It is not
+// corrected in place because UniFFI hashes an exported function's docstring into its ABI checksum
+// (measured: editing it moves `encode_request` 42219 → 59479), which would desync the committed
+// Android binding from the `.so` and force a `just ndk` rebuild for a documentation fix. Truth,
+// per rail: `dpay_core::PaymentRequest`.
 /// Merchant side: encode the request the payer will scan. `nonce` is the merchant's single-use
 /// request_id (it becomes the ledger nonce, so the payment can't be replayed or double-charged).
 /// `to_name` is the merchant's own display name and `memo` is an optional merchant-set note; both

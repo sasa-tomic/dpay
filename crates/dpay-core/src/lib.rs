@@ -539,13 +539,37 @@ impl SignedAuthorization {
 pub const REQUEST_LEN: usize = PUBKEY_LEN + 8 + NONCE_LEN + 8 + 4 + NAME_LEN + MEMO_LEN;
 
 /// The **request** the merchant shows the payer, carried by the merchant's QR. Unsigned: it names
-/// who to pay (`to`), how much (`amount`), a single-use `nonce` (the merchant's `request_id`, which
-/// becomes the ledger nonce), an `expiry`, the settlement `currency`, the payee's display name
-/// (`to_name`), and an optional `memo`. The payer scans this, reviews it, and signs an
+/// who to pay (`to`), how much (`amount`), a single-use `nonce` (the merchant's `request_id`), an
+/// `expiry`, the settlement `currency`, the payee's display name (`to_name`), and an optional
+/// `memo`. The payer scans this, reviews it, and signs an
 /// [`Authorization`] that copies these fields verbatim — so the amount, payee, currency, payee name,
 /// and memo are chosen by the merchant and then *bound* by the payer's signature. There is no `from`
 /// (the payer supplies their own) and no `from_name` (the payer supplies their own) and no signature
 /// here.
+///
+/// WHAT THE `nonce` DOES, PER RAIL — the ONE place this is written down, because a statement that
+/// was true of the facade was inherited by a rail where it is false. It is `NONCE_LEN` bytes the
+/// merchant mints once per request, and it is single-use in the sense that the merchant never
+/// reissues it. What ENFORCES that differs:
+///
+///  * FACADE rail (DEMO, the canister's `pay`): the nonce really is the ledger nonce. The canister
+///    reserves it in its `SPENT` set synchronously before any transfer, so a second `pay` carrying
+///    it is refused. Real, and still what `dpay-sim` and `scripts/dfx-deploy.sh` demonstrate.
+///  * SHIPPED app-signed rail (ckBTC/ckUSDC/ckETH/VCHF/ICP): there is no facade and no ledger
+///    nonce. This value rides along as the ICRC-1 `memo`, which the ledger does not key on at all
+///    (see `icp_transfer_arg` in dpay-ffi). It is a RECONCILIATION handle — it lets the payee match
+///    an arriving transfer to the request that asked for it — and nothing more.
+///
+/// At-most-once on the shipped rail comes from the IC itself, not from this field: the payer signs
+/// ONE envelope, its request id is the hash of that envelope's content, and the interface spec
+/// makes `E.content ∉ dom(S.requests)` a precondition of admitting a submitted request — so the
+/// identical bytes, handed over any number of times, execute once (proven in-repo by
+/// `signed_transfer_through_api_v2_moves_funds_and_lands_in_history`). That holds only while the
+/// envelope's own `ingress_expiry` has not passed, after which nothing executes at all.
+///
+/// THE SHARP EDGE: it is the BYTES that are single-use, not the nonce. Re-signing the same
+/// authorization yields a different request id and pays a second time, which is why the rail
+/// resubmits verbatim and never re-signs (`app/services/rail.ts`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PaymentRequest {
     pub to: [u8; PUBKEY_LEN],
@@ -638,8 +662,10 @@ pub const RECEIPT_UNREACHABLE: u8 = 2;
 /// day, a receipt QR). It names the `nonce` it answers (so the payer can match it to the exact
 /// payment they signed) and a `status`.
 ///
-/// **PoC trust model:** the receipt is *unsigned*. The payer's signature already binds the amount,
-/// payee, and single-use nonce, so a merchant can neither overcharge nor double-charge; the only
+/// **PoC trust model:** the receipt is *unsigned*. The payer's signature already binds the amount
+/// and the payee, so a merchant cannot overcharge, and it binds them into bytes the merchant can
+/// only hand over or withhold, never re-mint — so a merchant cannot double-charge either (why the
+/// bytes and not the nonce carry that: [`PaymentRequest`]); the only
 /// thing an unsigned receipt can't stop is a merchant lying about the outcome, and the incentives
 /// don't favour that (claiming "paid" when it wasn't only costs the merchant). A canister-signed
 /// receipt (the payer verifying the ledger's key) is the production hardening.

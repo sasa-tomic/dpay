@@ -66,8 +66,15 @@ dot next to the balance means the wallet can see the ledger.
      signed QR**
      camera scans it (or use the **Share auth code** button → paste box).
 3. Both **Recent** lists (phone + laptop) show the payment.
-4. **Settle the same request again** → **“Already paid — not charged twice.”** The merchant's
-   request id *is* the ledger nonce, so a replay can never double-charge.
+4. **Submit the payer's signed QR a second time** → the balances do not move and **Recent** gains
+   no second row: the payer signed one envelope, and the IC admits a given envelope's request id
+   once, so handing the same bytes over twice settles once.
+   > Say it as "the same slip, handed over twice, settles once" — NOT as a ledger nonce. On this
+   > rail the request id rides as the ICRC memo and the ledger does not key on it
+   > (`dpay_core::PaymentRequest`). Do not promise an "Already paid" screen: that copy renders only
+   > on a ledger `Duplicate`, which this rail cannot produce. Drive this step once before showing
+   > it — the invariant is proven in tests, the exact screen has not been re-checked since the
+   > facade cutover.
 
 Amount + payee are chosen by the **merchant** (the request) and **bound by the payer's signature**,
 so neither side can alter them and the payer approves the exact amount before signing.

@@ -114,7 +114,7 @@ log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context 
 | canister | ICP smart contract acting as the demo ledger (verifies sig, checks nonce/expiry/cap/balance, moves funds atomically, returns receipt) |
 | relay | tiny Node/Express + `@dfinity/agent` service that submits the merchant's authorization to the canister; the **only online dependency** in the demo |
 | authorization | signed payment payload binding `{from, to, amount, currency, nonce, expiry, names, memo}` that the payer builds and signs offline |
-| nonce | per-payment idempotency key; prevents double-spend / double-charge |
+| nonce | per-payment value the merchant mints once; the payee's reconciliation handle on the shipped rail, and the ledger nonce on the facade/DEMO rail. What actually makes a replay settle once is the signed envelope's request id — `dpay_core::PaymentRequest` |
 | offline payer | the phone that signs while in airplane mode |
 | online merchant | the phone that scans + submits and shows "Paid ✓" |
 | ckUSDC | chain-key USDC on ICP — the real stablecoin dpay would use off the internal demo ledger |
@@ -145,7 +145,7 @@ The next product milestone is an **asset-first wallet**, not a generic payer-sid
 2. **Payer (offline)** scans it, reviews "Pay <amount> <asset> to <merchant>" against that asset's balance, approves → signs the complete authorization → shows a signed-auth QR.
 3. **Merchant** scans the signed-auth QR → submits via relay → canister verifies sig + nonce/expiry/cap/balance, settles atomically → "Paid ✓".
 
-The signature binds the **exact amount + payee + request**, so consent is unambiguous and the merchant-issued `request_id` doubles as the ledger nonce (single-use → no double-charge). Short `expiry` (~5 min) kills stale replays. Rejected: single-scan payer-presented pre-auth (merchant fills the amount) — faster but weaker consent. Deferred: a signed receipt QR back to the payer for offline confirmation.
+The signature binds the **exact amount + payee + request**, so consent is unambiguous. No double-charge on a replay, but note the mechanism: on the shipped app-signed rail the merchant-issued `request_id` is NOT a ledger nonce (it rides as the ICRC memo, a reconciliation handle) — the payer signs one envelope and the IC admits that envelope's request id once, so the same bytes handed over twice settle once. It IS the ledger nonce on the facade/DEMO rail. Per-rail truth: `dpay_core::PaymentRequest`. Short `expiry` (~5 min) kills stale replays. Rejected: single-scan payer-presented pre-auth (merchant fills the amount) — faster but weaker consent. Deferred: a signed receipt QR back to the payer for offline confirmation.
 
 ## Non-negotiable: dpay never holds, swaps, or can move user funds
 

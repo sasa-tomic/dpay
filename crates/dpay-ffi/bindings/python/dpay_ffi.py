@@ -2164,7 +2164,8 @@ class _UniffiConverterTypeNfcCardResult(_UniffiConverterRustBuffer):
 class PaymentRequestData:
     """
     The merchant's request, as scanned by the payer. Mirrors [`dpay_core::PaymentRequest`]: who to
-    pay, how much (minor units), the single-use `nonce` (the merchant's request_id → ledger nonce),
+    pay, how much (minor units), the single-use `nonce` (the merchant's request_id — what it does
+    and does not enforce is documented on `dpay_core::PaymentRequest`),
     an `expiry`, the payee's display name (`to_name`), and an optional `memo` — both decoded back
     from their 32-byte NUL-padded wire fields to `String` by [`decode_name_field`].
     """
