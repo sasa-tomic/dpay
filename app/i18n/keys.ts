@@ -112,7 +112,6 @@ export type Messages = {
     tooOld: string;
     createdInFuture: string;
     temporarilyUnavailable: string;
-    duplicate: string;
     declined: (detail: string) => string;
   };
 

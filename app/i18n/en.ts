@@ -73,7 +73,6 @@ export const en: Messages = {
     tooOld: 'The request expired',
     createdInFuture: 'Clock skew — try again',
     temporarilyUnavailable: 'The ledger is busy — try again',
-    duplicate: 'Already paid',
     declined: detail =>
       detail ? `The ledger declined the payment (${detail})` : 'The ledger declined the payment',
   },

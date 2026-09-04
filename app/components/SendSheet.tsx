@@ -262,8 +262,7 @@ export function SendSheet({
         out = await submitTransfer(prepared, identity.secretHex, {attempts: 12, intervalMs: 500}, decodeLegacyReply);
       } else {
         // A send is not a payment against a request, so there is no request nonce to reconcile
-        // against; the memo is a fresh random 16 bytes purely to keep two identical sends (same
-        // destination, same amount) from colliding under the ledger's duplicate check.
+        // against; the memo is a fresh random 16 bytes — see `randomMemoHex`.
         prepared = await prepareTransfer(identity.secretHex, {currencies: [desc]}, {
           // The SAME string the field showed, the review showed and the address book will save.
           // The rail parses owner + subaccount out of it, so a `principal.subaccount` destination
@@ -572,8 +571,13 @@ export async function resolveDestination(
 }
 
 /** A fresh 16-byte memo, hex. Not a reconciliation key (a send has no open request to reconcile
- *  against) — it exists so two identical sends are distinct transfers to the ledger's duplicate
- *  check rather than one silently-deduped no-op. */
+ *  against) — it is what makes two otherwise identical sends tell themselves apart on the ledger,
+ *  and it is the value the recipient can quote back when asking which transfer was which.
+ *
+ *  It is NOT a duplicate guard, and it never was: dpay sends no `created_at_time`, so an ICRC-1
+ *  ledger runs no duplicate check at all and two identical transfers both execute (the rule and
+ *  the reasoning: `icp_transfer_arg` in dpay-ffi). The freshness costs nothing and the honest
+ *  claim is the smaller one. */
 function randomMemoHex(): string {
   const b = new Uint8Array(16);
   crypto.getRandomValues(b);

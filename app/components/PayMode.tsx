@@ -286,8 +286,8 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
       //
       // Either way it is fixed ONCE for this payment, so a second Approve after a refused attempt
       // re-signs the SAME instruction the till is waiting for rather than a payment it would not
-      // recognise. It is not a double-pay guard and must not be read as one: `prepareTransfer`
-      // sends no `created_at_time`, and an ICRC-1 ledger deduplicates only when that field is set.
+      // recognise. It is not a double-pay guard and must not be read as one — a repeated memo does
+      // not stop a ledger executing the transfer twice (`icp_transfer_arg` in dpay-ffi).
       nonceHex: out.target.reference ?? randNonceHex(),
       memo: '',
       // A till has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
@@ -593,6 +593,9 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
         if (out.kind === 'rejected') {
           // Structured-tag branch (not human-message matching): Duplicate = this payee already
           // landed this exact memo'd transfer — the request is PAID, show the already-paid state.
+          // Reaching it needs a ledger that dedups an UNSTAMPED transfer, which ICRC-1 says a
+          // ledger should not and DFINITY's do not — so this is how a third-party ledger's
+          // settled-already answer is honoured, never a promise that approving twice is safe.
           if (out.variant === 'Duplicate') { setPaid({amount: r.amount, currency: r.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
           setErr(out.reason); return;
         }

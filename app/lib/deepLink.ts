@@ -30,10 +30,14 @@ import {bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8} from './ba
 //              over-precise/overflowing/zero amount is refused, never rounded.
 //   label      the payee's CLAIMED display name (shown as claimed — the principal is the identity).
 //   memo       a note shown on the review screen. Display only: the ON-CHAIN memo is the nonce.
-//   ref        optional 32-hex reconciliation nonce = the on-chain ICRC memo. PRESENT ⇒ a single
-//              invoice: the ledger's own duplicate check makes a second payment of the identical
-//              transfer a no-op ("already paid"), and the payee's open request screen matches it.
-//              ABSENT ⇒ a reusable link (tip jar): the payer's app mints a fresh nonce per payment.
+//   ref        optional 32-hex reconciliation nonce = the on-chain ICRC memo. PRESENT ⇒ one
+//              invoice: every payment of this link lands under the SAME memo, so the payee's open
+//              request screen can tell which invoice an arriving transfer settles. ABSENT ⇒ a
+//              reusable link (tip jar): the payer's app mints a fresh nonce per payment.
+//              `ref` DOES NOT stop a second payment — paying an invoice link twice moves the money
+//              twice, because dpay sends no `created_at_time` and an ICRC-1 ledger deduplicates
+//              nothing without it (the rule and the reasoning: `icp_transfer_arg` in dpay-ffi).
+//              Crediting a sale exactly once is the payee's own bookkeeping, not the ledger's.
 //
 // NO EXPIRY. A request-level expiry protects a QR/NFC hand-off measured in seconds; a link is
 // meant to survive a chat thread. The signed envelope still carries its own IC ingress expiry, so

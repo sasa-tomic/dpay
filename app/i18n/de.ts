@@ -110,7 +110,6 @@ export const de: Messages = {
     tooOld: 'Die Anfrage ist abgelaufen',
     createdInFuture: 'Zeitabweichung — versuche es erneut',
     temporarilyUnavailable: 'Das Ledger ist ausgelastet — versuche es erneut',
-    duplicate: 'Bereits bezahlt',
     declined: detail =>
       detail ? `Das Ledger hat die Zahlung abgelehnt (${detail})` : 'Das Ledger hat die Zahlung abgelehnt',
   },

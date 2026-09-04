@@ -198,8 +198,11 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   takes the destination principal, derived from the pubkey on the wire path); SOL → the pre-filled
   Send-to-address form. A link NEVER auto-signs, always shows the FULL destination account, marks
   the sender-given label as claimed, and carries no expiry (the envelope's IC ingress expiry still
-  bounds signing). `ref` = the on-chain memo: present ⇒ a single invoice the ledger dedups and the
-  payee's request screen reconciles; absent ⇒ a reusable link. Every refusal names the asset/chain
+  bounds signing). `ref` = the on-chain memo: present ⇒ one invoice, in the sense that every
+  payment of the link carries the same memo for the payee's request screen to reconcile — NOT that
+  a second payment is refused, because dpay sends no `created_at_time` and an ICRC-1 ledger
+  deduplicates nothing without it (rule + reasoning: `icp_transfer_arg` in `crates/dpay-ffi`);
+  absent ⇒ a reusable link. Every refusal names the asset/chain
   and the payer's next action (founder rule). Authority for the grammar + trust model: the module
   header of `app/lib/deepLink.ts`; asset/amount resolution: `resolvePayLink` in `app/config/assets.ts`.
   New core export `icp_validate_principal` (FFI + wasm + Kotlin) CRC-validates a link's destination

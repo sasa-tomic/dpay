@@ -305,6 +305,8 @@ pub extern "C" fn w_icp_transfer_arg(
         },
         Err(e) => return e,
     };
+    // The trailing `None` is `created_at_time`, and it is a decision — see `icp_transfer_arg` in
+    // dpay-ffi.
     let arg = icrc_transfer_arg(&to, from_sub, amount, fee, memo, None);
     write_str_out(&arg, out_ptr, cap) // binary out via write_str_out's byte-copy semantics
 }

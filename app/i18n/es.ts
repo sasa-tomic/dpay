@@ -105,7 +105,6 @@ export const es: Messages = {
     tooOld: 'La solicitud caducó',
     createdInFuture: 'Desfase del reloj: inténtalo de nuevo',
     temporarilyUnavailable: 'La red está ocupada: inténtalo de nuevo',
-    duplicate: 'Ya está pagado',
     declined: detail =>
       detail ? `La red rechazó el pago (${detail})` : 'La red rechazó el pago',
   },

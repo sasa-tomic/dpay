@@ -244,6 +244,17 @@ describe('pollTransfer — truthful terminal outcomes', () => {
     expect(out).toEqual({kind: 'settled', blockIndex: '1234'});
   });
 
+  // The ICP ledger's legacy `transfer` is the one method that CAN answer this — it fills in a
+  // `created_at_time` of its own when the caller sends none, so its duplicate check is live where
+  // every icrc1_transfer's is not. Its spelling must reach the same settled outcome, or a send to
+  // an account identifier could report a decline for money that moved.
+  test('the legacy TxDuplicate spelling settles too, never rejects', async () => {
+    jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'replied', replyArgHex: 'ab'} as never);
+    const decode = async () => ({ok: false, errVariant: 'TxDuplicate', errDetail: 'duplicate_of 77'});
+    const out = await pollTransfer(PREPARED, '11'.repeat(32), {attempts: 1, intervalMs: 0}, decode);
+    expect(out).toEqual({kind: 'settled', blockIndex: '77'});
+  });
+
   test('other TransferErrors carry their own variant (callers must not need the message text)', async () => {
     jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'replied', replyArgHex: 'ab'} as never);
     jest.mocked(DpayCore.icpDecodeTransferResult).mockResolvedValue({
@@ -290,9 +301,6 @@ describe('pollTransfer — truthful terminal outcomes', () => {
 });
 
 describe('transferRejectionMessage', () => {
-  test('Duplicate renders the already-paid copy', () => {
-    expect(transferRejectionMessage('Duplicate', '5')).toBe('Already paid');
-  });
   test('known variants render friendly copy; unknown ones fall back to the raw detail', () => {
     expect(transferRejectionMessage('InsufficientFunds', '')).toBe('Not enough balance');
     expect(transferRejectionMessage('BadFee', 'x')).toContain('fee');

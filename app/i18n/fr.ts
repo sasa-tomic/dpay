@@ -111,7 +111,6 @@ export const fr: Messages = {
     tooOld: 'La demande a expiré',
     createdInFuture: 'Décalage d’horloge — réessayez',
     temporarilyUnavailable: 'Le registre est occupé — réessayez',
-    duplicate: 'Déjà payé',
     declined: detail =>
       detail ? `Le registre a refusé le paiement (${detail})` : 'Le registre a refusé le paiement',
   },

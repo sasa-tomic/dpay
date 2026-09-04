@@ -10,7 +10,9 @@
 //  - Outcome honesty: 'unknown' means NOT TERMINAL within budget (may still execute) — never
 //    render it as failure. 'rejected' is a decoded, definitive ledger refusal.
 //  - Duplicate{duplicate_of} is settled: the ledger identifies the block that already executed
-//    these exact transfer arguments. It must never be rendered as a decline.
+//    these exact transfer arguments. It must never be rendered as a decline. It is NOT a
+//    double-pay guard and must not be read as one — dpay sends no `created_at_time`, and without
+//    it a DFINITY ledger runs no duplicate check at all (`icp_transfer_arg` in dpay-ffi).
 import {DpayCore} from './native';
 import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS, INGRESS_AHEAD_S} from './icp';
 import {hexToBytes, bytesToHex, base, short} from '../lib/format';
@@ -221,7 +223,10 @@ async function decodeTransferStatus(
     // exact arguments already executed. Both spellings are accepted because the ICP ledger's
     // legacy `transfer` names it `TxDuplicate` where ICRC-1 names it `Duplicate` — the same fact
     // under two tags, and rendering either as a failure would show a false decline for money that
-    // has already moved.
+    // has already moved. Kept even though our own arguments cannot provoke it (see the header):
+    // ICRC-1 only says a ledger SHOULD NOT dedup an unstamped transfer, and VCHF's ledger is not
+    // ours to promise for. This is the ONE place `Duplicate` is interpreted — a rejection message
+    // for it would be unreachable, and would tell a user "already paid" about a refusal.
     if (tr.errVariant === 'Duplicate' || tr.errVariant === 'TxDuplicate') {
       return {kind: 'settled', blockIndex: tr.errDetail?.match(/\d+$/)?.[0] ?? ''};
     }
@@ -243,10 +248,10 @@ export function transferRejectionMessage(variant: string, detail: string): strin
     case 'TooOld': return M.rail.tooOld;
     case 'CreatedInFuture': return M.rail.createdInFuture;
     case 'TemporarilyUnavailable': return M.rail.temporarilyUnavailable;
-    case 'Duplicate': return M.rail.duplicate;
+    // No `Duplicate`/`TxDuplicate` arm: both spellings are turned into a SETTLED outcome above and
+    // never reach this switch.
     // The ICP ledger's legacy `transfer` tags. Same meanings, different spellings — mapped to the
     // SAME copy so the user never sees a rail's internal vocabulary leak into the message.
-    case 'TxDuplicate': return M.rail.duplicate;
     case 'TxTooOld': return M.rail.tooOld;
     case 'TxCreatedInFuture': return M.rail.createdInFuture;
     default: return M.rail.declined(detail);

@@ -193,6 +193,39 @@ pub fn icp_ingress_expiry(now_ns: String, ahead_s: u64) -> Result<String, DpayEr
 
 // --- DIDL arg builders ----------------------------------------------------------------------------
 
+// WHY `icp_transfer_arg` BELOW SENDS NO `created_at_time` — the ONE place that fact is explained,
+// because several surfaces used to describe a consequence it does not have. Deliberately a plain
+// comment and not a doc comment: UniFFI hashes the docstring into the exported function's ABI
+// checksum, so writing this two lines lower would make a documentation fix move the bridge ABI.
+//
+// ICRC-1 ("Transaction deduplication") makes that field the switch for the ledger's duplicate
+// check: "If the client did not set the `created_at_time` field, the ledger SHOULD NOT deduplicate
+// the transaction."
+//
+// DFINITY's own ledgers implement exactly that — `apply_transaction`
+// (`rs/ledger_suite/common/ledger_canister_core/src/ledger.rs`) runs the window and hash checks
+// only inside `transaction.created_at_time().map(...)`, and `icrc1_transfer` on both the ICRC-1
+// ledger and the ICP ledger passes the caller's `Option` straight through. SENDING NONE THEREFORE
+// MEANS TWO IDENTICAL TRANSFERS BOTH EXECUTE AND THE MONEY MOVES TWICE. A repeated `memo` changes
+// nothing: the memo is only ever a tie-breaker WITHIN that check, never a key on its own. (The ICP
+// ledger's LEGACY `transfer` is the one exception in reach — it substitutes its own `now`, which
+// is why `TxDuplicate` is handled in `app/services/rail.ts` and its ICRC-1 twin is not expected.)
+//
+// Setting it would not buy the property people expect from it. Dedup needs the two payloads to be
+// structurally EQUAL, so the stamp would have to be a deterministic function of the invoice — but a
+// dpay payment link carries no timestamp and no expiry by design (`app/lib/deepLink.ts`), and the
+// window is bounded anyway (`TRANSACTION_WINDOW` 24 h back, `ic_limits::PERMITTED_DRIFT` 60 s
+// forward, both read from the ic tree), so a link older than a day would have its FIRST payment
+// refused `TooOld`. Stamping "now" instead gives every signing its own payload — no dedup at all —
+// while adding a `CreatedInFuture` refusal for a CORRECT payment whenever our certified stamp leads
+// the target ledger's subnet clock by over a minute. Cost with no benefit, so: none. Offline
+// signing is not the obstacle and must not be blamed for this: both signing paths already hold
+// certified IC time (`icStampExpiry`; the NFC payer uses the merchant's stamp off the wire).
+//
+// EXACTLY-ONCE IS THE PAYEE'S JOB, and dpay does it where dpay is the payee: the till credits a
+// sale from its own settlement record and spends the ledger row it credited
+// (`crates/dpay-relay/src/till.rs`, "ONE TRANSFER, ONE SALE").
+
 /// `icrc1_transfer` argument bytes (DIDL record): `to` account, amount, optional
 /// fee/memo/from_subaccount. `amount`/`fee` are decimal strings.
 #[uniffi::export]
@@ -686,6 +719,30 @@ mod tests {
         assert_eq!(read.statuses.len(), 1);
         assert_eq!(read.statuses[0].state, "replied");
         assert_eq!(read.statuses[0].reply_arg.as_deref(), Some(b"ok".as_slice()));
+    }
+
+    // The decision lock for the doc on `icp_transfer_arg`: the app's transfers carry NO
+    // `created_at_time`, so no ICRC-1 ledger deduplicates them — not even two that agree on every
+    // other field including the memo. Anyone who later stamps a timestamp here makes the ledger
+    // start refusing correct payments (`TooOld`/`CreatedInFuture`), so they should have to delete
+    // this test and read why first.
+    #[test]
+    fn transfer_arg_sends_no_created_at_time_so_the_ledger_cannot_dedup() {
+        let build = || icp_transfer_arg(
+            "mxzaz-hqaaa-aaaar-qaada-cai".into(),
+            None,
+            None,
+            "250000".into(),
+            Some("10".into()),
+            Some("aabbccddeeff00112233445566778899".into()),
+        ).unwrap();
+        let first = dpay_icp::icrc::decode_transfer_arg(&build()).unwrap();
+        assert_eq!(first.created_at_time_ns, None, "a stamped created_at_time changes the rail's failure modes");
+        // Same invoice paid twice: the memo repeats, and the ledger still sees two distinct
+        // transfers because the dedup switch was never thrown.
+        let second = dpay_icp::icrc::decode_transfer_arg(&build()).unwrap();
+        assert_eq!(first.memo, second.memo);
+        assert_eq!(second.created_at_time_ns, None);
     }
 
     #[test]
