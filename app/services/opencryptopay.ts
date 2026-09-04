@@ -452,6 +452,13 @@ export type OcpTarget = {
   to: string;
   /** The exact amount in the asset's raw units, converted once at its own precision. */
   rawAmount: string;
+  /** The provider's own reference for this sale, to be carried as the transfer's ON-CHAIN memo, or
+   *  null when it named none. It is how the provider matches the payment to the charge it belongs
+   *  to (dpay's till mints one per charge), so a payment that dropped it could move money and leave
+   *  the sale uncredited. Null is not a gap: the rail mints its own nonce, which is what every till
+   *  payment carried before references existed. The IC rail is the only one that can have one —
+   *  Solana Pay has no equivalent field, and this integration signs no SPL memo. */
+  reference: string | null;
   /** The earlier of the quote's expiry and the transfer instruction's, in epoch ms. Approving
    *  after it would burn the quote AFTER the funds moved, which is the worst outcome there is. */
   expiresAt: number;
@@ -607,6 +614,7 @@ export async function resolveOcpOffer(
       assetId: offer.assetId,
       to: dest.to,
       rawAmount: dest.rawAmount,
+      reference: dest.ref,
       expiresAt,
       payableUntil,
     },
@@ -691,12 +699,15 @@ function walletAssetList(payable: OcpOffer[], assets: SelectableAsset[]): string
 }
 
 /** The provider's transfer instruction, parsed for the selected asset's rail and checked against
- *  it. Null on ANY disagreement — the caller refuses; there is no partial answer worth keeping. */
+ *  it. Null on ANY disagreement — the caller refuses; there is no partial answer worth keeping.
+ *
+ *  `ref` is the provider's on-chain reference where the rail can carry one, and null on Solana,
+ *  which has no such field in a `solana:` URI and no memo instruction this integration builds. */
 async function destinationOf(
   uri: string,
   selected: SelectableAsset,
   catalog: CurrencyDescriptor[],
-): Promise<{to: string; rawAmount: string} | null> {
+): Promise<{to: string; rawAmount: string; ref: string | null} | null> {
   if (selected.protocol === 'ic') {
     const parsed = parseIcpUri(uri);
     if (!parsed.ok) {
@@ -727,7 +738,7 @@ async function destinationOf(
       // So the form is refused BEFORE consent instead of paid on a guess. A SIBLING `subaccount=`
       // parameter, which names the same thing from outside the `to` value, is refused by the parser
       // itself (`unexpected-parameter`).
-      return {to: await DpayCore.icpValidatePrincipal(parsed.to), rawAmount: raw};
+      return {to: await DpayCore.icpValidatePrincipal(parsed.to), rawAmount: raw, ref: parsed.ref};
     } catch (e) {
       console.warn(`opencryptopay: destination principal rejected: ${errText(e)}`);
       return null;
@@ -743,7 +754,7 @@ async function destinationOf(
     return null;
   }
   const raw = rawAmountOf(parsed.amount, selected.decimals);
-  return raw === null ? null : {to: parsed.to, rawAmount: raw};
+  return raw === null ? null : {to: parsed.to, rawAmount: raw, ref: null};
 }
 
 /** The instructed amount in the asset's raw units, or null with the reason logged. Shared by both

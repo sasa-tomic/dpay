@@ -1,0 +1,59 @@
+<!doctype html>
+<!-- Served at /pl/ by crates/dpay-relay/src/till.rs (`till_code_page`), which is where the QR this
+     till prints points a phone camera that is not a wallet. The asset and network named below are
+     the pair that module serves; both change together with it. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Till payment code | Different Pay</title>
+<meta name="description" content="You scanned a Different Pay till code. Here is how to pay it." />
+<meta name="color-scheme" content="light dark" />
+<meta name="theme-color" content="#F4F1E8" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+<meta name="robots" content="noindex" />
+<style>
+  :root{
+    --bg:#F4F1E8; --panel:#FDFCF9; --ink:#1B1A17; --ink-2:#57534A;
+    --brand:#FF5A1F; --line:#E5DFD1;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#141210; --panel:#1D1A17; --ink:#F4F1E8; --ink-2:#B8B1A3; --line:#2E2A25; }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:32px 20px; background:var(--bg); color:var(--ink);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  main{max-width:32rem; margin:0 auto}
+  h1{font-size:1.5rem; line-height:1.25; margin:0 0 .5rem}
+  p{margin:0 0 1rem; color:var(--ink-2)}
+  ol{margin:0 0 1rem; padding-left:1.2rem; color:var(--ink-2)}
+  li{margin:0 0 .4rem}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px}
+  .btn{
+    display:inline-block; margin:.25rem .5rem .25rem 0; padding:12px 18px; border-radius:10px;
+    background:var(--brand); color:#fff; font-weight:600; text-decoration:none;
+  }
+  .btn.secondary{background:transparent; color:var(--ink); border:1px solid var(--line)}
+  .note{font-size:.9rem}
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>This is a Different Pay till code</h1>
+  <p>You pointed a camera at a shop's payment code. Nothing has been charged, and this page cannot
+     take a payment — the payment happens in your wallet, on your phone.</p>
+  <ol>
+    <li>Install Different Pay and open it.</li>
+    <li>Tap <strong>Pay</strong>, then <strong>Pay now</strong> to start the scanner.</li>
+    <li>Point it at the same code on the counter. The app shows the amount, the shop's account and
+        how long the price is good for, and it pays only when you approve.</li>
+  </ol>
+  <p><a class="btn" href="/">Get Different Pay</a><a class="btn secondary" href="/wallet">Open the web wallet</a></p>
+  <p class="note">This till is paid in VCHF on the Internet Computer. Other Lightning or LNURL
+     wallets cannot pay it — they do not settle on that network — so a Different Pay wallet is what
+     this code is for. If you do not have one, ask the shop for another way to pay.</p>
+</main>
+</body>
+</html>

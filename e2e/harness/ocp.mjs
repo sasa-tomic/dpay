@@ -96,6 +96,8 @@ export const REQUESTED_AMOUNT = {asset: 'CHF', amount: 1};
 const TILL_WIRE = JSON.parse(readFileSync(new URL('../../dfx/till_wire.json', import.meta.url), 'utf8'));
 const TILL_LEDGER = /^icp:([^/]+)\/transfer\?/.exec(TILL_WIRE.callback.uri);
 if (TILL_LEDGER === null) throw new Error(`till_wire.json's callback URI is not an icp: transfer: ${TILL_WIRE.callback.uri}`);
+const TILL_REF = /&ref=([0-9a-f]{32})$/.exec(TILL_WIRE.callback.uri);
+if (TILL_REF === null) throw new Error(`till_wire.json's callback URI names no per-charge ref: ${TILL_WIRE.callback.uri}`);
 
 /** dpay's own till, as the golden states it: ONE method, ONE asset, and the raw units its decimal
  *  amount means (`amount_raw` — the integer the payer's converter has to land on). */
@@ -109,6 +111,10 @@ export const DPAY_TILL = {
   amount: TILL_WIRE.details.transferAmounts[0].assets[0].amount,
   amountRaw: TILL_WIRE.amount_raw,
   ledger: TILL_LEDGER[1],
+  /** The per-charge reference the till puts on its step-3 URI and matches its ledger history on.
+   *  The payer must carry it as the transfer's ICRC-1 memo — which is what flow 113 checks against
+   *  the merchant's real history, on the far side of a real settlement. */
+  ref: TILL_REF[1],
   /** What the till answers a submission with while it has not yet seen the transfer in the
    *  merchant's ledger history. `202 {"status":"PENDING"}` — reported, not credited. */
   pendingBody: TILL_WIRE.submit_pending,
@@ -145,7 +151,7 @@ export function dpayTillAt(relayBaseURL, destination) {
       pendingBody: DPAY_TILL.pendingBody,
       uris: {
         [`${DPAY_TILL.method}/${DPAY_TILL.asset}`]:
-          `icp:${DPAY_TILL.ledger}/transfer?to=${destination}&amount=${DPAY_TILL.amount}`,
+          `icp:${DPAY_TILL.ledger}/transfer?to=${destination}&amount=${DPAY_TILL.amount}&ref=${DPAY_TILL.ref}`,
       },
     },
   };

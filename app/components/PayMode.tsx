@@ -278,10 +278,17 @@ export function PayMode({identity, relayUrl, online, nfcStatus, onSettled, onOff
       toAccountText: out.target.to,
       amount: out.target.rawAmount,
       currency: paying.currency,
-      // A fresh reconciliation nonce, generated ONCE for this till payment: an Approve after a
-      // refused attempt re-signs the identical transfer, which the ledger dedups instead of
-      // paying twice. The provider never reads it — it verifies the block index.
-      nonceHex: randNonceHex(),
+      // The ON-CHAIN MEMO, which is the till's own reference when it gave one: a provider that
+      // mints a `ref` per charge matches its history on that value, so a transfer that dropped it
+      // can move the money and leave the sale uncredited. Absent — a provider that names none, as
+      // the measured one does — a fresh nonce is minted here instead, which is what every till
+      // payment carried before references existed.
+      //
+      // Either way it is fixed ONCE for this payment, so a second Approve after a refused attempt
+      // re-signs the SAME instruction the till is waiting for rather than a payment it would not
+      // recognise. It is not a double-pay guard and must not be read as one: `prepareTransfer`
+      // sends no `created_at_time`, and an ICRC-1 ledger deduplicates only when that field is set.
+      nonceHex: out.target.reference ?? randNonceHex(),
       memo: '',
       // A till has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
       // the review's countdown + the Approve-time check.

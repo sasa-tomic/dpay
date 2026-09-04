@@ -75,7 +75,10 @@ export type PayLinkParse = {ok: true; link: PayLink} | {ok: false; err: PayLinkE
 const MAX_RECIPIENT_LEN = 128; // an IC principal is ≤63 chars, a base58 Solana address ≤44
 const MAX_ASSET_LEN = 32;
 const MAX_NETWORK_LEN = 32;
-const RE_REF = /^[0-9a-fA-F]{32}$/; // the 16-byte wire nonce, hex
+/** The `ref` grammar: the 16-byte wire nonce as hex. Exported because the SAME field arrives on an
+ *  OpenCryptoPay provider's transfer instruction (`parseIcpUri`, `lib/opencryptopay.ts`) and it is
+ *  the same fact — the on-chain ICRC memo — so it is read against one rule, not two. */
+export const RE_REF = /^[0-9a-fA-F]{32}$/;
 
 /** Canonical spelling of a settlement-chain name: lowercase, spaces as hyphens. So a link written
  *  by hand as `network=Internet%20Computer` and one written by the app as

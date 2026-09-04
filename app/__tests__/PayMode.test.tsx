@@ -658,6 +658,9 @@ const OCP_TARGET: OcpTarget = {
   assetId: 'ic:0',
   to: TILL_PRINCIPAL,
   rawAmount: '100',
+  // No reference: DFX's measured URI names none, so this fixture is the provider that gives the
+  // wallet nothing to echo. The till that DOES give one is the dpay-served case below.
+  reference: null,
   expiresAt: Date.now() + 300_000,
   // A live price with room to spare. The gap to `expiresAt` is what the countdown shows and what
   // Approve is gated on — see the deadline suite below.
@@ -747,6 +750,35 @@ describe('PayMode — OpenCryptoPay till', () => {
     const approve = tree.root.findAll(n => n.props && n.props.testID === 'btn-approve')[0];
     expect(approve.props.disabled).toBe(true);
     expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+  });
+
+  test('the till’s own reference becomes the transfer’s on-chain memo, and its absence mints one', async () => {
+    // THE MATCH. A provider that names a `ref` matches its ledger history on exactly that memo
+    // (dpay's till mints one per charge, `crates/dpay-relay/src/till.rs`), so a transfer signed
+    // with the wallet's own nonce instead would move the money and leave the sale uncredited.
+    const REF = '19ff3250469370d21a04c100ad5ab8bb';
+    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'ok', target: {...OCP_TARGET, reference: REF}});
+    const tree = mountTill();
+    await scanTill(tree);
+    await pressByLabel(tree, M.pay.approveA11y);
+    await (jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>)();
+
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(prepareTransfer).mock.calls[0][2].nonceHex).toBe(REF);
+
+    // A provider that names none — the measured DFX till — still pays: the wallet mints its own
+    // 16-byte memo, which is what every till payment carried before references existed. It must be
+    // a real nonce, not an empty string, or the transfer would carry no memo at all.
+    jest.mocked(prepareTransfer).mockClear();
+    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'ok', target: OCP_TARGET});
+    const plain = mountTill();
+    await scanTill(plain);
+    await pressByLabel(plain, M.pay.approveA11y);
+    await (jest.mocked(payAndReport).mock.calls[1][3] as () => Promise<OcpSendResult>)();
+
+    const minted = jest.mocked(prepareTransfer).mock.calls[0][2].nonceHex;
+    expect(minted).toMatch(/^[0-9a-f]{32}$/);
+    expect(minted).not.toBe(REF);
   });
 
   test('the IC rail reports a CONFIRMED block index, and anything else as unknown', async () => {

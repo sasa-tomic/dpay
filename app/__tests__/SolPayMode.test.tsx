@@ -490,6 +490,9 @@ const OCP_TARGET: OcpTarget = {
   assetId: 'solana:SOL',
   to: MERCHANT,
   rawAmount: '12214220',
+  // Always null on this rail: a `solana:` URI has no reference field, and this integration signs
+  // no SPL memo instruction (`destinationOf`, services/opencryptopay.ts).
+  reference: null,
   expiresAt: Date.now() + 300_000,
   // A live price with room to spare. The gap to `expiresAt` is what the countdown shows and what
   // Approve is gated on — the same deadline the IC rail uses, from the same helper.

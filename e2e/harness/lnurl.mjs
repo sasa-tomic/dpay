@@ -1,14 +1,19 @@
 // LNURL (LUD-01) bech32 ENCODER — the harness half of the OpenCryptoPay till codes.
 //
-// The app ships a bech32 DECODER (`decodeLnurl` in `app/lib/opencryptopay.ts`); nothing in the repo
-// encodes one, and a flow that wants to scan a merchant's till code needs a real, checksum-valid
-// `lnurl1…` string to point the camera at. Hand-transcribing one would pin a magic constant nobody
-// can re-derive, so this is the encoder — 40 lines of BIP-173, the mirror of the decoder the app
-// already documents.
+// A FIXTURE BUILDER, not a second copy of a production rule, and the distinction survived the
+// relay learning to encode: `lnurl_of` (`crates/dpay-relay/src/till.rs`) mints the code for a
+// charge on dpay's OWN origin, which is the only origin it can ever speak for. What these flows
+// need is a code for `api.dfx.swiss` — a FOREIGN provider our relay would never serve and whose
+// codes it therefore cannot produce. Hand-transcribing one would pin a magic constant nobody can
+// re-derive, so this is the encoder: 40 lines of BIP-173, the mirror of the decoder the app ships
+// (`decodeLnurl`, `app/lib/opencryptopay.ts`).
 //
-// It is deliberately NOT a second copy of the decoder: the flows never decode. The round trip is
-// verified where it matters — flow 111 feeds the output through the REAL app, so a wrong encoder
-// fails that flow loudly instead of quietly agreeing with itself.
+// It is deliberately NOT a second copy of the decoder either: the flows never decode. The round
+// trip is verified where it matters — flow 111 feeds the output through the REAL app, so a wrong
+// encoder fails that flow loudly instead of quietly agreeing with itself. The RELAY's encoder is
+// pinned separately and against outside evidence: a code decoded from a real DFX till's QR
+// (`crates/dpay-relay/src/till.rs`), and the wallet's own decoder reading the relay's real output
+// (`app/__tests__/tillWire.test.ts`).
 //
 // A corroborating check on the construction: the findings doc records the live example QR as 94
 // characters for the 51-character URL `https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e`, and

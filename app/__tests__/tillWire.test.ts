@@ -1,7 +1,7 @@
 import {describe, it, expect} from '@jest/globals';
 import {readFileSync} from 'fs';
 import {join} from 'path';
-import {parseIcpUri, parseOcpScan, parsePaymentDetails, parseProviderInstant} from '../lib/opencryptopay';
+import {decodeLnurl, parseIcpUri, parseOcpScan, parsePaymentDetails, parseProviderInstant} from '../lib/opencryptopay';
 import {parseDecimalToUnits} from '../lib/amount';
 import {BUNDLED_NETWORKS, icpCatalogOf, ledgerToCurrency} from '../config/catalog';
 
@@ -23,7 +23,7 @@ import {BUNDLED_NETWORKS, icpCatalogOf, ledgerToCurrency} from '../config/catalo
 const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8')) as {
   input: {merchant_name: string; host: string};
   amount_raw: string;
-  open: {id: string; merchant: string; url: string};
+  open: {id: string; merchant: string; url: string; lnurl: string; qr: string; created_secs: number; expires_at: number};
   details: Record<string, unknown>;
   callback: {blockchain: string; expiryDate: string; uri: string};
 };
@@ -43,6 +43,40 @@ describe('the dpay till’s wire, read by the dpay payer', () => {
       apiUrl: GOLDEN.open.url,
       host: GOLDEN.input.host,
     });
+  });
+
+  it('decodes the bech32 code the relay minted back to the relay’s own endpoint', () => {
+    // THE CROSS-LANGUAGE PROOF, and the reason the relay mints the LNURL rather than the screen
+    // that renders it: this string was produced by `lnurl_of` in Rust
+    // (`crates/dpay-relay/src/till.rs`) and is read here by the wallet's own hand-rolled bech32.
+    // Two independent implementations of LUD-01, agreeing on a value neither of them wrote into
+    // this file — a bare https endpoint is scannable by dpay and by nothing else, so getting this
+    // wrong would ship a QR no wallet could use.
+    expect(decodeLnurl(GOLDEN.open.lnurl)).toEqual({ok: true, url: GOLDEN.open.url});
+    // Single-case, which is what makes the checksum well-defined at all — and uppercase, which is
+    // what lets a QR encoder pick alphanumeric mode.
+    expect(GOLDEN.open.lnurl).toBe(GOLDEN.open.lnurl.toUpperCase());
+
+    // …and the QR string the merchant's screen actually renders is that code inside the wrapper a
+    // generic phone camera opens as a web page. The scanner must reach the SAME endpoint from it,
+    // through the `?lightning=` branch rather than the bare-URL one.
+    expect(parseOcpScan(GOLDEN.open.qr)).toEqual({
+      ok: true,
+      apiUrl: GOLDEN.open.url,
+      host: GOLDEN.input.host,
+    });
+  });
+
+  it('states the charge’s own clock, so a cashier’s screen needs no copy of the till’s lifetime', () => {
+    // Both instants are on the wire because the alternative is a copy of the relay's charge TTL
+    // living in this app — the drift the golden exists to prevent. What is asserted HERE is only
+    // that the pair is usable: two whole unix seconds, the deadline after the ring-up, so a
+    // countdown is subtraction and nothing else. The VALUE of the gap is the relay's own rule and
+    // is pinned there, against the relay's own constant — restating it here would be the second
+    // copy this field removes.
+    expect(Number.isInteger(GOLDEN.open.created_secs)).toBe(true);
+    expect(Number.isInteger(GOLDEN.open.expires_at)).toBe(true);
+    expect(GOLDEN.open.expires_at).toBeGreaterThan(GOLDEN.open.created_secs);
   });
 
   it('narrows the till’s payment details to the exact quote, price and deadline', () => {
@@ -78,6 +112,11 @@ describe('the dpay till’s wire, read by the dpay payer', () => {
     // The account is the merchant's own, the same one their ring-up answer named. dpay holds no key
     // for it and never appears between the two.
     expect(parsed.to).toBe(GOLDEN.open.merchant);
+    // The till's per-charge reference, which the payer carries as the transfer's ICRC-1 memo and
+    // the till matches its history on. Read here as the 16-byte memo the app will actually sign:
+    // if this parsed to null the payment would go out with a nonce of the wallet's own and the
+    // sale would never be credited, with the money already gone.
+    expect(parsed.ref).toMatch(/^[0-9a-f]{32}$/);
     // The instruction and the quote must be the same money — they are separate calls, and a payer
     // that signed the URI's amount against the quote's price would be paying an unquoted number.
     const quoted = (GOLDEN.details as {transferAmounts: {assets: {amount: string}[]}[]}).transferAmounts[0].assets[0];

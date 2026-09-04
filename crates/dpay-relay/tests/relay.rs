@@ -2339,6 +2339,114 @@ async fn open_till(
     body
 }
 
+/// VCHF's ledger and fee, as this relay's own compiled catalog states them — the SAME lookup the
+/// till makes when it names a destination, so a test can never pay a ledger the provider does not
+/// read or guess a fee the gateway would refuse.
+async fn vchf_ledger(state: &AppState) -> (String, u64) {
+    let (status, body) = call(state, get_req("/api/v1/currencies")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let row = body["networks"]
+        .as_array()
+        .expect("the catalog is a list of networks")
+        .iter()
+        .flat_map(|n| n["assets"].as_array().cloned().unwrap_or_default())
+        .find(|a| a["currency"] == 7)
+        .expect("the served catalog must carry VCHF as currency 7");
+    let fee = row["fee"].as_str().expect("the VCHF row states a fee").parse().expect("a decimal fee");
+    (row["ledger"].as_str().expect("the VCHF row names a ledger").to_string(), fee)
+}
+
+/// The `ref` this till hands a payer for one charge, read the way a payer reads it: off the step-3
+/// instruction, which is the only place this provider states it. Minting a quote to get there is
+/// not test scaffolding — it is the sequence, and the measured provider mints one per read too.
+async fn till_reference(state: &AppState, id: &str) -> String {
+    let (status, details) = call(state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::OK, "reading the details to reach step 3: {details}");
+    let quote = details["quote"]["id"].as_str().expect("a quote carries an id");
+    let (status, transfer) = call(
+        state,
+        get_req(&format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=VCHF")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "step 3: {transfer}");
+    let uri = transfer["uri"].as_str().expect("a transfer instruction carries a uri");
+    uri.rsplit_once("&ref=")
+        .unwrap_or_else(|| panic!("the step-3 URI must name this charge's reference: {uri}"))
+        .1
+        .to_string()
+}
+
+/// Pay a charge the way a payer does: a REAL signed `icrc1_transfer` on the VCHF ledger to the
+/// merchant's own account, carrying the charge's `ref` as the ICRC-1 memo. Returns the ledger block
+/// it landed in — the identity a settlement names, so a caller can assert WHICH transfer credited.
+///
+/// Deliberately not a faucet credit (which is what these tests used before, and which logs a
+/// memo-less mint row): what settles a charge is now the memo, so a fixture that could not carry
+/// one would prove the opposite of what these tests are for.
+async fn pay_till(
+    state: &AppState,
+    fake: &Arc<FakeIc>,
+    merchant_pk: [u8; 32],
+    raw: u64,
+    reference: &str,
+) -> u64 {
+    let (ledger, fee) = vchf_ledger(state).await;
+    let payer = keypair();
+    let payer_owner = user_principal(&pubkey(&payer));
+    let before = fake.balance_for(Currency::from(7u32), &user_principal(&merchant_pk));
+    fake.faucet_credit(Currency::from(7u32), &payer_owner, u128::from(raw) + u128::from(fee));
+    let arg = transfer_arg(
+        &Account::new(user_principal(&merchant_pk)),
+        None,
+        u128::from(raw),
+        Some(u128::from(fee)),
+        Some(hex::decode(reference).expect("a reference is hex")),
+        None,
+    );
+    let req = CallRequest {
+        canister: Principal::from_text(&ledger).expect("the VCHF ledger principal parses"),
+        method_name: "icrc1_transfer".to_string(),
+        arg,
+        ingress_expiry_ns: ingress_expiry(now_ns(), 300),
+        nonce: None,
+    };
+    let (status, _headers, body) = call_raw(
+        state,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/v2/canister/{ledger}/call"))
+            .body(Body::from(sign_update(&payer, &req)))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "the payer's signed transfer must be taken by the gateway: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_eq!(
+        fake.balance_for(Currency::from(7u32), &user_principal(&merchant_pk)),
+        before + raw,
+        "the money really moved to the merchant before any charge is polled"
+    );
+    // The block this landed in, read back through the relay's own exact-memo history filter — the
+    // same reconciliation the Receive tab uses, so the identity a caller asserts on is the one the
+    // ledger states rather than one this helper counted.
+    let merchant_hex = hex::encode(merchant_pk);
+    let (status, rows) = call(
+        state,
+        get_req(&format!("/api/v1/transactions/{merchant_hex}?currency=7&memo={reference}")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rows}");
+    let row = rows["transactions"]
+        .as_array()
+        .and_then(|r| r.first())
+        .unwrap_or_else(|| panic!("the transfer carrying {reference} must be in history: {rows}"));
+    row["block"].as_u64().unwrap_or_else(|| panic!("a history row names its block: {row}"))
+}
+
 /// A GET carrying the same origin pair, for the one provider route that builds absolute URLs.
 fn till_get(uri: &str, host: &str, proto: &str) -> Request<Body> {
     Request::builder()
@@ -2405,6 +2513,14 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // provider fails to honour on its own verification side.
     assert!(uri.starts_with("icp:"), "{uri}");
     assert!(uri.contains(&format!("/transfer?to={merchant_account}&amount=10.")), "{uri}");
+    // …and this charge's own reference, which is what the payer echoes as the transfer's memo and
+    // what the till matches on. 32 hex characters — the 16-byte width dpay's reconciliation memo
+    // has everywhere else — and different from the charge's id, which is a read token and not a
+    // claim on a ledger row.
+    let reference = uri.rsplit_once("&ref=").unwrap_or_else(|| panic!("{uri}")).1.to_string();
+    assert_eq!(reference.len(), 32, "{uri}");
+    assert!(reference.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')), "{uri}");
+    assert!(!id.contains(&reference), "the reference is not the charge id in another spelling");
 
     // A pair this till does not serve is refused rather than quoted — quoting it would mean
     // holding an exchange rate, which v1 deliberately does not.
@@ -2427,10 +2543,16 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     assert!(status_body["paid"].is_null(), "nothing may be credited before a transfer exists");
 
     // --- the money actually arrives --------------------------------------------------------------
-    // Credited to the merchant's principal on the VCHF ledger — the same place a signed
-    // icrc1_transfer from any wallet would land it.
-    let merchant_principal = Principal::self_authenticating_ed25519(&merchant_pk);
-    fake.faucet_credit(Currency::from(7u32), &merchant_principal, 1_000_000_000);
+    // A real signed transfer to the merchant's principal on the VCHF ledger, carrying the step-3
+    // `ref` as its memo — the exact thing a payer is instructed to send.
+    let paying_block = pay_till(&state, &fake, merchant_pk, 1_000_000_000, &reference).await;
+
+    // A same-amount transfer to the same merchant carrying somebody ELSE's reference is not this
+    // sale. Sent second, so it is the NEWER row and the first one a newest-first walk meets:
+    // matching on amount alone would take it, and this charge would be credited out of a payment
+    // made for something else.
+    let stray = pay_till(&state, &fake, merchant_pk, 1_000_000_000, &"9e".repeat(16)).await;
+    assert_ne!(stray, paying_block, "two transfers are two ledger rows");
 
     // Waiting out the observation window, which is a real property and not a test convenience: a
     // charge is walked at most once every couple of seconds however hard it is polled, so a
@@ -2456,6 +2578,10 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     assert_eq!(status, StatusCode::OK, "the retry settles: {body}");
     assert_eq!(body["status"], "OK");
     assert_eq!(body["paid"]["amount_raw"], "1000000000");
+    assert_eq!(
+        body["paid"]["block"], paying_block,
+        "the sale is credited out of the transfer that NAMED it, not the newer look-alike: {body}"
+    );
 
     // …and it is idempotent: reporting a third time answers the same, and never re-credits.
     let (status, again) = call(&state, get_req(&tx)).await;
@@ -2486,28 +2612,35 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
 
 /// ONE TRANSFER, ONE SALE — the money bug, over the real HTTP surface.
 ///
-/// Two charges for the same price at the same till and exactly one payment. Before the ledger row
-/// was consumed, both read as paid off that single transfer and the shop handed over the goods
-/// twice; the timestamp clause the old comment credited for preventing this cannot, because the
-/// payment is newer than both charges.
+/// Two charges for the same price at the same till and exactly one payment. Matching on amount
+/// alone, both read as paid off that single transfer and the shop handed over the goods twice.
+/// Now the payment NAMES the charge it is for, so the second one is not merely left open by the
+/// order the two happened to be polled in — that transfer could never have credited it.
 #[tokio::test]
 async fn one_transfer_credits_exactly_one_sale() {
     let (state, fake) = till_state();
     let merchant = SigningKey::from_bytes(&[21u8; 32]);
     let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
 
-    // Ring up CHF 4.50, then ring up CHF 4.50 again — the customer fumbled, the cashier re-rang.
+    // Ring up CHF 4.50 and let a customer read its instruction, then ring up CHF 4.50 again — the
+    // customer fumbled, the cashier re-rang. Reading the first charge's step 3 BEFORE the re-ring
+    // is the sequence a real payer lives: a superseded charge is no longer quoted, which is exactly
+    // why the payer standing there is still holding an instruction the till must honour.
     let first = open_till(&state, &merchant, "Test Shop", 450, "till.example", "http").await;
+    let first_id = first["id"].as_str().unwrap().to_string();
+    let first_ref = till_reference(&state, &first_id).await;
     let second = open_till(&state, &merchant, "Test Shop", 450, "till.example", "http").await;
-    let (first_id, second_id) = (first["id"].as_str().unwrap(), second["id"].as_str().unwrap());
+    let second_id = second["id"].as_str().unwrap().to_string();
+    let second_ref = till_reference(&state, &second_id).await;
+    let (first_id, second_id) = (first_id.as_str(), second_id.as_str());
     assert_ne!(first_id, second_id, "two ring-ups are two charges, not one");
+    // The two charges are handed DIFFERENT references, which is the whole mechanism: each customer
+    // is told what to write on their payment, so the shop can tell two identical prices apart.
+    assert_ne!(first_ref, second_ref, "each charge names itself, or none of this works");
 
-    // ONE payment of exactly CHF 4.50 lands at the merchant.
-    fake.faucet_credit(
-        Currency::from(7u32),
-        &Principal::self_authenticating_ed25519(&merchant_pk),
-        450_000_000,
-    );
+    // ONE payment of exactly CHF 4.50 lands at the merchant, carrying the FIRST charge's reference
+    // — the code the customer was actually holding when they paid.
+    pay_till(&state, &fake, merchant_pk, 450_000_000, &first_ref).await;
 
     let status_of = |id: &str| format!("/api/v1/till/{id}");
     let (_, a) = call(&state, get_req(&status_of(first_id))).await;
@@ -2520,10 +2653,10 @@ async fn one_transfer_credits_exactly_one_sale() {
     );
     assert_eq!(paid[0]["paid"]["amount_raw"], "450000000");
 
-    // Which one takes it is not a coin toss: the first charge polled claims the row, and the
-    // second is left honestly open. A VOIDED charge is still observed — that is deliberate, and
-    // it is why a payer holding the old code a heartbeat before the cashier re-rang does not lose
-    // their money.
+    // Which one takes it is not the order they were polled in: the transfer named the first charge,
+    // so the second is left honestly open however hard it is asked. A VOIDED charge is still
+    // observed — that is deliberate, and it is why a payer holding the old code a heartbeat before
+    // the cashier re-rang does not lose their money.
     assert_eq!(a["state"], "paid");
     assert_eq!(b["paid"], Value::Null);
     assert_eq!(b["state"], "open");
@@ -2797,7 +2930,8 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
     // merchant "cancelled" here would have them hand over goods they have already been paid for.
     let paid = open_till(&state, &merchant, "Bahnhof Kiosk", 100, "till.example", "http").await;
     let paid_id = paid["id"].as_str().expect("a rung-up charge carries an id").to_string();
-    fake.faucet_credit(Currency::from(7u32), &user_principal(&merchant_pk), 100_000_000);
+    let paid_ref = till_reference(&state, &paid_id).await;
+    pay_till(&state, &fake, merchant_pk, 100_000_000, &paid_ref).await;
     let (_, settled) = call(&state, get_req(&format!("/api/v1/till/{paid_id}"))).await;
     assert_eq!(settled["state"], "paid", "{settled}");
     let too_late = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), unix_secs());
@@ -3024,12 +3158,48 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     let (state, fake) = till_state();
 
     // --- what the merchant's own screen gets, and the URL its QR carries --------------------------
+    let rung_at = now_ns() / 1_000_000_000;
     let opened = open_till(&state, &merchant, &merchant_name, cents, &host, &proto).await;
+    let rung_done = now_ns() / 1_000_000_000;
     let charge_id = opened["id"].as_str().expect("a rung-up charge carries an id").to_string();
     let golden_charge = field(&["open", "id"]);
     assert_minted_like(&charge_id, &golden_charge, "the payment-link id");
+
+    // The LNURL is not a substring of anything above it, so it cannot ride the id substitution: a
+    // one-character change to the URL changes the whole bech32. Both sides are therefore checked
+    // against the encoder itself — the observed code must encode the observed URL, and the golden's
+    // must encode the golden's — which pins the recorded string as the till's own output rather
+    // than as a value somebody typed. What the CROSS-LANGUAGE proof is remains the payer's half:
+    // `app/__tests__/tillWire.test.ts` decodes this very string with the wallet's own bech32.
+    let lnurl = opened["lnurl"].as_str().expect("a ring-up answer carries the bech32 code").to_string();
+    assert_eq!(lnurl, dpay_relay::till::lnurl_of(&field(&["open", "url"]).replace(&golden_charge, &charge_id)));
+    assert_eq!(field(&["open", "lnurl"]), dpay_relay::till::lnurl_of(&field(&["open", "url"])));
+    // …and the QR string is that code inside the wrapper a generic camera can open, so pinning the
+    // code pins the QR with it.
+    assert!(opened["qr"].as_str().unwrap_or_default().ends_with(&format!("?lightning={lnurl}")), "{opened}");
+
+    // The charge's clock: `created_secs` is when this request was served, and `expires_at` is the
+    // ONE lifetime rule applied to it — asserted as a derivation, not as a shape, so the golden's
+    // pair cannot drift from the store's own deadline.
+    let created = opened["created_secs"].as_u64().expect("a ring-up answer states when it was rung up");
+    assert!((rung_at..=rung_done).contains(&created), "created_secs {created} ∉ [{rung_at}, {rung_done}]");
+    assert_eq!(opened["expires_at"], created + dpay_relay::till::CHARGE_TTL_SECS);
+    let golden_created = golden["open"]["created_secs"].as_u64().expect("the golden states created_secs");
+    assert_eq!(golden["open"]["expires_at"], golden_created + dpay_relay::till::CHARGE_TTL_SECS);
+
     assert_eq!(
-        pinned(&opened, &[(charge_id.as_str(), golden_charge.as_str())]),
+        pinned(
+            &opened,
+            &[
+                (charge_id.as_str(), golden_charge.as_str()),
+                (lnurl.as_str(), &field(&["open", "lnurl"])),
+                (&format!("\"created_secs\":{created}"), &format!("\"created_secs\":{golden_created}")),
+                (
+                    &format!("\"expires_at\":{}", created + dpay_relay::till::CHARGE_TTL_SECS),
+                    &format!("\"expires_at\":{}", golden["open"]["expires_at"]),
+                ),
+            ],
+        ),
         golden_body(&golden, "open"),
         "the merchant's ring-up answer drifted from dfx/till_wire.json"
     );
@@ -3069,12 +3239,26 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     let answered_at = now_ns() / 1_000_000_000;
     let expiry_date = transfer["expiryDate"].as_str().expect("a transfer instruction carries an expiry").to_string();
     assert_deadline(&expiry_date, &field(&["callback", "expiryDate"]), called_at, answered_at, "the transfer expiry");
+    // The per-charge reference, the third thing this provider mints fresh. Held to the shape its
+    // pinned counterpart states — same length, lowercase hex — before the golden's own is
+    // substituted, for the reason `assert_minted_like` exists: a normalisation that asked nothing
+    // of what it replaced would pin nothing.
+    let uri = transfer["uri"].as_str().expect("a transfer instruction carries a uri").to_string();
+    let golden_uri = field(&["callback", "uri"]);
+    let reference = uri.rsplit_once("&ref=").unwrap_or_else(|| panic!("step 3 must name a ref: {uri}")).1;
+    let golden_reference = golden_uri
+        .rsplit_once("&ref=")
+        .unwrap_or_else(|| panic!("dfx/till_wire.json's callback URI must name a ref: {golden_uri}"))
+        .1;
+    assert_eq!(reference.len(), golden_reference.len(), "the reference width ({reference})");
+    assert!(reference.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')), "{reference}");
     assert_eq!(
         pinned(
             &transfer,
             &[
                 (charge_id.as_str(), golden_charge.as_str()),
                 (expiry_date.as_str(), &field(&["callback", "expiryDate"])),
+                (reference, golden_reference),
             ],
         ),
         golden_body(&golden, "callback"),
@@ -3098,14 +3282,16 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     // own price credit — so the number in the file is the till's own arithmetic rather than one
     // copied by hand.
     //
-    // A FRESH charge, rung up after the money lands, rather than the one above: that charge was
+    // A FRESH charge, rung up before the money is sent, rather than the one above: that charge was
     // just walked, and a charge is walked at most once every couple of seconds however hard it is
     // polled (the amplification bound). Ringing up again is what a cashier does anyway, and it
-    // keeps this test free of a sleep it would otherwise have to spend.
+    // keeps this test free of a sleep it would otherwise have to spend. The payment carries THAT
+    // charge's own reference, because a transfer that names no charge credits none.
     let raw: u64 = field(&["amount_raw"]).parse().expect("amount_raw is an integer");
-    fake.faucet_credit(Currency::from(7u32), &user_principal(&pk), u128::from(raw));
     let reopened = open_till(&state, &merchant, &merchant_name, cents, &host, &proto).await;
-    let reopened_id = reopened["id"].as_str().expect("a rung-up charge carries an id");
+    let reopened_id = reopened["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let reopened_ref = till_reference(&state, &reopened_id).await;
+    pay_till(&state, &fake, pk, raw, &reopened_ref).await;
     let (status, paid) = call(
         &state,
         get_req(&format!(

@@ -73,7 +73,7 @@ pub struct AppState {
     /// worth less than the hour it lives, and settlement is re-derived from the ledger on every
     /// read — so a restart costs a cashier a re-ring, never a payment and never a double credit.
     pub tills: crate::till::SharedTills,
-    /// Whether the till's six routes are REGISTERED at all — see the gate in [`app`]. Read once,
+    /// Whether the till's seven routes are REGISTERED at all — see the gate in [`app`]. Read once,
     /// while the router is built, so it cannot change under a live request. Set by
     /// [`AppState::with_till`]; `false` for a state that does not ask.
     till_enabled: bool,
@@ -126,7 +126,7 @@ impl AppState {
         self
     }
 
-    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the six routes gated in [`app`].
+    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the seven routes gated in [`app`].
     /// Must be set BEFORE the router is built, because that is where the gate is read.
     pub fn with_till(mut self, enabled: bool) -> Self {
         self.till_enabled = enabled;
@@ -183,12 +183,13 @@ pub fn app(state: AppState) -> Router {
 
     // --- the OpenCryptoPay till, OFF unless the operator asks for it -----------------------------
     //
-    // The six routes below (three here, the standard's three on the root router) are registered only
-    // when `DPAY_ENABLE_TILL` is set — founder decision 2026-09-04, taken against a production probe
-    // of `POST /api/v1/till`. That route was UNAUTHENTICATED: anyone could ring up a charge naming
-    // any ed25519 pubkey and any merchant name, and this relay then served a full payment page for it
-    // on dpay's own domain under dpay's own certificate — a phishing primitive aimed at the exact
-    // control the payer's review relies on, which host served the quote.
+    // The seven routes below (three here; the standard's three plus the camera landing page on the
+    // root router) are registered only when `DPAY_ENABLE_TILL` is set — founder decision 2026-09-04,
+    // taken against a production probe of `POST /api/v1/till`. That route was UNAUTHENTICATED:
+    // anyone could ring up a charge naming any ed25519 pubkey and any merchant name, and this relay
+    // then served a full payment page for it on dpay's own domain under dpay's own certificate — a
+    // phishing primitive aimed at the exact control the payer's review relies on, which host served
+    // the quote.
     //
     // Both merchant routes now require the ring-up to be SIGNED by the very key its destination
     // account derives from (`crate::till`, rule 0; `dpay_core::validate_till_open`), so a charge
@@ -257,15 +258,18 @@ pub fn app(state: AppState) -> Router {
         .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/shots/{name}", get(screenshot));
 
-    // The payer-facing half of the same till, behind the same gate (see above). These sit at the
-    // paths the STANDARD dictates rather than under this relay's own namespace: a wallet derives the
-    // submission URL from the callback by swapping `/cb/` for `/tx/`, so these segments are part of
-    // the protocol.
+    // The payer-facing half of the same till, behind the same gate (see above). The three
+    // `/v1/lnurlp/*` routes sit at the paths the STANDARD dictates rather than under this relay's
+    // own namespace: a wallet derives the submission URL from the callback by swapping `/cb/` for
+    // `/tx/`, so those segments are part of the protocol. The fourth is where a GENERIC phone camera
+    // lands — the till's QR carries the LNURL inside an ordinary web address, so a camera that is
+    // not a wallet opens a page rather than a 404 (`crate::till::till_code_page`).
     let router = if state.till_enabled {
         router
             .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
             .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
             .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
+            .route(crate::till::TILL_CODE_PATH, get(crate::till::till_code_page))
     } else {
         router
     };

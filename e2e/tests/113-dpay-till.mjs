@@ -51,14 +51,17 @@ export const meta = {
   id: '113',
   name: 'dpay-till',
   journey: 'pay',
-  covers: ['opencryptopay', 'own-relay-trust', 'vchf', 'explicit-approve', 'claimed-name', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'settle'],
-  verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer accepts it BECAUSE the till is served by the relay this wallet is configured to use — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name and the CHF price, and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) and reports the proof exactly once → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
+  covers: ['opencryptopay', 'own-relay-trust', 'vchf', 'explicit-approve', 'claimed-name', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'settle'],
+  verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer accepts it BECAUSE the till is served by the relay this wallet is configured to use — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name and the CHF price, and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) carrying the till\'s per-charge `ref` as the transfer\'s on-chain memo, then reports the proof exactly once → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
   timeoutMs: 45000, // 2 legs: 4 provider round trips + 2 real IC settlements
 };
 
 /** Point the camera at the till's code (arming the pay-intent gate first — the shared choke point).
- *  dpay's ring-up hands the merchant a plain `https://…/v1/lnurlp/<id>` URL, so that URL IS the
- *  code: no LNURL wrapper, admitted by its `/lnurlp/` path segment. */
+ *  dpay's ring-up hands the merchant three spellings of one address (`dfx/till_wire.json`, `open`);
+ *  this flow scans the plain `https://…/v1/lnurlp/<id>` endpoint, admitted by its `/lnurlp/` path
+ *  segment. The bech32 spelling and its `?lightning=` wrapper are exercised where they can be
+ *  proven against the relay's own encoder rather than the harness's — `app/__tests__/tillWire.test.ts`
+ *  — and the wrapper's scan branch is flow 111's. */
 async function scanTill(driver, qr) {
   await armPayScan(driver);
   await driver.eval((code) => { window.__DPAY_TEST_SCAN(code); }, qr);
@@ -140,6 +143,19 @@ export async function run() {
       'the payer is debited the till\'s exact amount plus the ledger fee');
     assertEq(await getBalance(relayBaseURL, merchant.publicHex, VCHF), String(PAY_RAW),
       'the MERCHANT is credited the exact amount — the sale really happened on the ledger');
+
+    // THE REFERENCE, end to end. dpay's till puts a per-charge `ref` on its step-3 URI and credits
+    // only a transfer whose ICRC-1 memo carries it. So the payer must have signed THAT memo, and
+    // the proof is the merchant's own history read back through the relay's exact-memo filter —
+    // the same reconciliation the Receive tab uses. A payment without it would settle on-chain and
+    // never be credited to the sale.
+    const byRef = await fetch(
+      `${relayBaseURL}/api/v1/transactions/${merchant.publicHex}?currency=${VCHF}&memo=${DPAY_TILL.ref}`,
+    ).then(r => r.json());
+    assertEq(String(byRef.transactions?.length ?? 0), '1',
+      `exactly one transfer must carry the till's reference ${DPAY_TILL.ref}, got ${JSON.stringify(byRef)}`);
+    assertEq(byRef.transactions[0].amount, String(PAY_RAW),
+      'the referenced transfer is the one that paid the charge');
 
     let seen = await ocpStubState(driver);
     assertEq(String(seen.txUrls.length), '1', 'the proof is reported exactly once');

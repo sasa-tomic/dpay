@@ -44,6 +44,8 @@ const BECH32_OTHER_HRP = 'split1checkupstagehandshakeupstreamerranterredcaperred
 const ICP_URI =
   'icp:ly36x-wiaaa-aaaai-aqj7q-cai/transfer?to=ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae&amount=1.';
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
+// A per-charge reference in the shape dpay's own till mints (32 hex = the 16-byte ICRC memo).
+const REF = '19ff3250469370d21a04c100ad5ab8bb';
 const ICP_URI_TO = 'ygf2v-iniac-cojwe-damoz-s4act-k4xft-xgpjy-776wl-wr754-qxkgo-4ae';
 // RECORDED: `solana:2eQ2Somiat…?amount=1.246922`. The findings doc elides the address, so the tail
 // here is a real Solana address standing in for it: what this pins is the scheme, the recorded
@@ -206,7 +208,9 @@ describe('parseOcpScan', () => {
 
 describe('parseIcpUri', () => {
   it('parses the recorded IC destination URI, trailing bare decimal point and all', () => {
-    expect(parseIcpUri(ICP_URI)).toEqual({ok: true, ledger: VCHF_LEDGER, to: ICP_URI_TO, amount: '1.'});
+    // `ref` is null: the measured provider names none, and its absence is not a failure — the
+    // wallet mints its own memo (`PayMode`). A till that DOES name one is the case below.
+    expect(parseIcpUri(ICP_URI)).toEqual({ok: true, ledger: VCHF_LEDGER, to: ICP_URI_TO, amount: '1.', ref: null});
   });
 
   it('hands the amount on in a spelling the project’s converter accepts', () => {
@@ -246,7 +250,35 @@ describe('parseIcpUri', () => {
       ledger: VCHF_LEDGER,
       to: ICP_URI_TO,
       amount: '1.',
+      ref: null,
     });
+  });
+
+  it('carries the till’s reference, and refuses one it could not put in a memo', () => {
+    // `ref` is the provider's name for the sale, echoed back as the transfer's ON-CHAIN memo — how
+    // dpay's own till matches a payment to the charge it belongs to
+    // (`crates/dpay-relay/src/till.rs`). Honoured, not ignored: dropping it moves the money and
+    // leaves the sale uncredited.
+    expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&amount=1.&ref=${REF}`)).toEqual({
+      ok: true,
+      ledger: VCHF_LEDGER,
+      to: ICP_URI_TO,
+      amount: '1.',
+      ref: REF,
+    });
+    // Lowercased on the way through, because it becomes bytes in a memo and the ledger renders
+    // that memo as lowercase hex — the same normalisation a payment link's `ref` gets.
+    expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&amount=1.&ref=${REF.toUpperCase()}`))
+      .toEqual({ok: true, ledger: VCHF_LEDGER, to: ICP_URI_TO, amount: '1.', ref: REF});
+    // A reference this wallet cannot carry is REFUSED, never dropped: the payment would move real
+    // money against a memo the provider is not looking for. Its own reason, so the console line
+    // says which field was wrong.
+    for (const bad of ['', 'abcd', `${REF}00`, `${REF.slice(0, -1)}z`]) {
+      expect(parseIcpUri(`icp:${VCHF_LEDGER}/transfer?to=${ICP_URI_TO}&amount=1.&ref=${bad}`)).toEqual({
+        ok: false,
+        reason: 'bad-ref',
+      });
+    }
   });
 
   it('refuses a repeated parameter rather than picking one of the two amounts', () => {

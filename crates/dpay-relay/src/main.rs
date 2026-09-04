@@ -29,11 +29,11 @@
 //!                           DPAY_IC_URL is a loopback/local address. See `AgentLedger::connect_with`.
 //!   DPAY_ENABLE_FAUCET      (test-helpers build only) serve `POST /api/v1/faucet`, which mints
 //!                           demo funds on the fake-IC gateway (default: true on `memory`)
-//!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's six routes (`POST /api/v1/till`,
+//!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's seven routes (`POST /api/v1/till`,
 //!                           `POST /api/v1/till/void`, `GET /api/v1/till/{id}`,
-//!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`). Default FALSE, on every
-//!                           build and every ledger — the gate, and what a merchant must sign to
-//!                           reach the two POSTs: `app.rs` and `till.rs`.
+//!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`, `GET /pl/`). Default FALSE,
+//!                           on every build and every ledger — the gate, and what a merchant must
+//!                           sign to reach the two POSTs: `app.rs` and `till.rs`.
 //!   DPAY_CONTROLLER_SEED    (ic, agent build) hex-encoded 32-byte Ed25519 seed of the facade
 //!                           canister's CONTROLLER key. When set, the relay's agent signs its
 //!                           calls with this identity and `POST /api/v1/faucet` is served: the

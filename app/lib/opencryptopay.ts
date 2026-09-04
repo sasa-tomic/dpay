@@ -1,6 +1,6 @@
 import {parseDecimalToUnits} from './amount';
 import {bytesToUtf8} from './base64url';
-import {clampLinkText, sanitiseDisplayText} from './deepLink';
+import {clampLinkText, sanitiseDisplayText, RE_REF} from './deepLink';
 import type {AssetId} from './types';
 import {tokenEq, type SelectableAsset} from '../config/assets';
 
@@ -68,6 +68,11 @@ export type OcpRefusal =
    *  — ignoring `subaccount` pays the owner's DEFAULT account, i.e. a different account than the
    *  one the URI named, which is exactly the silent redirect this module refuses everywhere else. */
   | 'unexpected-parameter'
+  /** The URI carries a `ref` that is not the 32-hex reconciliation memo. Its own reason rather than
+   *  `malformed-uri`, because the fault is precise and the console line is the only place the
+   *  distinction survives: a provider that names a reference this wallet cannot put in a memo would
+   *  have its sale go uncredited, so the payment is refused before any money moves. */
+  | 'bad-ref'
   /** The amount is missing or is not a decimal number. Never coerced to 0. */
   | 'bad-amount'
   /** A Solana URI naming an SPL token. The Solana leg ships native SOL only, so a token URI is
@@ -90,8 +95,14 @@ export type OcpRefusal =
    *  is false — measured live on `TaprootAsset`, `Spark` and `Arkade`). Offering it anyway would
    *  push the failure to the destination call or beyond, i.e. after the payer chose it. */
   | 'method-unavailable'
-  /** USDC on Solana, refused BY NAME: the provider's URI carries no `spl-token` parameter and it is
-   *  unresolved whether the address is the owner or the associated token account. */
+  /** USDC on Solana, refused BY NAME. What the URI's address IS was settled by measurement on
+   *  2026-09-02 — it is the merchant's OWNER wallet, not a token account
+   *  (`docs/specs/2026-09-01-opencryptopay-findings.md`) — so the ambiguity this refusal was first
+   *  written for is gone. What stands in its place: an SPL transfer must be sent to the associated
+   *  token account derived from that owner and the USDC mint, so the account credited would not be
+   *  the account the review showed and the provider named. This wallet derives ATAs for its own
+   *  USDC sends (`app/solana/spl.ts`), so the leg is buildable — it is simply not built here, and
+   *  paying a token URI as if it were native SOL is what refusing it prevents. */
   | 'solana-usdc-unsupported'
   /** An Internet Computer asset that is NOT native ICP, offered by a provider this wallet has no way
    *  to check (`isOwnRelayProvider`). One provider has been measured, at the cost of one real
@@ -117,8 +128,8 @@ export type OcpScan =
   | {ok: true; apiUrl: string; host: string}
   | Refused<'not-lnurl' | 'malformed-lnurl' | 'bad-checksum' | 'not-a-url' | 'not-https'>;
 export type IcpUriParse =
-  | {ok: true; ledger: string; to: string; amount: string}
-  | Refused<'wrong-scheme' | 'malformed-uri' | 'unexpected-parameter' | 'bad-amount'>;
+  | {ok: true; ledger: string; to: string; amount: string; ref: string | null}
+  | Refused<'wrong-scheme' | 'malformed-uri' | 'unexpected-parameter' | 'bad-amount' | 'bad-ref'>;
 export type SolanaUriParse =
   | {ok: true; to: string; amount: string}
   | Refused<'wrong-scheme' | 'malformed-uri' | 'unexpected-parameter' | 'bad-amount' | 'spl-token-unsupported'>;
@@ -417,9 +428,14 @@ const SOLANA_URI_SCHEME = 'solana:';
  *  pedantry. The lists are data, so a parameter joins one the day the code that honours it lands and
  *  not before: admitting a name without implementing it is precisely the silent drop this refuses.
  *
- *  ICP: `to` names the account and `amount` names the value. `subaccount` — the one a real wallet
- *  might be tempted to accept — stays out, for the reason the `to` value's own `owner.subaccount`
- *  spelling is refused a step later (`destinationOf`, `services/opencryptopay.ts`).
+ *  ICP: `to` names the account, `amount` names the value, and `ref` names the sale — the reference a
+ *  provider wants echoed as the transfer's on-chain memo so its ledger match is exact rather than a
+ *  resemblance (dpay's own till mints one per charge, `crates/dpay-relay/src/till.rs`). It is
+ *  honoured, which is why it is listed: the payer's transfer carries it as the ICRC-1 memo. Same
+ *  name and same 32-hex shape as a payment link's `ref` (`lib/deepLink.ts`, the authority for
+ *  both), because it is the same fact. `subaccount` — the one a real wallet might be tempted to
+ *  accept — stays out, for the reason the `to` value's own `owner.subaccount` spelling is refused a
+ *  step later (`destinationOf`, `services/opencryptopay.ts`).
  *
  *  Solana: `amount` only. Solana Pay also defines `spl-token`, `reference`, `memo`, `label` and
  *  `message`, and NONE of them may be silently dropped here:
@@ -432,7 +448,7 @@ const SOLANA_URI_SCHEME = 'solana:';
  *     review does not render — accepting one means the payer approves a URI carrying words they
  *     were never shown. The measured provider sends none of them (findings doc), so refusing costs
  *     a conversation while accepting-and-ignoring costs the payment. */
-const ICP_URI_PARAMS = ['to', 'amount'];
+const ICP_URI_PARAMS = ['to', 'amount', 'ref'];
 const SOLANA_URI_PARAMS = ['amount'];
 
 /** True when the query carries a parameter outside `allowed`. FAIL-CLOSED on purpose: this module
@@ -444,13 +460,19 @@ function hasUnknownParam(params: Map<string, string>, allowed: string[]): boolea
 }
 
 /**
- * Parse `icp:<ledger>/transfer?to=<principal>&amount=<decimal>`.
+ * Parse `icp:<ledger>/transfer?to=<principal>&amount=<decimal>[&ref=<32 hex>]`.
  *
  * The path's method segment is checked against `transfer` exactly: the URI tells the wallet which
  * ledger call to make, and anything other than a plain transfer is a call this wallet will not
  * perform on a stranger's say-so. Likewise the query is closed, not sampled (`ICP_URI_PARAMS`). The
  * principal is NOT validated here — the caller runs the core validator, so a mistyped destination
- * is refused by the same code that refuses one from a payment link. Pure, total, never throws.
+ * is refused by the same code that refuses one from a payment link.
+ *
+ * `ref` is OPTIONAL and absence is not a failure: a provider that names no reference gets the
+ * wallet's own fresh nonce as the memo, which is what every till payment did before references
+ * existed. A `ref` that is PRESENT and unreadable is refused rather than dropped — it is the
+ * provider's instruction for how its sale gets matched, so ignoring it is how money moves and a
+ * sale goes uncredited. Pure, total, never throws.
  */
 export function parseIcpUri(uri: string): IcpUriParse {
   const t = typeof uri === 'string' ? uri.trim() : '';
@@ -470,7 +492,11 @@ export function parseIcpUri(uri: string): IcpUriParse {
   const amount = params.get('amount') ?? '';
   // Missing and unreadable are one fact for the payer: there is no amount to pay.
   if (!RE_DECIMAL_AMOUNT.test(amount)) return {ok: false, reason: 'bad-amount'};
-  return {ok: true, ledger: path[0], to, amount};
+  const ref = params.get('ref') ?? null;
+  if (ref !== null && !RE_REF.test(ref)) return {ok: false, reason: 'bad-ref'};
+  // Lowercased, because a memo is compared as bytes downstream and the ledger renders it as
+  // lowercase hex — the same normalisation `parsePayLink` applies to the identical field.
+  return {ok: true, ledger: path[0], to, amount, ref: ref === null ? null : ref.toLowerCase()};
 }
 
 /**
