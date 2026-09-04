@@ -1,8 +1,10 @@
-# Africa outreach targets (verified 2026-08-28)
+# Africa outreach targets (contacts verified 2026-08-28; **calendar re-verified 2026-09-04**)
 
 Collaboration targets for ∂pay — researched via 5 parallel agents (East / West / Southern+North Africa, forums+events, ICP+Solana ecosystems), emails verified in a second 5-agent pass (every email below was seen printed on a cited page — none guessed; confidence marked). Founder contact: sato.dpay@kalaj.org.
 
 **One-liner for outreach:** ∂pay is an Android wallet where the payer's phone has ZERO connectivity (airplane mode, dead zone, foreign SIM) and still pays via NFC tap or QR scan; the online merchant (any phone with wifi) submits and gets final settlement in seconds. Non-custodial, no swaps, settles the exact asset the merchant requests (ckUSDC/ckBTC/ckETH/VCHF/native ICP on the Internet Computer + native SOL and USDC on Solana). Merchants need no POS hardware.
+
+**Say this accurately if pressed (2026-09-04):** the two-phone NFC tap is proven on hardware for the **Internet Computer** rail only (2026-08-26). The Solana rail has its own independent NFC transport that has **never crossed a radio**, and a Solana payment signed offline may land after its blockhash expires — dpay reports that honestly as unknown, never as settled. "Final settlement in seconds" is an IC-rail claim. The merchant till is **built but not serving**: its routes are gated off by default and are off in production. Never claim other wallets can pay a dpay till — none on the standard's own compatibility list settles an Internet Computer asset (`CLAUDE.md`, hard rule).
 
 **Dropped 2026-08-28:** Kotani Pay — founder-checked, website dead.
 
@@ -15,7 +17,7 @@ High = printed on official site/press; medium = third-party/official-social only
 |---|---|---|---|
 | Bitcoin Ekasi (ZA) | NONE — form bitcoinekasi.com/contact + X DM @vryfokkenou (Hermann Vivier) | — | Team page lists X handles only |
 | Sorted Wallet | hello@sorted.io | high | sorted.io/contact |
-| Fonbnk | support@fonbnk.com | high | fonbnk.com ToS §8.8; contact nav = Google Form |
+| Fonbnk | support@fonbnk.com | high | fonbnk.com/terms-of-service/ (NOT /terms, which 404s); hello@fonbnk.com on homepage; contact nav = Google Form |
 | Yellow Card | hello@yellowcard.io (press@yellowcard.io) | high | yellowcard.io/contact, /press |
 | VeryPay | info@verypay.africa | high | verypay.ug FAQ; Calendly calendly.com/verypay |
 | Grassroots Economics (KE) | info@grassecon.org | high | Will Ruddick |
@@ -27,7 +29,7 @@ High = printed on official site/press; medium = third-party/official-social only
 | Go2Africa | contact@go2africa.com | high | verified live in /about-us footer |
 | SafariBookings | info@safaribookings.com (dennis@, heini@, mart@safaribookings.com) | high | /contact-us + /about-us; dennis@ = head of dev |
 | VoiceMap | hello@voicemap.me (support@voicemap.me) | high | /about footer |
-| Kazang | help@kazang.com | high | via official FB + Play listing; kazang.com currently suspended; parent: customercare@lesakatech.com |
+| Kazang | help@kazang.com | high | via official FB + Play listing; kazang.com DEAD — TLS handshake fails and port 80 returns nothing (re-measured 2026-09-04); parent: customercare@lesakatech.com |
 | Zapper | support@zapper.com (sasupport@zapper.com) | med | site 403s fetchers; from FAQ snippet + Play listing |
 | AC Mobility (Tap&Go RW) | info@acmobility.rw | high | acgroup.rw footer; WhatsApp +250 78 013 9126 |
 
@@ -47,7 +49,7 @@ High = printed on official site/press; medium = third-party/official-social only
 | Paymob (EG) | sales@paymob.com | high | /en/contact-sales footer |
 | Chari (MA) | partnerships@chari.group (contact@chari.group; founder self-published: isma@is.ma) | high | chari.group/en/contact |
 | Tilt Africa (ZM) | hello@tiltafrica.com | high | /contact-us |
-| Busha (NG) | support@busha.io | high | ToS; no partnerships alias |
+| Busha (NG) | support@busha.io | high | /terms-of-use (NOT /terms); busha.co 301s to .io; no partnerships alias |
 | Quidax (NG) | institutional@quidax.com (support@, otc@) | high | institutional = partnerships entry |
 | LemFi | support@lemfi.com | high | /contact-us + ToS; no partnerships alias |
 | Afriex | hello@afriex.co | high | note .co, printed consistently |
@@ -59,10 +61,10 @@ High = printed on official site/press; medium = third-party/official-social only
 | Target | Email | Conf | Notes |
 |---|---|---|---|
 | Web3Lagos / Web3Bridge | event@web3bridge.com (support@web3bridge.com) | high | event.web3bridge.com footer |
-| ETHSafari | partners@ethsafari.xyz (info@, hello@) | high | /contact; Sept 4–12 2026 |
-| Africa Fintech Summit | info@africafintechsummit.com (press@) | high | Kigali Nov 18–20 2026; New Venture Pitch Competition track |
-| Blockchain Africa / Bitcoin Events | info@bitcoinevents.co.za | high | Oct 15 2026, Gauteng |
-| Adopting Bitcoin Cape Town | capetown@adoptingbitcoin.org (info@adoptingbitcoin.org; max@ volunteer) | high | next edition Feb 26–27 2027, Workshop17 Watershed; organizer Carel van Wyk @carelvwyk; CFP watch ~Q4 2026 |
+| ETHSafari | partners@ethsafari.xyz (info@, hello@) | high | /contact. **POSTPONED — site reads "DATES TBA"; organiser's pinned post 2026-08-25 announces the postponement.** Was Sept 4–12 2026 |
+| Africa Fintech Summit | info@africafintechsummit.com (press@) | high | Kigali Nov 18–20 2026, registration OPEN (4 tiers, $150–$1,250; no dated early-bird printed as of 2026-09-04); New Venture Pitch Competition track |
+| Blockchain Africa / Bitcoin Events | info@bitcoinevents.co.za | high | Oct 15 2026, Gauteng; standard tickets ZAR1,485, sales close Oct 14 |
+| Adopting Bitcoin Cape Town | capetown@adoptingbitcoin.org (info@adoptingbitcoin.org; max@ volunteer) | high | Feb 26–27 2027, Workshop17 Watershed; earlybird tickets ALREADY on sale and speakers already being announced. **There is no call-for-speakers page** — the only published route in is Volunteer, so approach via that or the organisers (Carel van Wyk @carelvwyk, Hermann Vivier) |
 | Africa Tech Summit | info@africatechsummit.com (register@) | high | Nairobi Feb 10–11 2027; CFP at /nairobi/call-for-speakers/ |
 | Superteam Nigeria | support@superteam.fun | high | no NG-specific inbox; X @SuperteamNG; Discord; bounty = superteam.fun/earn |
 | ICP Hub Nigeria | NONE — Telegram t.me/saharaicphub, X @IcpSahara, Discord | — | WARNING: icpsahara.africa domain is hijacked (gambling) — do not use |
@@ -75,8 +77,8 @@ High = printed on official site/press; medium = third-party/official-social only
 | Frontier Fintech | samora@frontierfintech.io | high | via substack /advertise-with-us; Calendly samora-frontierfintech/30min |
 | Baobab Network | team@thebaobabnetwork.com | high | apply: thebaobabnetwork.com/apply-now (open, $100k checks) |
 | Founders Factory Africa | africa-enquiries@foundersfactory.co (portfolio@foundersfactory.africa) | high | foundersfactory.africa footer; Gen F EIR = founder-intake path |
-| timbuktoo (UNDP) | oluwagbemisola.fagbemi@undp.org | med | UNDP Africa timbuktoo liaison (published on AfriLabs release); no hub inbox exists; fintech call closed Aug 14 2026 |
-| Circle USDC grants | NONE — apply circle.questbook.app + circle.com/discord | — | window may be closed (May 2026 note) — watch via portal/Discord |
+| timbuktoo (UNDP) | oluwagbemisola.fagbemi@undp.org | med | UNDP Africa timbuktoo liaison (published on AfriLabs release); no hub inbox exists. **Live site is timbuktoo.org** (timbuktoo.africa redirects; timbuktoo.undp.org does not resolve); no fintech call is listed there as of 2026-09-04 — only EdTech (Dakar) and AgriTech (Angola) |
+| Circle USDC grants | NONE — apply circle.questbook.app + circle.com/discord | — | **2026 Cohort 2 is OPEN** (measured 2026-09-04). BUT the 2026 program funds teams **building on Arc**, where Arc is central to the flow of value/settlement — dpay settles on IC and Solana, so this is an ELIGIBILITY question, not a timing one |
 | MEST Africa | info@meltwater.org (recruitment@meltwater.org) | high | now AI-focused — weak fit |
 | GDG DevFests | per-chapter organizer forms | — | gdg.community.dev/events |
 
@@ -105,8 +107,8 @@ Bumpa (NG 100k+ merchants, +KE/RW; note CTO/co-founder passed away Mar 2025), Ta
 Busha + Quidax (NG SEC-licensed, naira↔USDC liquidity), LemFi ($53M Series B; BVNK stablecoin settlement Jul 2026 — dpay = offline last mile), Afriex ($600M+/yr US→Africa), Daya (ex-Circle founder, $2.4M pre-seed Jun 2026), BitLipa (KE ramp APIs), Breet (NG USDT-accept API Jan 2026), MoneyGram Ramps (physical USDC cash-out; verify coverage per market).
 
 ### E. Communities & events
-**2026 calendar:** Web3Lagos Aug 28–29 (free); ETHSafari Sept 4–12; Blockchain Africa Oct 15 (Gauteng); AFTS Kigali Nov 18–20 (early-bird Aug 31); DevFests Oct–Dec (Kampala Oct 31, Accra Nov 7, Lusaka Dec 4 — pitch Android/NFC engineering, not the token). **2027:** Adopting Bitcoin Cape Town Feb 26–27 (CFP ~Q4 2026); Africa Tech Summit Nairobi Feb 10–11.
-**Rolling:** Superteam Nigeria bounty on superteam.fun/earn ("offline Solana payment demo"); ICP hubs NG/KE/GH/ZA — dpay runs live mainnet ICP canisters (facade `ssqti` + DUSD `td2nx`), rare in these ecosystems, headline it; Bitcoin DADA (women's BTC education, Cohort 11); Celo Africa DAO micro-grants; The Flip (crypto@scale: "Stablecoins: Africa's killer app"); Frontier Fintech (~4.7k operators/investors).
+**Calendar, re-verified against each event's own site 2026-09-04.** *Still ahead:* Blockchain Africa **Oct 15** (Gauteng); DevFest **Kampala Oct 31**; DevFest **Accra Nov 6–7** (two days — workshops then sessions; a Pre-DevFest runs Sep 19); AFTS **Kigali Nov 18–20**; DevFest **Lusaka Dec 5** (NOT Dec 4). **2027:** Africa Tech Summit **Nairobi Feb 10–11** (call-for-speakers page live); Adopting Bitcoin Cape Town **Feb 26–27**. Pitch DevFests on Android/NFC engineering, not the token. *Gone:* Web3Lagos (Aug 28–29, past) and **ETHSafari, which is POSTPONED with no new date** — do not plan around it. Trap: devfestkampala.com is a DIFFERENT, non-GDG event that already ran; the GDG one is under chapter `gdg-cloud-kampala`.
+**Rolling:** Superteam Nigeria bounty on superteam.fun/earn ("offline Solana payment demo"); ICP hubs NG/KE/GH/ZA — dpay signs raw IC ingress envelopes on-device and settles on mainnet ICRC ledgers at the user's own principal — proven with real funds (VCHF round trip, physical device, 2026-09-01). Headline THAT, not the two owned canisters (`ssqti`/`td2nx`): post-cutover neither is on the value path, so naming them points an ICP audience at the least load-bearing part and invites a question `docs/CANISTERS.md` answers unfavourably; Bitcoin DADA (women's BTC education, Cohort 11); Celo Africa DAO micro-grants; The Flip (crypto@scale: "Stablecoins: Africa's killer app"); Frontier Fintech (~4.7k operators/investors).
 
 ### F. Accelerators & grants
 Baobab Network ($100k, open application), Founders Factory Africa (fintech-native, corporate-partner distribution; Gen F EIR intake), timbuktoo UNDP fintech hub Lagos (call closed Aug 14 2026 — watch), Circle USDC grants (recent cohorts included 5 African projects; Circle×Sasai/Cassava Africa push Mar 2026; questbook portal), MEST (now AI-focused — weak fit).
@@ -115,6 +117,6 @@ Baobab Network ($100k, open application), Founders Factory Africa (fintech-nativ
 Kotani Pay (site dead, founder-checked 2026-08-28) · Lipa Later (administration Mar 2025) · Payday (acquired/retired) · PayDunya (Peach Payments) · iKhokha (Nedbank) · SnapScan (Standard Bank) · Kopo Kopo (Moniepoint) · UPay (unlicensed) · YouCan Pay (discontinued) · Machankura (no recent activity) · Popout/"Bottle"/"HexPay" (unverifiable) · giants (Flutterwave, Paystack, MTN MoMo, Safaricom, Fawry, EcoCash).
 
 ## Suggested first wave
-1. **Bitcoin Ekasi** (form + X DM) — pilot-ready. 2. **Sorted Wallet** hello@sorted.io. 3. **Tourism trio** contact@go2africa.com, info@safaribookings.com, hello@voicemap.me. 4. **Fonbnk** support@fonbnk.com. 5. **Busha/Quidax** (NG liquidity). 6. **Self-serve:** Superteam bounty + ICP hub DMs (Mzansi has the only hub inbox). 7. **Yellow Card** hello@yellowcard.io. Then Bumpa/TandaPay/Kazang networks + event circuit (ETHSafari and AFTS are the nearest).
+1. **Bitcoin Ekasi** (form + X DM) — pilot-ready. 2. **Sorted Wallet** hello@sorted.io. 3. **Tourism trio** contact@go2africa.com, info@safaribookings.com, hello@voicemap.me. 4. **Fonbnk** support@fonbnk.com. 5. **Busha/Quidax** (NG liquidity). 6. **Self-serve:** Superteam bounty + ICP hub DMs (Mzansi has the only hub inbox). 7. **Yellow Card** hello@yellowcard.io. Then Bumpa/TandaPay/Kazang networks + event circuit — **the nearest are now Blockchain Africa (Oct 15) and AFTS Kigali (Nov 18–20)**; ETHSafari is postponed.
 
 Caveats: no email was guessed — every address was seen printed at a cited source (session research, 2026-08-28). Medium-confidence entries (Zapper, ClickPesa info@, ICP Ghana, timbuktoo) verified via third-party or official-social listings only.

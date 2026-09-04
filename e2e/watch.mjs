@@ -90,10 +90,9 @@ const FILE_JOURNEY = [
   ['app/components/SendSheet.tsx',           'withdraw'],  // the ONE send-to-address surface (routes to ICRC / legacy-ICP / the chain-key offramp)
   ['app/components/AddressField.tsx',        'withdraw'],  // the shared destination field it owns
   // --- app/* root production modules ---
-  ['app/payments.ts',                        'pay'],       // settlement-outcome logic + receipt↔request nonce-match
   ['app/relayConfig.ts',                     'system'],    // relay retarget flow
   // --- app/services/* (native.ts + relay.ts → ALL: shared by every journey) ---
-  ['app/services/receipt.ts',                'pay'],       // verifyOutcomeReceipt (receipt flows)
+  ['app/services/rail.ts',                    'pay'],       // the ONE build/sign/submit/poll + RailOutcome classification
   ['app/services/addressBook.ts',             'withdraw'],  // saved send destinations (tap-to-reuse)
   ['app/services/ckerc20Persist.ts',          'deposit'],   // ckERC20 watching-resume flow
   // --- app/hooks/* ---

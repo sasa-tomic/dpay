@@ -49,16 +49,14 @@
    - **EURC** — the last item the plan itself lists as open.
    - A relay-served merchant page (the plan's "web page later") is additive and unstarted.
    Founder ops:
-   - **PROD IS AT `425eb97` AND SERVES AN UNGATED, UNSIGNED TILL.** Re-measured 2026-09-04:
-     `/api/v1/version` reports that commit, and `GET https://dpay.kalaj.org/v1/lnurlp/nope` answers
-     the till's own `{"statusCode":404,"message":"Payment link not found"}` while an unregistered
-     path answers an empty 404. That build predates the gate (`23c4ebe`), the signature check
-     (`516aac4`) and the defect sweep (`bfe18bd`), so a stranger can still open a charge on dpay's
-     own domain naming a key nobody holds. `just apk && just up` from HEAD with `DPAY_ENABLE_TILL`
-     unset removes the routes and ships everything else this session landed — including `e5d43ac`,
-     without which the APK now on prod (`/download/dpay.apk` sha256 `f0e9890a…`, == the staged
-     `deploy/dist/dpay.apk`, measured 2026-09-04) signs a Send-to-address transfer to an account
-     other than the one it displayed.
+   - ~~**PROD IS AT `425eb97` AND SERVES AN UNGATED, UNSIGNED TILL.**~~ **DONE — the founder
+     deployed, re-measured 2026-09-04 later the same day.** `/api/v1/version` now reports
+     `dce8ff1` == repo HEAD, and `GET https://dpay.kalaj.org/v1/lnurlp/nope` answers an EMPTY 404
+     byte-identical to an unregistered path — i.e. the till's seven routes are not registered and
+     `DPAY_ENABLE_TILL` is off, which is the gate working. The unauthenticated-write window is
+     closed: prod now carries the gate (`23c4ebe`), the signed ring-up (`516aac4`) and the defect
+     sweep (`bfe18bd`). It also carries `e5d43ac`, so the shipped APK no longer signs a
+     Send-to-address transfer to an account other than the one it displayed.
    - ~~**PROD SERVES A BUILD THAT CANNOT PAY ANY TILL.**~~ **STALE — corrected 2026-09-02.** It was
      true when written (prod was at `7499b30`, before the parser fix `8912db5`); the founder
      redeployed the same day. **The device cannot be checked, only reinstalled** — `versionName` is
@@ -247,9 +245,10 @@
   in the UI.
 - **Helius API key baked as a literal** — rate-limit key, not a fund key (non-custodial, device
   key signs). Rotate if the repo ever goes public.
-- **Canister-side `refresh_deposit` rate-gate NOT implemented** — deliberate: the relay is the
-  only ingress path (relay-side TTL cache suffices); revisit only if the canister is ever called
-  directly.
+- **Canister-side `refresh_deposit` rate-gate NOT implemented** — moot post-cutover: nothing calls
+  `refresh_deposit`. The relay route was deleted (404-pinned by `settlement_era_routes_stay_404`)
+  and the app queries the minter at the user principal instead. (The "relay-side TTL cache
+  suffices" rationale this row used to carry was itself stale — that cache no longer exists.)
 - **Receipt-poll 404 console lines** — cosmetic, by-design not-yet-settled poll
   (`GET /api/v1/receipt/<nonce>`; Chrome auto-logs non-2xx). Invisible to users.
 - **History names stay PRINCIPAL-prefix by design** post-cutover (ledger memo is the frozen
@@ -262,24 +261,33 @@
   fontTools cmap-verified; renders acceptably on MIUI/Android today). If a device ever shows a
   fallback artifact, swap to an in-font covered glyph (`○`/`●` basics covered; `Δ Ω`
   grotesk-only). Low, visual-only.
-- **(medium) Doc rot found by the 2026-09-04 sweep and deliberately NOT fixed in it.** Each is
-  stale or false, each predates that session, and each is bigger than a reconciliation commit.
-  `FUNDING.md` — the whole mechanism half is pre-cutover and its custody model is false; flagged at
-  the top of that file, and it needs a rewrite against `docs/CANISTERS.md`.
-  `CODEBASE_ANALYSIS.md` — the app module tree is months behind (line counts, a deleted
-  `RailSelector`, ~28 unlisted components, no `services/opencryptopay.ts`/`till.ts`, no `app/i18n/`),
-  and two passages still describe `app/payments.ts` / `app/services/receipt.ts` in the present tense
-  while the same file records them as deleted.
-  `genai-video-brief.md` — every model name, price and availability claim is dated Jul 2026 and must
-  be re-verified before any spend; its "the QR flow is two scans (matches the real protocol)" is now
-  one of two protocols and not the default.
-  `docs/REACHOUT.md` — the 2026 event calendar has run past today.
-- **(low) `deploy/.env.example` says the till gate turns off "all six" routes; there are seven.**
-  A comment, no runtime effect, and left untouched only because the sweep that found it was
-  docs-only. `/pl/` (`dd51eee`) is the one it is missing.
-- **Campaign line is dual-sourced** — `app/config/education.ts` + the `landing.html` literal,
-  pinned byte-identical by relay test `landing_page_tells_the_offline_payment_story`; edit both
-  together.
+- ~~**(medium) Doc rot found by the 2026-09-04 sweep and deliberately NOT fixed in it.**~~
+  **CLEARED 2026-09-04 by a six-agent audit, every finding grounded in code at HEAD or a live
+  primary source.** `FUNDING.md`
+  rewritten — it now owns the Add money *shape* and points at one owner per mechanism instead of
+  restating a pre-cutover custody model. `CODEBASE_ANALYSIS.md` reconciled across all three ranges;
+  the rot-generating COPIES are deleted rather than updated (line counts, module enumerations, test
+  and flow counts, and the duplicated priority/R1-R4 backlog, which now points here). `docs/REACHOUT.md`
+  calendar re-verified against each event's own site. `genai-video-brief.md` re-measured against
+  vendor pricing pages.
+  **Two follow-ups the audit opened, both since CLOSED (2026-09-04, founder-directed):**
+  - `dpay_core::Receipt` + `RECEIPT_LEN` + its three status consts (the unsigned 17-byte outcome
+    receipt) are DELETED. They had no consumer anywhere — superseded by the merchant-SIGNED
+    114-byte `NfcResult` in `crates/dpay-core/src/nfc/message.rs`, which is the hardening the old
+    type's own doc comment anticipated. NOT part of the frozen surface: the wasm ABI guard still
+    passes 144/144, and `w_verify_receipt_sig` is about the unrelated 108-byte `ReceiptClaim`.
+  - `UX_AUDIT_FINDINGS.md` is DELETED (its 23 findings were all closed, all 23 `location:` pointers
+    addressed the pre-split monolith, and its resolution-detail pointer had been pruned away). The
+    durable part — the issue CLASSES that UI can reintroduce — moved into `CODEBASE_ANALYSIS.md`'s
+    "UX audit" section. Recoverable at `824b43e`.
+  **Still NOT audited:** `docs/specs/` session reports — historical records, but several are cited by
+  living docs and may carry the same drift.
+- ~~**(low) `deploy/.env.example` says the till gate turns off "all six" routes.**~~ **FIXED by
+  `dce8ff1`** — the file says seven; this row outlived its defect by one commit.
+- ~~**Campaign line is dual-sourced.**~~ **NOT TRUE as written (corrected 2026-09-04).** The literal
+  has exactly ONE home, `M.education.campaignLine` in `app/i18n/domains/en/wallet.ts`;
+  `app/config/education.ts` holds structure only, and `landing.html` carries a pointer COMMENT, not
+  a copy of the words — which is what `landing_page_tells_the_offline_payment_story` pins.
 
 ## Documented decisions / tripwires
 

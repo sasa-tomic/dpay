@@ -29,8 +29,10 @@ import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 // `testnet` field from its owning section's environment at parse time and NEVER re-infers. The
 // FROZEN payment wire format is untouched (this is catalog metadata, not wire bytes).
 export type MinterFamily = 'CkBtcUtxo' | 'CkEthErc20' | 'CkSol';
-// Per-direction ramp capability. Mirrors the canister's `RampCapability`. `Unavailable` ⇒ the UI
-// shows NO button for that direction (no-swap honesty; ckUSDC offramp is `Unavailable` per Fork-C).
+// Per-direction ramp capability. Mirrors the relay catalog's `RampCapability`. `Unavailable` ⇒ the
+// UI shows NO button for that direction — DEMO's offramp, and BOTH directions on VCHF/ICP, which
+// have no fiat ramp. On VCHF/ICP that is fiat-ramp honesty ONLY: a transfer in from any IC wallet
+// still works, via Receive ▸ My address (`IcrcDepositSheet`).
 export type RampCapability = 'Direct' | 'Partner' | 'Unavailable';
 export type CurrencyDescriptor = {
   currency: number;          // the Currency u32 — read from the catalog, NEVER hardcoded

@@ -1,5 +1,11 @@
 # ck-Canister Deposit / Top-Up Integration — build plan
 
+> **HISTORICAL. This plan was built (`2996eb9`) and then SUPERSEDED by the 2026-08-19/20
+> user-principal cutover.** Its §0 "locked" design decision — the facade proxying the minter with
+> `owner = canister_self()`, `subaccount = pubkey` — is exactly what the cutover reversed: funds live
+> at the user's own principal and no dpay canister is on the value path. Read it for why the
+> facade-proxy shape was chosen, never for how funding works. `docs/CANISTERS.md` is the authority.
+
 Seamless **ckBTC-style** funding for dpay: app → deposit address → instructions → live
 status/progress → credited balance. The facade **proxies the ck minter**; the mint lands exactly
 where the facade's `icrc1_balance_of` already reads (`Account{owner: facade, subaccount: pubkey}`),
@@ -348,10 +354,10 @@ outer-loop device gate (out of the offline inner loop).
   the architecture map; note the new risk surface (deposit proxy is unauthenticated — acceptable, see
   §0) and that `refresh_deposit` is value-creating but idempotent. Strike/refresh any funding-risk
   note now resolved by having a concrete deposit path.
-- **`FUNDING.md`:** replace the "shape recorded" placeholder with the implemented facade-proxy model
-  + mainnet canister IDs (ckBTC minter `mqygn-kiaaa-aaaar-qaadq-cai`, ledger
-  `mxzaz-hqaaa-aaaar-qaada-cai`). NOTE: ckBTC mainnet minting needs **no KYC** — the minter runs in
-  GeneralAvailability mode with no KYC checker (only automatic KYT screening of tainted UTXOs).
+- ~~**`FUNDING.md`:** replace the "shape recorded" placeholder with the implemented facade-proxy
+  model + mainnet canister IDs.~~ **DO NOT DO THIS (struck 2026-09-04).** Carrying it out is what put
+  a false custody model in `FUNDING.md` and kept it there; the cutover then made the facade-proxy
+  model wrong outright. `FUNDING.md` owns the Add money *shape* and points at code for mechanism.
 - **`dfx/dpay_canister.did`:** the hand-maintained candid (§1.5).
 
 ---

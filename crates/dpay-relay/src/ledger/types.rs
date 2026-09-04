@@ -122,8 +122,10 @@ pub enum MinterFamily {
 
 /// Per-direction ramp capability for a currency (MC1 unit 5). Serialized as the plain variant
 /// name (e.g. `"Direct"`), matching the wallet's JSON contract (the label the canister-era
-/// candid variant also used). `Unavailable` ⇒ the wallet renders NO button for that direction
-/// (no-swap honesty; ckUSDC offramp is `Unavailable` per Fork-C/O3).
+/// candid variant also used). `Unavailable` ⇒ the wallet renders NO button for that direction —
+/// DEMO's offramp, and BOTH directions on VCHF/ICP, which have no fiat ramp. On VCHF/ICP that is
+/// fiat-ramp honesty ONLY, never a transfer-in blocker: see the per-row rationale in
+/// [`crate::catalog`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum RampCapability {
     Direct,

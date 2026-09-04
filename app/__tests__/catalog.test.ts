@@ -379,8 +379,9 @@ describe('assetTestKey — testnet currencies get a "-testnet" suffix (unique te
 // RED-first proof that BUNDLED_CATALOG carries the authoritative per-currency field set (backing
 // symbol, wrapper name, network, decimals, fee/cap, chain id, token contract, per-direction ramp
 // capability), and that displayName/currencySymbol read from the PER-CURRENCY descriptor instead of
-// family-level assumptions (closes "every CkEthErc20 displays as USDC"). Also pins the no-swap
-// honesty contract: ckUSDC offramp is Unavailable (Fork-C/O3 — NO cash-out button).
+// family-level assumptions (closes "every CkEthErc20 displays as USDC"). Also pins the ramp-honesty
+// contract: the assets with NO fiat ramp (DEMO's offramp; VCHF/ICP both directions) render no button
+// for that direction, while ckBTC/ckUSDC/ckETH are Direct both ways.
 
 describe('BUNDLED_CATALOG — authoritative per-currency metadata populated', () => {
   const byId = (id: number) => BUNDLED_CATALOG.find(c => c.currency === id)!;
@@ -727,9 +728,10 @@ describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol 
 
 // --- catalog single-source drift alarm (item 2, 2026-08-08) -----------------------------------
 // `dfx/catalog_truth.json` is the single source of truth for the drift-prone currency literals
-// shared across the relay's fake_catalog() (crates/dpay-relay/src/ledger.rs) and the app's
-// BUNDLED_CATALOG (app/config/catalog.ts). The RELAY side is cross-checked by a Rust #[cfg(test)]
-// drift-alarm in ledger.rs (catalog_truth_tests); THIS suite is the APP half. A drift in either
+// shared across the relay's compiled catalog (crates/dpay-relay/src/catalog.rs — the sole catalog
+// authority since 2026-08-28; the old `fake_catalog()` in ledger/fake.rs was promoted into it) and
+// the app's BUNDLED_CATALOG (app/config/catalog.ts). The RELAY side is cross-checked by a Rust
+// #[cfg(test)] drift-alarm in catalog.rs (catalog_truth_tests); THIS suite is the APP half. A drift in either
 // direction goes RED:
 //   - someone changes a literal in BUNDLED_CATALOG without updating the JSON → this suite RED;
 //   - someone changes the JSON without updating BUNDLED_CATALOG → this suite RED.
