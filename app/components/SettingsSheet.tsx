@@ -19,7 +19,7 @@ import {computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {JOURNEY_STAMPS, awardStamp, useJourney} from '../lib/journey';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
 import {LOCALES, LOCALE_ENDONYM, type LocaleChoice} from '../i18n/locale';
-import {type HomeCurrency, currencyName, offerableCurrencies} from '../config/currency';
+import {type HomeCurrency, currencyName, offerableCurrencies, railsLabel} from '../config/currency';
 import type {SelectableAsset} from '../config/assets';
 import {M} from '../i18n';
 
@@ -95,6 +95,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // Live n/4 for the Trip readiness row (same source as the strip + archive — no second truth).
   const {journey} = useJourney();
   const tripReadiness = useMemo(() => computeReadiness(journey), [journey]);
+  // The active currency's whole group on one line ("ckUSDC · Internet Computer, USDC · Solana") —
+  // the group shape the first-run chooser shows per rail, so "Main currency: USD" never reads as
+  // ONE token. Preferred rail first; null only if the catalog dropped every rail of the currency.
+  const mainCurrencyGroup = railsLabel(homeCurrency, assets);
   useHotkeys({escape: onClose}, {enabled: !howItWorks && !tripReadyOpen});
   const [confirmReset, setConfirmReset] = useState(false);
   // Backup reveal is a TWO-step gate (mirrors the reset confirm idiom): `confirmBackup` opens the
@@ -475,6 +479,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 );
               })}
             </View>
+            {mainCurrencyGroup != null ? <Text style={S.dim2}>{mainCurrencyGroup}</Text> : null}
             <Text style={S.dim2}>{M.wallet.homeCurrency.settingsHint}</Text>
           </View>
 

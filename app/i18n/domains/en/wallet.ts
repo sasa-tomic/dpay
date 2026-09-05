@@ -81,8 +81,11 @@ export type WalletMessages = {
     /** The chooser's title + subtitle. */
     chooseTitle: string;
     chooseBody: string;
-    /** What the user actually ends up holding: the token, on its chain. */
-    rail: (symbol: string, network: string) => string;
+    /** Why the rail dpay picks is the one it picks — short qualifiers, attached to its line by
+     *  `railWithReason`. */
+    railReason: {destination: string; funded: string; preference: string};
+    /** One rail's line with its reason attached ("ckUSDC · Internet Computer — dpay's default rail"). */
+    railWithReason: (line: string, reason: string) => string;
     /** The badge on the accounts-list row that IS the main currency. */
     mainBadge: string;
     /** The header eyebrow above the headline amount. */
@@ -201,7 +204,8 @@ export const walletEn: WalletMessages = {
     name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros'},
     chooseTitle: 'Which currency do you think in?',
     chooseBody: 'dpay shows this currency first and pays in it by default. You can hold any of the others too, and change this any time in Settings.',
-    rail: (symbol, network) => `Held as ${symbol} on ${network}`,
+    railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here', preference: 'dpay\'s default rail'},
+    railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Main',
     mainLabel: currency => `${currency} · Main`,
     settingsTitle: 'Main currency',

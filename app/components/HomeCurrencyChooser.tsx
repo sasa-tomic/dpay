@@ -9,10 +9,12 @@ import {AssetGlyph} from './AssetGlyph';
 import {type SelectableAsset} from '../config/assets';
 import {
   type HomeCurrency,
+  type RailBalances,
+  chooseRail,
   currencyName,
+  currencyRails,
   offerableCurrencies,
-  preferredRail,
-  railLabel,
+  railLineLabel,
 } from '../config/currency';
 
 // The first-run home-currency chooser — "which currency do you think in?".
@@ -28,14 +30,17 @@ import {
 //     the day an EURC row ships and not one build earlier. Offering a currency that resolves to
 //     nothing would be the dead end the founder's 2026-08-29 rule forbids.
 //   • It never prints the currency as a unit next to an amount. Each row names the currency as a
-//     heading and then says, plainly, what the wallet will actually hold — "Held as VCHF on
-//     Internet Computer" — because VCHF is a third party's token, not francs.
+//     heading and then lists EVERY rail the wallet could hold it on — "VCHF · Internet Computer" —
+//     because VCHF is a third party's token, not francs. A two-rail currency shows both lines; the
+//     rail dpay would pick (`chooseRail`) is listed first with its reason, so the choice the wallet
+//     will make is stated before the user commits, not discovered after.
 //
 // The empty case is a REAL failure, not a state to paper over: if the catalog carries no rail for
 // any currency, the wallet's own asset list is broken, so the screen says so and names the relay
 // setting rather than showing an empty list with a dead Continue button.
-export function HomeCurrencyChooser({assets, onChoose}: {
+export function HomeCurrencyChooser({assets, balances, onChoose}: {
   assets: SelectableAsset[];
+  balances?: RailBalances | null;
   onChoose: (c: HomeCurrency) => void;
 }) {
   const offerable = offerableCurrencies(assets);
@@ -59,7 +64,11 @@ export function HomeCurrencyChooser({assets, onChoose}: {
         ) : null}
 
         {offerable.map(currency => {
-          const rail = preferredRail(currency, assets);
+          const rails = currencyRails(currency, assets);
+          const choice = chooseRail(currency, assets, balances);
+          const ordered = choice === null
+            ? rails
+            : [choice.rail, ...rails.filter(r => r.id !== choice.rail.id)];
           const active = picked === currency;
           return (
             <Pressable
@@ -72,13 +81,19 @@ export function HomeCurrencyChooser({assets, onChoose}: {
               accessibilityState={{checked: active, disabled: false}}
             >
               <View style={S.assetSelect}>
-                {rail ? <AssetGlyph asset={rail} /> : null}
+                {ordered.length > 0 ? <AssetGlyph asset={ordered[0]} /> : null}
                 <View style={S.pickTextCol}>
                   <View style={S.assetTitleRow}>
                     <Text style={S.assetLabel}>{currencyName(currency)}</Text>
                     {active ? <View style={S.pickCheck}><IconCheck size={18} color={C.brand} /></View> : null}
                   </View>
-                  {rail ? <Text style={S.assetSub}>{railLabel(rail)}</Text> : null}
+                  {ordered.map((rail, i) => (
+                    <Text key={rail.id} style={S.assetSub}>
+                      {i === 0 && choice !== null
+                        ? M.wallet.homeCurrency.railWithReason(railLineLabel(rail), M.wallet.homeCurrency.railReason[choice.reason])
+                        : railLineLabel(rail)}
+                    </Text>
+                  ))}
                 </View>
               </View>
             </Pressable>

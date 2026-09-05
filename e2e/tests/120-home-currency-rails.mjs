@@ -1,0 +1,93 @@
+// Flow 120 — the CURRENCY GROUP: a currency is a set of rails, and the chooser names them all
+// (Objective 2, docs/specs/2026-09-04-currency-first-wallet-plan.md).
+//
+// Flow 118 pinned that a row names the ledger token on its settlement chain; this flow pins that a
+// row names EVERY rail of the currency, with the rail dpay would pick listed first and its reason
+// attached. What each assertion protects:
+//
+//   * USD is a TWO-rail currency here (ckUSDC on the Internet Computer, USDC on Solana) — a row
+//     that named only ckUSDC would present "US dollars" as one token, which is exactly the merged-
+//     balance reading the founder's honesty rule forbids (same-currency rails on different chains
+//     must never read as one balance; naming both is how they stay distinct).
+//   * CHF is a ONE-rail currency (VCHF on the Internet Computer) — its row must not carry a
+//     Solana line that would promise a rail the catalog does not have.
+//   * The preferred rail is FIRST and says WHY (chooseRail, reason 'preference' on a fresh wallet
+//     with no balances) — the choice the wallet will make is stated before the user commits.
+//   * Settings shows the same group shape for the main currency, so "Main currency: USD" there
+//     never reads as one token either.
+//   * The byte-stable chooser testIDs still drive the flow (home-currency-<CCY>,
+//     btn-home-currency-continue) — the ~106 flows that ride chooseHomeCurrencyIfPresent.
+import {
+  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+} from '../harness/lib.mjs';
+
+export const meta = {
+  id: '120',
+  name: 'home-currency-rails',
+  journey: 'onboard',
+  covers: ['home-currency', 'onboard', 'ckusdc', 'solana-usdc', 'settings', 'group-model'],
+  verifies: 'The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; CHF: VCHF only), preferred rail first with its reason, Settings shows the same group for the main currency, and Continue still works.',
+  timeoutMs: 30000,
+};
+
+export async function run() {
+  const start = Date.now();
+  console.log('[120-home-currency-rails] setup…');
+  const env = await setup({solStub: true});
+  try {
+    const {driver} = env;
+
+    // --- 1. onboard by hand, and STOP at the currency question ---------------------------------
+    console.log('[120-home-currency-rails] onboarding to the currency question…');
+    await skipWalkthroughIfPresent(driver);
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-currency-rails', {timeoutMs: 8_000});
+    await driver.click('btn-create', {timeoutMs: 4_000});
+    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
+    await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
+    await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
+    await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
+    await skipRehearsalIfPresent(driver);
+    await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
+
+    // --- 2. the USD row names BOTH rails, preferred first, with its reason ----------------------
+    const usdRow = await driver.readText('home-currency-USD');
+    assertIncludes(usdRow, 'ckUSDC · Internet Computer',
+      'the USD row must name the IC rail as ledger token · settlement chain');
+    assertIncludes(usdRow, 'USDC · Solana',
+      'the USD row must ALSO name the Solana rail — USD is a two-rail currency, and hiding one would read as one merged balance');
+    assertIncludes(usdRow, "ckUSDC · Internet Computer — dpay's default rail",
+      'the preferred rail comes first and states its reason (chooseRail: preference on a fresh wallet)');
+    assert(usdRow.indexOf('ckUSDC') < usdRow.indexOf('USDC · Solana'),
+      `the preferred rail must be listed first. Got: ${JSON.stringify(usdRow)}`);
+    console.log('[120-home-currency-rails] ✓ USD row names both rails, preferred first with its reason');
+
+    // --- 3. the CHF row names its ONE rail and no phantom second one ----------------------------
+    const chfRow = await driver.readText('home-currency-CHF');
+    assertIncludes(chfRow, 'VCHF · Internet Computer',
+      'the CHF row must name the VCHF rail as ledger token · settlement chain');
+    assert(!/Solana/.test(chfRow),
+      `CHF has one rail in the catalog — a Solana line would promise a rail it cannot deliver. Got: ${JSON.stringify(chfRow)}`);
+    console.log('[120-home-currency-rails] ✓ CHF row names exactly its one rail');
+    await driver.screenshot('120-home-currency-rails-chooser');
+
+    // --- 4. Continue still works, byte-stable testIDs and all ------------------------------------
+    await driver.click('home-currency-USD', {timeoutMs: 4_000});
+    await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
+    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    const label = await driver.readText('active-asset-label');
+    assertIncludes(label, 'US dollars', 'choosing USD must land the wallet on its preferred rail, in the currency\'s name');
+    console.log(`[120-home-currency-rails] ✓ continue works: ${JSON.stringify(label)}`);
+
+    // --- 5. Settings shows the same group shape for the main currency ----------------------------
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    const settings = await driver.bodyText();
+    assertIncludes(settings, 'ckUSDC · Internet Computer, USDC · Solana',
+      'the Settings main-currency row must show the whole USD group on one line, preferred rail first');
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    console.log('[120-home-currency-rails] ✓ Settings names the whole group');
+
+    console.log(`[120-home-currency-rails] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
+  } finally {
+    await env.stop();
+  }
+}
