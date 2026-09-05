@@ -1,11 +1,12 @@
-import {useCallback} from 'react';
+import {useCallback, useState} from 'react';
 import {View, Text, Pressable, Platform, ActivityIndicator} from 'react-native';
 import {QrCode} from './QrCode';
 import {IconAlert} from './icons';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
-import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {SOL_ATA_SETUP_MIN_LAMPORTS, USDC_MINT_ADDRESS} from '../solana/spl';
+import {buildSolanaPayUri, createSolanaPayReference} from '../solana/payUri';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
@@ -36,6 +37,7 @@ import {M} from '../i18n';
  */
 export function SolanaReceiveSheet({
   address,
+  uriRecipient,
   token = 'SOL',
   ataStatus = 'ready',
   ataSetupBusy = false,
@@ -50,6 +52,7 @@ export function SolanaReceiveSheet({
   onClose,
 }: {
   address: string;
+  uriRecipient?: string;
   token?: 'SOL' | 'USDC';
   ataStatus?: 'ready' | 'absent' | 'checking' | 'unverified';
   ataSetupBusy?: boolean;
@@ -65,9 +68,14 @@ export function SolanaReceiveSheet({
 }) {
   const {copied, copy: doCopy} = useCopyFeedback();
   useEscapeToClose(onClose);
+  const [reference] = useState(createSolanaPayReference);
 
   const copy = useCallback(async () => { await doCopy(address); }, [address, doCopy]);
   const isUsdc = token === 'USDC';
+  const payUri = buildSolanaPayUri(uriRecipient ?? address, {
+    splToken: isUsdc ? USDC_MINT_ADDRESS : null,
+    reference,
+  });
   // The asset NAME, not copy — it names the token the sentences are about (never a ledger id).
   const assetLabel = isUsdc ? 'USDC' : 'SOL';
   const status = isUsdc ? ataStatus : 'ready';
@@ -142,7 +150,7 @@ export function SolanaReceiveSheet({
         ) : null}
       </View>
 
-      <View testID="sol-receive-qr" style={S.qrCard}><QrCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>
+      <View testID="sol-receive-qr" style={S.qrCard}><QrCode value={payUri} size={QR_SIZE_SMALL} ecl="L" /></View>
 
       <Text testID="sol-receive-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 

@@ -20,8 +20,18 @@ import {describe, test, expect} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {SolanaReceiveSheet} from '../components/SolanaReceiveSheet';
+import {QrCode} from '../components/QrCode';
+import {USDC_MINT_ADDRESS} from '../solana/spl';
 
 const ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
+const OWNER = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+function qrValue(tree: renderer.ReactTestRenderer): string {
+  const nodes = tree.root.findAllByType(QrCode);
+  expect(nodes.length).toBe(1);
+  return nodes[0].props.value as string;
+}
 
 function has(tree: renderer.ReactTestRenderer, testID: string): boolean {
   return tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
@@ -180,6 +190,65 @@ describe('SolanaReceiveSheet — fund-first resume link + waiting cue (2026-08-1
     const tree = mount({token: 'SOL', ataStatus: 'ready', tokenZero: false, onRetryAta: () => {}});
     expect(has(tree, 'sol-receive-waiting')).toBe(false);
     expect(has(tree, 'btn-sol-receive-check')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('SolanaReceiveSheet — Solana Pay QR payload', () => {
+  test('SOL: the QR encodes solana:<address>?reference=<base58>, no spl-token', () => {
+    const tree = mount({token: 'SOL', ataStatus: 'ready'});
+    const value = qrValue(tree);
+    const m = new RegExp(`^solana:${ADDR}\\?reference=([1-9A-HJ-NP-Za-km-z]{32,44})$`).exec(value);
+    expect(m).not.toBeNull();
+    expect(value).not.toContain('spl-token');
+    act(() => { tree.unmount(); });
+  });
+
+  test('USDC without uriRecipient: the QR recipient is the passed address and carries spl-token', () => {
+    const tree = mount({token: 'USDC', ataStatus: 'ready'});
+    const value = qrValue(tree);
+    expect(value.startsWith(`solana:${ADDR}?spl-token=${USDC_MINT_ADDRESS}&reference=`)).toBe(true);
+    const ref = value.slice(`solana:${ADDR}?spl-token=${USDC_MINT_ADDRESS}&reference=`.length);
+    expect(BASE58.test(ref)).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('USDC with uriRecipient: the QR recipient is the OWNER, not the ATA', () => {
+    const tree = mount({token: 'USDC', ataStatus: 'ready', uriRecipient: OWNER});
+    const value = qrValue(tree);
+    expect(value.startsWith(`solana:${OWNER}?spl-token=${USDC_MINT_ADDRESS}&reference=`)).toBe(true);
+    expect(value.startsWith(`solana:${ADDR}?`)).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the reference is stable across re-renders of the same mount', () => {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<SolanaReceiveSheet address={ADDR} ataStatus="ready" onClose={() => {}} />);
+    });
+    const before = qrValue(tree);
+    act(() => {
+      tree.update(<SolanaReceiveSheet address={ADDR} ataStatus="ready" onClose={() => {}} />);
+    });
+    const after = qrValue(tree);
+    expect(after).toBe(before);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a fresh reference is drawn per mount (per receive session)', () => {
+    const tree1 = mount({token: 'SOL', ataStatus: 'ready'});
+    const v1 = qrValue(tree1);
+    act(() => { tree1.unmount(); });
+    const tree2 = mount({token: 'SOL', ataStatus: 'ready'});
+    const v2 = qrValue(tree2);
+    act(() => { tree2.unmount(); });
+    expect(v2).not.toBe(v1);
+  });
+
+  test('the on-screen address text stays the bare base58 address (copy target unchanged)', () => {
+    const tree = mount({token: 'SOL', ataStatus: 'ready'});
+    const text = tree.root.findAll(node => node.props && node.props.testID === 'sol-receive-address')[0];
+    expect(text.props.children).toBe(ADDR);
     act(() => { tree.unmount(); });
   });
 });

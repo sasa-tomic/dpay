@@ -175,6 +175,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         {toggle}
         <SolanaReceiveSheet
           address={usdcAtaAddress}
+          uriRecipient={solAddress}
           token={selectedToken}
           ataStatus={ataState}
           solBalance={solBalance}

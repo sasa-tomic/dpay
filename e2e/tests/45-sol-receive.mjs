@@ -17,8 +17,8 @@ export const meta = {
   id: '45',
   name: 'sol-receive',
   journey: 'deposit',
-  covers: ['sol-card', 'sol-derive', 'sol-receive', 'qr', 'address', 'sol-tab-ia', 'sol-clipboard'],
-  verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR via the Receive tab "My address" sub-mode (offline, no devnet).',
+  covers: ['sol-card', 'sol-derive', 'sol-receive', 'solana-pay', 'qr', 'address', 'sol-tab-ia', 'sol-clipboard'],
+  verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR (a Solana Pay URI solana:<address>?reference=<base58>) via the Receive tab "My address" sub-mode (offline, no devnet).',
   timeoutMs: 20000,
 };
 
@@ -68,6 +68,14 @@ export async function run() {
     assert(BASE58.test(address),
       `SOL receive address should be a valid base58 Solana address (32–44 chars), got "${address}"`);
     console.log(`[45-sol-receive] ✓ receive address: ${address}`);
+
+    const qrVal = await driver.eval(() => window.__DPAY_QR_LAST);
+    assert(typeof qrVal === 'string' && qrVal.startsWith(`solana:${address}?reference=`),
+      `the receive QR must carry a Solana Pay URI solana:<address>?reference=, got "${qrVal}"`);
+    const solanaPayRef = qrVal.slice(`solana:${address}?reference=`.length);
+    assert(BASE58.test(solanaPayRef), `the reference param must be a base58 pubkey, got "${solanaPayRef}"`);
+    assert(!qrVal.includes('spl-token'), 'the SOL receive QR must not carry an spl-token param');
+    console.log(`[45-sol-receive] ✓ QR carries a Solana Pay URI (reference ${solanaPayRef})`);
 
     // Back-toggle regression (Rules of Hooks): SolReceiveMode's early return for the 'address'
     // sub-mode MUST sit below its useState/useEffect calls. Otherwise toggling back to 'request'

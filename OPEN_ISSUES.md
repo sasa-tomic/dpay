@@ -43,14 +43,21 @@ Opened by that investigation, and each independently actionable:
 - **dpay speaks no external payment standard, in either direction** (measured 2026-09-04 by driving
   real URIs through `classifyScan`). The scanner accepts only dpay's own binary wire, dpay's own
   https link, an OpenCryptoPay LNURL, and a bare address; it does not parse Solana Pay, BIP-21/321,
-  EIP-681 or BOLT-11. The receive side emits bare strings, not URIs. Two cheap items follow, both
-  additive: **emit Solana Pay** (`solana:<addr>?amount=&reference=`) instead of a bare base58 string
-  on the Solana receive surface, and **accept a merchant's Solana Pay QR** (half the parser already
-  exists inside the OCP client; the work is `reference` keys, ATA derivation, the SPL Memo slot and
-  a route from `classifyScan`). Reach for both is UNMEASURED and must not be claimed. Two further
-  items are honesty rather than reach: parsing `bitcoin:`/`ethereum:` URIs only so a scan can be
-  refused **by name** with an instruction, which the 2026-08-29 founder rule requires and which
-  today's "not a payment code" dead end violates.
+  EIP-681 or BOLT-11. The EMIT half landed 2026-09-05 (app-only, `app/solana/payUri.ts` +
+  `SolanaReceiveSheet`): the Solana "My address" QR now encodes a real Solana Pay URI —
+  `solana:<addr>?reference=<fresh base58 keypair>` for SOL, `solana:<owner>?spl-token=<USDC mint>&reference=…`
+  for USDC (recipient is the OWNER, not the ATA, per the spl-token spec) — while the on-screen text
+  and copy button stay the bare address; the builder also supports an `amount=` param, unused on this
+  surface (it has no amount). Interim consequence, deliberate per this item's sequencing: dpay's own
+  camera can no longer read its own SOL receive QR back (a `solana:` URI falls to the generic "not a
+  payment code" refusal; the old bare-address read-back path in `scan.ts` is superseded) until the
+  ACCEPT item lands. That accept item remains OPEN: **accept a merchant's Solana Pay QR** (half the
+  parser already exists inside the OCP client; the work is `reference` keys, ATA derivation, the SPL
+  Memo slot and a route from `classifyScan`). Reach for it is UNMEASURED and must not be claimed. The
+  honesty half landed 2026-09-05: a scanned `bitcoin:`/`ethereum:` (BIP-21/EIP-831) URI is now
+  refused **by name** with a practical instruction — `coin-request` verdict in `app/lib/scan.ts`,
+  copy in all four locales, e2e flow 109 leg 3 — closing the "not a payment code" dead-end violation
+  of the 2026-08-29 founder rule.
 
 0. **THE MERCHANT SIDE OF OpenCryptoPay — dpay serves its own till** (founder decision, 2026-09-02).
    **Demoted 2026-09-04 to one interop rail among several** (founder), below the currency work above.

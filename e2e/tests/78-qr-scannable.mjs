@@ -10,7 +10,8 @@
 // The gate rasterizes the RENDERED element (element screenshot → PNG → vendored jsQR — the exact
 // decoder the prod web wallet ships) and asserts the decode matches the encoded value:
 //   - request-qr  (QR_SIZE 244, ecl M, brand mark, 132-byte wire request) vs window.__DPAY_QR_LAST
-//   - sol-receive-qr (QR_SIZE_SMALL 200, ecl L, base58 SOL address) vs the on-screen address text
+//   - sol-receive-qr (QR_SIZE_SMALL 200, ecl L, Solana Pay URI solana:<address>?reference=<base58>)
+//     vs the on-screen address text; and the USDC variant (owner recipient + spl-token mint param)
 import { strict as assert } from 'node:assert';
 import { PNG } from 'pngjs';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -36,14 +37,14 @@ export const meta = {
   id: '78',
   name: 'qr-scannable',
   journey: 'tour',
-  covers: ['qr-scannable', 'qr-brand-mark', 'quiet-zone'],
+  covers: ['qr-scannable', 'qr-brand-mark', 'quiet-zone', 'solana-pay'],
   verifies:
-    'every rendered <QrCode> stays machine-decodable: request-qr (244/M + brand mark) decodes to the exact encoded value (__DPAY_QR_LAST byte-for-byte) and sol-receive-qr (200/L, base58 address) decodes to the on-screen address — rasterized pixels through the same vendored jsQR the prod web wallet ships',
+    'every rendered <QrCode> stays machine-decodable: request-qr (244/M + brand mark) decodes to the exact encoded value (__DPAY_QR_LAST byte-for-byte) and sol-receive-qr (200/L) decodes to the Solana Pay URI — solana:<address>?reference=<base58> for SOL, solana:<owner>?spl-token=<USDC mint>&reference=<base58> for USDC — rasterized pixels through the same vendored jsQR the prod web wallet ships',
   timeoutMs: 25_000,
 };
 
 export async function run() {
-  const env = await setup();
+  const env = await setup({solStub: true});
   const { driver } = env;
   try {
     await onboardWallet(driver, 'e2e-qr');
@@ -74,7 +75,33 @@ export async function run() {
     assert.match(addr, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, 'sol-receive-address must render a base58 pubkey');
     const decodedAddr = await decodeQrElement(driver, 'sol-receive-qr', '/tmp/qr-sol.png');
     assert.ok(decodedAddr, 'sol-receive-qr pixels must decode');
-    assert.equal(decodedAddr.trim(), addr, 'sol-receive-qr decode must equal the on-screen address');
+    assert.match(decodedAddr.trim(), new RegExp(`^solana:${addr}\\?reference=[1-9A-HJ-NP-Za-km-z]{32,44}$`),
+      'sol-receive-qr decode must be the Solana Pay URI solana:<address>?reference=<base58 pubkey>');
+
+    // Surface 3 — the USDC address QR (ecl L, QR_SIZE_SMALL 200, owner recipient + spl-token mint).
+    // The stub seeds an EXISTING USDC token account so the ATA gate opens ('balance' → address + QR)
+    // with no create step. `addr` above IS this device's owner pubkey (same seed), so the URI's
+    // recipient must equal it while the on-screen text stays the derived ATA.
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '1'.repeat(32), lastValidBlockHeight: 999999}}),
+        getBalance: () => ({value: 5000000000}),
+        getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
+        getTokenAccountBalance: () => ({value: {amount: '0', decimals: 6}}),
+      };
+    });
+    await openBalances(driver);
+    await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
+    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
+    await driver.click('tab-receive', {timeoutMs: 5_000});
+    await driver.findByTestID('receive-mode-toggle', {timeoutMs: 5_000});
+    await driver.click('btn-receive-address', {timeoutMs: 5_000});
+    await driver.findByTestID('sol-receive-address', {timeoutMs: 10_000});
+    const decodedUsdc = await decodeQrElement(driver, 'sol-receive-qr', '/tmp/qr-sol-usdc.png');
+    assert.ok(decodedUsdc, 'USDC sol-receive-qr pixels must decode');
+    assert.match(decodedUsdc.trim(),
+      new RegExp(`^solana:${addr}\\?spl-token=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&reference=[1-9A-HJ-NP-Za-km-z]{32,44}$`),
+      'USDC sol-receive-qr decode must be the Solana Pay URI solana:<owner>?spl-token=<USDC mint>&reference=<base58 pubkey>');
   } finally {
     await env.stop();
   }
