@@ -9,6 +9,7 @@ import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import type {CurrencyDescriptor} from '../config/catalog';
+import {type HomeCurrency} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId, NfcStatus} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
@@ -29,6 +30,7 @@ import {NfcStatusRow} from './NfcStatusRow';
 import {ModeToggle} from './ModeToggle';
 import {TillCharge} from './TillCharge';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
+import {RailDisclosure} from './RailDisclosure';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
 import {useJourney} from '../lib/journey';
@@ -61,9 +63,11 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
  */
-export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; catalog: CurrencyDescriptor[]; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; catalog: CurrencyDescriptor[]; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
-  onLockChange?: (locked: boolean) => void}) {
+  onLockChange?: (locked: boolean) => void;
+  homeCurrency?: HomeCurrency | null;
+  onReceiveRailChange?: (id: AssetId) => void}) {
   // The 4-state radio status, and the local "is a tap possible" gate derived from it — see the
   // same pair in ReceiveMode for why the state travels whole rather than as a boolean.
   const nfcReady = nfcStatus === 'ready';
@@ -173,6 +177,16 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
     return (
       <View style={S.center}>
         {toggle}
+        {homeCurrency != null && onReceiveRailChange != null ? (
+          <RailDisclosure
+            currency={homeCurrency}
+            assets={assets}
+            balances={balances}
+            catalog={catalog}
+            selectedAssetId={selectedAssetId}
+            onSwitch={onReceiveRailChange}
+          />
+        ) : null}
         <SolanaReceiveSheet
           address={usdcAtaAddress}
           uriRecipient={solAddress}

@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **116 flows**
-> (115 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **118 flows**
+> (117 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (15) · pay (34) · offline (10) · deposit (8) · withdraw (11) · nfc (10) · system (21) · tour (6)
+wire (1) · onboard (16) · pay (34) · offline (10) · deposit (9) · withdraw (11) · nfc (10) · system (21) · tour (6)
 
 ---
 
@@ -41,6 +41,7 @@ wire (1) · onboard (15) · pay (34) · offline (10) · deposit (8) · withdraw 
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
 | 118 | home-currency | The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD, never EUR), names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload. | home-currency, onboard, vchf, ckusdc, settings, asset-selector, persistence |
 | 120 | home-currency-rails | The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; CHF: VCHF only), preferred rail first with its reason, Settings shows the same group for the main currency, and Continue still works. | home-currency, onboard, ckusdc, solana-usdc, settings, group-model |
+| 121 | home-currency-balance-rails | Balances marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges). | home-currency, balances, ckusdc, solana-usdc, vchf, group-model |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 | 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ … approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 | 54 | testnet-toggle | Balances testnet toggle reveals + hides all three testnet rows (BTC/USDC/ETH testnet — catalog-driven testnet detection). | testnet, catalog, toggle, balances |
@@ -114,6 +115,7 @@ wire (1) · onboard (15) · pay (34) · offline (10) · deposit (8) · withdraw 
 | 03 | deposit-address | ckBTC deposit sheet: address + QR + instructions + fee/min + the "Already on the Internet Computer?" ICRC-1 receive section (own principal); deep-link ?screen=deposit works. | deposit-address, qr, instructions, fee-min, deep-link |
 | 04 | deposit-copy | 'Copy address' writes the REAL address to the clipboard (not the Share noop). | deposit-address, clipboard |
 | 05 | deposit-credited | ckBTC deposit lands via faucet-at-principal → balance-recheck delta "Deposited ✓", relay balance grows, asset row appears. | deposit-credit, mint-delta, asset-card, balance-update |
+| 122 | receive-rail-choice | Receive ▸ "My address" on a multi-rail home currency defaults to the wallet's rail pick with reason + the rail's own fee fact, exposes the sibling rail's own address + fee one toggle away without leaving the sub-mode, and asserts both addresses belong to the user; single-rail CHF renders with no rail disclosure. | home-currency, receive, rails, ckusdc, sol-usdc, vchf, group-model |
 | 16 | ckusdc-onramp | ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note). | ckusdc, onramp, eip-1193, calldata, eth-gas |
 | 22 | deposit-error | IC gateway unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
 | 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |

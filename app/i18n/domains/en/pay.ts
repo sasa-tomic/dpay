@@ -510,6 +510,13 @@ export type ReceiveMessages = {
   // --- the request QR screen -----------------------------------------------------------------
   requestPayment: string;
   myAddress: string;
+  /** The home-currency rail disclosure on Receive ▸ My address: the fee fact of the SHOWN rail,
+   *  in that rail's own unit (never converted, never summed with the sibling's). */
+  rail: {
+    feeLine: (network: string, fee: string) => string;
+    feeWithOneTime: (network: string, fee: string, oneTime: string) => string;
+    feeUnknown: (network: string) => string;
+  };
   /** 'tap' = the payer may tap instead; 'expired' = the short NFC request lapsed; 'none' = QR only. */
   showToPayer: (nfc: 'tap' | 'expired' | 'none') => string;
   expiredMakeNew: string;
@@ -659,6 +666,11 @@ export const receiveEn: ReceiveMessages = {
 
   requestPayment: 'Request payment',
   myAddress: 'My address',
+  rail: {
+    feeLine: (network, fee) => `${network} · Fee ${fee}`,
+    feeWithOneTime: (network, fee, oneTime) => `${network} · Fee ${fee} + one-time account rent ${oneTime}`,
+    feeUnknown: network => `${network} · Fee unknown`,
+  },
   showToPayer: nfc =>
     `Show this to the payer${nfc === 'tap' ? ' · or let them tap' : nfc === 'expired' ? ' · NFC tap expired' : ''}`,
   expiredMakeNew: 'Expired — make a new request',

@@ -1,10 +1,14 @@
 /**
- * IcrcDepositSheet — the direct-ICRC receive surface (VCHF/ICP, 2026-08-29 founder hard rule:
- * every funding gate gives useful practical instructions). GATE matrix:
+ * IcrcDepositSheet — the IC-rail receive surface (2026-08-29 founder hard rule: every funding
+ * gate gives useful practical instructions; Objective 2 extends it to the home currency's IC
+ * rail). GATE matrix:
  *
  *   direct-ICRC row (7/8) + principal derived → instructions card (send-from-any-IC-wallet,
  *       no-memo, catalog fee) + QR + copyable principal + honest watch + manual check.
- *   non-direct row (e.g. ckBTC 1, family-mintered) → fail-closed noAddress error, NO QR.
+ *   home-currency IC rail (ckUSDC 2, reached via ReceiveMode's rail routing) → the SAME surface,
+ *       with the network named as the SETTLEMENT chain ("Internet Computer") — never the
+ *       catalog's backing-chain field ("Ethereum"), which would misdirect the sender.
+ *   incomplete row (no catalog descriptor / no ledger) → fail-closed noAddress error, NO QR.
  *   received delta (ledger balance strictly above the watched baseline) → success card with the
  *       exact received amount (formatted via the catalog descriptor) + Done.
  *
@@ -18,9 +22,17 @@ import renderer, {act} from 'react-test-renderer';
 
 import {IcrcDepositSheet} from '../components/IcrcDepositSheet';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import type {Identity} from '../lib/types';
 
 const BUNDLED_CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
+const BUNDLED_ASSETS = buildSelectableAssets(BUNDLED_CATALOG, {showTestnet: false, solanaEnabled: false});
+
+const assetOf = (currency: number): SelectableAsset => {
+  const a = BUNDLED_ASSETS.find(x => x.protocol === 'ic' && x.currency === currency);
+  if (!a) throw new Error(`no bundled IC asset for currency ${currency}`);
+  return a;
+};
 
 const PRINCIPAL = 'w7x7r-cok77-xa2jb-wa2jb-bc'; // stand-in self principal
 jest.mock('../services/native', () => ({
@@ -69,7 +81,7 @@ async function renderSheet(currency: number) {
 async function renderSheetInner(currency: number) {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {
-    tree = renderer.create(<IcrcDepositSheet identity={IDENTITY} catalog={BUNDLED_CATALOG} currency={currency} onClose={() => {}} />);
+    tree = renderer.create(<IcrcDepositSheet identity={IDENTITY} catalog={BUNDLED_CATALOG} asset={assetOf(currency)} onClose={() => {}} />);
   });
   await act(async () => {}); // flush the derivation effect
   return tree;
@@ -106,8 +118,30 @@ describe('IcrcDepositSheet', () => {
     expect(instr).toContain('0.00010000 ICP'); // ICP ledger fee 10_000 e8s
   });
 
-  test('non-direct row fails CLOSED: noAddress error, no QR, no copy button', async () => {
-    const tree = await renderSheet(1); // ckBTC — family-mintered, not direct-ICRC
+  test('ckUSDC (the home-currency IC rail): same surface, network named as the SETTLEMENT chain', async () => {
+    (railBalanceOf as unknown as ReturnType<typeof jest.fn>).mockResolvedValue(null);
+    const tree = await renderSheet(2); // ckUSDC — family-mintered, but reachable as USD's IC rail
+    expect(textOf(tree, 'deposit-address')).toBe(PRINCIPAL);
+    const instr = allText(tree.root.findAll(n => n.props && n.props.testID === 'deposit-instructions')[0]);
+    expect(instr).toContain('USDC');            // displayName's family vocabulary for CkEthErc20
+    expect(instr).toContain('Internet Computer'); // the chain the transfer settles on
+    expect(instr).not.toContain('Ethereum');      // the catalog's backing-chain field must NOT leak
+    expect(instr).toContain('0.010000 USDC');     // ckUSDC ledger fee 10_000 e6s, formatted via the descriptor
+    expect(has(tree, 'deposit-qr')).toBe(true);
+    expect(has(tree, 'btn-deposit-copy')).toBe(true);
+  });
+
+  test('incomplete row fails CLOSED: noAddress error, no QR, no copy button', async () => {
+    // A currency with NO catalog descriptor (reachability is ReceiveMode's call; the sheet itself
+    // only fails on incomplete data). Clone VCHF's row under an unknown currency id.
+    const base = assetOf(7);
+    const orphan: SelectableAsset = base.protocol === 'ic' ? {...base, id: 'ic:77', currency: 77} : base;
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<IcrcDepositSheet identity={IDENTITY} catalog={BUNDLED_CATALOG} asset={orphan} onClose={() => {}} />);
+    });
+    await act(async () => {});
+    activeTree = tree;
     const errText = allText(tree.root).toString();
     expect(errText).toContain('No deposit address available.');
     expect(has(tree, 'deposit-qr')).toBe(false);

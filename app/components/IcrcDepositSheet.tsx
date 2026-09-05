@@ -6,7 +6,8 @@ import {S} from '../styles';
 import {POLL, QR_SIZE_SMALL} from '../config/constants';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
-import {type CurrencyDescriptor, displayName, fmtCurrencyAmount, isDirectIcrcAsset} from '../config/catalog';
+import {type CurrencyDescriptor, displayName, fmtCurrencyAmount} from '../config/catalog';
+import {type SelectableAsset, linkNetworkOf, prettyNetwork} from '../config/assets';
 import {railBalanceOf} from '../services/rail';
 import {DpayCore} from '../services/native';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -16,18 +17,26 @@ import {InstrLine} from './InstrLine';
 import {M} from '../i18n';
 
 /**
- * Direct-ICRC receive sheet (VCHF/ICP, 2026-08-29 founder hard rule: every funding gate gives
- * useful practical instructions — never a "check back soon" dead end). These assets have NO
- * minter: receiving is a plain icrc1_transfer from ANY Internet Computer wallet to THIS user's
- * own ICRC-1 account (owner = self-authenticating principal, default subaccount) on the row's
- * ledger — the exact rail payments already use. The "address" is therefore the user's principal
- * (derived LOCALLY by the core — no gateway round trip), shown as QR + copyable text with honest
- * instructions: send this asset only, no memo needed, the ledger fee from the catalog, and the
- * dpay-never-holds/never-converts line. Receive detection is the same honest watch as
- * DepositSheet: a signed icrc1_balance_of baseline + strictly-higher delta while open.
+ * IC-rail receive sheet (2026-08-29 founder hard rule: every funding gate gives useful practical
+ * instructions — never a "check back soon" dead end). Serves two reachable-by-caller cases that
+ * share ONE address shape: the user's OWN ICRC-1 account (owner = self-authenticating principal,
+ * default subaccount) on the asset's ledger — the exact rail payments already use. (a) complete
+ * no-minter rows (VCHF/ICP): a plain icrc1_transfer from ANY Internet Computer wallet. (b) the
+ * home currency's IC rail (Objective 2: home=USD on ckUSDC) — the group's rail address with the
+ * rail disclosure above it. The "address" is derived LOCALLY by the core (no gateway round trip)
+ * and shown as QR + copyable text with honest instructions: send this asset only, no memo
+ * needed, the ledger fee from the catalog, and the dpay-never-holds/never-converts line. The
+ * network named in the instructions is the SETTLEMENT chain (linkNetworkOf), never the catalog's
+ * `network` field — that one names the chain a wrapper is BACKED by (ckUSDC: "Ethereum") and
+ * would misdirect a same-chain send. Reachability is the CALLER's call (ReceiveMode's rail
+ * routing); this sheet fails closed only on incomplete data. Receive detection is the same
+ * honest watch as DepositSheet: a signed icrc1_balance_of baseline + strictly-higher delta.
  */
-export function IcrcDepositSheet({identity, catalog, currency, onClose}: {identity: Identity; catalog: CurrencyDescriptor[]; currency: number; onClose: () => void}) {
-  const desc = catalog.find(c => c.currency === currency) ?? null;
+export function IcrcDepositSheet({identity, catalog, asset, onClose}: {identity: Identity; catalog: CurrencyDescriptor[]; asset: SelectableAsset; onClose: () => void}) {
+  // SelectableAsset is a discriminated union and this sheet is IC-only by contract (ReceiveMode's
+  // rail routing never passes a Solana row); a stray non-IC row narrows to a null descriptor and
+  // hits the same fail-closed path as an incomplete one.
+  const desc = asset.protocol === 'ic' ? catalog.find(c => c.currency === asset.currency) ?? null : null;
   const [principal, setPrincipal] = useState<string | null>(null);
   const [receivedTotal, setReceivedTotal] = useState<string | null>(null);
   // Balance baseline (first successful ledger read while open); received = strictly above it.
@@ -46,7 +55,7 @@ export function IcrcDepositSheet({identity, catalog, currency, onClose}: {identi
     (async () => {
       setLoading(true); setErr(null);
       try {
-        if (!isDirectIcrcAsset(desc)) { if (alive) setErr(M.deposit.ck.noAddress); return; }
+        if (desc == null || !desc.ledger) { if (alive) setErr(M.deposit.ck.noAddress); return; }
         const p = await DpayCore.icpSelfPrincipal(identity.secretHex);
         if (alive) setPrincipal(p);
       } catch {
@@ -91,10 +100,13 @@ export function IcrcDepositSheet({identity, catalog, currency, onClose}: {identi
   }, [principal, doCopy]);
 
   const symbol = desc ? displayName(desc) : '';
-  const network = desc?.network ?? '';
+  // The SETTLEMENT chain (linkNetworkOf → "Internet Computer"), never the catalog's `network` —
+  // that field names the chain a wrapper is BACKED by (ckUSDC: "Ethereum"), which would misdirect
+  // the sender off the rail this address actually lives on.
+  const network = prettyNetwork(linkNetworkOf(asset));
   // The ledger fee from the catalog descriptor (already formatted in the asset's own units); the
   // feeNone word only renders for a malformed descriptor the caller failed to gate out.
-  const feeVal = desc && desc.fee != null ? fmtCurrencyAmount(catalog, currency, desc.fee) : M.deposit.ck.feeNone;
+  const feeVal = desc && desc.fee != null ? fmtCurrencyAmount(catalog, desc.currency, desc.fee) : M.deposit.ck.feeNone;
 
   const body = (
     <>
@@ -111,7 +123,7 @@ export function IcrcDepositSheet({identity, catalog, currency, onClose}: {identi
         <View style={S.centerAll}>
           <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
           <Text style={S.paidText}>{M.deposit.deposited}</Text>
-          <Text style={S.paidSub}>{M.deposit.icrc.receivedAmount(fmtCurrencyAmount(catalog, currency, receivedTotal))}</Text>
+          <Text style={S.paidSub}>{M.deposit.icrc.receivedAmount(desc ? fmtCurrencyAmount(catalog, desc.currency, receivedTotal) : '')}</Text>
           <Text style={S.dim2}>{M.deposit.balanceAuto}</Text>
           <Pressable testID="btn-deposit-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
         </View>

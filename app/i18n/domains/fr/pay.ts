@@ -227,6 +227,11 @@ export const receiveFr: ReceiveMessages = {
 
   requestPayment: 'Demander',
   myAddress: 'Mon adresse',
+  rail: {
+    feeLine: (network, fee) => `${network} · Frais ${fee}`,
+    feeWithOneTime: (network, fee, oneTime) => `${network} · Frais ${fee} + loyer unique ${oneTime}`,
+    feeUnknown: network => `${network} · Frais inconnus`,
+  },
   showToPayer: nfc =>
     `Montrez ceci au payeur${nfc === 'tap' ? ' · ou sans contact' : nfc === 'expired' ? ' · NFC expiré' : ''}`,
   expiredMakeNew: 'Expiré — créez une nouvelle demande',

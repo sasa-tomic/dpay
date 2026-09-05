@@ -761,6 +761,17 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     setDepositReturnTo(null); // a manual switch supersedes any fund-funnel resume origin
   }, [selectionLocked]);
 
+  // The rail flip inside Receive ▸ "My address" (Objective 2, currency-first wallet): switching
+  // WHICH rail of the home-currency group the address surface shows. Deliberately NOT handleSelect
+  // — that one resets the within-tab sub-modes so every surface starts fresh on a new asset, which
+  // would kick the user out of "My address" at the exact moment they flipped the rail. This switch
+  // must KEEP the sub-mode (the whole point is the sibling rail's address one tap away); like any
+  // user gesture it still respects the selection lock.
+  const receiveRailSelect = useCallback((id: AssetId) => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
+    selectAsset(id);
+  }, [selectionLocked]);
+
   // Zero-funds funnel (2026-08-16 UX): the ONE programmatic "show this asset's deposit address"
   // action used by every fund-first surface (SolPayMode's InstructionPanel + AtaSetupCard's
   // fund-SOL secondary). Programmatic like the deeplink router — it bypasses the selection lock
@@ -972,6 +983,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                       : null}
                   onReturnFromDeposit={returnFromDeposit}
                   onLockChange={setSelectionLocked}
+                  homeCurrency={homeCurrency}
+                  onReceiveRailChange={receiveRailSelect}
                 />
               : (
                   /* Phase 4 (2026-08-12 unified asset selection rewrite): the PHASE 3 INTERIM bridge
@@ -1007,6 +1020,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                     balances={balances}
                     onSelectAsset={handleSelect}
                     onLockChange={setSelectionLocked}
+                    homeCurrency={homeCurrency}
+                    onReceiveRailChange={receiveRailSelect}
                   />
                 )
           )
