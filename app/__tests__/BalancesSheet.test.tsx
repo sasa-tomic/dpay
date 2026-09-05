@@ -94,3 +94,78 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
     act(() => { tree.unmount(); });
   });
 });
+
+describe('BalancesSheet — home-currency rail badges (mark every rail, never sum the group)', () => {
+  const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
+  // The full two-rail USD group: ckUSDC on the IC + USDC on Solana (solanaUsdc forced on so the
+  // row is present regardless of the offline test loop's empty RPC URL).
+  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const balances = buildAssetBalances({
+    catalog: BUNDLED,
+    assets,
+    icBalances: {},
+    primaryBalance: null,
+    online: true,
+    solState: {balance: null, status: 'unavailable'},
+    usdcState: {amount: null, decimals: null, status: 'unavailable'},
+  });
+
+  function mountSheet(home: 'CHF' | 'USD'): renderer.ReactTestRenderer {
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(
+        <BalancesSheet
+          assets={assets}
+          balances={balances}
+          selectedId="ic:0"
+          homeCurrency={home}
+          onSelect={jest.fn()}
+          hasTestnet={false}
+          onTopUp={jest.fn()}
+          topUpBusy={false}
+          topUpErr={null}
+          showTestnet={false}
+          onToggleTestnet={jest.fn()}
+          onClose={jest.fn()}
+        />,
+      );
+    });
+    return tree;
+  }
+
+  const badgeText = (tree: renderer.ReactTestRenderer, testID: string): string =>
+    tree.root
+      .findAll(node => node.props && node.props.testID === testID)[0]!
+      .findAllByType(Text)
+      .map(n => n.props.children)
+      .join(' ');
+
+  const hasBadge = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
+    tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
+
+  test('home=USD: MAIN on ckUSDC only; the Solana sibling wears a badge NAMING its rail', () => {
+    const tree = mountSheet('USD');
+    // The preferred rail keeps the one MAIN badge.
+    expect(hasBadge(tree, 'asset-ckusdc-main')).toBe(true);
+    expect(hasBadge(tree, 'asset-sol-usdc-main')).toBe(false);
+    expect(hasBadge(tree, 'asset-ckusdc-rail')).toBe(false);
+    // The sibling rail's badge names the rail with the S1 rail-line vocabulary — never "MAIN".
+    expect(hasBadge(tree, 'asset-sol-usdc-rail')).toBe(true);
+    expect(badgeText(tree, 'asset-sol-usdc-rail')).toBe('USDC · Solana');
+    // No OTHER row gains a badge: VCHF settles CHF (a different currency), ICP/ckETH settle none.
+    for (const key of ['asset-vchf', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-demo']) {
+      expect(hasBadge(tree, `${key}-rail`)).toBe(false);
+      expect(hasBadge(tree, `${key}-main`)).toBe(false);
+    }
+    act(() => { tree.unmount(); });
+  });
+
+  test('home=CHF: single-rail group renders exactly as before — MAIN on VCHF, no rail badges', () => {
+    const tree = mountSheet('CHF');
+    expect(hasBadge(tree, 'asset-vchf-main')).toBe(true);
+    for (const key of ['asset-vchf', 'asset-ckusdc', 'asset-sol-usdc', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-demo']) {
+      expect(hasBadge(tree, `${key}-rail`)).toBe(false);
+    }
+    act(() => { tree.unmount(); });
+  });
+});

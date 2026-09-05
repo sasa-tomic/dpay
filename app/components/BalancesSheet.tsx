@@ -8,7 +8,7 @@ import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
 import {IconClose, IconPlus} from './icons';
 import {type SelectableAsset} from '../config/assets';
-import {type HomeCurrency, preferredRail} from '../config/currency';
+import {type HomeCurrency, currencyOfAsset, preferredRail, railLineLabel} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
 import type {AssetId} from '../lib/types';
 
@@ -52,8 +52,13 @@ export function BalancesSheet({assets, balances, selectedId, homeCurrency, onSel
   // are currently shown (so the user can hide them again). `hasTestnet` is computed upstream from
   // the FULL catalog (the assets list is already filtered, so it cannot answer this on its own).
   const showToggle = hasTestnet || showTestnet;
-  // The one row that is the home currency's rail. Marked, not reordered: the list's order is the
-  // catalog's and several flows read it positionally, so the badge carries the meaning instead.
+  // The home currency's rail group, marked — never summed and never reordered: each rail keeps its
+  // own row and balance (the founder's honesty rule: same-currency rails on different chains must
+  // never read as one balance), and the list's order is the catalog's, which several flows read
+  // positionally, so the badges carry the meaning instead. The preferred rail (mainId) carries the
+  // MAIN badge; every OTHER rail of the group carries a badge NAMING that rail (the S1 rail-line
+  // vocabulary — "USDC · Solana" — so a sibling row says which rail it is instead of wearing a
+  // second MAIN or vanishing into a group total).
   const mainId = preferredRail(homeCurrency, assets)?.id ?? null;
   return (
     <SheetOverlay>
@@ -120,6 +125,13 @@ export function BalancesSheet({assets, balances, selectedId, homeCurrency, onSel
             const mainBadge = asset.id === mainId
               ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>
               : null;
+            // The sibling-rail badge — a rail of the home currency's group that is NOT the preferred
+            // one. Its text NAMES the rail (railLineLabel: ledger token · settlement chain), never
+            // "MAIN", so the two USD rows read as two named rails of one currency, each with its own
+            // balance — the opposite of a merged group total.
+            const railBadge = asset.id !== mainId && currencyOfAsset(asset) === homeCurrency
+              ? <Text testID={`asset-${asset.testKey}-rail`} style={S.assetBadge}>{railLineLabel(asset)}</Text>
+              : null;
             return (
               <CurrencyRow
                 key={asset.testKey}
@@ -138,6 +150,7 @@ export function BalancesSheet({assets, balances, selectedId, homeCurrency, onSel
               >
                 {errLine}
                 {mainBadge}
+                {railBadge}
                 {setupBadge}
               </CurrencyRow>
             );
