@@ -12,8 +12,10 @@ import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {buildCanonicalSolMessage, verifySolPayment, base58Decode32} from '../solana/tx';
 import {buildCanonicalUsdcMessage, deriveAta, ASSOCIATED_TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
 import {deriveSolanaKeypair} from '../solana/identity';
+import {utf8ToBytes} from '../lib/base64url';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../solana/payments';
 import type {SolanaRpcStub} from '../solana/rpc';
+import type {SolanaPayTransfer} from '../solana';
 
 const realFetch = globalThis.fetch;
 
@@ -883,5 +885,152 @@ describe('solana seam — broadcastSolPayment (money-critical freshness state ma
     });
     expect(receipt.status).toBe(RECEIPT_UNREACHABLE);
     expect(receipt.sig).toBe(sig);
+  });
+});
+
+describe('solana seam — sendSolanaPay (a scanned Solana Pay transfer)', () => {
+  const REFERENCE = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const SOL_TRANSFER = {
+    recipient: MERCHANT_ADDRESS,
+    splToken: null as string | null,
+    amount: 1_000_000n, // 0.001 SOL
+    references: [REFERENCE],
+    memo: 'order-42',
+  };
+
+  function solanaPayStub(broadcast: string, sent: string[] = []) {
+    return {
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: (params: unknown[]) => { sent.push(params[0] as string); return broadcast; },
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+  }
+
+  test('offline (SOLANA_RPC_URL empty) throws without any network', async () => {
+    let called = false;
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
+      called = true;
+      return Promise.resolve({});
+    });
+    const {sendSolanaPay} = require('../solana');
+    await expect(
+      (sendSolanaPay as (s: string, t: SolanaPayTransfer) => Promise<string>)(SEED_HEX, SOL_TRANSFER),
+    ).rejects.toThrow('offline');
+    expect(called).toBe(false);
+  });
+
+  test('an unknown mint is refused before ANY rpc call — the scan surface named it first', async () => {
+    let calls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getLatestBlockhash: () => { calls++; return {context: {slot: 1}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 1}}; },
+    };
+    await expect(withStubUrl(async () => {
+      const {sendSolanaPay} = require('../solana');
+      return (sendSolanaPay as (s: string, t: SolanaPayTransfer) => Promise<string>)(SEED_HEX, {
+        ...SOL_TRANSFER, splToken: REFERENCE, // a valid pubkey, but not the USDC mint
+      });
+    })).rejects.toThrow(/spl-token/i);
+    expect(calls).toBe(0);
+  });
+
+  test('SOL: memo FIRST + transfer carrying the reference key, in ONE broadcast', async () => {
+    const sent: string[] = [];
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = solanaPayStub('SigSpaySol', sent);
+    const sig = await withStubUrl(async () => {
+      const {sendSolanaPay} = require('../solana');
+      return (sendSolanaPay as (s: string, t: SolanaPayTransfer) => Promise<string>)(SEED_HEX, SOL_TRANSFER);
+    });
+    expect(sig).toBe('SigSpaySol');
+    expect(sent).toHaveLength(1);
+    const bytes = Uint8Array.from(Buffer.from(sent[0], 'base64'));
+    // SPL Memo instruction + System transfer = exactly 2 instructions, one transaction.
+    expect(countInstructions(bytes)).toBe(2);
+    // The merchant's reference pubkey rides the account table — the matching mechanism itself.
+    expect(indexOfBytes(bytes, base58Decode32(REFERENCE))).toBeGreaterThanOrEqual(0);
+    // The memo bytes ride their own instruction's data.
+    expect(indexOfBytes(bytes, utf8ToBytes('order-42'))).toBeGreaterThanOrEqual(0);
+  });
+
+  test('SOL with NO memo and NO references is the plain two-key transfer (byte-compat with sendSol)', async () => {
+    const sent: string[] = [];
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = solanaPayStub('SigSpayPlain', sent);
+    await withStubUrl(async () => {
+      const {sendSolanaPay} = require('../solana');
+      return (sendSolanaPay as (s: string, t: SolanaPayTransfer) => Promise<string>)(SEED_HEX, {
+        recipient: MERCHANT_ADDRESS, splToken: null, amount: 1_000_000n, references: [], memo: null,
+      });
+    });
+    const bytes = Uint8Array.from(Buffer.from(sent[0], 'base64'));
+    expect(countInstructions(bytes)).toBe(1);
+    expect(indexOfBytes(bytes, utf8ToBytes('order-42'))).toBe(-1);
+  });
+
+  test('USDC: transferChecked against the recipient ATA, reference key attached', async () => {
+    const sent: string[] = [];
+    let accountChecks = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      ...solanaPayStub('SigSpayUsdc', sent),
+      // Both ATAs exist (sender first, recipient second) — no create instruction.
+      getAccountInfo: () => {
+        accountChecks++;
+        return {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}};
+      },
+    };
+    const sig = await withStubUrl(async () => {
+      const {sendSolanaPay} = require('../solana');
+      return (sendSolanaPay as (s: string, t: SolanaPayTransfer) => Promise<string>)(SEED_HEX, {
+        ...SOL_TRANSFER, splToken: USDC_MINT, amount: 1_500_000n, // 1.5 USDC
+      });
+    });
+    expect(sig).toBe('SigSpayUsdc');
+    expect(accountChecks).toBe(2);
+    const bytes = Uint8Array.from(Buffer.from(sent[0], 'base64'));
+    // memo + transferChecked; the recipient's ATA (not the wallet owner) is the transfer target.
+    expect(countInstructions(bytes)).toBe(2);
+    expect(indexOfBytes(bytes, deriveAta(MERCHANT_ADDRESS, USDC_MINT))).toBeGreaterThanOrEqual(0);
+    expect(indexOfBytes(bytes, base58Decode32(REFERENCE))).toBeGreaterThanOrEqual(0);
+  });
+
+  test('USDC: a missing recipient ATA is created in the SAME tx, rent pre-checked (sendSpl parity)', async () => {
+    const sent: string[] = [];
+    let calls = 0;
+    let broadcasts = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getAccountInfo: () => {
+        calls++;
+        return calls === 1 ? {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}} : {value: null};
+      },
+      getBalance: () => ({value: 1000000000}), // 1 SOL ≥ rent+fee — the create is fundable
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: (params: unknown[]) => { broadcasts++; sent.push(params[0] as string); return 'SigSpayUsdcAta'; },
+      getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
+    };
+    const sig = await withStubUrl(async () => {
+      const {sendSolanaPay} = require('../solana');
+      return (sendSolanaPay as (s: string, t: SolanaPayTransfer) => Promise<string>)(SEED_HEX, {
+        ...SOL_TRANSFER, splToken: USDC_MINT,
+      });
+    });
+    expect(sig).toBe('SigSpayUsdcAta');
+    expect(broadcasts).toBe(1);
+    // memo + createIdempotent + transferChecked = 3 instructions, one broadcast.
+    const bytes = Uint8Array.from(Buffer.from(sent[0], 'base64'));
+    expect(countInstructions(bytes)).toBe(3);
+  });
+
+  test('onBroadcast fires the moment the network accepts — a confirm failure still hands back the sig', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+      sendTransaction: () => 'SigSpayUnknown',
+      getSignatureStatuses: () => { throw new Error('rpc down'); },
+    };
+    const seen: string[] = [];
+    await expect(withStubUrl(async () => {
+      const {sendSolanaPay} = require('../solana');
+      return (sendSolanaPay as (s: string, t: SolanaPayTransfer, sig?: AbortSignal, cb?: (x: string) => void) => Promise<string>)(
+        SEED_HEX, SOL_TRANSFER, undefined, x => seen.push(x),
+      );
+    })).rejects.toThrow();
+    expect(seen).toEqual(['SigSpayUnknown']);
   });
 });

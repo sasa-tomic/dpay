@@ -233,6 +233,37 @@ export type PayMessages = {
   /** A scanned wallet address for an asset that cannot leave the wallet to an address at all. */
   scannedAddressNotSendable: (symbol: string) => string;
 
+  // --- scanned Solana Pay requests (the `solana:` open standard the SOL receive QR speaks) ----
+  /** Everything the scan surface + review screen need for a scanned Solana Pay request. The named
+   *  refusals mirror `parseSolanaPayUri`'s refusal codes one-for-one (`solana/payUri.ts`), so the
+   *  payer always gets the broken part AND the way out — the opencryptopay.ts discipline. */
+  spay: {
+    /** The IC Pay screen's refusal: this code IS payable — on the Solana rail this wallet
+     *  carries. Names the rail and the switch, per the scannedCoinRequest founder rule. */
+    wrongRail: string;
+    badUri: string;
+    badRecipient: string;
+    badAmount: string;
+    badSplToken: string;
+    badReference: string;
+    unexpectedParam: (param: string) => string;
+    memoTooLong: string;
+    /** A spl-token mint the catalog does not carry — named, with the way out. */
+    unknownMint: (mint: string) => string;
+    /** A Solana Pay transfer is submitted by the payer's own phone, so offline blocks the scan. */
+    offline: string;
+    /** Label above the amount entry when the URI carried no amount (spec-optional — the receive
+     *  QR this wallet emits itself is amount-less). */
+    amountLabel: string;
+    /** The merchant's `message` param — display text for the payer, sanitised upstream. It is
+     *  NOT the on-chain memo; that is the `memo` param, which rides an SPL Memo instruction. */
+    merchantMessage: (message: string) => string;
+    /** The outcome note when a Solana Pay transfer was ACCEPTED by the network but its
+     *  confirmation did not land in the window — the signature is the payer's record, and paying
+     *  again is the one action that could double-charge. */
+    pendingNote: string;
+  };
+
   // --- the scan surface + its NFC status row ------------------------------------------------
   scanToPay: string;
   sendToAddress: string;
@@ -411,6 +442,27 @@ export const payEn: PayMessages = {
     `Your phone submits an address send itself, so it has to be online. To pay while you're offline, scan the merchant's payment code instead — their phone submits your ${symbol} payment for you.`,
   scannedAddressNotSendable: symbol =>
     `That's a wallet address. ${symbol} can't be sent to an address — scan the merchant's payment code to pay.`,
+
+  spay: {
+    wrongRail:
+      "That's a Solana Pay request. This screen settles on the Internet Computer — switch to Solana under Balances and scan it there to pay it.",
+    badUri: 'This Solana Pay code is damaged. Ask the merchant for a fresh QR.',
+    badRecipient: "The recipient in this Solana Pay code isn't a valid Solana address. Ask the merchant for a fresh QR.",
+    badAmount: "The amount in this Solana Pay code isn't a plain number above zero. Ask the merchant for a fresh QR.",
+    badSplToken: "The token mint in this Solana Pay code isn't valid. Ask the merchant for a fresh QR.",
+    badReference: "The payment reference in this Solana Pay code isn't valid. Ask the merchant for a fresh QR.",
+    unexpectedParam: param =>
+      `This Solana Pay code carries a parameter dpay doesn't know (${param}) — paying it would sign meaning dpay can't review. Ask the merchant for a code without it.`,
+    memoTooLong: 'The memo in this Solana Pay code is too long for a Solana transaction. Ask the merchant for a fresh QR.',
+    unknownMint: mint =>
+      `This Solana Pay code asks for a token dpay doesn't carry yet (mint ${mint}). Pay it with a wallet that supports it.`,
+    offline:
+      'Paying a Solana Pay code submits the transfer from your phone, so it needs a connection. Go online and scan again.',
+    amountLabel: 'Amount',
+    merchantMessage: message => `Message from the merchant: ${message}`,
+    pendingNote:
+      'The network accepted this payment, but its confirmation is still on the way. The transaction signature below is your record — check it before paying again.',
+  },
 
   scanToPay: 'Scan to pay',
   sendToAddress: 'Send to address',

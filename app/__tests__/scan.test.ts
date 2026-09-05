@@ -118,6 +118,30 @@ describe('classifyScan — addresses', () => {
   });
 });
 
+describe('classifyScan — Solana Pay requests', () => {
+  test('a solana: URI with amount + reference is a solana-pay verdict', () => {
+    expect(classifyScan(`solana:${SOLANA}?amount=0.001&reference=${SOLANA}`)).toEqual({kind: 'solana-pay'});
+  });
+
+  test('an UPPERCASE SOLANA: URI is the same verdict — QR encoders uppercase', () => {
+    expect(classifyScan(`SOLANA:${SOLANA}?amount=0.001`)).toEqual({kind: 'solana-pay'});
+  });
+
+  test('the match needs the colon — solanaabc: is a different scheme and stays unknown', () => {
+    expect(classifyScan(`solanaabc:${SOLANA}`)).toEqual({kind: 'unknown'});
+  });
+
+  test('a DAMAGED solana: URI is still a solana-pay verdict — the SOL rail names the broken part', () => {
+    // Same discipline as the damaged till code: "the recipient isn't valid" is actionable, the
+    // camera's generic "not a payment code" is not.
+    expect(classifyScan('solana:notanaddress?amount=abc')).toEqual({kind: 'solana-pay'});
+  });
+
+  test('a bare Solana address is still an ADDRESS — the scheme test never sees it', () => {
+    expect(classifyScan(SOLANA)).toEqual({kind: 'address', shape: 'base58'});
+  });
+});
+
 describe('classifyScan — nothing recognised it', () => {
   test.each([
     ['empty', ''],

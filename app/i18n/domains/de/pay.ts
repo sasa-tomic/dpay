@@ -162,6 +162,27 @@ export const payDe: PayMessages = {
   scannedAddressNotSendable: symbol =>
     `Das ist eine Wallet-Adresse. ${symbol} kann nicht an eine Adresse gesendet werden — scanne den Zahlungscode des Händlers, um zu bezahlen.`,
 
+  spay: {
+    wrongRail:
+      'Das ist eine Solana-Pay-Anfrage. Dieser Bildschirm zahlt über den Internet Computer — wechsle unter Guthaben zu Solana und scanne den Code dort, um zu zahlen.',
+    badUri: 'Dieser Solana-Pay-Code ist beschädigt. Bitte den Händler um einen neuen QR-Code.',
+    badRecipient: 'Der Empfänger in diesem Solana-Pay-Code ist keine gültige Solana-Adresse. Bitte den Händler um einen neuen QR-Code.',
+    badAmount: 'Der Betrag in diesem Solana-Pay-Code ist keine klare Zahl über null. Bitte den Händler um einen neuen QR-Code.',
+    badSplToken: 'Der Token-Mint in diesem Solana-Pay-Code ist ungültig. Bitte den Händler um einen neuen QR-Code.',
+    badReference: 'Die Zahlungsreferenz in diesem Solana-Pay-Code ist ungültig. Bitte den Händler um einen neuen QR-Code.',
+    unexpectedParam: param =>
+      `Dieser Solana-Pay-Code trägt einen Parameter, den dpay nicht kennt (${param}) — ihn zu zahlen hieße, Bedeutung zu unterschreiben, die dpay nicht prüfen kann. Bitte den Händler um einen Code ohne ihn.`,
+    memoTooLong: 'Das Memo in diesem Solana-Pay-Code ist zu lang für eine Solana-Transaktion. Bitte den Händler um einen neuen QR-Code.',
+    unknownMint: mint =>
+      `Dieser Solana-Pay-Code verlangt einen Token, den dpay noch nicht führt (Mint ${mint}). Zahl ihn mit einer Wallet, die ihn unterstützt.`,
+    offline:
+      'Bei einem Solana-Pay-Code reicht dein Handy die Zahlung selbst ein — dafür braucht es eine Verbindung. Geh online und scanne erneut.',
+    amountLabel: 'Betrag',
+    merchantMessage: message => `Nachricht des Händlers: ${message}`,
+    pendingNote:
+      'Das Netzwerk hat diese Zahlung angenommen, aber die Bestätigung ist noch unterwegs. Die Transaktionssignatur unten ist dein Nachweis — prüfe sie, bevor du erneut zahlst.',
+  },
+
   scanToPay: 'Scannen & zahlen',
   sendToAddress: 'An Adresse senden',
   tapOrScanToPay: 'Auflegen oder scannen',

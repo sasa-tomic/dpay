@@ -35,6 +35,12 @@ export type ScanFallback =
    *  format, on a network no dpay rail settles on. Only the scheme is detected; the verdict exists
    *  to refuse it BY NAME with an instruction (founder rule 2026-08-29), never to parse it. */
   | {kind: 'coin-request'; scheme: CoinUriScheme}
+  /** A Solana Pay request (`solana:<recipient>?amount=…`) — the open standard the SOL rail's own
+   *  receive QR speaks, so the camera can now read back what this wallet emits. Like `coin-request`
+   *  only the scheme is detected here; the Solana rail's own parser (solana/payUri.ts) decides on
+   *  the SOL pay mode whether the request is payable, and the IC pay mode refuses it by name with
+   *  the one instruction that helps (switch to the Solana rail and scan again). */
+  | {kind: 'solana-pay'}
   /** Nothing claimed it. The caller's honest "not a payment code" error stands. */
   | {kind: 'unknown'};
 
@@ -50,6 +56,8 @@ export type CoinUriScheme = 'bitcoin' | 'ethereum';
  *   • an OCP code is an `lnurl1…` bech32 string, or a URL carrying one in a `lightning` parameter;
  *   • a coin-request is a case-insensitive `bitcoin:`/`ethereum:` scheme prefix — AFTER the OCP test,
  *     because a BIP-21 URI may legally carry its payable Lightning part in a `lightning` parameter;
+ *     a `solana:` prefix is the same kind of test with the colon guarding the scheme boundary, and
+ *     only ever routes: the SOL rail parses it, the IC rail refuses it by name;
  *   • an address is a loose shape regex — and an UPPERCASE `LNURL1…` is inside the base58 alphabet,
  *     so testing addresses first would classify a perfectly good till code as a Solana address and
  *     send the payer to a send form.
@@ -79,6 +87,12 @@ export function classifyScan(raw: string): ScanFallback {
   if (ocp.ok || ocp.reason !== 'not-lnurl') return {kind: 'opencryptopay', ocp};
   const coin = coinUriSchemeOf(t);
   if (coin !== null) return {kind: 'coin-request', scheme: coin};
+  // The colon is part of the prefix, so `solanaabc:` (a different scheme) is not claimed — same
+  // guard the coin schemes use. A `solana:https://…` transaction-request form still matches the
+  // scheme and is the Solana rail's own parser's to refuse, exactly as a damaged LNURL stays an
+  // `opencryptopay` verdict: "it is a Solana Pay code and part of it is unusable" must not decay
+  // into the camera's generic shrug.
+  if (t.toLowerCase().startsWith('solana:')) return {kind: 'solana-pay'};
   const shape = detectAddressShape(t);
   return shape === 'unknown' ? {kind: 'unknown'} : {kind: 'address', shape};
 }

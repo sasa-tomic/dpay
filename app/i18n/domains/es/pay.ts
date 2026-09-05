@@ -162,6 +162,27 @@ export const payEs: PayMessages = {
   scannedAddressNotSendable: symbol =>
     `Eso es una dirección de billetera. ${symbol} no se puede enviar a una dirección: escanea el código de pago del comercio para pagar.`,
 
+  spay: {
+    wrongRail:
+      'Esa es una solicitud de Solana Pay. Esta pantalla paga por Internet Computer: cambia a Solana en Saldos y escanea el código allí para pagarla.',
+    badUri: 'Este código de Solana Pay está dañado. Pide al comercio un QR nuevo.',
+    badRecipient: 'El destinatario de este código de Solana Pay no es una dirección Solana válida. Pide al comercio un QR nuevo.',
+    badAmount: 'El importe de este código de Solana Pay no es un número simple mayor que cero. Pide al comercio un QR nuevo.',
+    badSplToken: 'El mint de token de este código de Solana Pay no es válido. Pide al comercio un QR nuevo.',
+    badReference: 'La referencia de pago de este código de Solana Pay no es válida. Pide al comercio un QR nuevo.',
+    unexpectedParam: param =>
+      `Este código de Solana Pay trae un parámetro que dpay no conoce (${param}) — pagarlo firmaría un significado que dpay no puede revisar. Pide al comercio un código sin él.`,
+    memoTooLong: 'El memo de este código de Solana Pay es demasiado largo para una transacción Solana. Pide al comercio un QR nuevo.',
+    unknownMint: mint =>
+      `Este código de Solana Pay pide un token que dpay aún no ofrece (mint ${mint}). Págalo con una billetera que lo admita.`,
+    offline:
+      'Con un código de Solana Pay es tu teléfono quien envía la transferencia, así que necesita conexión. Conéctate y vuelve a escanear.',
+    amountLabel: 'Importe',
+    merchantMessage: message => `Mensaje del comercio: ${message}`,
+    pendingNote:
+      'La red aceptó este pago, pero su confirmación sigue en camino. La firma de transacción de abajo es tu comprobante: revísala antes de pagar de nuevo.',
+  },
+
   scanToPay: 'Escanear y pagar',
   sendToAddress: 'Enviar a dirección',
   tapOrScanToPay: 'Acerca o escanea para pagar',

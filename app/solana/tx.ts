@@ -281,6 +281,35 @@ export function assembleMessage(
   return new Uint8Array(out);
 }
 
+/**
+ * Build a System Program `transfer` instruction with optional extra READONLY account keys — the
+ * Solana Pay `reference` mechanism. A merchant matches the payment to their sale by scanning for
+ * transfers whose instruction carries the reference pubkey as an additional (non-signing,
+ * non-writable) account key; the System Program itself ignores the extras, so the transfer is
+ * identical to a plain one plus the matching key. Byte-exact against
+ * @solana/web3.js `SystemProgram.transfer(...).keys.concat(references.map(...))`.
+ */
+export function buildSolTransferInstruction(
+  fromPubkey: Uint8Array,
+  toPubkey: Uint8Array,
+  lamports: bigint,
+  additionalKeys: Uint8Array[] = [],
+): Instruction {
+  if (lamports < 0n) throw new Error('lamports must be non-negative');
+  const data: number[] = [];
+  encodeU32LE(data, TRANSFER_DISCRIMINATOR);
+  encodeU64LE(data, lamports);
+  return {
+    programId: SYSTEM_PROGRAM_BYTES,
+    keys: [
+      {pubkey: fromPubkey, signer: true, writable: true},
+      {pubkey: toPubkey, signer: false, writable: true},
+      ...additionalKeys.map(pubkey => ({pubkey, signer: false, writable: false})),
+    ],
+    data: new Uint8Array(data),
+  };
+}
+
 // ============================================================================
 // Phase 2 — Canonical recent-blockhash v2 transaction construction + STRICT verification.
 // These build the {Memo, transfer} message that binds a SolReqV2 into the signed transaction, plus

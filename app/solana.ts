@@ -19,8 +19,9 @@ import {solanaUsdcAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
 import {fmtAsset} from './lib/format';
-import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, type Instruction} from './solana/tx';
-import {buildSplTransferInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
+import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, buildMemoInstruction, buildSolTransferInstruction, type Instruction} from './solana/tx';
+import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS, USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
+import {utf8ToBytes} from './lib/base64url';
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
 import type {SolanaSignatureStatus} from './solana/rpc';
@@ -157,6 +158,87 @@ export async function sendSpl(secretHex: string, destAddress: string, amount: bi
   const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
   const raw = signTransaction(message, seed);
   const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
+  await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
+  return signature;
+}
+
+/** What a Solana Pay transfer carries beyond a plain send (see sendSolanaPay). `amount` is RAW
+ *  integer units at the asset's decimals (lamports for SOL, 6-decimal base units for USDC) — the
+ *  caller parsed the URI's decimal string at review time; `references` are the scanned URI's
+ *  base58 reference pubkeys (possibly empty — the spec makes the param optional); `memo` is the
+ *  SPL Memo program's on-chain text (null when the URI carried none). */
+export type SolanaPayTransfer = {
+  recipient: string;
+  splToken: string | null;
+  amount: bigint;
+  references: string[];
+  memo: string | null;
+};
+
+/** Build, sign, broadcast, and confirm a scanned Solana Pay request (`solana:<recipient>?…`, the
+ *  open standard this wallet's own receive QR emits — `solana/payments.ts` is the format's home).
+ *  Signs LOCALLY with the device-derived key, exactly like sendSol/sendSpl — non-custodial; dpay
+ *  never holds keys or funds, and paying another wallet's standard never becomes a swap.
+ *
+ *  What makes it a Solana Pay transfer rather than a plain send:
+ *    • `reference` — the merchant's matching mechanism. Each reference pubkey is attached to the
+ *      transfer instruction as an additional READONLY non-signing account key (the System/Token
+ *      programs ignore it; the merchant finds the payment by the key). NOT a memo — the spec's
+ *      matching story is account keys, full stop.
+ *    • `memo` — the SPL Memo program's text, as its OWN instruction before the transfer (per
+ *      spec ordering) when the URI carried one.
+ *    • `spl-token` — the URI recipient is the wallet OWNER; the transfer target is the derived
+ *      Associated Token Account for (owner, mint), auto-created idempotently when missing with
+ *      the same rent pre-check + disclosure sendSpl has. SOL path uses a System transfer, the
+ *      USDC path uses `transferChecked` (commits mint + decimals, the solana-pay SDK's choice).
+ *
+ *  Supports exactly the mints the app catalog supports (USDC mainnet) — anything else is refused
+ *  by name at the scan surface, so reaching here with a foreign mint is a wiring error and is
+ *  thrown as such. `onBroadcast` carries the same "accepted, pre-confirmation" contract as
+ *  sendSol. Throws offline / on RPC error / on-chain failure; returns the signature. */
+export async function sendSolanaPay(
+  secretHex: string,
+  transfer: SolanaPayTransfer,
+  signal?: AbortSignal,
+  onBroadcast?: (signature: string) => void,
+): Promise<string> {
+  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
+  if (transfer.splToken !== null && transfer.splToken !== USDC_MINT_ADDRESS) {
+    throw new Error('unsupported spl-token mint for Solana Pay');
+  }
+  const {seed, publicKey} = deriveSolanaKeypair(secretHex);
+  const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
+  const referenceKeys = transfer.references.map(base58Decode32);
+  const ixs: Instruction[] = [];
+  if (transfer.memo !== null) ixs.push(buildMemoInstruction(utf8ToBytes(transfer.memo)));
+  if (transfer.splToken === null) {
+    ixs.push(buildSolTransferInstruction(publicKey, base58Decode32(transfer.recipient), transfer.amount, referenceKeys));
+  } else {
+    const senderAddress = bs58.encode(publicKey);
+    const senderAta = deriveAta(senderAddress, transfer.splToken);
+    const recipientAta = deriveAta(transfer.recipient, transfer.splToken);
+    // Sender ATA first — the device must hold the token account to debit from (fail-closed, same
+    // as sendSpl).
+    if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
+      throw new Error(M.errors.solana.senderNoUsdcAccount);
+    }
+    if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
+      // Same honest cost pre-check as sendSpl: without it the payment passes review and dies at
+      // broadcast with a raw program error no friendlySolError pattern matches.
+      const lamports = await getBalance(SOLANA_RPC_URL, senderAddress, {signal});
+      if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
+        throw new Error(M.errors.solana.recipientNoUsdcAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)));
+      }
+      ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(transfer.recipient), base58Decode32(transfer.splToken)));
+    }
+    ixs.push(buildTransferCheckedInstruction(senderAta, base58Decode32(transfer.splToken), recipientAta, publicKey, transfer.amount, USDC_DECIMALS, referenceKeys));
+  }
+
+  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
+  const raw = signTransaction(message, seed);
+  const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
+  onBroadcast?.(signature);
   await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
   return signature;
 }

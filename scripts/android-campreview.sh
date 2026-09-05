@@ -361,6 +361,14 @@ if 'mnemonic-backup-checkbox' in rids:
         print('btn-mnemonic-continue')
 elif 'mnemonic-word-0' in rids:
     print('SCROLL')
+elif 'home-currency-USD' in rids:
+    # home-currency picker (2026-09 onboarding): radio card — only tap while UNCHECKED
+    # (avoids toggle loops); Continue while still disabled is a harmless no-op.
+    cur = rids['home-currency-USD']
+    if cur.get('checked') != 'true':
+        print('home-currency-USD')
+    else:
+        print('btn-home-currency-continue')
 elif 'btn-create' in rids:
     print('btn-create')
 elif 'btn-onboard-continue' in rids:

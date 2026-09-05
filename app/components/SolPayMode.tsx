@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {View, Text, Pressable} from 'react-native';
+import {View, Text, Pressable, TextInput} from 'react-native';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
@@ -9,9 +9,10 @@ import {IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {POLL, QR_SIZE} from '../config/constants';
 import type {SolPayGate} from '../config/assets';
 import type {Identity, NfcStatus} from '../lib/types';
-import {fmtAsset, short} from '../lib/format';
+import {fmtAsset, short, toUnits} from '../lib/format';
+import {parseDecimalToUnits} from '../lib/amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
+import {USDC_DECIMALS, USDC_MINT_ADDRESS, SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {classifyScan, coinDisplayOfScheme} from '../lib/scan';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
@@ -23,7 +24,8 @@ import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
 import type {SolReqV2} from '../solana/qr';
 import {isSolReqV2Expired} from '../solana/payments';
-import {getSolSignatureStatus, sendSol, signSolPayment, signSplPayment, type SolanaSignatureStatus} from '../solana';
+import {parseSolanaPayUri, type SolanaPayRequest, type SolanaPayRefusal} from '../solana/payUri';
+import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, signSplPayment, type SolanaSignatureStatus} from '../solana';
 import {DpaySolNfc} from '../services/native';
 import {QrScanner} from './QrScanner';
 import {NfcStatusRow} from './NfcStatusRow';
@@ -54,9 +56,16 @@ import {M} from '../i18n';
  *
  * NFC arming: this component mounts only while the SOL rail is selected. Switching the rail unmounts
  * it, whose `useNfcTapState` cleanup disarms the HCE card — no arm-leak.
+ *
+ * The camera also accepts a scanned Solana Pay URI (`solana:<recipient>?…`) — the open standard the
+ * receive tab's own QR is built from (`solana/payUri.ts`). Unlike a solreq it is paid ONLINE (the
+ * payer's phone broadcasts; there is no merchant phone to submit it), it is reviewed explicitly
+ * (stranger-supplied values, never auto-signed), and the transfer carries the merchant's
+ * `reference` pubkeys as instruction account keys and the optional `memo` as an SPL Memo
+ * instruction — the matching mechanism the standard is built on (`sendSolanaPay`).
  */
 export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
-  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done'>('scan');
+  const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
   // holds (PayMode) — the quote context, and the honest sentence for an outcome that is neither
@@ -101,6 +110,18 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   // not. Takes precedence over a link prefill: both fill the same form and the scan is the newer
   // intent. IC twin: PayMode's `scannedAddress`.
   const [scannedAddress, setScannedAddress] = useState<string | null>(null);
+  // A scanned Solana Pay request (`solana:<recipient>?…` — the open standard the receive QR this
+  // wallet shows is built from, `solana/payUri.ts`). Kept as the parser's verbatim request: the
+  // review renders sanitised views of its text params, but the transfer itself must carry the
+  // merchant's exact reference keys and memo bytes, so nothing display-side is written back.
+  const [spay, setSpay] = useState<SolanaPayRequest | null>(null);
+  // The amount the review acts on. Seeded from the URI when it carried one; otherwise it is the
+  // payer's own entry (the spec makes `amount` optional — this wallet's own amount-less receive
+  // QR read back must reach review, not die at a missing number).
+  const [spayAmount, setSpayAmount] = useState('');
+  // The outcome of a Solana Pay transfer: `null` note = confirmed, a note = accepted-but-unconfirmed
+  // (the broadcast succeeded, the confirmation poll did not — the signature is the record).
+  const [spayDone, setSpayDone] = useState<{amount: string; who: string; signature: string; note: string | null} | null>(null);
 
   // U-F1 — visible confirmation after the share resolves (the DepositSheet copy pattern). Dismissed
   // sheets leave the label honest.
@@ -295,7 +316,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
   // route it back to the IC rail if that is where the asset lives); an address — of ANY namespace,
   // not just base58 — goes to the send form, whose status line names the chain it belongs to and
   // refuses a wrong-chain paste by name. Every SOL asset is sendable, so there is no
-  // not-sendable branch here.
+  // not-sendable branch here. A `solana:` URI is the ONE verdict the two rails answer differently:
+  // here it is this rail's own standard and starts the Solana Pay review; the IC rail refuses it
+  // by name with the switch instruction.
   function onNotARequest(raw: string) {
     const what = classifyScan(raw);
     if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
@@ -305,6 +328,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
       refuseScan(M.pay.scannedCoinRequest(named.coin, named.uri));
       return;
     }
+    if (what.kind === 'solana-pay') { startSpay(raw); return; }
     if (what.kind === 'address') {
       setErr(null);
       setScannedAddress(raw.trim());
@@ -312,6 +336,97 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
       return;
     }
     refuseScan(M.pay.notAPaymentCode);
+  }
+
+  // The SOLANA PAY entry — a scanned `solana:` URI, the open standard the receive tab's own QR is
+  // built from. Refuse-early discipline (opencryptopay.ts): every unusable code is refused BY NAME
+  // on the scan surface with a way out, and only a request this rail can actually pay reaches the
+  // review. Unlike a solreq this transfer is BROADCAST BY THE PAYER (the merchant is not standing
+  // there to submit it), so online is a scan-time gate; and it is reviewed explicitly — every
+  // value on the screen came from a code a stranger printed, the one-press rule never reaches it.
+  function startSpay(raw: string) {
+    const parsed = parseSolanaPayUri(raw);
+    if (!parsed.ok) { refuseScan(spayRefusalMessage(parsed.reason, parsed.param ?? '')); return; }
+    const request = parsed.request;
+    if (!online) { refuseScan(M.pay.spay.offline); return; }
+    if (request.splToken !== null && request.splToken !== USDC_MINT_ADDRESS) {
+      refuseScan(M.pay.spay.unknownMint(request.splToken));
+      return;
+    }
+    // The catalog gate's second half: a USDC request needs a USDC account to debit from, and a
+    // KNOWN-absent one is refusable the moment the code is read — the same fail-closed check
+    // sendSpl makes at the RPC, surfaced at the scan where the way out (one-tap setup in Receive)
+    // is nameable.
+    if (request.splToken !== null && usdcAtaAbsent) { refuseScan(M.errors.solana.senderNoUsdcAccount); return; }
+    if (request.amount !== null) {
+      const resolved = parseDecimalToUnits(request.amount, request.splToken === null ? SOL_DECIMALS : USDC_DECIMALS);
+      if (!resolved.ok || resolved.raw === '0') { refuseScan(M.pay.spay.badAmount); return; }
+    }
+    setSpay(request);
+    setSpayAmount(request.amount ?? '');
+    setErr(null);
+    setPhase('spay-review');
+  }
+
+  /** The four-locale copy for a parser refusal, one key per code — the payer always gets the
+   *  broken part and the way out, never the parser's internals. */
+  function spayRefusalMessage(reason: SolanaPayRefusal, param: string): string {
+    switch (reason) {
+      case 'malformed-uri': return M.pay.spay.badUri;
+      case 'bad-recipient': return M.pay.spay.badRecipient;
+      case 'bad-amount': return M.pay.spay.badAmount;
+      case 'bad-spl-token': return M.pay.spay.badSplToken;
+      case 'bad-reference': return M.pay.spay.badReference;
+      case 'unexpected-parameter': return M.pay.spay.unexpectedParam(param);
+      case 'memo-too-long': return M.pay.spay.memoTooLong;
+    }
+  }
+
+  // Approve on a Solana Pay review: the payer's phone builds the transfer (reference keys attached
+  // to the instruction, memo as its own SPL Memo instruction), signs locally, broadcasts, and
+  // confirms. The `onBroadcast` split is the OCP one (sendSolForOcp): a throw before the network
+  // accepted anything is a plain refusal, a throw after it is UNKNOWN — the money may be landing,
+  // so the outcome screen shows the signature as the record instead of a retry affordance.
+  async function approveSpay(request: SolanaPayRequest) {
+    const isSol = request.splToken === null;
+    const decimals = isSol ? SOL_DECIMALS : USDC_DECIMALS;
+    const raw = toUnits(spayAmount, decimals);
+    if (raw === '0') { setErr(M.pay.spay.badAmount); return; }
+    const rawAmount = BigInt(raw);
+    // The same fee-inclusive gate the review renders, re-asserted at the press: the balance prop
+    // can refresh between render and tap, and this is the last point before irreversible money.
+    if (isSol) {
+      if (BigInt(solBalance) < rawAmount + SOL_FEE_LAMPORTS) { setErr(M.pay.notEnoughBalance); return; }
+    } else {
+      if (BigInt(usdcBalance) < rawAmount) { setErr(M.pay.notEnoughBalance); return; }
+    }
+    const who = sanitiseDisplayText(request.label ?? '') || request.recipient;
+    const amount = fmtAsset(raw, decimals, isSol ? SOL_UNIT : 'USDC');
+    const broadcast: {sig: string | null} = {sig: null};
+    const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
+    setBusy(true);
+    setErr(null);
+    try {
+      const sig = await sendSolanaPay(identity.secretHex, {recipient: request.recipient, splToken: request.splToken, amount: rawAmount, references: request.references, memo: request.memo}, signal, s => { broadcast.sig = s; });
+      (isSol ? onSent : onSentUsdc)();
+      setSpayDone({amount, who, signature: sig, note: null});
+      setPhase('spay-done');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('solana pay send failed:', msg);
+      if (broadcast.sig !== null) {
+        // The network accepted the transaction; only the confirmation is missing. Definitively
+        // NOT-sent is off the table, so this is the honest pending screen with the signature.
+        (isSol ? onSent : onSentUsdc)();
+        setSpayDone({amount, who, signature: broadcast.sig, note: M.pay.spay.pendingNote});
+        setPhase('spay-done');
+      } else {
+        setErr(isSolTransactionFailed(msg) ? M.pay.ocp.transferFailed : friendlySolError(msg));
+      }
+    } finally {
+      setBusy(false);
+      cancel();
+    }
   }
 
   // The OPENCRYPTOPAY entry — the IC rail's twin (PayMode.startOcp), running the SAME resolution so
@@ -473,7 +588,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setErr(null); setScanArmed(false); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setSpay(null); setSpayAmount(''); setSpayDone(null); setErr(null); setScanArmed(false); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -684,6 +799,96 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
         </Text>
         <Text style={S.paidSub}>{M.pay.toWho(ocpDone.who)}</Text>
         {ocpDone.note ? <Text testID="ocp-outcome" style={S.warnNote}>{ocpDone.note}</Text> : null}
+        <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.pay.newPayment} accessibilityState={{disabled: false}}>
+          <Text style={S.ghostBtnText}>{M.pay.newPayment}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (phase === 'spay-review' && spay) {
+    // A scanned Solana Pay request: reviewed and approved explicitly, NEVER auto-signed — the same
+    // rule as the OCP till review above (every value came from a code a stranger printed; the
+    // one-press rule covers only dpay's own solreq QRs). The amount is fixed text when the URI
+    // carried one, an entry field when it did not (the spec makes it optional, and this wallet's
+    // own receive QR emits it without one — reading that QR back is the flow this screen serves).
+    const isSol = spay.splToken === null;
+    const decimals = isSol ? SOL_DECIMALS : USDC_DECIMALS;
+    const unit = isSol ? SOL_UNIT : 'USDC';
+    const raw = toUnits(spayAmount, decimals);
+    const amountValid = raw !== '0';
+    const balance = isSol ? BigInt(solBalance) : BigInt(usdcBalance);
+    // SOL must cover the transfer AND the fee — the same fee-inclusive gate the till review uses.
+    const insufficient = !amountValid || (isSol ? balance < BigInt(raw) + SOL_FEE_LAMPORTS : balance < BigInt(raw));
+    const spayLabel = sanitiseDisplayText(spay.label ?? '');
+    const spayMessage = sanitiseDisplayText(spay.message ?? '');
+    const approveDisabled = busy || !!err || !amountValid || insufficient;
+    return (
+      <View style={S.center}>
+        <Text style={S.label}>{M.pay.reviewPayment}</Text>
+        {spay.amount !== null ? (
+          <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(raw, decimals, unit))}</Text>
+        ) : (
+          <>
+            <Text style={S.dim2}>{M.pay.spay.amountLabel}</Text>
+            <TextInput
+              testID="sol-spay-amount-input"
+              style={S.amountInput}
+              value={spayAmount}
+              onChangeText={setSpayAmount}
+              keyboardType="decimal-pad"
+              accessibilityLabel={M.pay.spay.amountLabel}
+            />
+          </>
+        )}
+        <Text style={S.reviewTo}>{M.pay.toWho(spayLabel || spay.recipient)}</Text>
+        {/* The FULL destination, never shortened (the till review's discipline): for a spl-token
+            request this is the recipient's WALLET address — the transfer itself targets the
+            derived associated token account, and the payable address is the thing to check. */}
+        <Text testID="sol-pay-payee" style={S.dim2}>{spay.recipient}</Text>
+        {spayLabel ? <Text style={S.dim2}>{M.pay.ocp.claimedMerchant}</Text> : null}
+        {spayMessage ? <Text testID="sol-spay-message" style={S.dim2}>{M.pay.spay.merchantMessage(spayMessage)}</Text> : null}
+        {/* The USDC path may need the recipient's token account created in the same transaction —
+            the sender covers its one-time rent. Same disclosure line as the send form. */}
+        {!isSol ? <Text testID="sol-spay-ata-note" style={S.dim2}>{M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT))}</Text> : null}
+        {insufficient ? <Text testID="sol-pay-lowbal" style={S.warnNote}>{M.pay.notEnoughBalance}</Text> : null}
+        {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
+        <Pressable
+          testID="btn-approve"
+          style={[S.primary, approveDisabled && S.disabledFlat]}
+          disabled={approveDisabled}
+          accessibilityRole="button"
+          accessibilityLabel={M.pay.approveA11y}
+          accessibilityHint={M.pay.approveHint}
+          accessibilityState={{disabled: approveDisabled}}
+          onPress={() => void approveSpay(spay)}>
+          <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
+        </Pressable>
+        <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
+          <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (phase === 'spay-done' && spayDone) {
+    // Two outcomes, one surface — the ocp-done discipline. A `null` note = the transfer confirmed;
+    // a note = the network accepted it and the confirmation did not land in the window, so the
+    // check mark is replaced by the clock and the signature below is the payer's record. No retry
+    // affordance in the noted case: the transaction may still be landing, and paying again is the
+    // one action that could double-charge.
+    return (
+      <View style={S.center}>
+        <View style={[S.check, spayDone.note ? S.checkAlready : null]}>
+          {spayDone.note ? <IconClock size={44} color={C.brandInk}/> : <IconCheck size={44} color={C.brandInk}/>}
+        </View>
+        <Text testID="sol-pay-status" style={[S.paidText, spayDone.note ? S.alreadyText : null]}>
+          {spayDone.note ? M.pay.sent(spayDone.amount) : M.nfc.paidAmount(spayDone.amount)}
+        </Text>
+        <Text style={S.paidSub}>{M.pay.toWho(spayDone.who)}</Text>
+        {spayDone.note ? <Text testID="sol-spay-outcome" style={S.warnNote}>{spayDone.note}</Text> : null}
+        <Text style={S.dim2}>{M.withdraw.sol.txSignature}</Text>
+        <Text testID="sol-spay-signature" selectable={true} style={S.sheetAddr} accessibilityLabel={M.pay.ocp.ref.solTransaction(spayDone.signature)}>{spayDone.signature}</Text>
         <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.pay.newPayment} accessibilityState={{disabled: false}}>
           <Text style={S.ghostBtnText}>{M.pay.newPayment}</Text>
         </Pressable>

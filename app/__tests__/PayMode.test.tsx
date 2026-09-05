@@ -603,6 +603,21 @@ describe('PayMode — what the camera does with a code that is not a payment req
     act(() => { tree.unmount(); });
   });
 
+  // The mirror of the coin-request refusal, with the difference that matters: this wallet CAN pay
+  // a Solana Pay request — one rail over. The refusal must say so (the switch instruction), not
+  // lump a payable standard in with the ones that need another wallet.
+  test('a scanned solana: request is refused BY NAME with the switch-to-Solana instruction', async () => {
+    const scanned: string[] = [];
+    const modes: string[] = [];
+    const tree = mountPay({...sendCapableProps(), onScannedLink: (u: string) => scanned.push(u), onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, `SOLANA:9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM?amount=0.001&reference=9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM`);
+    expect(texts(tree)).toContain(M.pay.spay.wrongRail);
+    expect(texts(tree)).not.toContain(M.pay.notAPaymentCode);
+    expect(scanned).toEqual([]);
+    expect(modes).toEqual([]);
+    act(() => { tree.unmount(); });
+  });
+
   test('a payload NOTHING recognises keeps the honest "not a payment code" refusal', async () => {
     const scanned: string[] = [];
     const modes: string[] = [];

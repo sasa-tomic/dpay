@@ -196,6 +196,11 @@ const IX_TOKEN_TRANSFER_CHECKED = 12;
  *   [2] dest     — writable, nonsigner
  *   [3] owner    — readonly, signer (authorizes the debit)
  * Data: u8(12) || u64 LE amount || u8 decimals.
+ *
+ * `additionalKeys` are extra READONLY non-signing account references — the Solana Pay `reference`
+ * keys, appended after the owner exactly the way the solana-pay SDK appends them, so a merchant can
+ * match the transfer to their sale. The Token Program ignores them. Default `[]` keeps every
+ * existing caller byte-identical.
  */
 export function buildTransferCheckedInstruction(
   sourceAta: Uint8Array,
@@ -204,6 +209,7 @@ export function buildTransferCheckedInstruction(
   owner: Uint8Array,
   amount: bigint,
   decimals: number,
+  additionalKeys: Uint8Array[] = [],
 ): Instruction {
   if (amount < 0n) throw new Error('amount must be non-negative');
   const data: number[] = [];
@@ -217,6 +223,7 @@ export function buildTransferCheckedInstruction(
       { pubkey: mint, signer: false, writable: false },
       { pubkey: destAta, signer: false, writable: true },
       { pubkey: owner, signer: true, writable: false },
+      ...additionalKeys.map(pubkey => ({ pubkey, signer: false, writable: false })),
     ],
     data: new Uint8Array(data),
   };

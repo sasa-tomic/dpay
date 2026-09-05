@@ -11,14 +11,14 @@
 // RPC is DISABLED in e2e (`__DPAY_TEST_SOLANA_RPC_URL=''`) so the balance shows "—" and no devnet
 // call is ever made — the inner loop stays fully offline. The deposit address renders inline (no
 // overlay sheet); the SOL per-row Balances buttons are gone (uniform with IC).
-import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, armPayScan} from '../harness/lib.mjs';
 
 export const meta = {
   id: '45',
   name: 'sol-receive',
   journey: 'deposit',
   covers: ['sol-card', 'sol-derive', 'sol-receive', 'solana-pay', 'qr', 'address', 'sol-tab-ia', 'sol-clipboard'],
-  verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR (a Solana Pay URI solana:<address>?reference=<base58>) via the Receive tab "My address" sub-mode (offline, no devnet).',
+  verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR (a Solana Pay URI solana:<address>?reference=<base58>) via the Receive tab "My address" sub-mode (offline, no devnet); the same URI scanned back in the Pay tab opens the Solana Pay review for the same address.',
   timeoutMs: 20000,
 };
 
@@ -127,6 +127,21 @@ export async function run() {
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('btn-pay-send', {timeoutMs: 5_000});
     console.log('[45-sol-receive] ✓ Pay tab "Send to address" toggle present (SOL === IC)');
+
+    // 7. READ-BACK (2026-09-05): scan the URI this same flow captured from the receive QR at step 4
+    //    (`window.__DPAY_QR_LAST`). The interim state was documented in OPEN_ISSUES — dpay's own
+    //    camera answered its own Solana Pay QR with the generic "not a payment code". The accept
+    //    half landed: the scan must reach the Solana Pay review for the SAME address. The QR is
+    //    amount-less by design (the payer names the amount), so the review opens with amount ENTRY —
+    //    RPC stays disabled; reaching review sends nothing.
+    await armPayScan(driver);
+    await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), qrVal);
+    await driver.findByTestID('sol-spay-amount-input', {timeoutMs: 8_000});
+    assertEq(await driver.readText('sol-pay-payee'), address,
+      'reading the receive QR back must open review for the SAME address');
+    await driver.findByTestID('btn-approve', {timeoutMs: 5_000});
+    await driver.findByTestID('btn-sol-pay-cancel', {timeoutMs: 5_000});
+    console.log('[45-sol-receive] ✓ read-back: the app scans its OWN receive QR into the pay review');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[45-sol-receive] GREEN in ${elapsed}s`);

@@ -229,6 +229,27 @@ describe('Phase 2 — buildTransferCheckedInstruction (golden)', () => {
       ),
     ).toThrow(/non-negative/);
   });
+
+  test('reference keys (a scanned Solana Pay request) append as READONLY non-signers after the owner', () => {
+    const ix = buildTransferCheckedInstruction(
+      base58Decode32(SOURCE_ATA),
+      base58Decode32(USDC_MINT_ADDRESS),
+      base58Decode32(DEST_ATA),
+      base58Decode32(AUTHORITY_ADDRESS),
+      BigInt(USDC_REQ.amt),
+      USDC_DECIMALS,
+      [base58Decode32('9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM')],
+    );
+    expect(ix.keys).toHaveLength(5);
+    expect(ix.keys[4]).toEqual({
+      pubkey: base58Decode32('9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'),
+      signer: false,
+      writable: false,
+    });
+    // The data bytes are the golden transferChecked payload — reference keys ride the account
+    // table, never the instruction data.
+    expect(toHex(ix.data)).toBe(V2_TRANSFER_CHECKED_DATA_HEX);
+  });
 });
 
 describe('Phase 2 — buildCanonicalUsdcMessage (golden byte-equality)', () => {

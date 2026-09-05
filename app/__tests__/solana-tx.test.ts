@@ -2,6 +2,7 @@ import { describe, test, expect } from '@jest/globals';
 import {
   buildTransferMessage,
   buildSignedTransfer,
+  buildSolTransferInstruction,
   encodeCompactU16,
   decodeCompactU16,
   extractSignedTxParts,
@@ -373,4 +374,76 @@ describe('Phase 2 — verifySolPayment never throws', () => {
       if (!result.ok) expect(result.reason.length).toBeGreaterThan(0);
     });
   }
+});
+
+describe('solana/tx — buildSolTransferInstruction (a scanned Solana Pay transfer)', () => {
+  const FROM_BYTES = Uint8Array.from(Buffer.from(FROM_PUBKEY_HEX, 'hex'));
+  const TO_BYTES = base58Decode32(TO_ADDRESS);
+  const REFERENCE = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const SECOND_REFERENCE = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
+
+  function findSub(hay: Uint8Array, needle: Uint8Array): boolean {
+    outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+      for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+      return true;
+    }
+    return false;
+  }
+
+  test('data is u32(2) + u64(lamports) — the System Program transfer discriminator', () => {
+    const data: number[] = [];
+    encodeU32LE(data, 2);
+    encodeU64LE(data, LAMPORTS);
+    const expected = Uint8Array.from(data);
+    const ix = buildSolTransferInstruction(FROM_BYTES, TO_BYTES, LAMPORTS);
+    expect(bytesEqual(ix.data, expected)).toBe(true);
+    expect(bytesEqual(ix.programId, SYSTEM_PROGRAM_BYTES)).toBe(true);
+  });
+
+  test('keys are [from(signer, writable), to(writable)] — the golden two-key shape', () => {
+    const ix = buildSolTransferInstruction(FROM_BYTES, TO_BYTES, LAMPORTS);
+    expect(ix.keys).toHaveLength(2);
+    expect(ix.keys[0]).toEqual({pubkey: FROM_BYTES, signer: true, writable: true});
+    expect(ix.keys[1]).toEqual({pubkey: TO_BYTES, signer: false, writable: true});
+  });
+
+  test('reference keys append as READONLY non-signers, in URI order, after the transfer keys', () => {
+    // The merchant's matching mechanism: Solana Pay passes reference pubkeys as additional account
+    // keys on the transfer instruction — the ordering is what the standard's verifiers index into.
+    const ix = buildSolTransferInstruction(FROM_BYTES, TO_BYTES, LAMPORTS, [
+      base58Decode32(REFERENCE),
+      base58Decode32(SECOND_REFERENCE),
+    ]);
+    expect(ix.keys).toHaveLength(4);
+    expect(ix.keys[2]).toEqual({pubkey: base58Decode32(REFERENCE), signer: false, writable: false});
+    expect(ix.keys[3]).toEqual({pubkey: base58Decode32(SECOND_REFERENCE), signer: false, writable: false});
+  });
+
+  test('rejects negative lamports', () => {
+    expect(() => buildSolTransferInstruction(FROM_BYTES, TO_BYTES, -1n)).toThrow(/non-negative/);
+  });
+
+  test('WITHOUT references the assembled message is byte-identical to the golden fixed path', () => {
+    // The legacy send (buildSignedTransfer/buildTransferMessage) is byte-pinned to a
+    // @solana/web3.js golden. A scanned transfer with no reference keys pays the SAME bytes —
+    // proving the new builder is a generalisation, not a second wire format.
+    const assembled = assembleMessage(FROM_BYTES, [buildSolTransferInstruction(FROM_BYTES, TO_BYTES, LAMPORTS)], BLOCKHASH_ZEROS);
+    const golden = buildTransferMessage(FROM_BYTES, TO_ADDRESS, LAMPORTS, BLOCKHASH_ZEROS);
+    expect(bytesEqual(assembled, golden)).toBe(true);
+  });
+
+  test('assembleMessage carries reference keys in the account table without touching the signature count', () => {
+    const plain = assembleMessage(FROM_BYTES, [buildSolTransferInstruction(FROM_BYTES, TO_BYTES, LAMPORTS)], BLOCKHASH_ZEROS);
+    const withRefs = assembleMessage(
+      FROM_BYTES,
+      [buildSolTransferInstruction(FROM_BYTES, TO_BYTES, LAMPORTS, [base58Decode32(REFERENCE), base58Decode32(SECOND_REFERENCE)])],
+      BLOCKHASH_ZEROS,
+    );
+    // Each reference key adds its 32-byte account-table entry PLUS one compact-u16 key-index
+    // byte inside the transfer instruction — 33 bytes per ref, and still ONE required signature.
+    expect(withRefs.length - plain.length).toBe(66);
+    expect(withRefs[0]).toBe(1);
+    expect(findSub(withRefs, base58Decode32(REFERENCE))).toBe(true);
+    expect(findSub(withRefs, base58Decode32(SECOND_REFERENCE))).toBe(true);
+  });
 });

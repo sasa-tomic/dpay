@@ -163,6 +163,27 @@ export const payFr: PayMessages = {
   scannedAddressNotSendable: symbol =>
     `C’est une adresse de portefeuille. Les ${symbol} ne peuvent pas être envoyés vers une adresse — scannez le code de paiement du commerçant pour payer.`,
 
+  spay: {
+    wrongRail:
+      'C’est une demande Solana Pay. Cet écran règle sur Internet Computer — passez à Solana dans Soldes et scannez-y le code pour la payer.',
+    badUri: 'Ce code Solana Pay est endommagé. Demandez un nouveau QR au commerçant.',
+    badRecipient: 'Le destinataire de ce code Solana Pay n’est pas une adresse Solana valide. Demandez un nouveau QR au commerçant.',
+    badAmount: 'Le montant de ce code Solana Pay n’est pas un nombre positif simple. Demandez un nouveau QR au commerçant.',
+    badSplToken: 'Le mint de jeton de ce code Solana Pay n’est pas valide. Demandez un nouveau QR au commerçant.',
+    badReference: 'La référence de paiement de ce code Solana Pay n’est pas valide. Demandez un nouveau QR au commerçant.',
+    unexpectedParam: param =>
+      `Ce code Solana Pay porte un paramètre inconnu de dpay (${param}) — le payer signerait un sens que dpay ne peut pas vérifier. Demandez au commerçant un code sans ce paramètre.`,
+    memoTooLong: 'Le memo de ce code Solana Pay est trop long pour une transaction Solana. Demandez un nouveau QR au commerçant.',
+    unknownMint: mint =>
+      `Ce code Solana Pay demande un jeton que dpay ne propose pas encore (mint ${mint}). Payez-le avec un portefeuille qui le prend en charge.`,
+    offline:
+      'Pour un code Solana Pay, c’est votre téléphone qui soumet le transfert : il doit être en ligne. Reconnectez-vous et scannez à nouveau.',
+    amountLabel: 'Montant',
+    merchantMessage: message => `Message du commerçant : ${message}`,
+    pendingNote:
+      'Le réseau a accepté ce paiement, mais sa confirmation est encore en route. La signature de transaction ci-dessous est votre preuve — vérifiez-la avant de payer à nouveau.',
+  },
+
   scanToPay: 'Scanner pour payer',
   sendToAddress: 'Vers une adresse',
   tapOrScanToPay: 'Sans contact ou scan',

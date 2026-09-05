@@ -200,6 +200,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   //     fee, or names what the address IS when it cannot be used for this asset.
   //   • an OPENCRYPTOPAY till code — a real merchant's static QR. Resolved to a live quote and put
   //     on the same review screen a payment link uses.
+  //   • a SOLANA PAY request — the open standard the SOL rail's receive QR speaks. This rail cannot
+  //     pay it, but unlike a coin-request it is not foreign: the wallet CAN pay it, one rail over.
+  //     Refused by name with that one instruction (founder rule 2026-08-29).
   // Anything else keeps the honest "not a payment code" refusal.
   function onNotARequest(raw: string) {
     const what = classifyScan(raw);
@@ -210,6 +213,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       refuseScan(M.pay.scannedCoinRequest(named.coin, named.uri));
       return;
     }
+    if (what.kind === 'solana-pay') { refuseScan(M.pay.spay.wrongRail); return; }
     if (what.kind === 'address') {
       // An asset with no route off the wallet (DEMO) has nothing to prefill, so say that instead of
       // opening a form that could only refuse.

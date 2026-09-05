@@ -42,8 +42,9 @@ jest.mock('../solana', () => {
     ...actual,
     signSolPayment: jest.fn(actual.signSolPayment),
     signSplPayment: jest.fn(actual.signSplPayment),
-    // No test may reach a Solana RPC; the OpenCryptoPay suite below drives these directly.
+    // No test may reach a Solana RPC; the OpenCryptoPay + Solana Pay suites drive these directly.
     sendSol: jest.fn(),
+    sendSolanaPay: jest.fn(),
     getSolSignatureStatus: jest.fn(),
   };
 });
@@ -60,7 +61,7 @@ jest.mock('../services/opencryptopay', () => ({
 }));
 
 import {encodeSolReq, type SolReqInput} from '../solana/qr';
-import {getSolSignatureStatus, sendSol, signSolPayment, type SolanaSignatureStatus} from '../solana';
+import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, type SolanaSignatureStatus} from '../solana';
 import {payAndReport, resolveOcpOffer, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {buildSelectableAssets} from '../config/assets';
 import {POLL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
@@ -937,6 +938,177 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
       {kind: 'unknown'},
       {kind: 'settled', txId: SIGNATURE, reference: M.pay.ocp.ref.solTransaction(SIGNATURE)},
     ]);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('SolPayMode — a scanned Solana Pay request (the open standard the receive QR speaks)', () => {
+  const REFERENCE = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+  /** Scan any payload through the real camera gate — the entry a merchant's printed QR takes. */
+  async function scanCode(tree: renderer.ReactTestRenderer, uri: string) {
+    pressByTestID(tree, 'btn-sol-start-scan');
+    const scanner = tree.root.find(node => typeof node.props.onScan === 'function');
+    await act(async () => {
+      scanner.props.onScan(uri);
+    });
+  }
+
+  function errText(tree: renderer.ReactTestRenderer): string {
+    return textByTestID(tree, 'sol-pay-err');
+  }
+
+  beforeEach(() => {
+    jest.mocked(sendSolanaPay).mockReset().mockResolvedValue('SigSpayBase58');
+  });
+
+  test('a full request reviews FIXED values — amount, label, message, FULL destination — never auto-signs', async () => {
+    const tree = mountSolPay();
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}&label=Coffee%20Bar&message=Order%2042`);
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.001000000 SOL');
+    expect(textByTestID(tree, 'sol-pay-payee')).toBe(MERCHANT);
+    expect(texts(tree)).toContain(M.pay.toWho('Coffee Bar'));
+    expect(textByTestID(tree, 'sol-spay-message')).toBe(M.pay.spay.merchantMessage('Order 42'));
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
+    expect(hasTestID(tree, 'btn-sol-pay-cancel')).toBe(true);
+    expect(jest.mocked(sendSolanaPay)).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
+  test('Approve sends ONE transfer carrying the reference key and memo, then reports Paid', async () => {
+    const sent: string[] = [];
+    const tree = mountSolPay({onSent: () => sent.push('sol')});
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}&memo=order-42`);
+    await pressByLabel(tree, M.pay.approveA11y);
+    expect(jest.mocked(sendSolanaPay)).toHaveBeenCalledTimes(1);
+    const [secretHex, transfer] = jest.mocked(sendSolanaPay).mock.calls[0];
+    expect(secretHex).toBe(IDENTITY.secretHex);
+    expect(transfer).toEqual({recipient: MERCHANT, splToken: null, amount: 1000000n, references: [REFERENCE], memo: 'order-42'});
+    expect(sent).toEqual(['sol']);
+    expect(textByTestID(tree, 'sol-pay-status')).toContain('0.001000000 SOL');
+    expect(textByTestID(tree, 'sol-spay-signature')).toBe('SigSpayBase58');
+    expect(hasTestID(tree, 'btn-sol-pay-done')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('an amount-less request (the shape this wallet itself emits) opens review with amount ENTRY', async () => {
+    const tree = mountSolPay();
+    await scanCode(tree, `solana:${MERCHANT}?reference=${REFERENCE}`);
+    // The read-back contract: the receive tab's own QR carries no amount, and scanning it back
+    // must reach a review that can still be paid — not die at a missing number.
+    expect(hasTestID(tree, 'sol-spay-amount-input')).toBe(true);
+    expect(hasTestID(tree, 'sol-pay-amount')).toBe(false);
+    // Approve is blocked until an amount exists…
+    const approve = tree.root.findAll(node => node.props && node.props.testID === 'btn-approve')[0];
+    expect(approve.props.disabled).toBe(true);
+    // …then the typed amount is what gets sent.
+    const input = tree.root.find(node => node.props && node.props.testID === 'sol-spay-amount-input');
+    await act(async () => { input.props.onChangeText('0.0005'); });
+    expect(tree.root.findAll(node => node.props && node.props.testID === 'btn-approve')[0].props.disabled).toBe(false);
+    await pressByLabel(tree, M.pay.approveA11y);
+    const [, transfer] = jest.mocked(sendSolanaPay).mock.calls[0];
+    expect(transfer.amount).toBe(500000n);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a spl-token request pays USDC via the recipient ATA path and reports onSentUsdc', async () => {
+    const sentUsdc: string[] = [];
+    const tree = mountSolPay({usdcBalance: '2000000', onSentUsdc: () => sentUsdc.push('usdc')});
+    await scanCode(tree, `solana:${MERCHANT}?spl-token=${USDC_MINT}&amount=1.5&reference=${REFERENCE}`);
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('1.500000 USDC');
+    expect(hasTestID(tree, 'sol-spay-ata-note')).toBe(true);
+    await pressByLabel(tree, M.pay.approveA11y);
+    const [, transfer] = jest.mocked(sendSolanaPay).mock.calls[0];
+    expect(transfer).toEqual({recipient: MERCHANT, splToken: USDC_MINT, amount: 1500000n, references: [REFERENCE], memo: null});
+    expect(sentUsdc).toEqual(['usdc']);
+    act(() => { tree.unmount(); });
+  });
+
+  test('refusals are BY NAME, each with its own four-locale sentence — never the generic shrug', async () => {
+    const cases: Array<[string, string]> = [
+      [`solana:${MERCHANT}?amount=0.001&residual=1`, M.pay.spay.unexpectedParam('residual')],
+      [`solana:${MERCHANT}?spl-token=${REFERENCE}`, M.pay.spay.unknownMint(REFERENCE)],
+      [`solana:${MERCHANT}?amount=0`, M.pay.spay.badAmount],
+      [`solana:${MERCHANT}?label=x&label=y`, M.pay.spay.badUri],
+      [`solana:${MERCHANT}?reference=not-a-pubkey!!`, M.pay.spay.badReference],
+      [`solana:${MERCHANT}?memo=${'a'.repeat(65)}`, M.pay.spay.memoTooLong],
+    ];
+    for (const [uri, expected] of cases) {
+      const tree = mountSolPay();
+      await scanCode(tree, uri);
+      expect(errText(tree)).toBe(expected);
+      expect(jest.mocked(sendSolanaPay)).not.toHaveBeenCalled();
+      act(() => { tree.unmount(); });
+    }
+  });
+
+  test('offline, a Solana Pay request is refused at the scan — the payer broadcasts it, so online is required', async () => {
+    const tree = mountSolPay({online: false});
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}`);
+    expect(errText(tree)).toBe(M.pay.spay.offline);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a USDC request against a wallet with no USDC account is refused at the scan, by name', async () => {
+    const tree = mountSolPay({usdcAtaAbsent: true});
+    await scanCode(tree, `solana:${MERCHANT}?spl-token=${USDC_MINT}&amount=1.5`);
+    expect(errText(tree)).toBe(M.errors.solana.senderNoUsdcAccount);
+    act(() => { tree.unmount(); });
+  });
+
+  test('insufficient balance (fee-inclusive) blocks Approve with the named warning', async () => {
+    // 0.001 SOL balance vs a 0.001 transfer + 5000 lamports fee — the fee is what tips it.
+    const tree = mountSolPay({solBalance: '1000000'});
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}`);
+    expect(hasTestID(tree, 'sol-pay-lowbal')).toBe(true);
+    expect(texts(tree)).toContain(M.pay.notEnoughBalance);
+    expect(tree.root.findAll(node => node.props && node.props.testID === 'btn-approve')[0].props.disabled).toBe(true);
+    expect(jest.mocked(sendSolanaPay)).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
+  test('a broadcast-then-confirm-failure lands on the honest PENDING screen, not a false Paid', async () => {
+    jest.mocked(sendSolanaPay).mockImplementation(
+      (_s: string, _t: unknown, _sig?: AbortSignal, onBroadcast?: (x: string) => void) => {
+        onBroadcast?.('SigSpayUnknown');
+        return Promise.reject(new Error('confirm blown'));
+      },
+    );
+    const sent: string[] = [];
+    const tree = mountSolPay({onSent: () => sent.push('sol')});
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}`);
+    await pressByLabel(tree, M.pay.approveA11y);
+    // The money may be landing: no Paid claim, the signature is the record, the note says so.
+    expect(texts(tree)).not.toContain(M.nfc.paidAmount('0.001000000 SOL'));
+    expect(textByTestID(tree, 'sol-spay-signature')).toBe('SigSpayUnknown');
+    expect(textByTestID(tree, 'sol-spay-outcome')).toBe(M.pay.spay.pendingNote);
+    expect(sent).toEqual(['sol']);
+    // And no retry affordance that could double-charge: Done, not Approve.
+    expect(hasTestID(tree, 'btn-sol-pay-done')).toBe(true);
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a pre-broadcast failure stays on the review with the honest error — nothing was sent', async () => {
+    jest.mocked(sendSolanaPay).mockRejectedValue(new Error('rpc down'));
+    const tree = mountSolPay();
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}`);
+    await pressByLabel(tree, M.pay.approveA11y);
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
+    expect(errText(tree)).toBe('rpc down');
+    expect(hasTestID(tree, 'btn-sol-pay-done')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('Cancel returns to the scan surface clean — a second scan starts fresh', async () => {
+    const tree = mountSolPay();
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}`);
+    pressByTestID(tree, 'btn-sol-pay-cancel');
+    expect(hasTestID(tree, 'sol-pay-scan')).toBe(true);
+    expect(errText(tree)).toBe('');
+    await scanCode(tree, `solana:${MERCHANT}?amount=0.002&reference=${REFERENCE}`);
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.002000000 SOL');
     act(() => { tree.unmount(); });
   });
 });
