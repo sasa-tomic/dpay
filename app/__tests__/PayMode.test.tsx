@@ -591,6 +591,18 @@ describe('PayMode — what the camera does with a code that is not a payment req
     act(() => { tree.unmount(); });
   });
 
+  test('a scanned bitcoin: request is refused BY NAME and stays on scan', async () => {
+    const scanned: string[] = [];
+    const modes: string[] = [];
+    const tree = mountPay({...sendCapableProps(), onScannedLink: (u: string) => scanned.push(u), onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, `BITCOIN:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.001`);
+    expect(texts(tree)).toContain(M.pay.scannedCoinRequest('Bitcoin', 'bitcoin:'));
+    expect(texts(tree)).not.toContain(M.pay.notAPaymentCode);
+    expect(scanned).toEqual([]);
+    expect(modes).toEqual([]);
+    act(() => { tree.unmount(); });
+  });
+
   test('a payload NOTHING recognises keeps the honest "not a payment code" refusal', async () => {
     const scanned: string[] = [];
     const modes: string[] = [];

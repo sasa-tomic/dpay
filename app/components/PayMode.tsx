@@ -5,7 +5,7 @@ import {S} from '../styles';
 import {C} from '../config/palette';
 import {POLL, QR_SIZE} from '../config/constants';
 import {parseRequestQR, randNonceHex} from '../lib/format';
-import {classifyScan} from '../lib/scan';
+import {classifyScan, coinDisplayOfScheme} from '../lib/scan';
 import {ocpIcTxId, type OcpDetails, type OcpOffer, type OcpScan} from '../lib/opencryptopay';
 import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
@@ -205,6 +205,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     const what = classifyScan(raw);
     if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
     if (what.kind === 'opencryptopay') { void startOcp(what.ocp); return; }
+    if (what.kind === 'coin-request') {
+      const named = coinDisplayOfScheme(what.scheme);
+      refuseScan(M.pay.scannedCoinRequest(named.coin, named.uri));
+      return;
+    }
     if (what.kind === 'address') {
       // An asset with no route off the wallet (DEMO) has nothing to prefill, so say that instead of
       // opening a form that could only refuse.

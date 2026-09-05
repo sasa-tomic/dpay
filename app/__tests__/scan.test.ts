@@ -80,6 +80,28 @@ describe('classifyScan — OpenCryptoPay till codes', () => {
   });
 });
 
+describe('classifyScan — foreign coin payment requests', () => {
+  test('a BIP-21 bitcoin: URI with parameters is refused as a bitcoin request', () => {
+    expect(classifyScan(`bitcoin:${BTC}?amount=0.001&label=Coffee`)).toEqual({kind: 'coin-request', scheme: 'bitcoin'});
+  });
+
+  test('an UPPERCASE BITCOIN: URI is the same verdict — QR encoders uppercase', () => {
+    expect(classifyScan(`BITCOIN:${BTC}`)).toEqual({kind: 'coin-request', scheme: 'bitcoin'});
+  });
+
+  test('an ethereum: URI (EIP-831 shape) is refused as an ethereum request', () => {
+    expect(classifyScan(`ethereum:${EVM}?value=1e17`)).toEqual({kind: 'coin-request', scheme: 'ethereum'});
+  });
+
+  test('the match needs the colon — bitcoincash: is a different scheme and stays unknown', () => {
+    expect(classifyScan('bitcoincash:qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a')).toEqual({kind: 'unknown'});
+  });
+
+  test('a bare BTC address is still an ADDRESS — the scheme test never sees it', () => {
+    expect(classifyScan(BTC)).toEqual({kind: 'address', shape: 'btc'});
+  });
+});
+
 describe('classifyScan — addresses', () => {
   test.each([
     ['ic-account', IC_PRINCIPAL],

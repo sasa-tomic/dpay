@@ -8,6 +8,8 @@ import type {PayMessages, ReceiveMessages} from '../../keys';
 
 export const payFr: PayMessages = {
   notAPaymentCode: 'Ce n’est pas un code de paiement dpay',
+  scannedCoinRequest: (coin, uri) =>
+    `C’est une demande de paiement ${coin} (${uri}…). dpay ne peut pas la payer — ce portefeuille règle sur Internet Computer et Solana, pas sur le réseau ${coin}. Payez-la avec un portefeuille qui prend ${coin} en charge.`,
   requestExpired: 'Cette demande a expiré — demandez un nouveau QR au commerçant',
   solRequestExpired: 'Cette demande de paiement a expiré. Demandez un nouveau QR au commerçant.',
 

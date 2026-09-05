@@ -18,7 +18,10 @@
 //      produces (flow 49), reached through the camera, and STILL requiring an Approve press;
 //   2. a scanned IC account switches to "Send to address" with the destination filled in and its
 //      route disclosed, so the refusal/disclosure logic that already exists is what speaks;
-//   3. a payload nothing recognises keeps the honest "not a payment code" refusal — the second
+//   3. a `bitcoin:` payment request (BIP-21) is refused BY NAME with a practical instruction —
+//      another wallet's payment format used to die as "not a payment code" (founder rule
+//      2026-08-29: every error path gives the user something to do);
+//   4. a payload nothing recognises keeps the honest "not a payment code" refusal — the second
 //      opinion widens the answer, it does not soften it (flow 36 owns the malformed-wire case).
 //
 // Selector contract: `asset-vchf-select`, `btn-start-scan` (via armPayScan), `pay-amount`,
@@ -34,13 +37,14 @@ const LINK_AMOUNT = '1.25';
 // A second wallet's pubkey. Its self-authenticating principal is a real destination as far as the
 // app is concerned — it is what the link names AND what the bare-address scan carries.
 const RECIPIENT_PUBKEY = 'c'.repeat(64);
+const BTC_ADDRESS = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
 
 export const meta = {
   id: '109',
   name: 'scan-link-and-address',
   journey: 'pay',
   covers: ['scan-fallback', 'pay-link', 'send-to-address', 'error-handling', 'input-validation'],
-  verifies: 'The Pay camera classifies what it read: a payment-link QR opens the pre-filled review (no auto-sign), a bare IC account opens Send to address with the destination filled + route disclosed, and unrecognised input keeps the honest "not a payment code" refusal.',
+  verifies: 'The Pay camera classifies what it read: a payment-link QR opens the pre-filled review (no auto-sign), a bare IC account opens Send to address with the destination filled + route disclosed, a bitcoin: request is refused by name with an instruction to use a Bitcoin wallet, and unrecognised input keeps the honest "not a payment code" refusal.',
   timeoutMs: 40000,
 };
 
@@ -123,8 +127,21 @@ export async function run() {
     console.log(`[109-scan-link-and-address] ✓ address → Send to address, route: ${status}`);
     await driver.screenshot('109-scan-address');
 
-    // --- 3. still honest about what it genuinely cannot read -------------------------------------
+    // --- 3. another wallet's payment format, refused BY NAME --------------------------------------
     await driver.click('btn-pay-scan');
+    console.log('[109-scan-link-and-address] scanning a bitcoin: payment request…');
+    await scan(driver, `BITCOIN:${BTC_ADDRESS}?amount=0.001&label=Coffee`);
+    assert(
+      await driver.waitForText('payment request for Bitcoin', {timeoutMs: 5_000}),
+      'a bitcoin: request must be refused by name — the coin, the scheme, and where to pay it instead',
+    );
+    const coinBody = await driver.bodyText();
+    assert(!coinBody.includes("isn't a dpay payment code"), 'a bitcoin: request must not get the generic refusal');
+    assert(!(await driver.isPresent('pay-amount')), 'a coin request must never reach a review');
+    console.log('[109-scan-link-and-address] ✓ bitcoin: request → named refusal, no review');
+    await driver.screenshot('109-scan-bitcoin');
+
+    // --- 4. still honest about what it genuinely cannot read -------------------------------------
     console.log('[109-scan-link-and-address] scanning an unrecognised payload…');
     await scan(driver, 'not a link, not an address, not a request');
     assert(

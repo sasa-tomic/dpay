@@ -432,6 +432,18 @@ describe('SolPayMode — what the camera does with a code that is not a payment 
     act(() => { tree.unmount(); });
   });
 
+  test('a scanned ethereum: request is refused BY NAME and stays on scan', async () => {
+    const modes: string[] = [];
+    const scanned: string[] = [];
+    const tree = mountSolPay({onScannedLink: (u: string) => scanned.push(u), onSubModeChange: (m: string) => modes.push(m)});
+    await scanUnreadable(tree, 'ethereum:0x2D39863d5A1E1B1e8b7b0b8c7c9d0e1f2a3b4c5d?value=1e17');
+    expect(texts(tree)).toContain(M.pay.scannedCoinRequest('Ethereum', 'ethereum:'));
+    expect(texts(tree)).not.toContain(M.pay.notAPaymentCode);
+    expect(scanned).toEqual([]);
+    expect(modes).toEqual([]);
+    act(() => { tree.unmount(); });
+  });
+
   test('a payload NOTHING recognises keeps the honest "not a payment code" refusal', async () => {
     const modes: string[] = [];
     const tree = mountSolPay({onSubModeChange: (m: string) => modes.push(m)});

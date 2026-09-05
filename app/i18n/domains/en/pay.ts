@@ -20,6 +20,11 @@ export type PayMessages = {
   // --- decode + expiry refusals -------------------------------------------------------------
   /** Also used by ReceiveMode when the merchant scans something that isn't a signed dpay envelope. */
   notAPaymentCode: string;
+  /** A scanned `bitcoin:`/`ethereum:` payment request — another wallet's format, on a network no
+   *  dpay rail settles on. `coin` is the proper noun, `uri` the scheme spelling (`bitcoin:`); both
+   *  are never-translated display constants (see coinDisplayOfScheme), so every locale moves them
+   *  freely. The instruction is the point: name the coin, say dpay can't pay it, point elsewhere. */
+  scannedCoinRequest: (coin: string, uri: string) => string;
   requestExpired: string;
   solRequestExpired: string;
 
@@ -252,6 +257,8 @@ export type PayMessages = {
 
 export const payEn: PayMessages = {
   notAPaymentCode: "This isn't a dpay payment code",
+  scannedCoinRequest: (coin, uri) =>
+    `That's a payment request for ${coin} (${uri}…). dpay can't pay it — this wallet settles on the Internet Computer and Solana, not on the ${coin} network. Pay it with a wallet that supports ${coin}.`,
   requestExpired: 'This request expired — ask the merchant for a fresh QR',
   solRequestExpired: 'This payment request has expired. Ask the merchant for a fresh QR.',
 

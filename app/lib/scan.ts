@@ -31,16 +31,25 @@ export type ScanFallback =
    *  it again" needs the refusal, and the camera's generic shrug would throw it away. Only a string
    *  with no LNURL in it at all falls through to the checks below. */
   | {kind: 'opencryptopay'; ocp: OcpScan}
+  /** A BIP-21 `bitcoin:` or EIP-831-style `ethereum:` payment request — another wallet's payment
+   *  format, on a network no dpay rail settles on. Only the scheme is detected; the verdict exists
+   *  to refuse it BY NAME with an instruction (founder rule 2026-08-29), never to parse it. */
+  | {kind: 'coin-request'; scheme: CoinUriScheme}
   /** Nothing claimed it. The caller's honest "not a payment code" error stands. */
   | {kind: 'unknown'};
+
+/** The foreign payment-request URI schemes the classifier refuses by name. */
+export type CoinUriScheme = 'bitcoin' | 'ethereum';
 
 /**
  * Classify a scanned string the rail's payment codec could not read.
  *
- * Link before OpenCryptoPay before address — each test is stricter than the one after it, so a
- * looser matcher can never steal a string a stricter one owns:
+ * Link before OpenCryptoPay before coin-request before address — each test is stricter than the one
+ * after it, so a looser matcher can never steal a string a stricter one owns:
  *   • a link is an EXACT path match (`/wallet/pay/`) or an exact scheme (`dpay:pay/`);
  *   • an OCP code is an `lnurl1…` bech32 string, or a URL carrying one in a `lightning` parameter;
+ *   • a coin-request is a case-insensitive `bitcoin:`/`ethereum:` scheme prefix — AFTER the OCP test,
+ *     because a BIP-21 URI may legally carry its payable Lightning part in a `lightning` parameter;
  *   • an address is a loose shape regex — and an UPPERCASE `LNURL1…` is inside the base58 alphabet,
  *     so testing addresses first would classify a perfectly good till code as a Solana address and
  *     send the payer to a send form.
@@ -49,6 +58,17 @@ export type ScanFallback =
  * "it is X and part of it is broken" is a different, more useful statement than "unrecognised", and
  * each pipeline already names which part. Pure, total, never throws.
  */
+function coinUriSchemeOf(t: string): CoinUriScheme | null {
+  const lower = t.toLowerCase();
+  if (lower.startsWith('bitcoin:')) return 'bitcoin';
+  if (lower.startsWith('ethereum:')) return 'ethereum';
+  return null;
+}
+
+export function coinDisplayOfScheme(scheme: CoinUriScheme): {coin: string; uri: string} {
+  return scheme === 'bitcoin' ? {coin: 'Bitcoin', uri: 'bitcoin:'} : {coin: 'Ethereum', uri: 'ethereum:'};
+}
+
 export function classifyScan(raw: string): ScanFallback {
   const t = raw.trim();
   if (t.length === 0) return {kind: 'unknown'};
@@ -57,6 +77,8 @@ export function classifyScan(raw: string): ScanFallback {
   // "this OCP code is broken", so it alone falls through to the address check.
   const ocp = parseOcpScan(t);
   if (ocp.ok || ocp.reason !== 'not-lnurl') return {kind: 'opencryptopay', ocp};
+  const coin = coinUriSchemeOf(t);
+  if (coin !== null) return {kind: 'coin-request', scheme: coin};
   const shape = detectAddressShape(t);
   return shape === 'unknown' ? {kind: 'unknown'} : {kind: 'address', shape};
 }

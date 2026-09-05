@@ -7,6 +7,8 @@ import type {PayMessages, ReceiveMessages} from '../../keys';
 
 export const payEs: PayMessages = {
   notAPaymentCode: 'Este no es un código de pago de dpay',
+  scannedCoinRequest: (coin, uri) =>
+    `Esa es una solicitud de pago de ${coin} (${uri}…). dpay no puede pagarla: esta billetera liquida en Internet Computer y Solana, no en la red de ${coin}. Págala con una billetera que admita ${coin}.`,
   requestExpired: 'Esta solicitud caducó: pide al comercio un QR nuevo',
   solRequestExpired: 'Esta solicitud de pago ha caducado. Pide al comercio un QR nuevo.',
 

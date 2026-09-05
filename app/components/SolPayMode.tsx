@@ -12,7 +12,7 @@ import type {Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
-import {classifyScan} from '../lib/scan';
+import {classifyScan, coinDisplayOfScheme} from '../lib/scan';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
 import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
@@ -300,6 +300,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     const what = classifyScan(raw);
     if (what.kind === 'link') { setErr(null); onScannedLink(raw.trim()); return; }
     if (what.kind === 'opencryptopay') { void startOcp(what.ocp); return; }
+    if (what.kind === 'coin-request') {
+      const named = coinDisplayOfScheme(what.scheme);
+      refuseScan(M.pay.scannedCoinRequest(named.coin, named.uri));
+      return;
+    }
     if (what.kind === 'address') {
       setErr(null);
       setScannedAddress(raw.trim());
