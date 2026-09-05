@@ -16,13 +16,19 @@ import {describe, it, expect} from '@jest/globals';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {
   HOME_CURRENCIES,
+  chooseRail,
   currencyOfAsset,
   currencyRails,
   offerableCurrencies,
   parseHomeCurrency,
   preferredRail,
+  railFees,
+  railsLabel,
+  type RailBalances,
 } from '../config/currency';
 import type {CurrencyDescriptor} from '../config/catalog';
+import type {BalanceView} from '../lib/assetBalances';
+import type {AssetId} from '../lib/types';
 
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
@@ -127,5 +133,95 @@ describe('parseHomeCurrency — absent means UNCHOSEN, never a guess', () => {
     for (const v of [null, undefined, '', 'chf', 'GBP', 'system', 'ic:7']) {
       expect(parseHomeCurrency(v)).toBeNull();
     }
+  });
+});
+
+describe('railFees — fee FACTS in each rail\'s own unit, never a cross-token verdict', () => {
+  const CKUSDC_FEE = mk({currency: 2, minter: 's', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6, wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', fee: '10000'});
+  const withSol = build([DEMO, CKUSDC_FEE, VCHF], true);
+
+  it('formats an IC rail\'s catalog fee with the asset\'s own decimals and token', () => {
+    const ckusdc = withSol.find(a => a.id === 'ic:2')!;
+    expect(railFees(ckusdc, [DEMO, CKUSDC_FEE, VCHF]).perTransfer).toEqual({raw: '10000', formatted: '0.010000 ckUSDC'});
+    expect(railFees(ckusdc, [DEMO, CKUSDC_FEE, VCHF]).oneTime).toBeNull();
+  });
+
+  it('reports an IC rail with no catalog fee as unknown, never as free', () => {
+    const vchf = withSol.find(a => a.id === 'ic:7')!;
+    expect(railFees(vchf, [DEMO, CKUSDC_FEE, VCHF]).perTransfer).toBeNull();
+    expect(railFees(vchf, []).perTransfer).toBeNull();
+  });
+
+  it('reports a native-SOL rail\'s signature fee in SOL, with no one-time cost', () => {
+    const sol = withSol.find(a => a.id === 'solana:SOL')!;
+    expect(railFees(sol, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005000 SOL'});
+    expect(railFees(sol, []).oneTime).toBeNull();
+  });
+
+  it('keeps the USDC rail\'s signature fee in SOL (not USDC decimals) and adds the one-time ATA rent', () => {
+    // The signature fee is charged in SOL even when moving USDC — 9-decimal padding proves the
+    // unit is SOL, not the rail token's 6.
+    const usdc = withSol.find(a => a.id === 'solana:USDC')!;
+    expect(railFees(usdc, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005000 SOL'});
+    expect(railFees(usdc, []).oneTime).toEqual({raw: '2039280', formatted: '0.002039280 SOL'});
+  });
+});
+
+describe('chooseRail — which rail, and why', () => {
+  const withSol = build([DEMO, CKUSDC, VCHF], true);
+  const ckusdc = withSol.find(a => a.id === 'ic:2')!;
+  const vchf = withSol.find(a => a.id === 'ic:7')!;
+  const usdc = withSol.find(a => a.id === 'solana:USDC')!;
+  const bv = (status: BalanceView['status']): BalanceView => ({displayText: '1 X', status});
+  const bal = (...entries: [AssetId, BalanceView['status']][]): RailBalances =>
+    Object.fromEntries(entries.map(([id, status]) => [id, bv(status)])) as RailBalances;
+
+  it('falls back to the stated preference when nothing constrains the choice', () => {
+    expect(chooseRail('USD', withSol)).toEqual({rail: ckusdc, reason: 'preference'});
+    expect(chooseRail('CHF', withSol)).toEqual({rail: vchf, reason: 'preference'});
+    expect(chooseRail('CHF', withSol, {})).toEqual({rail: vchf, reason: 'preference'});
+  });
+
+  it('is null when the catalog carries no rail for the currency', () => {
+    expect(chooseRail('EUR', withSol)).toBeNull();
+  });
+
+  it('picks the funded rail, in preference order among the funded ones', () => {
+    expect(chooseRail('USD', withSol, bal(['ic:2', 'ok']))).toEqual({rail: ckusdc, reason: 'funded'});
+    // A funded sibling is chosen over the unfunded default — "already holds" outranks "would default".
+    expect(chooseRail('USD', withSol, bal(['solana:USDC', 'ok']))).toEqual({rail: usdc, reason: 'funded'});
+    expect(chooseRail('CHF', withSol, bal(['ic:7', 'ok']))).toEqual({rail: vchf, reason: 'funded'});
+  });
+
+  it('never treats an unknown or known-zero balance as funded', () => {
+    for (const status of ['loading', 'zero', 'absent', 'unavailable', 'error'] as const) {
+      expect(chooseRail('USD', withSol, bal(['solana:USDC', status]))).toEqual({rail: ckusdc, reason: 'preference'});
+    }
+  });
+
+  it('returns the destination-pinned rail, whichever rail of the group it names', () => {
+    expect(chooseRail('USD', withSol, null, ckusdc)).toEqual({rail: ckusdc, reason: 'destination'});
+    // The request's own rail wins even when the OTHER rail is funded — a merchant's settlement
+    // asset is never second-guessed onto a "better" rail.
+    expect(chooseRail('USD', withSol, bal(['ic:2', 'ok']), usdc)).toEqual({rail: usdc, reason: 'destination'});
+  });
+
+  it('is null when the destination names an asset outside the currency\'s group', () => {
+    expect(chooseRail('USD', withSol, null, vchf)).toBeNull();
+  });
+});
+
+describe('railsLabel — the whole group on one line', () => {
+  it('names every rail of a two-rail currency, preferred first', () => {
+    const withSol = build([DEMO, CKUSDC, VCHF], true);
+    expect(railsLabel('USD', withSol)).toBe('ckUSDC · Internet Computer, USDC · Solana');
+  });
+
+  it('names the single rail of a one-rail currency', () => {
+    expect(railsLabel('CHF', FULL)).toBe('VCHF · Internet Computer');
+  });
+
+  it('is null when the catalog carries no rail for the currency', () => {
+    expect(railsLabel('EUR', FULL)).toBeNull();
   });
 });

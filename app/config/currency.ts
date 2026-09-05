@@ -19,8 +19,23 @@
 //      authority: "the payment unit must remain VCHF"). Naming the currency in the label and the
 //      token in the amount is how the wallet can be "in francs" without asserting a peg.
 //
-// PURE: no React, no AsyncStorage, no network. Deterministic in (currency, assets).
+// PURE: no React, no AsyncStorage, no network. Deterministic in (currency, assets, balances,
+// destination, catalog).
+//
+// Objective 2 (2026-09-04 plan): the GROUP is the model. A currency is a set of rails, and this
+// module also answers "which rail, and why" (chooseRail) and "what does each rail cost" (railFees)
+// — as FACTS, never as a verdict: every fee stays in its own token's unit, because comparing
+// "0.0001 VCHF" against "0.000005 SOL" is an FX quote, and dpay does not quote FX (no swap, no
+// exchange credentials — CLAUDE.md boundary). The day a price comparison is wanted, a quote source
+// arrives first; until then both numbers are shown side by side, in their own units, and the human
+// does the comparing.
 import {type SelectableAsset, linkNetworkOf, prettyNetwork, tokenEq} from './assets';
+import {type CurrencyDescriptor} from './catalog';
+import {type BalanceView} from '../lib/assetBalances';
+import {fmtAsset} from '../lib/format';
+import {type AssetId} from '../lib/types';
+import {SOL_ATA_RENT_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
+import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {M} from '../i18n';
 
 /** The currencies dpay can be "in". Ordered as the chooser presents them. */
@@ -97,10 +112,9 @@ export function currencyName(currency: HomeCurrency): string {
 }
 
 /**
- * The one-line explanation of what the wallet will actually hold for this currency — the chooser's
- * subtitle, and the founder rule's "say what it is" for this screen.
- *
- * Names the LEDGER TOKEN and the SETTLEMENT CHAIN, and both halves are deliberate:
+ * One rail's compact line — LEDGER TOKEN · SETTLEMENT CHAIN ("ckUSDC · Internet Computer",
+ * "USDC · Solana"). Both halves are deliberate honesty choices, inherited from the chooser's
+ * original single-rail subtitle:
  *   • the token is `linkToken` (ckUSDC), never `symbol` (USDC) — the display glyph is the backing
  *     currency, and telling a user they hold "USDC" hides which USDC it is;
  *   • the chain is where the transfer EXECUTES (`linkNetworkOf`), never `network`, which on a
@@ -108,12 +122,99 @@ export function currencyName(currency: HomeCurrency): string {
  *     it settles on the Internet Computer, so using it produced the flatly wrong "Held as USDC on
  *     Ethereum" — a user could reasonably send Ethereum USDC somewhere on the strength of it.
  */
-export function currencyRailLabel(currency: HomeCurrency, assets: SelectableAsset[]): string | null {
-  const rail = preferredRail(currency, assets);
-  return rail === null ? null : railLabel(rail);
+export function railLineLabel(rail: SelectableAsset): string {
+  return M.wallet.asset.networkLabel(rail.linkToken ?? rail.symbol, prettyNetwork(linkNetworkOf(rail)));
 }
 
-/** `currencyRailLabel`'s per-rail half, so the chooser can label a rail it already resolved. */
-export function railLabel(rail: SelectableAsset): string {
-  return M.wallet.homeCurrency.rail(rail.linkToken ?? rail.symbol, prettyNetwork(linkNetworkOf(rail)));
+/**
+ * Every rail of `currency`'s group on one subtitle line ("ckUSDC · Internet Computer, USDC ·
+ * Solana"), or null when the catalog carries no rail for it. The whole-group counterpart of
+ * `railLineLabel`: surfaces that summarise (Settings) name the group; surfaces that ask the user
+ * to choose (the chooser) print one `railLineLabel` per rail instead.
+ */
+export function railsLabel(currency: HomeCurrency, assets: SelectableAsset[]): string | null {
+  const rails = currencyRails(currency, assets);
+  return rails.length === 0 ? null : rails.map(railLineLabel).join(', ');
+}
+
+/**
+ * What a rail charges, as FACTS in the rail's own units — the inputs to a cost decision, never
+ * the decision: comparing fees across tokens would be an FX quote (module boundary above).
+ *
+ *   IC rails: the ICRC transfer fee from the catalog row, formatted with the asset's own
+ *   decimals and token (a null/absent fee is reported as null — "unknown", never "free").
+ *   SOL rails: the per-transaction signature fee, always in SOL even on the USDC rail (Solana
+ *   charges fees in SOL, not in the token being moved), plus the ONE-TIME associated-token-account
+ *   rent where relevant — a USDC rail needs an ATA the first time it is used; a native-SOL rail
+ *   is its own account and needs none.
+ */
+export type RailFeeFact = {raw: string; formatted: string};
+export type RailFees = {perTransfer: RailFeeFact | null; oneTime: RailFeeFact | null};
+
+export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescriptor[]): RailFees {
+  if (rail.protocol === 'solana') {
+    const signature = SOL_FEE_LAMPORTS.toString();
+    const fee: RailFees = {
+      perTransfer: {raw: signature, formatted: fmtAsset(signature, SOL_DECIMALS, SOL_UNIT)},
+      oneTime: null,
+    };
+    if (rail.token === 'USDC') {
+      const rent = SOL_ATA_RENT_LAMPORTS.toString();
+      fee.oneTime = {raw: rent, formatted: fmtAsset(rent, SOL_DECIMALS, SOL_UNIT)};
+    }
+    return fee;
+  }
+  const fee = catalog.find(c => c.currency === rail.currency)?.fee;
+  const perTransfer = fee != null && /^\d+$/.test(fee)
+    ? {raw: fee, formatted: fmtAsset(fee, rail.decimals, rail.linkToken ?? rail.symbol)}
+    : null;
+  return {perTransfer, oneTime: null};
+}
+
+/**
+ * The per-asset balance map the wallet already renders from (`buildAssetBalances`) — keyed by
+ * stable AssetId. May be absent entirely (first chooser render before any poll).
+ */
+export type RailBalances = Readonly<Partial<Record<AssetId, BalanceView>>>;
+
+/** Why chooseRail returned the rail it did — the reason is part of the answer, not a log line. */
+export type RailReason = 'destination' | 'funded' | 'preference';
+export type RailChoice = {rail: SelectableAsset; reason: RailReason};
+
+/**
+ * Which rail of `currency`'s group to use, and why. The policy is exactly three steps, first
+ * match wins:
+ *
+ *   1. DESTINATION — a request that names an asset pins the answer. The request's own rail is
+ *      returned if (and only if) it belongs to this currency's group; a destination naming some
+ *      other asset returns null, because this currency has nothing honest to say about that
+ *      request. A merchant's settlement asset is never second-guessed, never "improved" onto a
+ *      cheaper rail (CLAUDE.md boundary).
+ *   2. FUNDED — the first rail in stated-preference order whose balance is a known non-zero
+ *      (`status: 'ok'` — the ONE definition the whole app already renders by). Unknown is not
+ *      funded: a loading, errored, absent or zero rail is skipped, so the wallet never "chooses"
+ *      a rail it cannot see money on.
+ *   3. PREFERENCE — CURRENCY_RAILS order: the stated product default (ckUSDC's offline tap is
+ *      hardware-proven). This is also exactly `preferredRail`, which stays the one-line form of
+ *      "no balances, no request — just the default".
+ *
+ * Null when the catalog carries no rail for the currency at all.
+ */
+export function chooseRail(
+  currency: HomeCurrency,
+  assets: SelectableAsset[],
+  balances?: RailBalances | null,
+  destination?: SelectableAsset | null,
+): RailChoice | null {
+  const rails = currencyRails(currency, assets);
+  if (rails.length === 0) return null;
+  if (destination != null) {
+    const pinned = rails.find(r => r.id === destination.id);
+    return pinned == null ? null : {rail: pinned, reason: 'destination'};
+  }
+  if (balances != null) {
+    const funded = rails.find(r => balances[r.id]?.status === 'ok');
+    if (funded != null) return {rail: funded, reason: 'funded'};
+  }
+  return {rail: rails[0], reason: 'preference'};
 }
