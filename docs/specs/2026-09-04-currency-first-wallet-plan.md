@@ -1,9 +1,9 @@
 # The currency-first wallet — CHF/EUR/USD, on whichever rail serves the user best
 
-**Founder direction taken 2026-09-04. This is the top of the backlog.** Except for the slice
-recorded under "What landed" at the end, every verb below is a roadmap verb, deliberately. What is
-deployed lives in `OPEN_ISSUES.md`, and per-asset availability lives in `positioning.md` — neither
-is restated here.
+**Founder direction taken 2026-09-04. This is the top of the backlog.** Except for the slices
+recorded as landed — O1 under "What landed" at the end, O2 in its own section — every verb below
+is a roadmap verb, deliberately. What is deployed lives in `OPEN_ISSUES.md`, and per-asset
+availability lives in `positioning.md` — neither is restated here.
 
 ## What the brief was, and what measurement did to it
 
@@ -84,6 +84,23 @@ across launches.
 `CHF` resolves to `VCHF@InternetComputer` or `VCHF@Solana`; `USD` to `ckUSDC@InternetComputer` or
 `USDC@Solana`; `EUR` to `EURC@Solana`. The wallet chooses per operation, on measured cost, and tells
 the user which rail it chose and why.
+
+**LANDED 2026-09-05, app-only, five commits (`3d44de1`→`470b0b6`) — not deployed; deployment state
+lives in `OPEN_ISSUES.md`.** The group is the model, purely in `app/config/currency.ts`: `railFees`
+states each rail's fee as a fact in the rail's own unit; `chooseRail` is the policy — destination →
+funded → preference, first match wins — returning a reason with the rail; `railsLabel` names the
+whole group on one line. Around it: the chooser and Settings list every rail of the group with the
+preferred rail's reason; Balances badges every sibling rail, MAIN stays on the preferred one, rows
+are never merged and there is no group sum; Receive defaults to the chosen rail and discloses both
+rails' addresses and fees (`RailDisclosure`), and `IcrcDepositSheet` names the settlement chain
+(ckUSDC no longer says "Ethereum"); SendSheet's route line names the rail and its fee; the
+funded-sibling pointer on all four fund gates switches via lock-gated `payRailSelect` — a user
+gesture, never a side-effect. Never-override is pinned: `app/__tests__/rail-choice-isolation.test.ts`
+(structural — no pinned surface, `resolvePayLink`/OpenCryptoPay/Solana Pay/wire, may import or call
+the chooser) plus e2e flows 123 (a named-rail link pays the named rail exactly) and 124 (pointer +
+one-tap switch). Fees stay facts in their own units — no cross-token comparison anywhere; that would
+be an FX quote and waits on O3's legal decisions. New e2e flows 120–124; the default suite runs 119
+GREEN, `FLOWS.md` carries 120 rows. Objectives 3 and 4 remain not started.
 
 ### O3 — funding: card and bank, several providers
 
@@ -205,7 +222,8 @@ UI made that was not true:
 3. The chooser's own render **latched DEMO** before the user's choice arrived, so the wallet opened
    on DEMO whichever currency was picked. The selection effects are inert while the gate is open.
 
-**Explicitly NOT built, and not started:** objectives 2, 3 and 4. In particular the Revolut IA
+**Explicitly NOT built in this slice:** objectives 2, 3 and 4 — O2 landed the next day; see its
+section. In particular the Revolut IA
 itself — a bottom tab bar, inline accounts and an inline activity feed on the home surface — is
 untouched; what landed is the currency model those surfaces will display, plus the MAIN badge on the
 existing Balances sheet. The scanner remains the landing screen (founder decision).

@@ -11,14 +11,33 @@
 currency (CHF · USD · EUR) chosen at onboarding; a currency spanning several rails with dpay picking
 one on price; funding by card through licensed providers; Revolut as the UI reference.
 **Objective 1 (the home currency itself) is BUILT and green on every inner-loop gate — e2e 113/113
-with the new flow 118, jest 84/1698, relay 88/88 — and is NOT deployed. Objectives 2, 3 and 4 are
+with the new flow 118, jest 84/1698, relay 88/88 — and is NOT deployed. Objective 2 (a currency is
+a set of rails, dpay picks one) LANDED 2026-09-05, app-only, five commits `3d44de1`→`470b0b6`,
+same not-deployed caveat (prod relay at `a913c6d`, measured 2026-09-05). Objectives 3 and 4 are
 not started**, including the Revolut information architecture itself: what landed is the currency
-model, not the balance-first home. The objectives, the founder decisions, the boundary that keeps
-rail-selection inside the no-swap non-negotiable, the measured venue/ramp evidence, the code cost,
-and the three UI-honesty defects this work surfaced and fixed:
+model and its rail group, not the balance-first home. The objectives, the founder decisions, the
+boundary that keeps rail-selection inside the no-swap non-negotiable, the measured venue/ramp
+evidence, the code cost, and the three UI-honesty defects this work surfaced and fixed:
 [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
 This outranks everything numbered below, including the OpenCryptoPay milestone — which the founder
 reframed the same day as **one interop rail among several, not the strategy**.
+
+**Objective 2's substance (2026-09-05):** the rail model is pure in `app/config/currency.ts` —
+`railFees` states each rail's fee as a FACT in the rail's own unit, `chooseRail` is the explainable
+policy (destination → funded → preference, first match wins, returning a reason), `railsLabel` puts
+the whole group on one line. The chooser and Settings name every rail of the group with the
+preferred rail's reason; Balances badges every sibling rail (MAIN stays on the preferred one, rows
+never merged, no group sum); Receive defaults to the chosen rail and discloses both rails'
+addresses/fees via `RailDisclosure`, and `IcrcDepositSheet` now names the settlement chain (ckUSDC
+no longer says "Ethereum"); SendSheet's route line names the rail and its fee. The funded-sibling
+pointer on all four fund gates switches via lock-gated `payRailSelect` — a user gesture, never a
+side-effect. Never-override is PINNED: `app/__tests__/rail-choice-isolation.test.ts` (structural —
+no pinned surface, `resolvePayLink`/OpenCryptoPay/Solana Pay/wire, may import or call the chooser)
++ e2e flows 123 (a named-rail link pays the named rail exactly) and 124 (pointer + one-tap switch).
+Fees are facts in their own units — NO cross-token comparison anywhere; that would be an FX quote,
+gated on Objective 3's legal decisions. New e2e flows 120–124; default suite 119/119 GREEN,
+`FLOWS.md` 120 rows. **Objectives 3 (card/bank funding) and 4 (Revolut-style home) remain NOT
+STARTED — the next work.**
 
 Opened by that investigation, and each independently actionable:
 
