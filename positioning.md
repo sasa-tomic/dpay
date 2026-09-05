@@ -45,7 +45,7 @@ dpay will want to offer conversion between assets, with the exchange itself perf
 
 A screen that shows one blended "you get X" and hides the split is not transparent, however accurate X is.
 
-**Founder decisions this needs, none of them taken:**
+**Founder decisions this needs, none of them taken** (regulatory evidence: `docs/REGULATORY.md`):
 
 1. **Quote, or only relay the provider's quote.** Displaying a rate at all is near the line that turns a wallet into a broker. Showing the provider's own rate, attributed and timestamped, is the conservative shape; dpay computing or blending one is not.
 2. **Pick the provider, or let the user pick.** Picking is routing, and routing is the clause with legal weight (`monetization.md`).
@@ -63,17 +63,22 @@ The "seconds" promise comes from settling on the **Internet Computer**, where ch
 ## Asset availability & roadmap
 
 IC rows re-measured against the production catalog (`GET https://dpay.kalaj.org/api/v1/currencies`)
-on 2026-09-04; the EUR and CHF-issuance rows are desk research from 2026-07 and are NOT re-verified.
+on 2026-09-04. The EUR and CHF rows were re-measured the same day against the ledgers and mints
+themselves, replacing 2026-07 desk research that had both wrong.
 
-| Currency | Asset on IC | Status | Notes |
-|----------|-------------|--------|-------|
+A currency may name **more than one rail** (founder decision 2026-09-04). Which rail dpay should
+put a user on, and the measured liquidity and ramp evidence behind that choice, is
+`docs/specs/2026-09-04-currency-first-wallet-plan.md` — not restated here.
+
+| Currency | Rail(s) | Status | Notes |
+|----------|---------|--------|-------|
 | USD | ckUSDC | **Live** — primary launch rail | The default; tourist lingua franca. (ckUSDT = future ckERC20 candidate.) |
 | BTC | ckBTC | **Live** | Fast & final on IC; not mainnet BTC. |
 | ETH | ckETH | **Live** | Same. |
 | ICP | native ICP | **Live** — payable, no fiat ramp | Catalog id 8, ledger `ryjl3-tyaaa-aaaaa-aaaba-cai`. In and out by ordinary ICRC-1 transfer from any Internet Computer wallet; no ramp to francs or dollars. |
-| EUR | EURC (→ chain-key ERC-20) | **Near-term** | EURC is EMI/MiCA-licensed and the dominant euro stablecoin. Since the MiCA transitional period closed 30 Jun 2026, only licensed euro stablecoins are legal to offer in the EU — EURC qualifies. Bringing it to the IC as a ck-ERC20 is feasible; **verify ckEURC minting/liquidity before promising**. |
+| EUR | EURC on **Solana** | **Planned — not built** | Circle-issued, EMI/MiCA-licensed, the dominant euro stablecoin; since the MiCA transitional period closed 30 Jun 2026 only licensed euro stablecoins are legal to offer in the EU, and EURC qualifies. Founder decision 2026-09-04: EUR means EURC on Solana. **The two Internet Computer alternatives were measured on 2026-09-04 and both rejected** — ckEURC (`pe5t5-diaaa-aaaar-qahwa-cai`) is deployed but holds 53.99 tokens with no trading venue, and VEUR (`wu6g4-6qaaa-aaaan-qmrza-cai`) holds 1.499 tokens across 33 ledger blocks ever. The earlier "bring EURC to the IC as a ck-ERC20, near-term" line was desk research and is withdrawn: the asset already exists there and is empty. |
 | SOL | native rail (device-key, direct RPC) | **Shipped in-app** | SOL + USDC-on-Solana settle natively (~1s); mainnet RPC live in the shipped APK. ckSOL-on-IC: no minter exists — not available. |
-| CHF | VCHF (external ICRC token) | **Live** — payable, no fiat ramp | Catalog id 7, ledger `ly36x-wiaaa-aaaai-aqj7q-cai`. A franc-denominated token issued by a third party: **not** chain-key-backed, and its peg is the issuer's claim, not something dpay verifies — say that whenever it is named. A funded VCHF payment was made on a physical device with real funds on 2026-09-01. Still no **ckCHF** — chain-key CHF does not exist; the wider issuance picture: CHFAU (AllUnity) on Ethereum ~Feb 2026, Safirum CHF-S planned Q3 2026 on Solana, a UBS-led Swiss-bank sandbox on Ethereum through 2026 (institutional). |
+| CHF | VCHF on the IC (**live**) · VCHF on **Solana** (planned, not built) | **Live on the IC** — payable, no fiat ramp in-app | IC: catalog id 7, ledger `ly36x-wiaaa-aaaai-aqj7q-cai`; a funded VCHF payment was made on a physical device with real funds on 2026-09-01. Solana: the same issuer's token on a second rail, with materially more float and depth — measured in the spec. **Both rails carry the same issuer risk and it must be said whenever VCHF is named:** a franc-denominated token issued by a third party, **not** chain-key-backed, its peg the issuer's claim and not something dpay verifies. Measured 2026-09-04: the VCHF ledgers are controlled by ordinary company keys rather than NNS Root (unlike ckUSDC), the Solana mint holds both mint and freeze authority, and no independent reserve attestation was found — so never write "audited" or "attested" about VCHF. CHF **can** be bought as VCHF on the IC by bank transfer from a licensed Swiss provider (DFX.swiss); there is no card route to it anywhere. Still no **ckCHF** — chain-key CHF does not exist; the wider issuance picture: CHFAU (AllUnity) on Ethereum ~Feb 2026, Safirum CHF-S planned Q3 2026 on Solana, a UBS-led Swiss-bank sandbox on Ethereum through 2026 (institutional). |
 
 ## Why we win where it matters (abroad)
 
@@ -84,7 +89,7 @@ on 2026-09-04; the EUR and CHF-issuance rows are desk research from 2026-07 and 
 
 - The promise is "**you** don't need signal," not "nobody needs signal." If the *merchant* is also offline (remote market, mountain hut), settlement defers until they reach the network (store-and-forward the signed authorization); the offline receipt round-trip tells the payer the outcome once it settles.
 - Volatile crypto (BTC/ETH/SOL) acceptance is a **merchant opt-in** who then holds price risk; "spend crypto, merchant receives stable dollars" is a **licensed-partner edge feature**, never a dpay-native swap.
-- Any cross-asset conversion, on-ramp, or off-ramp is a licensed third party the user deals with directly — keep dpay demonstrably a technical/UI layer (the same MiCA "transfer services on behalf of clients" line already flagged for the relay).
+- Any cross-asset conversion, on-ramp, or off-ramp is a licensed third party the user deals with directly — keep dpay demonstrably a technical/UI layer (`docs/REGULATORY.md`).
 
 ## Scope
 

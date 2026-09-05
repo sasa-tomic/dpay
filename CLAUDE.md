@@ -5,9 +5,36 @@
 Solo founder & engineer building **∂ifferent Pay** (display: ∂pay / Different Pay; technical ASCII: dpay — name decided 2026-08-17, see `2026-08-17-name-decision.md`). Contact: sato.dpay@kalaj.org.
 Currently pre-seed: building the investor proof-of-concept, then a first pilot.
 
-## CURRENT TOP PRIORITY — native-asset in/out (BTC / ETH / SOL)  (set 2026-08-06; status updated 2026-08-06)
+## CURRENT TOP PRIORITY — the money the user thinks in (set 2026-09-04)
 
-**The single highest-priority product direction.** Getting BTC, ETH, and SOL **in and out** of the wallet, as **convenient as possible** for the user, is the top of the backlog for every future session until it's done. The bar is **testnet coverage for BOTH directions** (deposit in *and* withdraw out), proven live, not just wiring-reachable. Testnet4 BTC / Sepolia / Solana devnet are the targets.
+**The single highest-priority product direction, replacing the native-asset objective below, which
+it achieved.** Four objectives, in this order of dependency. **Objective 1 is BUILT (2026-09-04, not
+deployed); 2, 3 and 4 are not started** — including the Revolut information architecture itself:
+
+1. **A home currency — CHF · USD · EUR — chosen at onboarding, changeable in Settings.** It sets the
+   default asset, the home screen's headline number, and the unit a price is read in. The founder's
+   own default is CHF.
+2. **A currency is a set of rails, and dpay picks one for the user, on price.** CHF is VCHF on the
+   Internet Computer *and* VCHF on Solana; USD is ckUSDC *and* USDC-on-Solana; EUR is EURC on
+   Solana. Selecting between rails of the **same** currency is routing, not exchange — the boundary
+   that keeps this inside the no-swap non-negotiable is stated in the spec and is not negotiable.
+3. **Funding by card, through several licensed providers, landing at the user's own address**;
+   conversion, where a currency cannot be bought directly, is a transaction the **user** signs, with
+   dpay taking no cut. Gated on an unresolved legal question — see the spec.
+4. **Revolut is the golden reference** for the visual system and information architecture. The
+   scanner stays the landing screen (founder decision — the tourist's first gesture is scanning).
+
+Design, every founder decision, the measured venue/ramp evidence behind them, and the code cost:
+[`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
+Per-currency asset availability: `positioning.md`. Work order: `OPEN_ISSUES.md`.
+
+When in doubt about sequencing, **pick the work that gets a user holding, and spending, the currency
+they actually think in.**
+
+## Previous top priority — native-asset in/out (BTC / ETH / SOL): ACHIEVED (set 2026-08-06)
+
+Both directions are done on all three assets; the residual gates are outer-loop only and live in
+`OPEN_ISSUES.md`. Kept below as the evidence record, because these live proofs exist nowhere else.
 
 ### Status (2026-08-06)
 
@@ -22,8 +49,6 @@ Currently pre-seed: building the investor proof-of-concept, then a first pilot.
 - **Convenience is a hard requirement, not a nice-to-have.** One-tap address, copy/QR, clear confirmations, honest fees/time.
 
 The BTC/ETH rails layer on the existing facade (minter-family-agnostic; dispatches `CkBtcUtxo` / `CkEthErc20`); the SOL rail is **app-only** and must not touch the facade, relay, wire, or core. The IC offline-pay rail is unaffected and must stay untouched.
-
-When in doubt about sequencing, **pick the work that gets a user real native BTC/ETH/SOL into or out of the wallet fastest.** Reference: `OPEN_ISSUES.md` "NEXT SESSION — work order".
 
 ## Non-negotiable: governance posture (set 2026-08-20)
 
@@ -149,7 +174,7 @@ The signature binds the **exact amount + payee + request**, so consent is unambi
 
 ## Non-negotiable: dpay never holds, swaps, or can move user funds
 
-Hard requirement, **not a preference**. Reject any design that violates it — restructure instead. This is what keeps dpay an *interface*, not a money transmitter / VASP / CASP, and it is why custody, KYC, and licensing stay out of scope.
+Hard requirement, **not a preference**. Reject any design that violates it — restructure instead. This is a product rule and stands as one. The legal conclusion previously attached to it here was too strong and is deleted — see `docs/REGULATORY.md`.
 
 - **No custody.** The user's key lives on their device. dpay (the company, the relay, any operator) must never hold a user seed, an omnibus account, or funds it can move.
 - **No swaps by dpay.** dpay does not exchange one asset for another on a user's behalf, and does not take price risk. Conversion by a licensed third party the user authorizes directly is already the plan, not an exception (`positioning.md`). Whether dpay may quote, route, or take a cut on that third party's conversion is **open, not decided** — see `monetization.md`.

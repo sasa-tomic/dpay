@@ -68,6 +68,12 @@ your address — we never hold it."*
 
 **Status: unstarted. This is the only part of this document that is not built.**
 
+**And the shape below has a hard external limit, measured 2026-09-04:** no card on-ramp anywhere
+delivers a chain-key asset or VCHF — only native ICP reaches the Internet Computer at all. So
+"pre-fill the user's deposit address at a provider" works for Solana and for native ICP, and for
+nothing else on the IC. Which providers reach what, and the bank-transfer route that does reach
+VCHF: `docs/specs/2026-09-04-currency-first-wallet-plan.md`.
+
 Hand off to an embedded **licensed third-party provider** (Onramper / Transak / Changelly-class
 aggregator) with the user's deposit address **pre-filled as the destination**. The provider is the
 counterparty of record and carries the licensing; dpay supplies an address and shows a status — the
@@ -76,7 +82,8 @@ page is the zero-integration fallback and is equally clean.
 
 This is what keeps a fiat ramp compatible with the non-custodial non-negotiable: the user authorizes
 the provider **directly**, and dpay never becomes the counterparty. Whether dpay may quote, route, or
-take a cut of that provider's business is open and belongs to `monetization.md`.
+take a cut of that provider's business is open and belongs to `monetization.md`; the regulatory
+evidence is `docs/REGULATORY.md`.
 
 ## The user never sees "supported vs. unsupported"
 

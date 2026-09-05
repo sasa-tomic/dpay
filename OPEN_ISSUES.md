@@ -7,7 +7,52 @@
 
 ## NEXT SESSION — work order (unblocked; do these first)
 
+**TOP OF THE BACKLOG — the money the user thinks in (founder direction, 2026-09-04).** A home
+currency (CHF · USD · EUR) chosen at onboarding; a currency spanning several rails with dpay picking
+one on price; funding by card through licensed providers; Revolut as the UI reference.
+**Objective 1 (the home currency itself) is BUILT and green on every inner-loop gate — e2e 113/113
+with the new flow 118, jest 84/1698, relay 88/88 — and is NOT deployed. Objectives 2, 3 and 4 are
+not started**, including the Revolut information architecture itself: what landed is the currency
+model, not the balance-first home. The objectives, the founder decisions, the boundary that keeps
+rail-selection inside the no-swap non-negotiable, the measured venue/ramp evidence, the code cost,
+and the three UI-honesty defects this work surfaced and fixed:
+[`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
+This outranks everything numbered below, including the OpenCryptoPay milestone — which the founder
+reframed the same day as **one interop rail among several, not the strategy**.
+
+Opened by that investigation, and each independently actionable:
+
+- **PROD NOW CARRIES THE FIX FOR THE THING THAT LOST THE MONEY — redeployed 2026-09-04.** MEASURED
+  2026-09-05: `/api/v1/version` reports `a913c6d` (commit_date 2026-09-04T14:56:39+02:00), so the
+  deployed relay includes the fix that names the ledger when reporting an OpenCryptoPay payment —
+  the defect that cost CHF 1 on 2026-09-03. The earlier report in this file of `dce8ff1` was true
+  on 2026-09-04 and is superseded. Still INFERRED, not measured: that the APK prod serves was built
+  from that same commit; nobody has pulled the served APK and checked. The do-not-attempt gate on
+  the acceptance proof is lifted, but run it from a freshly installed APK — an already-installed
+  build is only as current as the day it was installed.
+- **"No third-party wallet can settle an Internet Computer asset" may be too strong — re-measure
+  before it goes near a deck.** DFINITY's own Oisy wallet appears to ship
+  `src/frontend/src/icp/services/ic-open-crypto-pay.services.ts` with
+  `pay: {openCryptoPay: 'InternetComputer'}` on `main`. Oisy is not on DFX's compatibility list, so
+  the measured claim in `CLAUDE.md` is not falsified — but it was read on source only, not driven.
+  A concrete hazard if it is real: Oisy's URN decoder accepts and ignores unknown params, so a dpay
+  till's `&ref=` would be silently dropped, and `match_payment` credits only a transfer carrying
+  that reference as its ICRC-1 memo — the payer's money would move and the sale would not be
+  credited.
+- **dpay speaks no external payment standard, in either direction** (measured 2026-09-04 by driving
+  real URIs through `classifyScan`). The scanner accepts only dpay's own binary wire, dpay's own
+  https link, an OpenCryptoPay LNURL, and a bare address; it does not parse Solana Pay, BIP-21/321,
+  EIP-681 or BOLT-11. The receive side emits bare strings, not URIs. Two cheap items follow, both
+  additive: **emit Solana Pay** (`solana:<addr>?amount=&reference=`) instead of a bare base58 string
+  on the Solana receive surface, and **accept a merchant's Solana Pay QR** (half the parser already
+  exists inside the OCP client; the work is `reference` keys, ATA derivation, the SPL Memo slot and
+  a route from `classifyScan`). Reach for both is UNMEASURED and must not be claimed. Two further
+  items are honesty rather than reach: parsing `bitcoin:`/`ethereum:` URIs only so a scan can be
+  refused **by name** with an instruction, which the 2026-08-29 founder rule requires and which
+  today's "not a payment code" dead end violates.
+
 0. **THE MERCHANT SIDE OF OpenCryptoPay — dpay serves its own till** (founder decision, 2026-09-02).
+   **Demoted 2026-09-04 to one interop rail among several** (founder), below the currency work above.
    **The v1 build is COMPLETE in-tree at `702c359`**; what remains is outer-loop, founder ops, and
    the additive items below.
    Design, rejected alternatives and every founder decision:
@@ -217,6 +262,7 @@
 - **Conversion/swap direction — DRAFT AWAITING APPROVAL** (founder ask, 2026-09-04): `positioning.md`
   → "Roadmap, not built: conversion the user authorizes, delegated and itemised". Four decisions are
   listed there and none is taken; nothing is built and nothing should be.
+  The regulatory research is DONE and the questions for counsel are written out: `docs/REGULATORY.md`.
 
 ## Other open issues
 
