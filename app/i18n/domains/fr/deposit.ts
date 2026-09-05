@@ -228,7 +228,9 @@ export const withdrawFr: WithdrawMessages = {
     scanCancel: 'La saisir à la main',
 
     routeIcrc: (network, fee) => `${network} · arrive en quelques secondes · frais ${fee}`,
+    routeIcrcOnRail: (rail, fee) => `${rail} · arrive en quelques secondes · frais ${fee}`,
     routeIcrcUnknownFee: network => `${network} · arrive en quelques secondes · les frais du registre s’appliquent`,
+    routeIcrcOnRailUnknownFee: rail => `${rail} · arrive en quelques secondes · les frais du registre s’appliquent`,
     routeSolana: network => `${network} · arrive en quelques secondes · de petits frais de réseau en SOL s’appliquent`,
     feeUnknown: 'fixés par le registre',
     routeLegacy: fee => `Compte ICP · arrive en quelques secondes · frais ${fee}`,

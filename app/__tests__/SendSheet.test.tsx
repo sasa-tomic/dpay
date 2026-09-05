@@ -69,6 +69,7 @@ import {hasStamp, loadJourney} from '../lib/journey';
 import {SendSheet, resolveDestination} from '../components/SendSheet';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {CurrencyDescriptor} from '../config/catalog';
+import {buildSelectableAssets} from '../config/assets';
 import type {Identity} from '../lib/types';
 import {M} from '../i18n';
 
@@ -508,6 +509,32 @@ describe('SendSheet — a destination handed over by the camera', () => {
     act(() => { tree.update(sendElement({prefillAddress: SOL_ADDR})); });
     await act(async () => {});
     expect(textOf(tree, 'send-destination')).toBe(K2);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('SendSheet — the route line names the rail for home-currency rails (Objective 2, S5)', () => {
+  const CKUSDC = byId(2);
+  const USD_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const CKUSDC_RAIL = USD_ASSETS.find(a => a.id === 'ic:2') ?? null;
+
+  test('sending the home rail: the line names the RAIL and its own-unit fee, not the bare network', async () => {
+    const tree = await mountSend({desc: CKUSDC, balance: '500000000', homeRail: CKUSDC_RAIL});
+    await typeAddress(tree, K2);
+    expect(field(tree).status).toEqual({
+      text: 'ckUSDC · Internet Computer · arrives in seconds · fee 0.010000 USDC',
+      tone: 'ok',
+    });
+    act(() => { tree.unmount(); });
+  });
+
+  test('the same asset with no home-currency group keeps the plain network line', async () => {
+    const tree = await mountSend({desc: CKUSDC, balance: '500000000', homeRail: null});
+    await typeAddress(tree, K2);
+    expect(field(tree).status).toEqual({
+      text: 'Internet Computer · arrives in seconds · fee 0.010000 USDC',
+      tone: 'ok',
+    });
     act(() => { tree.unmount(); });
   });
 });

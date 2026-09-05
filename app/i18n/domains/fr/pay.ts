@@ -156,6 +156,10 @@ export const payFr: PayMessages = {
   fundBodyUsdc: 'Envoyez des USDC (Solana) à votre adresse USDC. Gardez un peu de SOL dans le portefeuille pour les frais de réseau.',
   showMyAddress: symbol => `Voir mon adresse ${symbol}`,
   createUsdcAccount: 'Créer mon compte USDC',
+  fundSibling: {
+    holds: (amount, rail) => `Vous détenez ${amount} sur ${rail}`,
+    switchTo: network => `Passer à ${network}`,
+  },
 
   offlineSendTitle: 'Envoyer vers une adresse demande une connexion',
   offlineSendBody: symbol =>

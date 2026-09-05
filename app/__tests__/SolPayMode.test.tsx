@@ -109,6 +109,8 @@ function solPayElement(props: Partial<SolPayModeProps> = {}) {
       nfcStatus="off"
       assets={[]}
       catalog={[]}
+      homeCurrency={null}
+      balances={{}}
       solBalance="5000000000"
       usdcBalance="0"
       usdcAtaAbsent={false}
@@ -1109,6 +1111,36 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
     expect(errText(tree)).toBe('');
     await scanCode(tree, `solana:${MERCHANT}?amount=0.002&reference=${REFERENCE}`);
     expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.002000000 SOL');
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('SolPayMode — the funded-sibling pointer on the fund gates (Objective 2, S5)', () => {
+  test('a USDC-zero gate with a funded ckUSDC sibling names it and offers the one-tap switch', () => {
+    const onSwitchRail = jest.fn();
+    const tree = mountTill({
+      homeCurrency: 'USD',
+      balances: {'ic:2': {displayText: '5.00 ckUSDC', status: 'ok'}},
+      payGate: 'usdc-zero',
+      selectedToken: 'USDC',
+      onSwitchRail,
+    });
+    expect(hasTestID(tree, 'sol-pay-fund')).toBe(true);
+    expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 5.00 ckUSDC on ckUSDC · Internet Computer');
+    pressByTestID(tree, 'btn-fund-sibling-switch');
+    expect(onSwitchRail).toHaveBeenCalledWith('ic:2');
+    act(() => { tree.unmount(); });
+  });
+
+  test('a SOL gate points nowhere — SOL is no home currency\'s rail', () => {
+    const tree = mountTill({
+      homeCurrency: 'USD',
+      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+      payGate: 'sol-zero',
+      selectedToken: 'SOL',
+    });
+    expect(hasTestID(tree, 'sol-pay-fund')).toBe(true);
+    expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

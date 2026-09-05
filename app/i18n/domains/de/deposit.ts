@@ -227,7 +227,9 @@ export const withdrawDe: WithdrawMessages = {
     scanCancel: 'Stattdessen von Hand eingeben',
 
     routeIcrc: (network, fee) => `${network} · in Sekunden da · Gebühr ${fee}`,
+    routeIcrcOnRail: (rail, fee) => `${rail} · in Sekunden da · Gebühr ${fee}`,
     routeIcrcUnknownFee: network => `${network} · in Sekunden da · es gilt die Gebühr des Ledgers`,
+    routeIcrcOnRailUnknownFee: rail => `${rail} · in Sekunden da · es gilt die Gebühr des Ledgers`,
     routeSolana: network => `${network} · in Sekunden da · es fällt eine kleine SOL-Netzwerkgebühr an`,
     feeUnknown: 'vom Ledger festgelegt',
     routeLegacy: fee => `ICP-Konto · in Sekunden da · Gebühr ${fee}`,

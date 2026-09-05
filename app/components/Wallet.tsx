@@ -772,6 +772,18 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     selectAsset(id);
   }, [selectionLocked]);
 
+  // The rail flip inside the Pay tab's fund-first gates (Objective 2, S5): switching to a FUNDED
+  // sibling rail of the home currency. Deliberately NOT handleSelect — the pointer lives on a
+  // fund gate, where the user's goal (pay or send) survives the switch; handleSelect's sub-mode
+  // reset would kick them off the surface they were just pointed to. Like any user gesture it
+  // respects the selection lock; Wallet also passes NO switch callback to the engines while
+  // locked, so the pointer renders without its button (the rail is still named).
+  const payRailSelect = useCallback((id: AssetId) => {
+    if (!shouldAllowUserSelect(selectionLocked)) return;
+    selectAsset(id);
+  }, [selectionLocked]);
+  const payRailSwitch = selectionLocked ? undefined : payRailSelect;
+
   // Zero-funds funnel (2026-08-16 UX): the ONE programmatic "show this asset's deposit address"
   // action used by every fund-first surface (SolPayMode's InstructionPanel + AtaSetupCard's
   // fund-SOL secondary). Programmatic like the deeplink router — it bypasses the selection lock
@@ -937,7 +949,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={onSolSent} onSentUsdc={onSolUsdcSent}                onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={onSolSent} onSentUsdc={onSolUsdcSent}                onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -945,6 +957,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   onRefreshBalances={recheckIcBalances}
                   refreshBusy={recheckBusy}
                   catalog={catalog} assets={assets} assetBalances={displayAssetBalances}
+                  homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch}
                   withdrawCurrency={selectedCurrency}
                   withdrawDisplay={depositDisplay} withdrawFamily={depositFamily}
                   withdrawTokenContract={selectedDesc?.token_contract ?? null}

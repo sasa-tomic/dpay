@@ -463,9 +463,16 @@ export type WithdrawMessages = {
     scanCancel: string;
     /** Route disclosure — what WILL happen, shown before the user commits. */
     routeIcrc: (network: string, fee: string) => string;
+    /** The same route line when the asset being sent is a rail of the home currency's group
+     *  (Objective 2, S5): the line names the RAIL (`railLineLabel`, e.g. "ckUSDC · Internet
+     *  Computer"), not just the network — several rails carry this currency, and the sender
+     *  should see which one this send settles on. */
+    routeIcrcOnRail: (rail: string, fee: string) => string;
     /** Used when the asset's catalog row carries NO registered fee: the ledger charges its own
      *  default and we do not know the number, so we say so rather than print a made-up 0. */
     routeIcrcUnknownFee: (network: string) => string;
+    /** The unknown-fee twin of `routeIcrcOnRail`. */
+    routeIcrcOnRailUnknownFee: (rail: string) => string;
     /** The Solana rail's route line. No fee number: this rail signs on-device and broadcasts to an
      *  RPC, so nothing has quoted one — and the screen never prints a fee it does not know. */
     routeSolana: (network: string) => string;
@@ -577,7 +584,9 @@ export const withdrawEn: WithdrawMessages = {
     scanCancel: 'Enter it by hand instead',
 
     routeIcrc: (network, fee) => `${network} · arrives in seconds · fee ${fee}`,
+    routeIcrcOnRail: (rail, fee) => `${rail} · arrives in seconds · fee ${fee}`,
     routeIcrcUnknownFee: network => `${network} · arrives in seconds · the ledger's own fee applies`,
+    routeIcrcOnRailUnknownFee: rail => `${rail} · arrives in seconds · the ledger's own fee applies`,
     routeSolana: network => `${network} · arrives in seconds · a small SOL network fee applies`,
     feeUnknown: 'set by the ledger',
     routeLegacy: fee => `ICP account · arrives in seconds · fee ${fee}`,

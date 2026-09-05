@@ -223,6 +223,14 @@ export type PayMessages = {
   showMyAddress: (symbol: string) => string;
   /** Also used by SolReceiveMode's inline ATA setup card. */
   createUsdcAccount: string;
+  /** The funded-sibling pointer on a fund-first gate (Objective 2, S5): another rail of the SAME
+   *  home currency already holds money. `holds` names the rail (`railLineLabel`, e.g. "USDC ·
+   *  Solana") with the amount line exactly as the balances map renders it (unit included); the
+   *  switch button names the network only — the currency is already on screen twice by then. */
+  fundSibling: {
+    holds: (amount: string, rail: string) => string;
+    switchTo: (network: string) => string;
+  };
 
   // --- send-to-address needs a connection; scan-to-pay does not ------------------------------
   /** Shown in place of the send form while the wallet is offline. A send goes straight to the
@@ -436,6 +444,10 @@ export const payEn: PayMessages = {
   fundBodyUsdc: 'Send USDC (Solana) to your USDC address. Keep a little SOL in the wallet for network fees.',
   showMyAddress: symbol => `Show my ${symbol} address`,
   createUsdcAccount: 'Create my USDC account',
+  fundSibling: {
+    holds: (amount, rail) => `You hold ${amount} on ${rail}`,
+    switchTo: network => `Switch to ${network}`,
+  },
 
   offlineSendTitle: 'Sending to an address needs a connection',
   offlineSendBody: symbol =>

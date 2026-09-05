@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **118 flows**
-> (117 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **120 flows**
+> (119 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (16) · pay (34) · offline (10) · deposit (9) · withdraw (11) · nfc (10) · system (21) · tour (6)
+wire (1) · onboard (16) · pay (36) · offline (10) · deposit (9) · withdraw (11) · nfc (10) · system (21) · tour (6)
 
 ---
 
@@ -75,6 +75,8 @@ wire (1) · onboard (16) · pay (34) · offline (10) · deposit (9) · withdraw 
 | 115 | till-refusals | The till code form renders for EVERY asset on BOTH Receive rails and fails closed by name where a charge cannot be rung up: with ckBTC selected it names the asset and its chain, says a till code is paid in VCHF, and offers one tap that switches — after which the counter is open with the till form still chosen (the code form is wallet-owned, so it survives the rail re-mount). With SOL selected the same control renders on the Solana Receive form and refuses naming SOL on Solana. A price finer than a rappen is refused on the device with the correction spelled out, and nothing is signed or sent. | till, merchant-till, rail-parity, same-surfaces, fail-closed, honest-instructions, asset-switch |
 | 116 | till-offline-cancel | A live till charge whose relay goes unreachable renders "can’t check" — the code stays up, the screen never says unpaid and never claims the sale, and it recovers to waiting the moment the relay answers again. Cancelling then signs a cents = 0 request on the merchant’s own key; the relay voids the charge and the screen ends the code with "nothing is owed" and the next action, from which the counter reopens. | till, merchant-till, offline, unknown-outcome, honest-instructions, cancel-charge, fail-closed |
 | 119 | solana-pay-scan | Solana Pay accept: scan a merchant solana: URI → named refusals on the IC rail and for unknown params/mints → explicit review (amount/label/message/full payee) → Approve sends SOL then USDC via the recipient ATA with reference keys attached (stub RPC). | solana-pay, sol-scan, review, reference-keys, spl-token, ata, refusal, sign, broadcast |
+| 123 | pay-link-named-rail | A payment link naming USDC@Solana pays exactly that rail with home=USD/preferred ckUSDC selected — no rail-selection copy on the pinned path. | pay-link, url-routing, rail-choice, never-override |
+| 124 | fund-gate-sibling-rail | The IC fund-first gate names a funded USDC@Solana sibling rail and one tap switches to it (user gesture, selection unlocked). | fund-gate, rail-choice, home-currency, solana |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |

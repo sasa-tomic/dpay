@@ -7,6 +7,8 @@ import {cmpRaw} from '../lib/amount';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
 import type {Identity} from '../lib/types';
+import type {SelectableAsset} from '../config/assets';
+import {railLineLabel} from '../config/currency';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
 import {displayName, fmtCurrencyAmount, isTestnetCurrency, testnetDisplayName, isValidDestinationAddress} from '../config/catalog';
 import {detectAddressShape, routeForShape, chainNameOfShape} from '../lib/destination';
@@ -52,7 +54,7 @@ const IC_NETWORK = 'Internet Computer';
  */
 export function SendSheet({
   identity, catalog, desc, balance, family, display, tokenContract,
-  prefillAddress = null, onPrefillConsumed, onSent, onClose,
+  homeRail = null, prefillAddress = null, onPrefillConsumed, onSent, onClose,
 }: {
   identity: Identity;
   catalog: CurrencyDescriptor[];
@@ -62,6 +64,12 @@ export function SendSheet({
   family: MinterFamily | null;
   display: FamilyDisplay | null;
   tokenContract: string | null;
+  /** When the asset being sent is a rail of the home currency's group (Objective 2, S5), the
+   *  selected asset itself — the route line then names the RAIL (`railLineLabel`, e.g. "ckUSDC ·
+   *  Internet Computer") instead of the bare network, because several rails carry this currency
+   *  and the sender should see which one this send settles on. Null for every non-group asset:
+   *  ckBTC/ckETH/ICP/DEMO and any foreign-currency selection keep the existing copy. */
+  homeRail?: SelectableAsset | null;
   /** A destination the Pay tab's camera read instead of a payment code. Pre-fills the field ONLY —
    *  the route disclosure and the Confirm press below are still the whole consent, exactly as when
    *  the address is typed by hand. */
@@ -236,15 +244,27 @@ export function SendSheet({
     // icrc1_transfer executes, for every asset in this catalog. `desc.network` is the BACKING
     // chain (ckBTC's is "Bitcoin"), so using it here would tell a ckBTC sender their IC transfer
     // settles on Bitcoin. It does not.
-    if (!feeKnown) return {text: M.withdraw.send.routeIcrcUnknownFee(IC_NETWORK), tone: 'ok'};
+    //
+    // A rail of the home currency's group (S5) names the RAIL, not just the network — the group
+    // carries this currency on several rails and the sender should see which one settles.
+    if (!feeKnown) {
+      return {
+        text: homeRail != null
+          ? M.withdraw.send.routeIcrcOnRailUnknownFee(railLineLabel(homeRail))
+          : M.withdraw.send.routeIcrcUnknownFee(IC_NETWORK),
+        tone: 'ok',
+      };
+    }
     const fee = feeText(feeRaw);
     return {
       text: resolved.kind === 'icp-legacy'
         ? M.withdraw.send.routeLegacy(fee)
-        : M.withdraw.send.routeIcrc(IC_NETWORK, fee),
+        : homeRail != null
+          ? M.withdraw.send.routeIcrcOnRail(railLineLabel(homeRail), fee)
+          : M.withdraw.send.routeIcrc(IC_NETWORK, fee),
       tone: 'ok',
     };
-  }, [address, resolved, isSelf, feeText, feeRaw, feeKnown, display, decimals]);
+  }, [address, resolved, isSelf, feeText, feeRaw, feeKnown, display, decimals, homeRail]);
 
   async function send() {
     if (!canSend || !resolved?.ok) return;

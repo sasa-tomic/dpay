@@ -8,7 +8,7 @@ import {C} from '../config/palette';
 import {IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {POLL, QR_SIZE} from '../config/constants';
 import type {SolPayGate} from '../config/assets';
-import type {Identity, NfcStatus} from '../lib/types';
+import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short, toUnits} from '../lib/format';
 import {parseDecimalToUnits} from '../lib/amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
@@ -18,6 +18,8 @@ import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
 import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import type {SelectableAsset} from '../config/assets';
+import {type HomeCurrency, type RailBalances} from '../config/currency';
+import {FundedSiblingRail} from './FundedSiblingRail';
 import type {CurrencyDescriptor} from '../config/catalog';
 import {withTimeout} from '../lib/timeout';
 import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
@@ -64,7 +66,7 @@ import {M} from '../i18n';
  * `reference` pubkeys as instruction account keys and the optional `memo` as an SPL Memo
  * instruction — the matching mechanism the standard is built on (`sendSolanaPay`).
  */
-export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void}) {
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
@@ -209,6 +211,23 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
     />
   );
 
+  // The funded-sibling pointer (Objective 2, S5): every fund-first gate below renders it. Null on
+  // its own unless a sibling rail of the home currency is funded (USDC-selected + funded ckUSDC is
+  // the live case; SOL is no currency's rail, so a SOL gate never points anywhere). The switch is
+  // a USER gesture — `onSwitchRail` is Wallet's `payRailSelect` under `shouldAllowUserSelect`;
+  // Wallet passes no switch while the selection is locked, and the pointer then names the rail
+  // without the button.
+  const siblingAssetId: AssetId = selectedToken === 'USDC' ? 'solana:USDC' : 'solana:SOL';
+  const siblingPointer = (
+    <FundedSiblingRail
+      homeCurrency={homeCurrency}
+      assets={assets}
+      balances={balances}
+      selectedAssetId={siblingAssetId}
+      onSwitch={onSwitchRail}
+    />
+  );
+
   // "Send to address" sub-mode: render the on-chain send flow INLINE (the SolanaWithdrawSheet body).
   // The toggle above lets the user flip back to "Scan to pay". The sheet is inline-only (no overlay
   // chrome — the tab body provides the surface). Mirrors the IC PayMode "Send to address" sub-mode.
@@ -258,6 +277,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
             onRecheck={onRecheckBalances}
             recheckBusy={recheckBusy}
           />
+          {siblingPointer}
           {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         </View>
       );
@@ -638,6 +658,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
             onRecheck={onRecheckBalances}
             recheckBusy={recheckBusy}
           />
+          {siblingPointer}
           {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         </View>
       );
@@ -660,6 +681,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, solBal
             onCreateAta={onCreateAta}
             onShowSolAddress={onShowSolAddress}
           />
+          {siblingPointer}
           {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         </View>
       );

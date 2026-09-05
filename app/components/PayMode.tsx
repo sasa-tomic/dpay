@@ -10,9 +10,11 @@ import {ocpIcTxId, type OcpDetails, type OcpOffer, type OcpScan} from '../lib/op
 import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
 import type {SelectableAsset} from '../config/assets';
+import {type HomeCurrency, currencyOfAsset, type RailBalances} from '../config/currency';
+import {FundedSiblingRail} from './FundedSiblingRail';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
-import type {Identity, PayIntent, NfcStatus} from '../lib/types';
+import type {AssetId, Identity, PayIntent, NfcStatus} from '../lib/types';
 import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, type RailOutcome, type RailPrepared} from '../services/rail';
 import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
@@ -51,7 +53,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_SUBMIT_TIMEOUT_MS
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
-export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -113,6 +115,14 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // are `Unavailable` on both while being perfectly sendable on-chain.
   const sendCapable = withdrawFamily != null || isDirectIcrcAsset(gateDesc);
   const gateSymbol = gateDesc ? (isTestnetCurrency(gateDesc) ? testnetDisplayName(gateDesc) : displayName(gateDesc)) : M.pay.fundsSymbol;
+  // The selected asset itself, when it is a rail of the home currency's group (S5): the send
+  // surface then names the RAIL on its route line, and the fund-first gate below can point at a
+  // funded sibling. Null for DEMO/ckBTC/ckETH/ICP and every foreign-currency selection.
+  const selectedAssetId: AssetId | null = `ic:${withdrawCurrency}`;
+  const selectedAsset = assets.find(a => a.id === selectedAssetId) ?? null;
+  const homeRail = homeCurrency != null && selectedAsset != null && currencyOfAsset(selectedAsset) === homeCurrency
+    ? selectedAsset
+    : null;
 
   // A wallet address the camera read instead of a payment code. Handed to the send form as a
   // prefill (mirrors the SOL rail's link prefill), so the ONE place that knows whether an address
@@ -921,18 +931,32 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   const gateCanFund = gateDepositable || isDirectIcrcAsset(gateDesc);
   const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
   const fundGate = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
+  // The funded-sibling pointer (S5): the fund gate exists because THIS rail is unfunded — when a
+  // sibling rail of the same home currency holds money, the gate names it and offers the switch
+  // as one tap. `onSwitchRail` is Wallet's `payRailSelect` (a user gesture under
+  // `shouldAllowUserSelect`); Wallet passes NO switch while the selection is locked, and the
+  // pointer then renders without the button.
   const fundPanel = fundGate ? (
-    <InstructionPanel
-      testID="pay-fund"
-      title={M.pay.fundTitle(gateSymbol, subMode === 'send' ? 'send' : 'pay')}
-      body={gateCanFund
-        ? M.pay.fundBody(gateSymbol, subMode === 'send' ? 'send' : 'pay')
-        : M.pay.fundBodyNoDeposits(gateSymbol)}
-      primaryLabel={gateCanFund ? M.pay.showMyAddress(gateSymbol) : undefined}
-      onPrimary={gateCanFund ? onShowDepositAddress : undefined}
-      onRecheck={onRefreshBalances}
+    <>
+      <InstructionPanel
+        testID="pay-fund"
+        title={M.pay.fundTitle(gateSymbol, subMode === 'send' ? 'send' : 'pay')}
+        body={gateCanFund
+          ? M.pay.fundBody(gateSymbol, subMode === 'send' ? 'send' : 'pay')
+          : M.pay.fundBodyNoDeposits(gateSymbol)}
+        primaryLabel={gateCanFund ? M.pay.showMyAddress(gateSymbol) : undefined}
+        onPrimary={gateCanFund ? onShowDepositAddress : undefined}
+        onRecheck={onRefreshBalances}
         recheckBusy={refreshBusy}
-    />
+      />
+      <FundedSiblingRail
+        homeCurrency={homeCurrency}
+        assets={assets}
+        balances={balances}
+        selectedAssetId={selectedAssetId}
+        onSwitch={onSwitchRail}
+      />
+    </>
   ) : null;
 
   // Offline gate for the send surface. The Pay tab's two halves have OPPOSITE connectivity truths
@@ -983,6 +1007,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             family={withdrawFamily}
             display={withdrawDisplay}
             tokenContract={withdrawTokenContract}
+            homeRail={homeRail}
             prefillAddress={scannedAddress}
             onPrefillConsumed={() => setScannedAddress(null)}
             onSent={onSettled}

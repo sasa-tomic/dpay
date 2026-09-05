@@ -135,6 +135,8 @@ function payElement(props: Partial<PayModeProps> = {}) {
       catalog={[]}
       assets={[]}
       assetBalances={{}}
+      homeCurrency={null}
+      balances={{}}
       withdrawCurrency={0}
       withdrawDisplay={null}
       withdrawFamily={null}
@@ -1168,6 +1170,79 @@ describe('PayMode — the till outcome screen does not contradict itself', () =>
     expect(texts(tree)).toContain(M.pay.toWhoAwaiting('Cafe'));
     expect(tips(tree, 'pendingOutcome')).toHaveLength(1);
     expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('PayMode — the funded-sibling pointer on the fund-first gate (Objective 2, S5)', () => {
+  const USD_CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
+  const USD_ASSETS = buildSelectableAssets(USD_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+
+  test('an unfunded ckUSDC gate with a funded USDC sibling names it and offers the one-tap switch', () => {
+    const onSwitchRail = jest.fn();
+    const tree = mountPay({
+      online: true,
+      catalog: USD_CATALOG,
+      assets: USD_ASSETS,
+      assetBalances: {2: '0'},
+      withdrawCurrency: 2,
+      withdrawBalance: '0',
+      homeCurrency: 'USD',
+      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+      onSwitchRail,
+    });
+    expect(hasTestID(tree, 'pay-fund')).toBe(true);
+    expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
+    pressByTestID(tree, 'btn-fund-sibling-switch');
+    expect(onSwitchRail).toHaveBeenCalledWith('solana:USDC');
+    act(() => { tree.unmount(); });
+  });
+
+  test('no funded sibling: the gate renders alone — no pointer, no switch', () => {
+    const tree = mountPay({
+      online: true,
+      catalog: USD_CATALOG,
+      assets: USD_ASSETS,
+      assetBalances: {2: '0'},
+      withdrawCurrency: 2,
+      withdrawBalance: '0',
+      homeCurrency: 'USD',
+      balances: {'solana:USDC': {displayText: '0.00 USDC', status: 'zero'}},
+    });
+    expect(hasTestID(tree, 'pay-fund')).toBe(true);
+    expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a foreign-currency selection never points: the pointer is a home-currency-group surface', () => {
+    const tree = mountPay({
+      online: true,
+      catalog: USD_CATALOG,
+      assets: USD_ASSETS,
+      assetBalances: {1: '0'},
+      withdrawCurrency: 1,
+      withdrawBalance: '0',
+      homeCurrency: 'USD',
+      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+    });
+    expect(hasTestID(tree, 'pay-fund')).toBe(true);
+    expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('no switch passed while locked (Wallet withholds it): the rail is named, the button is gone', () => {
+    const tree = mountPay({
+      online: true,
+      catalog: USD_CATALOG,
+      assets: USD_ASSETS,
+      assetBalances: {2: '0'},
+      withdrawCurrency: 2,
+      withdrawBalance: '0',
+      homeCurrency: 'USD',
+      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+    });
+    expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
+    expect(hasTestID(tree, 'btn-fund-sibling-switch')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });
