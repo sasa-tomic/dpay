@@ -22,14 +22,15 @@ reframed the same day as **one interop rail among several, not the strategy**.
 
 Opened by that investigation, and each independently actionable:
 
-- **PROD NOW CARRIES THE FIX FOR THE THING THAT LOST THE MONEY — redeployed 2026-09-04.** MEASURED
+- **PROD CARRIES THE FIX FOR THE THING THAT LOST THE MONEY, AND BOTH OCP TX-ID SPELLINGS ARE
+  PAID-PROVEN.** MEASURED
   2026-09-05: `/api/v1/version` reports `a913c6d` (commit_date 2026-09-04T14:56:39+02:00), so the
   deployed relay includes the fix that names the ledger when reporting an OpenCryptoPay payment —
   the defect that cost CHF 1 on 2026-09-03. The earlier report in this file of `dce8ff1` was true
-  on 2026-09-04 and is superseded. Still INFERRED, not measured: that the APK prod serves was built
-  from that same commit; nobody has pulled the served APK and checked. The do-not-attempt gate on
-  the acceptance proof is lifted, but run it from a freshly installed APK — an already-installed
-  build is only as current as the day it was installed.
+  on 2026-09-04 and is superseded. A freshly built physical-device app then paid DFX Shop order
+  `2609`: ICP block `38190401`, DFX `/tx` accepted, shop order received. Later the same day order
+  `2610` closed the prefixed half: VCHF block `81062`, submitted `ly36x-…-cai:81062`, accepted.
+  `just ocp-ledger-probe` and flow 113 stay as the regression tripwires.
 - **"No third-party wallet can settle an Internet Computer asset" may be too strong — re-measure
   before it goes near a deck.** DFINITY's own Oisy wallet appears to ship
   `src/frontend/src/icp/services/ic-open-crypto-pay.services.ts` with
@@ -122,13 +123,14 @@ Opened by that investigation, and each independently actionable:
      believing it (`just ocp-ledger-probe`) and fixed in `ocpIcTxId`. **Still open on their side:
      the CHF 1.** DFX say the VCHF reached their payment address and they are checking what they can
      do; nothing to build, but do not write it off or count it recovered until it lands.
-   - **PROVE AN ACCEPTANCE — the one leg `/tx` has never returned.** Every outcome ever observed
-     from that endpoint is a refusal. The identifier fix makes acceptance *possible*, not *proven*,
-     and until a real transfer is credited "dpay can pay an OpenCryptoPay till" is a claim about the
-     code, not about a completed purchase. **This is the LAST check, deliberately** — the gateway to
-     use, why, and the rule that it runs only once everything else is green: `docs/AGENT-FUNDS.md`.
-     Note for whoever runs it: the float holds ICP but no VCHF, and those exercise DIFFERENT halves
-     of the fix (bare vs prefixed `tx`), so which asset pays decides what the payment proves.
+    - ~~**PROVE AN ACCEPTANCE — the one leg `/tx` had never returned.**~~ **CLOSED 2026-09-05, both
+       spellings.** A freshly built physical-device app paid DFX Shop order `2609` in native ICP:
+       block `38190401` moved `0.00442682 ICP` plus fee, DFX answered accepted to the one bare-index
+       submission, and WooCommerce rendered the order received. Later the same day the same phone
+       paid order `2610` in VCHF: block `81062`, submitted prefixed `ly36x-…-cai:81062`, accepted —
+       the first paid post-fix prefixed acceptance (the 2026-09-03 CHF 1 loss was the bare-index
+       bug). Exact chain/provider evidence: `docs/specs/2026-09-01-opencryptopay-findings.md`;
+       spend records: `docs/AGENT-FUNDS.md`.
 1. ~~**Add VCHF + native ICP as complete direct-payment assets.**~~ **DONE (2026-08-28)** —
    [`docs/specs/2026-08-28-vchf-icp-support-spec.md`](docs/specs/2026-08-28-vchf-icp-support-spec.md)
    U1–U8 complete and fully verified: catalog ids 7/8 everywhere (bundled + fake + truth-file drift

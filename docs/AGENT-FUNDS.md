@@ -38,6 +38,13 @@ attempt costs a real order at a real merchant and buys exactly one observation. 
 while something else is still broken is an attempt that proves nothing and cannot be repeated for
 free. Green gates first (`just verify`, the device gate), then this.
 
+**Completed 2026-09-05 — both spellings.** A freshly built physical-device app paid order `2609` in
+native ICP. Ledger block `38,190,401` moved `0.00442682 ICP` plus the `0.00010000 ICP` fee, DFX
+answered accepted for that exact block, and the shop rendered the order received. Later the same day
+the same phone paid order `2610` in VCHF: ledger block `81,062`, submitted as the prefixed
+`ly36x-…-cai:81062`, accepted. Both of DFX's tx-id spellings — bare index for native ICP,
+`<ledger>:<index>` for every other ICRC ledger — are now live-proven with paid, credited orders.
+
 ## Commands
 
     just agent-principal   # the funding address (no decryption)
@@ -79,7 +86,10 @@ this float is possible today, with no code change.
 An encrypted blob in git is safe to push or mirror. It is **not** protection against local
 compromise: anyone with read access to this working copy has both halves on the same disk. And a
 commit is forever — if this key is ever rotated, the old encrypted blob stays in history. That is
-acceptable only because the float is capped. It is why the cap matters.
+acceptable only because the float is capped. It is why the cap matters. Both halves of that
+tradeoff were exercised on 2026-09-05: the key was rotated after a partial local disclosure (spend
+log below), and the old encrypted blob does remain in history — worthless now, because the old
+principal is empty and must never be funded again.
 
 ## Spend log
 
@@ -88,4 +98,22 @@ a second copy of the balance.
 
 | Date | Asset | Amount | To | Purpose | Result |
 |------|-------|--------|-----|---------|--------|
-| _(none yet — key generated 2026-09-01; nothing has been spent. What it HOLDS is `just agent-balance`, never this table)_ | | | | | |
+| 2026-09-05 | ICP | 0.00442682 (+ 0.00010000 fee) | DFX Merch Shop payment principal `ygf2v-…-4ae` | Approved €0.01 OpenCryptoPay acceptance test, WooCommerce order `2609` | Confirmed at ICP block `38,190,401`; DFX `/tx` answered accepted and the shop rendered order received |
+| 2026-09-05 | ICP | 0.01000000 (+ 0.00010000 fee) | Physical dpay test wallet `vi7yz-…-eqe` | Fund the freshly installed app for the approved €0.01 DFX OpenCryptoPay acceptance test without replacing the device's existing wallet | Confirmed at ICP block `38,190,338`; app detected the exact deposit |
+| 2026-09-05 | ICP | 0.01000000 | ICPSwap pool `65mrh-…-cai` | Founder-authorized one-off ("try to swap with icpswap"): acquire the VCHF the €0.01 prefixed-acceptance test needs — external test-float tooling only, NOT a dpay product feature; the no-swap product rule is unchanged | `icrc2_approve` 1,020,000 e8s, 10-min expiry, spender = the pool (ICP block `38,193,124`; pool via factory `4mmnk-…-cai` `getPool`, fee tier 3000); `depositFromAndSwap` returned `0.02119881 VCHF` — exactly the pre-flight quote, `amountOutMinimum` 1,800,000 |
+| 2026-09-05 | VCHF | 0.02000000 (+ 0.00010000 fee) | Physical dpay test wallet `vi7yz-…-eqe` | Fund the phone with the swapped VCHF for the €0.01 prefixed-acceptance test (order `2610`) | Confirmed at VCHF block `81,061`; phone received exactly `0.02` VCHF |
+| 2026-09-05 | VCHF | 0.00950150 (+ 0.00010000 fee) | DFX Merch Shop payment principal `ygf2v-…-4ae` | Approved €0.01 OpenCryptoPay acceptance test, WooCommerce order `2610` (payment link `pl_136966f8a5d2aa1d`), paid from the physical phone wallet | Confirmed at VCHF block `81,062` (memo `d70430be…`, quote `plq_2f35197812d4c97c`, paid `2026-09-05T12:54:42Z`); the app submitted the LEDGER-PREFIXED id `ly36x-…-cai:81062` to DFX `/tx` and DFX answered accepted — the FIRST paid post-fix prefixed acceptance; the link now answers HTTP 409 "Payment complete". Phone balance arithmetic exact: `0.02` → `0.0103985` |
+| 2026-09-05 | ICP + VCHF | 1.97960000 ICP + 0.00089881 VCHF (each + 0.00010000 fee) | New float principal `vloyo-…-5ae` (self) | Key rotation after the leak recorded below — move everything off the compromised old key | ICP block `38,193,953`; VCHF block `81,063`; balances re-measured on the new principal: 1.97960000 ICP + 0.00089881 VCHF + 0 ckBTC — float fully intact minus the two rotation fees |
+
+**Key-leak incident and rotation, 2026-09-05 — recorded honestly.** During the funding step, a
+first attempt to hand-build a PKCS#8 PEM for dfx failed, and the dfx error message echoed **63 of
+the 64 base64 characters of the old float key's DER** (all but the final byte) into a local tool
+log. The key was treated as COMPROMISED from that moment. Rotation executed the same day: a
+brand-new seed (generated in-memory, sops-encrypted with the existing age identity, plaintext
+shredded immediately); the float principal is now
+`vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae`; the old
+`secrets/agent-icp.sops.json` was shredded and replaced, `secrets/agent-icp.pub.json` updated
+(created 2026-09-05); both temporary dfx identities (`dpay-agent-ocp-temp`, `dpay-rotate-old`)
+removed; every PEM/DER temporary shredded. The old principal
+`lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe` is empty, compromised, and
+abandoned — **it must never be funded again.**

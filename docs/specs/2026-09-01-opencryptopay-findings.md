@@ -37,6 +37,13 @@ at the end of this file.
 4. **Pay + report** — move the funds on-chain yourself, then `GET {callback with /cb → /tx}` with
    the proof.
 
+**Harness note (2026-09-05, neither an app bug):** the QR's LNURL decodes to the step-2 quote-mint
+endpoint (`https://api.dfx.swiss/v1/lnurlp/<id>`), never to the step-3 `/cb/` callback. An
+agent-reconstructed LNURL that instead encoded the `/cb/` URL made the app reach DFX and surface the
+provider's honest `404 "No matching actual quote found"` verbatim — correct behaviour, provider copy
+shown as-is — and a bad-checksum LNURL was refused pre-network as damaged. Both refusals are the
+trust model below doing its job.
+
 ## Assets actually accepted (live, 2026-09-01)
 
 | Method | Live assets | dpay ships |
@@ -275,10 +282,13 @@ It also explains the two distinct errors: a *nonexistent* index answers "not con
 InternetComputer", while an index that *exists on the ledger being consulted* but is not their
 payment answers "does not pay any matching activation".
 
-### What is still not known
+### What the acceptance test added
 
-That the right spelling produces an **acceptance**. Every observation above is a refusal — of
-fabricated ids, by design, because that is what is free. See "What has NOT been proven".
+The free probes above prove ledger selection but deliberately cannot prove acceptance. Real paid
+orders closed BOTH halves on 2026-09-05: native ICP block `38190401` (bare index, order `2609`) and
+VCHF block `81062` (submitted `ly36x-…-cai:81062`, order `2610`) were each accepted by DFX and each
+completed its shop order. Details and exact evidence: "Live acceptance proof" below. Flow 113 still
+pins the prefixed wire spelling, and the free probe still guards the ledger-selection rule.
 
 ## Trust model — read before writing the parser
 
@@ -335,20 +345,27 @@ dpay hosting its own provider endpoint instead is the milestone:
 - The standard is open; in practice DFX is the only provider. Treat provider identity as
   configuration, not a constant.
 
-## What has NOT been proven
+## Live acceptance proof
 
-Everything up to consent is proven, as of 2026-09-02: `just live-ocp` drives the shipped app against
+Everything up to consent was proven as of 2026-09-02: `just live-ocp` drives the shipped app against
 this till and lands on a review carrying the live price, the full destination, the provider host and
 the countdown — so the scan, both provider reads, the parser, the destination checks and the review
 screen are all confirmed against the real thing, not against a fixture.
 
-**`/tx` has never returned an acceptance.** One real payment has been made — VCHF, 2026-09-03 — and
-it was refused because dpay reported the wrong identifier spelling; every other observed outcome is
-a refusal of a fabricated id. So the unproven leg is the same one it has always been, and the
-identifier fix does not shrink it: that a **real** confirmed transfer, reported in the spelling its
-ledger requires, is **accepted** and the sale credited. Until that is seen, "dpay can pay an
-OpenCryptoPay till" is a claim about the code, not about a completed purchase — say so exactly that
-way in anything outward-facing.
+**Native ICP acceptance is now proven with real money.** On 2026-09-05 a freshly built dpay app on a
+physical phone resolved the DFX Shop charge for WooCommerce order `2609`, showed an explicit review
+for EUR `0.01`, and sent exactly `0.00442682 ICP` plus the `0.00010000 ICP` ledger fee. The official
+ICP index independently reports block `38190401`, from the phone wallet's account identifier to the
+DFX payment account, with the quote memo. The app then submitted bare `tx=38190401` exactly once;
+DFX answered accepted, the app rendered Paid, and the shop rendered “Thank you. Your order has been
+received.” This closes the previously unproven `/tx` acceptance and credited-sale leg for native ICP.
 
-Buying that proof costs money and is one-shot. Which gateway to use, what it was measured to be, and
-when it may be attempted: `docs/AGENT-FUNDS.md`.
+**The prefixed half is paid-proven too, later the same day (2026-09-05).** The same physical phone
+paid DFX Shop order `2610` — EUR `0.01`, payment link `pl_136966f8a5d2aa1d` — in VCHF through the
+real app: scan → quote → review → one approval, zero retries. `0.00950150` VCHF plus the `0.0001`
+ledger fee moved at VCHF block `81062` (2026-09-05T12:54:42Z, memo `d70430be52464587075e85c904afbd79`,
+quote `plq_2f35197812d4c97c`) to the same DFX route address `ygf2v-…-4ae`. The app submitted the
+ledger-prefixed `ly36x-…-cai:81062` exactly once; DFX answered accepted, and the payment-link API now
+returns HTTP 409 "Payment complete" for the link. The phone held exactly `0.02` VCHF and holds
+`0.0103985` after — the arithmetic is exact. Both tx-id spellings are therefore live-proven with
+paid, credited orders: bare for native ICP (`2609`), prefixed for every other ICRC ledger (`2610`).

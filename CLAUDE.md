@@ -288,8 +288,11 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   fetch the quote, fetch the destination and report the proof over https.
   Verified at `702c359`: `just verify` EXIT=0 with 112/112 e2e (flows 113–117), `just test-relay`
   88/88, `just test-live` 106/106, jest 83 suites/1682, `just ondevice` 10/10 and `just app` green on
-  the emulator. What is NOT yet proven on hardware, and what production is actually serving:
-  `OPEN_ISSUES.md`.
+  the emulator. **Live provider acceptance proved 2026-09-05, both tx-id spellings:** a freshly
+  built physical-device app paid DFX Shop order `2609` in native ICP (official-ledger block
+  `38190401`, bare index) and order `2610` in VCHF (block `81062`, submitted prefixed
+  `ly36x-…-cai:81062`); DFX `/tx` accepted both and both shop orders completed. Remaining hardware
+  proofs and what production is actually serving: `OPEN_ISSUES.md`.
 
 **Device gate — now built and runnable in-sandbox** (this environment has `/dev/kvm`, the Android SDK/NDK, an x86_64 emulator, and `dfx`; see [[sandbox-can-run-device-gate]]):
 - **real dfx deploy** (`just deploy`, `scripts/dfx-deploy.sh`) — a live local replica settles the *exact* offline-signed 292-byte wire via `dfx canister call` (built by `dpay-fixture` from the shared core); funds move, replay refused. `dfx.json` + extracted candid in `dfx/`.
