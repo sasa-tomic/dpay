@@ -33,6 +33,9 @@ const SHEET_DEFAULTS = {
   username: 'Alice',
   themeChoice: null,
   onSetTheme: () => {},
+  homeCurrency: 'CHF' as const,
+  onSetHomeCurrency: () => {},
+  assets: [],
 };
 
 // Async: the sheet subscribes to the journey store on mount, and that load resolves a tick later.

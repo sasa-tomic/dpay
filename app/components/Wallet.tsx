@@ -4,12 +4,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
-import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
+import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {base, randNonceHex} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
-import {buildSelectableAssets, chipLabel, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable, solPayGate} from '../config/assets';
+import {buildSelectableAssets, chipLabel, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable, solPayGate} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import {mergeHistoryByTime} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent} from '../lib/types';
@@ -43,10 +43,12 @@ import {Walkthrough} from './Walkthrough';
 import {AppModal} from './AppModal';
 import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
+import {HomeCurrencyChooser} from './HomeCurrencyChooser';
+import {type HomeCurrency, currencyName, currencyOfAsset, preferredRail} from '../config/currency';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 
-export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void}) {
+export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
   // A shared payment link that has been PARSED but not yet resolved against the catalog (which
   // loads async). Held here until the resolve effect below turns it into a concrete asset + amount,
@@ -76,6 +78,22 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // family, NFC AID dispatch) is computed from `selectedAsset` below. `null` only before the first
   // reconcile runs; `effectiveSelectedId` (the reconciled value) is what every render reads.
   const [selectedAssetId, setSelectedAssetId] = useState<AssetId | null>(null);
+  // Whether the REMEMBERED selection has been read back from storage yet. It gates the persist
+  // effect below so the two cannot race: without it, the mount-time reconcile would write the home
+  // currency's rail before the read landed, and the read would return the value it had just
+  // overwritten — the wallet would forget where you were every single launch.
+  const [selectionHydrated, setSelectionHydrated] = useState(false);
+  // Has ANYTHING in this session chosen an asset — a tap, a deep link, a fund-funnel return? The
+  // remembered selection is what the wallet opens with, but it must never overrule a choice already
+  // made on THIS mount. That conflict is real and it is a timing one: the deep-link seeds run
+  // synchronously on mount while the storage read resolves a tick later, so without this the
+  // remembered asset silently clobbered `?screen=deposit`'s ckBTC. Precedence is expressed as a
+  // rule here rather than left to whichever effect happens to finish last.
+  const explicitlySelected = useRef(false);
+  const selectAsset = useCallback((id: AssetId) => {
+    explicitlySelected.current = true;
+    setSelectedAssetId(id);
+  }, []);
   const [balancesOpen, setBalancesOpen] = useState(false);
   const [passportOpen, setPassportOpen] = useState(false);
   // Phase 5 — selection lock. While the mounted Pay/Receive engine is mid-flight (a pay review/qr/
@@ -256,13 +274,54 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // selection leaking through a testnet hide). The effect below syncs the state so the fallback
   // sticks; declared before the auto-open-deposit effect so a deep-link/persisted-deposit seed
   // (which also runs on mount) wins the mount-time write order.
+  // The home currency's rail — the asset the wallet lands on when nothing else is selected. Null
+  // until a currency is chosen (the chooser gate below renders instead) or when the catalog carries
+  // no rail for it.
+  const homeAsset = useMemo(
+    () => (homeCurrency === null ? null : preferredRail(homeCurrency, assets)),
+    [homeCurrency, assets],
+  );
   const effectiveSelectedId = useMemo(
-    () => reconcileSelectedAsset(selectedAssetId, assets),
-    [selectedAssetId, assets],
+    () => reconcileSelectedAsset(selectedAssetId, assets, homeAsset?.id ?? null),
+    [selectedAssetId, assets, homeAsset],
   );
   useEffect(() => {
+    // Not while the home-currency gate is open. The chooser renders INSTEAD of the wallet, but this
+    // component still mounts and these effects still run — and with no currency yet there is no
+    // preferred rail, so reconcile answers DEMO. Latching that answer meant the choice the user was
+    // in the middle of making arrived to find the selection already taken, and the wallet opened on
+    // DEMO no matter which currency they picked. Leaving `selectedAssetId` null until the currency
+    // exists lets the very first reconcile land on the rail they chose.
+    if (homeCurrency === null) return;
     if (effectiveSelectedId !== selectedAssetId) setSelectedAssetId(effectiveSelectedId);
-  }, [effectiveSelectedId, selectedAssetId]);
+  }, [homeCurrency, effectiveSelectedId, selectedAssetId]);
+  // Read back the asset the wallet was last left on, ONCE on mount. A stored id that is no longer
+  // in the catalog is not special-cased here: it flows into `reconcileSelectedAsset`, which already
+  // owns "the selection disappeared" and lands on the home currency instead.
+  useEffect(() => {
+    let alive = true;
+    AsyncStorage.getItem(SELECTED_ASSET_STORAGE_KEY)
+      .then(v => {
+        if (!alive) return;
+        const id = parseAssetId(v);
+        if (id !== null && !explicitlySelected.current) setSelectedAssetId(id);
+        setSelectionHydrated(true);
+      })
+      .catch((e: unknown) => {
+        console.warn(`[dpay] failed to read the remembered asset: ${e instanceof Error ? e.message : String(e)}`);
+        if (alive) setSelectionHydrated(true); // a failed read means "nothing remembered", not "never persist again"
+      });
+    return () => { alive = false; };
+  }, []);
+  // Remember the RESOLVED selection — one writer for every path that can change it (a Balances tap,
+  // a payment link routing the payer to the right engine, a testnet hide falling back), so no call
+  // site can change the selection and forget to record it.
+  useEffect(() => {
+    if (homeCurrency === null || !selectionHydrated || effectiveSelectedId === null) return;
+    AsyncStorage.setItem(SELECTED_ASSET_STORAGE_KEY, effectiveSelectedId).catch((e: unknown) => {
+      console.warn(`[dpay] failed to remember the selected asset: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }, [selectionHydrated, effectiveSelectedId]);
   // The resolved selection view model (symbol/networkLabel/decimals/protocol). Null only before the
   // first assets list resolves; downstream derived consts fall back to DEMO/IC in that case.
   const selectedAsset = assets.find(a => a.id === effectiveSelectedId) ?? null;
@@ -283,6 +342,20 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // which network is selected from the main screen. Unique symbols (DEMO/BTC/ETH/SOL) stay compact.
   // The 'DEMO' fallback covers the pre-reconcile first paint (selectedAsset is null only then).
   const activeAssetName = selectedAsset ? chipLabel(selectedAsset, assets) : 'DEMO';
+  // The header eyebrow. When the selected asset IS the home currency's rail the label names the
+  // CURRENCY ("Swiss francs · Main") — that is the Revolut-style "this is your money" reading, and
+  // it is honest because the amount beneath it still carries the token's own unit. Any other
+  // selection keeps naming the ASSET, so switching to BTC never reads as francs.
+  const selectedIsHome = selectedAsset !== null && homeCurrency !== null
+    && currencyOfAsset(selectedAsset) === homeCurrency && selectedAsset.id === homeAsset?.id;
+  // Naming the currency changes the NAME, never the online/offline distinction. The offline branch
+  // marks the balance as an approximation, and that marker outranks the main-currency label — a
+  // wallet that reads "Swiss francs · Main" over a stale figure while offline would be asserting a
+  // balance it cannot know. Caught by flow 100, which is exactly what that flow is for.
+  const eyebrowName = selectedIsHome && homeCurrency !== null ? currencyName(homeCurrency) : activeAssetName;
+  const balanceEyebrow = !online
+    ? M.wallet.balance.approx(eyebrowName)
+    : (selectedIsHome ? M.wallet.homeCurrency.mainLabel(eyebrowName) : M.wallet.balance.of(eyebrowName));
 
   // Read the device NFC radio state once (re-checked when the app returns to the foreground, since
   // the user may toggle NFC in system settings). Purely informational for the status chip; failure
@@ -445,7 +518,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           return;
         }
         if (!alive || gen !== linkGenRef.current) return;
-        setSelectedAssetId(asset.id);
+        selectAsset(asset.id);
         setPrefillIntent({
           toAccount: principal,
           toName: link.label,
@@ -468,7 +541,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           return;
         }
         if (!alive || gen !== linkGenRef.current) return;
-        setSelectedAssetId(asset.id);
+        selectAsset(asset.id);
         // SOL has no IC-style request/review engine; its equivalent surface is the pre-filled
         // "Send to address" form in the SAME Pay tab (the same-surfaces hard rule).
         setSolPrefill({address: link.recipient, amount: link.amount});
@@ -492,7 +565,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     if (prefillReceipt == null) return;
     if (selectedAsset?.protocol === 'ic') return;          // IC engine already mounts — nothing to do
     const icId = routeDeeplinkToIc(effectiveSelectedId, assets);
-    if (icId) setSelectedAssetId(icId);
+    if (icId) selectAsset(icId);
   }, [prefillReceipt, selectedAsset, effectiveSelectedId, assets]);
 
   // MC8 U5 — AUTO-OPEN the ckERC20 deposit on mount if a watching deposit was persisted across a
@@ -508,7 +581,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     if (autoOpenAttempted.current) return;
     autoOpenAttempted.current = true;
     const seedDeposit = (currency: number) => {
-      setSelectedAssetId(`ic:${currency}`);
+      selectAsset(`ic:${currency}`);
       setMode('receive');
       setReceiveSubMode('address');
       setBalancesOpen(false);
@@ -681,7 +754,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // routing) calls setSelectedAssetId DIRECTLY, never here, so it bypasses the lock.
   const handleSelect = useCallback((id: AssetId) => {
     if (!shouldAllowUserSelect(selectionLocked)) return;
-    setSelectedAssetId(id);
+    selectAsset(id);
     setBalancesOpen(false);
     setReceiveSubMode('request');
     setPaySubMode('scan');
@@ -699,7 +772,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // one-tap "Back to paying <asset>" resume once the watched balance flips positive — closing
   // the >2-tap round trip without a modal and without an inline duplicate QR.
   const goToDeposit = useCallback((id: AssetId, returnTo?: AssetId) => {
-    setSelectedAssetId(id);
+    selectAsset(id);
     setMode('receive');
     setReceiveSubMode('address');
     setBalancesOpen(false);
@@ -709,7 +782,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   }, [paySubMode]);
   const returnFromDeposit = useCallback(() => {
     if (!depositReturnTo) return;
-    setSelectedAssetId(depositReturnTo.id);
+    selectAsset(depositReturnTo.id);
     setPaySubMode(depositReturnTo.subMode);
     setDepositReturnTo(null);
     setMode('pay');
@@ -746,6 +819,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         break;
     }
   }, []);
+
+  // The home-currency gate. Until the user has said which currency they think in, that question IS
+  // the wallet — every surface below reads the selection this choice seeds. It sits here, after all
+  // hooks, so the hook order is identical in both branches (Rules of Hooks), and it keys on the
+  // STORED value alone: a brand-new wallet and one upgrading into this build take the same path.
+  if (homeCurrency === null) {
+    return <HomeCurrencyChooser assets={assets} onChoose={onSetHomeCurrency} />;
+  }
 
   return (
     <SafeAreaView style={S.root}>
@@ -806,7 +887,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                 {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
                     offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
                     symbol; e2e asserts the active rail via this label (testID active-asset-label). */}
-                <Text testID="active-asset-label" style={S.balLabel}>{online ? M.wallet.balance.of(activeAssetName) : M.wallet.balance.approx(activeAssetName)}</Text>
+                <Text testID="active-asset-label" style={S.balLabel}>{balanceEyebrow}</Text>
               </View>
               <View style={S.balAmtRow}>
                 {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
@@ -937,6 +1018,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           assets={assets}
           balances={balances}
           selectedId={effectiveSelectedId}
+          homeCurrency={homeCurrency}
           onSelect={handleSelect}
           hasTestnet={hasTestnet}
           onTopUp={topUp}
@@ -960,6 +1042,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             onSetTheme={onSetTheme}
             localeChoice={localeChoice}
             onSetLocale={onSetLocale}
+            homeCurrency={homeCurrency}
+            onSetHomeCurrency={onSetHomeCurrency}
+            assets={assets}
             openBackup={settingsOpenBackup}
             onOpenStep={goToPassportStep}
          />

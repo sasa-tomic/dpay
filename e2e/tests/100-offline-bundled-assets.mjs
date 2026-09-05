@@ -9,6 +9,7 @@
 // Mirrors flow 37's dead-relay onboarding (faucet fails closed, wallet reaches $0 home).
 import {
   setup, assert, assertIncludes, pickFreePort, skipWalkthroughIfPresent, waitForEnabled,
+  chooseHomeCurrencyIfPresent,
 } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -47,6 +48,7 @@ export async function run() {
     await driver.click('btn-mnemonic-continue');
     await driver.findByTestID('onboard-faucet-failed', { timeoutMs: 10_000 });
     await driver.click('btn-onboard-continue');
+    await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 8_000 }); // wallet home mounted at $0
 
     // Offline indicator (header shows "approx." when online === false).

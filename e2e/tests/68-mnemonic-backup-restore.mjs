@@ -13,7 +13,7 @@
 // Selector contract: `btn-create`, `mnemonic-backup`, `mnemonic-word-{0..23}`,
 // `mnemonic-backup-checkbox`, `btn-mnemonic-continue`, `btn-settings`, `btn-reset`,
 // `btn-reset-confirm`, `btn-restore`, `restore-mnemonic-input`, `btn-restore-confirm`, `balance`.
-import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -70,6 +70,7 @@ export async function run() {
     await skipRehearsalIfPresent(driver);
 
     // 4. Wallet loaded — read the original identity's publicHex (the assertion target).
+    await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 12_000 });
     const original = await accountOf(driver);
     assert(original && typeof original.publicHex === 'string' && original.publicHex.length === 64,
@@ -93,6 +94,7 @@ export async function run() {
     await driver.click('btn-restore-confirm', { timeoutMs: 5_000 });
 
     // 7. Wallet loaded under the restored keypair.
+    await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 12_000 });
 
     // 8. The restored identity's publicHex MUST equal the original — the mnemonic recovered the

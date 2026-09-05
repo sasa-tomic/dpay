@@ -500,6 +500,10 @@ function buildStyles(p: Palette) {
   // 'Needs setup' pill on the Balances USDC (Solana) row — a warn-tinted row annotation,
   // left-aligned under the subtitle (not a centered banner).
   assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: `rgba(${p.warnRGB},0.08)`, borderWidth: 1, borderColor: `rgba(${p.warnRGB},0.35)`, fontSize: 11, fontWeight: '700', color: p.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
+  // 'Main' pill on the Balances row that IS the home currency's rail. Same pill geometry as
+  // `assetBadge`, brand-tinted rather than warn-tinted: this one marks the account the wallet opens
+  // with, which is a statement of fact, not a warning about setup.
+  assetBadgeMain: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(255,90,31,0.08)', borderWidth: 1, borderColor: 'rgba(255,90,31,0.35)', fontSize: 11, fontWeight: '700', color: p.brand, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
   // ─── Walkthrough (Trip Ready J1, 2026-08-22) ────────────────────────────────────────────────
   // The first-run 3-scene pager + its Settings replay. Editorial travel-document layout: a
   // left-aligned eyebrow/title/body block over a "paper plate" illustration stage, then a footer

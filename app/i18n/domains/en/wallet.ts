@@ -66,6 +66,37 @@ export type WalletMessages = {
     backAgainToExit: string;
   };
 
+  /**
+   * The HOME CURRENCY — the one currency the wallet is "in" (app/config/currency.ts).
+   *
+   * Copy rule, and it is a money-honesty rule rather than a style one: `name` is the CURRENCY the
+   * user chose, and it is never used as a unit next to an amount. The amount always carries the
+   * token's own unit (`12.40 VCHF`), because VCHF is a third party's franc-denominated token whose
+   * peg dpay does not verify. "Swiss francs" as a heading over `12.40 VCHF` is honest; "CHF 12.40"
+   * is a claim.
+   */
+  homeCurrency: {
+    /** The currency's own name, as a heading. Plural reads better as a section label than the code. */
+    name: {CHF: string; USD: string; EUR: string};
+    /** The chooser's title + subtitle. */
+    chooseTitle: string;
+    chooseBody: string;
+    /** What the user actually ends up holding: the token, on its chain. */
+    rail: (symbol: string, network: string) => string;
+    /** The badge on the accounts-list row that IS the main currency. */
+    mainBadge: string;
+    /** The header eyebrow above the headline amount. */
+    mainLabel: (currency: string) => string;
+    /** Settings row. */
+    settingsTitle: string;
+    settingsHint: string;
+    /** Chooser confirm. */
+    confirm: string;
+    /** The catalog carries no rail for ANY currency — a broken asset list, named as such. */
+    noneAvailable: string;
+    a11y: (currency: string) => string;
+  };
+
   tab: {pay: string; receive: string; transactions: string};
 
   /** The fund-funnel resume link on Receive → My address. */
@@ -164,6 +195,20 @@ export const walletEn: WalletMessages = {
     approx: asset => `~ ${asset} approx.`,
     approxAmount: amount => `~${amount}`,
     backAgainToExit: 'Press back again to exit',
+  },
+
+  homeCurrency: {
+    name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros'},
+    chooseTitle: 'Which currency do you think in?',
+    chooseBody: 'dpay shows this currency first and pays in it by default. You can hold any of the others too, and change this any time in Settings.',
+    rail: (symbol, network) => `Held as ${symbol} on ${network}`,
+    mainBadge: 'Main',
+    mainLabel: currency => `${currency} · Main`,
+    settingsTitle: 'Main currency',
+    settingsHint: 'The currency dpay shows first and pays in by default',
+    confirm: 'Continue',
+    noneAvailable: 'No currencies could be loaded. Check the server address in Settings, then reopen dpay.',
+    a11y: currency => `Choose ${currency}`,
   },
 
   tab: {pay: 'Pay', receive: 'Receive', transactions: 'Transactions'},

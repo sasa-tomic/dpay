@@ -22,7 +22,7 @@
 // Selector contract: `trip-strip`, `trip-strip-dot-<key>[-filled]`, `passport-archive`,
 // `passport-slot-<key>[-filled]`, `passport-count`, `passport-hint`, `trip-ready-capstone`,
 // `btn-passport-done`, `btn-trip-readiness`, `btn-trip-strip`, `btn-passport-close`.
-import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance, armPayScan} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance, armPayScan, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
 import {generateKeypair, randNonceHex, buildRequestQR} from '../harness/wire.mjs';
 
 export const meta = {
@@ -65,6 +65,9 @@ export async function run() {
     await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
     await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 }); // "Try with demo funds"
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
+    await chooseHomeCurrencyIfPresent(driver);
+    // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
+    await selectDemoAsset(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     await driver.waitForText('∂100.00', { timeoutMs: 15_000 }); // faucet funded → fundsReady
 

@@ -20,8 +20,9 @@ import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
-import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY} from './config/constants';
+import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY} from './config/constants';
 import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
+import {parseHomeCurrency, type HomeCurrency} from './config/currency';
 import {runSolSelfCheck} from './solana/selfcheck';
 import {runIntlSelfCheck} from './i18n/selfcheck';
 import {applyLocale} from './i18n';
@@ -50,6 +51,11 @@ export default function App() {
   // Language, on the same two-tier model as the theme: `null` = Auto (follow the device locale);
   // an explicit choice pins the catalog and wins from then on.
   const [localeChoice, setLocaleChoice] = useState<LocaleChoice>(null);
+
+  // The home currency. `null` is NOT a default — it means the user has not chosen yet, and the
+  // Wallet renders the chooser instead of the wallet until they do. `undefined` would be a third
+  // state with no extra meaning here: the mount read below always resolves it to a value or null.
+  const [homeCurrency, setHomeCurrency] = useState<HomeCurrency | null>(null);
 
   // Wave-4 dual theme + Wave-7 manual override: resolve stored choice + OS scheme → the palette.
   // styles.ts already resolved the OS theme at module load (synchronous Appearance probe → first
@@ -81,16 +87,18 @@ export default function App() {
       AsyncStorage.getItem(RELAY_STORAGE_KEY),
       AsyncStorage.getItem(THEME_STORAGE_KEY),
       AsyncStorage.getItem(LOCALE_STORAGE_KEY),
+      AsyncStorage.getItem(HOME_CURRENCY_STORAGE_KEY),
     ])
-      .then(([idV, relayV, themeV, localeV]) => {
+      .then(([idV, relayV, themeV, localeV, currencyV]) => {
         setIdentity(idV ? JSON.parse(idV) : null);
         if (typeof relayV === 'string' && relayV.length > 0) setRelayUrl(relayV);
         setThemeChoice(parseTheme(themeV)); // null (incl. legacy 'auto') → keep following the OS scheme
         setLocaleChoice(parseLocale(localeV)); // null (incl. 'system' or a dropped locale) → follow the device
+        setHomeCurrency(parseHomeCurrency(currencyV)); // null → not chosen yet → the Wallet asks
       })
       .catch((e: unknown) => {
         // No silent errors: log with context, then fall back to a safe empty identity.
-        console.log(`[dpay] failed to load identity/relay/theme/locale: ${e instanceof Error ? e.message : String(e)}`);
+        console.log(`[dpay] failed to load identity/relay/theme/locale/currency: ${e instanceof Error ? e.message : String(e)}`);
         setIdentity(null);
       });
   }, []);
@@ -119,6 +127,15 @@ export default function App() {
     setLocaleChoice(l);
     AsyncStorage.setItem(LOCALE_STORAGE_KEY, localePersistValue(l)).catch((e: unknown) => {
       console.log(`[dpay] failed to persist language choice: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }, []);
+
+  // Set the home currency AND persist it — same best-effort pattern as the others. Driven by the
+  // first-run chooser and by the Settings control; both go through this one mutator.
+  const persistHomeCurrency = useCallback((c: HomeCurrency) => {
+    setHomeCurrency(c);
+    AsyncStorage.setItem(HOME_CURRENCY_STORAGE_KEY, c).catch((e: unknown) => {
+      console.log(`[dpay] failed to persist home currency: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
@@ -183,5 +200,5 @@ export default function App() {
   if (identity === null) {
     return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
 }

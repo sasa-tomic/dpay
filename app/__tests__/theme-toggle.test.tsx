@@ -34,6 +34,9 @@ const SET_SHEET_DEFAULTS = {
   onRestore: async () => {},
   secretHex: 'ab'.repeat(32),
   username: 'Alice',
+  homeCurrency: 'CHF' as const,
+  onSetHomeCurrency: () => {},
+  assets: [],
 };
 
 function mountSheet(choice: ThemeOverride | null, onSetTheme: (t: ThemeOverride | null) => void) {

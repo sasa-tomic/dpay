@@ -42,6 +42,17 @@ export const THEME_STORAGE_KEY = 'dpay.theme.v1';
 // AsyncStorage pattern, and the same two-tier shape as the theme: the device decides until the user
 // says otherwise, and there is always an explicit way back to Auto.
 export const LOCALE_STORAGE_KEY = 'dpay.locale.v1';
+// The HOME CURRENCY — the one currency the wallet is "in" ('CHF' | 'USD' | 'EUR'). Same
+// AsyncStorage pattern as identity/relay/theme/locale, with ONE deliberate difference: there is no
+// "auto" value and no default. Absent means NOT YET CHOSEN, and the wallet asks — picking a
+// currency for someone who never said so is a worse failure than one extra tap. See
+// app/config/currency.ts for why, and for the rail resolution it drives.
+export const HOME_CURRENCY_STORAGE_KEY = 'dpay.homeCurrency.v1';
+// The asset the wallet was last left on. Remembering it is the least-astonishing behaviour — you
+// come back to the account you were using — and it is what makes a page reload or a cold start
+// resume rather than reset. Absent means "never chosen an asset", and the HOME CURRENCY's rail
+// seeds it (app/config/currency.ts); the home currency is the FIRST answer, not the permanent one.
+export const SELECTED_ASSET_STORAGE_KEY = 'dpay.selectedAsset.v1';
 // Trip Ready J1 — the journey/stamp store (app/lib/journey.ts): which milestones the user has hit
 // (walkthroughDone, recoverySaved, …). Same AsyncStorage pattern as identity/relay/theme; persisted
 // so the first-run walkthrough shows exactly once and later waves' passport survives relaunch.

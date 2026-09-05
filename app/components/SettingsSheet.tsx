@@ -19,6 +19,8 @@ import {computeReadiness, type ReadinessKey} from '../lib/readiness';
 import {JOURNEY_STAMPS, awardStamp, useJourney} from '../lib/journey';
 import {choiceLabel, type ThemeOverride} from '../config/theme';
 import {LOCALES, LOCALE_ENDONYM, type LocaleChoice} from '../i18n/locale';
+import {type HomeCurrency, currencyName, offerableCurrencies} from '../config/currency';
+import type {SelectableAsset} from '../config/assets';
 import {M} from '../i18n';
 
 /**
@@ -42,7 +44,7 @@ import {M} from '../i18n';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, openBackup, onOpenStep}: {
+export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, onOpenStep}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
   onClose: () => void;
@@ -66,6 +68,14 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   // The stored language CHOICE (null = Auto/follow the device locale) + its single mutator.
   localeChoice: LocaleChoice;
   onSetLocale: (l: LocaleChoice) => void;
+  // The HOME CURRENCY — the one currency the wallet is "in" — plus its single mutator. Unlike the
+  // theme and the language there is no Auto: by the time this sheet can be opened a currency has
+  // been chosen, so the control is a straight choice among the currencies the catalog can realise.
+  // `assets` is the wallet's visible list, and is what decides which currencies are offerable at
+  // all — the same list the first-run chooser reads, so the two can never disagree.
+  homeCurrency: HomeCurrency;
+  onSetHomeCurrency: (c: HomeCurrency) => void;
+  assets: SelectableAsset[];
   // Passport deep-link (founder ask 2026-08-24): auto-open the backup reveal ONCE on mount —
   // the unfilled "BACKED UP" stamp's destination (Wallet sets it when routing from the
   // passport). A manual gear-open (absent/false) keeps the normal two-step confirm gate.
@@ -441,6 +451,33 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
               the explicit way back after any pinned choice, on web AND native).
               ABOVE About (founder rule 2026-08-24): the theme choice is a frequent preference,
               About is the on-demand custody statement. */}
+          {/* Main currency — the money preference, so it sits ABOVE the presentation ones
+              (theme/language). Only currencies the catalog can actually realise are offered, which
+              is why the list is derived from `assets` rather than from the HomeCurrency union: a
+              row the user could pick and then not hold is a dead end. */}
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>{M.wallet.homeCurrency.settingsTitle}</Text>
+            <View style={S.railRow} role="radiogroup" accessibilityLabel={M.wallet.homeCurrency.settingsTitle}>
+              {offerableCurrencies(assets).map(choice => {
+                const active = homeCurrency === choice;
+                return (
+                  <Pressable
+                    key={choice}
+                    testID={`btn-currency-${choice}`}
+                    style={[S.railPill, active && S.railPillActive]}
+                    onPress={() => onSetHomeCurrency(choice)}
+                    accessibilityRole="radio"
+                    accessibilityLabel={M.wallet.homeCurrency.a11y(currencyName(choice))}
+                    accessibilityState={{checked: active, disabled: false}}
+                  >
+                    <Text style={active ? S.railPillTextActive : S.railPillText}>{choice}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={S.dim2}>{M.wallet.homeCurrency.settingsHint}</Text>
+          </View>
+
           <View style={S.settingsSection}>
             <Text style={S.inputLabel}>{M.settings.theme.label}</Text>
             <View style={S.railRow} role="radiogroup" accessibilityLabel={M.settings.theme.label}>

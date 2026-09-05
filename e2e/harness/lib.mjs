@@ -339,10 +339,14 @@ export async function skipRehearsalIfPresent(driver, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
   // Same press-confirmed-by-effect rule as `skipWalkthroughIfPresent` above, for the same reason:
   // Explore-wallet unmounts the rehearsal that carries the button being pressed.
+  // "Onboarding is over" is now TWO possible surfaces: the wallet itself, or the home-currency
+  // question that stands in front of it on a first run (2026-09-04). Waiting only for `balance`
+  // made every create-path flow fail here with the chooser plainly on screen.
+  const done = async () => (await driver.isPresent('balance')) || (await driver.isPresent('btn-home-currency-continue'));
   const deadline = Date.now() + timeoutMs;
   let sawSkip = false;
   while (Date.now() < deadline) {
-    if (await driver.isPresent('balance')) return;
+    if (await done()) return;
     if (await driver.isPresent('btn-rehearsal-skip')) { sawSkip = true; break; }
     await new Promise(r => setTimeout(r, 100));
   }
@@ -351,7 +355,14 @@ export async function skipRehearsalIfPresent(driver, opts = {}) {
   let pressErr = null;
   try { await driver.click('btn-rehearsal-skip', {timeoutMs}); }
   catch (e) { pressErr = e; }
-  try { await driver.findByTestID('balance', {timeoutMs}); }
+  try {
+    const settle = Date.now() + timeoutMs;
+    while (Date.now() < settle) {
+      if (await done()) return;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    throw new Error('neither the wallet nor the currency question appeared');
+  }
   catch (e) {
     throw new Error(
       `[lib] the rehearsal Skip was pressed but the wallet never appeared within ${timeoutMs}ms`
@@ -359,6 +370,60 @@ export async function skipRehearsalIfPresent(driver, opts = {}) {
       + `. On screen: ${JSON.stringify((await driver.bodyText()).slice(0, 300))}`,
     );
   }
+}
+
+/**
+ * Answer the first-run home-currency question if it is showing (2026-09-04).
+ *
+ * The wallet asks "which currency do you think in?" whenever no currency is stored, which is every
+ * fresh context — so this sits on the same shared preamble as the walkthrough and the rehearsal,
+ * and follows the same two rules they do: poll for EITHER surface before deciding (the gate is
+ * resolved from storage, so an instantaneous isPresent races the boot), and confirm the press by
+ * its EFFECT, because Continue unmounts the very button being clicked.
+ *
+ * A no-op when the chooser is absent (a context that already stored a currency).
+ */
+export async function chooseHomeCurrencyIfPresent(driver, currency = 'CHF', opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 8_000;
+  const deadline = Date.now() + timeoutMs;
+  let sawChooser = false;
+  while (Date.now() < deadline) {
+    if (await driver.isPresent('balance')) return;
+    if (await driver.isPresent('btn-home-currency-continue')) { sawChooser = true; break; }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  if (!sawChooser) return;
+
+  await driver.click(`home-currency-${currency}`, {timeoutMs});
+  let pressErr = null;
+  try { await driver.click('btn-home-currency-continue', {timeoutMs}); }
+  catch (e) { pressErr = e; }
+  try { await driver.findByTestID('balance', {timeoutMs}); }
+  catch (e) {
+    throw new Error(
+      `[lib] the home-currency Continue was pressed but the wallet never appeared within ${timeoutMs}ms`
+      + `${pressErr ? ` (the press itself reported: ${pressErr.message})` : ''}`
+      + `. On screen: ${JSON.stringify((await driver.bodyText()).slice(0, 300))}`,
+    );
+  }
+}
+
+/**
+ * Put the wallet on the DEMO asset — the funded, offline, play-money rail the vast majority of
+ * flows exercise.
+ *
+ * Since 2026-09-04 a fresh wallet lands on its HOME CURRENCY's rail (VCHF), not on DEMO, and the
+ * selection is session state re-derived from that currency on every load. Flows that want demo
+ * funds therefore have to say so. This is a preamble step rather than a per-flow one precisely
+ * because it is the suite's shared assumption, not any single flow's subject.
+ */
+export async function selectDemoAsset(driver, opts = {}) {
+  const timeoutMs = opts.timeoutMs ?? 8_000;
+  await driver.click('balance', {timeoutMs});
+  // Selecting a row closes the sheet itself (Wallet's `handleSelect`), so there is no close to press
+  // — pressing one would wait on a button that is correctly already gone.
+  await driver.click('asset-demo-select', {timeoutMs});
+  await driver.findByTestID('balance', {timeoutMs});
 }
 
 /**
@@ -388,7 +453,11 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
   await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
   await skipRehearsalIfPresent(driver);
+  // The home-currency question, then back onto DEMO: the wallet now opens in the user's chosen
+  // currency, and this preamble's contract with every downstream flow is a funded DEMO wallet.
+  await chooseHomeCurrencyIfPresent(driver);
   await driver.findByTestID('balance', { timeoutMs: 10_000 });
+  await selectDemoAsset(driver);
   await driver.waitForText('∂100.00', { timeoutMs });
   return driver;
 }

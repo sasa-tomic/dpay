@@ -163,10 +163,10 @@ describe('reconcileSelectedAsset — catalog refresh removes the selection', () 
       [DEMO, CKBTC, CKUSDC, mk({currency: 5, minter_family: 'CkBtcUtxo', wrapper_name: 'ckFOO', backing_symbol: 'FOO', network: 'Bitcoin', decimals: 8})],
       {showTestnet: false, solanaEnabled: false},
     );
-    expect(reconcileSelectedAsset('ic:5', before)).toBe('ic:5'); // still present
+    expect(reconcileSelectedAsset('ic:5', before, null)).toBe('ic:5'); // still present
     const after = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: false});
     expect(after.some(a => a.id === 'ic:5')).toBe(false); // gone
-    expect(reconcileSelectedAsset('ic:5', after)).toBe('ic:0'); // deterministic fallback
+    expect(reconcileSelectedAsset('ic:5', after, null)).toBe('ic:0'); // deterministic fallback
   });
 
   it('a still-present selection survives a descriptor object refresh (same id, new metadata)', () => {
@@ -174,7 +174,7 @@ describe('reconcileSelectedAsset — catalog refresh removes the selection', () 
       [{...CKBTC, fee: '999'}, CKUSDC, DEMO],
       {showTestnet: false, solanaEnabled: false},
     );
-    expect(reconcileSelectedAsset('ic:1', refreshed)).toBe('ic:1');
+    expect(reconcileSelectedAsset('ic:1', refreshed, null)).toBe('ic:1');
   });
 });
 
@@ -187,7 +187,7 @@ describe('reconcileSelectedAsset — hiding a selected testnet asset applies the
 
   it('ic:3 is selectable when testnet is shown', () => {
     expect(WITH_TESTNET.some(a => a.id === 'ic:3')).toBe(true);
-    expect(reconcileSelectedAsset('ic:3', WITH_TESTNET)).toBe('ic:3');
+    expect(reconcileSelectedAsset('ic:3', WITH_TESTNET, null)).toBe('ic:3');
   });
 
   it('hiding testnet removes ic:3 from the rebuilt list', () => {
@@ -195,16 +195,16 @@ describe('reconcileSelectedAsset — hiding a selected testnet asset applies the
   });
 
   it('reconcile falls back to ic:0 deterministically — the stale testnet selection cannot leak', () => {
-    expect(reconcileSelectedAsset('ic:3', WITHOUT_TESTNET)).toBe('ic:0');
+    expect(reconcileSelectedAsset('ic:3', WITHOUT_TESTNET, null)).toBe('ic:0');
   });
 
   it('the fallback is stable: re-reconciling the new id preserves it (no oscillation)', () => {
-    const next = reconcileSelectedAsset('ic:3', WITHOUT_TESTNET);
-    expect(reconcileSelectedAsset(next, WITHOUT_TESTNET)).toBe(next);
+    const next = reconcileSelectedAsset('ic:3', WITHOUT_TESTNET, null);
+    expect(reconcileSelectedAsset(next, WITHOUT_TESTNET, null)).toBe(next);
   });
 
   it('the AssetId type is carried through (ic:0 is the literal type, not a widened string)', () => {
-    const id: AssetId | null = reconcileSelectedAsset('ic:3', WITHOUT_TESTNET);
+    const id: AssetId | null = reconcileSelectedAsset('ic:3', WITHOUT_TESTNET, null);
     // Compile-time: `id` is typed `AssetId | null`; the runtime check pins the value.
     expect(id).toBe('ic:0');
   });

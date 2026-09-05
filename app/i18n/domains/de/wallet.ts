@@ -26,6 +26,20 @@ export const walletDe: WalletMessages = {
     backAgainToExit: 'Nochmal Zurück zum Beenden',
   },
 
+  homeCurrency: {
+    name: {CHF: 'Schweizer Franken', USD: 'US-Dollar', EUR: 'Euro'},
+    chooseTitle: 'In welcher Währung denkst du?',
+    chooseBody: 'dpay zeigt diese Währung zuerst an und bezahlt standardmässig damit. Du kannst auch alle anderen halten und das jederzeit in den Einstellungen ändern.',
+    rail: (symbol, network) => `Gehalten als ${symbol} auf ${network}`,
+    mainBadge: 'Haupt',
+    mainLabel: currency => `${currency} · Haupt`,
+    settingsTitle: 'Hauptwährung',
+    settingsHint: 'Die Währung, die dpay zuerst anzeigt und standardmässig verwendet',
+    confirm: 'Weiter',
+    noneAvailable: 'Es konnten keine Währungen geladen werden. Prüfe die Serveradresse in den Einstellungen und öffne dpay erneut.',
+    a11y: currency => `${currency} wählen`,
+  },
+
   tab: {pay: 'Bezahlen', receive: 'Empfangen', transactions: 'Verlauf'},
 
   backToPaying: asset => `Zurück zum Bezahlen mit ${asset}`,

@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **113 flows**
-> (112 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **114 flows**
+> (113 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (13) · pay (33) · offline (10) · deposit (8) · withdraw (11) · nfc (10) · system (21) · tour (6)
+wire (1) · onboard (14) · pay (33) · offline (10) · deposit (8) · withdraw (11) · nfc (10) · system (21) · tour (6)
 
 ---
 
@@ -39,8 +39,9 @@ wire (1) · onboard (13) · pay (33) · offline (10) · deposit (8) · withdraw 
 |---|------|----------|--------|
 | 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody honesty copy present at create + backup. | onboard, faucet, first-balance, empty-history, non-custodial |
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
+| 118 | home-currency | The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD, never EUR), names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload. | home-currency, onboard, vchf, ckusdc, settings, asset-selector, persistence |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
-| 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ DEMO approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
+| 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ … approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 | 54 | testnet-toggle | Balances testnet toggle reveals + hides all three testnet rows (BTC/USDC/ETH testnet — catalog-driven testnet detection). | testnet, catalog, toggle, balances |
 | 58 | restore-wallet | A wallet can be restored from the 64-hex recovery seed (toggle to hex mode; no faucet; secretHex matches). | restore-seed, keypair-from-secret, both-rails-recovery, btn-restore-mode-toggle |
 | 68 | mnemonic-backup-restore | The 24 mnemonic words shown at create time recover the exact same wallet keypair (publicHex match) when entered on restore. | mnemonic-backup, mnemonic-word-{0..23}, mnemonic-backup-checkbox, btn-mnemonic-continue, restore-mnemonic-input, bip39-round-trip, restore-via-mnemonic |

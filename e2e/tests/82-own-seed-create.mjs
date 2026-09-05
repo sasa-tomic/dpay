@@ -16,7 +16,7 @@
 // The fixed seed is 0x22 × 32 (flow 58's SEED) so the hex-equality assertion is meaningful; its
 // mnemonic (precomputed from the same codec app/lib/bip39.ts implements) is
 // "captain baby mass dust" ×5 + "captain baby mass fault".
-import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent, skipRehearsalIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
 
 const SEED = '22'.repeat(32);
 const WORDS = `${'captain baby mass dust '.repeat(5).trim()} captain baby mass fault`.replace(/\s+/g, ' ').trim();
@@ -74,6 +74,7 @@ export async function run() {
     await driver.click('btn-mnemonic-continue', { timeoutMs: 5_000 });
     // Trip Ready J2B/J3 — dismiss the recovery-beat + rehearsal interstitial (create path only).
     await skipRehearsalIfPresent(driver);
+    await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     let identity = await accountOf(driver);
     assert(identity != null, `identity should be stored (got ${JSON.stringify(identity)})`);
@@ -99,6 +100,7 @@ export async function run() {
     await driver.click('btn-mnemonic-continue', { timeoutMs: 5_000 });
     // Trip Ready J2B/J3 — same interstitial on the hex-form create path.
     await skipRehearsalIfPresent(driver);
+    await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     identity = await accountOf(driver);
     assertEq(identity.secretHex, SEED, 'hex-form create stored the normalized seed');

@@ -85,7 +85,11 @@ export async function run() {
     // instructions (founder hard rule 2026-08-29: no "check back soon" dead ends — receiving a
     // no-minter direct-ICRC asset is a plain ICRC-1 transfer to the user's own principal).
     await selectCurrency(driver, 'vchf');
-    assertEq(await driver.readText('active-asset-label'), 'VCHF balance', 'header active-asset label after VCHF select');
+    // VCHF is the rail of CHF, and the harness preamble picks CHF as the main currency — so the
+    // header names the CURRENCY, not the token (the home-currency model, 2026-09-04; flow 118 owns
+    // that behaviour). The AMOUNT below still carries the VCHF unit, which the balance assertions
+    // in this flow check directly.
+    assertEq(await driver.readText('active-asset-label'), 'Swiss francs · Main', 'header active-asset label after VCHF select');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
     const fundPanel = await driver.findByTestID('pay-fund', { timeoutMs: 6_000 });
     assert(fundPanel != null, 'unfunded VCHF selection parks Pay tab on the fund panel');

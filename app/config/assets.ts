@@ -190,19 +190,47 @@ function icTestKey(desc: CurrencyDescriptor, isPrimary: boolean, _testnet: boole
   return assetTestKey(desc);
 }
 
-// The deterministic idle-selection fallback policy. Called by the Wallet on every catalog/visibility
-// change with the CURRENT selected id (if any) and the FRESH list of visible assets:
+/**
+ * Parse a PERSISTED asset id back into an `AssetId`, or null.
+ *
+ * Shape-checked only — that a well-formed id is still in the catalog is `reconcileSelectedAsset`'s
+ * job, and it already handles a vanished selection. Anything else (absent, empty, a currency id
+ * from a build with a different catalog, a hand-edited value) is null, which means "nothing
+ * remembered" and lets the home currency seed the selection instead of crashing or, worse, letting
+ * a malformed id flow into the engine dispatch.
+ */
+export function parseAssetId(v: string | null | undefined): AssetId | null {
+  if (typeof v !== 'string') return null;
+  if (v === 'solana:SOL' || v === 'solana:USDC') return v;
+  const m = /^ic:(\d+)$/.exec(v);
+  return m ? (`ic:${Number(m[1])}` as AssetId) : null;
+}
+
+// The deterministic idle-selection policy. Called by the Wallet on every catalog/visibility change
+// with the CURRENT selected id (if any), the FRESH list of visible assets, and the HOME CURRENCY's
+// rail (`preferredId` — app/config/currency.ts; null when no currency has been chosen yet):
 //   1. Preserve the selected id while it remains present in the visible list.
-//   2. If it is gone (removed, hidden, or never existed) prefer `ic:0` (DEMO — always present in a
-//      healthy catalog) so the wallet lands on a non-destructive default.
-//   3. If `ic:0` is absent, select the first visible asset.
-//   4. If no asset is visible, return null (the caller renders a fail-closed unavailable state).
+//   2. Otherwise land on `preferredId` — the rail of the currency the user said they think in.
+//      Since the selection is session state and starts null, this is what makes the wallet OPEN in
+//      the user's own currency on every launch, which is the whole point of a home currency.
+//   3. If there is no home currency, or its rail is not visible, prefer `ic:0` (DEMO — always
+//      present in a healthy catalog) so the wallet still lands somewhere non-destructive.
+//   4. If `ic:0` is absent, select the first visible asset.
+//   5. If no asset is visible, return null (the caller renders a fail-closed unavailable state).
 //
-// Hiding a selected testnet asset is the canonical case: the rebuilt list no longer contains its
-// id, so step 1 fails and step 2/3 picks a deterministic fallback — the stale testnet selection
-// cannot leak into the new view.
-export function reconcileSelectedAsset(selectedId: AssetId | null, assets: SelectableAsset[]): AssetId | null {
+// `preferredId` is REQUIRED rather than defaulted: every caller has to say what the user's currency
+// is, or say explicitly that there isn't one. A default would let a new call site silently inherit
+// the DEMO-first policy this parameter exists to replace.
+//
+// Hiding a selected testnet asset is the canonical case for steps 2-4: the rebuilt list no longer
+// contains its id, so step 1 fails and the stale testnet selection cannot leak into the new view.
+export function reconcileSelectedAsset(
+  selectedId: AssetId | null,
+  assets: SelectableAsset[],
+  preferredId: AssetId | null,
+): AssetId | null {
   if (selectedId !== null && assets.some(a => a.id === selectedId)) return selectedId;
+  if (preferredId !== null && assets.some(a => a.id === preferredId)) return preferredId;
   const demo = assets.find(a => a.id === 'ic:0');
   if (demo) return demo.id;
   return assets.length > 0 ? assets[0].id : null;

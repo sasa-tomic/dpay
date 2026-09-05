@@ -8,6 +8,7 @@ import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
 import {IconClose, IconPlus} from './icons';
 import {type SelectableAsset} from '../config/assets';
+import {type HomeCurrency, preferredRail} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
 import type {AssetId} from '../lib/types';
 
@@ -31,10 +32,12 @@ import type {AssetId} from '../lib/types';
 // Phase 4: the ReceiveMode + SolReceiveMode pickers now consume the SAME `SelectableAsset` contract
 // as this sheet (via the unified `AssetPicker`). Both selectors share the selection TRUTH (one
 // `selectedAssetId`) AND the row model — there is no second list builder.
-export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestnet, onTopUp, topUpBusy, topUpErr, showTestnet, onToggleTestnet, onClose}: {
+export function BalancesSheet({assets, balances, selectedId, homeCurrency, onSelect, hasTestnet, onTopUp, topUpBusy, topUpErr, showTestnet, onToggleTestnet, onClose}: {
   assets: SelectableAsset[];
   balances: Record<AssetId, BalanceView>;
   selectedId: AssetId | null;
+  /** The currency the wallet is "in" — its rail carries the MAIN badge. */
+  homeCurrency: HomeCurrency;
   onSelect: (id: AssetId) => void;
   hasTestnet: boolean;
   onTopUp: () => void;
@@ -49,6 +52,9 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
   // are currently shown (so the user can hide them again). `hasTestnet` is computed upstream from
   // the FULL catalog (the assets list is already filtered, so it cannot answer this on its own).
   const showToggle = hasTestnet || showTestnet;
+  // The one row that is the home currency's rail. Marked, not reordered: the list's order is the
+  // catalog's and several flows read it positionally, so the badge carries the meaning instead.
+  const mainId = preferredRail(homeCurrency, assets)?.id ?? null;
   return (
     <SheetOverlay>
       <SafeAreaView style={S.sheet}>
@@ -110,6 +116,10 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
             const setupBadge = view?.status === 'absent'
               ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>{M.wallet.balances.needsSetup}</Text>
               : null;
+            // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
+            const mainBadge = asset.id === mainId
+              ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>
+              : null;
             return (
               <CurrencyRow
                 key={asset.testKey}
@@ -127,6 +137,7 @@ export function BalancesSheet({assets, balances, selectedId, onSelect, hasTestne
                 actions={faucet}
               >
                 {errLine}
+                {mainBadge}
                 {setupBadge}
               </CurrencyRow>
             );

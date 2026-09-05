@@ -196,49 +196,70 @@ describe('reconcileSelectedAsset — preserve/fallback policy', () => {
   const VISIBLE = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true});
 
   it('preserves a still-visible selection', () => {
-    expect(reconcileSelectedAsset('ic:1', VISIBLE)).toBe('ic:1');
-    expect(reconcileSelectedAsset('solana:SOL', VISIBLE)).toBe('solana:SOL');
+    expect(reconcileSelectedAsset('ic:1', VISIBLE, null)).toBe('ic:1');
+    expect(reconcileSelectedAsset('solana:SOL', VISIBLE, null)).toBe('solana:SOL');
   });
 
   it('returns null for a null selection when no assets are visible', () => {
-    expect(reconcileSelectedAsset(null, [])).toBeNull();
+    expect(reconcileSelectedAsset(null, [], null)).toBeNull();
   });
 
   it('falls back to ic:0 when the selected id is no longer present', () => {
-    expect(reconcileSelectedAsset('ic:99', VISIBLE)).toBe('ic:0');
+    expect(reconcileSelectedAsset('ic:99', VISIBLE, null)).toBe('ic:0');
   });
 
   it('falls back to ic:0 when the selected id is null but ic:0 is present', () => {
-    expect(reconcileSelectedAsset(null, VISIBLE)).toBe('ic:0');
+    expect(reconcileSelectedAsset(null, VISIBLE, null)).toBe('ic:0');
   });
 
   it('falls back to the FIRST visible asset when ic:0 is absent', () => {
     const noDemo = buildSelectableAssets([CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: false});
-    expect(reconcileSelectedAsset('ic:99', noDemo)).toBe('ic:1');
-    expect(reconcileSelectedAsset(null, noDemo)).toBe('ic:1');
+    expect(reconcileSelectedAsset('ic:99', noDemo, null)).toBe('ic:1');
+    expect(reconcileSelectedAsset(null, noDemo, null)).toBe('ic:1');
   });
 
   it('falls back to ic:0 even when ic:0 is not the first visible asset (ic:0 wins over first)', () => {
     // Catalog order: [ckBTC, DEMO, ckUSDC]. First visible is ic:1, but ic:0 is the preferred fallback.
     const reordered = buildSelectableAssets([CKBTC, DEMO, CKUSDC], {showTestnet: false, solanaEnabled: false});
     expect(ids(reordered)).toEqual(['ic:1', 'ic:0', 'ic:2']);
-    expect(reconcileSelectedAsset('ic:99', reordered)).toBe('ic:0');
+    expect(reconcileSelectedAsset('ic:99', reordered, null)).toBe('ic:0');
   });
 
   it('returns null when no assets are visible (fail-closed)', () => {
-    expect(reconcileSelectedAsset('ic:99', [])).toBeNull();
-    expect(reconcileSelectedAsset('solana:SOL', [])).toBeNull();
+    expect(reconcileSelectedAsset('ic:99', [], null)).toBeNull();
+    expect(reconcileSelectedAsset('solana:SOL', [], null)).toBeNull();
   });
 
   it('hiding a selected testnet asset atomically applies the fallback (rebuild ⇒ reconcile)', () => {
     // Step 1: testnet visible, user selects ic:3 (ckTESTBTC).
     const withTestnet = buildSelectableAssets([DEMO, CKBTC, CKTESTBTC], {showTestnet: true, solanaEnabled: false});
-    expect(reconcileSelectedAsset('ic:3', withTestnet)).toBe('ic:3');
+    expect(reconcileSelectedAsset('ic:3', withTestnet, null)).toBe('ic:3');
     // Step 2: user hides testnet — the rebuilt list no longer contains ic:3.
     const withoutTestnet = buildSelectableAssets([DEMO, CKBTC, CKTESTBTC], {showTestnet: false, solanaEnabled: false});
     expect(ids(withoutTestnet)).not.toContain('ic:3');
     // Step 3: reconcile falls back to ic:0 (deterministic).
-    expect(reconcileSelectedAsset('ic:3', withoutTestnet)).toBe('ic:0');
+    expect(reconcileSelectedAsset('ic:3', withoutTestnet, null)).toBe('ic:0');
+  });
+
+  // The home-currency precedence (2026-09-04). `preferredId` sits BETWEEN "keep what's selected"
+  // and "fall back to DEMO", which is what makes the wallet open in the user's own currency on
+  // every launch — the selection is session state, so a cold start always arrives here with null.
+  it('lands on the home currency rail when nothing is selected', () => {
+    expect(reconcileSelectedAsset(null, VISIBLE, 'ic:2')).toBe('ic:2');
+  });
+
+  it('lands on the home currency rail when the selected id has disappeared', () => {
+    expect(reconcileSelectedAsset('ic:99', VISIBLE, 'ic:2')).toBe('ic:2');
+  });
+
+  it('does NOT override a still-visible explicit selection with the home currency', () => {
+    // The user switched to BTC on purpose; a re-render must not yank them back to their main currency.
+    expect(reconcileSelectedAsset('ic:1', VISIBLE, 'ic:2')).toBe('ic:1');
+  });
+
+  it('falls through to ic:0 when the home currency rail is not visible', () => {
+    // e.g. the currency's only rail is a testnet row the user has hidden, or a catalog that lost it.
+    expect(reconcileSelectedAsset(null, VISIBLE, 'ic:77')).toBe('ic:0');
   });
 });
 

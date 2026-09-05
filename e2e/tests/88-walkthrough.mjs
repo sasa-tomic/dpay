@@ -13,7 +13,7 @@
 // Selector contract: `walkthrough`, `walkthrough-scene-1|2|3`, `walkthrough-body-1|2|3`,
 // `walkthrough-dots`, `btn-walkthrough-next`, `btn-walkthrough-skip`, then the existing onboarding
 // + wallet net (`username-input` by placeholder, `btn-create`, `mnemonic-backup`, `balance`).
-import { setup, assert, assertIncludes, waitForEnabled, skipRehearsalIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, waitForEnabled, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
 
 export const meta = {
   id: 88,
@@ -94,6 +94,9 @@ export async function run() {
     // Trip Ready J2B/J3 — the RECOVERY SAVED beat + payment rehearsal play here; flow 90 pins
     // them in full, this flow just needs the funded wallet behind them.
     await skipRehearsalIfPresent(driver);
+    await chooseHomeCurrencyIfPresent(driver);
+    // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
+    await selectDemoAsset(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
     await driver.waitForText('wlk', { timeoutMs: 5_000 });

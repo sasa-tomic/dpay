@@ -44,6 +44,7 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
           assets={assets}
           balances={balances}
           selectedId="ic:0"
+          homeCurrency="CHF"
           onSelect={jest.fn()}
           hasTestnet={false}
           onTopUp={jest.fn()}

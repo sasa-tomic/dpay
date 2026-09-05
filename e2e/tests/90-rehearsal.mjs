@@ -12,7 +12,7 @@
  * This is the ONLY flow that drives the interstitial instead of dismissing it — every other
  * onboarding flow skips past via skipRehearsalIfPresent (harness).
  */
-import { setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
 import { rehearsalSteps } from '../../app/config/education.ts';
 import { M } from '../../app/i18n/index.ts';
 
@@ -105,6 +105,9 @@ export async function run() {
     await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
     await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
+    await chooseHomeCurrencyIfPresent(driver);
+    // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
+    await selectDemoAsset(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
     const payScan = await driver.eval(() => !!document.querySelector('[data-testid="btn-settings"]'));
