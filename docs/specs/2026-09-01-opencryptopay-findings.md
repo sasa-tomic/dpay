@@ -83,6 +83,38 @@ Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is B
 - It is plausibly why the `tx` spelling below is documented nowhere: the `InternetComputer` leg has
   no third-party wallet to have needed it written down.
 
+### Oisy — the one wallet whose source shows an IC leg (re-measured 2026-09-05)
+
+- **MEASURED (2026-09-05):** the DFX list above is unchanged — same 29 wallets, same method union, no
+  `InternetComputer`, no Oisy entry (`GET https://api.dfx.swiss/v1/paymentLink/walletApp`); the live
+  DFX shop `/pl` page's recommended/compatible/semi-compatible rows likewise name no Oisy.
+- **SOURCE-ONLY** (`github.com/dfinity/oisy-wallet`, `main`, pushed 2026-09-04): Oisy ships an IC
+  OpenCryptoPay payer — `src/frontend/src/icp/services/ic-open-crypto-pay.services.ts` (commit
+  `455f16ac49ec`, 2026-03-05), network flag `pay: {openCryptoPay: 'InternetComputer'}` at
+  `src/frontend/src/env/networks/networks.icp.env.ts:46`. Assets are symbol-matched
+  (`mapTokenToPayableToken`): ICP plus any ICRC token in Oisy's list — including VCHF on the SAME
+  ledger `ly36x-wiaaa-aaaai-aqj7q-cai` this file already identity-checked.
+- **It is an Option-A wallet.** `payIcp` does `icrc2_approve(spender, amount+fee, 5-minute expiry)`
+  then `GET /tx?quote=&method=&asset=&sender=<principal>` (`getIcPaymentUri`) — it never reports a
+  tx id, so the CHF-1 spelling class cannot occur in its flow.
+- **The `&ref=` hazard is real at source but weaker than feared.** `decodeQrCodeUrn` keeps unknown
+  params (`DecodedUrnSchema` uses `.catchall()`), but `validateIcTransfer` reads only
+  `to`/`amount` and the approve sets no memo — `ref` is accepted and dropped. Against a dpay till
+  (Option-B only: `PayQuery` accepts `quote|method|asset|tx`, `match_payment` wants a memo-carrying
+  transfer) NO funds move — the 5-minute approval expires unused. Money-moves-but-uncredited needs a
+  provider that pulls (DFX), and there the pull's memo is DFX's own.
+- **Ingestion + drive boundary:** the only entry is the in-app scanner (`ScannerCode.svelte`);
+  `parseOpenCryptoPayCode` requires a URL with a `?lightning=` param, so a bare `LNURL1…` string is
+  refused as an invalid code, and `AppPath` defines no OCP deep-link route. Live (2026-09-05):
+  oisy.com IS the wallet (`app.oisy.com` is NXDOMAIN) and the scanner sits behind Internet Identity
+  sign-in (WebAuthn + CAPTCHA) — the flow was not driven past that gate. Everything above the gate
+  is measured; everything below it stays source-only.
+
+**Verdict on "no third-party wallet can settle an IC asset":** stands for every wallet DFX offers
+(re-measured). Oisy is the one counter-candidate — source-only, undriven — and it settles IC only
+via the approve flow, which dpay refuses on both sides (never grants, never pulls). A dpay till
+cannot be settled by it: nothing would move at all.
+
 ## Stale-README trap #1: the IC URI shape
 
 README says `icp:<canister>?amount=<n>`. The live API returns:

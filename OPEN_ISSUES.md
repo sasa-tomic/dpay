@@ -31,33 +31,42 @@ Opened by that investigation, and each independently actionable:
   `2609`: ICP block `38190401`, DFX `/tx` accepted, shop order received. Later the same day order
   `2610` closed the prefixed half: VCHF block `81062`, submitted `ly36x-…-cai:81062`, accepted.
   `just ocp-ledger-probe` and flow 113 stay as the regression tripwires.
-- **"No third-party wallet can settle an Internet Computer asset" may be too strong — re-measure
-  before it goes near a deck.** DFINITY's own Oisy wallet appears to ship
-  `src/frontend/src/icp/services/ic-open-crypto-pay.services.ts` with
-  `pay: {openCryptoPay: 'InternetComputer'}` on `main`. Oisy is not on DFX's compatibility list, so
-  the measured claim in `CLAUDE.md` is not falsified — but it was read on source only, not driven.
-  A concrete hazard if it is real: Oisy's URN decoder accepts and ignores unknown params, so a dpay
-  till's `&ref=` would be silently dropped, and `match_payment` credits only a transfer carrying
-  that reference as its ICRC-1 memo — the payer's money would move and the sale would not be
-  credited.
+- **"No third-party wallet can settle an Internet Computer asset" — re-measured 2026-09-05, claim
+  stands (sharpened).** Oisy's `main` (pushed 2026-09-04) does ship an IC OpenCryptoPay payer
+  (`ic-open-crypto-pay.services.ts`, commit `455f16ac49ec`) with `pay: {openCryptoPay:
+  'InternetComputer'}` — but it is an Option-A wallet (`icrc2_approve` + `sender=` report; no tx id,
+  no memo), so it cannot settle a dpay till (Option-B only). The `&ref=`-dropped hazard is real at
+  source, yet nothing would move: the 5-minute approval expires unused. Not drivable past Oisy's
+  Internet Identity gate without creating an anchor (WebAuthn), so the flow itself remains
+  source-only. DFX's wallet list, re-read the same day, still names no wallet paying
+  `InternetComputer`. Details: `docs/specs/2026-09-01-opencryptopay-findings.md` § "The standard's
+  reach".
 - **dpay speaks no external payment standard, in either direction** (measured 2026-09-04 by driving
-  real URIs through `classifyScan`). The scanner accepts only dpay's own binary wire, dpay's own
-  https link, an OpenCryptoPay LNURL, and a bare address; it does not parse Solana Pay, BIP-21/321,
-  EIP-681 or BOLT-11. The EMIT half landed 2026-09-05 (app-only, `app/solana/payUri.ts` +
-  `SolanaReceiveSheet`): the Solana "My address" QR now encodes a real Solana Pay URI —
-  `solana:<addr>?reference=<fresh base58 keypair>` for SOL, `solana:<owner>?spl-token=<USDC mint>&reference=…`
-  for USDC (recipient is the OWNER, not the ATA, per the spl-token spec) — while the on-screen text
-  and copy button stay the bare address; the builder also supports an `amount=` param, unused on this
-  surface (it has no amount). Interim consequence, deliberate per this item's sequencing: dpay's own
-  camera can no longer read its own SOL receive QR back (a `solana:` URI falls to the generic "not a
-  payment code" refusal; the old bare-address read-back path in `scan.ts` is superseded) until the
-  ACCEPT item lands. That accept item remains OPEN: **accept a merchant's Solana Pay QR** (half the
-  parser already exists inside the OCP client; the work is `reference` keys, ATA derivation, the SPL
-  Memo slot and a route from `classifyScan`). Reach for it is UNMEASURED and must not be claimed. The
-  honesty half landed 2026-09-05: a scanned `bitcoin:`/`ethereum:` (BIP-21/EIP-831) URI is now
-  refused **by name** with a practical instruction — `coin-request` verdict in `app/lib/scan.ts`,
-  copy in all four locales, e2e flow 109 leg 3 — closing the "not a payment code" dead-end violation
-  of the 2026-08-29 founder rule.
+  real URIs through `classifyScan`) — EXCEPT Solana Pay, which dpay now speaks in BOTH directions
+  (emit 2026-09-05, accept 2026-09-05, both app-only). For everything else the scanner accepts only
+  dpay's own binary wire, dpay's own https link, an OpenCryptoPay LNURL, and a bare address; it does
+  not parse BIP-21/321, EIP-681 or BOLT-11 (those get the named `coin-request` refusal below).
+  The EMIT half (`app/solana/payUri.ts` + `SolanaReceiveSheet`): the Solana "My address" QR encodes
+  a real Solana Pay URI — `solana:<addr>?reference=<fresh base58 keypair>` for SOL,
+  `solana:<owner>?spl-token=<USDC mint>&reference=…` for USDC (recipient is the OWNER, not the ATA,
+  per the spl-token spec) — while the on-screen text and copy button stay the bare address. The
+  ACCEPT half landed the same day and the interim read-back regression (dpay's camera couldn't read
+  its own SOL receive QR) is CLOSED, proven by e2e flow 45: `classifyScan` routes `solana:` to a
+  `solana-pay` verdict (colon-guarded like `coin-request`), `parseSolanaPayUri` — same module as the
+  builder, no duplicated knowledge — validates recipient/mint/reference as base58 pubkeys and the
+  amount as a plain decimal > 0, refusing unknown params **by name**; the SOL rail review is
+  EXPLICIT (never auto-sign — stranger-supplied QR, same discipline as OCP), the IC rail refuses a
+  scanned `solana:` URI by name with a switch instruction (four locales). Measured before building:
+  `assembleMessage` already accepts arbitrary `AccountMeta[]`, so `reference` keys ride the transfer
+  instruction as extra readonly account keys and the SPL memo as its own Memo-program instruction —
+  pure app TS, NO core wire change (nothing crossed Rust/UniFFI/Kotlin); the USDC path reuses the
+  send form's `deriveAta` + create-idempotent + rent pre-check exactly. Deliberately left open:
+  the Solana Pay **transaction-request** form (`solana:https://…` — refused as a damaged code; only
+  transfer requests), and non-USDC `spl-token` mints (catalog-limited, refused by name with the
+  mint's pubkey). The honesty half landed 2026-09-05: a scanned `bitcoin:`/`ethereum:`
+  (BIP-21/EIP-831) URI is now refused **by name** with a practical instruction — `coin-request`
+  verdict in `app/lib/scan.ts`, copy in all four locales, e2e flow 109 leg 3 — closing the "not a
+  payment code" dead-end violation of the 2026-08-29 founder rule.
 
 0. **THE MERCHANT SIDE OF OpenCryptoPay — dpay serves its own till** (founder decision, 2026-09-02).
    **Demoted 2026-09-04 to one interop rail among several** (founder), below the currency work above.
