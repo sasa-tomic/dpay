@@ -197,7 +197,8 @@ else
   SEED_HEX="$(openssl rand -hex 32)"
   echo "   faucet key: generated a NEW dedicated Ed25519 seed"
 fi
-RELAY_PRINCIPAL="$(cargo run -q -p dpay-icp-e2e --bin dev-principal -- "$SEED_HEX")" \
+# Seed over stdin (--from-stdin), never argv — argv is visible in `ps` during the build+run.
+RELAY_PRINCIPAL="$(printf '%s' "$SEED_HEX" | cargo run -q -p dpay-icp-e2e --bin dev-principal -- --from-stdin)" \
   || { echo "could not derive the faucet key's principal (cargo run -p dpay-icp-e2e --bin dev-principal)" >&2; exit 1; }
 CUR_CONTROLLER="$(dfx_i canister call "$CANISTER" admin_controller --network "$NETWORK" --query 2>/dev/null \
   | tr -d '\n' | sed -n 's/.*opt principal "\([^"]*\)".*/\1/p')"

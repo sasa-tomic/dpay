@@ -54,8 +54,10 @@ if ! [[ "$SEED_HEX" =~ ^[0-9a-fA-F]{64}$ ]]; then
 fi
 SEED_HEX="${SEED_HEX,,}"
 
-# The seed's self-authenticating principal — the same helper faucet-verify.sh uses (leg 2).
-SEED_PRINCIPAL="$(cargo run -q -p dpay-icp-e2e --bin dev-principal -- "$SEED_HEX")"
+# The seed's self-authenticating principal — the same helper faucet-verify.sh uses (leg 2). The
+# seed reaches it over STDIN (--from-stdin), never argv: argv is visible in `ps` for the whole
+# build+run window, stdin is not.
+SEED_PRINCIPAL="$(printf '%s' "$SEED_HEX" | cargo run -q -p dpay-icp-e2e --bin dev-principal -- --from-stdin)"
 
 # Wrap the raw seed in its canonical Ed25519 PKCS#8 DER (prefix + 32-byte key = 48 bytes) and
 # place it as a throwaway identity under a RELOCATED dfx config root (dfx nests identities at

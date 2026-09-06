@@ -2422,7 +2422,7 @@ async fn wasm_core_served_and_unknown_path_is_404() {
 
 /// A relay that SERVES the till, with the fake-IC gateway behind it (the merchant's incoming
 /// history is what settles a charge). The `with_till` is explicit and load-bearing: without it the
-/// six routes are not registered at all — see `the_till_is_not_served_unless_the_relay_is_told_to`,
+/// eight routes are not registered at all — see `the_till_is_not_served_unless_the_relay_is_told_to`,
 /// which is the reason the flag exists.
 fn till_state() -> (AppState, Arc<FakeIc>) {
     let fake = FakeIc::from_catalog();
@@ -3115,13 +3115,13 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
     assert_eq!(unchanged["state"], "paid", "a credited sale is not cancelled away: {unchanged}");
 }
 
-/// The till is served ONLY by a relay that was told to serve it, and "not served" means the six
+/// The till is served ONLY by a relay that was told to serve it, and "not served" means the eight
 /// routes do not exist — the gate is at registration, so no till handler is reachable at all.
 ///
-/// The two halves ride the SAME six requests: a relay with the till on answers every one of them
+/// The two halves ride the SAME eight requests: a relay with the till on answers every one of them
 /// (which is what makes the requests well-formed, the charge live and the quote real), and a
 /// DEFAULT relay — plain `AppState::new`, the shape `main` builds without `DPAY_ENABLE_TILL` —
-/// refuses all five. The refusal is pinned as a BARE 404: an empty body is axum's own answer for a
+/// refuses all eight. The refusal is pinned as a BARE 404: an empty body is axum's own answer for a
 /// path it has no route for, whereas every 404 this till can produce carries the provider's
 /// `{statusCode, message, error}` envelope (the test above pins that). The empty body is therefore
 /// the proof that no handler ran, rather than a handler politely declining.
@@ -3139,12 +3139,12 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
     let quote = details["quote"]["id"].as_str().expect("a quote carries an id").to_string();
 
     // The whole till surface, as its callers reach it: the merchant's ring-up, cancel and poll,
-    // the standard's three payer steps, and the cashier's own watch page. Rebuilt per call
-    // because a `Request` is consumed by the router, and each rebuild signs afresh because a
-    // merchant's signature is single-use.
+    // the standard's three payer steps, the page a generic camera lands on, and the cashier's own
+    // watch page. Rebuilt per call because a `Request` is consumed by the router, and each rebuild
+    // signs afresh because a merchant's signature is single-use.
     //
-    // The two POSTs name a DIFFERENT merchant than the charge the other five requests are about,
-    // because ringing one up voids that merchant's previous charge — the other five would then be
+    // The two POSTs name a DIFFERENT merchant than the charge the other six requests are about,
+    // because ringing one up voids that merchant's previous charge — the other six would then be
     // asking about a superseded code and meet a handler's honest 404 instead of its answer, which
     // is not what this test is measuring. They also run in this order on the serving relay: the
     // cancel has a charge to clear because the ring-up above it just made one.
@@ -3184,11 +3184,12 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
                     "/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF&tx=9f1c"
                 )),
             ),
+            ("GET /pl/".to_string(), get_req("/pl/?lightning=LNURL1TEST")),
             (format!("GET /till/{id}"), get_req(&format!("/till/{id}"))),
         ]
     };
 
-    // Served: each of the seven reaches its handler. WHAT each answers is pinned by the journey and
+    // Served: each of the eight reaches its handler. WHAT each answers is pinned by the journey and
     // golden tests; all that matters here is that these exact requests are not 404s by construction.
     for (what, req) in surface() {
         let (status, _headers, body) = call_raw(&serving, req).await;
@@ -3196,7 +3197,7 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
         assert!(!body.is_empty(), "{what}: a till handler always answers with a body");
     }
 
-    // Not served: the same seven against a relay that never asked for the till.
+    // Not served: the same eight against a relay that never asked for the till.
     let unserved = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(FakeIc::from_catalog());
     for (what, req) in surface() {
         let (status, _headers, body) = call_raw(&unserved, req).await;

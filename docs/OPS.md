@@ -19,7 +19,8 @@ upgrade loop they all serve. Every command here is founder-run; none may run una
 ### The command
 
 ```bash
-just reconcile        # every catalog currency (the ids the relay's compiled catalog serves)
+just reconcile        # currency ids 0–9 — the hardcoded CURRENCIES list in scripts/reconcile.sh,
+                      # kept current by hand when the compiled catalog grows
 just reconcile 7      # just VCHF — the targeted form for a single-currency report
 ```
 
@@ -59,7 +60,8 @@ canister's CONTROLLER cell. Rotate in this order — the canister must accept th
 BEFORE the relay starts signing with it, or every admin op 422s until it does:
 
 1. Generate the new seed: `NEW_SEED="$(openssl rand -hex 32)"` (do not print it).
-2. Derive its principal: `cargo run -q -p dpay-icp-e2e --bin dev-principal -- "$NEW_SEED"`.
+2. Derive its principal: `printf '%s' "$NEW_SEED" | cargo run -q -p dpay-icp-e2e --bin dev-principal -- --from-stdin`
+   (the seed rides stdin, never argv — argv is visible in `ps` during the whole build+run window).
 3. Rotate the cell — as the CURRENT controller (two-step; a locked canister can only be
    rotated by its controller, see `docs/GOVERNANCE.md`):
    `dfx canister call ssqti-wiaaa-aaaab-qhdia-cai set_controller '(opt principal "<NEW_PRINCIPAL>")' --network ic`

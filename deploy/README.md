@@ -20,9 +20,8 @@ rehearsal against a local `dfx` replica, and mainnet.
 
 **Public surface.** `/` serves the marketing landing page, `/wallet` the web wallet (the real
 RN-web app; `/merchant` 308-redirects there), `/privacy` the app and website privacy policy, the
-JSON API lives under `/api/v1/`
-(`/api/v1/health`, `/api/v1/pay`, `/api/v1/faucet`, `/api/v1/balances/{hex}`,
-`/api/v1/receipt/{nonce}`), and the Android app is at `/download/dpay.apk`.
+JSON API lives under `/api/v1/` (`/api/v1/health`, `/api/v1/faucet`,
+`/api/v1/balances/{hex}`), and the Android app is at `/download/dpay.apk`.
 
 ## One-time tunnel setup
 

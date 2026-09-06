@@ -78,7 +78,8 @@ fi
 echo "   ok: seed present, 32-byte Ed25519"
 
 echo "== leg 2: seed derives the relay's signing principal =="
-SEED_PRINCIPAL="$(cargo run -q -p dpay-icp-e2e --bin dev-principal -- "$SEED_HEX")" \
+# Seed over stdin (--from-stdin), never argv — argv is visible in `ps` during the build+run.
+SEED_PRINCIPAL="$(printf '%s' "$SEED_HEX" | cargo run -q -p dpay-icp-e2e --bin dev-principal -- --from-stdin)" \
   || { echo "FAIL: could not derive the seed's principal (cargo run -p dpay-icp-e2e --bin dev-principal)" >&2; exit 1; }
 echo "   ok: seed ⇒ $SEED_PRINCIPAL (the identity the relay signs as)"
 
