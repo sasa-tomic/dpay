@@ -202,6 +202,17 @@ dump_ui() {
   return 1
 }
 
+# rid_text <resource-id>: the text of the first node carrying resource-id ("" when absent)
+rid_text() {
+  python3 - "$ART/ui.xml" "$1" <<'PY'
+import sys, xml.etree.ElementTree as ET
+for n in ET.parse(sys.argv[1]).getroot().iter('node'):
+    if n.get('resource-id') == sys.argv[2]:
+        print(n.get('text') or '')
+        break
+PY
+}
+
 # tap_rid <resource-id>: tap the center of the first node carrying resource-id
 tap_rid() {
   local rid="$1"
@@ -286,7 +297,32 @@ check_screen() {
   local label="$1" rid="$2" which="$3"
   tap_rid balance
   sleep 2
-  tap_rid "$rid"
+  # The accounts list is longer than one viewport — the target row (e.g. USDC · Solana) can sit
+  # below the uiautomator fold. Scroll-and-retry until the row anchor is in the dumped viewport,
+  # then tap and VERIFY the header label changed (a row select always switches the active asset;
+  # a label that didn't change means the tap missed — re-scroll and tap again).
+  local sel_ok=""
+  for attempt in 1 2 3; do
+    local pre_label=""
+    for _ in 1 2 3 4 5; do
+      dump_ui || { sleep 1; continue; }
+      pre_label="$(rid_text active-asset-label)"
+      if grep -q "resource-id=\"$rid\"" "$ART/ui.xml"; then break; fi
+      $ADB shell input swipe 540 1700 540 700 300 || true
+      sleep 1
+    done
+    grep -q "resource-id=\"$rid\"" "$ART/ui.xml" || { echo "FAIL nav: anchor '$rid' not found (scrolled); ui dump: $ART/ui.xml"; exit 1; }
+    tap_rid "$rid"
+    sleep 2
+    dump_ui || true
+    local post_label; post_label="$(rid_text active-asset-label)"
+    echo "   row select attempt $attempt: '$pre_label' → '$post_label'"
+    if [ -n "$post_label" ] && [ "$post_label" != "$pre_label" ]; then sel_ok=1; break; fi
+  done
+  [ -n "$sel_ok" ] || { echo "FAIL nav: row select did not take (label stayed '$(rid_text active-asset-label)'); ui dump: $ART/ui.xml"; exit 1; }
+  # Post-S3 (Balances modal retired): selecting an asset row keeps the wallet on the Home tab —
+  # land the Pay surface explicitly before the scan gate.
+  tap_rid tab-pay
   sleep 2
   # Pay-intent gate (2026-08-23): the scan surface starts disarmed — camera and NFC mount only
   # after "Pay Now". Press the gate BEFORE resolving the camera box; RN testID surfaces as
@@ -361,6 +397,11 @@ if 'mnemonic-backup-checkbox' in rids:
         print('btn-mnemonic-continue')
 elif 'mnemonic-word-0' in rids:
     print('SCROLL')
+elif 'btn-home-currency-back' in rids:
+    # tapping a currency card also EXPANDS its per-rail detail panel (EUR landing, 2026-09-06),
+    # which pushes Continue below the uiautomator viewport; collapse it (selection is kept) so
+    # btn-home-currency-continue returns to the visible viewport.
+    print('btn-home-currency-back')
 elif 'home-currency-USD' in rids:
     # home-currency picker (2026-09 onboarding): radio card — only tap while UNCHECKED
     # (avoids toggle loops); Continue while still disabled is a harmless no-op.
@@ -373,6 +414,14 @@ elif 'btn-create' in rids:
     print('btn-create')
 elif 'btn-onboard-continue' in rids:
     print('btn-onboard-continue')
+elif 'btn-walkthrough-next' in rids:
+    # post-creation "How dpay works" tour (flows 88/89): auto-opens on a fresh wallet and
+    # blocks the Wallet surface; its Next is also the final "Get started" (same testID).
+    print('btn-walkthrough-next')
+elif 'btn-rehearsal-next' in rids:
+    # post-creation payment rehearsal coach (flow 87): same fresh-wallet gate; its Next is
+    # also the final "Try with demo funds" (same testID).
+    print('btn-rehearsal-next')
 PY
 )"
     if [ "$step" = "SCROLL" ]; then
