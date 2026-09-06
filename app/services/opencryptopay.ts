@@ -646,10 +646,11 @@ function unpayableMessage(
 ): string {
   // An expired quote refuses everything, so it is the whole story — say that, not "wrong asset".
   if (ctx.nowMs >= details.quoteExpiresAt) return M.pay.ocp.quoteExpired;
-  // The one asset this wallet CARRIES and the till TAKES but dpay will not pay: USDC on Solana,
-  // whose destination account is ambiguous in the provider's own URI.
+  // The one asset this wallet CARRIES and the till TAKES but dpay will not pay: tokens on Solana
+  // ('solana-usdc-unsupported' is the provider's own reason literal — the refusal the relay still
+  // sends for the USDC case), whose destination token account is ambiguous in the provider's URI.
   if (ctx.selected.id === 'solana:USDC' && refused.some(r => r.reason === 'solana-usdc-unsupported')) {
-    return M.pay.ocp.solanaUsdcUnsupported;
+    return M.pay.ocp.solanaTokenUnsupported(ctx.selected.symbol);
   }
   // The till DOES take the selected asset, but the provider says it cannot settle that method right
   // now. Matched against the selected asset, never "some method was unavailable": the live provider

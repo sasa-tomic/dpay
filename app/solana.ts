@@ -15,12 +15,13 @@
 
 import bs58 from 'bs58';
 import {SOLANA_RPC_URL, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
-import {solanaUsdcAvailable} from './config/assets';
+import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
 import {fmtAsset} from './lib/format';
 import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, buildMemoInstruction, buildSolTransferInstruction, type Instruction} from './solana/tx';
-import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalUsdcMessage, deriveAta, USDC_MINT_ADDRESS, USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
+import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalSplMessage, deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
+import {solanaTokenInfo, solanaTokenOfMint} from './solana/tokens';
 import {utf8ToBytes} from './lib/base64url';
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
@@ -110,13 +111,14 @@ export async function getSolSignatureStatus(
   return status;
 }
 
-/** Phase 6 — Build, sign, broadcast, and confirm an SPL Token `transfer` of `amount` raw USDC (6
- *  decimals) to `destAddress`. The recipient is a base58 Solana WALLET address (the same shape SOL
- *  send takes); the recipient's USDC Associated Token Account is DERIVED from it. Signs LOCALLY with
- *  the device-derived key (non-custodial — same shape as sendSol).
+/** Phase 6 — Build, sign, broadcast, and confirm an SPL Token `transfer` of `amount` raw units of
+ *  the registry token `mint` (at its `decimals`) to `destAddress`. The recipient is a base58 Solana
+ *  WALLET address (the same shape SOL send takes); the recipient's Associated Token Account for the
+ *  mint is DERIVED from it. Signs LOCALLY with the device-derived key (non-custodial — same shape
+ *  as sendSol).
  *
- *  FAIL-CLOSED sender check: the device's source ATA must exist on-chain (you cannot send USDC you
- *  don't hold an account for — the error names the sender, the first check).
+ *  FAIL-CLOSED sender check: the device's source ATA must exist on-chain (you cannot send tokens
+ *  you don't hold an account for — the error names the sender, the first check).
  *
  *  RECIPIENT AUTO-CREATE (2026-08-14 founder-approved): if the recipient's ATA is missing, the SAME
  *  transaction carries an AssociatedTokenProgram.createIdempotent instruction BEFORE the transfer —
@@ -128,29 +130,36 @@ export async function getSolSignatureStatus(
  *  Throws if SOL is offline, if the sender ATA is missing, on a network/RPC error, or if the
  *  on-chain tx fails. Returns the signature. Reuses the byte-exact `buildSplTransferInstruction` +
  *  `buildCreateAtaIdempotentInstruction` (proven in solana-spl.test.ts). */
-export async function sendSpl(secretHex: string, destAddress: string, amount: bigint, signal?: AbortSignal): Promise<string> {
+export async function sendSpl(
+  secretHex: string,
+  destAddress: string,
+  amount: bigint,
+  mint: string,
+  signal?: AbortSignal,
+): Promise<string> {
   if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
+  const token = solanaTokenOfMint(mint);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const senderAddress = bs58.encode(publicKey);
-  const senderAta = deriveAta(senderAddress, USDC_MINT_ADDRESS);
-  const recipientAta = deriveAta(destAddress, USDC_MINT_ADDRESS);
+  const senderAta = deriveAta(senderAddress, mint);
+  const recipientAta = deriveAta(destAddress, mint);
   const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
 
-  // Sender ATA first — the device must hold a USDC account to debit from (fail-closed).
+  // Sender ATA first — the device must hold the token account to debit from (fail-closed).
   if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
-    throw new Error(M.errors.solana.senderNoUsdcAccount);
+    throw new Error(M.errors.solana.senderNoTokenAccount(token ?? mint));
   }
   // Recipient ATA — if missing, create it in the same tx (sender pays the one-time rent, disclosed
   // upstream on the review screen; idempotent so a race with another creator is harmless).
   const ixs: Instruction[] = [];
   if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
-    // Honest cost pre-check (mirrors createUsdcAta): without it the send passes review and dies at
+    // Honest cost pre-check (mirrors createTokenAta): without it the send passes review and dies at
     // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
     const lamports = await getBalance(SOLANA_RPC_URL, senderAddress, {signal});
     if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-      throw new Error(M.errors.solana.recipientNoUsdcAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)));
+      throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
     }
-    ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(USDC_MINT_ADDRESS)));
+    ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(mint)));
   }
   ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));
 
@@ -192,10 +201,11 @@ export type SolanaPayTransfer = {
  *      the same rent pre-check + disclosure sendSpl has. SOL path uses a System transfer, the
  *      USDC path uses `transferChecked` (commits mint + decimals, the solana-pay SDK's choice).
  *
- *  Supports exactly the mints the app catalog supports (USDC mainnet) — anything else is refused
- *  by name at the scan surface, so reaching here with a foreign mint is a wiring error and is
- *  thrown as such. `onBroadcast` carries the same "accepted, pre-confirmation" contract as
- *  sendSol. Throws offline / on RPC error / on-chain failure; returns the signature. */
+ *  Supports exactly the mints the token registry supports (`solana/tokens.ts` — USDC + EURC
+ *  mainnet) — anything else is refused by name at the scan surface AND here, so reaching this seam
+ *  with a foreign mint is a wiring error and is thrown as such (the error NAMES the mint pubkey).
+ *  `onBroadcast` carries the same "accepted, pre-confirmation" contract as sendSol. Throws
+ *  offline / on RPC error / on-chain failure; returns the signature. */
 export async function sendSolanaPay(
   secretHex: string,
   transfer: SolanaPayTransfer,
@@ -203,8 +213,11 @@ export async function sendSolanaPay(
   onBroadcast?: (signature: string) => void,
 ): Promise<string> {
   if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
-  if (transfer.splToken !== null && transfer.splToken !== USDC_MINT_ADDRESS) {
-    throw new Error('unsupported spl-token mint for Solana Pay');
+  if (transfer.splToken !== null) {
+    const token = solanaTokenOfMint(transfer.splToken);
+    if (token === null) {
+      throw new Error(`unsupported spl-token mint for Solana Pay: ${transfer.splToken}`);
+    }
   }
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
@@ -217,21 +230,26 @@ export async function sendSolanaPay(
     const senderAddress = bs58.encode(publicKey);
     const senderAta = deriveAta(senderAddress, transfer.splToken);
     const recipientAta = deriveAta(transfer.recipient, transfer.splToken);
+    const token = solanaTokenOfMint(transfer.splToken) ?? transfer.splToken;
     // Sender ATA first — the device must hold the token account to debit from (fail-closed, same
     // as sendSpl).
     if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
-      throw new Error(M.errors.solana.senderNoUsdcAccount);
+      throw new Error(M.errors.solana.senderNoTokenAccount(token));
     }
     if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
       // Same honest cost pre-check as sendSpl: without it the payment passes review and dies at
       // broadcast with a raw program error no friendlySolError pattern matches.
       const lamports = await getBalance(SOLANA_RPC_URL, senderAddress, {signal});
       if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-        throw new Error(M.errors.solana.recipientNoUsdcAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)));
+        throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token));
       }
       ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(transfer.recipient), base58Decode32(transfer.splToken)));
     }
-    ixs.push(buildTransferCheckedInstruction(senderAta, base58Decode32(transfer.splToken), recipientAta, publicKey, transfer.amount, USDC_DECIMALS, referenceKeys));
+    // The registry's decimals for this mint — transferChecked commits to mint + decimals, so a
+    // foreign/wrong decimals can never satisfy the payment.
+    const decimals = solanaTokenInfo(solanaTokenOfMint(transfer.splToken) ?? '')?.decimals;
+    if (decimals == null) throw new Error(`unsupported spl-token mint for Solana Pay: ${transfer.splToken}`);
+    ixs.push(buildTransferCheckedInstruction(senderAta, base58Decode32(transfer.splToken), recipientAta, publicKey, transfer.amount, decimals, referenceKeys));
   }
 
   const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
@@ -243,29 +261,31 @@ export async function sendSolanaPay(
   return signature;
 }
 
-/** One-time USDC account (ATA) setup for THIS device's wallet — the receiver-side onboarding for
- *  Solana USDC (2026-08-14). Builds, signs LOCALLY (device key), broadcasts, and confirms a single
- *  AssociatedTokenProgram.createIdempotent instruction (payer = owner = the device key, mint =
- *  USDC). Non-custodial: the device key signs; dpay never holds keys or funds.
+/** One-time token account (ATA) setup for THIS device's wallet — the receiver-side onboarding for
+ *  a registered Solana SPL token (2026-08-14; generalized per-mint 2026-09-06). Builds, signs
+ *  LOCALLY (device key), broadcasts, and confirms a single AssociatedTokenProgram.createIdempotent
+ *  instruction (payer = owner = the device key, mint = `mint`). Non-custodial: the device key
+ *  signs; dpay never holds keys or funds.
  *
  *  Honest cost: the one-time account rent + transaction fee come out of the device's SOL balance.
  *  Pre-checked with a friendly error when the balance can't cover the ESTIMATE (the chain enforces
  *  the real value — the constant is display/pre-check only, never trust-bearing). Throws when SOL
  *  is offline, when the rail is incoherent (mainnet mint on a non-mainnet RPC), on insufficient
  *  SOL, or on any RPC/on-chain failure. Returns the transaction signature. */
-export async function createUsdcAta(secretHex: string, signal?: AbortSignal): Promise<string> {
-  if (!SOLANA_RPC_URL || !solanaUsdcAvailable()) throw new Error(M.errors.solana.usdcUnavailable);
+export async function createTokenAta(secretHex: string, mint: string, signal?: AbortSignal): Promise<string> {
+  const token = solanaTokenOfMint(mint);
+  if (!SOLANA_RPC_URL || !solanaTokenAvailable(mint)) throw new Error(M.errors.solana.tokenUnavailable(token ?? mint));
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const ownerAddress = bs58.encode(publicKey);
-  const ata = deriveAta(ownerAddress, USDC_MINT_ADDRESS);
+  const ata = deriveAta(ownerAddress, mint);
   const {getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
 
   const lamports = await getBalance(SOLANA_RPC_URL, ownerAddress, {signal});
   if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-    throw new Error(M.errors.solana.ownUsdcAccountRent(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT)));
+    throw new Error(M.errors.solana.ownTokenAccountRent(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
   }
 
-  const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(USDC_MINT_ADDRESS));
+  const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(mint));
   const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
   const message = assembleMessage(publicKey, [ix], base58Decode32(blockhash));
   const raw = signTransaction(message, seed);
@@ -285,54 +305,57 @@ export async function createUsdcAta(secretHex: string, signal?: AbortSignal): Pr
 // it into per-status state for the Wallet.
 // ============================================================================
 
-/** The Solana USDC balance result — a discriminated union capturing the four states the plan requires
- *  stay distinct at the seam boundary (the hook maps them to per-status UI state):
- *    - `offline`: SOLANA_RPC_URL empty (offline inner loop) OR `solanaUsdcAvailable()` false (a
- *      mainnet mint pointed at a non-mainnet RPC — fail-closed rather than read a non-existent token).
- *      No network call is made.
- *    - `absent`: the device's USDC ATA does NOT exist on-chain. The user has never received USDC;
- *      this is a KNOWN zero, not an unverifiable state.
- *    - `balance`: ATA exists and `getTokenAccountBalance` returned the exact raw `amount` (a decimal-
- *      digit STRING — money-critical, never coerced through JS `number`) + `decimals` (USDC = 6).
- *      A zero balance is `{kind:'balance', amount:'0', decimals:6}` — still a balance, not absent.
- *    - `error`: RPC failure (existence check or balance read threw). Transient/unverifiable; the hook
- *      preserves any prior amount (it does NOT turn a prior value into zero). */
-export type SolanaUsdcBalanceResult =
+/** The Solana token balance result — a discriminated union capturing the four states the plan
+ *  requires stay distinct at the seam boundary (the hook maps them to per-status UI state):
+ *    - `offline`: SOLANA_RPC_URL empty (offline inner loop) OR `solanaTokenAvailable(mint)` false
+ *      (a mainnet mint pointed at a non-mainnet RPC — fail-closed rather than read a non-existent
+ *      token). No network call is made.
+ *    - `absent`: the device's token account for the mint does NOT exist on-chain. The user has
+ *      never received this token; this is a KNOWN zero, not an unverifiable state.
+ *    - `balance`: the ATA exists and `getTokenAccountBalance` returned the exact raw `amount` (a
+ *      decimal-digit STRING — money-critical, never coerced through JS `number`) + `decimals`
+ *      (the chain's own answer, expected to equal the registry's). A zero balance is
+ *      `{kind:'balance', amount:'0', …}` — still a balance, not absent.
+ *    - `error`: RPC failure (existence check or balance read threw). Transient/unverifiable; the
+ *      hook preserves any prior amount (it does NOT turn a prior value into zero). */
+export type SolanaTokenBalanceResult =
   | {kind: 'offline'}
   | {kind: 'absent'}
   | {kind: 'balance'; amount: string; decimals: number}
   | {kind: 'error'};
 
-/** Read the device's USDC ATA balance as a discriminated result. Derives the device ATA from the
- *  seed + USDC mint, checks on-chain existence, and if present reads the exact raw token balance.
+/** Read the device's token-account balance for `mint` as a discriminated result. Derives the
+ *  device ATA from the seed + mint, checks on-chain existence, and if present reads the exact raw
+ *  token balance.
  *
  *  ONLINE — returns `{kind:'offline'}` (no throw, no network) when `SOLANA_RPC_URL` is empty OR
- *  `solanaUsdcAvailable()` is false (mirroring `getSolanaBalance`'s offline no-op). On any RPC error returns `{kind:'error'}` and
- *  logs the ATA + message at `console.warn` (debuggability — a silent error here would render as a
- *  stale balance forever). */
-export async function getSolanaUsdcBalance(
+ *  `solanaTokenAvailable(mint)` is false (mirroring `getSolanaBalance`'s offline no-op). On any RPC
+ *  error returns `{kind:'error'}` and logs the ATA + message at `console.warn` (debuggability — a
+ *  silent error here would render as a stale balance forever). */
+export async function getSolanaTokenBalance(
   secretHex: string,
+  mint: string,
   signal?: AbortSignal,
-): Promise<SolanaUsdcBalanceResult> {
-  if (!SOLANA_RPC_URL || !solanaUsdcAvailable()) return {kind: 'offline'};
+): Promise<SolanaTokenBalanceResult> {
+  if (!SOLANA_RPC_URL || !solanaTokenAvailable(mint)) return {kind: 'offline'};
   const {accountExists, getTokenAccountBalance} = await import('./solana/rpc');
   const address = deriveSolanaAddress(secretHex);
-  const ataAddress = bs58.encode(deriveAta(address, USDC_MINT_ADDRESS));
+  const ataAddress = bs58.encode(deriveAta(address, mint));
   try {
     const exists = await accountExists(SOLANA_RPC_URL, ataAddress, {signal});
     if (!exists) return {kind: 'absent'};
     const {amount, decimals} = await getTokenAccountBalance(SOLANA_RPC_URL, ataAddress, {signal});
     return {kind: 'balance', amount, decimals};
   } catch (e) {
-    console.warn(`getSolanaUsdcBalance: RPC failure for ATA ${ataAddress}:`, e instanceof Error ? e.message : String(e));
+    console.warn(`getSolanaTokenBalance: RPC failure for ATA ${ataAddress}:`, e instanceof Error ? e.message : String(e));
     return {kind: 'error'};
   }
 }
 
 /** Whether the Solana RPC rail is configured (RPC URL non-empty). A pure sync read of the constant —
  *  independent of relay `online` (plan invariant #9 — the relay could be reachable while SOL RPC is
- *  not, or vice versa). The USDC-coherence sense (a mainnet mint pointed at a non-mainnet RPC) is the
- *  separate `solanaUsdcAvailable()` predicate. */
+ *  not, or vice versa). The token-coherence sense (a mainnet mint pointed at a non-mainnet RPC) is
+ *  the separate `solanaTokenAvailable(mint)` predicate. */
 export function isSolanaRpcAvailable(): boolean {
   return SOLANA_RPC_URL !== '';
 }
@@ -356,7 +379,7 @@ export async function createSolPaymentRequest(
   input: {
     to: string;
     amt: string;
-    cur: 'SOL' | 'USDC';
+    cur: string;
     mint: string | null;
     toAta: string | null;
     name: string;
@@ -414,13 +437,18 @@ export function signSolPayment(secretHex: string, request: SolReqV2): SolPayV2 {
   return {v: 2, ...payInput};
 }
 
-/** OFFLINE payer (USDC). NO network. Same as `signSolPayment` with the USDC canonical builder
- *  (`{Memo, Token.transferChecked}` — commits to mint + decimals + ATAs). */
+/** OFFLINE payer (any registered SPL token — USDC, EURC, …). NO network. Same as `signSolPayment`
+ *  with the generic SPL canonical builder (`{Memo, Token.transferChecked}` — commits to the
+ *  request mint + ITS registry decimals + ATAs). Dispatch is per token: the decimals come from
+ *  the registry via the request's `cur`/`mint`, never from a hard-coded literal. */
 export function signSplPayment(secretHex: string, request: SolReqV2): SolPayV2 {
-  if (request.cur !== 'USDC') throw new Error('signSplPayment: expected USDC currency');
-  if (!request.mint || !request.toAta) throw new Error('signSplPayment: mint and toAta required for USDC');
+  if (request.cur === 'SOL') throw new Error('signSplPayment: expected an SPL-token currency (not SOL)');
+  if (!request.mint || !request.toAta) throw new Error('signSplPayment: mint and toAta required for an SPL token');
+  const info = solanaTokenInfo(request.cur);
+  const decimals = info?.mint === request.mint ? info.decimals : solanaTokenInfo(solanaTokenOfMint(request.mint) ?? '')?.decimals;
+  if (decimals == null) throw new Error(`signSplPayment: unsupported spl-token (cur=${request.cur}, mint=${request.mint})`);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
-  const message = buildCanonicalUsdcMessage(publicKey, request);
+  const message = buildCanonicalSplMessage(publicKey, request, decimals);
   const tx = signTransaction(message, seed);
   const payInput: SolPayInput = {rid: request.rid, tx};
   return {v: 2, ...payInput};
@@ -480,10 +508,17 @@ export async function broadcastSolPayment(
     return {status: RECEIPT_REJECTED, rid, sig: ''};
   }
 
-  // 3. Build the expected canonical message from the open request + extracted payer.
-  const expectedMessage = request.cur === 'SOL'
-    ? buildCanonicalSolMessage(parts.feePayer, request)
-    : buildCanonicalUsdcMessage(parts.feePayer, request);
+  // 3. Build the expected canonical message from the open request + extracted payer. Non-SOL
+  //    requests carry a registry mint; the canonical builder commits to ITS registry decimals.
+  let expectedMessage: Uint8Array;
+  if (request.cur === 'SOL') {
+    expectedMessage = buildCanonicalSolMessage(parts.feePayer, request);
+  } else {
+    const info = solanaTokenInfo(request.cur);
+    const decimals = info?.mint === request.mint ? info.decimals : solanaTokenInfo(solanaTokenOfMint(request.mint ?? '') ?? '')?.decimals;
+    if (decimals == null) throw new Error(`broadcastSolPayment: unsupported spl-token mint ${request.mint}`);
+    expectedMessage = buildCanonicalSplMessage(parts.feePayer, request, decimals);
+  }
 
   // 4. STRICT verify: signed message must be byte-equal to the canonical rebuild + Ed25519 valid.
   //    Failure is BLOCKING (invariant #5) — never broadcast a semantically wrong signature.

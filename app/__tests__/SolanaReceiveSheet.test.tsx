@@ -20,8 +20,8 @@ import {describe, test, expect} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {SolanaReceiveSheet} from '../components/SolanaReceiveSheet';
+import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import {QrCode} from '../components/QrCode';
-import {USDC_MINT_ADDRESS} from '../solana/spl';
 
 const ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 const OWNER = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -44,11 +44,18 @@ function pressByTestID(tree: renderer.ReactTestRenderer, testID: string): void {
 }
 
 function mount(props: Partial<Parameters<typeof SolanaReceiveSheet>[0]> = {}) {
+  // The sheet is prop-driven: a token is named by its literal AND its mint (registry truth).
+  // Default the mint the way the production caller does (the selected row's mint) so existing
+  // token:'USDC' tests exercise the SPL path exactly as the app wires it.
+  const mint = props.mint !== undefined
+    ? props.mint
+    : (props.token != null && props.token !== 'SOL' ? USDC_MINT_ADDRESS : null);
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
       <SolanaReceiveSheet
         address={ADDR}
+        mint={mint}
         onClose={() => {}}
         {...props}
       />,

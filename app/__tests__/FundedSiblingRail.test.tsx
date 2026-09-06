@@ -18,7 +18,7 @@ import {M} from '../i18n';
 const ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
   showTestnet: false,
   solanaEnabled: true,
-  solanaUsdc: true,
+  solanaTokens: true,
 });
 
 // Wrapped in a host View so the NULL renders (the pointer's most common case) still leave a

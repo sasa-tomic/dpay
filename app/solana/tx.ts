@@ -368,7 +368,7 @@ export function buildCanonicalSolMessage(payer: Uint8Array, request: SolReqV2): 
  * message to be BYTE-EQUAL to the canonical message rebuilt from the open request + payer pubkey,
  * and verifies the Ed25519 signature. NEVER throws across the UI boundary — every failure returns
  * `{ok:false, reason}`. The caller rebuilds `expectedMessage` via buildCanonicalSolMessage /
- * buildCanonicalUsdcMessage so this function stays currency-agnostic (and avoids a tx.ts↔spl.ts
+ * buildCanonicalSplMessage so this function stays currency-agnostic (and avoids a tx.ts↔spl.ts
  * circular import).
  */
 export type SolVerifyResult = { ok: true; payer: string; signature: string } | { ok: false; reason: string };

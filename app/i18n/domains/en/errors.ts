@@ -32,16 +32,17 @@ export type ErrorMessages = {
     feeUnavailable: string;
   };
 
-  /** Solana rail — the device-key send path and the one-time USDC account (ATA) setup. */
+  /** Solana rail — the device-key send path and the one-time token account (ATA) setup. Every
+   *  key names the ASSET it is about (USDC, EURC, …) — no token is hard-coded in the copy. */
   solana: {
     offline: string;
-    usdcUnavailable: string;
-    /** Fail-closed sender check: you cannot send USDC you hold no account for. */
-    senderNoUsdcAccount: string;
-    /** The recipient has no USDC account; the sender pays its one-time rent and is short of SOL. */
-    recipientNoUsdcAccount: (solAmount: string) => string;
+    tokenUnavailable: (asset: string) => string;
+    /** Fail-closed sender check: you cannot send a token you hold no account for. */
+    senderNoTokenAccount: (asset: string) => string;
+    /** The recipient has no token account; the sender pays its one-time rent and is short of SOL. */
+    recipientNoTokenAccount: (solAmount: string, asset: string) => string;
     /** Same rent, own account — the receive-side onboarding pre-check. */
-    ownUsdcAccountRent: (solAmount: string) => string;
+    ownTokenAccountRent: (solAmount: string, asset: string) => string;
   };
 
   /** The user's OWN Ethereum wallet during the ckERC20 onramp (injected provider / WalletConnect). */
@@ -114,12 +115,12 @@ export const errorsEn: ErrorMessages = {
 
   solana: {
     offline: 'Solana is offline (no RPC endpoint configured)',
-    usdcUnavailable: 'Solana USDC is not available (no RPC endpoint configured)',
-    senderNoUsdcAccount: "Your wallet doesn't have a USDC account yet",
-    recipientNoUsdcAccount: solAmount =>
-      `They don't have a USDC account yet — creating it needs about ${solAmount} of SOL in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`,
-    ownUsdcAccountRent: solAmount =>
-      `Creating your USDC account needs about ${solAmount} in this wallet (one-time account rent + fee) — send a little SOL here first`,
+    tokenUnavailable: asset => `Solana ${asset} is not available (no RPC endpoint configured)`,
+    senderNoTokenAccount: asset => `Your wallet doesn't have a ${asset} account yet`,
+    recipientNoTokenAccount: (solAmount, asset) =>
+      `They don't have a ${asset} account yet — creating it needs about ${solAmount} of SOL in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`,
+    ownTokenAccountRent: (solAmount, asset) =>
+      `Creating your ${asset} account needs about ${solAmount} in this wallet (one-time account rent + fee) — send a little SOL here first`,
   },
 
   ethWallet: {

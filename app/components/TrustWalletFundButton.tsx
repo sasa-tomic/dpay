@@ -6,8 +6,14 @@ import {trustWalletSendUrl, type TrustWalletAsset} from '../trustwallet';
 import {IconExternalLink} from './icons';
 import {M} from '../i18n';
 
-/** The asset name spoken in the a11y hint (SOL-USDC is a USDC send on Solana). */
-const ASSET_LABEL: Record<TrustWalletAsset, string> = {BTC: 'BTC', SOL: 'SOL', 'SOL-USDC': 'USDC'};
+/** The asset name spoken in the a11y hint. Fixed ids are self-describing; an SPL mint is not (a
+ *  base58 pubkey is no symbol), so the caller supplies the token's symbol via `assetName`. */
+function assetLabelOf(asset: TrustWalletAsset, assetName?: string): string {
+  if (assetName) return assetName;
+  if (asset === 'BTC') return 'BTC';
+  if (asset === 'SOL') return 'SOL';
+  return 'SPL token';
+}
 
 /**
  * TrustWalletFundButton — one-tap "Fund from Trust Wallet" (2026-08-17 plan).
@@ -25,7 +31,7 @@ const ASSET_LABEL: Record<TrustWalletAsset, string> = {BTC: 'BTC', SOL: 'SOL', '
  * already routes to a download landing, so an openURL failure is not the not-installed case).
  * Static chrome (no motion) — matches the sibling ghost buttons, so no reduced-motion branch.
  */
-export function TrustWalletFundButton({asset, address}: {asset: TrustWalletAsset; address: string}) {
+export function TrustWalletFundButton({asset, address, assetName}: {asset: TrustWalletAsset; address: string; assetName?: string}) {
   const [failed, setFailed] = useState(false);
   if (Platform.OS !== 'android') return null;
   const open = () => {
@@ -40,7 +46,7 @@ export function TrustWalletFundButton({asset, address}: {asset: TrustWalletAsset
         onPress={open}
         accessibilityRole="button"
         accessibilityLabel={M.deposit.trust.fund}
-        accessibilityHint={M.deposit.trust.fundHint(ASSET_LABEL[asset])}
+        accessibilityHint={M.deposit.trust.fundHint(assetLabelOf(asset, assetName))}
         accessibilityState={{disabled: false}}>
         <IconExternalLink size={16} color={C.sub} />
         <Text style={S.ghostBtnText}>{M.deposit.trust.fund}</Text>

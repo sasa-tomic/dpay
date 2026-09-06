@@ -5,7 +5,7 @@ import {IconAlert} from './icons';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
-import {SOL_ATA_SETUP_MIN_LAMPORTS, USDC_MINT_ADDRESS} from '../solana/spl';
+import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {buildSolanaPayUri, createSolanaPayReference} from '../solana/payUri';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
@@ -16,13 +16,14 @@ import {InstrLine} from './InstrLine';
 import {M} from '../i18n';
 
 /**
- * Receive SOL or Solana-USDC — the device's native deposit address, rendered inline in the Receive
- * tab's "My address" sub-mode. Asset-aware: when `token === 'USDC'`, the displayed address is the
- * device's derived USDC ATA (passed in by SolReceiveMode via `deriveAta(solAddress,
- * USDC_MINT_ADDRESS)`), the instructions describe USDC (not SOL), and `ataStatus` gates what the
- * user sees (2026-08-14 audit: tri-state, fail-closed, never a false claim):
+ * Receive any registered Solana asset (native SOL or an SPL token: USDC, EURC, …) — the device's
+ * deposit address, rendered inline in the Receive tab's "My address" sub-mode. Asset-aware: for a
+ * token (`token !== 'SOL'`), the displayed address is the device's derived token account (passed
+ * in by SolReceiveMode via `deriveAta(solAddress, mint)`), the instructions describe THAT token
+ * (`symbol`), and `ataStatus` gates what the user sees (2026-08-14 audit: tri-state, fail-closed,
+ * never a false claim):
  *
- *   - 'ready'      → the address + QR (the ATA exists on-chain; USDC sent here can land).
+ *   - 'ready'      → the address + QR (the token account exists on-chain; tokens sent here land).
  *   - 'absent'     → the one-tap setup card (SolanaAtaSetupCard) INSTEAD of the QR — the user is
  *                    not misled into sharing an address the Token program would reject.
  *   - 'checking'   → an honest in-progress state (M.deposit.sol.checkingAta) on the first poll;
@@ -30,15 +31,18 @@ import {M} from '../i18n';
  *   - 'unverified' → M.deposit.sol.ataUnverified + Retry (RPC down/error) — fail-closed, no QR, but
  *                    NO false "you don't have one" claim either.
  *
- * Native SOL (`token === 'SOL'`, the default) never gates — the device key IS the account; it
- * always renders 'ready'. There is no relay/minter round-trip for either token: the address is
- * local + instant, the balance poll reflects a send on confirmation. `onClose` is wired via the
- * tab's toggle (no overlay ✕).
+ * Every token fact arrives as a prop (`token`/`mint`/`decimals`/`symbol` — the selected asset row);
+ * the sheet itself holds NO token literals. Native SOL (`token === 'SOL'`, the default) never
+ * gates — the device key IS the account; it always renders 'ready'. There is no relay/minter
+ * round-trip for any of them: the address is local + instant, the balance poll reflects a send on
+ * confirmation. `onClose` is wired via the tab's toggle (no overlay ✕).
  */
 export function SolanaReceiveSheet({
   address,
   uriRecipient,
   token = 'SOL',
+  mint = null,
+  symbol,
   ataStatus = 'ready',
   ataSetupBusy = false,
   ataSetupErr = null,
@@ -53,7 +57,15 @@ export function SolanaReceiveSheet({
 }: {
   address: string;
   uriRecipient?: string;
-  token?: 'SOL' | 'USDC';
+  /** The registry token literal ('SOL', 'USDC', 'EURC', …) — selects the native-vs-SPL branch. */
+  token?: string;
+  /** The token's mint pubkey (null for SOL). Drives the Solana-Pay `spl-token` param + ATA gating. */
+  mint?: string | null;
+  /** The token's registry decimals (9 for SOL). Interface parity with the selected asset row —
+   *  this surface renders no amounts, so it is not bound in the body. */
+  decimals?: number;
+  /** The token's display symbol ('SOL', 'USDC', 'EURC', …). Defaults to `token`. */
+  symbol?: string;
   ataStatus?: 'ready' | 'absent' | 'checking' | 'unverified';
   ataSetupBusy?: boolean;
   ataSetupErr?: string | null;
@@ -71,28 +83,29 @@ export function SolanaReceiveSheet({
   const [reference] = useState(createSolanaPayReference);
 
   const copy = useCallback(async () => { await doCopy(address); }, [address, doCopy]);
-  const isUsdc = token === 'USDC';
+  const isSpl = token !== 'SOL' && mint != null;
   const payUri = buildSolanaPayUri(uriRecipient ?? address, {
-    splToken: isUsdc ? USDC_MINT_ADDRESS : null,
+    splToken: isSpl ? mint : null,
     reference,
   });
   // The asset NAME, not copy — it names the token the sentences are about (never a ledger id).
-  const assetLabel = isUsdc ? 'USDC' : 'SOL';
-  const status = isUsdc ? ataStatus : 'ready';
+  const assetLabel = symbol ?? token;
+  const status = isSpl ? ataStatus : 'ready';
   const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
   // SOL balance unconfirmed (loading/unavailable): the setup card says "checking", never claims
   // insufficiency on an unknown state (2026-08-16 UX review finding 9).
   const checkingSol = solBalance == null;
 
-  // USDC readiness gate — see the doc comment. SOL always renders the address.
+  // Token-readiness gate — see the doc comment. SOL always renders the address.
   if (status !== 'ready') {
     return (
       <View style={S.sheetBody}>
         {status === 'absent' ? (
           <SolanaAtaSetupCard
+            asset={assetLabel}
             instrTestID="sol-receive-instructions"
             btnTestID="btn-sol-ata-create"
-            buttonLabel={M.deposit.sol.createAtaLabel}
+            buttonLabel={M.deposit.sol.createAtaLabel(assetLabel)}
             hasSol={hasSol}
             checkingSol={checkingSol}
             busy={ataSetupBusy}
@@ -103,12 +116,12 @@ export function SolanaReceiveSheet({
         ) : status === 'checking' ? (
           <>
             <ActivityIndicator style={{marginTop: 24}} color={C.brand} />
-            <Text testID="sol-ata-checking" style={S.dim2}>{M.deposit.sol.checkingAta}</Text>
+            <Text testID="sol-ata-checking" style={S.dim2}>{M.deposit.sol.checkingAta(assetLabel)}</Text>
           </>
         ) : (
           <View testID="sol-ata-unverified" style={S.instrCard}>
-            <Text style={S.instrLine}>{M.deposit.sol.ataUnverified}</Text>
-            <Text style={S.instrCustody}>{M.deposit.sol.ataUnverifiedDetail}</Text>
+            <Text style={S.instrLine}>{M.deposit.sol.ataUnverified(assetLabel)}</Text>
+            <Text style={S.instrCustody}>{M.deposit.sol.ataUnverifiedDetail(assetLabel)}</Text>
           </View>
         )}
         {status === 'unverified' && onRetryAta ? (
@@ -117,8 +130,8 @@ export function SolanaReceiveSheet({
             style={S.primaryWide}
             onPress={onRetryAta}
             accessibilityRole="button"
-            accessibilityLabel={M.deposit.sol.retryAtaLabel}
-            accessibilityHint={M.deposit.sol.retryAtaHint}>
+            accessibilityLabel={M.deposit.sol.retryAtaLabel(assetLabel)}
+            accessibilityHint={M.deposit.sol.retryAtaHint(assetLabel)}>
             <Text style={S.primaryText}>{M.deposit.sol.checkAgain}</Text>
           </Pressable>
         ) : null}
@@ -138,7 +151,7 @@ export function SolanaReceiveSheet({
   return (
     <View style={S.sheetBody}>
       <View testID="sol-receive-instructions" style={S.instrCard}>
-        <InstrLine runs={M.deposit.sol.sendToAddress(assetLabel, isUsdc ? 'Solana USDC' : 'Solana')} />
+        <InstrLine runs={M.deposit.sol.sendToAddress(assetLabel, isSpl ? `Solana ${assetLabel}` : 'Solana')} />
         <Text style={S.instrCustody}>{M.deposit.sol.custody(assetLabel)}</Text>
         {IS_SOLANA_DEVNET ? (
           // P4 pattern — '⚠' text glyph is a leading IconAlert (mirrors SolanaAtaSetupCard's
@@ -190,11 +203,11 @@ export function SolanaReceiveSheet({
       </Pressable>
 
       {/* Trust Wallet send deep link (2026-08-17 plan): mainnet only — devnet has no Trust
-          asset id (copy/QR status quo). USDC links the SPL asset id (send to this ATA); the
-          sheet only renders the address branch when the account exists ('ready'), so the
-          button inherits the same can-receive gate. */}
+          asset id (copy/QR status quo). A token links its SPL asset id c501_t<mint> (send to
+          this token account); the sheet only renders the address branch when the account exists
+          ('ready'), so the button inherits the same can-receive gate. */}
       {!IS_SOLANA_DEVNET ? (
-        <TrustWalletFundButton asset={isUsdc ? 'SOL-USDC' : 'SOL'} address={address} />
+        <TrustWalletFundButton asset={isSpl && mint != null ? (`SPL:${mint}` as const) : 'SOL'} address={address} assetName={assetLabel} />
       ) : null}
 
       {/* Return-to-pay link (2026-08-16 UX review): when the user landed here from a fund-first

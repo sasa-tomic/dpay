@@ -46,7 +46,7 @@ describe('never-override: pinned payment paths cannot reach the spend-side rail 
   }
 
   const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
-  const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
   const DEST = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 
   test('a link naming USDC@Solana resolves to the NAMED rail, not the preferred/funded ckUSDC', () => {

@@ -4,8 +4,8 @@
  * Pins, byte-exact, the ONLY thing that leaves the app on this path: the send URL Trust's
  * docs define (https://link.trustwallet.com/send?asset=<UAI>&address=<addr>). The UAIs come
  * from the wallet-core registry (research 2026-08-17 — no testnet ids exist), and the
- * SOL-USDC id embeds the app's single mainnet USDC mint source (spl.ts) — asserted here so a
- * mint change can't silently desync the deep link.
+ * SPL asset id embeds the mint it is handed (c501_t<mint>) — the USDC golden below asserts the
+ * registry mint byte-for-byte so a mint change can't silently desync the deep link.
  *
  * Also pins the IC-rail eligibility predicate: mainnet CkBtcUtxo ONLY (testnet ckBTC and the
  * whole CkEthErc20 family stay off the Trust path — WC owns calldata; testnet has no UAI).
@@ -33,8 +33,8 @@ describe('trustWalletSendUrl — golden URLs', () => {
       .toBe(`https://link.trustwallet.com/send?asset=c501&address=${SOL_ADDR}`);
   });
 
-  test('SOL-USDC → SPL asset id c501_t<mint>, mint sourced from spl.ts (single source)', () => {
-    expect(trustWalletSendUrl('SOL-USDC', SOL_ADDR))
+  test('SPL:<mint> → SPL asset id c501_t<mint>, mint sourced from the token registry', () => {
+    expect(trustWalletSendUrl(`SPL:${USDC_MINT_ADDRESS}`, SOL_ADDR))
       .toBe(`https://link.trustwallet.com/send?asset=c501_t${USDC_MINT_ADDRESS}&address=${SOL_ADDR}`);
   });
 

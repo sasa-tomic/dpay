@@ -64,6 +64,7 @@ import {encodeSolReq, type SolReqInput} from '../solana/qr';
 import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, type SolanaSignatureStatus} from '../solana';
 import {payAndReport, resolveOcpOffer, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {buildSelectableAssets} from '../config/assets';
+import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import {POLL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {SolPayMode} from '../components/SolPayMode';
@@ -112,14 +113,15 @@ function solPayElement(props: Partial<SolPayModeProps> = {}) {
       homeCurrency={null}
       balances={{}}
       solBalance="5000000000"
-      usdcBalance="0"
-      usdcAtaAbsent={false}
+      tokenBalance="0"
+      tokenAtaAbsent={false}
+      tokenBalances={{}}
       payGate="none"
       selectedToken="SOL"
       onSent={() => {}}
-      onSentUsdc={() => {}}
+      onSentToken={() => {}}
       onShowSolAddress={() => {}}
-      onShowUsdcAddress={() => {}}
+      onShowTokenAddress={() => {}}
       onRecheckBalances={() => {}}
       subMode="scan"
       onSubModeChange={() => {}}
@@ -520,7 +522,7 @@ const OCP_TARGET: OcpTarget = {
 const SOL_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
   showTestnet: false,
   solanaEnabled: true,
-  solanaUsdc: true,
+  solanaTokens: true,
 });
 
 function mountTill(props: Partial<SolPayModeProps> = {}) {
@@ -555,7 +557,7 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     jest.mocked(resolveOcpOffer).mockResolvedValue({kind: 'ok', target: OCP_TARGET});
     // USDC selected: the one asset this rail carries that a till may decline. Funded, so the Pay
     // tab reaches the scan surface rather than the fund-first panel.
-    const tree = mountTill({selectedToken: 'USDC', usdcBalance: '5000000'});
+    const tree = mountTill({selectedToken: 'USDC', tokenBalance: '5000000', tokenBalances: {[USDC_MINT_ADDRESS]: {amount: '5000000', status: 'balance'}}});
     await scanTill(tree);
 
     expect(textByTestID(tree, 'ocp-choose')).toBe(M.pay.ocp.chooseAsset('USDC'));
@@ -696,11 +698,11 @@ describe('SolPayMode — OpenCryptoPay till', () => {
   });
 
   test('a refusal from the provider sequence stays on the scan screen, and nothing is sent', async () => {
-    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'refused', message: M.pay.ocp.solanaUsdcUnsupported});
+    jest.mocked(resolveOcpScan).mockResolvedValue({kind: 'refused', message: M.pay.ocp.solanaTokenUnsupported('USDC')});
     const tree = mountTill();
     await scanTill(tree);
 
-    expect(texts(tree)).toContain(M.pay.ocp.solanaUsdcUnsupported);
+    expect(texts(tree)).toContain(M.pay.ocp.solanaTokenUnsupported('USDC'));
     expect(hasTestID(tree, 'btn-approve')).toBe(false);
     expect(sendSol).not.toHaveBeenCalled();
   });
@@ -712,7 +714,7 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     const tree = mountTill();
     await scanTill(tree);
 
-    expect(texts(tree)).toContain(M.pay.ocp.solanaUsdcUnsupported);
+    expect(texts(tree)).toContain(M.pay.ocp.solanaTokenUnsupported('USDC'));
     expect(hasTestID(tree, 'btn-approve')).toBe(false);
   });
 
@@ -946,7 +948,6 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
 
 describe('SolPayMode — a scanned Solana Pay request (the open standard the receive QR speaks)', () => {
   const REFERENCE = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
-  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
   /** Scan any payload through the real camera gate — the entry a merchant's printed QR takes. */
   async function scanCode(tree: renderer.ReactTestRenderer, uri: string) {
@@ -1014,16 +1015,16 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
     act(() => { tree.unmount(); });
   });
 
-  test('a spl-token request pays USDC via the recipient ATA path and reports onSentUsdc', async () => {
-    const sentUsdc: string[] = [];
-    const tree = mountSolPay({usdcBalance: '2000000', onSentUsdc: () => sentUsdc.push('usdc')});
-    await scanCode(tree, `solana:${MERCHANT}?spl-token=${USDC_MINT}&amount=1.5&reference=${REFERENCE}`);
+  test('a spl-token request pays USDC via the recipient ATA path and reports onSentToken with its mint', async () => {
+    const sentMints: string[] = [];
+    const tree = mountSolPay({tokenBalance: '2000000', tokenBalances: {[USDC_MINT_ADDRESS]: {amount: '2000000', status: 'balance'}}, onSentToken: mint => sentMints.push(mint ?? '')});
+    await scanCode(tree, `solana:${MERCHANT}?spl-token=${USDC_MINT_ADDRESS}&amount=1.5&reference=${REFERENCE}`);
     expect(textByTestID(tree, 'sol-pay-amount')).toContain('1.500000 USDC');
     expect(hasTestID(tree, 'sol-spay-ata-note')).toBe(true);
     await pressByLabel(tree, M.pay.approveA11y);
     const [, transfer] = jest.mocked(sendSolanaPay).mock.calls[0];
-    expect(transfer).toEqual({recipient: MERCHANT, splToken: USDC_MINT, amount: 1500000n, references: [REFERENCE], memo: null});
-    expect(sentUsdc).toEqual(['usdc']);
+    expect(transfer).toEqual({recipient: MERCHANT, splToken: USDC_MINT_ADDRESS, amount: 1500000n, references: [REFERENCE], memo: null});
+    expect(sentMints).toEqual([USDC_MINT_ADDRESS]);
     act(() => { tree.unmount(); });
   });
 
@@ -1053,9 +1054,9 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
   });
 
   test('a USDC request against a wallet with no USDC account is refused at the scan, by name', async () => {
-    const tree = mountSolPay({usdcAtaAbsent: true});
-    await scanCode(tree, `solana:${MERCHANT}?spl-token=${USDC_MINT}&amount=1.5`);
-    expect(errText(tree)).toBe(M.errors.solana.senderNoUsdcAccount);
+    const tree = mountSolPay({tokenBalances: {[USDC_MINT_ADDRESS]: {amount: null, status: 'absent'}}});
+    await scanCode(tree, `solana:${MERCHANT}?spl-token=${USDC_MINT_ADDRESS}&amount=1.5`);
+    expect(errText(tree)).toBe(M.errors.solana.senderNoTokenAccount('USDC'));
     act(() => { tree.unmount(); });
   });
 
@@ -1121,7 +1122,7 @@ describe('SolPayMode — the funded-sibling pointer on the fund gates (Objective
     const tree = mountTill({
       homeCurrency: 'USD',
       balances: {'ic:2': {displayText: '5.00 ckUSDC', status: 'ok'}},
-      payGate: 'usdc-zero',
+      payGate: 'token-zero',
       selectedToken: 'USDC',
       onSwitchRail,
     });

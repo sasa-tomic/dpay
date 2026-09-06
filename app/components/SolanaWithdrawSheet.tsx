@@ -10,7 +10,8 @@ import {awardPaymentTested} from '../lib/readiness';
 import {detectAddressShape, routeForSolana, chainNameOfShape} from '../lib/destination';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from '../solana/identity';
-import {USDC_DECIMALS, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {solanaTokenInfo} from '../solana/tokens';
 import {sendSol, sendSpl} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
@@ -32,20 +33,20 @@ const SOL_NETWORK = 'Solana';
  * ed25519 via noble) and broadcasts directly to the Solana RPC — no relay, no DpayCore, no facade.
  * The non-custodial gate is the on-device SLIP-10 key itself.
  *
- * The `token` prop selects which transfer path runs:
+ * The `token` prop (a registry symbol — 'SOL', 'USDC', 'EURC', …) selects which transfer path runs:
  *   - 'SOL'  → System Program Transfer (sendSol). `balance` is lamports (9 decimals).
- *   - 'USDC' → SPL Token transfer (sendSpl). `balance` is USDC base units (6 decimals). The recipient
- *              is still a base58 Solana WALLET address — the recipient ATA is derived internally by
- *              sendSpl. If the recipient has NO USDC account yet, sendSpl creates it IN THE SAME
- *              transaction (real createIdempotent instruction; the sender pays the one-time rent,
- *              disclosed on the review card via `sol-send-ata-note`). The device's source ATA is
- *              pre-checked here via `usdcAtaAbsent` — when absent, the form is replaced by the
- *              same one-tap "Create my USDC account" setup card the Receive tab has (2026-08-14;
- *              was a dead-end "set one up elsewhere" message).
+ *   - a token → SPL Token transfer (sendSpl at that token's mint + decimals — both passed in from
+ *              the selected asset row). The recipient is still a base58 Solana WALLET address —
+ *              the recipient ATA is derived internally by sendSpl. If the recipient has NO token
+ *              account yet, sendSpl creates it IN THE SAME transaction (real createIdempotent
+ *              instruction; the sender pays the one-time rent, disclosed on the review card via
+ *              `sol-send-ata-note`). The device's source ATA is pre-checked here via `ataAbsent` —
+ *              when absent, the form is replaced by the same one-tap account-setup card the
+ *              Receive tab has (2026-08-14; was a dead-end "set one up elsewhere" message).
  *
  * Rendered inline in the Pay tab's "Send to address" sub-mode. The testIDs stay token-agnostic
  * (`sol-send-*`) — "send" applies to both SOL and SPL. The review-amount text carries the unit
- * (USDC vs SOL) so e2e can distinguish them.
+ * (USDC vs EURC vs SOL) so e2e can distinguish them.
  *
  * The destination is the SHARED `AddressField` — the same input, scanner button and saved-address
  * list the IC rail uses — over the shared `destination.ts` classifier. Before this it was a bare
@@ -53,7 +54,7 @@ const SOL_NETWORK = 'Solana';
  * Bitcoin address pasted into the wrong wallet, and which offered neither a scanner nor an address
  * book that the IC surface had. CLAUDE.md's same-surfaces rule calls that divergence a bug.
  */
-export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onSent, onClose}: {identity: Identity; token: 'SOL' | 'USDC'; balance: string; usdcAtaAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string} | null; onPrefillConsumed?: () => void; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onSent, onClose}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string} | null; onPrefillConsumed?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -84,14 +85,14 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefill, phase]);
 
-  const decimals = token === 'SOL' ? SOL_DECIMALS : USDC_DECIMALS;
-  const unit = token === 'SOL' ? SOL_UNIT : 'USDC';
-  const isUsdc = token === 'USDC';
+  const isSpl = token !== 'SOL';
+  const decimals = decimalsProp ?? (isSpl ? solanaTokenInfo(token)?.decimals ?? SOL_DECIMALS : SOL_DECIMALS);
+  const unit = symbol ?? token;
   // Every amount on this sheet is the same token at the same precision — one formatter, one place.
   const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, unit);
 
-  // Per-token address book, mirroring the IC rail's `ic:<currency>` key: SOL and USDC are sent to
-  // the same KIND of address but to different people, so one shared list would mix two audiences.
+  // Per-token address book, mirroring the IC rail's `ic:<currency>` key: distinct tokens are sent
+  // to the same KIND of address but to different people, so one shared list would mix audiences.
   const assetKey = `sol:${token}`;
   useEffect(() => {
     let alive = true;
@@ -145,15 +146,18 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
     setErr(null);
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     try {
-      // Branch on token: SOL → System Transfer; USDC → SPL Token transfer (recipient ATA derived +
-      // fail-closed checked inside sendSpl). Both sign locally + broadcast directly to the RPC.
-      const sig = isUsdc
-        ? await sendSpl(identity.secretHex, destination, BigInt(raw), signal)
+      // Branch on token: SOL → System Transfer; a registry token → SPL Token transfer at its own
+      // mint (recipient ATA derived + fail-closed checked inside sendSpl; an unchecked Token
+      // transfer needs no decimals — the mint fixes them). Both sign locally + broadcast to the RPC.
+      const splMint = isSpl ? mint : null;
+      if (isSpl && splMint == null) throw new Error(`no mint for token ${token}`);
+      const sig = splMint != null
+        ? await sendSpl(identity.secretHex, destination, BigInt(raw), splMint, signal)
         : await sendSol(identity.secretHex, destination, BigInt(raw), signal);
       setSignature(sig);
       setPhase('done');
       void rememberAddress(assetKey, destination, saveName.trim(), Date.now());
-      onSent(); // trigger an immediate balance refresh (SOL or USDC — the parent wires the right one)
+      onSent(); // trigger an immediate balance refresh (per-token — the parent wires the right one)
       awardPaymentTested(journey);
     } catch (e: unknown) {
       // A Solana RPC error (insufficient funds / rent-exempt violation / network / missing ATA) or abort.
@@ -168,21 +172,22 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
     if (signature) { await doCopy(signature); }
   };
 
-  // Phase 6 fail-closed + 2026-08-14 setup action: USDC send when the device's ATA is KNOWN absent
-  // → the shared one-tap setup card (SolanaAtaSetupCard — same surface as the Receive tab). You
-  // can't send USDC you don't have an account for; the card offers the REAL one-tap create
-  // (device-key-signed createIdempotent tx) instead of a dead end. On success the parent's ATA
-  // refresh flips `usdcAtaAbsent` and the form appears. Only 'absent' gates — loading/error/
+  // Phase 6 fail-closed + 2026-08-14 setup action: token send when the device's ATA is KNOWN
+  // absent → the shared one-tap setup card (SolanaAtaSetupCard — same surface as the Receive
+  // tab). You can't send tokens you don't have an account for; the card offers the REAL one-tap
+  // create (device-key-signed createIdempotent tx) instead of a dead end. On success the parent's
+  // ATA refresh flips `ataAbsent` and the form appears. Only 'absent' gates — loading/error/
   // unavailable states let the form through (the send itself fails honestly if the ATA is missing).
-  if (isUsdc && usdcAtaAbsent) {
+  if (isSpl && ataAbsent) {
     const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
     const checkingSol = solBalance == null;
     return (
       <View style={S.sheetBody}>
         <SolanaAtaSetupCard
+          asset={unit}
           instrTestID="sol-send-instructions"
           btnTestID="btn-sol-send-ata-create"
-          buttonLabel={M.withdraw.sol.createAtaLabel}
+          buttonLabel={M.withdraw.sol.createAtaLabel(unit)}
           hasSol={hasSol}
           checkingSol={checkingSol}
           busy={ataSetupBusy}
@@ -254,24 +259,24 @@ export function SolanaWithdrawSheet({identity, token, balance, usdcAtaAbsent, so
             value={amountStr}
             onChangeText={setAmountStr}
             keyboardType="decimal-pad"
-            placeholder={isUsdc ? M.withdraw.sol.usdcAmountPlaceholder : M.withdraw.sol.solAmountPlaceholder}
+            placeholder={isSpl ? M.withdraw.sol.tokenAmountPlaceholder : M.withdraw.sol.solAmountPlaceholder}
             placeholderTextColor={C.sub2}
           />
 
           {overBalance ? <Text style={S.warnNote}>{M.withdraw.overBalance(fmt(balance))}</Text> : null}
-          {/* Known-zero SOL while sending USDC (2026-08-16 UX review finding 13): fees + a possible
+          {/* Known-zero SOL while sending a token (2026-08-16 UX review finding 13): fees + a possible
               recipient-ATA creation are paid in SOL — say so BEFORE the user types an amount, so
-              a funded-USDC/zero-SOL wallet learns the real constraint up front (honest, no block). */}
-          {isUsdc && !solChecking && solBalance === '0' ? <Text testID="sol-send-needs-sol" style={S.warnNote}>{M.withdraw.sol.needsSol}</Text> : null}
+              a funded-token/zero-SOL wallet learns the real constraint up front (honest, no block). */}
+          {isSpl && !solChecking && solBalance === '0' ? <Text testID="sol-send-needs-sol" style={S.warnNote}>{M.withdraw.sol.needsSol(unit)}</Text> : null}
 
           {(phase === 'form' || phase === 'error') && raw !== '0' ? (
             <View testID="sol-send-review" style={S.reviewCard}>
               <Text style={S.reviewLabel}>{M.withdraw.sol.reviewTitle}</Text>
               <Text testID="sol-send-review-amount" style={S.reviewAmount}>{M.withdraw.sol.sendAmount(fmt(raw))}</Text>
               <Text style={S.reviewTo}>{M.withdraw.toDestination(address.trim() || '—')}</Text>
-              {isUsdc ? (
+              {isSpl ? (
                 <Text testID="sol-send-ata-note" style={S.dim2}>
-                  {M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT))}
+                  {M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), unit)}
                 </Text>
               ) : null}
             </View>

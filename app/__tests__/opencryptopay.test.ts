@@ -60,7 +60,7 @@ const SOLANA_URI = `solana:${SOL_ADDR}?amount=1.246922`;
 const WALLET_ASSETS: SelectableAsset[] = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
   showTestnet: false,
   solanaEnabled: true,
-  solanaUsdc: true,
+  solanaTokens: true,
 });
 
 // A step-2 body. RECORDED: the payment id `pl_beeddb41cd4b6d9e`, the CHF-1 fixed-amount till, the

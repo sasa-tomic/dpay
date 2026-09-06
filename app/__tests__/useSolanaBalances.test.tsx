@@ -1,35 +1,39 @@
 /**
- * useSolanaBalances — Phase 2 hook that polls native SOL lamports AND the device's USDC ATA balance
- * CONCURRENTLY with INDEPENDENT statuses + generation guards + AbortControllers. The two rails are
- * fully decoupled so a confirmed SOL send refreshes SOL only and a confirmed SPL send refreshes USDC
- * only (no conflation). Key behaviors under test (mirrors the plan's Phase 2 invariants):
- *   - SOL and USDC poll independently — a SOL-only stub change doesn't disturb USDC status and vice versa.
- *   - Missing ATA → usdc.status 'absent' (NOT 'error', NOT zeroed balance).
+ * useSolanaBalances — Phase 2 hook that polls native SOL lamports AND the device's token accounts
+ * (per-mint, one independent status each) CONCURRENTLY with generation guards + AbortControllers.
+ * The rails are fully decoupled so a confirmed SOL send refreshes SOL only and a confirmed SPL
+ * send refreshes only the mint that moved (no conflation). Key behaviors under test:
+ *   - SOL and token polls are independent — a SOL stub change doesn't disturb any mint and vice versa.
+ *   - Per-mint independence — a USDC poll failure does not flip the EURC status.
+ *   - Missing account → that mint's status 'absent' (NOT 'error', NOT zeroed amount).
  *   - RPC failure preserves the prior amount (status 'error', amount kept — NEVER zeroed).
- *   - refreshSol / refreshUsdc targeted refresh — each re-polls its own rail without disturbing the other.
- *   - Offline (empty RPC URL) → sol.status 'unavailable', usdc.status 'unavailable', NO network call.
+ *   - refreshSol / refreshToken(mint) targeted refresh — each re-polls its own rail only.
+ *   - Membership change: a NEW mint seeds 'loading' without flashing existing mints; a REMOVED
+ *     mint drops out of the record.
+ *   - Offline (empty RPC URL) → 'unavailable' everywhere, NO network call.
  *   - Generation guard: changing identity/address aborts in-flight + drops stale results.
  *
- * The seam (`getSolanaBalance` / `getSolanaUsdcBalance`) is mocked so the test exercises HOOK LOGIC
- * only; the seam-level "no network when offline" behavior is proven in solana-seam.test.ts.
+ * The seam (`getSolanaBalance` / `getSolanaTokenBalance`) is mocked so the test exercises HOOK
+ * LOGIC only; the seam-level "no network when offline" behavior is proven in solana-seam.test.ts.
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 
-// Mock the seam — the hook imports { getSolanaBalance, getSolanaUsdcBalance } from '../solana'.
+// Mock the seam — the hook imports { getSolanaBalance, getSolanaTokenBalance } from '../solana'.
 // Each test configures the mock returns to exercise a specific hook behavior.
 jest.mock('../solana', () => ({
   getSolanaBalance: jest.fn(),
-  getSolanaUsdcBalance: jest.fn(),
+  getSolanaTokenBalance: jest.fn(),
 }));
 
-import {getSolanaBalance, getSolanaUsdcBalance} from '../solana';
+import {getSolanaBalance, getSolanaTokenBalance} from '../solana';
+import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 import {POLL} from '../config/constants';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 
 const mockedGetSolanaBalance = getSolanaBalance as jest.MockedFunction<typeof getSolanaBalance>;
-const mockedGetSolanaUsdcBalance = getSolanaUsdcBalance as jest.MockedFunction<typeof getSolanaUsdcBalance>;
+const mockedGetSolanaTokenBalance = getSolanaTokenBalance as jest.MockedFunction<typeof getSolanaTokenBalance>;
 
 // POLL.balance is captured by constants.ts at module-load time; the per-file __DPAY_TEST_POLL
 // override would be set too late. Tests advance by the live value instead so they're robust to
@@ -37,6 +41,7 @@ const mockedGetSolanaUsdcBalance = getSolanaUsdcBalance as jest.MockedFunction<t
 
 const SECRET_HEX = '4f66b8c0a9b6e1f2d3a4c5b6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6';
 const SOL_ADDRESS = '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU';
+const IDLE_TOKEN = {amount: null, decimals: null, status: 'loading'} as const;
 
 type Api = ReturnType<typeof useSolanaBalances>;
 
@@ -44,23 +49,24 @@ type Api = ReturnType<typeof useSolanaBalances>;
 // holds across re-renders. Avoids @testing-library/react-hooks (not a project dep) — mirrors the
 // useCopyFeedback.test.tsx idiom.
 function Harness({
-  secretHex, solAddress, apiRef,
+  secretHex, solAddress, mints, apiRef,
 }: {
   secretHex: string | null;
   solAddress: string | null;
+  mints: string[];
   apiRef: React.MutableRefObject<Api | null>;
 }) {
-  const api = useSolanaBalances(secretHex, solAddress);
+  const api = useSolanaBalances(secretHex, solAddress, mints);
   apiRef.current = api;
   return <></>;
 }
 
-function renderHook(secretHex: string | null, solAddress: string | null) {
+function renderHook(secretHex: string | null, solAddress: string | null, mints: string[] = []) {
   const apiRef: React.MutableRefObject<Api | null> = {current: null};
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(
-      <Harness secretHex={secretHex} solAddress={solAddress} apiRef={apiRef} />,
+      <Harness secretHex={secretHex} solAddress={solAddress} mints={mints} apiRef={apiRef} />,
     );
   });
   return {apiRef, tree};
@@ -76,68 +82,80 @@ describe('useSolanaBalances', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     mockedGetSolanaBalance.mockReset();
-    mockedGetSolanaUsdcBalance.mockReset();
+    mockedGetSolanaTokenBalance.mockReset();
   });
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  test('initial state is loading on both rails', () => {
+  test('initial state is loading on every rail', () => {
     mockedGetSolanaBalance.mockReturnValue(new Promise(() => {})); // never resolves
-    mockedGetSolanaUsdcBalance.mockReturnValue(new Promise(() => {}));
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockReturnValue(new Promise(() => {}));
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     expect(apiRef.current!.sol).toEqual({balance: null, status: 'loading'});
-    expect(apiRef.current!.usdc).toEqual({amount: null, decimals: null, status: 'loading'});
+    expect(apiRef.current!.tokens).toEqual({[USDC_MINT_ADDRESS]: IDLE_TOKEN});
     act(() => { tree.unmount(); });
   });
 
   test('SOL poll success → sol.status "ok" + balance', async () => {
     mockedGetSolanaBalance.mockResolvedValue('1500000000');
-    mockedGetSolanaUsdcBalance.mockReturnValue(new Promise(() => {}));
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockReturnValue(new Promise(() => {}));
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
     expect(apiRef.current!.sol).toEqual({balance: '1500000000', status: 'ok'});
     act(() => { tree.unmount(); });
   });
 
-  test('USDC poll returns balance → usdc.status "balance" with exact amount + decimals', async () => {
+  test('token poll returns balance → per-mint status "balance" with exact amount + decimals', async () => {
     mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
-    mockedGetSolanaUsdcBalance.mockResolvedValue({kind: 'balance', amount: '1234567', decimals: 6});
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'balance', amount: '1234567', decimals: 6});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
-    expect(apiRef.current!.usdc).toEqual({amount: '1234567', decimals: 6, status: 'balance'});
+    expect(mockedGetSolanaTokenBalance).toHaveBeenCalledWith(SECRET_HEX, USDC_MINT_ADDRESS, expect.anything());
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '1234567', decimals: 6, status: 'balance'});
     act(() => { tree.unmount(); });
   });
 
-  test('missing ATA → usdc.status "absent" (NOT "error", NOT zeroed balance)', async () => {
+  test('missing account → that mint is "absent" (NOT "error", NOT zeroed amount)', async () => {
     mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
-    mockedGetSolanaUsdcBalance.mockResolvedValue({kind: 'absent'});
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'absent'});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
-    expect(apiRef.current!.usdc).toEqual({amount: null, decimals: null, status: 'absent'});
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: null, decimals: null, status: 'absent'});
     act(() => { tree.unmount(); });
   });
 
-  test('offline → sol.status "unavailable", usdc.status "unavailable", no rail activity', async () => {
+  test('offline → "unavailable" everywhere, no rail activity', async () => {
     // The seam returns null / {kind:'offline'} when SOLANA_RPC_URL is empty (jest.setup.js sets it
     // to ''). The hook translates those into 'unavailable' and MUST NOT touch the network.
     mockedGetSolanaBalance.mockResolvedValue(null);
-    mockedGetSolanaUsdcBalance.mockResolvedValue({kind: 'offline'});
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'offline'});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
     expect(apiRef.current!.sol).toEqual({balance: null, status: 'unavailable'});
-    expect(apiRef.current!.usdc).toEqual({amount: null, decimals: null, status: 'unavailable'});
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: null, decimals: null, status: 'unavailable'});
     act(() => { tree.unmount(); });
   });
 
-  test('SOL and USDC poll independently — a SOL failure does not flip the USDC status', async () => {
-    // SOL rejects (RPC error), USDC resolves cleanly. The two statuses must stay independent.
+  test('SOL and token polls are independent — a SOL failure does not flip any mint status', async () => {
+    // SOL rejects (RPC error), the mint resolves cleanly. The statuses must stay independent.
     mockedGetSolanaBalance.mockRejectedValue(new Error('sol rpc node degraded'));
-    mockedGetSolanaUsdcBalance.mockResolvedValue({kind: 'balance', amount: '500', decimals: 6});
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'balance', amount: '500', decimals: 6});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
     expect(apiRef.current!.sol.status).toBe('error');
-    expect(apiRef.current!.usdc).toEqual({amount: '500', decimals: 6, status: 'balance'});
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '500', decimals: 6, status: 'balance'});
+    act(() => { tree.unmount(); });
+  });
+
+  test('per-mint independence — a USDC failure does not flip the EURC status', async () => {
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockImplementation((_secret, mint) =>
+      mint === USDC_MINT_ADDRESS ? Promise.reject(new Error('rpc blip')) : Promise.resolve({kind: 'balance', amount: '42', decimals: 6}));
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS, EURC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('error');
+    expect(apiRef.current!.tokens[EURC_MINT_ADDRESS]).toEqual({amount: '42', decimals: 6, status: 'balance'});
     act(() => { tree.unmount(); });
   });
 
@@ -145,8 +163,8 @@ describe('useSolanaBalances', () => {
     // First poll: SOL resolves '2000000000'. Second poll: SOL rejects. The balance must persist.
     mockedGetSolanaBalance.mockResolvedValueOnce('2000000000');
     mockedGetSolanaBalance.mockRejectedValueOnce(new Error('transient rpc failure'));
-    mockedGetSolanaUsdcBalance.mockReturnValue(new Promise(() => {}));
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockReturnValue(new Promise(() => {}));
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); }); // first poll resolves
     expect(apiRef.current!.sol).toEqual({balance: '2000000000', status: 'ok'});
     await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); }); // second poll rejects
@@ -154,55 +172,84 @@ describe('useSolanaBalances', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('USDC RPC failure preserves the prior amount (status "error", amount kept — NEVER zeroed)', async () => {
+  test('token RPC failure preserves the prior amount (status "error", amount kept — NEVER zeroed)', async () => {
     mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
-    mockedGetSolanaUsdcBalance.mockResolvedValueOnce({kind: 'balance', amount: '7000000', decimals: 6});
-    mockedGetSolanaUsdcBalance.mockResolvedValueOnce({kind: 'error'});
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockResolvedValueOnce({kind: 'balance', amount: '7000000', decimals: 6});
+    mockedGetSolanaTokenBalance.mockResolvedValueOnce({kind: 'error'});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); }); // first poll → balance
-    expect(apiRef.current!.usdc).toEqual({amount: '7000000', decimals: 6, status: 'balance'});
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '7000000', decimals: 6, status: 'balance'});
     await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); }); // second poll → error
-    expect(apiRef.current!.usdc).toEqual({amount: '7000000', decimals: 6, status: 'error'}); // amount PRESERVED
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '7000000', decimals: 6, status: 'error'}); // amount PRESERVED
     act(() => { tree.unmount(); });
   });
 
-  test('refreshSol re-polls SOL without disturbing USDC', async () => {
+  test('refreshSol re-polls SOL without disturbing any mint', async () => {
     let solCalls = 0;
     mockedGetSolanaBalance.mockImplementation(() => Promise.resolve(String(++solCalls * 1000)));
-    let usdcCalls = 0;
-    mockedGetSolanaUsdcBalance.mockImplementation(() => {
-      ++usdcCalls;
+    let tokenCalls = 0;
+    mockedGetSolanaTokenBalance.mockImplementation(() => {
+      ++tokenCalls;
       return Promise.resolve({kind: 'balance', amount: '99', decimals: 6});
     });
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
-    const usdcCallsAfterFirst = usdcCalls;
-    const usdcStateAfterFirst = apiRef.current!.usdc;
+    const tokenCallsAfterFirst = tokenCalls;
+    const tokenStateAfterFirst = apiRef.current!.tokens[USDC_MINT_ADDRESS];
 
     await act(async () => { apiRef.current!.refreshSol(); await flushMicrotasks(); });
     expect(solCalls).toBeGreaterThanOrEqual(2); // SOL was re-polled
-    expect(usdcCalls).toBe(usdcCallsAfterFirst); // USDC NOT re-polled
-    expect(apiRef.current!.usdc).toBe(usdcStateAfterFirst); // USDC state untouched
+    expect(tokenCalls).toBe(tokenCallsAfterFirst); // the mint was NOT re-polled
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toBe(tokenStateAfterFirst); // mint state untouched
     act(() => { tree.unmount(); });
   });
 
-  test('refreshUsdc re-polls USDC without disturbing SOL', async () => {
+  test('refreshToken(mint) re-polls ONE mint without disturbing SOL or the sibling mint', async () => {
     let solCalls = 0;
     mockedGetSolanaBalance.mockImplementation(() => Promise.resolve(String(++solCalls * 1000)));
-    let usdcCalls = 0;
-    mockedGetSolanaUsdcBalance.mockImplementation(() => {
-      ++usdcCalls;
-      return Promise.resolve({kind: 'balance', amount: String(usdcCalls), decimals: 6});
+    const calls: Record<string, number> = {[USDC_MINT_ADDRESS]: 0, [EURC_MINT_ADDRESS]: 0};
+    mockedGetSolanaTokenBalance.mockImplementation((_secret, mint) => {
+      ++calls[mint];
+      return Promise.resolve({kind: 'balance', amount: String(calls[mint]), decimals: 6});
     });
-    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS);
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS, EURC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
     const solCallsAfterFirst = solCalls;
     const solStateAfterFirst = apiRef.current!.sol;
+    const usdcCallsAfterFirst = calls[USDC_MINT_ADDRESS];
 
-    await act(async () => { apiRef.current!.refreshUsdc(); await flushMicrotasks(); });
-    expect(usdcCalls).toBeGreaterThanOrEqual(2); // USDC was re-polled
+    await act(async () => { apiRef.current!.refreshToken(EURC_MINT_ADDRESS); await flushMicrotasks(); });
+    expect(calls[EURC_MINT_ADDRESS]).toBeGreaterThanOrEqual(2); // EURC was re-polled
+    expect(calls[USDC_MINT_ADDRESS]).toBe(usdcCallsAfterFirst); // USDC NOT re-polled
     expect(solCalls).toBe(solCallsAfterFirst); // SOL NOT re-polled
     expect(apiRef.current!.sol).toBe(solStateAfterFirst); // SOL state untouched
+    act(() => { tree.unmount(); });
+  });
+
+  test('membership change: a NEW mint seeds loading + a REMOVED mint drops out (no flashes)', async () => {
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'balance', amount: '5', decimals: 6});
+    const apiRef: React.MutableRefObject<Api | null> = {current: null};
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<Harness secretHex={SECRET_HEX} solAddress={SOL_ADDRESS} mints={[USDC_MINT_ADDRESS]} apiRef={apiRef} />);
+    });
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '5', decimals: 6, status: 'balance'});
+    // Grow the membership: EURC seeds 'loading'; USDC must NOT flash back to loading.
+    act(() => {
+      tree.update(<Harness secretHex={SECRET_HEX} solAddress={SOL_ADDRESS} mints={[USDC_MINT_ADDRESS, EURC_MINT_ADDRESS]} apiRef={apiRef} />);
+    });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '5', decimals: 6, status: 'balance'});
+    expect(apiRef.current!.tokens[EURC_MINT_ADDRESS]).toEqual(IDLE_TOKEN);
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[EURC_MINT_ADDRESS]).toEqual({amount: '5', decimals: 6, status: 'balance'});
+    // Shrink the membership: the dropped mint disappears entirely.
+    act(() => {
+      tree.update(<Harness secretHex={SECRET_HEX} solAddress={SOL_ADDRESS} mints={[USDC_MINT_ADDRESS]} apiRef={apiRef} />);
+    });
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[EURC_MINT_ADDRESS]).toBeUndefined();
     act(() => { tree.unmount(); });
   });
 
@@ -213,16 +260,16 @@ describe('useSolanaBalances', () => {
     const oldPromise = new Promise<string>((r) => { oldResolve = r; });
     mockedGetSolanaBalance.mockReturnValueOnce(oldPromise);
     mockedGetSolanaBalance.mockResolvedValue('NEW');
-    mockedGetSolanaUsdcBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockReturnValue(new Promise(() => {}));
 
     const apiRef: React.MutableRefObject<Api | null> = {current: null};
     let tree!: renderer.ReactTestRenderer;
     act(() => {
-      tree = renderer.create(<Harness secretHex={SECRET_HEX} solAddress={'OldAddr'} apiRef={apiRef} />);
+      tree = renderer.create(<Harness secretHex={SECRET_HEX} solAddress={'OldAddr'} mints={[USDC_MINT_ADDRESS]} apiRef={apiRef} />);
     });
     // Switch the address before the OLD poll resolves.
     act(() => {
-      tree.update(<Harness secretHex={SECRET_HEX} solAddress={'NewAddr'} apiRef={apiRef} />);
+      tree.update(<Harness secretHex={SECRET_HEX} solAddress={'NewAddr'} mints={[USDC_MINT_ADDRESS]} apiRef={apiRef} />);
     });
     // Now resolve the OLD poll — it must NOT update state (generation guard drops it).
     await act(async () => {
@@ -235,21 +282,21 @@ describe('useSolanaBalances', () => {
 
   test('null solAddress → no SOL polling (rail idle)', async () => {
     mockedGetSolanaBalance.mockResolvedValue('123');
-    mockedGetSolanaUsdcBalance.mockReturnValue(new Promise(() => {}));
-    const {apiRef, tree} = renderHook(SECRET_HEX, null);
+    mockedGetSolanaTokenBalance.mockReturnValue(new Promise(() => {}));
+    const {apiRef, tree} = renderHook(SECRET_HEX, null, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
     expect(mockedGetSolanaBalance).not.toHaveBeenCalled();
     expect(apiRef.current!.sol).toEqual({balance: null, status: 'loading'});
     act(() => { tree.unmount(); });
   });
 
-  test('null secretHex → no USDC polling (rail idle)', async () => {
+  test('null secretHex → no token polling (rail idle)', async () => {
     mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
-    mockedGetSolanaUsdcBalance.mockResolvedValue({kind: 'balance', amount: '1', decimals: 6});
-    const {apiRef, tree} = renderHook(null, SOL_ADDRESS);
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'balance', amount: '1', decimals: 6});
+    const {apiRef, tree} = renderHook(null, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
-    expect(mockedGetSolanaUsdcBalance).not.toHaveBeenCalled();
-    expect(apiRef.current!.usdc).toEqual({amount: null, decimals: null, status: 'loading'});
+    expect(mockedGetSolanaTokenBalance).not.toHaveBeenCalled();
+    expect(apiRef.current!.tokens).toEqual({});
     act(() => { tree.unmount(); });
   });
 });

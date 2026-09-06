@@ -1176,7 +1176,7 @@ describe('PayMode — the till outcome screen does not contradict itself', () =>
 
 describe('PayMode — the funded-sibling pointer on the fund-first gate (Objective 2, S5)', () => {
   const USD_CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
-  const USD_ASSETS = buildSelectableAssets(USD_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const USD_ASSETS = buildSelectableAssets(USD_CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
 
   test('an unfunded ckUSDC gate with a funded USDC sibling names it and offers the one-tap switch', () => {
     const onSwitchRail = jest.fn();

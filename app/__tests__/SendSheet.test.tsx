@@ -515,7 +515,7 @@ describe('SendSheet — a destination handed over by the camera', () => {
 
 describe('SendSheet — the route line names the rail for home-currency rails (Objective 2, S5)', () => {
   const CKUSDC = byId(2);
-  const USD_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const USD_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {showTestnet: false, solanaEnabled: true, solanaTokens: true});
   const CKUSDC_RAIL = USD_ASSETS.find(a => a.id === 'ic:2') ?? null;
 
   test('sending the home rail: the line names the RAIL and its own-unit fee, not the bare network', async () => {

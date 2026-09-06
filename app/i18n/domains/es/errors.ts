@@ -17,12 +17,12 @@ export const errorsEs: ErrorMessages = {
 
   solana: {
     offline: 'Solana está sin conexión (no hay endpoint RPC configurado)',
-    usdcUnavailable: 'El USDC de Solana no está disponible (no hay endpoint RPC configurado)',
-    senderNoUsdcAccount: 'Tu billetera aún no tiene una cuenta de USDC',
-    recipientNoUsdcAccount: solAmount =>
-      `Aún no tiene una cuenta de USDC: crearla requiere unos ${solAmount} de SOL en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
-    ownUsdcAccountRent: solAmount =>
-      `Crear tu cuenta de USDC requiere unos ${solAmount} en esta billetera (renta de la cuenta y comisión, una sola vez); envía un poco de SOL aquí primero`,
+    tokenUnavailable: asset => `El ${asset} de Solana no está disponible (no hay endpoint RPC configurado)`,
+    senderNoTokenAccount: asset => `Tu billetera aún no tiene una cuenta de ${asset}`,
+    recipientNoTokenAccount: (solAmount, asset) =>
+      `Aún no tiene una cuenta de ${asset}: crearla requiere unos ${solAmount} de SOL en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
+    ownTokenAccountRent: (solAmount, asset) =>
+      `Crear tu cuenta de ${asset} requiere unos ${solAmount} en esta billetera (renta de la cuenta y comisión, una sola vez); envía un poco de SOL aquí primero`,
   },
 
   ethWallet: {

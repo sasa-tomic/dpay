@@ -22,6 +22,7 @@ import renderer, {act} from 'react-test-renderer';
 import type {ReactTestInstance} from 'react-test-renderer';
 import {AssetPicker} from '../components/AssetPicker';
 import type {SelectableAsset} from '../config/assets';
+import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import type {BalanceView} from '../lib/assetBalances';
 import type {AssetId} from '../lib/types';
 
@@ -30,8 +31,8 @@ import type {AssetId} from '../lib/types';
 const ASSETS: SelectableAsset[] = [
   {id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', networkLabel: 'Internet Computer', network: null, decimals: 2, linkToken: 'DEMO', minFractionDigits: 0, visible: true, testKey: 'demo'},
   {id: 'ic:2', protocol: 'ic', currency: 2, symbol: 'USDC', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 6, linkToken: 'ckUSDC', minFractionDigits: 0, visible: true, testKey: 'ckusdc'},
-  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', decimals: 9, linkToken: 'SOL', minFractionDigits: 0, visible: true, testKey: 'sol'},
-  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', decimals: 6, linkToken: 'USDC', minFractionDigits: 0, visible: true, testKey: 'sol-usdc'},
+  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', mint: null, decimals: 9, linkToken: 'SOL', minFractionDigits: 0, liquidity: null, visible: true, testKey: 'sol'},
+  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', mint: USDC_MINT_ADDRESS, decimals: 6, linkToken: 'USDC', minFractionDigits: 0, liquidity: null, visible: true, testKey: 'sol-usdc'},
 ];
 
 const BALANCES: Record<AssetId, BalanceView> = {

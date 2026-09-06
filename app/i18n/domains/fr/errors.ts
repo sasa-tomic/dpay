@@ -18,12 +18,12 @@ export const errorsFr: ErrorMessages = {
 
   solana: {
     offline: 'Solana est hors ligne (aucun point d’accès RPC configuré)',
-    usdcUnavailable: 'L’USDC Solana n’est pas disponible (aucun point d’accès RPC configuré)',
-    senderNoUsdcAccount: 'Votre portefeuille n’a pas encore de compte USDC',
-    recipientNoUsdcAccount: solAmount =>
-      `Le destinataire n’a pas encore de compte USDC — le créer demande environ ${solAmount} de SOL dans ce portefeuille (loyer + frais, une seule fois, à votre charge) — envoyez d’abord un peu de SOL ici`,
-    ownUsdcAccountRent: solAmount =>
-      `La création de votre compte USDC demande environ ${solAmount} dans ce portefeuille (loyer du compte + frais, une seule fois) — envoyez d’abord un peu de SOL ici`,
+    tokenUnavailable: asset => `Le ${asset} Solana n’est pas disponible (aucun point d’accès RPC configuré)`,
+    senderNoTokenAccount: asset => `Votre portefeuille n’a pas encore de compte ${asset}`,
+    recipientNoTokenAccount: (solAmount, asset) =>
+      `Le destinataire n’a pas encore de compte ${asset} — le créer demande environ ${solAmount} de SOL dans ce portefeuille (loyer + frais, une seule fois, à votre charge) — envoyez d’abord un peu de SOL ici`,
+    ownTokenAccountRent: (solAmount, asset) =>
+      `La création de votre compte ${asset} demande environ ${solAmount} dans ce portefeuille (loyer du compte + frais, une seule fois) — envoyez d’abord un peu de SOL ici`,
   },
 
   ethWallet: {

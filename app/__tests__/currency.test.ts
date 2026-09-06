@@ -27,6 +27,7 @@ import {
   type RailBalances,
 } from '../config/currency';
 import type {CurrencyDescriptor} from '../config/catalog';
+import {EURC_MINT_ADDRESS} from '../solana/tokens';
 import type {BalanceView} from '../lib/assetBalances';
 import type {AssetId} from '../lib/types';
 
@@ -43,7 +44,7 @@ const VCHF = mk({currency: 7, minter_family: null, symbol: 'VCHF', decimals: 8, 
 const ICP = mk({currency: 8, minter_family: null, symbol: 'ICP', decimals: 8, wrapper_name: 'ICP', backing_symbol: 'ICP', network: 'Internet Computer'});
 
 const build = (catalog: CurrencyDescriptor[], solana = false): SelectableAsset[] =>
-  buildSelectableAssets(catalog, {showTestnet: false, solanaEnabled: solana, solanaUsdc: solana});
+  buildSelectableAssets(catalog, {showTestnet: false, solanaEnabled: solana, solanaTokens: solana});
 
 const FULL = build([DEMO, CKBTC, CKUSDC, VCHF, ICP]);
 
@@ -183,7 +184,19 @@ describe('chooseRail — which rail, and why', () => {
   });
 
   it('is null when the catalog carries no rail for the currency', () => {
-    expect(chooseRail('EUR', withSol)).toBeNull();
+    // Within the HomeCurrency type, CHF with no VCHF row present is the no-rail case (a foreign
+    // code like 'GBP' is a type error by design — the API only speaks home currencies).
+    expect(chooseRail('CHF', build([DEMO, CKUSDC], true))).toBeNull();
+  });
+
+  it('resolves EUR to the EURC rail (dual-rail Stage 2: EUR is offerable)', () => {
+    // CURRENCY_RAILS.EUR = ['EURC'] and the catalog's solana:EURC row (linkToken 'EURC') is
+    // enumerated with the token override on — the gate that withheld it was the assets
+    // enumeration, now generalized. A GBP-style null is the only remaining no-rail case.
+    const out = chooseRail('EUR', withSol);
+    expect(out?.rail.id).toBe('solana:EURC');
+    // Narrow the solana arm to read the row's registry mint.
+    expect(out != null && out.rail.protocol === 'solana' ? out.rail.mint : null).toBe(EURC_MINT_ADDRESS);
   });
 
   it('picks the funded rail, in preference order among the funded ones', () => {

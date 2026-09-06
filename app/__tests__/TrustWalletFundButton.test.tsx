@@ -15,6 +15,7 @@ import renderer, {act} from 'react-test-renderer';
 import {Platform, Linking} from 'react-native';
 
 import {TrustWalletFundButton} from '../components/TrustWalletFundButton';
+import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import {S} from '../styles';
 
 const ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
@@ -30,7 +31,7 @@ function pressByTestID(tree: renderer.ReactTestRenderer, testID: string): void {
   act(() => { node.props.onPress(); });
 }
 
-function mount(asset: 'BTC' | 'SOL' | 'SOL-USDC') {
+function mount(asset: 'BTC' | 'SOL' | `SPL:${string}`) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
     tree = renderer.create(<TrustWalletFundButton asset={asset} address={ADDR} />);
@@ -68,8 +69,8 @@ describe('TrustWalletFundButton', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('tap SOL-USDC → golden SPL link (c501_t<mint>)', async () => {
-    const tree = mount('SOL-USDC');
+  test('tap SPL:USDC → golden SPL link (c501_t<mint>)', async () => {
+    const tree = mount(`SPL:${USDC_MINT_ADDRESS}`);
     await act(async () => { pressByTestID(tree, 'btn-trust-fund'); });
     expect(mockLinkingOpenURL).toHaveBeenCalledWith(
       `https://link.trustwallet.com/send?asset=c501_tEPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&address=${ADDR}`);

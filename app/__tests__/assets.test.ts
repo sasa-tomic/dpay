@@ -16,7 +16,7 @@
  *      visible then null. Hiding a selected testnet asset applies the fallback atomically.
  *   5. Every `testKey` is unique stable ASCII (e2e matches testID literally).
  *   6. Two USDC assets (IC + Solana) carry distinct `networkLabel`s (no swap / no confusion).
- *   7. `solanaUsdcAvailable` fail-closes on an empty or misconfigured cluster (mainnet mint on a
+ *   7. `solanaTokenAvailable` fail-closes on an empty or misconfigured cluster (mainnet mint on a
  *      non-mainnet RPC ⇒ false; empty RPC ⇒ false).
  */
 import {describe, it, expect} from '@jest/globals';
@@ -26,13 +26,14 @@ import {
   linkNetworkOf,
   reconcileSelectedAsset,
   resolvePayLink,
-  solanaUsdcAvailable,
-  solanaUsdcCoherent,
+  solanaTokenAvailable,
+  solanaTokenCoherent,
   tokenEq,
   type SelectableAsset,
 } from '../config/assets';
 import {assetLinkToken, BUNDLED_NETWORKS, displayName, icpCatalogOf, parseNetworkCatalog} from '../config/catalog';
 import type {PayLink} from '../lib/deepLink';
+import {USDC_MINT_ADDRESS as MAINNET_MINT} from '../solana/tokens';
 import type {CurrencyDescriptor, NetworkSection, SolanaAsset} from '../config/catalog';
 import {buildAssetBalances} from '../lib/assetBalances';
 
@@ -61,19 +62,21 @@ describe('buildSelectableAssets — complete visible list', () => {
   });
 
   it('appends exactly solana:SOL when solanaEnabled=true and USDC is unavailable', () => {
-    // The default jest state has SOLANA_RPC_URL='' (jest.setup.js) ⇒ solanaUsdcAvailable() === false.
+    // The default jest state has SOLANA_RPC_URL='' (jest.setup.js) ⇒ solanaTokenAvailable() === false.
     const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true});
     expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'solana:SOL']);
   });
 
-  it('appends solana:USDC after solana:SOL when solanaUsdcAvailable() is true', () => {
-    // Force-build the list with a stubbed USDC resolver so the order is provable without RPC.
-    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
-    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'solana:SOL', 'solana:USDC']);
+  it('appends the token rows (USDC, EURC) after solana:SOL when solanaTokens is forced on', () => {
+    // Force-build the list with the token override so the order is provable without RPC. The
+    // override now enables EVERY catalog token row (Stage 2 widened it from the USDC-only gate),
+    // so the bundled catalog's EURC row is enumerated right after USDC.
+    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'solana:SOL', 'solana:USDC', 'solana:EURC']);
   });
 
-  it('omits solana:SOL/USDC entirely when solanaEnabled=false even if USDC would be available', () => {
-    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: false, solanaUsdc: true});
+  it('omits the solana rail entirely when solanaEnabled=false even if tokens would be available', () => {
+    const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: false, solanaTokens: true});
     expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2']);
   });
 
@@ -115,7 +118,7 @@ describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', ()
   ];
 
   it('omitted networks ⇒ the BUNDLED sections supply the SOL facts (cold/offline first load, identical rows)', () => {
-    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const sol = assets.find(a => a.id === 'solana:SOL')!;
     const usdc = assets.find(a => a.id === 'solana:USDC')!;
     expect(sol.symbol).toBe('SOL');
@@ -127,7 +130,7 @@ describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', ()
   });
 
   it('reads symbol/decimals from the solana section rows when networks is supplied', () => {
-    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: NETWORKS});
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: NETWORKS});
     const sol = assets.find(a => a.id === 'solana:SOL')!;
     expect(sol.symbol).toBe('SOLANA');
     expect(sol.decimals).toBe(4);
@@ -138,12 +141,12 @@ describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', ()
   it('ids + testKeys stay the stable literals regardless of catalog metadata (testID contract)', () => {
     // The section may rename symbols or shift decimals, but `solana:SOL`/'sol' and
     // `solana:USDC`/'sol-usdc' are the e2e testID contract — never derived from metadata.
-    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: NETWORKS});
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: NETWORKS});
     expect(assets.map(a => [a.id, a.testKey])).toEqual([['solana:SOL', 'sol'], ['solana:USDC', 'sol-usdc']]);
   });
 
   it('the USDC availability gate still applies when networks is supplied', () => {
-    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: false, networks: NETWORKS});
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaTokens: false, networks: NETWORKS});
     expect(ids(assets)).toEqual(['solana:SOL']);
   });
 
@@ -151,7 +154,7 @@ describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', ()
     const usdcOnly: NetworkSection[] = [
       {protocol: 'solana', name: 'Solana', environment: 'mainnet', assets: [SOL_ROWS[1]]},
     ];
-    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: usdcOnly});
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: usdcOnly});
     expect(ids(assets)).toEqual(['solana:USDC']);
   });
 });
@@ -270,7 +273,7 @@ describe('testKey — unique stable ASCII', () => {
   const isAscii = (s: string): boolean => /^[\x20-\x7E]+$/.test(s);
 
   it('every entry\'s testKey is unique ASCII across a mixed catalog + testnet + SOL + USDC', () => {
-    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC, CKTESTBTC], {showTestnet: true, solanaEnabled: true, solanaUsdc: true});
+    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC, CKTESTBTC], {showTestnet: true, solanaEnabled: true, solanaTokens: true});
     const keys = assets.map(a => a.testKey);
     // All ASCII.
     expect(keys.every(isAscii)).toBe(true);
@@ -289,7 +292,7 @@ describe('testKey — unique stable ASCII', () => {
   });
 
   it('Solana SOL and USDC carry distinct stable keys', () => {
-    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const assets = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const sol = assets.find(a => a.id === 'solana:SOL')!;
     const usdc = assets.find(a => a.id === 'solana:USDC')!;
     expect(sol.testKey).not.toBe(usdc.testKey);
@@ -303,7 +306,7 @@ describe('testKey — unique stable ASCII', () => {
 // =============================================================================================
 describe('Network qualification — IC USDC vs Solana USDC', () => {
   it('IC USDC networkLabel references Ethereum; Solana USDC references Solana', () => {
-    const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const icUsdc = assets.find(a => a.id === 'ic:2')!;
     const solUsdc = assets.find(a => a.id === 'solana:USDC')!;
     expect(icUsdc.networkLabel).not.toBe(solUsdc.networkLabel);
@@ -312,7 +315,7 @@ describe('Network qualification — IC USDC vs Solana USDC', () => {
   });
 
   it('SOL networkLabel references Solana (distinct from any IC asset)', () => {
-    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const sol = assets.find(a => a.id === 'solana:SOL')!;
     expect(sol.networkLabel).toMatch(/Solana/);
     // No IC asset's label references Solana.
@@ -321,35 +324,33 @@ describe('Network qualification — IC USDC vs Solana USDC', () => {
 });
 
 // =============================================================================================
-// 7. solanaUsdcAvailable / solanaUsdcCoherent — fail-closed for misconfigured cluster
+// 7. solanaTokenAvailable / solanaTokenCoherent — fail-closed for misconfigured cluster
 // =============================================================================================
-describe('solanaUsdcCoherent — pure coherence predicate', () => {
-  const MAINNET_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-
+describe('solanaTokenCoherent — pure coherence predicate', () => {
   it('empty RPC URL ⇒ false (SOL disabled)', () => {
-    expect(solanaUsdcCoherent('', false, MAINNET_MINT)).toBe(false);
+    expect(solanaTokenCoherent('', false, MAINNET_MINT)).toBe(false);
   });
 
   it('mainnet RPC + mainnet mint ⇒ true', () => {
-    expect(solanaUsdcCoherent('https://mainnet.helius-rpc.com', false, MAINNET_MINT)).toBe(true);
+    expect(solanaTokenCoherent('https://mainnet.helius-rpc.com', false, MAINNET_MINT)).toBe(true);
   });
 
   it('devnet RPC + mainnet mint ⇒ false (the only configured mint is mainnet; fail-closed)', () => {
     // The fund-loss case this guards: devnet RPC + mainnet mint would silently point at a
     // non-existent account. Fail-closed rather than risk an unfulfillable USDC row.
-    expect(solanaUsdcCoherent('https://api.devnet.solana.com', true, MAINNET_MINT)).toBe(false);
+    expect(solanaTokenCoherent('https://api.devnet.solana.com', true, MAINNET_MINT)).toBe(false);
   });
 
   it('missing mint ⇒ false (no configured mint for this cluster)', () => {
-    expect(solanaUsdcCoherent('https://mainnet.solana.com', false, '')).toBe(false);
+    expect(solanaTokenCoherent('https://mainnet.solana.com', false, '')).toBe(false);
   });
 });
 
-describe('solanaUsdcAvailable — default jest state is fail-closed', () => {
+describe('solanaTokenAvailable — default jest state is fail-closed', () => {
   // jest.setup.js sets __DPAY_TEST_SOLANA_RPC_URL='' ⇒ SOLANA_RPC_URL resolves to '' at module
-  // load ⇒ solanaUsdcAvailable() MUST be false under the default jest state (no real devnet hit).
+  // load ⇒ solanaTokenAvailable() MUST be false under the default jest state (no real devnet hit).
   it('returns false when the RPC URL is empty (default offline inner loop)', () => {
-    expect(solanaUsdcAvailable()).toBe(false);
+    expect(solanaTokenAvailable(MAINNET_MINT)).toBe(false);
   });
 });
 
@@ -374,7 +375,7 @@ describe('chipLabel — collision-driven network qualification', () => {
 
   it('qualifies IC USDC + Solana USDC with DISTINCT short network tags when both are visible', () => {
     // Both ic:2 and solana:USDC carry symbol 'USDC' — a collision. The chip must distinguish them.
-    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const assets = buildSelectableAssets([DEMO, CKBTC, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const icUsdc = assets.find(a => a.id === 'ic:2')!;
     const solUsdc = assets.find(a => a.id === 'solana:USDC')!;
     const icLabel = chipLabel(icUsdc, assets);
@@ -395,13 +396,13 @@ describe('chipLabel — collision-driven network qualification', () => {
     const icUsdc = icOnly.find(a => a.id === 'ic:2')!;
     expect(chipLabel(icUsdc, icOnly)).toBe('USDC');
     // Symmetric: Solana USDC alone (no IC catalog) ⇒ bare.
-    const solOnly = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const solOnly = buildSelectableAssets([], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const solUsdc = solOnly.find(a => a.id === 'solana:USDC')!;
     expect(chipLabel(solUsdc, solOnly)).toBe('USDC');
   });
 
   it('is pure: the same (asset, all) pair yields the same label across calls', () => {
-    const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+    const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const icUsdc = assets.find(a => a.id === 'ic:2')!;
     expect(chipLabel(icUsdc, assets)).toBe(chipLabel(icUsdc, assets));
   });
@@ -480,7 +481,7 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       primaryBalance: null,
       online: true,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+      tokenStates: {},
     });
     expect(balances['ic:7']).toEqual({displayText: '0.00 VCHF', status: 'zero'});
     expect(balances['ic:8']).toEqual({displayText: '0 ICP', status: 'zero'});
@@ -517,7 +518,7 @@ describe('resolvePayLink — link → asset + raw amount', () => {
   // A visible list with BOTH USDCs present: the IC chain-key wrapper (ckUSDC, backed by Ethereum,
   // settling on the Internet Computer) and native Solana USDC. This is the collision the
   // settlement-chain parameter exists for.
-  const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
   const link = (over: Partial<PayLink> = {}): PayLink => ({
     recipient: 'ryjl3-tyaaa-aaaaa-aaaba-cai', asset: 'ckUSDC', network: 'internet-computer',
     amount: '1.5', label: '', memo: '', ref: null, ...over,
@@ -598,7 +599,7 @@ describe('resolvePayLink — link → asset + raw amount', () => {
 });
 
 describe('linkNetworkOf — the settlement chain a link must name', () => {
-  const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
   it('every IC asset settles on the Internet Computer, including the chain-key wrappers', () => {
     // ckUSDC's catalog `network` says 'Ethereum' — that is what BACKS it. The link must name where
     // the transfer EXECUTES, or a link would claim an Ethereum payment that never touches Ethereum.

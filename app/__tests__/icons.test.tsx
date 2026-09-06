@@ -18,6 +18,7 @@ import {Svg} from 'react-native-svg';
 import {ICONS} from '../components/icons';
 import {AssetGlyph, glyphFor} from '../components/AssetGlyph';
 import type {SelectableAsset} from '../config/assets';
+import {USDC_MINT_ADDRESS} from '../solana/tokens';
 
 describe('icons registry', () => {
   test('every icon renders a 24-grid Svg with at least one primitive', () => {
@@ -61,8 +62,8 @@ const ASSETS: SelectableAsset[] = [
   {id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'ckBTC', networkLabel: 'Bitcoin', network: 'Bitcoin', decimals: 8, linkToken: 'ckBTC', minFractionDigits: 0, visible: true, testKey: 'ckbtc'},
   {id: 'ic:2', protocol: 'ic', currency: 2, symbol: 'ckETH', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 18, linkToken: 'ckETH', minFractionDigits: 0, visible: true, testKey: 'cketh'},
   {id: 'ic:3', protocol: 'ic', currency: 3, symbol: 'ckUSDC', networkLabel: 'Ethereum', network: 'Ethereum', decimals: 6, linkToken: 'ckUSDC', minFractionDigits: 0, visible: true, testKey: 'ckusdc'},
-  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', decimals: 9, linkToken: 'SOL', minFractionDigits: 0, visible: true, testKey: 'sol'},
-  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', decimals: 6, linkToken: 'USDC', minFractionDigits: 0, visible: true, testKey: 'sol-usdc'},
+  {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', mint: null, decimals: 9, linkToken: 'SOL', minFractionDigits: 0, liquidity: null, visible: true, testKey: 'sol'},
+  {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', mint: USDC_MINT_ADDRESS, decimals: 6, linkToken: 'USDC', minFractionDigits: 0, liquidity: null, visible: true, testKey: 'sol-usdc'},
   {id: 'ic:9', protocol: 'ic', currency: 9, symbol: 'CHF', networkLabel: 'Swiss Franc', network: 'Swiss Franc', decimals: 2, linkToken: 'CHF', minFractionDigits: 0, visible: true, testKey: 'chf'},
 ];
 

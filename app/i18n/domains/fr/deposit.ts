@@ -141,13 +141,13 @@ export const depositFr: DepositMessages = {
   },
 
   sol: {
-    createAtaLabel: 'Créer le compte USDC',
-    checkingAta: 'Vérification de votre compte USDC…',
-    ataUnverified: 'Impossible de vérifier votre compte USDC.',
-    ataUnverifiedDetail:
-      'Votre adresse est correcte — nous n’arrivons simplement pas à joindre Solana pour confirmer votre compte USDC sur la chaîne. Vérifiez votre connexion et réessayez.',
-    retryAtaLabel: 'Réessayer la vérification du compte USDC',
-    retryAtaHint: 'Vérifie à nouveau si votre compte USDC existe sur la chaîne',
+    createAtaLabel: asset => `Créer le compte ${asset}`,
+    checkingAta: asset => `Vérification de votre compte ${asset}…`,
+    ataUnverified: asset => `Impossible de vérifier votre compte ${asset}.`,
+    ataUnverifiedDetail: asset =>
+      `Votre adresse est correcte — nous n’arrivons simplement pas à joindre Solana pour confirmer votre compte ${asset} sur la chaîne. Vérifiez votre connexion et réessayez.`,
+    retryAtaLabel: asset => `Réessayer la vérification du compte ${asset}`,
+    retryAtaHint: asset => `Vérifie à nouveau si votre compte ${asset} existe sur la chaîne`,
     checkAgain: 'Revérifier',
     backToRequest: 'Retour à la demande',
     sendToAddress: (asset, network) => [
@@ -168,15 +168,15 @@ export const depositFr: DepositMessages = {
   },
 
   ata: {
-    absent: 'Vous n’avez pas encore de compte USDC sur cet appareil.',
-    cost: setupCost =>
-      `Solana conserve vos USDC dans un compte de jeton créé une seule fois et rattaché à ce portefeuille. Sa création coûte ${setupCost} (loyer du compte + frais) sur votre solde SOL — il reste votre compte, sous vos clés. dpay ne les détient jamais.`,
+    absent: asset => `Vous n’avez pas encore de compte ${asset} sur cet appareil.`,
+    cost: (setupCost, asset) =>
+      `Solana conserve vos ${asset} dans un compte de jeton créé une seule fois et rattaché à ce portefeuille. Sa création coûte ${setupCost} (loyer du compte + frais) sur votre solde SOL — il reste votre compte, sous vos clés. dpay ne les détient jamais.`,
     checkingSol: 'Vérification de votre solde SOL…',
     needSol: setupCost =>
       `Il vous faut d’abord environ ${setupCost} dans ce portefeuille — recevez des SOL à votre adresse, puis créez le compte.`,
     showSolAddress: 'Voir mon adresse SOL',
-    creating: 'Création de votre compte USDC — confirmation sur Solana…',
-    createHint: setupCost => `Crée votre compte USDC unique pour ${setupCost} sur votre solde SOL`,
+    creating: asset => `Création de votre compte ${asset} — confirmation sur Solana…`,
+    createHint: (setupCost, asset) => `Crée votre compte ${asset} unique pour ${setupCost} sur votre solde SOL`,
   },
 
   trust: {
@@ -270,7 +270,7 @@ export const withdrawFr: WithdrawMessages = {
   },
 
   sol: {
-    createAtaLabel: 'Créer mon compte USDC',
+    createAtaLabel: asset => `Créer mon compte ${asset}`,
     backToScan: 'Retour au scan',
     sent: 'Envoyé ✓',
     txSignature: 'signature de la transaction',
@@ -280,13 +280,13 @@ export const withdrawFr: WithdrawMessages = {
     confirmingOnSolana: 'Confirmation sur Solana — cela peut prendre jusqu’à une minute.',
     sendToSolana: asset => `Envoyez vos ${asset} vers une adresse Solana`,
     available: available => `Disponible : ${available}`,
-    usdcAmountPlaceholder: '1.5',
+    tokenAmountPlaceholder: '1.5',
     solAmountPlaceholder: '0.025',
-    needsSol: 'L’envoi d’USDC demande un peu de SOL dans le portefeuille pour les frais de réseau — ajoutez-en d’abord.',
+    needsSol: asset => `L’envoi de ${asset} demande un peu de SOL dans le portefeuille pour les frais de réseau — ajoutez-en d’abord.`,
     reviewTitle: 'Vérifier l’envoi',
     sendAmount: amount => `Envoyer ${amount}`,
-    recipientAtaNote: cost =>
-      `Si le destinataire n’a pas encore de compte USDC, cet envoi le crée pour lui (≈${cost} une seule fois, à votre charge).`,
+    recipientAtaNote: (cost, asset) =>
+      `Si le destinataire n’a pas encore de compte ${asset}, cet envoi le crée pour lui (≈${cost} une seule fois, à votre charge).`,
     confirmLabel: asset => `Confirmer l’envoi de ${asset}`,
   },
 };

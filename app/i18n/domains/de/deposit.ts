@@ -139,13 +139,13 @@ export const depositDe: DepositMessages = {
   },
 
   sol: {
-    createAtaLabel: 'USDC-Konto erstellen',
-    checkingAta: 'Dein USDC-Konto wird geprüft…',
-    ataUnverified: 'Dein USDC-Konto konnte nicht geprüft werden.',
-    ataUnverifiedDetail:
-      'Mit deiner Adresse ist alles in Ordnung — wir erreichen Solana gerade nur nicht, um dein USDC-Konto on-chain zu bestätigen. Prüfe deine Verbindung und versuche es erneut.',
-    retryAtaLabel: 'USDC-Konto erneut prüfen',
-    retryAtaHint: 'Prüft erneut, ob dein USDC-Konto on-chain existiert',
+    createAtaLabel: asset => `${asset}-Konto erstellen`,
+    checkingAta: asset => `Dein ${asset}-Konto wird geprüft…`,
+    ataUnverified: asset => `Dein ${asset}-Konto konnte nicht geprüft werden.`,
+    ataUnverifiedDetail: asset =>
+      `Mit deiner Adresse ist alles in Ordnung — wir erreichen Solana gerade nur nicht, um dein ${asset}-Konto on-chain zu bestätigen. Prüfe deine Verbindung und versuche es erneut.`,
+    retryAtaLabel: asset => `${asset}-Konto erneut prüfen`,
+    retryAtaHint: asset => `Prüft erneut, ob dein ${asset}-Konto on-chain existiert`,
     checkAgain: 'Erneut prüfen',
     backToRequest: 'Zurück zur Anfrage',
     sendToAddress: (asset, network) => [
@@ -166,15 +166,15 @@ export const depositDe: DepositMessages = {
   },
 
   ata: {
-    absent: 'Du hast auf diesem Gerät noch kein USDC-Konto.',
-    cost: setupCost =>
-      `Solana verwahrt dein USDC in einem einmaligen Token-Konto, das zu dieser Wallet gehört. Das Erstellen kostet ${setupCost} (Kontomiete + Gebühr) aus deinem SOL-Guthaben — es bleibt dein Konto, unter deinen Schlüsseln. dpay hält sie nie.`,
+    absent: asset => `Du hast auf diesem Gerät noch kein ${asset}-Konto.`,
+    cost: (setupCost, asset) =>
+      `Solana verwahrt dein ${asset} in einem einmaligen Token-Konto, das zu dieser Wallet gehört. Das Erstellen kostet ${setupCost} (Kontomiete + Gebühr) aus deinem SOL-Guthaben — es bleibt dein Konto, unter deinen Schlüsseln. dpay hält sie nie.`,
     checkingSol: 'Dein SOL-Guthaben wird geprüft…',
     needSol: setupCost =>
       `Du brauchst zuerst etwa ${setupCost} in dieser Wallet — empfange SOL an deiner Adresse und erstelle dann das Konto.`,
     showSolAddress: 'Meine SOL-Adresse zeigen',
-    creating: 'Dein USDC-Konto wird erstellt — Bestätigung auf Solana…',
-    createHint: setupCost => `Erstellt dein einmaliges USDC-Konto für ${setupCost} aus deinem SOL-Guthaben`,
+    creating: asset => `Dein ${asset}-Konto wird erstellt — Bestätigung auf Solana…`,
+    createHint: (setupCost, asset) => `Erstellt dein einmaliges ${asset}-Konto für ${setupCost} aus deinem SOL-Guthaben`,
   },
 
   trust: {
@@ -269,7 +269,7 @@ export const withdrawDe: WithdrawMessages = {
   },
 
   sol: {
-    createAtaLabel: 'Mein USDC-Konto erstellen',
+    createAtaLabel: asset => `Mein ${asset}-Konto erstellen`,
     backToScan: 'Zurück zum Scannen',
     sent: 'Gesendet ✓',
     txSignature: 'Transaktionssignatur',
@@ -279,13 +279,13 @@ export const withdrawDe: WithdrawMessages = {
     confirmingOnSolana: 'Bestätigung auf Solana — das kann bis zu einer Minute dauern.',
     sendToSolana: asset => `Sende dein ${asset} an eine Solana-Adresse`,
     available: available => `Verfügbar: ${available}`,
-    usdcAmountPlaceholder: '1.5',
+    tokenAmountPlaceholder: '1.5',
     solAmountPlaceholder: '0.025',
-    needsSol: 'Für das Senden von USDC brauchst du etwas SOL in der Wallet für Netzwerkgebühren — zahle zuerst etwas ein.',
+    needsSol: asset => `Für das Senden von ${asset} brauchst du etwas SOL in der Wallet für Netzwerkgebühren — zahle zuerst etwas ein.`,
     reviewTitle: 'Senden prüfen',
     sendAmount: amount => `${amount} senden`,
-    recipientAtaNote: cost =>
-      `Falls die Person noch kein USDC-Konto hat, wird es hiermit für sie erstellt (einmalig ≈${cost}, von dir bezahlt).`,
+    recipientAtaNote: (cost, asset) =>
+      `Falls die Person noch kein ${asset}-Konto hat, wird es hiermit für sie erstellt (einmalig ≈${cost}, von dir bezahlt).`,
     confirmLabel: asset => `Senden von ${asset} bestätigen`,
   },
 };

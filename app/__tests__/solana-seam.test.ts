@@ -10,7 +10,8 @@ import bs58 from 'bs58';
 import {encodeSolReq, decodeSolReq} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {buildCanonicalSolMessage, verifySolPayment, base58Decode32} from '../solana/tx';
-import {buildCanonicalUsdcMessage, deriveAta, ASSOCIATED_TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
+import {buildCanonicalSplMessage, deriveAta, ASSOCIATED_TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
+import {USDC_DECIMALS} from '../solana/tokens';
 import {deriveSolanaKeypair} from '../solana/identity';
 import {utf8ToBytes} from '../lib/base64url';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../solana/payments';
@@ -167,7 +168,7 @@ describe('solana seam — configured (RPC URL set) calls through to rpc', () => 
 // ============================================================================
 // Phase 2 — Solana USDC balance reader + RPC availability predicate.
 //
-// `getSolanaUsdcBalance` returns a discriminated union that distinguishes the four states the plan
+// `getSolanaTokenBalance(secret, mint)` returns a discriminated union that distinguishes the four states the plan
 // (invariant #10) requires stay distinct: offline (no/invalid config), absent (ATA missing — KNOWN
 // zero/empty), balance (have an exact amount string), error (RPC failure — transient/unverifiable).
 // `isSolanaRpcAvailable` exposes RPC availability independently from relay `online` (invariant #9).
@@ -187,15 +188,15 @@ function withStubMainnetUrl<T>(fn: () => Promise<T>): Promise<T> {
   return p!;
 }
 
-describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () => {
+describe('solana seam — getSolanaTokenBalance (Phase 2 honest balances)', () => {
   test('returns {kind:"offline"} when SOLANA_RPC_URL is empty (no network, no dynamic import)', async () => {
     let called = false;
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
       called = true;
       return Promise.resolve({});
     });
-    const {getSolanaUsdcBalance} = require('../solana');
-    const r = await (getSolanaUsdcBalance as (s: string) => Promise<{kind: string}>)(SEED_HEX);
+    const {getSolanaTokenBalance} = require('../solana');
+    const r = await (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string}>)(SEED_HEX, USDC_MINT);
     expect(r).toEqual({kind: 'offline'});
     expect(called).toBe(false);
   });
@@ -205,8 +206,8 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
       getAccountInfo: () => ({value: null}),
     };
     const r = await withStubMainnetUrl(async () => {
-      const {getSolanaUsdcBalance} = require('../solana');
-      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX);
+      const {getSolanaTokenBalance} = require('../solana');
+      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX, USDC_MINT);
     });
     expect(r).toEqual({kind: 'absent'});
     expect('amount' in r).toBe(false); // absent carries no amount
@@ -218,8 +219,8 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
       getTokenAccountBalance: () => ({value: {amount: '1234567', decimals: 6, uiAmount: 1.234567}}),
     };
     const r = await withStubMainnetUrl(async () => {
-      const {getSolanaUsdcBalance} = require('../solana');
-      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string; amount?: string; decimals?: number}>)(SEED_HEX);
+      const {getSolanaTokenBalance} = require('../solana');
+      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string; amount?: string; decimals?: number}>)(SEED_HEX, USDC_MINT);
     });
     expect(r).toEqual({kind: 'balance', amount: '1234567', decimals: 6});
     expect(typeof (r as {amount?: string}).amount).toBe('string');
@@ -231,8 +232,8 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
       getTokenAccountBalance: () => ({value: {amount: '10000000000000000', decimals: 6, uiAmount: null}}),
     };
     const r = await withStubMainnetUrl(async () => {
-      const {getSolanaUsdcBalance} = require('../solana');
-      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX);
+      const {getSolanaTokenBalance} = require('../solana');
+      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX, USDC_MINT);
     });
     expect(r).toEqual({kind: 'balance', amount: '10000000000000000', decimals: 6});
   });
@@ -242,8 +243,8 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
       getAccountInfo: () => { throw new Error('RPC node degraded'); },
     };
     const r = await withStubMainnetUrl(async () => {
-      const {getSolanaUsdcBalance} = require('../solana');
-      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string}>)(SEED_HEX);
+      const {getSolanaTokenBalance} = require('../solana');
+      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string}>)(SEED_HEX, USDC_MINT);
     });
     expect(r).toEqual({kind: 'error'});
   });
@@ -254,8 +255,8 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
       getTokenAccountBalance: () => { throw new Error('account decoder error'); },
     };
     const r = await withStubMainnetUrl(async () => {
-      const {getSolanaUsdcBalance} = require('../solana');
-      return (getSolanaUsdcBalance as (s: string) => Promise<{kind: string}>)(SEED_HEX);
+      const {getSolanaTokenBalance} = require('../solana');
+      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string}>)(SEED_HEX, USDC_MINT);
     });
     expect(r).toEqual({kind: 'error'});
   });
@@ -273,7 +274,7 @@ describe('solana seam — getSolanaUsdcBalance (Phase 2 honest balances)', () =>
 // Reuses the byte-exact buildSplTransferInstruction + buildCreateAtaIdempotentInstruction
 // (both proven in solana-spl.test.ts).
 // ============================================================================
-describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
+describe('solana seam — sendSpl (Phase 6 SPL direct send — mint passed by the caller)', () => {
   test('throws offline error when SOLANA_RPC_URL is empty', async () => {
     let called = false;
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
@@ -281,7 +282,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
       return Promise.resolve({});
     });
     const {sendSpl} = require('../solana');
-    await expect((sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n)).rejects.toThrow('offline');
+    await expect((sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT)).rejects.toThrow('offline');
     expect(called).toBe(false);
   });
 
@@ -292,7 +293,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     };
     await expect(withStubUrl(async () => {
       const {sendSpl} = require('../solana');
-      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT);
     })).rejects.toThrow(/USDC account/);
   });
 
@@ -312,7 +313,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     };
     const sig = await withStubUrl(async () => {
       const {sendSpl} = require('../solana');
-      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT);
     });
     expect(sig).toBe('SigSplBase58');
     // Exactly ONE broadcast — create + transfer ride the same signed transaction.
@@ -378,7 +379,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     };
     const sig = await withStubUrl(async () => {
       const {sendSpl} = require('../solana');
-      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT);
     });
     expect(sig).toBe('SigSplBase58');
     // Both ATA existence checks ran (sender + recipient).
@@ -407,7 +408,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     };
     await expect(withStubUrl(async () => {
       const {sendSpl} = require('../solana');
-      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT);
     })).rejects.toThrow(/SOL|rent/i);
     expect(broadcasts).toBe(0); // fail-closed BEFORE any tx is signed or broadcast
   });
@@ -419,7 +420,7 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
     };
     await expect(withStubUrl(async () => {
       const {sendSpl} = require('../solana');
-      return (sendSpl as (s: string, d: string, a: bigint) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n);
+      return (sendSpl as (s: string, d: string, a: bigint, m: string) => Promise<string>)(SEED_HEX, MERCHANT_ADDRESS, 1_000_000n, USDC_MINT);
     })).rejects.toThrow(/your wallet|USDC account/i); // not "recipient"
   });
 });
@@ -430,15 +431,15 @@ describe('solana seam — sendSpl (Phase 6 USDC direct send)', () => {
 // device key, paid by the device's own SOL (rent + fee pre-checked against the
 // ESTIMATE; the chain enforces the real value). Mirrors the sendSpl stub shape.
 // ============================================================================
-describe('solana seam — createUsdcAta (receiver-side one-tap setup)', () => {
+describe('solana seam — createTokenAta (receiver-side one-tap setup)', () => {
   test('throws offline when SOLANA_RPC_URL is empty (no network import)', async () => {
     let called = false;
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
       called = true;
       return Promise.resolve({});
     });
-    const {createUsdcAta} = require('../solana');
-    await expect((createUsdcAta as (s: string) => Promise<string>)(SEED_HEX)).rejects.toThrow('not available');
+    const {createTokenAta} = require('../solana');
+    await expect((createTokenAta as (s: string, m: string) => Promise<string>)(SEED_HEX, USDC_MINT)).rejects.toThrow('not available');
     expect(called).toBe(false);
   });
 
@@ -449,8 +450,8 @@ describe('solana seam — createUsdcAta (receiver-side one-tap setup)', () => {
       sendTransaction: () => { throw new Error('must not broadcast'); },
     };
     await expect(withStubUrl(async () => {
-      const {createUsdcAta} = require('../solana');
-      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+      const {createTokenAta} = require('../solana');
+      return (createTokenAta as (s: string, m: string) => Promise<string>)(SEED_HEX, USDC_MINT);
     })).rejects.toThrow(/one-time account rent|send a little SOL/i);
     expect(balanceCalls).toBe(1);
   });
@@ -467,8 +468,8 @@ describe('solana seam — createUsdcAta (receiver-side one-tap setup)', () => {
       getSignatureStatuses: () => ({value: [{confirmationStatus: 'confirmed'}]}),
     };
     const sig = await withStubUrl(async () => {
-      const {createUsdcAta} = require('../solana');
-      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+      const {createTokenAta} = require('../solana');
+      return (createTokenAta as (s: string, m: string) => Promise<string>)(SEED_HEX, USDC_MINT);
     });
     expect(sig).toBe('SigAtaBase58');
     expect(sent.length).toBe(1);
@@ -492,8 +493,8 @@ describe('solana seam — createUsdcAta (receiver-side one-tap setup)', () => {
       getSignatureStatuses: () => ({value: [{err: {InstructionError: [0, {Custom: 1}]}, confirmationStatus: 'processed'}]}),
     };
     await expect(withStubUrl(async () => {
-      const {createUsdcAta} = require('../solana');
-      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+      const {createTokenAta} = require('../solana');
+      return (createTokenAta as (s: string, m: string) => Promise<string>)(SEED_HEX, USDC_MINT);
     })).rejects.toThrow(/transaction failed/i);
     expect(broadcasts).toBe(1); // broadcast DID happen — the error is the honest outcome
   });
@@ -508,8 +509,8 @@ describe('solana seam — createUsdcAta (receiver-side one-tap setup)', () => {
       getSignatureStatuses: () => { throw new Error('rpc exploded mid-confirm'); },
     };
     await expect(withStubUrl(async () => {
-      const {createUsdcAta} = require('../solana');
-      return (createUsdcAta as (s: string) => Promise<string>)(SEED_HEX);
+      const {createTokenAta} = require('../solana');
+      return (createTokenAta as (s: string, m: string) => Promise<string>)(SEED_HEX, USDC_MINT);
     })).rejects.toThrow('rpc exploded mid-confirm');
   });
 });
@@ -685,7 +686,7 @@ describe('solana seam — signSolPayment / signSplPayment (OFFLINE, no network)'
     expect(pay.rid).toBe(request.rid);
 
     const {publicKey} = deriveSolanaKeypair(SEED_HEX);
-    const message = buildCanonicalUsdcMessage(publicKey, request);
+    const message = buildCanonicalSplMessage(publicKey, request, USDC_DECIMALS);
     const verify = verifySolPayment(message, pay);
     expect(verify.ok).toBe(true);
     expect(stubCalls).toBe(0);
@@ -706,7 +707,7 @@ describe('solana seam — broadcastSolPayment (money-critical freshness state ma
     const {publicKey} = deriveSolanaKeypair(SEED_HEX);
     const message = request.cur === 'SOL'
       ? buildCanonicalSolMessage(publicKey, request)
-      : buildCanonicalUsdcMessage(publicKey, request);
+      : buildCanonicalSplMessage(publicKey, request, USDC_DECIMALS);
     const verify = verifySolPayment(message, payment);
     if (!verify.ok) throw new Error('test fixture: payment failed to verify');
     return {payment, sig: verify.signature};

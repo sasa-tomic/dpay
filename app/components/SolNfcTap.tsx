@@ -6,7 +6,7 @@ import {SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import type {SolNfcEvent, Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS} from '../solana/spl';
+import {solanaTokenInfo} from '../solana/tokens';
 import {decodeSolReq, decodeSolPay, encodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {extractSignedTxParts} from '../solana/tx';
@@ -19,8 +19,14 @@ import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
 import {M} from '../i18n';
 
-function solUnit(cur: 'SOL' | 'USDC'): {decimals: number; unit: string} {
-  return cur === 'USDC' ? {decimals: USDC_DECIMALS, unit: 'USDC'} : {decimals: SOL_DECIMALS, unit: SOL_UNIT};
+/** Display facts for a request's token: registry decimals + the token literal as its own unit.
+ *  SOL is the identity case (lamports); any registry SPL symbol (USDC, EURC, …) reads its own
+ *  row. Unknown tokens (the codec is shape-only) render their literal with SOL decimals as a
+ *  display-only fallback — the SIGN path refuses them authoritatively. */
+function solUnit(cur: string): {decimals: number; unit: string} {
+  if (cur === 'SOL') return {decimals: SOL_DECIMALS, unit: SOL_UNIT};
+  const info = solanaTokenInfo(cur);
+  return {decimals: info?.decimals ?? SOL_DECIMALS, unit: cur};
 }
 
 /**
@@ -40,7 +46,7 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
   req?: SolReqV2;
   reqUri?: string;
   onOutcome?: (o: 'success' | 'pending' | 'declined') => void;
-  onResult?: (r: {amount: string; cur: 'SOL' | 'USDC'; sig: string} | null) => void;
+  onResult?: (r: {amount: string; cur: string; sig: string} | null) => void;
   onActive?: () => void;
   onClose: () => void;
 }) {

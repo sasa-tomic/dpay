@@ -6,6 +6,7 @@ import {BALANCE_TIMEOUT_MS} from './constants';
 import {fetchWithTimeout} from '../services/relay';
 import {SOL_DECIMALS} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
+import {EURC_DECIMALS, EURC_MINT_ADDRESS} from '../solana/tokens';
 
 // --- currency catalog (M0 + MC1 unit 5 + catalog v2 network-first) ---------------------------
 // The wallet's runtime source of truth for which assets exist + how to display/fund them. Fetched
@@ -319,10 +320,11 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
       {token: 'SOL', symbol: 'SOL', decimals: SOL_DECIMALS, min_fraction_digits: null, mint: null, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable'},
       {token: 'USDC', symbol: 'USDC', decimals: USDC_DECIMALS, min_fraction_digits: 2, mint: USDC_MINT_ADDRESS, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable'},
       // EURC — the solana half of the EUR dual-rail (Stage 1, 2026-09-06): the DEEP-liquidity
-      // EUR asset (Circle's native solana EURC). Mint pinned to dfx/catalog_truth.json eurc_mint
-      // by the jest suite (no app-side rail constant exists yet — Stage 4's job). INERT until
-      // Stage 4 wires the EUR rail; display data only for now.
-      {token: 'EURC', symbol: 'EURC', decimals: 6, min_fraction_digits: 2, mint: 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr', liquidity: 'deep', onramp: 'Unavailable', offramp: 'Unavailable'},
+      // EUR asset (Circle's native solana EURC). Mint + decimals come from the token registry
+      // (`solana/tokens.ts`, Stage 2) — the same source of truth dfx/catalog_truth.json's
+      // eurc_mint drift-checks against. Offerable since Stage 2 wired the solana asset
+      // enumeration (CURRENCY_RAILS.EUR: ['EURC'] matches its linkToken).
+      {token: 'EURC', symbol: 'EURC', decimals: EURC_DECIMALS, min_fraction_digits: 2, mint: EURC_MINT_ADDRESS, liquidity: 'deep', onramp: 'Unavailable', offramp: 'Unavailable'},
     ],
   },
 ];

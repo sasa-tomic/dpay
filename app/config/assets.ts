@@ -31,7 +31,6 @@ import {
   testnetDisplayName,
 } from './catalog';
 import {IS_SOLANA_DEVNET, SOLANA_RPC_URL} from './constants';
-import {USDC_MINT_ADDRESS} from '../solana/spl';
 import {parseDecimalToUnits} from '../lib/amount';
 import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
@@ -42,9 +41,10 @@ import {M} from '../i18n';
 // (so a catalog object refresh cannot invalidate the selection — the id is derived from the
 // currency u32 / token literal alone, not from any descriptor reference).
 //
-// `protocol: 'ic'` recovers `currency: number`; `protocol: 'solana'` recovers `token: 'SOL'|'USDC'`.
-// Consumers narrow on `protocol` to get a typed ref — no `any`, no cast. The discriminated union
-// matches the `AssetRef` shape so it composes with future Phase-3/4 selection contracts.
+// `protocol: 'ic'` recovers `currency: number`; `protocol: 'solana'` recovers `token: string` (a
+// registry symbol — 'SOL'/'USDC'/'EURC'). Consumers narrow on `protocol` to get a typed ref — no
+// `any`, no cast. The discriminated union matches the `AssetRef` shape so it composes with future
+// Phase-3/4 selection contracts.
 export type SelectableAsset =
   | {
       id: `ic:${number}`;
@@ -60,34 +60,38 @@ export type SelectableAsset =
       testKey: string;         // stable ASCII testID key (unique within a built list)
     }
   | {
-      id: 'solana:SOL' | 'solana:USDC';
+      id: `solana:${string}`;
       protocol: 'solana';
-      token: 'SOL' | 'USDC';
-      symbol: string;          // 'SOL' | 'USDC'
+      token: string;           // the registry symbol — 'SOL' | 'USDC' | 'EURC' | …
+      symbol: string;          // display symbol, verbatim from the catalog row
       linkToken: string | null; // the payment link's `?asset=` token — the ledger token itself
-      networkLabel: string;    // 'SOL · Solana' | 'USDC · Solana' — distinct from any IC USDC
+      networkLabel: string;    // 'SOL · Solana' | 'USDC · Solana' | 'EURC · Solana' — distinct from any IC sibling
       network: 'Solana';       // the chain's proper noun — never translated
-      decimals: number;        // SOL=9, USDC=6
+      mint: string | null;     // the SPL mint pubkey; null ⇒ native SOL (no mint)
+      decimals: number;        // SOL=9, USDC=6, EURC=6 — from the catalog row (registry-pinned)
       minFractionDigits: number; // compact-display floor (catalog `min_fraction_digits`; 0 when unset)
+      liquidity: 'deep' | 'thin' | null; // the catalog row's ramp-liquidity fact (null = unknown/native)
       visible: boolean;        // always true (appended only when the rail is enabled)
-      testKey: string;         // stable ASCII testID key ('sol' | 'sol-usdc')
+      testKey: string;         // stable ASCII testID key ('sol' | 'sol-usdc' | 'sol-eurc' | …)
     };
 
-// Options for the list builder. `solanaUsdc` is an explicit override used by tests; production
-// callers omit it and the builder resolves USDC availability from the live Solana config (the
-// `solanaUsdcAvailable()` helper below — pure over the config constants). `networks` is the
+// Options for the list builder. `solanaTokens` is an explicit override used by tests to force every
+// non-SOL token row available/unavailable regardless of the live config; production callers omit it
+// and the builder resolves per-token availability from the live Solana config (the
+// `solanaTokenAvailable()` helper below — pure over the config constants). `networks` is the
 // network-first catalog (catalog v2): when omitted, the bundled sections (`BUNDLED_NETWORKS`)
 // supply the Solana display facts, so a cold/offline first load renders the identical rows.
 export type BuildSelectableAssetsOptions = {
   showTestnet: boolean;
   solanaEnabled: boolean;
-  solanaUsdc?: boolean;
+  solanaTokens?: boolean;
   networks?: NetworkSection[];
 };
 
 // The ONE pure list builder. Returns the complete ordered list of selectable assets for the current
 // catalog + Solana config. Order: IC assets (catalog order, deduped by currency id, filtered by
-// testnet visibility) THEN `solana:SOL` THEN `solana:USDC`. Duplicate IC currency IDs are rejected
+// testnet visibility) THEN the solana rows in catalog-section order (`solana:SOL`, `solana:USDC`,
+// `solana:EURC`, … — the bundled/live section order). Duplicate IC currency IDs are rejected
 // deterministically (first occurrence wins) so a malformed catalog cannot produce two rows for one
 // currency id (a row that would make selection ambiguous).
 //
@@ -112,21 +116,40 @@ export function buildSelectableAssets(
     assets.push(icAsset(desc));
   }
   if (solanaEnabled) {
-    // Catalog v2: the SOL/USDC display facts (symbol/decimals) are CATALOG-DRIVEN — read from
-    // the network sections (the parsed relay response, or the bundled fallback when omitted — same
-    // one code path, so cold/offline first-load rendering is identical). A missing SOL row simply
-    // omits the asset; ids/testKeys stay stable literals so testID derivation never shifts.
+    // Catalog v2: the solana display facts (symbol/decimals/mint/liquidity) are CATALOG-DRIVEN —
+    // read from the network sections (the parsed relay response, or the bundled fallback when
+    // omitted — same one code path, so cold/offline first-load rendering is identical). SOL is the
+    // native rail and is always present; every SPL token (USDC/EURC/…) is fail-closed when the
+    // cluster is misconfigured (empty RPC, no mint, or a mainnet mint on a non-mainnet RPC — see
+    // `solanaTokenCoherent`). An unfulfillable token row would silently point at a non-existent
+    // token account; fail closed instead.
     const solana = solanaAssetsOf(opts.networks ?? BUNDLED_NETWORKS);
-    const sol = solana.find(a => a.token === 'SOL');
-    if (sol) assets.push(solanaAssetRow(sol, 'SOL', 'sol'));
-    // Solana USDC is fail-closed when the cluster is misconfigured (empty RPC, or mainnet mint on
-    // a non-mainnet RPC — see `solanaUsdcAvailable`). An unfulfillable USDC row would silently
-    // point at a non-existent token account; fail closed instead.
-    const usdc = opts.solanaUsdc ?? solanaUsdcAvailable();
-    const usdcRow = solana.find(a => a.token === 'USDC');
-    if (usdc && usdcRow) assets.push(solanaAssetRow(usdcRow, 'USDC', 'sol-usdc'));
+    for (const row of solana) {
+      if (row.token === 'SOL') {
+        assets.push(solanaAssetRow(row));
+        continue;
+      }
+      const available = opts.solanaTokens ?? solanaTokenAvailable(row.mint);
+      if (available) assets.push(solanaAssetRow(row));
+    }
   }
   return assets;
+}
+
+/**
+ * The SPL mints `buildSelectableAssets` will enumerate as visible token rows for the LIVE config
+ * (SOL excluded — it has no mint). This is the SAME predicate the builder's production path uses
+ * (`solanaTokenAvailable(row.mint)`; the `solanaTokens` test override is deliberately ignored),
+ * so Wallet can feed the per-mint balance hook a mint list whose membership always matches the
+ * visible asset list — no drift between "rendered row" and "polled account".
+ */
+export function visibleSolanaMints(networks?: NetworkSection[]): string[] {
+  const mints: string[] = [];
+  for (const row of solanaAssetsOf(networks ?? BUNDLED_NETWORKS)) {
+    if (row.token === 'SOL') continue;
+    if (row.mint != null && solanaTokenAvailable(row.mint)) mints.push(row.mint);
+  }
+  return mints;
 }
 
 // Build the SelectableAsset view model for one IC catalog descriptor. Pure; called per visible
@@ -157,24 +180,30 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
   };
 }
 
-// Build the SelectableAsset for one Solana catalog row. The display facts come from the row the
-// relay/bundled sections supplied (symbol/decimals); the id/testKey stay STABLE literals so
-// selection + testID derivation never shifts with catalog metadata. USDC's `networkLabel` is
-// distinct from any IC USDC so the two never read as the same balance (no-swap / no-confusion
+// Build the SelectableAsset for one Solana catalog row. Every display fact comes from the row the
+// relay/bundled sections supplied (symbol/decimals/mint/liquidity); the id/testKey are DERIVED from
+// the row's token alone so selection + testID derivation never shifts with catalog metadata
+// (`solana:SOL`→'sol', `solana:<TOKEN>`→`sol-<token-lowercased>` — byte-stable for the existing
+// SOL/USDC rows, extensible for EURC and beyond). A non-SOL row's `networkLabel` is distinct from
+// any IC sibling symbol so the two never read as the same balance (no-swap / no-confusion
 // invariant).
-function solanaAssetRow(row: SolanaAsset, token: 'SOL' | 'USDC', testKey: string): SelectableAsset {
+function solanaAssetRow(row: SolanaAsset): SelectableAsset {
+  const testKey = row.token === 'SOL' ? 'sol' : `sol-${row.token.toLowerCase()}`;
   return {
-    id: token === 'SOL' ? 'solana:SOL' : 'solana:USDC',
+    id: `solana:${row.token}`,
     protocol: 'solana',
-    token,
+    token: row.token,
     symbol: row.symbol,
-    // The Solana rail's link token IS its ledger token ('SOL'/'USDC') — the mint is the asset, so
-    // the symbol needs no wrapper distinction (and never collides with the IC 'ckUSDC' row).
-    linkToken: token,
+    // The Solana rail's link token IS its ledger token ('SOL'/'USDC'/'EURC') — the mint is the
+    // asset, so the symbol needs no wrapper distinction (and never collides with the IC 'ckUSDC'
+    // row).
+    linkToken: row.token,
     networkLabel: M.wallet.asset.networkLabel(row.symbol, 'Solana'),
     network: 'Solana',
+    mint: row.mint,
     decimals: row.decimals,
     minFractionDigits: row.min_fraction_digits ?? 0,
+    liquidity: row.liquidity,
     visible: true,
     testKey,
   };
@@ -202,6 +231,11 @@ function icTestKey(desc: CurrencyDescriptor, isPrimary: boolean, _testnet: boole
 export function parseAssetId(v: string | null | undefined): AssetId | null {
   if (typeof v !== 'string') return null;
   if (v === 'solana:SOL' || v === 'solana:USDC') return v;
+  // `solana:<TOKEN>` — an uppercase registry symbol ([A-Z0-9]{2,10}: SOL/USDC/EURC/…). Shape-checked
+  // only; whether the token is selectable TODAY is `reconcileSelectedAsset`'s job (a vanished
+  // selection falls back like any other stale id).
+  const s = /^solana:([A-Z0-9]{2,10})$/.exec(v);
+  if (s) return v as AssetId;
   const m = /^ic:(\d+)$/.exec(v);
   return m ? (`ic:${Number(m[1])}` as AssetId) : null;
 }
@@ -368,25 +402,27 @@ export function shouldAllowUserSelect(selectionLocked: boolean): boolean {
   return !selectionLocked;
 }
 
-// Whether Solana USDC is selectable on the CURRENTLY configured cluster. Pure over the constants;
-// no network. The two fail-closed cases:
+// Whether a Solana SPL token is selectable on the CURRENTLY configured cluster. Pure over the
+// constants; no network. The three fail-closed cases:
 //   - empty RPC URL (`SOLANA_RPC_URL=''` — the offline inner loop / jest / a build with SOL
-//     disabled): no cluster at all ⇒ USDC unavailable.
-//   - mainnet mint on a NON-mainnet RPC: the only configured USDC mint is the mainnet mint
-//     (`USDC_MINT_ADDRESS`); pointing it at devnet/testnet would silently address a non-existent
-//     account. Fail closed rather than ship an unfulfillable USDC row.
+//     disabled): no cluster at all ⇒ the token is unavailable.
+//   - no mint: an SPL token row with `mint: null` (other than SOL, which never reaches this check)
+//     names no on-chain account ⇒ unavailable.
+//   - mainnet mint on a NON-mainnet RPC: the configured mints are mainnet mints; pointing them at
+//     devnet/testnet would silently address a non-existent account. Fail closed rather than ship
+//     an unfulfillable token row.
 //
-// The pure predicate is split out (`solanaUsdcCoherent`) so the policy is unit-testable without
-// module-registry gymnastics; the public no-arg helper reads the config and delegates.
-export function solanaUsdcCoherent(rpcUrl: string, isDevnet: boolean, mint: string): boolean {
+// The pure predicate is split out (`solanaTokenCoherent`) so the policy is unit-testable without
+// module-registry gymnastics; the public helper reads the config and delegates.
+export function solanaTokenCoherent(rpcUrl: string, isDevnet: boolean, mint: string | null): boolean {
   if (!rpcUrl) return false;       // SOL disabled / offline inner loop
   if (!mint) return false;         // no configured mint for this cluster
   if (isDevnet) return false;      // mainnet mint on a devnet RPC ⇒ fail closed
   return true;
 }
 
-export function solanaUsdcAvailable(): boolean {
-  return solanaUsdcCoherent(SOLANA_RPC_URL, IS_SOLANA_DEVNET, USDC_MINT_ADDRESS);
+export function solanaTokenAvailable(mint: string | null): boolean {
+  return solanaTokenCoherent(SOLANA_RPC_URL, IS_SOLANA_DEVNET, mint);
 }
 
 // The active-rail chip + header balance label. Returns the bare asset `symbol` UNLESS another
@@ -424,27 +460,28 @@ export function chipLabel(asset: SelectableAsset, all: SelectableAsset[]): strin
   return `${asset.symbol}·${shortNetworkTag(asset)}`;
 }
 
-// The Solana Pay-tab gate (2026-08-16 zero-funds UX): when the active asset is KNOWN unfunded, the
-// payer should fund the wallet FIRST, not scan a doomed payment. Pure derivation from the
-// useSolanaBalances states — the Wallet computes it, SolPayMode renders it.
-//   'sol-zero'    — SOL selected, RPC confirmed balance === '0' (a KNOWN zero, not loading/missing)
-//   'usdc-absent' — USDC selected, the device's USDC token account (ATA) is KNOWN absent
-//   'usdc-zero'   — USDC selected, ATA exists, RPC confirmed amount === '0'
-//   'none'        — fundable as-is (OR any UNCONFIRMED state: loading / unavailable / error — the
-//                   gate FAILS OPEN to the live scanner per the offline-first rule; error preserves
-//                   the last amount by hook contract, so it is never a confident zero).
+// The Solana Pay-tab gate (2026-08-16 zero-funds UX, generalized per-token 2026-09-06): when the
+// active asset is KNOWN unfunded, the payer should fund the wallet FIRST, not scan a doomed
+// payment. Pure derivation from the useSolanaBalances states — the Wallet computes it for the
+// SELECTED token, SolPayMode renders it.
+//   'sol-zero'     — SOL selected, RPC confirmed balance === '0' (a KNOWN zero, not loading/missing)
+//   'token-absent' — an SPL token selected, the device's token account (ATA) for ITS mint is KNOWN absent
+//   'token-zero'   — an SPL token selected, ATA exists, RPC confirmed amount === '0'
+//   'none'         — fundable as-is (OR any UNCONFIRMED state: loading / unavailable / error — the
+//                    gate FAILS OPEN to the live scanner per the offline-first rule; error preserves
+//                    the last amount by hook contract, so it is never a confident zero).
 // The NFC card must NOT arm while gated (a tap is auto-sign consent — a zero balance signs a
 // signature the merchant can never settle).
-export type SolPayGate = 'none' | 'sol-zero' | 'usdc-absent' | 'usdc-zero';
+export type SolPayGate = 'none' | 'sol-zero' | 'token-absent' | 'token-zero';
 export function solPayGate(
-  selectedToken: 'SOL' | 'USDC',
+  selectedToken: string,
   sol: {balance: string | null; status: string},
-  usdc: {amount: string | null; status: string},
+  token: {amount: string | null; status: string},
 ): SolPayGate {
   if (selectedToken === 'SOL') {
     return sol.status === 'ok' && sol.balance === '0' ? 'sol-zero' : 'none';
   }
-  if (usdc.status === 'absent') return 'usdc-absent';
-  if (usdc.status === 'balance' && usdc.amount != null && usdc.amount === '0') return 'usdc-zero';
+  if (token.status === 'absent') return 'token-absent';
+  if (token.status === 'balance' && token.amount != null && token.amount === '0') return 'token-zero';
   return 'none';
 }

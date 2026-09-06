@@ -44,6 +44,29 @@ const SOL_REQ_INPUT: SolReqInput = {
   memo: 'table 7',
 };
 
+// EURC golden vector (Stage 2 dual-rail). Mint is the REAL mainnet EURC mint from the token
+// registry — the codec itself never gates on WHICH mint (structural validation only); the
+// supported-mint gate lives at the component/engine layer, so this vector pins exactly the
+// codec-level promise: a third token's bytes lay out identically to USDC's.
+const EURC_MINT = 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr';
+const MERCHANT_EURC_ATA = 'Fg6VdtbcsqSB4rJmFQdYK5JmWr17cy3q7nHvhCwhfWqX';
+const EURC_REQ_INPUT: SolReqInput = {
+  rid: RID,
+  net: 'mainnet-beta',
+  bh: BLOCKHASH,
+  lvh: 300_000_000,
+  slot: 290_000_000,
+  iat: 1760000000,
+  exp: 1760000060, // iat + 60
+  to: MERCHANT,
+  amt: '2500000', // 2.5 EURC (micro-EURC, 6 decimals)
+  cur: 'EURC',
+  mint: EURC_MINT,
+  toAta: MERCHANT_EURC_ATA,
+  name: 'Cafe Sol',
+  memo: 'table 7',
+};
+
 const USDC_REQ_INPUT: SolReqInput = {
   rid: RID,
   net: 'mainnet-beta',
@@ -182,6 +205,11 @@ describe('solana/qr — v2 canonical byte-equality (golden round-trip)', () => {
     expect(uri).toBe(goldenReqUri(USDC_REQ_INPUT));
     expect(encodeSolReq(decodeSolReq(uri))).toBe(uri);
   });
+  test('EURC request round-trips byte-exactly (same wire layout as USDC)', () => {
+    const uri = encodeSolReq(EURC_REQ_INPUT);
+    expect(uri).toBe(goldenReqUri(EURC_REQ_INPUT));
+    expect(encodeSolReq(decodeSolReq(uri))).toBe(uri);
+  });
   test('decodeSolReq returns the declared field values (SOL)', () => {
     const d = decodeSolReq(goldenReqUri(SOL_REQ_INPUT));
     expect(d).toEqual({v: 2, ...SOL_REQ_INPUT});
@@ -189,6 +217,11 @@ describe('solana/qr — v2 canonical byte-equality (golden round-trip)', () => {
   test('decodeSolReq returns the declared field values (USDC)', () => {
     const d = decodeSolReq(goldenReqUri(USDC_REQ_INPUT));
     expect(d).toEqual({v: 2, ...USDC_REQ_INPUT});
+  });
+  test('decodeSolReq returns the declared field values (EURC)', () => {
+    const d = decodeSolReq(goldenReqUri(EURC_REQ_INPUT));
+    expect(d).toEqual({v: 2, ...EURC_REQ_INPUT});
+    expect(d.mint).toBe(EURC_MINT);
   });
   test('encodeSolPay/decodeSolPay round-trip byte-exactly, including 0xfb/0xff/0xbf tx bytes', () => {
     const uri = encodeSolPay(SOL_PAY_INPUT);
@@ -318,8 +351,13 @@ describe('solana/qr — solreq field validation', () => {
     expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, net: 'mainnet'}))).toThrow(/net/i);
     expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, net: 'Mainnet-Beta'}))).toThrow(/net/i);
   });
-  test('cur must be SOL or USDC', () => {
-    expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, cur: 'BTC'}))).toThrow(/cur/i);
+  test('cur must be an uppercase token symbol [A-Z0-9]{2,10}', () => {
+    // Lowercase, too-short, too-long, and non-symbol characters are all refused at the SHAPE
+    // level — WHICH symbol it is (USDC, EURC, …) is deliberately NOT the codec's business.
+    expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, cur: 'btc'}))).toThrow(/cur/i);
+    expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, cur: 'S'}))).toThrow(/cur/i);
+    expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, cur: 'SOLPOWEREDX'}))).toThrow(/cur/i);
+    expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, cur: 'US-DC'}))).toThrow(/cur/i);
   });
   test('SOL requires mint === null && toAta === null', () => {
     expect(() => decodeSolReq(goldenReqUri({...SOL_REQ_INPUT, mint: USDC_MINT}))).toThrow(/mint/i);
@@ -328,6 +366,10 @@ describe('solana/qr — solreq field validation', () => {
   test('USDC requires non-null mint AND non-null toAta', () => {
     expect(() => decodeSolReq(goldenReqUri({...USDC_REQ_INPUT, mint: null}))).toThrow(/mint/i);
     expect(() => decodeSolReq(goldenReqUri({...USDC_REQ_INPUT, toAta: null}))).toThrow(/ata/i);
+  });
+  test('EURC (any non-SOL token) requires non-null mint AND non-null toAta, error names the token', () => {
+    expect(() => decodeSolReq(goldenReqUri({...EURC_REQ_INPUT, mint: null}))).toThrow(/EURC/);
+    expect(() => decodeSolReq(goldenReqUri({...EURC_REQ_INPUT, toAta: null}))).toThrow(/EURC/);
   });
   test('iat < exp AND exp <= iat + 90', () => {
     // exp == iat (NOT strictly greater) must fail.

@@ -142,10 +142,17 @@ describe('DepositSheet — Trust gate (IC rail, mainnet CkBtcUtxo only)', () => 
 });
 
 describe('SolanaReceiveSheet — Trust gate (native SOL rail)', () => {
+  // A token row is named by its token literal AND its mint (registry truth) — the sheet itself
+  // holds no token literals anymore, so the USDC mount passes the registry mint.
   const mount = (token: 'SOL' | 'USDC') => {
     let tree!: renderer.ReactTestRenderer;
     act(() => {
-      tree = renderer.create(<SolanaReceiveSheet address={SOL_ADDR} token={token} onClose={() => {}} />);
+      tree = renderer.create(
+        <SolanaReceiveSheet
+          address={SOL_ADDR}
+          token={token}
+          mint={token === 'USDC' ? 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' : null}
+          onClose={() => {}} />);
     });
     return tree;
   };

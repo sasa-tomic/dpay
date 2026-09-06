@@ -194,13 +194,13 @@ export type DepositMessages = {
 
   /** Native Solana rail (SolanaReceiveSheet): the device key IS the account. */
   sol: {
-    createAtaLabel: string;
-    checkingAta: string;
+    createAtaLabel: (asset: string) => string;
+    checkingAta: (asset: string) => string;
     /** Fail-closed, never a false claim: the account could not be CHECKED, so nothing is asserted. */
-    ataUnverified: string;
-    ataUnverifiedDetail: string;
-    retryAtaLabel: string;
-    retryAtaHint: string;
+    ataUnverified: (asset: string) => string;
+    ataUnverifiedDetail: (asset: string) => string;
+    retryAtaLabel: (asset: string) => string;
+    retryAtaHint: (asset: string) => string;
     checkAgain: string;
     backToRequest: string;
     sendToAddress: (asset: string, network: string) => InstrRun[];
@@ -214,16 +214,17 @@ export type DepositMessages = {
     returnHint: string;
   };
 
-  /** The one-tap USDC token-account setup card (SolanaAtaSetupCard), shared by receive AND send. */
+  /** The one-tap token-account setup card (SolanaAtaSetupCard), shared by receive AND send. Every
+   *  sentence names the asset it is about (USDC, EURC, …) — never a hard-coded token. */
   ata: {
-    absent: string;
+    absent: (asset: string) => string;
     /** The one-time rent + fee is DISCLOSED before the tap — no silent cost on a money screen. */
-    cost: (setupCost: string) => string;
+    cost: (setupCost: string, asset: string) => string;
     checkingSol: string;
     needSol: (setupCost: string) => string;
     showSolAddress: string;
-    creating: string;
-    createHint: (setupCost: string) => string;
+    creating: (asset: string) => string;
+    createHint: (setupCost: string, asset: string) => string;
   };
 
   /** One-tap funding from Trust Wallet (Android only). */
@@ -359,13 +360,13 @@ export const depositEn: DepositMessages = {
   },
 
   sol: {
-    createAtaLabel: 'Create USDC account',
-    checkingAta: 'Checking your USDC account…',
-    ataUnverified: "Couldn't check your USDC account.",
-    ataUnverifiedDetail:
-      "Your address is fine — we just can't reach Solana right now to confirm your USDC account on-chain. Check your connection and try again.",
-    retryAtaLabel: 'Retry checking USDC account',
-    retryAtaHint: 'Re-check whether your USDC account exists on-chain',
+    createAtaLabel: asset => `Create ${asset} account`,
+    checkingAta: asset => `Checking your ${asset} account…`,
+    ataUnverified: asset => `Couldn't check your ${asset} account.`,
+    ataUnverifiedDetail: asset =>
+      `Your address is fine — we just can't reach Solana right now to confirm your ${asset} account on-chain. Check your connection and try again.`,
+    retryAtaLabel: asset => `Retry checking ${asset} account`,
+    retryAtaHint: asset => `Re-check whether your ${asset} account exists on-chain`,
     checkAgain: 'Check again',
     backToRequest: 'Back to request',
     sendToAddress: (asset, network) => [
@@ -386,15 +387,15 @@ export const depositEn: DepositMessages = {
   },
 
   ata: {
-    absent: "You don't have a USDC account on this device yet.",
-    cost: setupCost =>
-      `Solana keeps your USDC in a one-time token account tied to this wallet. Creating it costs ${setupCost} (account rent + fee) from your SOL balance — it stays your account, on your keys. dpay never holds them.`,
+    absent: asset => `You don't have a ${asset} account on this device yet.`,
+    cost: (setupCost, asset) =>
+      `Solana keeps your ${asset} in a one-time token account tied to this wallet. Creating it costs ${setupCost} (account rent + fee) from your SOL balance — it stays your account, on your keys. dpay never holds them.`,
     checkingSol: 'Checking your SOL balance…',
     needSol: setupCost =>
       `You need about ${setupCost} in this wallet first — receive SOL at your address, then create the account.`,
     showSolAddress: 'Show my SOL address',
-    creating: 'Creating your USDC account — confirming on Solana…',
-    createHint: setupCost => `Create your one-time USDC account for ${setupCost} from your SOL balance`,
+    creating: asset => `Creating your ${asset} account — confirming on Solana…`,
+    createHint: (setupCost, asset) => `Create your one-time ${asset} account for ${setupCost} from your SOL balance`,
   },
 
   trust: {
@@ -521,8 +522,7 @@ export type WithdrawMessages = {
 
   /** Native Solana rail (SolanaWithdrawSheet): the device key signs and broadcasts directly. */
   sol: {
-    createAtaLabel: string;
-    backToScan: string;
+    createAtaLabel: (asset: string) => string;    backToScan: string;
     sent: string;
     txSignature: string;
     copySignatureLabel: string;
@@ -531,13 +531,14 @@ export type WithdrawMessages = {
     confirmingOnSolana: string;
     sendToSolana: (asset: string) => string;
     available: (available: string) => string;
-    usdcAmountPlaceholder: string;
+    /** Amount placeholder for a registry token send (SOL's own scale sits beside it). */
+    tokenAmountPlaceholder: string;
     solAmountPlaceholder: string;
     /** Fees (and a possible recipient-account creation) are paid in SOL — said BEFORE the amount. */
-    needsSol: string;
+    needsSol: (asset: string) => string;
     reviewTitle: string;
     sendAmount: (amount: string) => string;
-    recipientAtaNote: (cost: string) => string;
+    recipientAtaNote: (cost: string, asset: string) => string;
     confirmLabel: (asset: string) => string;
   };
 };
@@ -631,7 +632,7 @@ export const withdrawEn: WithdrawMessages = {
   },
 
   sol: {
-    createAtaLabel: 'Create my USDC account',
+    createAtaLabel: asset => `Create my ${asset} account`,
     backToScan: 'Back to scan',
     sent: 'Sent ✓',
     txSignature: 'transaction signature',
@@ -641,13 +642,13 @@ export const withdrawEn: WithdrawMessages = {
     confirmingOnSolana: 'Confirming on Solana — this can take up to a minute.',
     sendToSolana: asset => `Send your ${asset} to a Solana address`,
     available: available => `Available: ${available}`,
-    usdcAmountPlaceholder: '1.5',
+    tokenAmountPlaceholder: '1.5',
     solAmountPlaceholder: '0.025',
-    needsSol: 'Sending USDC needs a little SOL in the wallet for network fees — add some first.',
+    needsSol: asset => `Sending ${asset} needs a little SOL in the wallet for network fees — add some first.`,
     reviewTitle: 'Review send',
     sendAmount: amount => `Send ${amount}`,
-    recipientAtaNote: cost =>
-      `If they don't have a USDC account yet, this creates it for them (one-time ≈${cost} paid by you).`,
+    recipientAtaNote: (cost, asset) =>
+      `If they don't have a ${asset} account yet, this creates it for them (one-time ≈${cost} paid by you).`,
     confirmLabel: asset => `Confirm ${asset} send`,
   },
 };

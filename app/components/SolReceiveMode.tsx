@@ -13,7 +13,8 @@ import {type HomeCurrency} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId, NfcStatus} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS, USDC_MINT_ADDRESS, deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {solanaTokenInfo} from '../solana/tokens';
 import {decodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED} from '../solana/payments';
@@ -21,7 +22,7 @@ import {extractSignedTxParts} from '../solana/tx';
 import {createSolPaymentRequest, broadcastSolPayment, isSolanaRpcAvailable} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {loadSolMerchantState, saveSolMerchantState, clearSolMerchantState} from '../services/solMerchantPersist';
-import {type SolUsdcStatus} from '../hooks/useSolanaBalances';
+import {type SolTokenStatus} from '../hooks/useSolanaBalances';
 import {DpaySolNfc} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {QrScanner} from './QrScanner';
@@ -62,8 +63,13 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  *
  * Mirrors ReceiveMode.tsx's form → reqQr → result phase machine, but settles directly on Solana
  * (no relay, no /receipt poll — `confirmTransaction` is the source of truth).
+ *
+ * Token-generic (2026-09-06): every token fact (decimals, mint, symbol, cur literal) comes from
+ * the SELECTED asset row (`assets` + `selectedAssetId`) — the registry is the only truth, so a
+ * new token (EURC, …) renders here with no component change. `selectedToken` stays as the
+ * native-vs-SPL discriminator ('SOL' ⇔ mint null).
  */
-export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, usdcAtaStatus = 'balance', usdcAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshUsdc, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; catalog: CurrencyDescriptor[]; selectedToken: 'SOL' | 'USDC'; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; usdcAtaStatus?: SolUsdcStatus; usdcAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshUsdc?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, tokenAtaStatus = 'balance', tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void;
   homeCurrency?: HomeCurrency | null;
@@ -84,7 +90,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   const [reqSnapshot, setReqSnapshot] = useState<SolReqV2 | null>(null);
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{amount: string; cur: 'SOL' | 'USDC'; sig: string | null} | null>(null);
+  const [result, setResult] = useState<{amount: string; cur: string; sig: string | null} | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const {copied, copy: doCopy} = useCopyFeedback();
   const {shared, share} = useShareFeedback();
@@ -119,8 +125,15 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   useReportLock(onLockChange, locked);
   const [pickOpen, setPickOpen] = useState(false);
 
-  const decimals = selectedToken === 'SOL' ? SOL_DECIMALS : USDC_DECIMALS;
-  const unit = selectedToken === 'SOL' ? SOL_UNIT : 'USDC';
+  // Token facts come from the selected ASSET ROW (registry truth: decimals, mint, symbol) — never
+  // a USDC-shaped ternary. `selectedToken` remains only as the native-vs-SPL discriminator; the
+  // asset switcher mid-flow can leave them divergent, which is why each phase re-derives from the
+  // row (or the request itself) rather than trusting `selectedToken` alone.
+  const isNativeSol = selectedToken === 'SOL';
+  const decimals = isNativeSol ? SOL_DECIMALS : (solanaTokenInfo(selectedToken)?.decimals ?? SOL_DECIMALS);
+  const unit = isNativeSol ? SOL_UNIT : selectedToken;
+  const selectedMint = isNativeSol ? null : solanaTokenInfo(selectedToken)?.mint ?? null;
+  const isSpl = !isNativeSol && selectedMint != null;
 
   // Display clock — ticks 1s while a request QR is showing (for the expiry countdown).
   useEffect(() => {
@@ -164,15 +177,16 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   );
 
   if (subMode === 'address') {
-    const usdcAtaAddress = selectedToken === 'USDC' ? bs58.encode(deriveAta(solAddress, USDC_MINT_ADDRESS)) : solAddress;
-    // Map the USDC poll status onto the sheet's tri-state gate (2026-08-14 audit): only a KNOWN
-    // balance shows the QR; only KNOWN absence shows the setup card. checking/unverified never
-    // claim absence — fail-closed without a false "you don't have one" message.
-    const ataState = selectedToken !== 'USDC'
+    const tokenAtaAddress = isSpl && selectedMint != null ? bs58.encode(deriveAta(solAddress, selectedMint)) : solAddress;
+    // Map the per-mint token poll status onto the sheet's tri-state gate (2026-08-14 audit): only
+    // a KNOWN balance shows the QR; only KNOWN absence shows the setup card. checking/unverified
+    // never claim absence — fail-closed without a false "you don't have one" message. Native SOL
+    // has no token account at all, so it is always 'ready'.
+    const ataState = !isSpl
       ? 'ready'
-      : usdcAtaStatus === 'balance' ? 'ready'
-      : usdcAtaStatus === 'absent' ? 'absent'
-      : usdcAtaStatus === 'loading' ? 'checking'
+      : tokenAtaStatus === 'balance' ? 'ready'
+      : tokenAtaStatus === 'absent' ? 'absent'
+      : tokenAtaStatus === 'loading' ? 'checking'
       : 'unverified';
     return (
       <View style={S.center}>
@@ -188,17 +202,20 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           />
         ) : null}
         <SolanaReceiveSheet
-          address={usdcAtaAddress}
+          address={tokenAtaAddress}
           uriRecipient={solAddress}
           token={selectedToken}
+          mint={selectedMint}
+          symbol={unit}
+          decimals={decimals}
           ataStatus={ataState}
           solBalance={solBalance}
-          tokenZero={(selectedToken === 'SOL' && solOk && solBalance === '0') || (selectedToken === 'USDC' && usdcAtaStatus === 'balance' && (usdcAmount ?? null) === '0')}
+          tokenZero={(!isSpl && solOk && solBalance === '0') || (isSpl && tokenAtaStatus === 'balance' && (tokenAmount ?? null) === '0')}
           ataSetupBusy={ataSetupBusy}
           ataSetupErr={ataSetupErr}
           onCreateAta={onCreateAta}
           onShowSolAddress={onShowSolAddress}
-          onRetryAta={selectedToken === 'USDC' ? onRefreshUsdc : onRefreshSol}
+          onRetryAta={isSpl ? onRefreshToken : onRefreshSol}
           returnLabel={depositReturnLabel}
           onReturn={onReturnFromDeposit}
           onClose={() => onSubModeChange('request')}
@@ -213,12 +230,18 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   async function makeRequest() {
     const raw = toUnits(amount, decimals);
     if (!raw || raw === '0') return;
+    // An SPL request needs the registry row's mint — a token without one cannot be requested
+    // (fail honestly at the button, never build a broken QR).
+    if (!isNativeSol && selectedMint == null) { setErr(friendlySolError(`unknown token ${selectedToken}`)); return; }
     setBusy(true); setErr(null);
     const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
-      const input = selectedToken === 'SOL'
-        ? {to: solAddress, amt: raw, cur: 'SOL' as const, mint: null, toAta: null, name: identity.username, memo: memo.trim()}
-        : {to: solAddress, amt: raw, cur: 'USDC' as const, mint: USDC_MINT_ADDRESS, toAta: bs58.encode(deriveAta(solAddress, USDC_MINT_ADDRESS)), name: identity.username, memo: memo.trim()};
+      // `cur` is the token literal itself; mint/toAta come from the selected token's registry
+      // row. The QR codec validates shape only — membership in the registry is enforced here by
+      // construction (the row exists or the button never fires).
+      const input = !isNativeSol && selectedMint != null
+        ? {to: solAddress, amt: raw, cur: selectedToken, mint: selectedMint, toAta: bs58.encode(deriveAta(solAddress, selectedMint)), name: identity.username, memo: memo.trim()}
+        : {to: solAddress, amt: raw, cur: 'SOL', mint: null, toAta: null, name: identity.username, memo: memo.trim()};
       const {request, uri} = await createSolPaymentRequest(input, signal);
       setReqSnapshot(request);
       setReqUri(uri);
@@ -279,7 +302,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   }
 
   // NFC reader success — same handling as onSignedQr SETTLED path.
-  function onNfcResult(r: {amount: string; cur: 'SOL' | 'USDC'; sig: string} | null) {
+  function onNfcResult(r: {amount: string; cur: string; sig: string} | null) {
     if (!r) return;
     setResult({amount: r.amount, cur: r.cur, sig: r.sig});
     awardPaymentTested(journeyRef.current);
@@ -330,7 +353,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       <View style={S.center}>
         {toggle}
         <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-        <Text testID="sol-req-status" style={S.paidText}>{M.receive.receivedAmount(fmtAsset(result.amount, result.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS, result.cur === 'USDC' ? 'USDC' : SOL_UNIT))}</Text>
+        <Text testID="sol-req-status" style={S.paidText}>{M.receive.receivedAmount(fmtAsset(result.amount, result.cur === 'SOL' ? SOL_DECIMALS : solanaTokenInfo(result.cur)?.decimals ?? SOL_DECIMALS, result.cur === 'SOL' ? SOL_UNIT : result.cur))}</Text>
         {result.sig ? (
           <>
             <Text style={S.dim2}>{M.receive.transactionSignature}</Text>
@@ -502,7 +525,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           accessibilityLabel={M.receive.receiveIn(selectedToken)}
           accessibilityHint={M.receive.chooseAssetHint}
           accessibilityState={{disabled: false}}>
-          <Text style={S.currency}>{selectedToken === 'SOL' ? '◎' : '$'}</Text>
+          <Text style={S.currency}>{isNativeSol ? '◎' : selectedToken === 'EURC' ? '€' : selectedToken === 'USDC' ? '$' : '¤'}</Text>
           <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
         <TextInput
@@ -526,16 +549,17 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         accessibilityLabel={M.receive.memo}
         maxLength={32}
       />
-      {/* 2026-08-14 audit: a USDC request whose settlement is doomed must not be creatable. If the
-          device's ATA is KNOWN absent, the payer would sign a transferChecked to a non-existent
-          account — broadcast fails AFTER they walked away. Inline the same one-tap setup card and
-          block Request (known-absent only; loading/error/unavailable do not block — the honest
-          unknown-handling the founder set when the dead-end gate was removed in 19c6e8f). */}
-      {selectedToken === 'USDC' && usdcAtaStatus === 'absent' ? (
+      {/* 2026-08-14 audit: a token request whose settlement is doomed must not be creatable. If the
+          device's token account is KNOWN absent, the payer would sign a transferChecked to a
+          non-existent account — broadcast fails AFTER they walked away. Inline the same one-tap
+          setup card and block Request (known-absent only; loading/error/unavailable do not block —
+          the honest unknown-handling the founder set when the dead-end gate was removed in 19c6e8f). */}
+      {isSpl && tokenAtaStatus === 'absent' ? (
         <SolanaAtaSetupCard
+          asset={unit}
           instrTestID="sol-req-ata"
           btnTestID="btn-sol-req-ata-create"
-          buttonLabel={M.pay.createUsdcAccount}
+          buttonLabel={M.pay.createTokenAccount(unit)}
           hasSol={solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS}
           checkingSol={solBalance == null}
           busy={ataSetupBusy}
@@ -553,8 +577,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       ) : null}
       {err ? <Text style={S.err}>{err}</Text> : null}
       {(() => {
-        const usdcAbsent = selectedToken === 'USDC' && usdcAtaStatus === 'absent';
-        const blocked = !solRpc || busy || usdcAbsent;
+        const tokenAbsent = isSpl && tokenAtaStatus === 'absent';
+        const blocked = !solRpc || busy || tokenAbsent;
         return (
           <Pressable
             testID="btn-sol-req-make"

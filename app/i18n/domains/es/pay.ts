@@ -78,8 +78,8 @@ export const payEs: PayMessages = {
   },
 
   ocp: {
-    solanaUsdcUnsupported:
-      'Esta caja acepta USDC en Solana, pero su código no indica a qué cuenta de token enviarlo: pagar así podría mandar dinero real a la cuenta equivocada. Paga con SOL, o cambia en «Saldos» a otro activo que acepte esta caja.',
+    solanaTokenUnsupported: symbol =>
+      `Esta caja acepta ${symbol} en Solana, pero su código no indica a qué cuenta de token enviarlo: pagar así podría mandar dinero real a la cuenta equivocada. Paga con SOL, o cambia en «Saldos» a otro activo que acepte esta caja.`,
     chooseAsset: selected =>
       `Esta caja no acepta ${selected}, pero sí estos: elige con cuál pagar. dpay nunca convierte: pagas el activo que elijas.`,
     assetNotAccepted: (selected, accepted) =>
@@ -152,9 +152,9 @@ export const payEs: PayMessages = {
     `Esta billetera todavía no tiene ${symbol}. Envía ${symbol} a tu dirección y podrás ${action === 'pay' ? 'pagar' : 'enviar'} enseguida.`,
   fundBodyNoDeposits: symbol =>
     `Esta billetera todavía no tiene ${symbol}, y ${symbol} aún no admite depósitos. Añade fondos en otro activo o vuelve a intentarlo pronto.`,
-  fundBodyUsdc: 'Envía USDC (Solana) a tu dirección de USDC. Deja un poco de SOL en la billetera para las comisiones de red.',
+  fundBodyToken: symbol => `Envía ${symbol} (Solana) a tu dirección de ${symbol}. Deja un poco de SOL en la billetera para las comisiones de red.`,
   showMyAddress: symbol => `Ver mi dirección de ${symbol}`,
-  createUsdcAccount: 'Crear mi cuenta de USDC',
+  createTokenAccount: symbol => `Crear mi cuenta de ${symbol}`,
   fundSibling: {
     holds: (amount, rail) => `Tienes ${amount} en ${rail}`,
     switchTo: network => `Cambiar a ${network}`,

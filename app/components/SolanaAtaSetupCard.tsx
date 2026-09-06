@@ -9,25 +9,27 @@ import {IconAlert} from './icons';
 import {M} from '../i18n';
 
 /**
- * The one-tap USDC-account (ATA) setup card — the SHARED surface for every place the device's
- * USDC token account is KNOWN absent (2026-08-14). Renders: the instruction card (cost + custody
- * disclosure), the insufficient-SOL warning (+ the fund-SOL escape hatch, 2026-08-16), the devnet
- * warning, the busy state, the create button, and the error line. The create action (`onCreateAta`,
- * owned by Wallet → `createUsdcAta`) broadcasts a REAL AssociatedTokenProgram.createIdempotent
- * transaction signed by the device key; the one-time rent + fee are paid from the device's SOL
- * balance and DISCLOSED in the copy (honest cost, no silent fee — founder rule 2026-08-14:
- * "I don't want faking").
+ * The one-tap token-account (ATA) setup card — the SHARED surface for every place the device's
+ * token account for a registered SPL token is KNOWN absent (2026-08-14; generalized per-token
+ * 2026-09-06). Renders: the instruction card (cost + custody disclosure), the insufficient-SOL
+ * warning (+ the fund-SOL escape hatch, 2026-08-16), the devnet warning, the busy state, the
+ * create button, and the error line. The create action (`onCreateAta`, owned by Wallet →
+ * `createTokenAta`) broadcasts a REAL AssociatedTokenProgram.createIdempotent transaction signed
+ * by the device key; the one-time rent + fee are paid from the device's SOL balance and
+ * DISCLOSED in the copy (honest cost, no silent fee — founder rule 2026-08-14:
+ * "I don't want faking"). `asset` names the token in the copy (USDC, EURC, …).
  *
  * Callers (each with its own testIDs so e2e can tell the surfaces apart):
- *   - SolanaReceiveSheet  (Receive → My address, USDC absent)  — btn-sol-ata-create
- *   - SolanaWithdrawSheet (Pay → Send to address, USDC absent) — btn-sol-send-ata-create
- *   - SolReceiveMode      (Receive → request form, USDC absent — inline, blocks btn-sol-req-make)
+ *   - SolanaReceiveSheet  (Receive → My address, token absent)  — btn-sol-ata-create
+ *   - SolanaWithdrawSheet (Pay → Send to address, token absent) — btn-sol-send-ata-create
+ *   - SolReceiveMode      (Receive → request form, token absent — inline, blocks btn-sol-req-make)
  *                        — btn-sol-req-ata-create
- *   - SolPayMode          (Pay → scan, USDC absent — the zero-funds gate) — btn-sol-pay-ata-create
+ *   - SolPayMode          (Pay → scan, token absent — the zero-funds gate) — btn-sol-pay-ata-create
  * Only render this card when the ATA status is KNOWN 'absent' — never for loading/unavailable/
  * error (those states must not claim the account is missing; that was the 2026-08-14 audit fix).
  */
 export function SolanaAtaSetupCard({
+  asset,
   instrTestID,
   btnTestID,
   buttonLabel,
@@ -38,6 +40,8 @@ export function SolanaAtaSetupCard({
   onCreateAta,
   onShowSolAddress,
 }: {
+  /** The token's display symbol — names the account in every sentence ('USDC', 'EURC', …). */
+  asset: string;
   instrTestID: string;
   btnTestID: string;
   buttonLabel: string;
@@ -54,8 +58,8 @@ export function SolanaAtaSetupCard({
   return (
     <>
       <View testID={instrTestID} style={S.instrCard}>
-        <Text style={S.instrLine}>{M.deposit.ata.absent}</Text>
-        <Text style={S.instrCustody}>{M.deposit.ata.cost(setupCost)}</Text>
+        <Text style={S.instrLine}>{M.deposit.ata.absent(asset)}</Text>
+        <Text style={S.instrCustody}>{M.deposit.ata.cost(setupCost, asset)}</Text>
         {!hasSol ? (
           <>
             {checkingSol ? (
@@ -80,14 +84,14 @@ export function SolanaAtaSetupCard({
           // sizing in row form). No e2e/jest asserts this text; the testID moves to the wrapper.
           <View testID="sol-devnet-warning" style={S.warnRow}>
             <IconAlert size={14} color={C.warn} />
-            <Text style={S.warnRowText}>{M.deposit.sol.devnetWarn('USDC')}</Text>
+            <Text style={S.warnRowText}>{M.deposit.sol.devnetWarn(asset)}</Text>
           </View>
         ) : null}
       </View>
       {busy ? (
         <>
           <ActivityIndicator color={C.brand} />
-          <Text testID="sol-ata-busy" style={S.dim2}>{M.deposit.ata.creating}</Text>
+          <Text testID="sol-ata-busy" style={S.dim2}>{M.deposit.ata.creating(asset)}</Text>
         </>
       ) : (
         <Pressable
@@ -97,7 +101,7 @@ export function SolanaAtaSetupCard({
           onPress={onCreateAta}
           accessibilityRole="button"
           accessibilityLabel={buttonLabel}
-          accessibilityHint={M.deposit.ata.createHint(setupCost)}
+          accessibilityHint={M.deposit.ata.createHint(setupCost, asset)}
           accessibilityState={{disabled: !canCreate}}>
           <Text style={S.primaryText}>{buttonLabel}</Text>
         </Pressable>

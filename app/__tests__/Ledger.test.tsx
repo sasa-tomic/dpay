@@ -24,7 +24,7 @@ import type {AssetId, Txn} from '../lib/types';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {
-  showTestnet: false, solanaEnabled: true, solanaUsdc: true, networks: BUNDLED_NETWORKS,
+  showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS,
 });
 
 const TS_NEW = 1_756_000_200;

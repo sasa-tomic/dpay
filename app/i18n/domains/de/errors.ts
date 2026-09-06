@@ -16,12 +16,12 @@ export const errorsDe: ErrorMessages = {
 
   solana: {
     offline: 'Solana ist offline (kein RPC-Endpunkt konfiguriert)',
-    usdcUnavailable: 'Solana-USDC ist nicht verfügbar (kein RPC-Endpunkt konfiguriert)',
-    senderNoUsdcAccount: 'Deine Wallet hat noch kein USDC-Konto',
-    recipientNoUsdcAccount: solAmount =>
-      `Die Person hat noch kein USDC-Konto — zum Erstellen brauchst du etwa ${solAmount} SOL in dieser Wallet (einmalige Kontomiete + Gebühr, von dir bezahlt) — sende zuerst etwas SOL hierher`,
-    ownUsdcAccountRent: solAmount =>
-      `Für dein USDC-Konto brauchst du etwa ${solAmount} in dieser Wallet (einmalige Kontomiete + Gebühr) — sende zuerst etwas SOL hierher`,
+    tokenUnavailable: asset => `Solana-${asset} ist nicht verfügbar (kein RPC-Endpunkt konfiguriert)`,
+    senderNoTokenAccount: asset => `Deine Wallet hat noch kein ${asset}-Konto`,
+    recipientNoTokenAccount: (solAmount, asset) =>
+      `Die Person hat noch kein ${asset}-Konto — zum Erstellen brauchst du etwa ${solAmount} SOL in dieser Wallet (einmalige Kontomiete + Gebühr, von dir bezahlt) — sende zuerst etwas SOL hierher`,
+    ownTokenAccountRent: (solAmount, asset) =>
+      `Für dein ${asset}-Konto brauchst du etwa ${solAmount} in dieser Wallet (einmalige Kontomiete + Gebühr) — sende zuerst etwas SOL hierher`,
   },
 
   ethWallet: {

@@ -9,7 +9,7 @@ import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog'
 import {base, randNonceHex} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
-import {buildSelectableAssets, chipLabel, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solanaUsdcAvailable, solPayGate} from '../config/assets';
+import {buildSelectableAssets, chipLabel, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import {mergeHistoryByTime} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent} from '../lib/types';
@@ -24,7 +24,7 @@ import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
-import {deriveSolanaAddress, createUsdcAta} from '../solana';
+import {deriveSolanaAddress, createTokenAta} from '../solana';
 import {isValidSolanaAddress} from '../solana/identity';
 import {friendlySolError} from '../solana/errors';
 import {readDepositDeepLink, readPayLink, readPaymentDeeplink, parsePayLink, decodeDeeplink, type PayLink, type PayLinkParse} from '../lib/deepLink';
@@ -195,23 +195,29 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
 
   // Native SOL rail — a device-derived Solana key (SLIP-10 m/44'/501'/0'/0') from the SAME IC identity
   // seed, so one backup recovers both rails. The address is derived once (pure; stable per identity).
-  // useSolanaBalances polls the SOL RPC directly (no relay) AND the device's USDC ATA concurrently
-  // with independent statuses; when SOLANA_RPC_URL is empty (jest/e2e) it no-ops and the SOL card
-  // renders `—`. Both halves feed the per-asset balance map below.
+  // useSolanaBalances polls the SOL RPC directly (no relay) AND the device's token accounts for
+  // every VISIBLE SPL mint (`visibleSolanaMints` mirrors the builder's availability predicate, so
+  // hook membership always equals the rendered asset list) concurrently with independent per-mint
+  // statuses; when SOLANA_RPC_URL is empty (jest/e2e) it no-ops and the SOL card renders `—`.
+  // Both halves feed the per-asset balance map below.
   const solAddress = useMemo(() => {
     try { return deriveSolanaAddress(identity.secretHex); }
     catch (e) { console.warn('deriveSolanaAddress failed:', e instanceof Error ? e.message : String(e)); return null; }
   }, [identity.secretHex]);
-  const {sol: solState, usdc: usdcState, refreshSol, refreshUsdc} = useSolanaBalances(identity.secretHex, solAddress);
+  const solanaMints = useMemo(
+    () => (!solAddress ? [] : visibleSolanaMints(networks)),
+    [solAddress, networks],
+  );
+  const {sol: solState, tokens: tokenStates, refreshSol, refreshToken, refreshTokens} = useSolanaBalances(identity.secretHex, solAddress, solanaMints);
   // Defined AFTER the destructure (TDZ): manual re-poll for the fund-first "Check again" —
   // fire-and-forget polls get a self-clearing busy flag (UI affordance, not lifecycle tracking).
   const recheckSolBalances = useCallback(() => {
     refreshSol();
-    refreshUsdc();
+    refreshTokens();
     setRecheckBusy(true);
     if (recheckTimer.current != null) clearTimeout(recheckTimer.current);
     recheckTimer.current = setTimeout(() => setRecheckBusy(false), 1500);
-  }, [refreshSol, refreshUsdc]);
+  }, [refreshSol, refreshTokens]);
   // IC rail twin (UX review r3 MUST-1): same self-clearing busy affordance for the shared
   // InstructionPanel's "Check again" — without this, the IC panel's button gives zero feedback
   // while the identical SOL panel spins (per-rail divergence in a shared surface).
@@ -229,31 +235,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   const {history: solHistory, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(history, solHistory), [history, solHistory]);
 
-  // One-time USDC account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
-  // gate + Pay "Send to address" gate) share one busy/err state + one handler. createUsdcAta signs
-  // a REAL AssociatedTokenProgram.createIdempotent tx with the device key (non-custodial — dpay
-  // never holds keys); the one-time rent + fee come out of the device's SOL balance and are
-  // disclosed in the setup-card copy. On success both balance rails refresh: SOL (rent debited)
-  // + USDC (status flips 'absent' → 'balance' with amount 0, which unhides the address QR).
+  // One-time token-account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
+  // gate + Pay "Send to address"/scan gates) share one busy/err state + one handler. The handler is
+  // declared below the selection layer (it creates the SELECTED asset's account); these two states
+  // live here to keep the hook order section together. createTokenAta signs a REAL
+  // AssociatedTokenProgram.createIdempotent tx with the device key (non-custodial — dpay never
+  // holds keys); the one-time rent + fee come out of the device's SOL balance and are disclosed in
+  // the setup-card copy. On success both balance rails refresh: SOL (rent debited) + the token
+  // (status flips 'absent' → 'balance' with amount 0, which unhides the address QR).
   const [ataSetupBusy, setAtaSetupBusy] = useState(false);
   const [ataSetupErr, setAtaSetupErr] = useState<string | null>(null);
-  const createAta = useCallback(async () => {
-    if (ataSetupBusy) return;
-    setAtaSetupBusy(true);
-    setAtaSetupErr(null);
-    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
-    try {
-      await createUsdcAta(identity.secretHex, signal);
-      refreshSol();
-      refreshUsdc();
-    } catch (e: unknown) {
-      console.warn('createUsdcAta failed:', e instanceof Error ? e.message : String(e));
-      setAtaSetupErr(friendlySolError(e instanceof Error ? e.message : String(e)));
-    } finally {
-      cancel();
-      setAtaSetupBusy(false);
-    }
-  }, [ataSetupBusy, identity.secretHex, refreshSol, refreshUsdc]);
 
   // --- Phase 3 selection layer --------------------------------------------------------------
   // The ONE complete visible asset list, rebuilt from the catalog + Solana config. Pure; rebuilt on
@@ -262,7 +253,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // Solana USDC only when the cluster is coherent (`solanaUsdcAvailable` — fail-closed on devnet +
   // mainnet mint or an empty RPC). This list IS the visibility filter (testnet omitted, not flagged).
   const assets = useMemo(
-    () => buildSelectableAssets(catalog, {showTestnet, solanaEnabled: !!solAddress, solanaUsdc: solanaUsdcAvailable(), networks}),
+    // No `solanaTokens` override: the builder resolves each token row's availability from the live
+    // config (`solanaTokenAvailable(row.mint)` — fail-closed per mint), which is also exactly what
+    // `visibleSolanaMints` mirrors for the balance-hook membership above.
+    () => buildSelectableAssets(catalog, {showTestnet, solanaEnabled: !!solAddress, networks}),
     [catalog, showTestnet, solAddress, networks],
   );
   // Whether the FULL catalog carries any testnet currency (the assets list is already filtered, so
@@ -329,6 +323,42 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // Pay/Receive engine mounts (and thus which NFC AID is armed); `selectedCurrency`/`selectedDesc`
   // resolve the IC deposit/withdraw family for the "My address"/"Send to address" sub-modes.
   const activeSol = selectedAsset?.protocol === 'solana';
+  // The selected SOLANA asset's own token facts + per-mint state (registry truth — every Solana
+  // child surface reads THESE, never a USDC-shaped ternary). `activeSolAsset` is null on the IC
+  // rail; the token state is undefined while its mint is outside the visible list (e.g. the RPC
+  // is configured off), which every consumer treats as unknown/zero — fail closed.
+  const activeSolAsset = selectedAsset?.protocol === 'solana' ? selectedAsset : null;
+  const selectedSolToken = activeSolAsset?.token ?? 'SOL';
+  const selectedTokenState = activeSolAsset?.mint != null ? tokenStates[activeSolAsset.mint] : undefined;
+  const selectedTokenBalance = selectedTokenState?.amount ?? '0';
+  const selectedTokenAbsent = selectedTokenState?.status === 'absent';
+  // One-tap account setup for the SELECTED token — the only one whose gates ever render the setup
+  // card. Creates that token's ATA (device-key-signed createIdempotent tx); on success both rails
+  // refresh: SOL (rent debited) + the token ('absent' → 'balance' amount 0, which unhides the QR).
+  const createAta = useCallback(async () => {
+    if (ataSetupBusy) return;
+    const mint = activeSolAsset?.mint ?? null;
+    if (mint == null) return; // native SOL (or no solana selection) — no token account to create
+    setAtaSetupBusy(true);
+    setAtaSetupErr(null);
+    const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
+    try {
+      await createTokenAta(identity.secretHex, mint, signal);
+      refreshSol();
+      refreshToken(mint);
+    } catch (e: unknown) {
+      console.warn('createTokenAta failed:', e instanceof Error ? e.message : String(e));
+      setAtaSetupErr(friendlySolError(e instanceof Error ? e.message : String(e)));
+    } finally {
+      cancel();
+      setAtaSetupBusy(false);
+    }
+  }, [ataSetupBusy, activeSolAsset, identity.secretHex, refreshSol, refreshToken]);
+  // Refresh the SELECTED token's account state (naming its mint when known; else repoll all).
+  const refreshSelectedToken = useCallback(() => {
+    if (activeSolAsset?.mint != null) refreshToken(activeSolAsset.mint);
+    else refreshTokens();
+  }, [activeSolAsset, refreshToken, refreshTokens]);
   const selectedCurrency = selectedAsset?.protocol === 'ic' ? selectedAsset.currency : 0;
   const selectedDesc = selectedAsset?.protocol === 'ic' ? (catalog.find(c => c.currency === selectedAsset.currency) ?? null) : null;
   const selectedFamily = selectedDesc?.minter_family ?? null;
@@ -615,7 +645,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // because the BALANCES are independent (a SOL send must not perturb the USDC status); the
   // Transactions list is one list per rail, so both refresh it.
   const onSolSent = useCallback(() => { refreshSol(); refreshSolHistory(); }, [refreshSol, refreshSolHistory]);
-  const onSolUsdcSent = useCallback(() => { refreshUsdc(); refreshSolHistory(); }, [refreshUsdc, refreshSolHistory]);
+  // Token sends name their mint (a scanned Solana Pay request may pay a token that is NOT the
+  // selection); an unnamed one repolls every visible mint. Per-mint independence is preserved:
+  // only the account that moved is refreshed.
+  const onSolTokenSent = useCallback((mint?: string | null) => {
+    if (mint != null) refreshToken(mint); else refreshTokens();
+    refreshSolHistory();
+  }, [refreshToken, refreshTokens, refreshSolHistory]);
   // The DEMO header balance (currency 0): when online the polled balance is authoritative (the
   // deduction resets on every successful poll); when offline we apply the per-currency deduction.
   const shownBalance = applyOffline(balance, online ? {} : offlineSpent, 0);
@@ -634,25 +670,26 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   }, [assetBalances, offlineSpent, online]);
 
   // The per-asset balance map — the ONE source every balance-rendering surface reads (header + the
-  // Balances sheet rows). Built pure from the IC poll + DEMO shownBalance + the SOL/USDC hook
-  // states; keyed by stable AssetId so a catalog object refresh never invalidates it.
+  // Balances sheet rows). Built pure from the IC poll + DEMO shownBalance + the SOL + per-mint
+  // token hook states; keyed by stable AssetId so a catalog object refresh never invalidates it.
   const balances = useMemo(
     () => buildAssetBalances({
       catalog, assets,
       icBalances: displayAssetBalances,
       primaryBalance: shownBalance,
       online,
-      solState, usdcState,
+      solState, tokenStates,
     }),
-    [catalog, assets, displayAssetBalances, shownBalance, online, solState, usdcState],
+    [catalog, assets, displayAssetBalances, shownBalance, online, solState, tokenStates],
   );
   // Trip Ready J5b — fundsReady: awarded ONCE at the first sight of any spendable balance
   // (DEMO counts; `—` unknowns do not). Reads the memo above; ref-guarded against poll spam.
   useFundsReady(balances);
-  // Solana-USDC refresh is consumed by the balance map (status/amount drive the USDC row) AND by the
-  // Phase 6 USDC send path (SolPayMode's onSentUsdc refreshes USDC only after a confirmed SPL send).
-  // The SOL send path refreshes SOL only via `refreshSol`, so a confirmed native-SOL send does NOT
-  // perturb the independent USDC status (plan invariant: independent statuses).
+  // Per-mint token refreshes are consumed by the balance map (status/amount drive each token row)
+  // AND by the send paths (SolPayMode's onSentToken names the mint it paid, so a confirmed SPL
+  // send refreshes only that token). The SOL send path refreshes SOL only via `refreshSol`, so a
+  // confirmed native-SOL send does NOT perturb any token status (plan invariant: independent
+  // per-mint statuses).
 
   // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
   // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
@@ -943,7 +980,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} usdcBalance={usdcState.amount ?? '0'} usdcAtaAbsent={usdcState.status === 'absent'} payGate={solPayGate(selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL', solState, usdcState)} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'} onSent={onSolSent} onSentUsdc={onSolUsdcSent}                onShowSolAddress={() => goToDeposit('solana:SOL', selectedAsset?.id === 'solana:USDC' ? 'solana:USDC' : undefined)} onShowUsdcAddress={() => goToDeposit('solana:USDC')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -969,24 +1006,25 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
                   catalog={catalog}
-                  selectedToken={selectedAsset?.protocol === 'solana' ? selectedAsset.token : 'SOL'}
+                  selectedToken={selectedSolToken}
                   assets={assets}
                   selectedAssetId={effectiveSelectedId}
                   balances={balances}
                   onSelectAsset={handleSelect}
-                  usdcAtaStatus={usdcState.status}
-                  usdcAmount={usdcState.amount}
+                  tokenAtaStatus={selectedTokenState?.status ?? 'loading'}
+                  tokenAmount={selectedTokenState?.amount ?? null}
                   solBalance={solBalance}
                   solOk={solState.status === 'ok'}
                   ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta}
                   onShowSolAddress={() => goToDeposit('solana:SOL')}
-                  onRefreshUsdc={refreshUsdc}
+                  onRefreshToken={refreshSelectedToken}
                   onRefreshSol={refreshSol}
                   depositReturnLabel={
                     // Resume link fires ONLY when the deposit actually landed (known positive
                     // balance on the watched asset) — never on loading/error/unconfirmed state.
+                    // The label names the asset being returned to by its own row's symbol.
                     selectedAsset?.id === 'solana:SOL' && solState.status === 'ok' && solBalance != null && solBalance !== '0' && depositReturnTo
-                      ? M.wallet.backToPaying(depositReturnTo.id === 'solana:USDC' ? 'USDC' : 'SOL')
+                      ? M.wallet.backToPaying(assets.find(a => a.id === depositReturnTo.id)?.symbol ?? 'SOL')
                       : null}
                   onReturnFromDeposit={returnFromDeposit}
                   onLockChange={setSelectionLocked}

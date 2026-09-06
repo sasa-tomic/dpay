@@ -37,13 +37,21 @@ const MAX_MEMO_LEN = 32;
 const MAX_TX_LEN = 1232;
 const MAX_URI_LEN = 2000;
 
-export type SolCurrency = 'SOL' | 'USDC';
+/** The request's token literal: 'SOL' for native lamports, or a registered SPL token symbol
+ *  ('USDC', 'EURC', …). The CODEC is deliberately token-agnostic — it validates the SHAPE of
+ *  `cur` (an uppercase `[A-Z0-9]{2,10}` symbol) and the mint/toAta STRUCTURE (SOL ⇔ both null,
+ *  non-SOL ⇔ both present and valid base58), never the MEMBERSHIP. Whether a given mint is one
+ *  this wallet will pay is a catalog/registry decision enforced at the engine + component layer
+ *  (same split as `parseSolanaPayUri`'s structural parse). The `(string & {})` arm keeps the
+ *  known literals as completions while accepting any future registry symbol. */
+export type SolCurrency = 'SOL' | 'USDC' | 'EURC' | (string & {});
 
 /** The frozen cluster id. v2 is locked to mainnet-beta; other clusters are out of scope. */
 export type SolNet = 'mainnet-beta';
 
-/** Merchant → payer request. `amt` is a decimal-digit string of smallest units (lamports for SOL,
- *  micro-USDC for USDC) — BigInt-safe, never a JS number (lossy > 2^53). */
+/** Merchant → payer request. `amt` is a decimal-digit string of smallest units (lamports for SOL;
+ *  the token's smallest unit at its own decimals for an SPL token — micro-USDC, micro-EURC, …) —
+ *  BigInt-safe, never a JS number (lossy > 2^53). */
 export interface SolReqV2 {
   readonly v: 2;
   readonly rid: string;       // 32 lowercase hex chars (16 random bytes) — binds request ↔ receipt
@@ -56,8 +64,8 @@ export interface SolReqV2 {
   readonly to: string;        // base58 merchant SOL address (the payee)
   readonly amt: string;       // decimal-digit string, smallest units, > 0, ≤ 2^64-1
   readonly cur: SolCurrency;
-  readonly mint: string | null; // null for SOL; the SPL mint for USDC
-  readonly toAta: string | null;// null for SOL; the merchant's pre-existing token account for USDC
+  readonly mint: string | null; // null for SOL; the SPL mint for a token request
+  readonly toAta: string | null;// null for SOL; the merchant's pre-existing token account for the mint
   readonly name: string;      // merchant display name ("" ok)
   readonly memo: string;      // optional note ("" ok)
 }
@@ -115,6 +123,9 @@ function canonicalPayJson(r: SolPayV2): string {
 const DECIMAL_RE = /^[0-9]+$/;
 const RID_RE = /^[0-9a-f]{32}$/;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+// A token symbol literal — the same shape rule parseAssetId uses for `solana:<TOKEN>` (registry
+// symbols: SOL, USDC, EURC, …). Uppercase + digits, 2–10 chars.
+const TOKEN_RE = /^[A-Z0-9]{2,10}$/;
 // 2^64 - 1 inclusive — u64 max. amt must fit in a u64 (Solana's largest unit count).
 const AMT_MAX_BIGINT = 18446744073709551615n;
 
@@ -182,8 +193,10 @@ function expectBoundedStr(v: unknown, field: string, max: number): string {
   return v;
 }
 
-/** Validate a parsed request object. Enforces cross-field rules: SOL ⇒ mint+toAta null; USDC ⇒ both
- *  present; the iat<exp≤iat+90 lifetime window; and the per-field bounds above. */
+/** Validate a parsed request object. Enforces cross-field rules: SOL ⇒ mint+toAta null; a
+ *  non-SOL token ⇒ both present and valid base58; the iat<exp≤iat+90 lifetime window; and the
+ *  per-field bounds above. SHAPE only — token MEMBERSHIP (is this mint one we pay?) is the
+ *  engine/component layer's call, never the codec's. */
 function validateReq(obj: unknown): SolReqV2 {
   if (!isObj(obj)) throw new Error('solana qr: request payload is not an object');
   if (obj.v !== SOL_QR_VERSION) {
@@ -199,7 +212,9 @@ function validateReq(obj: unknown): SolReqV2 {
   if (!(iat < exp)) throw new Error("solana qr: 'exp' must be strictly greater than 'iat'");
   if (exp > iat + 90) throw new Error("solana qr: 'exp' must be at most 'iat' + 90");
   const cur = obj.cur;
-  if (cur !== 'SOL' && cur !== 'USDC') throw new Error("solana qr: 'cur' must be SOL or USDC");
+  if (!isStr(cur) || !TOKEN_RE.test(cur)) {
+    throw new Error("solana qr: 'cur' must be an uppercase token symbol ([A-Z0-9]{2,10})");
+  }
   const to = expectBase58(obj.to, 'to');
   const amt = expectAmt(obj.amt);
   const mint = optBase58(obj.mint, 'mint');
@@ -208,8 +223,8 @@ function validateReq(obj: unknown): SolReqV2 {
     if (mint !== null) throw new Error("solana qr: 'mint' must be null for SOL");
     if (toAta !== null) throw new Error("solana qr: 'toAta' must be null for SOL");
   } else {
-    if (mint === null) throw new Error("solana qr: 'mint' is required for USDC");
-    if (toAta === null) throw new Error("solana qr: 'toAta' is required for USDC");
+    if (mint === null) throw new Error(`solana qr: 'mint' is required for ${cur}`);
+    if (toAta === null) throw new Error(`solana qr: 'toAta' is required for ${cur}`);
   }
   const name = expectBoundedStr(obj.name, 'name', MAX_NAME_LEN);
   const memo = expectBoundedStr(obj.memo, 'memo', MAX_MEMO_LEN);

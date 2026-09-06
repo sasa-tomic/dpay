@@ -79,8 +79,8 @@ export const payFr: PayMessages = {
   },
 
   ocp: {
-    solanaUsdcUnsupported:
-      'Cette caisse accepte les USDC sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.',
+    solanaTokenUnsupported: symbol =>
+      `Cette caisse accepte les ${symbol} sur Solana, mais son code n’indique pas vers quel compte de jetons les envoyer — payer ainsi risquerait d’envoyer de l’argent réel sur le mauvais compte. Payez plutôt en SOL, ou passez dans « Soldes » à un autre actif accepté par cette caisse.`,
     chooseAsset: selected =>
       `Cette caisse n’accepte pas ${selected}, mais elle accepte ceux-ci — choisis avec lequel payer. dpay ne convertit jamais : tu paies l’actif que tu choisis.`,
     assetNotAccepted: (selected, accepted) =>
@@ -153,9 +153,9 @@ export const payFr: PayMessages = {
     `Ce portefeuille n’a pas encore de ${symbol}. Envoyez des ${symbol} à votre adresse et vous pourrez ${action === 'pay' ? 'payer' : 'envoyer'} aussitôt.`,
   fundBodyNoDeposits: symbol =>
     `Ce portefeuille n’a pas encore de ${symbol} — et les ${symbol} ne sont pas encore disponibles en dépôt. Approvisionnez un autre actif, ou revenez bientôt.`,
-  fundBodyUsdc: 'Envoyez des USDC (Solana) à votre adresse USDC. Gardez un peu de SOL dans le portefeuille pour les frais de réseau.',
+  fundBodyToken: symbol => `Envoyez des ${symbol} (Solana) à votre adresse ${symbol}. Gardez un peu de SOL dans le portefeuille pour les frais de réseau.`,
   showMyAddress: symbol => `Voir mon adresse ${symbol}`,
-  createUsdcAccount: 'Créer mon compte USDC',
+  createTokenAccount: symbol => `Créer mon compte ${symbol}`,
   fundSibling: {
     holds: (amount, rail) => `Vous détenez ${amount} sur ${rail}`,
     switchTo: network => `Passer à ${network}`,

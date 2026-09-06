@@ -33,7 +33,7 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
     primaryBalance: null,
     online: true,
     solState: {balance: null, status: 'unavailable'},
-    usdcState: {amount: null, decimals: null, status: 'unavailable'},
+    tokenStates: {},
   });
 
   function mountSheet(): renderer.ReactTestRenderer {
@@ -99,7 +99,7 @@ describe('BalancesSheet — home-currency rail badges (mark every rail, never su
   const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
   // The full two-rail USD group: ckUSDC on the IC + USDC on Solana (solanaUsdc forced on so the
   // row is present regardless of the offline test loop's empty RPC URL).
-  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
   const balances = buildAssetBalances({
     catalog: BUNDLED,
     assets,
@@ -107,7 +107,7 @@ describe('BalancesSheet — home-currency rail badges (mark every rail, never su
     primaryBalance: null,
     online: true,
     solState: {balance: null, status: 'unavailable'},
-    usdcState: {amount: null, decimals: null, status: 'unavailable'},
+    tokenStates: {},
   });
 
   function mountSheet(home: 'CHF' | 'USD'): renderer.ReactTestRenderer {
@@ -153,7 +153,7 @@ describe('BalancesSheet — home-currency rail badges (mark every rail, never su
     expect(hasBadge(tree, 'asset-sol-usdc-rail')).toBe(true);
     expect(badgeText(tree, 'asset-sol-usdc-rail')).toBe('USDC · Solana');
     // No OTHER row gains a badge: VCHF settles CHF (a different currency), ICP/ckETH settle none.
-    for (const key of ['asset-vchf', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-demo']) {
+    for (const key of ['asset-vchf', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-sol-eurc', 'asset-demo']) {
       expect(hasBadge(tree, `${key}-rail`)).toBe(false);
       expect(hasBadge(tree, `${key}-main`)).toBe(false);
     }
@@ -163,7 +163,7 @@ describe('BalancesSheet — home-currency rail badges (mark every rail, never su
   test('home=CHF: single-rail group renders exactly as before — MAIN on VCHF, no rail badges', () => {
     const tree = mountSheet('CHF');
     expect(hasBadge(tree, 'asset-vchf-main')).toBe(true);
-    for (const key of ['asset-vchf', 'asset-ckusdc', 'asset-sol-usdc', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-demo']) {
+    for (const key of ['asset-vchf', 'asset-ckusdc', 'asset-sol-usdc', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-sol-eurc', 'asset-demo']) {
       expect(hasBadge(tree, `${key}-rail`)).toBe(false);
     }
     act(() => { tree.unmount(); });

@@ -220,15 +220,18 @@ export type NfcStatus = 'ready' | 'off' | 'unsupported' | 'unknown';
 //
 // `ic:${number}` carries the relay/canister currency u32 directly in the id — the SAME value the
 // IC wire format, request QRs, NFC requests, and ledger use — so resolving from id → currency id
-// is a pure parse, never a catalog lookup. Solana ids are the literal device-key-rail tokens; they
-// NEVER enter the relay/canister catalog, the ICRC polling, or the IC wire currency-id space (SOL
-// is a device-key rail, not an ICRC catalog asset — CLAUDE.md non-negotiable).
-export type AssetId = `ic:${number}` | 'solana:SOL' | 'solana:USDC';
+// is a pure parse, never a catalog lookup. Solana ids are the literal device-key-rail tokens
+// (`solana:SOL`, `solana:USDC`, `solana:EURC`, … — the registry, `solana/tokens.ts`); they NEVER
+// enter the relay/canister catalog, the ICRC polling, or the IC wire currency-id space (SOL is a
+// device-key rail, not an ICRC catalog asset — CLAUDE.md non-negotiable). The template arm keeps
+// the known literals as named members so every existing literal keeps its narrowed type.
+export type AssetId = `ic:${number}` | `solana:${string}` | 'solana:SOL' | 'solana:USDC';
 
 // A reference into the asset domain: either an IC currency u32 or a Solana token. This is the
 // discriminated payload a `SelectableAsset` carries alongside its display fields, so a consumer
 // narrowing on `protocol: 'ic'` recovers a typed `currency: number` and a consumer narrowing on
-// `protocol: 'solana'` recovers a typed `token: 'SOL' | 'USDC'` — no `any`, no `!`, no cast.
+// `protocol: 'solana'` recovers a typed `token: string` (a registry symbol like 'SOL'/'USDC'/
+// 'EURC') — no `any`, no `!`, no cast.
 export type AssetRef =
   | {id: `ic:${number}`; protocol: 'ic'; currency: number}
-  | {id: 'solana:SOL' | 'solana:USDC'; protocol: 'solana'; token: 'SOL' | 'USDC'};
+  | {id: `solana:${string}`; protocol: 'solana'; token: string};

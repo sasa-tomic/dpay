@@ -29,10 +29,9 @@ import { SYSTEM_PROGRAM_ADDRESS } from './constants';
 export const TOKEN_PROGRAM_ADDRESS = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 /** Associated Token Account Program (creates ATAs; not directly invoked here but documented). */
 export const ASSOCIATED_TOKEN_PROGRAM_ADDRESS = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
-/** USDC mainnet mint. The devnet mint differs — config surfaces in a later unit; this is the default. */
-export const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-/** USDC has 6 decimals (1 USDC = 1_000_000 raw units). */
-export const USDC_DECIMALS = 6;
+/** USDC mainnet mint + decimals. Canonical home is the token registry (`tokens.ts`); these
+ *  re-exports keep every existing import (and the golden-vector bytes) unmoved. */
+export {USDC_MINT_ADDRESS, USDC_DECIMALS} from './tokens';
 /** Rent sysvar (passed readonly to create-ATA; the chain charges real rent regardless). */
 export const RENT_SYSVAR_ADDRESS = 'SysvarRent111111111111111111111111111111111';
 /** Canonical mainnet rent for a 165-byte SPL token account (lamports). An ESTIMATE for display +
@@ -230,14 +229,16 @@ export function buildTransferCheckedInstruction(
 }
 
 /**
- * Build the canonical USDC v2 message: {Memo(ix0), Token.transferChecked(ix1)} with
+ * Build the canonical SPL-token v2 message: {Memo(ix0), Token.transferChecked(ix1)} with
  * recentBlockhash = request.bh. The memo binds every request field; transferChecked commits to the
- * source ATA, mint, destination ATA, owner (payer), amount, and 6 decimals. The payer is the sole
- * signer and fee payer; the source ATA is the payer's canonical ATA for the request mint.
+ * source ATA, mint, destination ATA, owner (payer), amount, and `decimals` (the token's own — the
+ * caller supplies the registry value; USDC callers pass `USDC_DECIMALS`, keeping the historical
+ * bytes identical). The payer is the sole signer and fee payer; the source ATA is the payer's
+ * canonical ATA for the request mint.
  */
-export function buildCanonicalUsdcMessage(payer: Uint8Array, request: SolReqV2): Uint8Array {
+export function buildCanonicalSplMessage(payer: Uint8Array, request: SolReqV2, decimals: number): Uint8Array {
   if (request.mint === null || request.toAta === null) {
-    throw new Error('buildCanonicalUsdcMessage: mint and toAta are required for USDC');
+    throw new Error('buildCanonicalSplMessage: mint and toAta are required for an SPL token');
   }
   const canonicalUri = encodeSolReq(request);
   const memoIx = buildMemoInstruction(solreqMemoData(canonicalUri));
@@ -250,7 +251,7 @@ export function buildCanonicalUsdcMessage(payer: Uint8Array, request: SolReqV2):
     destAta,
     payer,
     BigInt(request.amt),
-    USDC_DECIMALS,
+    decimals,
   );
   return assembleMessage(payer, [memoIx, transferCheckedIx], base58Decode32(request.bh));
 }

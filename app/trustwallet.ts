@@ -17,23 +17,25 @@
 //   • The link's `data` param is NOT used (unreliable for calldata) — ckETH/ckUSDC deposits
 //     stay on the WalletConnect path (dpay-built depositEth / approve+depositErc20 calldata).
 //   • NO amount pre-fill, ever — dpay does not quote or imply conversion (no-swap).
-import {USDC_MINT_ADDRESS} from './solana/spl';
 import {isTestnetCurrency, type CurrencyDescriptor} from './config/catalog';
 
-/** The dpay assets Trust's send screen can pre-fill (one per eligible rail variant). */
-export type TrustWalletAsset = 'BTC' | 'SOL' | 'SOL-USDC';
+/** The dpay assets Trust's send screen can pre-fill: BTC + native SOL by fixed id, and ANY
+ *  registered SPL token by mint (`SPL:<mint>` → Trust's `c501_t<mint>` id). Generic over the
+ *  token registry — EURC (or any future token) needs no new entry here. */
+export type TrustWalletAsset = 'BTC' | 'SOL' | `SPL:${string}`;
 
-// Trust Universal Asset Ids (wallet-core registry). The SOL-USDC id embeds the app's single
-// source of truth for the mainnet USDC mint — never a second copy of the base58 string.
-const TRUST_UAI: Record<TrustWalletAsset, string> = {
-  BTC: 'c0',
-  SOL: 'c501',
-  'SOL-USDC': `c501_t${USDC_MINT_ADDRESS}`,
-};
+/** Trust Universal Asset Ids (wallet-core registry): BTC = c0 (coinId 0), SOL = c501 (coinId 501),
+ *  SPL token = c501_t<mint-base58>. The SPL id embeds the CALLER's mint (the asset row's own
+ *  truth) — never a second copy of any mint string here. */
+function trustUai(asset: TrustWalletAsset): string {
+  if (asset === 'BTC') return 'c0';
+  if (asset === 'SOL') return 'c501';
+  return `c501_t${asset.slice('SPL:'.length)}`;
+}
 
 /** Build Trust Wallet's send deep link for an asset + destination address. Pure + total. */
 export function trustWalletSendUrl(asset: TrustWalletAsset, address: string): string {
-  return `https://link.trustwallet.com/send?asset=${TRUST_UAI[asset]}&address=${encodeURIComponent(address)}`;
+  return `https://link.trustwallet.com/send?asset=${trustUai(asset)}&address=${encodeURIComponent(address)}`;
 }
 
 /**

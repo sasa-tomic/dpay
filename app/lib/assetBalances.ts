@@ -2,16 +2,16 @@
 // asset selection rewrite).
 //
 // `buildAssetBalances` is the ONE pure mapper from the wallet's raw balance sources (IC polled
-// balances + the SOL hook state + the Solana-USDC hook state) to a `Record<AssetId, BalanceView>`
-// keyed by the STABLE asset id. Every surface that renders an asset amount — the header balance,
-// the Balances sheet rows — reads from this single map, so the header and the sheet can NEVER
-// disagree on an amount or a zero/dim state.
+// balances + the SOL hook state + the per-mint Solana token hook states) to a
+// `Record<AssetId, BalanceView>` keyed by the STABLE asset id. Every surface that renders an
+// asset amount — the header balance, the Balances sheet rows — reads from this single map, so the
+// header and the sheet can NEVER disagree on an amount or a zero/dim state.
 //
 // PURE: no React, no network. Its output is a deterministic function of (catalog, assets, the
 // balance inputs); it is safe to unit-test directly and to call on every render (wrapped in a
 // useMemo upstream). No-swap / no-cross-talk: each entry is computed from its OWN source only —
-// an IC asset reads `icBalances[currency]`, SOL reads `solState`, USDC reads `usdcState`. An IC
-// USDC row and the Solana USDC row are financially isolated (invariant #8).
+// an IC asset reads `icBalances[currency]`, SOL reads `solState`, an SPL token reads its OWN
+// mint's state. An IC USDC row and the Solana USDC row are financially isolated (invariant #8).
 
 import {M} from '../i18n';
 import {type CurrencyDescriptor, fmtCurrencyAmountCompact} from '../config/catalog';
@@ -19,7 +19,6 @@ import {type SelectableAsset} from '../config/assets';
 import {usd, fmtAssetCompact} from './format';
 import {cmpRaw} from './amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS} from '../solana/spl';
 import type {AssetId} from './types';
 
 // The unified per-asset balance status. Every value is meaningful for styling/gating:
@@ -49,14 +48,20 @@ export type BalanceView = {displayText: string; status: BalanceStatus};
 // React import — structural typing keeps this module pure/testable).
 export type SolStateInput = {balance: string | null; status: 'loading' | 'ok' | 'unavailable' | 'error'};
 
-// The USDC hook status union (mirrors `SolUsdcStatus`). 'absent' (no ATA) stays distinct from
-// 'balance' (a real, possibly-zero amount) and from 'unavailable' (offline/incoherent) — plan
-// invariant #10.
-export type UsdcStateInput = {amount: string | null; decimals: number | null; status: 'loading' | 'absent' | 'balance' | 'unavailable' | 'error'};
+// The SPL-token hook status union (mirrors `SolTokenStatus`). 'absent' (no token account) stays
+// distinct from 'balance' (a real, possibly-zero amount) and from 'unavailable'
+// (offline/incoherent) — plan invariant #10. One shape for EVERY registered token (USDC, EURC, …).
+export type TokenStateInput = {amount: string | null; decimals: number | null; status: 'loading' | 'absent' | 'balance' | 'unavailable' | 'error'};
+
+/** Back-compat alias — the per-mint token input carries the exact former USDC-only shape. */
+export type UsdcStateInput = TokenStateInput;
 
 /**
  * Build the per-asset balance map for the current asset list + balance sources. Every asset in
  * `assets` gets an entry; the map is keyed by the stable `AssetId`. Pure — call on every render.
+ *
+ * SPL tokens are keyed BY MINT: `tokenStates[mint]` is that token's hook state; each solana asset
+ * row reads its own mint's entry (USDC and EURC are financially isolated — invariant #8).
  */
 export function buildAssetBalances(args: {
   catalog: CurrencyDescriptor[];
@@ -65,9 +70,9 @@ export function buildAssetBalances(args: {
   primaryBalance: string | null;            // the DEMO (currency-0) balance (`shownBalance`)
   online: boolean;                          // IC relay online (drives DEMO's "~" offline prefix)
   solState: SolStateInput;
-  usdcState: UsdcStateInput;
+  tokenStates: Record<string, TokenStateInput>;  // keyed by SPL mint pubkey
 }): Record<AssetId, BalanceView> {
-  const {catalog, assets, icBalances, primaryBalance, online, solState, usdcState} = args;
+  const {catalog, assets, icBalances, primaryBalance, online, solState, tokenStates} = args;
   const out: Partial<Record<AssetId, BalanceView>> = {};
   for (const a of assets) {
     if (a.protocol === 'ic') {
@@ -77,8 +82,9 @@ export function buildAssetBalances(args: {
     } else if (a.token === 'SOL') {
       out[a.id] = solView(solState, a.minFractionDigits);
     } else {
-      // a.token === 'USDC'
-      out[a.id] = usdcView(usdcState, a.minFractionDigits);
+      // A registered SPL token (USDC, EURC, …): its own mint's state, own symbol, own decimals —
+      // no cross-token fallback, ever.
+      out[a.id] = tokenView(tokenStates[a.mint ?? ''] ?? {amount: null, decimals: null, status: 'loading'}, a.symbol, a.decimals, a.minFractionDigits);
     }
   }
   return out as Record<AssetId, BalanceView>;
@@ -128,30 +134,31 @@ function solView(solState: SolStateInput, minFractionDigits: number): BalanceVie
   }
 }
 
-// Solana USDC (an SPL token). 'balance' ⇒ a real amount (zero ⇒ 'zero', dims); 'absent' ⇒ the
-// device's USDC ATA does not exist on chain (a KNOWN zero-by-absence, rendered as "0 USDC" —
-// distinct from a zero balance only in status, and from offline — invariant #10); 'unavailable' ⇒
-// the rail is misconfigured/offline; 'error' ⇒ preserves the prior amount (never zeroes);
-// 'loading' ⇒ first poll pending. The unit is always 'USDC' (distinct from any IC USDC's
-// "USDC · Ethereum" label — invariant #5).
-function usdcView(usdcState: UsdcStateInput, minFractionDigits: number): BalanceView {
-  const decimals = usdcState.decimals ?? USDC_DECIMALS;
-  switch (usdcState.status) {
+// A registered Solana SPL token (USDC, EURC, …). 'balance' ⇒ a real amount (zero ⇒ 'zero', dims);
+// 'absent' ⇒ the device's token account for this mint does not exist on chain (a KNOWN
+// zero-by-absence, rendered as "0 <symbol>" — distinct from a zero balance only in status, and
+// from offline — invariant #10); 'unavailable' ⇒ the rail is misconfigured/offline; 'error' ⇒
+// preserves the prior amount (never zeroes); 'loading' ⇒ first poll pending. The decimals come
+// from the ASSET row (registry-pinned), NOT a per-token fallback — an unknown state never invents
+// a token it isn't. The unit is the asset's symbol (distinct from any IC sibling's
+// "SYM · Ethereum" label — invariant #5).
+function tokenView(state: TokenStateInput, symbol: string, decimals: number, minFractionDigits: number): BalanceView {
+  switch (state.status) {
     case 'balance':
-      if (usdcState.amount == null) return {displayText: '—', status: 'zero'};
-      if (cmpRaw(usdcState.amount, '0') === 0) return {displayText: fmtAssetCompact(usdcState.amount, decimals, 'USDC', undefined, minFractionDigits), status: 'zero'};
-      return {displayText: fmtAssetCompact(usdcState.amount, decimals, 'USDC', undefined, minFractionDigits), status: 'ok'};
+      if (state.amount == null) return {displayText: '—', status: 'zero'};
+      if (cmpRaw(state.amount, '0') === 0) return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'zero'};
+      return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'ok'};
     case 'absent':
-      // D3: a missing ATA is a KNOWN zero (the RPC answered — the account simply doesn't exist), so
-      // render a real "0.00 USDC" with normal formatting. The '—' placeholder is reserved strictly for
-      // unknown/unreachable states (offline / error / loading). Status stays 'absent' so the row
-      // still dims and the receive/send setup-gate surfaces keep their trigger.
-      return {displayText: fmtAssetCompact('0', decimals, 'USDC', undefined, minFractionDigits), status: 'absent'};
+      // D3: a missing token account is a KNOWN zero (the RPC answered — the account simply doesn't
+      // exist), so render a real "0.00 <symbol>" with normal formatting. The '—' placeholder is
+      // reserved strictly for unknown/unreachable states (offline / error / loading). Status stays
+      // 'absent' so the row still dims and the receive/send setup-gate surfaces keep their trigger.
+      return {displayText: fmtAssetCompact('0', decimals, symbol, undefined, minFractionDigits), status: 'absent'};
     case 'unavailable':
       return {displayText: '—', status: 'unavailable'};
     case 'error':
       return {
-        displayText: usdcState.amount == null ? '—' : fmtAssetCompact(usdcState.amount, decimals, 'USDC', undefined, minFractionDigits),
+        displayText: state.amount == null ? '—' : fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits),
         status: 'error',
       };
     case 'loading':

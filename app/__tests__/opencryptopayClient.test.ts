@@ -655,7 +655,7 @@ const SCAN = {apiUrl: 'https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9e', hos
 const WALLET_ASSETS = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {
   showTestnet: false,
   solanaEnabled: true,
-  solanaUsdc: true,
+  solanaTokens: true,
 });
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 /** Inside the recorded quote's 300s window (it expires at 14:29:42.646Z), with room to spare for
@@ -921,7 +921,7 @@ describe('resolveOcpScan', () => {
     // wins over the menu whenever the till's list names the selected asset.
     installRoutes([{match: '/lnurlp/pl_', status: 200, body: DETAILS_200}]);
     const out = await resolveOcpScan(SCAN, ctx('solana:USDC'));
-    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.solanaUsdcUnsupported});
+    expect(out).toEqual({kind: 'refused', message: M.pay.ocp.solanaTokenUnsupported('USDC')});
   });
 
   test('an expired quote is the whole story — no per-asset advice on top of it', async () => {

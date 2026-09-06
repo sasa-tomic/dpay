@@ -20,6 +20,7 @@ import {buildSelectableAssets, reconcileSelectedAsset, routeDeeplinkToIc, should
 import {buildAssetBalances, type BalanceView} from '../lib/assetBalances';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {AssetId} from '../lib/types';
+import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 
 // --- shared fixtures (mirror assets.test.ts) ---------------------------------------------------
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
@@ -38,7 +39,7 @@ const CATALOG: CurrencyDescriptor[] = [DEMO, CKBTC, CKUSDC];
 // 1. buildAssetBalances — correct Record<AssetId, BalanceView> for every rail
 // =============================================================================================
 describe('buildAssetBalances — per-asset balance map', () => {
-  const assets = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const assets = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
 
   it('IC assets: funded ⇒ ok, unfunded ⇒ zero, with the catalog formatter producing the unit text', () => {
     const m = buildAssetBalances({
@@ -46,7 +47,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
       icBalances: {1: '50000', 2: '0'}, // ckBTC funded (50000 sats), ckUSDC zero
       primaryBalance: '10000', online: true,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+      tokenStates: {},
     });
     expect(m['ic:1'].status).toBe('ok');
     expect(m['ic:1'].displayText).toBe('0.0005 BTC');   // compact: BTC has no decimal floor
@@ -60,7 +61,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
       icBalances: {}, // nothing polled yet
       primaryBalance: null, online: true,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+      tokenStates: {},
     });
     expect(m['ic:1'].status).toBe('zero');
     expect(m['ic:1'].displayText).toBe('0 BTC');
@@ -70,7 +71,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     const online = buildAssetBalances({
       catalog: CATALOG, assets, icBalances: {}, primaryBalance: '10000', online: true,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+      tokenStates: {},
     });
     expect(online['ic:0'].displayText).toBe('∂100.00');
     expect(online['ic:0'].status).toBe('ok');
@@ -78,7 +79,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     const offline = buildAssetBalances({
       catalog: CATALOG, assets, icBalances: {}, primaryBalance: '9100', online: false,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+      tokenStates: {},
     });
     expect(offline['ic:0'].displayText).toBe('~∂91.00');
     expect(offline['ic:0'].status).toBe('ok'); // DEMO never dims, even offline
@@ -88,7 +89,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     const m = buildAssetBalances({
       catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+      tokenStates: {},
     });
     expect(m['ic:0'].displayText).toBe('—');
     expect(m['ic:0'].status).toBe('ok');
@@ -99,7 +100,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
       const m = buildAssetBalances({
         catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
         solState: {balance, status: st},
-        usdcState: {amount: null, decimals: null, status: 'unavailable'},
+        tokenStates: {},
       });
       return m['solana:SOL'];
     };
@@ -115,7 +116,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     const m = buildAssetBalances({
       catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
       solState: {balance: '2500000000', status: 'error'}, // prior balance preserved
-      usdcState: {amount: null, decimals: null, status: 'unavailable'},
+      tokenStates: {},
     });
     expect(m['solana:SOL'].displayText).toBe('2.5 SOL');
     expect(m['solana:SOL'].status).toBe('error');
@@ -128,7 +129,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     ): BalanceView => buildAssetBalances({
       catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount, decimals, status},
+      tokenStates: {[USDC_MINT_ADDRESS]: {amount, decimals, status}},
     })['solana:USDC'];
     expect(usdc('1500000', 6, 'balance')).toEqual({displayText: '1.50 USDC', status: 'ok'});
     expect(usdc('0', 6, 'balance')).toEqual({displayText: '0.00 USDC', status: 'zero'});
@@ -144,13 +145,45 @@ describe('buildAssetBalances — per-asset balance map', () => {
       icBalances: {2: '999999'}, // IC USDC funded
       primaryBalance: null, online: true,
       solState: {balance: null, status: 'unavailable'},
-      usdcState: {amount: '0', decimals: 6, status: 'balance'}, // Solana USDC zero
+      tokenStates: {[USDC_MINT_ADDRESS]: {amount: '0', decimals: 6, status: 'balance'}}, // Solana USDC zero
     });
     // IC USDC (ic:2) shows its funded balance; Solana USDC (solana:USDC) is independently zero.
     expect(m['ic:2'].displayText).toBe('0.999999 USDC');
     expect(m['ic:2'].status).toBe('ok');
     expect(m['solana:USDC'].displayText).toBe('0.00 USDC');
     expect(m['solana:USDC'].status).toBe('zero');
+  });
+
+  it('Solana tokens are PER-MINT isolated — EURC renders its own symbol/decimals, other mints never leak', () => {
+    // Stage 3 per-mint design: each token row reads ONLY its own mint's state. USDC funded while
+    // EURC is mid-poll: USDC shows its amount, EURC shows '—' (loading) — no USDC fallback, no
+    // cross-mint status bleed; and the EURC row names EURC, not a hardcoded unit.
+    const m = buildAssetBalances({
+      catalog: CATALOG, assets,
+      icBalances: {}, primaryBalance: null, online: true,
+      solState: {balance: null, status: 'unavailable'},
+      tokenStates: {
+        [USDC_MINT_ADDRESS]: {amount: '2000000', decimals: 6, status: 'balance'},
+        [EURC_MINT_ADDRESS]: {amount: null, decimals: null, status: 'loading'},
+      },
+    });
+    expect(m['solana:USDC']).toEqual({displayText: '2.00 USDC', status: 'ok'});
+    expect(m['solana:EURC']).toEqual({displayText: '—', status: 'loading'});
+    // A mint OUTSIDE the state record (e.g. RPC-gated off) fails closed to unknown, never zero.
+    const without = buildAssetBalances({
+      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
+      solState: {balance: null, status: 'unavailable'},
+      tokenStates: {[USDC_MINT_ADDRESS]: {amount: '2000000', decimals: 6, status: 'balance'}},
+    });
+    expect(without['solana:EURC']).toEqual({displayText: '—', status: 'loading'});
+    // Funded EURC renders in EURC's own unit (same 6-decimal formatting, own symbol).
+    const funded = buildAssetBalances({
+      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
+      solState: {balance: null, status: 'unavailable'},
+      tokenStates: {[EURC_MINT_ADDRESS]: {amount: '2500000', decimals: 6, status: 'balance'}},
+    });
+    expect(funded['solana:EURC']).toEqual({displayText: '2.50 EURC', status: 'ok'});
+    expect(funded['solana:EURC'].displayText).not.toContain('USDC');
   });
 });
 
@@ -223,7 +256,7 @@ describe('reconcileSelectedAsset — hiding a selected testnet asset applies the
 // USER-initiated selection; programmatic routing (routeDeeplinkToIc) bypasses it by calling
 // setSelectedAssetId directly.
 describe('routeDeeplinkToIc — force the IC engine to mount for an IC deeplink', () => {
-  const assets = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaUsdc: true});
+  const assets = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
 
   it('SOL idle-selected ⇒ routes to ic:0 (DEMO, the always-present IC asset)', () => {
     expect(routeDeeplinkToIc('solana:SOL', assets)).toBe('ic:0');

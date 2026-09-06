@@ -12,7 +12,7 @@
  *   • Money is formatted by fmtCurrencyAmount/fmtAsset at the call site and passed in ALREADY
  *     FORMATTED. This catalog never formats numbers.
  *   • A few strings are read across the two namespaces (ReceiveMode reads `M.pay.notAPaymentCode`,
- *     SolReceiveMode reads `M.pay.createUsdcAccount`). That is deliberate: the sentence is the same
+ *     SolReceiveMode reads `M.pay.createTokenAccount`). That is deliberate: the sentence is the same
  *     fact on both screens, and one copy is the point. Same reason PayMode reads `M.nfc.paidAmount`.
  */
 
@@ -106,7 +106,9 @@ export type PayMessages = {
   //     post-transfer keys must say neither "paid" nor "failed", and must hand the payer the
   //     transfer's reference — it is the only thing that ties their money to this sale.
   ocp: {
-    solanaUsdcUnsupported: string;
+    /** An OpenCryptoPay till that takes a Solana token but whose code carries no token account.
+     *  `symbol` names the token (USDC, EURC, …). */
+    solanaTokenUnsupported: (symbol: string) => string;
     /** The till doesn't take the selected asset, but DOES take others this wallet can pay from the
      *  screen the payer is already on. Heading for that menu. Distinct from `assetNotAccepted`,
      *  which is the dead end — this one has options under it, so it must not send anyone to
@@ -219,10 +221,11 @@ export type PayMessages = {
   fundTitle: (symbol: string, action: 'pay' | 'send') => string;
   fundBody: (symbol: string, action: 'pay' | 'send') => string;
   fundBodyNoDeposits: (symbol: string) => string;
-  fundBodyUsdc: string;
+  /** The token-rail fund body — `symbol` names the token (USDC, EURC, …). */
+  fundBodyToken: (symbol: string) => string;
   showMyAddress: (symbol: string) => string;
   /** Also used by SolReceiveMode's inline ATA setup card. */
-  createUsdcAccount: string;
+  createTokenAccount: (symbol: string) => string;
   /** The funded-sibling pointer on a fund-first gate (Objective 2, S5): another rail of the SAME
    *  home currency already holds money. `holds` names the rail (`railLineLabel`, e.g. "USDC ·
    *  Solana") with the amount line exactly as the balances map renders it (unit included); the
@@ -367,8 +370,8 @@ export const payEn: PayMessages = {
   },
 
   ocp: {
-    solanaUsdcUnsupported:
-      'This till takes USDC on Solana, but its code doesn’t say which token account to send to — paying it would risk sending real money to the wrong account. Pay with SOL instead, or switch in Balances to another asset this till takes.',
+    solanaTokenUnsupported: symbol =>
+      `This till takes ${symbol} on Solana, but its code doesn’t say which token account to send to — paying it would risk sending real money to the wrong account. Pay with SOL instead, or switch in Balances to another asset this till takes.`,
     chooseAsset: selected =>
       `This till doesn’t take ${selected}, but it takes these — pick one to pay with. dpay never swaps: you pay the asset you choose.`,
     assetNotAccepted: (selected, accepted) =>
@@ -441,9 +444,9 @@ export const payEn: PayMessages = {
     `This wallet has no ${symbol} yet. Send ${symbol} to your address and you can ${action} right away.`,
   fundBodyNoDeposits: symbol =>
     `This wallet has no ${symbol} yet — and ${symbol} isn't available for deposits yet. Fund another asset, or check back soon.`,
-  fundBodyUsdc: 'Send USDC (Solana) to your USDC address. Keep a little SOL in the wallet for network fees.',
+  fundBodyToken: symbol => `Send ${symbol} (Solana) to your ${symbol} address. Keep a little SOL in the wallet for network fees.`,
   showMyAddress: symbol => `Show my ${symbol} address`,
-  createUsdcAccount: 'Create my USDC account',
+  createTokenAccount: symbol => `Create my ${symbol} account`,
   fundSibling: {
     holds: (amount, rail) => `You hold ${amount} on ${rail}`,
     switchTo: network => `Switch to ${network}`,

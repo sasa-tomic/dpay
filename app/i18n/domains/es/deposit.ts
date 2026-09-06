@@ -140,13 +140,13 @@ export const depositEs: DepositMessages = {
   },
 
   sol: {
-    createAtaLabel: 'Crear cuenta de USDC',
-    checkingAta: 'Revisando tu cuenta de USDC…',
-    ataUnverified: 'No se pudo revisar tu cuenta de USDC.',
-    ataUnverifiedDetail:
-      'Tu dirección está bien; lo que pasa es que ahora mismo no podemos contactar con Solana para confirmar tu cuenta de USDC en la cadena. Revisa tu conexión e inténtalo de nuevo.',
-    retryAtaLabel: 'Reintentar la revisión de la cuenta de USDC',
-    retryAtaHint: 'Vuelve a revisar si tu cuenta de USDC existe en la cadena',
+    createAtaLabel: asset => `Crear cuenta de ${asset}`,
+    checkingAta: asset => `Revisando tu cuenta de ${asset}…`,
+    ataUnverified: asset => `No se pudo revisar tu cuenta de ${asset}.`,
+    ataUnverifiedDetail: asset =>
+      `Tu dirección está bien; lo que pasa es que ahora mismo no podemos contactar con Solana para confirmar tu cuenta de ${asset} en la cadena. Revisa tu conexión e inténtalo de nuevo.`,
+    retryAtaLabel: asset => `Reintentar la revisión de la cuenta de ${asset}`,
+    retryAtaHint: asset => `Vuelve a revisar si tu cuenta de ${asset} existe en la cadena`,
     checkAgain: 'Revisar de nuevo',
     backToRequest: 'Volver a la solicitud',
     sendToAddress: (asset, network) => [
@@ -167,15 +167,15 @@ export const depositEs: DepositMessages = {
   },
 
   ata: {
-    absent: 'Todavía no tienes una cuenta de USDC en este dispositivo.',
-    cost: setupCost =>
-      `Solana guarda tus USDC en una cuenta de token única, ligada a esta billetera. Crearla cuesta ${setupCost} (renta de la cuenta + comisión) de tu saldo de SOL. La cuenta es tuya y está bajo tus claves: dpay nunca las guarda.`,
+    absent: asset => `Todavía no tienes una cuenta de ${asset} en este dispositivo.`,
+    cost: (setupCost, asset) =>
+      `Solana guarda tus ${asset} en una cuenta de token única, ligada a esta billetera. Crearla cuesta ${setupCost} (renta de la cuenta + comisión) de tu saldo de SOL. La cuenta es tuya y está bajo tus claves: dpay nunca las guarda.`,
     checkingSol: 'Revisando tu saldo de SOL…',
     needSol: setupCost =>
       `Primero necesitas unos ${setupCost} en esta billetera: recibe SOL en tu dirección y luego crea la cuenta.`,
     showSolAddress: 'Ver mi dirección de SOL',
-    creating: 'Creando tu cuenta de USDC. Confirmando en Solana…',
-    createHint: setupCost => `Crea tu cuenta única de USDC por ${setupCost} de tu saldo de SOL`,
+    creating: asset => `Creando tu cuenta de ${asset}. Confirmando en Solana…`,
+    createHint: (setupCost, asset) => `Crea tu cuenta única de ${asset} por ${setupCost} de tu saldo de SOL`,
   },
 
   trust: {
@@ -269,7 +269,7 @@ export const withdrawEs: WithdrawMessages = {
   },
 
   sol: {
-    createAtaLabel: 'Crear mi cuenta de USDC',
+    createAtaLabel: asset => `Crear mi cuenta de ${asset}`,
     backToScan: 'Volver a escanear',
     sent: 'Enviado ✓',
     txSignature: 'firma de la transacción',
@@ -279,13 +279,13 @@ export const withdrawEs: WithdrawMessages = {
     confirmingOnSolana: 'Confirmando en Solana: puede tardar hasta un minuto.',
     sendToSolana: asset => `Envía tus ${asset} a una dirección de Solana`,
     available: available => `Disponible: ${available}`,
-    usdcAmountPlaceholder: '1.5',
+    tokenAmountPlaceholder: '1.5',
     solAmountPlaceholder: '0.025',
-    needsSol: 'Enviar USDC requiere un poco de SOL en la billetera para las comisiones de red: añade algo primero.',
+    needsSol: asset => `Enviar ${asset} requiere un poco de SOL en la billetera para las comisiones de red: añade algo primero.`,
     reviewTitle: 'Revisa el envío',
     sendAmount: amount => `Enviar ${amount}`,
-    recipientAtaNote: cost =>
-      `Si aún no tiene cuenta de USDC, se la crea (una sola vez, ≈${cost}, lo pagas tú).`,
+    recipientAtaNote: (cost, asset) =>
+      `Si aún no tiene cuenta de ${asset}, se la crea (una sola vez, ≈${cost}, lo pagas tú).`,
     confirmLabel: asset => `Confirmar envío de ${asset}`,
   },
 };

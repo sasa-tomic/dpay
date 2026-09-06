@@ -12,7 +12,8 @@ import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short, toUnits} from '../lib/format';
 import {parseDecimalToUnits} from '../lib/amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {USDC_DECIMALS, USDC_MINT_ADDRESS, SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
+import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
+import {solanaTokenInfo, solanaTokenOfMint} from '../solana/tokens';
 import {classifyScan, coinDisplayOfScheme} from '../lib/scan';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
@@ -66,7 +67,7 @@ import {M} from '../i18n';
  * `reference` pubkeys as instruction account keys and the optional `memo` as an SPL Memo
  * instruction — the matching mechanism the standard is built on (`sendSolanaPay`).
  */
-export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, usdcBalance, usdcAtaAbsent, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentUsdc, onShowSolAddress, onShowUsdcAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; usdcBalance: string; usdcAtaAbsent: boolean; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: 'SOL' | 'USDC'; onSent: () => void; onSentUsdc: () => void; onShowSolAddress: () => void; onShowUsdcAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: Record<string, {amount: string | null; status: string}>; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
@@ -211,13 +212,20 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     />
   );
 
+  // Token facts of the SELECTED asset, from the registry (never a USDC-shaped ternary): the send
+  // form, the fund gates and the ATA gate all speak the selected token's own symbol/mint.
+  // `selectedToken` remains as the native-vs-SPL discriminator ('SOL' ⇔ mint null).
+  const isNativeSelected = selectedToken === 'SOL';
+  const selectedMint = isNativeSelected ? null : solanaTokenInfo(selectedToken)?.mint ?? null;
+  const selectedSymbol = isNativeSelected ? SOL_UNIT : selectedToken;
+
   // The funded-sibling pointer (Objective 2, S5): every fund-first gate below renders it. Null on
-  // its own unless a sibling rail of the home currency is funded (USDC-selected + funded ckUSDC is
+  // its own unless a sibling rail of the home currency is funded (a funded sibling token rail is
   // the live case; SOL is no currency's rail, so a SOL gate never points anywhere). The switch is
   // a USER gesture — `onSwitchRail` is Wallet's `payRailSelect` under `shouldAllowUserSelect`;
   // Wallet passes no switch while the selection is locked, and the pointer then names the rail
   // without the button.
-  const siblingAssetId: AssetId = selectedToken === 'USDC' ? 'solana:USDC' : 'solana:SOL';
+  const siblingAssetId: AssetId = isNativeSelected ? 'solana:SOL' : `solana:${selectedToken}`;
   const siblingPointer = (
     <FundedSiblingRail
       homeCurrency={homeCurrency}
@@ -234,8 +242,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   // Sits BELOW the useState so React's Rules of Hooks hold across sub-mode flips (the payer's
   // phase state survives a Send detour without re-mounting).
   if (subMode === 'send') {
-    const sendBalance = selectedToken === 'SOL' ? solBalance : usdcBalance;
-    const sendOnSent = selectedToken === 'SOL' ? onSent : onSentUsdc;
+    // The send form spends the SELECTED token — its refresh names the selected mint.
+    const sendBalance = isNativeSelected ? solBalance : tokenBalance;
+    const sendOnSent = isNativeSelected ? onSent : () => onSentToken(selectedMint);
     // Offline gate — IC twin: PayMode's `offlinePanel`, same reason. This rail broadcasts straight
     // to a Solana RPC from THIS phone, so airplane mode blocks an address send outright while
     // scan-to-pay keeps working (the payer signs offline against the merchant's blockhash and the
@@ -259,19 +268,19 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // Zero-funds gate (2026-08-16): the send form is replaced by the fund-first panel while the
     // active token is KNOWN unfunded — no amount entry against a zero balance. Same panel, same
     // copy family as the scan branch (only "…to send" instead of "…to pay"), per the spec.
-    if (payGate !== 'none' && payGate !== 'usdc-absent') {
+    if (payGate !== 'none' && payGate !== 'token-absent') {
       const isSol = payGate === 'sol-zero';
       return (
         <View style={S.center}>
           {toggle}
           <InstructionPanel
             testID="sol-send-fund"
-            title={M.pay.fundTitle(isSol ? 'SOL' : 'USDC', 'send')}
+            title={M.pay.fundTitle(isSol ? 'SOL' : selectedSymbol, 'send')}
             body={isSol
               ? M.pay.fundBody('SOL', 'send')
-              : M.pay.fundBodyUsdc}
-            primaryLabel={M.pay.showMyAddress(isSol ? 'SOL' : 'USDC')}
-            onPrimary={isSol ? onShowSolAddress : onShowUsdcAddress}
+              : M.pay.fundBodyToken(selectedSymbol)}
+            primaryLabel={M.pay.showMyAddress(isSol ? 'SOL' : selectedSymbol)}
+            onPrimary={isSol ? onShowSolAddress : onShowTokenAddress}
             secondaryLabel={!isSol && solZero ? M.pay.showMyAddress('SOL') : undefined}
             onSecondary={!isSol && solZero ? onShowSolAddress : undefined}
             onRecheck={onRecheckBalances}
@@ -288,10 +297,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         <SolanaWithdrawSheet
           identity={identity}
           token={selectedToken}
+          mint={selectedMint}
           balance={sendBalance}
           prefill={scannedAddress != null ? {address: scannedAddress, amount: ''} : sendPrefill}
           onPrefillConsumed={() => { if (scannedAddress != null) setScannedAddress(null); else onSendPrefillConsumed?.(); }}
-          usdcAtaAbsent={usdcAtaAbsent}
+          ataAbsent={tokenAtaAbsent}
           solBalance={solBalance}
           solChecking={solChecking}
           ataSetupBusy={ataSetupBusy}
@@ -369,17 +379,24 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     if (!parsed.ok) { refuseScan(spayRefusalMessage(parsed.reason, parsed.param ?? '')); return; }
     const request = parsed.request;
     if (!online) { refuseScan(M.pay.spay.offline); return; }
-    if (request.splToken !== null && request.splToken !== USDC_MINT_ADDRESS) {
+    // The registry gate: this rail pays native SOL and any REGISTERED SPL mint (USDC, EURC —
+    // `sendSolanaPay` re-asserts the same allowlist at the engine). A mint outside it is refused
+    // BY NAME with the pubkey, exactly as before — the codec's structural checks said the URI is
+    // well-formed; this says whether the wallet can actually pay it.
+    if (request.splToken !== null && solanaTokenOfMint(request.splToken) === null) {
       refuseScan(M.pay.spay.unknownMint(request.splToken));
       return;
     }
-    // The catalog gate's second half: a USDC request needs a USDC account to debit from, and a
-    // KNOWN-absent one is refusable the moment the code is read — the same fail-closed check
-    // sendSpl makes at the RPC, surfaced at the scan where the way out (one-tap setup in Receive)
-    // is nameable.
-    if (request.splToken !== null && usdcAtaAbsent) { refuseScan(M.errors.solana.senderNoUsdcAccount); return; }
+    // The registry gate's second half: an SPL request needs a token account of THAT mint to debit
+    // from (the request's own mint — not necessarily the selected asset's), and a KNOWN-absent one
+    // is refusable the moment the code is read — the same fail-closed check sendSpl makes at the
+    // RPC, surfaced at the scan where the way out (one-tap setup in Receive) is nameable.
+    if (request.splToken !== null && tokenBalances[request.splToken]?.status === 'absent') {
+      refuseScan(M.errors.solana.senderNoTokenAccount(solanaTokenOfMint(request.splToken) ?? request.splToken));
+      return;
+    }
     if (request.amount !== null) {
-      const resolved = parseDecimalToUnits(request.amount, request.splToken === null ? SOL_DECIMALS : USDC_DECIMALS);
+      const resolved = parseDecimalToUnits(request.amount, request.splToken === null ? SOL_DECIMALS : solanaTokenInfo(solanaTokenOfMint(request.splToken) ?? '')?.decimals ?? SOL_DECIMALS);
       if (!resolved.ok || resolved.raw === '0') { refuseScan(M.pay.spay.badAmount); return; }
     }
     setSpay(request);
@@ -409,26 +426,32 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   // so the outcome screen shows the signature as the record instead of a retry affordance.
   async function approveSpay(request: SolanaPayRequest) {
     const isSol = request.splToken === null;
-    const decimals = isSol ? SOL_DECIMALS : USDC_DECIMALS;
+    // The request's OWN token (registry truth — startSpay already refused foreign mints), not the
+    // selected asset's: a USDC scan is payable while EURC is selected.
+    const spayToken = isSol ? null : solanaTokenOfMint(request.splToken!);
+    const decimals = isSol ? SOL_DECIMALS : solanaTokenInfo(spayToken ?? '')?.decimals ?? SOL_DECIMALS;
+    const unit = isSol ? SOL_UNIT : spayToken ?? request.splToken!;
     const raw = toUnits(spayAmount, decimals);
     if (raw === '0') { setErr(M.pay.spay.badAmount); return; }
     const rawAmount = BigInt(raw);
     // The same fee-inclusive gate the review renders, re-asserted at the press: the balance prop
     // can refresh between render and tap, and this is the last point before irreversible money.
+    // An unknown token balance (loading/error) gates as zero — fail closed.
     if (isSol) {
       if (BigInt(solBalance) < rawAmount + SOL_FEE_LAMPORTS) { setErr(M.pay.notEnoughBalance); return; }
     } else {
-      if (BigInt(usdcBalance) < rawAmount) { setErr(M.pay.notEnoughBalance); return; }
+      if (BigInt(tokenBalances[request.splToken ?? '']?.amount ?? '0') < rawAmount) { setErr(M.pay.notEnoughBalance); return; }
     }
     const who = sanitiseDisplayText(request.label ?? '') || request.recipient;
-    const amount = fmtAsset(raw, decimals, isSol ? SOL_UNIT : 'USDC');
+    const amount = fmtAsset(raw, decimals, unit);
     const broadcast: {sig: string | null} = {sig: null};
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     setBusy(true);
     setErr(null);
     try {
       const sig = await sendSolanaPay(identity.secretHex, {recipient: request.recipient, splToken: request.splToken, amount: rawAmount, references: request.references, memo: request.memo}, signal, s => { broadcast.sig = s; });
-      (isSol ? onSent : onSentUsdc)();
+      // Refresh the account that actually moved — the REQUEST's mint, not the selection's.
+      if (isSol) onSent(); else onSentToken(request.splToken);
       setSpayDone({amount, who, signature: sig, note: null});
       setPhase('spay-done');
     } catch (e: unknown) {
@@ -437,7 +460,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       if (broadcast.sig !== null) {
         // The network accepted the transaction; only the confirmation is missing. Definitively
         // NOT-sent is off the table, so this is the honest pending screen with the signature.
-        (isSol ? onSent : onSentUsdc)();
+        if (isSol) onSent(); else onSentToken(request.splToken);
         setSpayDone({amount, who, signature: broadcast.sig, note: M.pay.spay.pendingNote});
         setPhase('spay-done');
       } else {
@@ -461,7 +484,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       refuseScan(scan.reason === 'not-https' ? M.pay.ocp.notHttps : M.pay.ocp.badCode);
       return;
     }
-    const id = selectedToken === 'USDC' ? 'solana:USDC' : 'solana:SOL';
+    const id: AssetId = siblingAssetId;
     const selected = assets.find(a => a.id === id) ?? null;
     if (selected === null) {
       // Unreachable in a mounted wallet — this component only renders while a Solana row IS the
@@ -493,9 +516,13 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     if (out.kind === 'refused') { setOcpChoice(null); setPhase('scan'); refuseScan(out.message); return; }
     if (out.kind === 'choose') { setOcpChoice({...out, declined}); setPhase('ocp-choose'); return; }
     // Fail closed on anything but native SOL: the send below is a System Program transfer, so a
-    // token target would move SOL against a token price. The resolver already refuses Solana USDC
-    // by name (its URI does not say which token account to pay); this is the second lock on it.
-    if (out.target.assetId !== 'solana:SOL') { setOcpChoice(null); setPhase('scan'); refuseScan(M.pay.ocp.solanaUsdcUnsupported); return; }
+    // token target would move SOL against a token price. The resolver already refuses Solana
+    // token targets by name (its URI does not say which token account to pay); this is the second
+    // lock on it, still naming the token it refused.
+    if (out.target.assetId !== 'solana:SOL') {
+      const sym = out.target.assetId.startsWith('solana:') ? out.target.assetId.slice('solana:'.length) : String(out.target.assetId);
+      setOcpChoice(null); setPhase('scan'); refuseScan(M.pay.ocp.solanaTokenUnsupported(sym)); return;
+    }
     setOcp(out.target);
     setPhase('ocp');
   }
@@ -616,8 +643,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     setPhase('paid');
   }
 
-  const decimals = req?.cur === 'USDC' ? USDC_DECIMALS : SOL_DECIMALS;
-  const unit = req?.cur === 'USDC' ? 'USDC' : SOL_UNIT;
+  // The in-flight solreq's own token (registry truth — a signed request carries its cur literal,
+  // whatever the current selection is).
+  const decimals = req != null && req.cur !== 'SOL' ? solanaTokenInfo(req.cur)?.decimals ?? SOL_DECIMALS : SOL_DECIMALS;
+  const unit = req != null && req.cur !== 'SOL' ? req.cur : SOL_UNIT;
   // The merchant's CLAIMED name and note, from a code a stranger printed or a phone that tapped
   // this one. Same threat and same helper as the IC wire request (`wireRequestToIntent`), a payment
   // link's `label`/`memo` (`clampLinkText`) and a till's merchant name (`claimedMerchantNameOf`):
@@ -640,19 +669,19 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // and a zero balance would sign a payment the merchant can never settle (doomed signature).
     // loading/error/unavailable NEVER reach here (the Wallet's gate fails OPEN to the scanner —
     // offline-first rule; the honest backstop is the same review/RPC failure as before).
-    if (payGate === 'sol-zero' || payGate === 'usdc-zero') {
+    if (payGate === 'sol-zero' || payGate === 'token-zero') {
       const isSol = payGate === 'sol-zero';
       return (
         <View style={S.center}>
           {toggle}
           <InstructionPanel
             testID="sol-pay-fund"
-            title={M.pay.fundTitle(isSol ? 'SOL' : 'USDC', 'pay')}
+            title={M.pay.fundTitle(isSol ? 'SOL' : selectedSymbol, 'pay')}
             body={isSol
               ? M.pay.fundBody('SOL', 'pay')
-              : M.pay.fundBodyUsdc}
-            primaryLabel={M.pay.showMyAddress(isSol ? 'SOL' : 'USDC')}
-            onPrimary={isSol ? onShowSolAddress : onShowUsdcAddress}
+              : M.pay.fundBodyToken(selectedSymbol)}
+            primaryLabel={M.pay.showMyAddress(isSol ? 'SOL' : selectedSymbol)}
+            onPrimary={isSol ? onShowSolAddress : onShowTokenAddress}
             secondaryLabel={!isSol && solZero ? M.pay.showMyAddress('SOL') : undefined}
             onSecondary={!isSol && solZero ? onShowSolAddress : undefined}
             onRecheck={onRecheckBalances}
@@ -663,17 +692,19 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         </View>
       );
     }
-    if (payGate === 'usdc-absent') {
-      // USDC-selected + ATA KNOWN absent: the one-tap setup card (with the fund-SOL secondary when
-      // SOL is also zero) replaces the scanner. Setup first, then pay — never a doomed SPL sign.
+    if (payGate === 'token-absent') {
+      // Token-selected + its account KNOWN absent: the one-tap setup card (with the fund-SOL
+      // secondary when SOL is also zero) replaces the scanner. Setup first, then pay — never a
+      // doomed SPL sign.
       const hasSol = BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
       return (
         <View style={S.center}>
           {toggle}
           <SolanaAtaSetupCard
+            asset={selectedSymbol}
             instrTestID="sol-pay-ata-instructions"
             btnTestID="btn-sol-pay-ata-create"
-            buttonLabel={M.pay.createUsdcAccount}
+            buttonLabel={M.pay.createTokenAccount(selectedSymbol)}
             hasSol={hasSol}
             checkingSol={solChecking}
             busy={ataSetupBusy}
@@ -835,11 +866,13 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // carried one, an entry field when it did not (the spec makes it optional, and this wallet's
     // own receive QR emits it without one — reading that QR back is the flow this screen serves).
     const isSol = spay.splToken === null;
-    const decimals = isSol ? SOL_DECIMALS : USDC_DECIMALS;
-    const unit = isSol ? SOL_UNIT : 'USDC';
+    // The request's OWN token (registry truth — startSpay already refused foreign mints).
+    const spayToken = isSol ? null : solanaTokenOfMint(spay.splToken);
+    const decimals = isSol ? SOL_DECIMALS : solanaTokenInfo(spayToken ?? '')?.decimals ?? SOL_DECIMALS;
+    const unit = isSol ? SOL_UNIT : spayToken ?? spay.splToken ?? '';
     const raw = toUnits(spayAmount, decimals);
     const amountValid = raw !== '0';
-    const balance = isSol ? BigInt(solBalance) : BigInt(usdcBalance);
+    const balance = isSol ? BigInt(solBalance) : BigInt(tokenBalances[spay.splToken ?? '']?.amount ?? '0');
     // SOL must cover the transfer AND the fee — the same fee-inclusive gate the till review uses.
     const insufficient = !amountValid || (isSol ? balance < BigInt(raw) + SOL_FEE_LAMPORTS : balance < BigInt(raw));
     const spayLabel = sanitiseDisplayText(spay.label ?? '');
@@ -870,9 +903,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         <Text testID="sol-pay-payee" style={S.dim2}>{spay.recipient}</Text>
         {spayLabel ? <Text style={S.dim2}>{M.pay.ocp.claimedMerchant}</Text> : null}
         {spayMessage ? <Text testID="sol-spay-message" style={S.dim2}>{M.pay.spay.merchantMessage(spayMessage)}</Text> : null}
-        {/* The USDC path may need the recipient's token account created in the same transaction —
+        {/* The token path may need the recipient's token account created in the same transaction —
             the sender covers its one-time rent. Same disclosure line as the send form. */}
-        {!isSol ? <Text testID="sol-spay-ata-note" style={S.dim2}>{M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT))}</Text> : null}
+        {!isSol ? <Text testID="sol-spay-ata-note" style={S.dim2}>{M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), unit)}</Text> : null}
         {insufficient ? <Text testID="sol-pay-lowbal" style={S.warnNote}>{M.pay.notEnoughBalance}</Text> : null}
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         <Pressable
