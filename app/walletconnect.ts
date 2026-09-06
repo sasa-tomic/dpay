@@ -79,10 +79,16 @@ export const WALLETCONNECT_DEEPLINK_CHOICE = 'WALLETCONNECT_DEEPLINK_CHOICE';
 // is the entire remaining evidence. Done ONCE, here, so callers switch on a type instead.
 const USER_REJECTED = /user rejected/i;
 
-// The single cached init promise. WalletConnect's pairing/session is long-lived; calling
-// `EthereumProvider.init` again would tear down the session and re-pair every time the sheet opens.
-// Init once, share the resulting provider across calls. Cleared by `disconnectWalletConnect()` (U6.5)
-// so a teardown (sheet close mid-pair, or an aborted session) forces a fresh init on the next open.
+// The single cached init promise, kept for the LIFE OF THE PROCESS. WalletConnect's pairing/session
+// is long-lived, and every `EthereumProvider.init` builds a fresh WalletConnect Core — relay socket
+// included — that its own `disconnect()` never tears down (it drops the SESSION only), so a
+// disconnect→init cycle per sheet open accumulated live Cores on-device (OPEN_ISSUES: "WalletConnect
+// Core is already initialized… Init() was called N times"). Init ONCE; every pair/tear-down cycle
+// reuses this instance, rebinding the requested chains per pairing via `connect({chains})` — the
+// SDK-supported rebind (`ConnectOps.chains` re-seeds the namespaces `connect` proposes with).
+//
+// The only thing that may reset the cache is a REJECTED init (see `ensureProvider`): a failed init
+// would otherwise wedge the module forever now that nothing else ever clears it.
 //
 // MC8 U6 capstone — typed as `Promise<EthereumProviderInstance>` (the FULL provider surface) so
 // `pairWalletConnect` can use `.on('display_uri', ...)` / `.connect()` / `.removeListener(...)`.
@@ -90,6 +96,23 @@ const USER_REJECTED = /user rejected/i;
 // is pinned at compile time by walletconnect-conformance.test.ts (`_promisePin` +
 // `_instanceToEip1193`), so an SDK bump that breaks the narrowing fails `just typecheck`.
 let cachedProvider: Promise<EthereumProviderInstance> | null = null;
+
+/** The lazy singleton creator both entry points share. The FIRST call wins the init-time `chains`
+ *  (the provider is constructed bound to that network); every later pairing rebinds the requested
+ *  chains via `connect({chains})` in `pairWalletConnect`. A REJECTED init drops the cache so the
+ *  next open retries rather than wedging on a dead promise forever — the recovery the old
+ *  clear-on-disconnect used to provide, now that disconnect clears nothing. */
+function ensureProvider(chainId: number): Promise<EthereumProviderInstance> {
+  if (cachedProvider) return cachedProvider;
+  const init = initProvider(chainId);
+  init.catch(() => {
+    // Drop only OUR OWN still-cached promise: a later, successful init must not be evicted by a
+    // stale handler. Callers still see the rejection through the returned promise.
+    if (cachedProvider === init) cachedProvider = null;
+  });
+  cachedProvider = init;
+  return init;
+}
 
 /**
  * Initialize the provider with the capstone options (showQrModal:false — we render the QR ourselves).
@@ -126,11 +149,11 @@ function initProvider(chainId: number = 1): Promise<EthereumProviderInstance> {
  * `wallet.ts` consumes.
  *
  * `chainId` (OPEN_ISSUES #1/#2): the EVM chain the requested ckERC20 currency settles on. The FIRST
- * call wins the cached init promise — its `chains:[chainId]` binds the WC session to that network.
- * `pairWalletConnect` owns chain correctness from there: it reuses a session that already approved
- * the requested chain, and TEARS THE PROVIDER DOWN + re-inits when the session covers some other
- * chain. So a provider handed out by this function before that pairing is DEAD if the tear-down
- * fires — a caller that pairs must resolve the provider again afterwards.
+ * call wins the init-time `chains:[chainId]`; `pairWalletConnect` owns chain correctness from there
+ * — it reuses a session that already approved the requested chain, drops the session when it covers
+ * some other chain, and re-pairs on the requested one via `connect({chains})`. The PROVIDER
+ * instance survives every one of those cycles (one WC Core per app run), so a provider resolved
+ * before a pairing is never invalidated by it.
  * Default 1 (mainnet) for callers that don't thread the currency's chain_id.
  */
 export async function getWalletConnectProvider(
@@ -139,10 +162,9 @@ export async function getWalletConnectProvider(
   // Disabled guard (defense-in-depth — `resolveOnrampProvider()` already gates Platform + projectId
   // before dynamically importing this module; this makes the module self-protecting too).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return null;
-  if (!cachedProvider) cachedProvider = initProvider(chainId);
   // EthereumProviderInstance is assignable to Eip1193Provider (request signature compatible) —
   // pinned by walletconnect-conformance.test.ts. No cast needed (pure assignability).
-  return cachedProvider;
+  return ensureProvider(chainId);
 }
 
 /** A settled WalletConnect session, as the SDK's own provider surface types it (no cast, no new dep). */
@@ -181,7 +203,8 @@ function approvedChainIds(session: WalletConnectSession): string[] {
  *      approval prompt in the wallet. Re-pairing a live session was prompting the user on every
  *      sheet open.
  *  (c) a session that does NOT approve `chainId` (e.g. a cached mainnet session while a Sepolia
- *      deposit is requested) → tear it down and re-init on the requested chain, then pair.
+ *      deposit is requested) → drop the SESSION (the provider and its Core are reused — no
+ *      re-init, no second Core) and re-pair on the requested chain.
  *
  * Then, in every state, the WALLET's own approval is verified against `chainId` — see the check at
  * the end. Throws on pair failure or a wrong-network approval (the caller surfaces the message).
@@ -190,7 +213,8 @@ function approvedChainIds(session: WalletConnectSession): string[] {
  * `getWalletConnectProvider()`'s guard and makes `pairOnrampWallet`'s delegation safe.
  *
  * `chainId` (OPEN_ISSUES #1/#2): the EVM chain the requested ckERC20 currency settles on, threaded
- * into `initProvider` so the pairing session binds to that network. Default 1 (mainnet).
+ * into `connect({chains})` (and into `initProvider` on the very first init) so the pairing session
+ * binds to that network. Default 1 (mainnet).
  */
 export async function pairWalletConnect(
   onUri: (uri: string | null) => void,
@@ -198,18 +222,15 @@ export async function pairWalletConnect(
 ): Promise<void> {
   // Disabled guard — same gate as getWalletConnectProvider (defense-in-depth).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;
-  if (!cachedProvider) cachedProvider = initProvider(chainId);
-  let provider = await cachedProvider;
+  const provider = await ensureProvider(chainId);
 
   const restored = provider.session;
   if (restored) {
     // (b) the live/restored session already covers this chain — done, nothing to prompt.
     if (approvedChainIds(restored).includes(String(chainId))) return;
-    // (c) it covers some other chain: the provider was init'd with those `chains`, so the session
-    //     cannot be moved — drop it (this also clears the cache) and init on the requested chain.
-    await disconnectWalletConnect();
-    cachedProvider = initProvider(chainId);
-    provider = await cachedProvider;
+    // (c) it covers some other chain: the session cannot be moved — drop it and re-pair on the
+    //     requested chain. The PROVIDER stays cached and alive; only the session dies.
+    await dropSession(provider);
   }
 
   // Subscribe BEFORE connect() so the display_uri event (emitted during connect) is never missed.
@@ -226,19 +247,28 @@ export async function pairWalletConnect(
   // in the enclosing scope so `finally` can clear it (a `let` inside `try` would be out of scope).
   // NOTE: Promise.race cannot truly cancel the underlying connect() (JS promises aren't
   // cancellable) — the SDK's connect() stays pending until its own pairing-topic TTL or until
-  // `disconnectWalletConnect()` tears the provider down (the sheet wires that on close).
+  // `disconnectWalletConnect()` tears the session down (the sheet wires that on close; the next
+  // `connect()` also runs the SDK's `cleanupPendingPairings()`, retiring the abandoned topic).
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     // connect() initiates the pairing handshake; it resolves when the session is established (the
     // wallet approved). The SDK emits display_uri (→ onUri(uri)) during this call, then connect
-    // (→ onUri(null)) when the session settles. No opts needed (the chains were set at init).
+    // (→ onUri(null)) when the session settles. `connect({chains, optionalChains})` rebinds the
+    // proposed networks for THIS pairing (`ConnectOps` → `loadConnectOpts` overwrites the provider's
+    // rpc config), so a reused provider pairs on the chain this deposit needs even when its first
+    // init bound another. Both fields, exactly as `initProvider` seeds them — leaving
+    // optionalChains at its init value would let the wallet offer that first chain as an optional
+    // add-on to (say) a Sepolia pairing.
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
         () => reject(new Error(M.errors.ethWallet.pairingTimedOut)),
         PAIR_TIMEOUT_MS,
       );
     });
-    await Promise.race([provider.connect(), timeout]);
+    await Promise.race([
+      provider.connect({chains: [chainId], optionalChains: [chainId]}),
+      timeout,
+    ]);
   } catch (e) {
     // The ONE place that holds the SDK's own error, so the rejection-vs-other call is made here and
     // travels as a TYPE (see USER_REJECTED above for what the evidence actually is).
@@ -333,17 +363,41 @@ export async function recordWalletChoice(wallet: KnownWallet): Promise<void> {
 }
 
 /**
- * U6.5 — disconnect the cached WalletConnect provider AND clear the cache. Idempotent + safe to call
- * from a fire-and-forget teardown (the sheet's unmount cleanup): a provider.disconnect() failure is
- * logged rather than propagated, so a teardown glitch never reaches a caller that has already torn
- * down its UI.
+ * The session teardown shared by `pairWalletConnect`'s wrong-chain re-pair and the public
+ * `disconnectWalletConnect`: drop the recorded wallet choice, then the session itself. The PROVIDER
+ * (and its WalletConnect Core) is deliberately left alive — see the note on `cachedProvider`.
+ * A teardown failure is LOGGED, never propagated: both callers are fire-and-forget/flow-continuing
+ * (the sheet's unmount cleanup; the re-pair that follows immediately).
+ */
+async function dropSession(provider: EthereumProviderInstance): Promise<void> {
+  try {
+    // Drop the recorded wallet choice BEFORE disconnecting. It outlives the session otherwise, and
+    // a stale href foregrounds a wallet the user is no longer paired with. Order matters: an
+    // already-dropped session makes `disconnect()` throw routinely, and that must not gate this.
+    await provider.signer.client.core.storage.removeItem(WALLETCONNECT_DEEPLINK_CHOICE);
+    // The real provider no-ops `disconnect()` when no session is settled (`this.session && …`), so
+    // the sheet's mid-pair teardown is safe to fire at any state.
+    await provider.disconnect();
+  } catch (e) {
+    // Best-effort teardown — this runs fire-and-forget from a React unmount cleanup (or ahead of an
+    // immediate re-pair), so the failure must not propagate. It is LOGGED, never silently dropped.
+    console.warn(
+      'disconnectWalletConnect: teardown failed:',
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+}
+
+/**
+ * U6.5 — drop the cached WalletConnect provider's SESSION (wallet-choice record included). Safe to
+ * call from a fire-and-forget teardown (the sheet's unmount cleanup) and idempotent at the SDK
+ * level: `provider.disconnect()` is a no-op when no session is settled.
  *
- * Why clear the cache: the WC pairing/session is bound to a specific provider instance. Leaving a
- * disconnected/stale provider cached would make the next `getWalletConnectProvider()` /
- * `pairWalletConnect()` reuse a dead session. Clearing forces a fresh `EthereumProvider.init` on the
- * next open, so the user gets a clean re-pair rather than errors on a stale provider. The cache is
- * cleared BEFORE awaiting disconnect so even a rejecting disconnect leaves the module in the clean
- * (re-init-next) state.
+ * The provider itself STAYS cached and alive. This is deliberate (see `cachedProvider`): a fresh
+ * `EthereumProvider.init` per open accumulated live WC Cores — relay sockets included — because the
+ * SDK's disconnect never tears a Core down. The next `pairWalletConnect()` reuses the instance and
+ * re-pairs via `connect({chains})`, so the user still gets a clean re-pair; only the SESSION is
+ * torn down here, never the transport.
  *
  * Disabled guard: web Platform / empty projectId → immediate no-op (mirrors the other exports, so
  * the sheet can call this unconditionally without special-casing the disabled path).
@@ -352,22 +406,6 @@ export async function disconnectWalletConnect(): Promise<void> {
   // Disabled guard — same gate as the other exports (defense-in-depth).
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return;
   const cached = cachedProvider;
-  if (!cached) return; // nothing cached (never initialized, or already disconnected) → no-op.
-  // Clear the cache FIRST so a rejecting disconnect cannot leave a stale provider cached.
-  cachedProvider = null;
-  try {
-    const provider = await cached;
-    // Drop the recorded wallet choice BEFORE disconnecting. It outlives the session otherwise, and
-    // a stale href foregrounds a wallet the user is no longer paired with. Order matters: an
-    // already-dropped session makes `disconnect()` throw routinely, and that must not gate this.
-    await provider.signer.client.core.storage.removeItem(WALLETCONNECT_DEEPLINK_CHOICE);
-    await provider.disconnect();
-  } catch (e) {
-    // Best-effort teardown — the cache is already cleared and this runs fire-and-forget from a React
-    // unmount cleanup, so the failure must not propagate. It is LOGGED, never silently dropped.
-    console.warn(
-      'disconnectWalletConnect: teardown failed:',
-      e instanceof Error ? e.message : String(e),
-    );
-  }
+  if (!cached) return; // nothing cached (never initialized) → no-op.
+  await dropSession(await cached);
 }

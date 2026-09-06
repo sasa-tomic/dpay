@@ -287,13 +287,18 @@ Opened by that investigation, and each independently actionable:
   wallet with no ETH may refuse before the user sees a prompt). Calling this "outer-loop sign-off,
   NOT a blocker" is what let four bugs sit on the only path to a ckETH/ckUSDC deposit — the flow
   could not complete at all. Do not re-file it as a formality.
-- **WalletConnect Core accumulates across re-inits** (low). Observed live 2026-08-30:
-  `WalletConnect Core is already initialized … Init() was called 2 times` then `3 times`. Every
-  `disconnectWalletConnect()` → `initProvider()` cycle (sheet re-open, and the wrong-chain
-  tear-down) builds a fresh Core while the previous one lingers with its relay socket. Every flow
-  still worked; this is resource hygiene, not correctness. The fix is a pairing-lifecycle change
-  (reuse the instance via `connect({chains})` instead of re-initialising), deliberately NOT bundled
-  with the fixes above so it cannot regress a path that is now proven.
+- ~~**WalletConnect Core accumulates across re-inits** (low)~~ **CLOSED 2026-09-06 — fixed by
+  instance reuse.** Observed live 2026-08-30: `WalletConnect Core is already initialized … Init()
+  was called 2 times` then `3 times`. Every `disconnectWalletConnect()` → `initProvider()` cycle
+  (sheet re-open, and the wrong-chain tear-down) built a fresh Core while the previous one lingered
+  with its relay socket. Every flow still worked; this was resource hygiene, not correctness. The
+  fix: the provider is now a process-lifetime singleton (`ensureProvider`);
+  `disconnectWalletConnect()` drops the SESSION only (the SDK's own `disconnect()` never tears a
+  Core down), and the wrong-chain re-pair rebinds via `connect({chains, optionalChains})` on the
+  SAME instance (the SDK's `cleanupPendingPairings()` retires the abandoned pairing topic). A
+  rejected init unwedges the cache, so a relay-down first open cannot wedge the module. Unit-pinned
+  in `walletconnect.test.ts` (no second init across disconnect→get; same-instance re-pair;
+  unwedge) — confirm the warning is gone on the next device session.
 - **Tier-2 full Testnet4 mint** — externally blocked (faucet captcha + cycle-starved minter);
   optional, proves DFINITY infra, low dpay value.
 - **Play launch ops** (old ###11/###12): pre-launch report + `just play-upload` (upload-key AAB

@@ -97,9 +97,10 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   // PR3/U6.5 — on unmount (the close X, Esc, or any parent-driven teardown), if a WalletConnect
   // pairing is still in flight (wcUri is non-null: display_uri fired but the connect event never
   // did → no session established), abort it via the WC disconnect helper so the relay isn't left
-  // holding a dangling pairing topic and the cached provider is cleared for a clean re-pair next
-  // open. Fire-and-forget: the sheet is already tearing down, so there is no UI to surface an error
-  // (the helper swallows failures internally anyway). Reached via a lazy dynamic import — the SAME
+  // holding a dangling pairing topic; the provider itself stays cached and the next open re-pairs
+  // on the reused instance (one WC Core for the app's lifetime — no accumulation). Fire-and-forget:
+  // the sheet is already tearing down, so there is no UI to surface an error (the helper swallows
+  // failures internally anyway). Reached via a lazy dynamic import — the SAME
   // isolation boundary `wallet.ts` uses (wallet.ts is read-only here; the sheet never statically
   // imports walletconnect.ts). The guard (`wcUriRef.current !== null`) means a successful pair (QR
   // already cleared → null) does NOT tear down the session the user is actively depositing through.
@@ -235,9 +236,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
     // available) surfaces an honest, platform-aware message — NOT a browser-only "install MetaMask"
     // instruction that would lie to a native user.
     //
-    // AFTER pairing, never before: `pairWalletConnect` tears the provider DOWN and re-inits when a
-    // cached session approved a different chain than this deposit needs, so an instance captured
-    // beforehand would be the disconnected one and every call below would run on a dead session.
+    // AFTER pairing, never before: `pairWalletConnect` is what guarantees a session APPROVING THIS
+    // DEPOSIT'S CHAIN exists (it drops a wrong-chain cached session and re-pairs via
+    // `connect({chains})`), so the provider source is resolved only once that is true — the calls
+    // below would otherwise run against a session pairing is about to replace. (The provider
+    // INSTANCE is stable across that cycle — reused, never re-init'd — but the session is not.)
     const provider = await resolveOnrampProvider(chainId ?? 1);
     if (!provider) {
       setErr(Platform.OS === 'web' ? M.deposit.erc20.noWalletWeb : M.deposit.erc20.noWalletNative);

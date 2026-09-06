@@ -184,6 +184,18 @@ describe('getWalletConnectProvider — (2) singleton (init exactly once)', () =>
       }),
     );
   });
+
+  // The old clear-on-disconnect recovery is GONE (the provider is kept for the app's lifetime), so
+  // a REJECTED init must unwind its own cache entry — otherwise one failed init (relay down at the
+  // first open) would wedge WalletConnect for the whole run with a cached dead promise.
+  test('a rejected init drops the cache — the next get retries init instead of wedging', async () => {
+    const {init, getWalletConnectProvider} = load(PROJECT_ID);
+    init.mockRejectedValueOnce(new Error('relay unreachable'));
+    await expect(getWalletConnectProvider()).rejects.toThrow(/relay unreachable/);
+    init.mockResolvedValue(new FakeEthereumProvider());
+    expect(await getWalletConnectProvider()).not.toBeNull();
+    expect(init).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('getWalletConnectProvider — (3) EIP-1193 surface', () => {
@@ -256,7 +268,9 @@ describe('pairWalletConnect — display_uri + connect event handling', () => {
     // The display_uri payload (a plain string) was forwarded to onUri, then connect cleared it.
     expect(uris).toEqual(['wc:abcdef-1234@2?relay-protocol=…&symKey=…', null]);
     expect(fake.connect).toHaveBeenCalledTimes(1);
-    expect(fake.connect).toHaveBeenCalledWith();
+    // Instance reuse (OPEN_ISSUES 'Core accumulates'): connect() rebinds the requested chains for
+    // the pairing instead of the provider being re-initialised per open.
+    expect(fake.connect).toHaveBeenCalledWith({chains: [1], optionalChains: [1]});
   });
 
   test('registers display_uri + connect listeners BEFORE calling connect()', async () => {
@@ -358,26 +372,30 @@ describe('pairWalletConnect — session states + the approved-chain check', () =
     expect(fake.connect).not.toHaveBeenCalled();
   });
 
-  test('(c) a session approving another chain is torn down and re-paired on the requested one', async () => {
-    const stale = new FakeEthereumProvider();
-    approve(stale, 1); // an earlier mainnet ckUSDC deposit
-    const fresh = new FakeEthereumProvider();
-    fresh.connect.mockImplementation(async () => {
-      fresh.emit('display_uri', 'wc:sepolia-pairing');
-      approve(fresh, 11155111);
+  test('(c) a session approving another chain is dropped and re-paired on the requested one, on the SAME provider', async () => {
+    const fake = new FakeEthereumProvider();
+    approve(fake, 1); // an earlier mainnet ckUSDC deposit left this session behind
+    // The re-pair on the reused instance: a real pairing URI, then a Sepolia-approving session —
+    // exactly what the SDK's cleanupPendingPairings() → pair() sequence leaves behind.
+    fake.connect.mockImplementation(async () => {
+      fake.emit('display_uri', 'wc:sepolia-pairing');
+      approve(fake, 11155111);
     });
     const {init, getWalletConnectProvider, pairWalletConnect} = load(PROJECT_ID);
-    init.mockResolvedValueOnce(stale).mockResolvedValueOnce(fresh);
+    init.mockResolvedValue(fake);
 
     await getWalletConnectProvider(1); // prime the cache the way the mainnet deposit did
     const uris: (string | null)[] = [];
     await pairWalletConnect((uri) => uris.push(uri), 11155111); // now a Sepolia deposit
 
-    expect(stale.disconnect).toHaveBeenCalledTimes(1); // the mainnet session is dropped…
-    expect(stale.connect).not.toHaveBeenCalled(); // …never re-used for Sepolia
-    expect(init).toHaveBeenNthCalledWith(1, expect.objectContaining({chains: [1]}));
-    expect(init).toHaveBeenNthCalledWith(2, expect.objectContaining({chains: [11155111]}));
-    expect(fresh.connect).toHaveBeenCalledTimes(1);
+    // The mainnet session is dropped ON THE REUSED PROVIDER — no second EthereumProvider.init, so
+    // no second WalletConnect Core (the accumulation this pins away). connect() carries the
+    // requested chain, the init-time chains are NOT re-seeded.
+    expect(fake.disconnect).toHaveBeenCalledTimes(1);
+    expect(init).toHaveBeenCalledTimes(1);
+    expect(init).toHaveBeenCalledWith(expect.objectContaining({chains: [1]}));
+    expect(fake.connect).toHaveBeenCalledTimes(1);
+    expect(fake.connect).toHaveBeenCalledWith({chains: [11155111], optionalChains: [11155111]});
     expect(uris).toEqual(['wc:sepolia-pairing']); // a real pairing ⇒ a real QR
   });
 
@@ -575,24 +593,30 @@ describe('pairWalletConnect — PR3 pair timeout', () => {
   });
 });
 
-// --- U6.5 — disconnectWalletConnect (clear cache + provider.disconnect) ------------------------
-// `cachedProvider` was previously NEVER cleared: a pairing left mid-flight (or a dropped session)
-// wedged the cache so the next open reused a dead provider. U6.5 adds a teardown helper that calls
-// `provider.disconnect()` AND nulls the cache, forcing a fresh `init` on the next open. Idempotent
-// and safe to fire-and-forget from a React unmount cleanup (swallows disconnect failures).
-describe('disconnectWalletConnect — U6.5 (clear cache + provider.disconnect)', () => {
-  test('clears the cached provider and calls provider.disconnect() exactly once', async () => {
+// --- U6.5 — disconnectWalletConnect (session teardown; the provider is KEPT) -------------------
+// The teardown helper drops the SESSION (and the recorded wallet choice) on the cached provider.
+// It deliberately does NOT clear the cache: every `EthereumProvider.init` builds a fresh
+// WalletConnect Core that its own disconnect never tears down, so a disconnect→init cycle per sheet
+// open accumulated live Cores on-device (OPEN_ISSUES "Core is already initialized… Init() was called
+// N times"). The next open re-pairs on the REUSED instance via `connect({chains})` instead. Still
+// idempotent at the SDK level (provider.disconnect() no-ops without a session) and safe to
+// fire-and-forget from a React unmount cleanup (swallows disconnect failures).
+describe('disconnectWalletConnect — U6.5 (session teardown; the provider is kept)', () => {
+  test('drops the session on the cached provider, which is KEPT — the next get does NOT re-init', async () => {
     const fake = new FakeEthereumProvider();
+    approve(fake, 1); // a live session to drop
     const {init, getWalletConnectProvider, disconnectWalletConnect} = load(PROJECT_ID);
     init.mockResolvedValue(fake);
-    await getWalletConnectProvider(); // prime the cache
+    const first = await getWalletConnectProvider(); // prime the cache
     await disconnectWalletConnect();
     expect(fake.disconnect).toHaveBeenCalledTimes(1);
-    // Cache cleared → a subsequent get re-inits (init fires again with a fresh provider).
+    expect(fake.session).toBeUndefined(); // the fake mirrors the real provider's session drop
+    // Provider still cached → a subsequent get returns the SAME instance, no second init (and so
+    // no second WC Core — the accumulation this pins away).
     init.mockClear();
-    init.mockResolvedValue(new FakeEthereumProvider());
-    await getWalletConnectProvider();
-    expect(init).toHaveBeenCalledTimes(1);
+    init.mockResolvedValue(new FakeEthereumProvider()); // would fire if the cache was cleared
+    expect(await getWalletConnectProvider()).toBe(first);
+    expect(init).not.toHaveBeenCalled();
   });
 
   test('no-op when no provider is cached (never initialized)', async () => {
@@ -614,22 +638,24 @@ describe('disconnectWalletConnect — U6.5 (clear cache + provider.disconnect)',
     expect(init).not.toHaveBeenCalled();
   });
 
-  test('idempotent — a second call is a no-op (cache already cleared by the first)', async () => {
+  test('idempotent — the second call is a provider-level no-op (the session is already gone)', async () => {
     const fake = new FakeEthereumProvider();
     const {init, getWalletConnectProvider, disconnectWalletConnect} = load(PROJECT_ID);
     init.mockResolvedValue(fake);
     await getWalletConnectProvider();
     await disconnectWalletConnect();
-    await disconnectWalletConnect(); // second call: cache is null → no-op
-    expect(fake.disconnect).toHaveBeenCalledTimes(1);
+    await disconnectWalletConnect(); // second call: the provider is still cached — disconnect() is
+    // reached again and no-ops at the SDK level (no session to drop), exactly like the real one.
+    expect(fake.disconnect).toHaveBeenCalledTimes(2);
+    expect(fake.session).toBeUndefined();
   });
 
-  test('swallows a provider.disconnect failure (cache still cleared, no throw to caller)', async () => {
+  test('swallows a provider.disconnect failure (provider still cached, no throw to caller)', async () => {
     const fake = new FakeEthereumProvider();
     fake.disconnect.mockRejectedValue(new Error('session already closed'));
     const {init, getWalletConnectProvider, disconnectWalletConnect} = load(PROJECT_ID);
     init.mockResolvedValue(fake);
-    await getWalletConnectProvider();
+    const first = await getWalletConnectProvider();
     // Silenced, not asserted: the teardown log is pinned by its own case below — here it would only
     // be noise in the suite output.
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
@@ -638,10 +664,9 @@ describe('disconnectWalletConnect — U6.5 (clear cache + provider.disconnect)',
       // unhandled rejection would be invisible + noisy.
       await expect(disconnectWalletConnect()).resolves.toBeUndefined();
       expect(fake.disconnect).toHaveBeenCalledTimes(1);
-      // Cache cleared despite the failure → next get re-inits.
-      init.mockClear();
-      init.mockResolvedValue(new FakeEthereumProvider());
-      await getWalletConnectProvider();
+      // Provider still cached despite the failure → the next get reuses it (no re-init; the failed
+      // teardown must not cost a WC Core).
+      expect(await getWalletConnectProvider()).toBe(first);
       expect(init).toHaveBeenCalledTimes(1);
     } finally {
       warn.mockRestore();

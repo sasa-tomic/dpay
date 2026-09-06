@@ -110,13 +110,18 @@ export class FakeEthereumProvider
     EthereumProviderInstance['connect']
   >;
 
-  /** WC `disconnect` — jest.fn (tests override to reject to drive the teardown-error path). Typed
-   * as `jest.MockedFunction<real signature>` so tests can call `.mockRejectedValue()` while STILL
-   * satisfying the `implements Pick<..., 'disconnect'>` constraint (the intersection preserves the
-   * SDK call signature for drift detection — mirrors `connect` above). */
-  disconnect = jest.fn(async (): Promise<void> => undefined) as jest.MockedFunction<
-    EthereumProviderInstance['disconnect']
-  >;
+  /** WC `disconnect` — jest.fn mirroring the REAL provider's semantics: a no-op (resolved,
+   * nothing dropped) when no session is settled, and the settled session cleared otherwise — the
+   * real `EthereumProvider.disconnect()` guards on `this.session` the same way, which is what makes
+   * a mid-pair teardown safe and a second call idempotent. Tests override with `.mockRejectedValue()`
+   * to drive the teardown-error path. Typed as `jest.MockedFunction<real signature>` so tests can
+   * call the mock helpers while STILL satisfying the `implements Pick<..., 'disconnect'>` constraint
+   * (the intersection preserves the SDK call signature for drift detection — mirrors `connect`
+   * above). */
+  disconnect = jest.fn(async (): Promise<void> => {
+    if (this.session === undefined) return; // the real provider no-ops without a session
+    this.session = undefined;
+  }) as jest.MockedFunction<EthereumProviderInstance['disconnect']>;
 
   /**
    * WC `on` — jest.fn that ALSO registers the listener in the internal registry so `emit` can fire
