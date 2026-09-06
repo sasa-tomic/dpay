@@ -885,7 +885,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // hooks, so the hook order is identical in both branches (Rules of Hooks), and it keys on the
   // STORED value alone: a brand-new wallet and one upgrading into this build take the same path.
   if (homeCurrency === null) {
-    return <HomeCurrencyChooser assets={assets} balances={balances} onChoose={onSetHomeCurrency} />;
+    return <HomeCurrencyChooser assets={assets} balances={balances} catalog={catalog} onChoose={onSetHomeCurrency} />;
   }
 
   return (

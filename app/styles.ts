@@ -334,6 +334,21 @@ function buildStyles(p: Palette) {
   assetLabel: {flex: 1, fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
   assetAmt: {fontSize: 16, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, marginLeft: 10},
   assetSub: {fontSize: 12, color: p.sub2, marginTop: 4, fontFamily: FONT.sans},
+  // Rail-detail panel — the chooser's inline per-rail expansion (EUR dual-rail, Stage 5). An
+  // inset WELL inside the asset card (panel2 + hairline), so the detail reads as drilling into
+  // the card rather than as a second card. Rows are glyph-led like assetSelect but top-aligned:
+  // the detail rows carry 3-5 wrapped fact lines, and a centered glyph against that would float.
+  railDetailPanel: {marginTop: 10, alignSelf: 'stretch', backgroundColor: p.panel2, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: p.line2},
+  railDetailRow: {flexDirection: 'row', alignItems: 'flex-start', marginTop: 8},
+  railDetailCol: {flex: 1, marginLeft: 10},
+  railDetailLine: {fontSize: 12, color: p.sub2, marginTop: 2, lineHeight: 17, fontFamily: FONT.sans},
+  // Chain tag pill — the settlement chain's proper noun, uppercase mono, pill-shaped. Overflow
+  // hidden keeps the pill's radius honest if a future chain name runs long.
+  railChainTag: {paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, fontSize: 10, fontWeight: '700', color: p.sub2, letterSpacing: 1.0, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden', marginLeft: 8, alignSelf: 'center'},
+  // Rail-health note (RailLiquidityNote warn tone) — the warnRow idiom scaled to a sub-line:
+  // flex-start so the alert icon anchors the FIRST line of wrapped text, warn colour throughout.
+  railHealthRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 4},
+  railHealthText: {flex: 1, fontSize: 12, color: p.warn, lineHeight: 17, fontFamily: FONT.sans},
   assetActions: {flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 10},
   assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: p.line2, minHeight: 44, backgroundColor: p.card},
   assetActionText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},

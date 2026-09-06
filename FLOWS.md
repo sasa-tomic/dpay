@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **120 flows**
-> (119 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **124 flows**
+> (123 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (16) · pay (36) · offline (10) · deposit (9) · withdraw (11) · nfc (10) · system (21) · tour (6)
+wire (1) · onboard (18) · pay (37) · offline (10) · deposit (10) · withdraw (11) · nfc (10) · system (21) · tour (6)
 
 ---
 
@@ -39,9 +39,11 @@ wire (1) · onboard (16) · pay (36) · offline (10) · deposit (9) · withdraw 
 |---|------|----------|--------|
 | 01 | onboard | New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody honesty copy present at create + backup. | onboard, faucet, first-balance, empty-history, non-custodial |
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
-| 118 | home-currency | The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD, never EUR), names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload. | home-currency, onboard, vchf, ckusdc, settings, asset-selector, persistence |
-| 120 | home-currency-rails | The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; CHF: VCHF only), preferred rail first with its reason, Settings shows the same group for the main currency, and Continue still works. | home-currency, onboard, ckusdc, solana-usdc, settings, group-model |
+| 118 | home-currency | The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD/EUR) with each row naming exactly its catalogued rails as token · chain, names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload. | home-currency, onboard, vchf, ckusdc, settings, asset-selector, persistence |
+| 120 | home-currency-rails | The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; EUR: EURC · Solana first — the deep-liquidity preference — then VEUR · Internet Computer; CHF: VCHF only), preferred rail first with its reason, Settings shows the same group for the main currency, and Continue still works. | home-currency, onboard, ckusdc, solana-usdc, eur, eurc, veur, settings, group-model |
 | 121 | home-currency-balance-rails | Balances marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges). | home-currency, balances, ckusdc, solana-usdc, vchf, group-model |
+| 129 | eur-rail-detail | Tapping the EUR row expands an in-card detail panel: both rails preferred-first (EURC reason on the pick only), fee facts in each rail's own units, thin-warn on VEUR vs deep on EURC, DFX sell-only ramp on VEUR; Back collapses without unpicking; CHF never expands; Continue lands the wallet on EURC@Solana. | home-currency, onboard, eur, eurc, veur, group-model, rail-detail, fees |
+| 130 | eur-balances-rails | home=EUR in Balances: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none. | home-currency, balances, eur, eurc, veur, vchf, group-model, rail-health |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 | 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ … approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 | 54 | testnet-toggle | Balances testnet toggle reveals + hides all three testnet rows (BTC/USDC/ETH testnet — catalog-driven testnet detection). | testnet, catalog, toggle, balances |
@@ -77,6 +79,7 @@ wire (1) · onboard (16) · pay (36) · offline (10) · deposit (9) · withdraw 
 | 119 | solana-pay-scan | Solana Pay accept: scan a merchant solana: URI → named refusals on the IC rail and for unknown params/mints → explicit review (amount/label/message/full payee) → Approve sends SOL then USDC via the recipient ATA with reference keys attached (stub RPC). | solana-pay, sol-scan, review, reference-keys, spl-token, ata, refusal, sign, broadcast |
 | 123 | pay-link-named-rail | A payment link naming USDC@Solana pays exactly that rail with home=USD/preferred ckUSDC selected — no rail-selection copy on the pinned path. | pay-link, url-routing, rail-choice, never-override |
 | 124 | fund-gate-sibling-rail | The IC fund-first gate names a funded USDC@Solana sibling rail and one tap switches to it (user gesture, selection unlocked). | fund-gate, rail-choice, home-currency, solana |
+| 132 | eurc-solana-pay | home=EUR on the EURC rail: a scanned solana: URI naming EURC's mint reviews and pays EURC (named token, own 6 decimals, ATA rent disclosed); a non-catalog mint is refused BY NAME with its pubkey. | solana-pay, eur, eurc, scan, refusal, fees |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
@@ -118,6 +121,7 @@ wire (1) · onboard (16) · pay (36) · offline (10) · deposit (9) · withdraw 
 | 04 | deposit-copy | 'Copy address' writes the REAL address to the clipboard (not the Share noop). | deposit-address, clipboard |
 | 05 | deposit-credited | ckBTC deposit lands via faucet-at-principal → balance-recheck delta "Deposited ✓", relay balance grows, asset row appears. | deposit-credit, mint-delta, asset-card, balance-update |
 | 122 | receive-rail-choice | Receive ▸ "My address" on a multi-rail home currency defaults to the wallet's rail pick with reason + the rail's own fee fact, exposes the sibling rail's own address + fee one toggle away without leaving the sub-mode, and asserts both addresses belong to the user; single-rail CHF renders with no rail disclosure. | home-currency, receive, rails, ckusdc, sol-usdc, vchf, group-model |
+| 131 | eur-receive-rail | Receive ▸ My address on home=EUR defaults to EURC@Solana (own ATA + SOL fees, no health line on the deep rail) and toggles to VEUR@IC (own principal + e8s VEUR fee + the thin-liability note on the disclosure) without leaving the sub-mode; both addresses stable across flips. | home-currency, receive, rails, eur, eurc, veur, rail-health, fees |
 | 16 | ckusdc-onramp | ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note). | ckusdc, onramp, eip-1193, calldata, eth-gas |
 | 22 | deposit-error | IC gateway unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
 | 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |

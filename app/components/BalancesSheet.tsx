@@ -7,6 +7,7 @@ import {SheetOverlay} from './SheetOverlay';
 import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
 import {IconClose, IconPlus} from './icons';
+import {RailLiquidityNote} from './RailLiquidityNote';
 import {type SelectableAsset} from '../config/assets';
 import {type HomeCurrency, currencyOfAsset, preferredRail, railLineLabel} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
@@ -152,6 +153,11 @@ export function BalancesSheet({assets, balances, selectedId, homeCurrency, onSel
                 {mainBadge}
                 {railBadge}
                 {setupBadge}
+                {/* The rail-health footer — ONE shared slot under the badge stack, rendered by the
+                    same component everywhere so the thin-liability statement (VEUR) reads with one
+                    voice. Warn tone: only THIN rails carry it; deep/untiered rows render nothing
+                    (no badge colours change — the note is text, not chrome). */}
+                <RailLiquidityNote asset={asset} tone="warn" />
               </CurrencyRow>
             );
           })}

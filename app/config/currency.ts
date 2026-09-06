@@ -2,17 +2,18 @@
 //
 // A currency is NOT an asset. It is a set of rails that all settle the same unit: CHF is VCHF on
 // the Internet Computer and (when it lands) VCHF on Solana; USD is ckUSDC on the IC and USDC on
-// Solana. The user picks a currency; this module resolves it to the concrete assets the CURRENT
-// catalog can actually realise, in preference order. Full direction + the boundary that keeps
-// rail-selection out of swap territory: docs/specs/2026-09-04-currency-first-wallet-plan.md.
+// Solana; EUR is EURC on Solana and VEUR on the IC. The user picks a currency; this module
+// resolves it to the concrete assets the CURRENT catalog can actually realise, in preference
+// order. Full direction + the boundary that keeps rail-selection out of swap territory:
+// docs/specs/2026-09-04-currency-first-wallet-plan.md.
 //
 // Two rules this module exists to enforce, both of them honesty rules:
 //
-//   1. A currency is only OFFERED if the catalog carries a rail for it. EUR resolves to EURC,
-//      which is not in the catalog yet, so EUR is not in the chooser yet — and it will appear on
-//      its own the day an EURC row ships, with no code change here. Shipping a currency the user
-//      can select and then cannot hold would be exactly the dead end the founder's 2026-08-29 rule
-//      forbids.
+//   1. A currency is only OFFERED if the catalog carries a rail for it. EUR is the live two-rail
+//      case: EURC on Solana and VEUR on the Internet Computer are both catalog rows, so EUR is
+//      offered — and a currency whose last row vanishes disappears from the chooser on its own,
+//      with no code change here. Shipping a currency the user can select and then cannot hold
+//      would be exactly the dead end the founder's 2026-08-29 rule forbids.
 //   2. The currency is the LABEL; the token is the UNIT. A CHF balance is displayed as
 //      `12.40 VCHF`, never `CHF 12.40` — VCHF is a third party's franc-denominated token whose peg
 //      is the issuer's claim, not something dpay verifies (docs/VCHF_ICP_ANALYSIS.md is the
@@ -46,13 +47,15 @@ export type HomeCurrency = (typeof HOME_CURRENCIES)[number];
 // catalog is the rail the wallet lands on. Order is a product decision, not an accident:
 //   USD prefers ckUSDC because the Internet Computer rail is the one whose offline tap is proven
 //   on physical hardware; the Solana USDC row is the same dollar on a second rail.
+//   EUR prefers EURC on Solana because that rail's liquidity is catalogued deep while VEUR's is
+//   thin — the stated preference, backed by a catalog field, never an adjective.
 // Matching is by the asset's `linkToken` through `tokenEq` — the ONE definition of asset-token
 // identity in the app (app/config/assets.ts). A second definition here would be a second way to
 // resolve a currency to the wrong asset.
 const CURRENCY_RAILS: Record<HomeCurrency, readonly string[]> = {
   CHF: ['VCHF'],
   USD: ['ckUSDC', 'USDC'],
-  EUR: ['EURC'],
+  EUR: ['EURC', 'VEUR'],
 };
 
 /**
@@ -158,7 +161,10 @@ export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescri
       perTransfer: {raw: signature, formatted: fmtAsset(signature, SOL_DECIMALS, SOL_UNIT)},
       oneTime: null,
     };
-    if (rail.token === 'USDC') {
+    if (rail.token !== 'SOL') {
+      // ANY SPL token rail (USDC, EURC, …) needs its associated token account the first time it is
+      // used — the rent is a property of holding the token, not of USDC specifically. Native SOL is
+      // its own account and needs none.
       const rent = SOL_ATA_RENT_LAMPORTS.toString();
       fee.oneTime = {raw: rent, formatted: fmtAsset(rent, SOL_DECIMALS, SOL_UNIT)};
     }
@@ -169,6 +175,48 @@ export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescri
     ? {raw: fee, formatted: fmtAsset(fee, rail.decimals, rail.linkToken ?? rail.symbol)}
     : null;
   return {perTransfer, oneTime: null};
+}
+
+/**
+ * The rail's catalogued liquidity tier — a FACT carried by the catalog row ('deep' | 'thin'), or
+ * null when the row says nothing (SOL, native assets, unknown). The tier feeds the rail-health
+ * lines (`railLiquidityLine`) and nothing else: it is never a verdict and never a comparison.
+ */
+export function railLiquidity(asset: SelectableAsset): 'deep' | 'thin' | null {
+  return asset.liquidity;
+}
+
+/**
+ * The rail-health statement for `asset`, or null when the catalog makes none. Thin and deep are
+ * the only two statements — there is deliberately no key for a tier the catalog cannot name. The
+ * token named is the LEDGER token (`linkToken`), the same honesty choice as `railLineLabel`: the
+ * line says how much VEUR exists, not how many "euros".
+ */
+export function railLiquidityLine(asset: SelectableAsset): string | null {
+  const tier = railLiquidity(asset);
+  if (tier === 'thin') return M.wallet.railHealth.thin(asset.linkToken ?? asset.symbol);
+  if (tier === 'deep') return M.wallet.railHealth.deep;
+  return null;
+}
+
+/**
+ * The rail's ramp capability as ONE statement derivable from the catalog row, or null when no
+ * honest line exists. Exactly four derivations, no speculative keys:
+ *   Direct + Direct            → deposit and cash-out are wired in dpay (the ck* family shape)
+ *   Unavailable + Partner(p)   → p lists this token as sellable; buying is not available today
+ *   Unavailable + Unavailable  → no fiat ramp today; it moves wallet to wallet
+ *   anything else             → null (a Partner onramp, a Direct mixed with a non-Direct — the day
+ *                               one of those ships, its key ships with it). A Partner offramp with
+ *                               no named partner is also null: the line names DFX because the
+ *                               catalog does, never a guess.
+ */
+export function railRampLine(rail: SelectableAsset): string | null {
+  if (rail.onramp === 'Direct' && rail.offramp === 'Direct') return M.wallet.railDetail.rampBothDirect;
+  if (rail.onramp === 'Unavailable' && rail.offramp === 'Partner') {
+    return rail.rampPartner != null ? M.wallet.railDetail.rampSellPartner(rail.rampPartner) : null;
+  }
+  if (rail.onramp === 'Unavailable' && rail.offramp === 'Unavailable') return M.wallet.railDetail.rampNone;
+  return null;
 }
 
 /**

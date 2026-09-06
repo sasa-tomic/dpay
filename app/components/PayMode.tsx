@@ -12,6 +12,7 @@ import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
 import type {SelectableAsset} from '../config/assets';
 import {type HomeCurrency, currencyOfAsset, type RailBalances} from '../config/currency';
 import {FundedSiblingRail} from './FundedSiblingRail';
+import {RailLiquidityNote} from './RailLiquidityNote';
 import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {AssetId, Identity, PayIntent, NfcStatus} from '../lib/types';
@@ -931,6 +932,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   const gateCanFund = gateDepositable || isDirectIcrcAsset(gateDesc);
   const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
   const fundGate = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
+  // The gated rail itself — its catalog row's liquidity statement rides INSIDE the fund panel
+  // (warn tone ⇒ renders exactly for a thin rail like VEUR; untiered/deep rails show nothing).
+  const gatedAsset = assets.find(a => a.id === selectedAssetId) ?? null;
   // The funded-sibling pointer (S5): the fund gate exists because THIS rail is unfunded — when a
   // sibling rail of the same home currency holds money, the gate names it and offers the switch
   // as one tap. `onSwitchRail` is Wallet's `payRailSelect` (a user gesture under
@@ -949,6 +953,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         onRecheck={onRefreshBalances}
         recheckBusy={refreshBusy}
       />
+      {gatedAsset != null ? <RailLiquidityNote asset={gatedAsset} tone="warn" /> : null}
       <FundedSiblingRail
         homeCurrency={homeCurrency}
         assets={assets}

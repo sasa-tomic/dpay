@@ -2,6 +2,7 @@ import {View, Text, type TextStyle} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
 import {ModeToggle} from './ModeToggle';
+import {RailLiquidityNote} from './RailLiquidityNote';
 import {type SelectableAsset, linkNetworkOf, prettyNetwork} from '../config/assets';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {type HomeCurrency, chooseRail, currencyRails, railFees, railLineLabel, type RailBalances} from '../config/currency';
@@ -54,6 +55,10 @@ export function RailDisclosure({currency, assets, balances, catalog, selectedAss
     <View testID="receive-rail-disclosure">
       <Text testID="receive-rail-why" style={[S.assetSub, disclosureLine]}>{why}</Text>
       <Text testID="receive-rail-fee" style={[S.assetSub, disclosureLine]}>{fee}</Text>
+      {/* Third line: the SHOWN rail's liquidity statement — warn tone, so it renders exactly on
+          the thin side (VEUR) and says nothing on the deep side (a caution icon on "circulates
+          widely" would contradict itself). Same component as Balances/chooser detail → one voice. */}
+      <RailLiquidityNote asset={shown} tone="warn" />
       <ModeToggle
         testID="receive-rail-toggle"
         value={shown.id}

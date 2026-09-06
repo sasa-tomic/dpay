@@ -6,9 +6,11 @@
 //
 //   * The chooser stands in FRONT of the wallet on a first run, for any wallet with no stored
 //     currency — it is not an onboarding-only screen.
-//   * It offers exactly the currencies the catalog can realise: CHF and USD. **EUR is absent**, and
-//     that is the honesty gate, not an oversight — EUR resolves to EURC, which is not a catalog row,
-//     so offering it would hand the user a currency they cannot hold (founder rule 2026-08-29).
+//   * It offers exactly the currencies the catalog can realise: CHF, USD and — since the EUR
+//     dual-rail landed (EURC@Solana + VEUR@IC, both catalog rows) — EUR, with each row naming
+//     exactly its catalogued rails, each as ledger token · settlement chain. The honesty gate
+//     is now shape, not absence: a row may not name a rail the catalog does not carry (founder
+//     rule 2026-08-29).
 //   * Each row says what the wallet will actually HOLD: the ledger token on the chain the transfer
 //     executes on. USD must read "ckUSDC on Internet Computer" — NOT "USDC on Ethereum", which is
 //     what naming the display glyph and the backing chain produced, and which would invite someone
@@ -30,14 +32,16 @@ export const meta = {
   name: 'home-currency',
   journey: 'onboard',
   covers: ['home-currency', 'onboard', 'vchf', 'ckusdc', 'settings', 'asset-selector', 'persistence'],
-  verifies: 'The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD, never EUR), names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload.',
+  verifies: 'The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD/EUR) with each row naming exactly its catalogued rails as token · chain, names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload.',
   timeoutMs: 30000,
 };
 
 export async function run() {
   const start = Date.now();
   console.log('[118-home-currency] setup…');
-  const env = await setup();
+  // solStub: the EUR row's second rail (EURC@Solana) must be enumerable offline — the stub is the
+  // harness's stand-in for the solana RPC the app's coherence check reads.
+  const env = await setup({solStub: true});
   try {
     const {driver, webBaseURL, relayBaseURL} = env;
 
@@ -58,12 +62,19 @@ export async function run() {
       'the wallet must not be reachable until a currency has been chosen');
     console.log('[118-home-currency] ✓ the currency question gates the wallet');
 
-    // --- 2. only realisable currencies are offered ---------------------------------------------
+    // --- 2. only realisable currencies are offered, each with exactly its catalogued rails ------
     assert(await driver.isPresent('home-currency-CHF'), 'CHF must be offered (VCHF is a catalog row)');
     assert(await driver.isPresent('home-currency-USD'), 'USD must be offered (ckUSDC is a catalog row)');
-    assert(!(await driver.isPresent('home-currency-EUR')),
-      'EUR must NOT be offered — EURC is not in the catalog, so it is a currency the user could pick and then not hold');
-    console.log('[118-home-currency] ✓ CHF + USD offered, EUR correctly absent');
+    assert(await driver.isPresent('home-currency-EUR'),
+      'EUR must be offered — both its rails (EURC@Solana, VEUR@IC) are catalog rows');
+    // ...and the EUR row names EXACTLY its two catalogued rails — the honesty gate inverted from
+    // absence to shape: a third rail would promise one the catalog does not carry.
+    const eurRow = await driver.readText('home-currency-EUR');
+    assertIncludes(eurRow, 'EURC · Solana', 'the EUR row names its Solana rail');
+    assertIncludes(eurRow, 'VEUR · Internet Computer', 'the EUR row names its IC rail');
+    assert(!/(^|[^A-Za-z])EUR ·/.test(eurRow),
+      `no phantom "EUR" token rail — the row carries exactly its two catalogued rails. Got: ${JSON.stringify(eurRow)}`);
+    console.log('[118-home-currency] ✓ CHF + USD + EUR offered, EUR with exactly its catalogued rails');
 
     // Each row names the LEDGER TOKEN on the SETTLEMENT chain.
     const chooser = await driver.bodyText();

@@ -19,6 +19,7 @@
 import {
   type CurrencyDescriptor,
   type NetworkSection,
+  type RampCapability,
   type SolanaAsset,
   BUNDLED_NETWORKS,
   assetLinkToken,
@@ -56,6 +57,10 @@ export type SelectableAsset =
       network: string | null;  // the CHAIN's proper noun ('Bitcoin'/'Ethereum') — wire/constant, never translated; null for DEMO
       decimals: number;        // smallest-unit decimal count for amount formatting
       minFractionDigits: number; // compact-display floor (catalog `min_fraction_digits`; 0 when unset)
+      liquidity: 'deep' | 'thin' | null; // the catalog row's ramp-liquidity fact (null = unknown)
+      onramp: RampCapability;  // funding capability fact, verbatim from the catalog row
+      offramp: RampCapability; // cash-out capability fact, verbatim from the catalog row
+      rampPartner: string | null; // named ramp partner when a capability is 'Partner' (e.g. DFX)
       visible: boolean;        // true on every entry the builder returns (the builder IS the filter)
       testKey: string;         // stable ASCII testID key (unique within a built list)
     }
@@ -71,6 +76,9 @@ export type SelectableAsset =
       decimals: number;        // SOL=9, USDC=6, EURC=6 — from the catalog row (registry-pinned)
       minFractionDigits: number; // compact-display floor (catalog `min_fraction_digits`; 0 when unset)
       liquidity: 'deep' | 'thin' | null; // the catalog row's ramp-liquidity fact (null = unknown/native)
+      onramp: RampCapability;  // funding capability fact, verbatim from the catalog row
+      offramp: RampCapability; // cash-out capability fact, verbatim from the catalog row
+      rampPartner: string | null; // named ramp partner; null until the solana wire carries one
       visible: boolean;        // always true (appended only when the rail is enabled)
       testKey: string;         // stable ASCII testID key ('sol' | 'sol-usdc' | 'sol-eurc' | …)
     };
@@ -175,6 +183,10 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
     network,
     decimals: desc.decimals ?? 0,
     minFractionDigits: desc.min_fraction_digits ?? 0,
+    liquidity: desc.liquidity,
+    onramp: desc.onramp,
+    offramp: desc.offramp,
+    rampPartner: desc.ramp_partner,
     visible: true,
     testKey: icTestKey(desc, isPrimary, testnet),
   };
@@ -204,6 +216,12 @@ function solanaAssetRow(row: SolanaAsset): SelectableAsset {
     decimals: row.decimals,
     minFractionDigits: row.min_fraction_digits ?? 0,
     liquidity: row.liquidity,
+    onramp: row.onramp,
+    offramp: row.offramp,
+    // The solana wire carries no ramp partner today — the only Partner row in the catalog is VEUR
+    // on the IC. The field exists on BOTH arms so `railRampLine` treats every rail uniformly; the
+    // day a solana partner ships, SolanaAsset gains the field and this maps it.
+    rampPartner: null,
     visible: true,
     testKey,
   };

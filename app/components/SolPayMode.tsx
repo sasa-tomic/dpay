@@ -21,6 +21,7 @@ import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpR
 import type {SelectableAsset} from '../config/assets';
 import {type HomeCurrency, type RailBalances} from '../config/currency';
 import {FundedSiblingRail} from './FundedSiblingRail';
+import {RailLiquidityNote} from './RailLiquidityNote';
 import type {CurrencyDescriptor} from '../config/catalog';
 import {withTimeout} from '../lib/timeout';
 import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
@@ -225,15 +226,23 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   // a USER gesture — `onSwitchRail` is Wallet's `payRailSelect` under `shouldAllowUserSelect`;
   // Wallet passes no switch while the selection is locked, and the pointer then names the rail
   // without the button.
+  // The fund-gate rail notes: FIRST the gated rail's OWN liquidity statement (warn tone ⇒ renders
+  // exactly for a thin gated rail — untiered SOL/USDC show nothing), THEN the funded-sibling
+  // pointer. Together they answer, at the gate itself: "what does this rail cost to use, and what
+  // could I switch to instead?"
   const siblingAssetId: AssetId = isNativeSelected ? 'solana:SOL' : `solana:${selectedToken}`;
+  const gatedAsset = assets.find(a => a.id === siblingAssetId) ?? null;
   const siblingPointer = (
-    <FundedSiblingRail
-      homeCurrency={homeCurrency}
-      assets={assets}
-      balances={balances}
-      selectedAssetId={siblingAssetId}
-      onSwitch={onSwitchRail}
-    />
+    <>
+      {gatedAsset != null ? <RailLiquidityNote asset={gatedAsset} tone="warn" /> : null}
+      <FundedSiblingRail
+        homeCurrency={homeCurrency}
+        assets={assets}
+        balances={balances}
+        selectedAssetId={siblingAssetId}
+        onSwitch={onSwitchRail}
+      />
+    </>
   );
 
   // "Send to address" sub-mode: render the on-chain send flow INLINE (the SolanaWithdrawSheet body).

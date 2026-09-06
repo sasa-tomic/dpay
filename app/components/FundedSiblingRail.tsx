@@ -4,6 +4,7 @@ import {M} from '../i18n';
 import {type SelectableAsset, linkNetworkOf, prettyNetwork} from '../config/assets';
 import {type HomeCurrency, currencyRails, railLineLabel, type RailBalances} from '../config/currency';
 import type {AssetId} from '../lib/types';
+import {RailLiquidityNote} from './RailLiquidityNote';
 
 const pointerLine: TextStyle = {marginTop: 2, textAlign: 'center'};
 
@@ -50,6 +51,11 @@ export function FundedSiblingRail({homeCurrency, assets, balances, selectedAsset
       <Text testID="fund-sibling-holds" style={[S.assetSub, pointerLine]}>
         {M.pay.fundSibling.holds(held.displayText, railLineLabel(sibling))}
       </Text>
+      {/* The sibling's rail-health note — rendered BEFORE the switch button because it is the
+          cost of the very thing the button offers: the user is one tap from moving to this rail,
+          and a thin one (VEUR) must say so at the decision, not after it. Warn tone: it renders
+          exactly on the thin rails; a deep sibling shows no caution (and no icon). */}
+      <RailLiquidityNote asset={sibling} tone="warn" />
       {onSwitch ? (
         <Pressable
           testID="btn-fund-sibling-switch"

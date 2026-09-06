@@ -42,6 +42,18 @@ export const walletEs: WalletMessages = {
     a11y: currency => `Elegir ${currency}`,
   },
 
+  railHealth: {
+    thin: token => `Hoy hay muy poco ${token} on-chain: recibir puede ser difícil y pagar requiere a alguien que lo tenga.`,
+    deep: 'Circula ampliamente on-chain hoy.',
+  },
+
+  railDetail: {
+    back: 'Atrás',
+    rampNone: 'Hoy no hay rampa fiduciaria — se mueve de wallet a wallet.',
+    rampSellPartner: partner => `${partner} lista este token como vendible; comprar no está disponible hoy.`,
+    rampBothDirect: 'Depósito y retiro a su cadena nativa están conectados en dpay.',
+  },
+
   tab: {pay: 'Pagar', receive: 'Recibir', transactions: 'Movimientos'},
 
   backToPaying: asset => `Volver a pagar con ${asset}`,

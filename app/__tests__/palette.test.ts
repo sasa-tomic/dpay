@@ -90,7 +90,7 @@ describe('dual theme: applyPalette', () => {
     // Fixture mirrors config/assets.ts DEMO shape (see __tests__/icons.test.tsx).
     const demo = {
       id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', networkLabel: 'Internet Computer',
-      decimals: 2, visible: true, testKey: 'demo',
+      decimals: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'demo',
     } as const;
     applyPalette(LIGHT);
     expect(glyphFor(demo)).toEqual({glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});

@@ -43,6 +43,18 @@ export const walletFr: WalletMessages = {
     a11y: currency => `Choisir ${currency}`,
   },
 
+  railHealth: {
+    thin: token => `Très peu de ${token} existe on-chain aujourd’hui — en recevoir peut être difficile, et payer suppose un destinataire qui en détient.`,
+    deep: 'Circule largement on-chain aujourd’hui.',
+  },
+
+  railDetail: {
+    back: 'Retour',
+    rampNone: 'Pas de rampe fiat aujourd’hui — les transferts se font de wallet à wallet.',
+    rampSellPartner: partner => `${partner} liste ce jeton comme vendable ; l’achat n’est pas disponible aujourd’hui.`,
+    rampBothDirect: 'Le dépôt et le retrait vers sa chaîne native sont câblés dans dpay.',
+  },
+
   tab: {pay: 'Payer', receive: 'Recevoir', transactions: 'Transactions'},
 
   backToPaying: asset => `Retour au paiement en ${asset}`,

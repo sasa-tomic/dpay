@@ -100,6 +100,22 @@ export type WalletMessages = {
     a11y: (currency: string) => string;
   };
 
+  /** The catalog's per-rail liquidity statement — the rail-health lines (RailLiquidityNote).
+   *  `token` is the LEDGER token (VEUR), never the currency glyph. */
+  railHealth: {
+    thin: (token: string) => string;
+    deep: string;
+  };
+
+  /** The chooser's per-rail detail panel: its back affordance + the ramp statements derivable
+   *  from the catalog's onramp/offramp facts (config/currency.ts `railRampLine`). */
+  railDetail: {
+    back: string;
+    rampNone: string;
+    rampSellPartner: (partner: string) => string;
+    rampBothDirect: string;
+  };
+
   tab: {pay: string; receive: string; transactions: string};
 
   /** The fund-funnel resume link on Receive → My address. */
@@ -213,6 +229,18 @@ export const walletEn: WalletMessages = {
     confirm: 'Continue',
     noneAvailable: 'No currencies could be loaded. Check the server address in Settings, then reopen dpay.',
     a11y: currency => `Choose ${currency}`,
+  },
+
+  railHealth: {
+    thin: token => `Very little ${token} exists on-chain today — receiving can be hard, and paying needs someone who holds it.`,
+    deep: 'Circulates widely on-chain today.',
+  },
+
+  railDetail: {
+    back: 'Back',
+    rampNone: 'No fiat ramp today — it moves wallet to wallet.',
+    rampSellPartner: partner => `${partner} lists this token as sellable; buying is not available today.`,
+    rampBothDirect: 'Deposit and cash-out to its native chain are wired in dpay.',
   },
 
   tab: {pay: 'Pay', receive: 'Receive', transactions: 'Transactions'},

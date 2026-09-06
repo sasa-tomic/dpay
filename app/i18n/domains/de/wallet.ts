@@ -41,6 +41,18 @@ export const walletDe: WalletMessages = {
     a11y: currency => `${currency} wählen`,
   },
 
+  railHealth: {
+    thin: token => `Heute gibt es on-chain nur sehr wenig ${token} — Empfangen kann schwierig sein, und Zahlen geht nur an jemanden, der ${token} hält.`,
+    deep: 'Zirkuliert heute breit on-chain.',
+  },
+
+  railDetail: {
+    back: 'Zurück',
+    rampNone: 'Kein Fiat-Zugang heute — Überweisungen laufen von Wallet zu Wallet.',
+    rampSellPartner: partner => `${partner} listet dieses Token als verkäuflich; Kaufen ist heute nicht möglich.`,
+    rampBothDirect: 'Einzahlung und Auszahlung auf die native Chain sind in dpay eingebaut.',
+  },
+
   tab: {pay: 'Bezahlen', receive: 'Empfangen', transactions: 'Verlauf'},
 
   backToPaying: asset => `Zurück zum Bezahlen mit ${asset}`,
