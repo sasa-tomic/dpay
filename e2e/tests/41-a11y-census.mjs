@@ -28,8 +28,9 @@
 // control means adding its testID to the right surface (single source of truth the next dev updates
 // alongside the new testID).
 //
-// Selector contract: surfaces are reached by the same taps a user makes — `tab-receive`,
-// `req-prefix`, `balance`, `btn-settings`, `tab-transactions`, `asset-vchf-select`, `btn-pay-send`.
+// Selector contract: surfaces are reached by the same taps a user makes — `tab-home`,
+// `tab-receive`, `req-prefix`, `balance`, `btn-settings`, `tab-transactions`, `asset-vchf-select`,
+// `btn-pay-send`.
 import {
   setup, onboardWallet, assert, accountOf, faucetAccount, openBalances, selectCurrency, openPaySend,
   railPrincipalText,
@@ -53,10 +54,14 @@ const SURFACES = {
   // Always-present (header + tabbar) on every surface. link-home is the web-only wordmark
   // back-link to the site root (WordmarkLink in Logo.tsx) — on native it degrades to inert
   // text, so the census (web) is its only role/label gate.
-  chrome: ['btn-settings', 'btn-theme', 'balance', 'link-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
+  chrome: ['btn-settings', 'btn-theme', 'balance', 'link-home', 'tab-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
   // Wallet home (Pay tab) — only chrome is interactive (the scan card's QR scanner is a viewport,
   // not a Pressable; the pay-scan DIV is informational).
   home: [],
+  // Home tab (O4) — the balance-first surface: the three uniform action-row buttons (capability-
+  // dispatched: Pay/Receive navigate, Add money fires the DEMO faucet or lands the deposit
+  // surface) plus the activity feed's See-all link. The headline block itself is informational.
+  homeTab: ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money', 'btn-home-activity-all'],
   // Receive tab + currency picker (open via req-prefix). The picker rows are req-pick-<assetTestKey>;
   // the wallet's IC-mainnet catalog ships DEMO/ckBTC/ckUSDC/ckETH/VCHF/ICP (the REAL prod rows —
   // six mainnet IC assets since the 2026-08-28 catalog transplant), so all six picker rows assert.
@@ -181,6 +186,12 @@ export async function run() {
     // 1. Wallet home (Pay tab — the default after onboarding).
     await census('home');
     console.log('[41-a11y-census] ✓ census: wallet home (Pay)');
+
+    // 1b. Home tab (O4) — the balance-first surface, one tap from Pay.
+    await driver.click('tab-home', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    await census('homeTab');
+    console.log('[41-a11y-census] ✓ census: home tab (balance-first surface)');
 
     // 2. Receive + currency picker (open via req-prefix → modal).
     await driver.click('tab-receive', { timeoutMs: 4_000 });

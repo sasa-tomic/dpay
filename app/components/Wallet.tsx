@@ -34,6 +34,7 @@ import {Tab} from './Tab';
 import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
 import {Ledger} from './Ledger';
+import {HomeTab} from './HomeTab';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
@@ -41,7 +42,7 @@ import {BalancesSheet} from './BalancesSheet';
 import {PassportArchive} from './TripPassport';
 import {Walkthrough} from './Walkthrough';
 import {AppModal} from './AppModal';
-import {IconArrowDownLeft, IconChevronDown, IconClock, IconMoon, IconQr, IconSettings, IconSun} from './icons';
+import {IconArrowDownLeft, IconChevronDown, IconClock, IconHome, IconMoon, IconQr, IconSettings, IconSun} from './icons';
 import {nextTheme, themeLabel, type ThemeOverride} from '../config/theme';
 import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {type HomeCurrency, currencyName, currencyOfAsset, preferredRail} from '../config/currency';
@@ -49,7 +50,7 @@ import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
-  const [mode, setMode] = useState<'pay' | 'receive' | 'ledger'>('pay');
+  const [mode, setMode] = useState<'pay' | 'receive' | 'ledger' | 'home'>('pay');
   // A shared payment link that has been PARSED but not yet resolved against the catalog (which
   // loads async). Held here until the resolve effect below turns it into a concrete asset + amount,
   // or into an honest on-screen refusal.
@@ -980,7 +981,25 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       <TripStrip onOpen={() => setPassportOpen(true)} />
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
-        {mode === 'pay'
+        {mode === 'home'
+          ? <HomeTab
+              assets={assets}
+              selectedAsset={selectedAsset}
+              balances={balances}
+              catalog={catalog}
+              homeCurrency={homeCurrency}
+              homeAsset={homeAsset}
+              online={online}
+              history={ledgerHistory}
+              topUpBusy={topUpBusy}
+              topUpErr={topUpErr}
+              onPay={() => setMode('pay')}
+              onReceive={() => setMode('receive')}
+              onDeposit={goToDeposit}
+              onTopUp={topUp}
+              onSeeAll={() => setMode('ledger')}
+            />
+          : mode === 'pay'
           ? (activeSol && solAddress
               ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} />
               : <PayMode
@@ -1075,11 +1094,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} />}
       </ScrollView>
 
-      {/* O4 S1 — persistent bottom navigation: the three primary tabs moved from the top pill row
+      {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row
           to a bar OUTSIDE the ScrollView (primary nav stays reachable without scrolling). Same
           `mode` union, byte-stable testIDs, and P/R/L hotkeys (useHotkeys); the enclosing
-          SafeAreaView owns the bottom safe-area inset. */}
+          SafeAreaView owns the bottom safe-area inset. O4: Home (the balance-first surface) sits
+          LEFTMOST — the scanner stays the landing mode, Home is one tap away, not in front of it. */}
       <View style={S.bottomNav}>
+        <Tab variant="bottom" testId="tab-home" label={M.wallet.tab.home} active={mode === 'home'} onPress={() => setMode('home')} icon={c => <IconHome size={22} color={c} />} />
         <Tab variant="bottom" testId="tab-pay" label={M.wallet.tab.pay} active={mode === 'pay'} onPress={() => setMode('pay')} icon={c => <IconQr size={22} color={c} />} />
         <Tab variant="bottom" testId="tab-receive" label={M.wallet.tab.receive} active={mode === 'receive'} onPress={() => setMode('receive')} icon={c => <IconArrowDownLeft size={22} color={c} />} />
         <Tab variant="bottom" testId="tab-transactions" label={M.wallet.tab.transactions} active={mode === 'ledger'} onPress={() => setMode('ledger')} icon={c => <IconClock size={22} color={c} />} />

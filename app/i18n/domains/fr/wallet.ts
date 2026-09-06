@@ -55,7 +55,25 @@ export const walletFr: WalletMessages = {
     rampBothDirect: 'Le dépôt et le retrait vers sa chaîne native sont câblés dans dpay.',
   },
 
-  tab: {pay: 'Payer', receive: 'Recevoir', transactions: 'Transactions'},
+  tab: {pay: 'Payer', receive: 'Recevoir', transactions: 'Transactions', home: 'Accueil'},
+
+  home: {
+    headlineA11y: (amount, asset) => `Solde ${asset} : ${amount}`,
+    actions: {
+      pay: 'Payer',
+      payHint: 'Scanner un code ou envoyer à une adresse',
+      receive: 'Recevoir',
+      receiveHint: 'Demander un paiement ou afficher votre adresse',
+      addMoney: 'Ajouter de l’argent',
+      addMoneyHint: 'Ajouter des fonds à ce portefeuille',
+    },
+    activity: {
+      title: 'Activité',
+      seeAll: 'Tout voir',
+      seeAllHint: 'Ouvrir la liste complète des transactions',
+      empty: 'Aucun paiement pour l’instant.',
+    },
+  },
 
   backToPaying: asset => `Retour au paiement en ${asset}`,
 

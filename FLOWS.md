@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **124 flows**
-> (123 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **127 flows**
+> (126 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (18) · pay (37) · offline (10) · deposit (10) · withdraw (11) · nfc (10) · system (21) · tour (6)
+wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw (11) · nfc (10) · system (23) · tour (6)
 
 ---
 
@@ -122,6 +122,7 @@ wire (1) · onboard (18) · pay (37) · offline (10) · deposit (10) · withdraw
 | 05 | deposit-credited | ckBTC deposit lands via faucet-at-principal → balance-recheck delta "Deposited ✓", relay balance grows, asset row appears. | deposit-credit, mint-delta, asset-card, balance-update |
 | 122 | receive-rail-choice | Receive ▸ "My address" on a multi-rail home currency defaults to the wallet's rail pick with reason + the rail's own fee fact, exposes the sibling rail's own address + fee one toggle away without leaving the sub-mode, and asserts both addresses belong to the user; single-rail CHF renders with no rail disclosure. | home-currency, receive, rails, ckusdc, sol-usdc, vchf, group-model |
 | 131 | eur-receive-rail | Receive ▸ My address on home=EUR defaults to EURC@Solana (own ATA + SOL fees, no health line on the deep rail) and toggles to VEUR@IC (own principal + e8s VEUR fee + the thin-liability note on the disclosure) without leaving the sub-mode; both addresses stable across flips. | home-currency, receive, rails, eur, eurc, veur, rail-health, fees |
+| 134 | home-add-money | DEMO add-money fires the faucet and the ∂ balance rises; a real IC asset's add-money lands the deposit surface for that asset | home-tab, add-money |
 | 16 | ckusdc-onramp | ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note). | ckusdc, onramp, eip-1193, calldata, eth-gas |
 | 22 | deposit-error | IC gateway unreachable when opening the deposit sheet → honest error ('Check connection'), no spinner-forever. | deposit-error, offline, graceful |
 | 33 | ckerc20-persist | ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown. | ckerc20, persist, restart, watching-resume |
@@ -165,6 +166,8 @@ wire (1) · onboard (18) · pay (37) · offline (10) · deposit (10) · withdraw
 |---|------|----------|--------|
 | 12 | settings | Settings: privacy policy is reachable, the non-custodial statement is present, relay URL persists, and reset wallet wipes identity. | settings, relay-config, privacy-policy, non-custodial, reset, persist |
 | 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
+| 133 | home-surface | Landing stays the Pay scanner; tab-home lands Home: headline shows the selected asset balance in its own token unit with the correct eyebrow; the action row navigates to Pay and Receive | home-tab, action-row, landing |
+| 135 | home-activity | Home activity shows the newest ledger rows in their own token units, capped at 3; See all opens the full Transactions tab | home-tab, activity-feed |
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4). | keyboard-shortcuts, tabs, sheet-guard, input-guard, focus-visible |
 | 17 | scan-cleanup | Pay tab starts gated (0 listeners until "Pay Now"); armed → 1; Pay→Receive→Pay tears down cleanly (no leak; re-mount re-gates then re-arms). | qr-scanner, teardown, unmount, listener-leak, pay-intent-gate |
 | 24 | wallet-cleanup | Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties. | asset-cards, labels, symbols |

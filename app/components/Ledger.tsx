@@ -2,11 +2,9 @@ import {useState} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
-import {C} from '../config/palette';
-import {assetTestKey, fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
+import {assetTestKey, type CurrencyDescriptor} from '../config/catalog';
 import {chipLabel, type SelectableAsset} from '../config/assets';
-import {fmtAssetCompact} from '../lib/format';
-import {IconArrowDownLeft, IconArrowUpRight} from './icons';
+import {HistoryRow} from './HistoryRow';
 import type {AssetId, Txn} from '../lib/types';
 
 // The chip's stable testID key, dispatched on rail. An IC row keeps the CATALOG's `assetTestKey`
@@ -17,26 +15,6 @@ function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): s
   if (asset.protocol === 'solana') return asset.testKey;
   const desc = catalog.find(c => c.currency === asset.currency);
   return desc ? assetTestKey(desc) : null;
-}
-
-// One row's amount in the row's OWN units, dispatched on rail. History is a glanceable surface, so
-// both rails use the COMPACT formatter (trailing zeros trimmed to the asset's floor; "≈"/"<" when a
-// display cap hides value) — the exact string stays on the surfaces where money is committed. An IC
-// row goes through `fmtCurrencyAmountCompact` (DEMO's `∂` early-return lives inside it, and it
-// fail-closes to the explicit "Unsupported" sentinel for an unknown family — never a wrong
-// "… BTC"); a Solana row formats at its SelectableAsset's `decimals` + `symbol` + compact floor,
-// the only place those facts exist for that rail. A row
-// whose asset is not in the visible list (a testnet asset hidden mid-poll, a disabled rail) fails
-// closed to the SAME sentinel rather than guessing a unit.
-function fmtRowAmount(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[]): string {
-  const asset = assets.find(a => a.id === t.assetId);
-  if (!asset) return M.wallet.asset.unsupported;
-  // The direction sign goes THROUGH the formatter (never concatenated here) so it lands inside a
-  // truncation marker — "≈ −0.039922 ETH", not "−≈ 0.039922 ETH". See fmtAssetCompact.
-  const sign = t.dir === 'out' ? '−' : '+';
-  return asset.protocol === 'ic'
-    ? fmtCurrencyAmountCompact(catalog, asset.currency, t.amount, sign)
-    : fmtAssetCompact(t.amount, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
 }
 
 // The transaction list, promoted from an inline card under Pay/Receive into its own tab. Renders the
@@ -115,33 +93,13 @@ export function Ledger({history, catalog, assets, dropped = 0}: {history: Txn[];
           })}
         </View>
       ) : null}
-      {rows.map((t, i) => {
-        const amtTxt = fmtRowAmount(t, catalog, assets);
-        return (
-          // IC-rail rows carry an EMPTY nonce (memo is the reconciliation key), so the raw nonce
-          // alone is no longer unique (mint + transfer rows collide). Composite key: index pins
-          // positional identity; the nonce keeps facade-era rows (which had unique nonces) stable
-          // across refreshes when the list head shifts.
-          <View key={`${i}-${t.nonce}`} style={S.histRow}>
-            {/* P4 — direction glyph leading each row (t.dir is Txn's reliable 'out' | 'in' field):
-                incoming = arrow-down-left in ok green (matching the credited amount; tangerine stays
-                reserved for CTA/active), outgoing = arrow-up-right neutral. The icon renders no
-                textContent, so the asserted amounts/memos are untouched. */}
-            <View style={S.histDirIcon}>
-              {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.ok} />}
-            </View>
-            <View style={S.histWhoCol}>
-              <Text style={S.histWho}>{t.dir === 'out' ? M.wallet.ledger.to(t.who || '—') : M.wallet.ledger.from(t.who || '—')}</Text>
-              {t.memo ? <Text style={S.histMemo} testID={`hist-memo-${i}`}>{t.memo}</Text> : null}
-            </View>
-            <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{amtTxt}</Text>
-            {/* testID: the visual flows (40/84) MASK this element — the rendered time is
-                inherently time-varying (minute digits + 1↔2-digit hour width), so an unmasked
-                diff is a standing flake riding just under the 0.5% tolerance. */}
-            <Text style={S.histTime} testID={`hist-time-${i}`}>{t.time}</Text>
-          </View>
-        );
-      })}
+      {rows.map((t, i) => (
+        // IC-rail rows carry an EMPTY nonce (memo is the reconciliation key), so the raw nonce
+        // alone is no longer unique (mint + transfer rows collide). Composite key: index pins
+        // positional identity; the nonce keeps facade-era rows (which had unique nonces) stable
+        // across refreshes when the list head shifts.
+        <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} />
+      ))}
     </View>
   );
 }

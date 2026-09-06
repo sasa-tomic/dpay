@@ -1,4 +1,4 @@
-// Flow 83 — Mobile viewport: the tab row (incl. Transactions) must fit a 390px phone screen.
+// Flow 83 — Mobile viewport: the bottom tab row (incl. Transactions) must fit a 390px phone screen.
 //
 // The e2e harness's default viewport is already iPhone-12-ish 390×844 — exactly the mobile-web
 // width where the tab row used to overflow (~517px: 3 pills × icon+label+24px HotkeyHint badge +
@@ -47,6 +47,7 @@ export async function run() {
       return {
         innerW: window.innerWidth,
         scrollW: document.documentElement.scrollWidth,
+        home: rect('tab-home'),
         pay: rect('tab-pay'),
         receive: rect('tab-receive'),
         transactions: rect('tab-transactions'),
@@ -57,9 +58,9 @@ export async function run() {
     assert(m.scrollW <= m.innerW, `document overflows horizontally: scrollWidth=${m.scrollW} > innerWidth=${m.innerW} (a pill row or child is wider than the phone screen)`);
     console.log(`[83-mobile-viewport] ✓ no horizontal document overflow (scrollWidth ${m.scrollW} ≤ innerWidth ${m.innerW})`);
 
-    assert(m.pay && m.receive && m.transactions, `all three tab pills must render (pay=${!!m.pay} receive=${!!m.receive} transactions=${!!m.transactions})`);
+    assert(m.home && m.pay && m.receive && m.transactions, `all four tab pills must render (home=${!!m.home} pay=${!!m.pay} receive=${!!m.receive} transactions=${!!m.transactions})`);
     assert(m.transactions.height > 0, 'tab-transactions rendered 0px tall — collapsed/hidden');
-    for (const [name, r] of [['pay', m.pay], ['receive', m.receive], ['transactions', m.transactions]]) {
+    for (const [name, r] of [['home', m.home], ['pay', m.pay], ['receive', m.receive], ['transactions', m.transactions]]) {
       assert(r.right <= m.innerW + 0.5, `tab-${name} clips off-screen right (right=${r.right.toFixed(1)} > innerWidth=${m.innerW})`);
     }
     console.log(`[83-mobile-viewport] ✓ Transactions pill fits (right=${m.transactions.right.toFixed(1)} ≤ ${m.innerW})`);

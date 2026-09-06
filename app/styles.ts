@@ -182,15 +182,30 @@ function buildStyles(p: Palette) {
   tabActive: {backgroundColor: p.brand, borderColor: p.brand, ...LIFT},
   tabText: {color: p.sub, fontWeight: '600', fontFamily: FONT.sansMedium},
   tabTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
-  // Bottom-bar tab (O4 S1) — icon over label, `flex:1` so the three tabs split the bar equally on
-  // a 390px phone; minHeight 56 clears the 44pt touch floor with comfortable thumb room. Active
+  // Bottom-bar tab (O4 S1) — icon over label, `flex:1` so the tabs split the bar equally on a
+  // 390px phone; minHeight 56 clears the 44pt touch floor with comfortable thumb room. Active
   // keeps the old pill language (tangerine fill + brandInk) so primary nav stays the loudest
-  // level. Labels are 11px single-line-safe: the longest locale label ("Movimientos", es) fits a
-  // ~124px tab without truncation, so no numberOfLines clamp is needed.
+  // level. Labels are 11px single-line-safe: FOUR tabs share the bar since O4 slice 1 (Home +
+  // Pay + Receive + Transactions, ~86px each), and the longest locale label ("Movimientos", es
+  // ≈ 67px at 11px) still fits without truncation, so no numberOfLines clamp is needed.
   bottomTab: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 8, minHeight: 56, borderRadius: 12},
   bottomTabActive: {backgroundColor: p.brand, ...LIFT},
   bottomTabText: {color: p.sub, fontWeight: '600', fontSize: 11, fontFamily: FONT.sansMedium},
   bottomTabTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
+  // ── The Home tab (O4) — the balance-first home surface ────────────────────────────────────
+  // Headline: ONE asset's OWN balance (never a portfolio sum), eyebrow + big number stacked and
+  // centered like the review/paid moments. The action row is three uniform card buttons (icon
+  // over label) — capability-dispatched, one chrome for every asset. The activity feed reuses the
+  // Ledger's histRow grammar (via the shared HistoryRow), capped at 3 rows under a mono eyebrow.
+  homeHeadline: {alignSelf: 'stretch', alignItems: 'center', marginTop: 10, marginBottom: 2},
+  homeEyebrow: {fontSize: 13, color: p.sub, marginBottom: 8, fontFamily: FONT.sansMedium},
+  homeAmount: {fontSize: 40, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -1},
+  homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 18},
+  homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, borderRadius: 16, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 72},
+  homeActionLabel: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
+  homeFaucetErr: {fontSize: 13, color: p.bad, marginTop: 10, textAlign: 'center', fontFamily: FONT.sans},
+  homeActivity: {alignSelf: 'stretch', marginTop: 24},
+  homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   // Mode toggle — a joined two-segment pill control at the top of the Pay/Receive tab bodies:
   // `[ Scan to pay | Send to address ]` (Pay) and `[ Request payment | My address ]` (Receive).
   // Inset well (panel2) + white active segment + ink text: the editorial segmented control,

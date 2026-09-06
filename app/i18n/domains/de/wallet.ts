@@ -53,7 +53,25 @@ export const walletDe: WalletMessages = {
     rampBothDirect: 'Einzahlung und Auszahlung auf die native Chain sind in dpay eingebaut.',
   },
 
-  tab: {pay: 'Bezahlen', receive: 'Empfangen', transactions: 'Verlauf'},
+  tab: {pay: 'Bezahlen', receive: 'Empfangen', transactions: 'Verlauf', home: 'Start'},
+
+  home: {
+    headlineA11y: (amount, asset) => `${asset}-Guthaben ${amount}`,
+    actions: {
+      pay: 'Bezahlen',
+      payHint: 'Code scannen oder an eine Adresse senden',
+      receive: 'Empfangen',
+      receiveHint: 'Zahlung anfordern oder eigene Adresse anzeigen',
+      addMoney: 'Geld hinzufügen',
+      addMoneyHint: 'Guthaben auf dieses Wallet laden',
+    },
+    activity: {
+      title: 'Aktivität',
+      seeAll: 'Alle anzeigen',
+      seeAllHint: 'Die vollständige Transaktionsliste öffnen',
+      empty: 'Noch keine Zahlungen.',
+    },
+  },
 
   backToPaying: asset => `Zurück zum Bezahlen mit ${asset}`,
 

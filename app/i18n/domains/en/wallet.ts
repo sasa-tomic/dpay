@@ -116,7 +116,35 @@ export type WalletMessages = {
     rampBothDirect: string;
   };
 
-  tab: {pay: string; receive: string; transactions: string};
+  tab: {pay: string; receive: string; transactions: string; home: string};
+
+  /**
+   * The HOME TAB (O4) — the balance-first home surface. Its headline mirrors the header's eyebrow
+   * rules EXACTLY (see `balance` + `homeCurrency.mainLabel`): the home rail names the CURRENCY,
+   * any other selection names the ASSET, and the offline approximation marker outranks both —
+   * naming the currency changes the NAME, never the online/offline distinction. The amount is
+   * always ONE asset's own balance in its own token unit, never a portfolio sum.
+   */
+  home: {
+    /** The headline block's accessible name — the named asset/currency over its own amount. */
+    headlineA11y: (amount: string, asset: string) => string;
+    /** The action row's three uniform buttons (capability-dispatched, one chrome for every asset). */
+    actions: {
+      pay: string;
+      payHint: string;
+      receive: string;
+      receiveHint: string;
+      addMoney: string;
+      addMoneyHint: string;
+    };
+    /** The inline activity feed — the newest ledger rows, capped, with the see-all link. */
+    activity: {
+      title: string;
+      seeAll: string;
+      seeAllHint: string;
+      empty: string;
+    };
+  };
 
   /** The fund-funnel resume link on Receive → My address. */
   backToPaying: (asset: string) => string;
@@ -249,7 +277,25 @@ export const walletEn: WalletMessages = {
     rampBothDirect: 'Deposit and cash-out to its native chain are wired in dpay.',
   },
 
-  tab: {pay: 'Pay', receive: 'Receive', transactions: 'Transactions'},
+  tab: {pay: 'Pay', receive: 'Receive', transactions: 'Transactions', home: 'Home'},
+
+  home: {
+    headlineA11y: (amount, asset) => `${asset} balance ${amount}`,
+    actions: {
+      pay: 'Pay',
+      payHint: 'Scan a code or send to an address',
+      receive: 'Receive',
+      receiveHint: 'Request a payment or show your address',
+      addMoney: 'Add money',
+      addMoneyHint: 'Add funds to this wallet',
+    },
+    activity: {
+      title: 'Activity',
+      seeAll: 'See all',
+      seeAllHint: 'Open the full transactions list',
+      empty: 'No payments yet.',
+    },
+  },
 
   backToPaying: asset => `Back to paying ${asset}`,
 

@@ -226,6 +226,15 @@ export const IconKey = make(({color}) => {
   ];
 });
 
+// O4 home tab — the house (lucide `home`): the balance-first home surface, one tap left of Pay.
+export const IconHome = make(({color}) => {
+  const {p, pl} = withStroke(color);
+  return [
+    p('m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'),
+    pl('9 22 9 12 15 12 15 22'),
+  ];
+});
+
 export const ICONS = {
   settings: IconSettings,
   close: IconClose,
@@ -248,6 +257,7 @@ export const ICONS = {
   moon: IconMoon,
   auto: IconAuto,
   key: IconKey,
+  home: IconHome,
 } as const;
 
 export type IconName = keyof typeof ICONS;

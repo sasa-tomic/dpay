@@ -54,7 +54,25 @@ export const walletEs: WalletMessages = {
     rampBothDirect: 'Depósito y retiro a su cadena nativa están conectados en dpay.',
   },
 
-  tab: {pay: 'Pagar', receive: 'Recibir', transactions: 'Movimientos'},
+  tab: {pay: 'Pagar', receive: 'Recibir', transactions: 'Movimientos', home: 'Inicio'},
+
+  home: {
+    headlineA11y: (amount, asset) => `Saldo de ${asset}: ${amount}`,
+    actions: {
+      pay: 'Pagar',
+      payHint: 'Escanea un código o envía a una dirección',
+      receive: 'Recibir',
+      receiveHint: 'Pide un pago o muestra tu dirección',
+      addMoney: 'Añadir dinero',
+      addMoneyHint: 'Añade fondos a esta cartera',
+    },
+    activity: {
+      title: 'Actividad',
+      seeAll: 'Ver todo',
+      seeAllHint: 'Abrir la lista completa de transacciones',
+      empty: 'Aún no hay pagos.',
+    },
+  },
 
   backToPaying: asset => `Volver a pagar con ${asset}`,
 
