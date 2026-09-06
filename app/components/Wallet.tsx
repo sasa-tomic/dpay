@@ -940,12 +940,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           archive = record). Retires itself when done. */}
       <TripStrip onOpen={() => setPassportOpen(true)} />
 
-      <View style={S.tabs}>
-        <Tab testId="tab-pay" label={M.wallet.tab.pay} active={mode === 'pay'} onPress={() => setMode('pay')} hotkey="P" icon={c => <IconQr size={16} color={c} />} />
-        <Tab testId="tab-receive" label={M.wallet.tab.receive} active={mode === 'receive'} onPress={() => setMode('receive')} hotkey="R" icon={c => <IconArrowDownLeft size={16} color={c} />} />
-        <Tab testId="tab-transactions" label={M.wallet.tab.transactions} active={mode === 'ledger'} onPress={() => setMode('ledger')} hotkey="L" icon={c => <IconClock size={16} color={c} />} />
-      </View>
-
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'pay'
           ? (activeSol && solAddress
@@ -1040,6 +1034,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           )
           : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} />}
       </ScrollView>
+
+      {/* O4 S1 — persistent bottom navigation: the three primary tabs moved from the top pill row
+          to a bar OUTSIDE the ScrollView (primary nav stays reachable without scrolling). Same
+          `mode` union, byte-stable testIDs, and P/R/L hotkeys (useHotkeys); the enclosing
+          SafeAreaView owns the bottom safe-area inset. */}
+      <View style={S.bottomNav}>
+        <Tab variant="bottom" testId="tab-pay" label={M.wallet.tab.pay} active={mode === 'pay'} onPress={() => setMode('pay')} icon={c => <IconQr size={22} color={c} />} />
+        <Tab variant="bottom" testId="tab-receive" label={M.wallet.tab.receive} active={mode === 'receive'} onPress={() => setMode('receive')} icon={c => <IconArrowDownLeft size={22} color={c} />} />
+        <Tab variant="bottom" testId="tab-transactions" label={M.wallet.tab.transactions} active={mode === 'ledger'} onPress={() => setMode('ledger')} icon={c => <IconClock size={22} color={c} />} />
+      </View>
 
       {balancesOpen ? (
         <BalancesSheet

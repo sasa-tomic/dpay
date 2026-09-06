@@ -40,7 +40,7 @@ function buildStyles(p: Palette) {
   // column instead of a stretched sheet. Centered by the `screenFrame` wrapper in App.tsx.
   root: {flex: 1, backgroundColor: p.bg, width: '100%', maxWidth: 480},
   // Content scroller. `flex:1` makes the ScrollView FILL the remaining column height below the
-  // header/tabs (a bare ScrollView with no style sizes to its content, so short screens like the
+  // header (the bottom nav bar, O4 S1, takes the foot of the column AFTER the scroller) (a bare ScrollView with no style sizes to its content, so short screens like the
   // Paid phase left a dead zone below the content and flexGrow on children had no bounded parent to
   // expand into). With this filling the column, `.body` (contentContainer) flexGrow:1 then fills the
   // scroller, and the mode surface `.center` flexGrow:1 fills the gap above the asset rail.
@@ -161,10 +161,13 @@ function buildStyles(p: Palette) {
   // The transient Android back-to-exit hint under the header balance (inline Text, not a
   // toast — no native module, matches the caption tone but with a warn tint for visibility).
   balBackHint: {fontSize: 12, color: p.warn, marginTop: 6, fontFamily: FONT.sansMedium},
-  // Tabs — primary nav: inactive = white card pills with hairlines; active = tangerine fill.
-  // `flexWrap` is the safety valve: if a long-locale label (or a future 4th tab) ever outgrows a
-  // 390px row, the overflow pill drops to a second row instead of clipping off-screen right.
-  tabs: {flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 12, gap: 6, marginTop: 4, marginBottom: 6},
+  // Bottom navigation bar (O4 S1) — the persistent primary nav, replacing the old top pill row.
+  // Rendered AFTER the ScrollView inside the SafeAreaView so it never scrolls away; the
+  // SafeAreaView owns the bottom safe-area inset (web env() inset; native MainActivity's API-35
+  // content-frame reservation). Card surface + top hairline + soft lift so it reads as chrome
+  // floating over content; the full-screen sheets still cover it (their overlay runs elevation 10
+  // vs the bar's 1). Three `flex:1` tabs split the full 390px row — no wrap needed.
+  bottomNav: {flexDirection: 'row', alignItems: 'stretch', backgroundColor: p.card, borderTopWidth: 1, borderTopColor: p.line2, paddingHorizontal: 8, paddingVertical: 6, ...LIFT_SM},
   // TripStrip (UX hardening 2026-08-23) — the home-surface readiness line: one slim pill row
   // between the header and the tabs. 4 stamp-dots (filled = brand ring + deterministic tilt,
   // echoing the passport's slots) + a mono progress phrase. Quiet by design (panel2, hairline)
@@ -179,6 +182,15 @@ function buildStyles(p: Palette) {
   tabActive: {backgroundColor: p.brand, borderColor: p.brand, ...LIFT},
   tabText: {color: p.sub, fontWeight: '600', fontFamily: FONT.sansMedium},
   tabTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
+  // Bottom-bar tab (O4 S1) — icon over label, `flex:1` so the three tabs split the bar equally on
+  // a 390px phone; minHeight 56 clears the 44pt touch floor with comfortable thumb room. Active
+  // keeps the old pill language (tangerine fill + brandInk) so primary nav stays the loudest
+  // level. Labels are 11px single-line-safe: the longest locale label ("Movimientos", es) fits a
+  // ~124px tab without truncation, so no numberOfLines clamp is needed.
+  bottomTab: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 8, minHeight: 56, borderRadius: 12},
+  bottomTabActive: {backgroundColor: p.brand, ...LIFT},
+  bottomTabText: {color: p.sub, fontWeight: '600', fontSize: 11, fontFamily: FONT.sansMedium},
+  bottomTabTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
   // Mode toggle — a joined two-segment pill control at the top of the Pay/Receive tab bodies:
   // `[ Scan to pay | Send to address ]` (Pay) and `[ Request payment | My address ]` (Receive).
   // Inset well (panel2) + white active segment + ink text: the editorial segmented control,
