@@ -74,4 +74,21 @@ pub trait Ledger: Send + Sync {
         let _ = (pubkey, currency, amount);
         Err(LedgerError::Transient("faucet unavailable: this ledger cannot mint".to_string()))
     }
+
+    /// The facade canister's LIVE module hash — the sha256 of the wasm the IC currently reports
+    /// as installed, read off the PUBLIC state tree (`canister/<id>/module_hash`; no signature,
+    /// no cycles — the same path `dfx canister info` prints). Lowercase hex (32 bytes). The
+    /// integrity surface (`GET /api/v1/integrity`) compares this against the PIN baked at build
+    /// time (`deploy/facade-module-hash.txt` via build.rs) so an operator can detect an
+    /// unrecorded upgrade with one curl (GOVERNANCE row 7). The default impl is "not supported" —
+    /// [`FakeLedger`](super::FakeLedger) and test fakes inherit it (and FakeLedger overrides it
+    /// with a deterministic hash the test-helpers build bakes as the pin, so the MATCH state is
+    /// exercisable offline); [`AgentLedger`](crate::agent_ledger::AgentLedger) overrides it with
+    /// the real `read_state` call. Failures are `Transient` — the caller degrades to
+    /// `status:"UNREACHABLE"`, never a 5xx.
+    async fn facade_module_hash(&self) -> Result<String, LedgerError> {
+        Err(LedgerError::Transient(
+            "facade module hash unavailable: this ledger cannot read the IC state tree".to_string(),
+        ))
+    }
 }

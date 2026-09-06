@@ -15,8 +15,16 @@
 //!    LOUD (no silent stub wallet — a stub could ship a broken /wallet while `just check` is
 //!    green).
 //!
-//! Both steps are feature-unconditional: the prod image carries them too (the `agent` feature is
-//! not required), and both fall back / fail deterministically when git or the dist is absent.
+//! 3. The PINNED facade canister module hash (`deploy/facade-module-hash.txt`, tracked) →
+//!    `DPAY_PINNED_FACADE_HASH`, the reference half of `GET /api/v1/integrity` (GOVERNANCE row
+//!    7): the route reads the LIVE hash off the IC state tree and compares. A missing or
+//!    malformed pin FAILS THE BUILD LOUD (embed_web_dist precedent — an integrity surface that
+//!    silently degraded to "unpinned" would be security theater). Test-helpers builds are the
+//!    ONE exception: they bake the FakeLedger's deterministic hash so the offline loop sees
+//!    MATCH without depending on the real, upgrade-chasing pin (see `bake_pinned_facade_hash`).
+//!
+//! All steps are feature-unconditional (the prod image carries them too — the `agent` feature
+//! is not required), and all fall back / fail deterministically when git or the dist is absent.
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -25,6 +33,7 @@ use std::process::Command;
 
 fn main() {
     bake_commit();
+    bake_pinned_facade_hash();
     embed_web_dist();
 }
 
@@ -51,6 +60,52 @@ fn bake_commit() {
 
     println!("cargo:rustc-env=DPAY_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=DPAY_BUILD_DATE={date}");
+}
+
+/// The hash `test-helpers` builds bake as the integrity pin — MUST equal
+/// [`FakeLedger`'s](crate::ledger::fake) `FAKE_FACADE_MODULE_HASH` (all `ff`, so it can never
+/// collide with a real wasm hash). Duplicated here because a build script cannot import the
+/// crate it builds; `relay.rs`'s integrity tests assert the two never drift.
+const TEST_HELPERS_PIN: &str = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+
+/// Bake the PINNED facade module hash from tracked `deploy/facade-module-hash.txt` (single
+/// sha256-hex line — `scripts/dfx-deploy-ic.sh` rewrites it on every successful upgrade).
+/// Prod/agent builds fail LOUD on a missing or malformed file: the pin is the whole point of
+/// `/api/v1/integrity`, and a build that silently shipped without it would report `UNPINNED`
+/// forever — an integrity surface that can't say MATCH is security theater. Test-helpers
+/// builds (CARGO_FEATURE_TEST_HELPERS=1, incl. agent co-enabled — fakes are what they run)
+/// bake the deterministic fake pin instead, so the offline integrity route reads MATCH and the
+/// test matrix never depends on the real, upgrade-chasing pin.
+fn bake_pinned_facade_hash() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let pin_path = manifest_dir.join("../../deploy/facade-module-hash.txt");
+    // Rerun when the pin moves (a pin bump must rebuild the image that reports it).
+    println!("cargo:rerun-if-changed={}", pin_path.display());
+
+    if env::var("CARGO_FEATURE_TEST_HELPERS").is_ok_and(|v| v == "1") {
+        println!("cargo:rustc-env=DPAY_PINNED_FACADE_HASH={TEST_HELPERS_PIN}");
+        return;
+    }
+
+    let raw = fs::read_to_string(&pin_path).unwrap_or_else(|e| {
+        panic!(
+            "deploy/facade-module-hash.txt is unreadable ({e}) — it is the PINNED facade module \
+             hash behind GET /api/v1/integrity (GOVERNANCE row 7). It is tracked: restore it via \
+             git, or record the live hash with `dfx canister info <facade> --network ic` \
+             (the 'Module hash: 0x…' line, hex only)."
+        )
+    });
+    let pin = raw.trim();
+    let well_formed = pin.len() == 64 && pin.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if !well_formed {
+        panic!(
+            "deploy/facade-module-hash.txt must hold ONE sha256 as 64 lowercase hex chars (the \
+             'Module hash: 0x…' line `dfx canister info` prints, minus the 0x) — found {:?}. \
+             Fix the file; the integrity route will not bake a pin it cannot name.",
+            raw.trim_end()
+        );
+    }
+    println!("cargo:rustc-env=DPAY_PINNED_FACADE_HASH={pin}");
 }
 
 /// Map a dist filename to its HTTP content type (the closed set vite emits for this app).

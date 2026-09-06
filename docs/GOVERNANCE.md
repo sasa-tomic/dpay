@@ -58,9 +58,9 @@ community to vote on our upgrades is unrealistic until critical mass. Therefore:
 | # | Item | Closes |
 |---|------|--------|
 | 6 | **Cold storage for the IC-level controller identity** (upgrade authority): PEM offline, imported only at deliberate deploys, never on the relay box | O1(c) |
-| 7 | **Module-hash pinning/publishing**: relay `/api/v1/health` (or a `/api/v1/integrity`) reports the live facade module hash (read_state); changelog per upgrade | O3 |
+| 7 | **Module-hash pinning/publishing**: relay `/api/v1/health` (or a `/api/v1/integrity`) reports the live facade module hash (read_state); changelog per upgrade | ✅ shipped — `GET /api/v1/integrity` compares the live hash against the pin baked at build time (`deploy/facade-module-hash.txt`; `just integrity-check` gates MATCH); the changelog is `docs/UPGRADES.md`, and `just deploy-ic` re-pins + demands a row on every upgrade |
 | 8 | ~~**`lock_catalog` one-way ratchet** (canister): after lock, `register_ledger`/`register_currency_meta` refuse changes (or require a timelocked path) — closes the ledger-repoint phishing vector from a leaked faucet key~~ — **struck 2026-08-28: superseded by the founder decision above.** The registry (and with it the ledger-repoint vector) no longer exists on the canister; catalog authority is relay code behind git review + drift alarms | ~~O1~~ closed structurally |
-| 9 | Ops runbook: `reconcile` on a schedule + after any suspected trap; key-rotation runbook for each scoped key | O2 |
+| 9 | Ops runbook: `reconcile` on a schedule + after any suspected trap; key-rotation runbook for each scoped key | ✅ shipped — `docs/OPS.md` (when/how to `just reconcile`, how to read the report, run log; per-key rotation for the controller seed, the IC-level controller PEM, and the retired receipt key; the upgrade loop) |
 
 ### P2 — Pre-real-money (when real value flows, still no NNS)
 
@@ -212,12 +212,15 @@ dfx canister status dpay_canister --network ic | grep controller
 - [ ] Blast-radius review: no standing approvals (per-op exact-amount only), faucet fixed-amount +
       cooldown; catalog changes ride the relay-deploy path (git review + drift alarms — registry
       repoint ceased to exist with the 2026-08-28 registry removal).
-- [ ] Module hash of the deployed facade is pinned/published (relay health surface) so upgrades are
-      user-detectable; upgrades ship with a changelog.
+- [x] Module hash of the deployed facade is pinned/published (relay health surface) so upgrades are
+      user-detectable; upgrades ship with a changelog. — `GET /api/v1/integrity` (live vs the
+      build-time pin) + `just integrity-check`; `docs/UPGRADES.md` is the changelog (2026-09-06).
 - ~~[ ] `receipt_pubkey()` is fetched and the app verifies receipt signatures (R2) before "Paid ✓".~~
   **Struck 2026-09-04 — retired by the cutover, not done.** `/receipt/{nonce}` and `/receipt_pubkey`
   are deleted; "Paid ✓" comes from the app's own `read_state` poll of the envelope it submitted.
-- [ ] `reconcile(currency)` is wired into ops runbooks (run after any suspected trap / on a schedule).
+- [x] `reconcile(currency)` is wired into ops runbooks (run after any suspected trap / on a schedule).
+      — `docs/OPS.md` §1 (symptoms, cadence, report reading, run log); `just reconcile` is the
+      founder-run hook (2026-09-06).
 
 ## Non-custodial invariant
 

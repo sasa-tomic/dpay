@@ -2052,6 +2052,33 @@ pub(crate) async fn till_code_page() -> Response {
         .into_response()
 }
 
+/// `GET /till/{id}` — the CASHIER's own screen: watches the charge the merchant rang up in the
+/// app (the app rings up; this page is the plan's "web page later" — same endpoints, additive).
+///
+/// THE FENCE this page stands on: it can WATCH a charge and it can NEVER ring one up, void one,
+/// or move a cent — those actions live behind the merchant's key in the app, and the app is
+/// where they stay. Putting a seed in a browser to make this page "smarter" would be
+/// custody-shaped (rule 1), and no amount of watching is worth that. What the page CAN do is
+/// render the poll's own answer: [`ChargeState`]'s five states with the copy the enum documents
+/// for each, so every terminal state names the cashier's next action.
+///
+/// Served for ANY `{id}` — the handler does not look the charge up, because the PAGE renders
+/// client-side from `GET /api/v1/till/{id}` (the same poll the app uses). That keeps the
+/// claimed merchant name out of every Rust string on this route entirely (it is untrusted
+/// CLAIMED text; the browser writes it via `textContent`, never as markup), and it means an
+/// unknown id gets the poll's honest answer on the first fetch rather than a server-rendered
+/// guess. `no-store`: a cashier's screen must never resume a stale verdict.
+pub(crate) async fn till_page() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        include_str!("../assets/till.html"),
+    )
+        .into_response()
+}
+
 /// `POST /api/v1/till/void` — the merchant clears their till.
 ///
 /// THE MIS-KEYED TOTAL, which until now nobody could take back: a cashier who rings up CHF 100.00

@@ -522,6 +522,27 @@ impl Ledger for AgentLedger {
         Self::faucet_mint(self, pubkey, currency, amount).await
     }
 
+    async fn facade_module_hash(&self) -> Result<String, LedgerError> {
+        // The live wasm's sha256 off the PUBLIC state tree (`canister/<id>/module_hash`), via the
+        // vendored ic-agent helper — the same read `dfx canister info` prints and
+        // verify-deploy.sh compares, from behind the SAME authenticated-or-anonymous agent this
+        // ledger already uses (the path is public: query rights suffice). Feeds
+        // `GET /api/v1/integrity`'s live half. Bounded like every other call; an unreachable IC
+        // degrades to the route's UNREACHABLE status, never a 5xx.
+        let digest = tokio::time::timeout(
+            Duration::from_secs(MINTER_CALL_TIMEOUT_SECS),
+            self.agent.read_state_canister_module_hash(self.canister_id),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "module-hash read_state timed out after {MINTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("module-hash read_state: {e}")))?;
+        Ok(hex::encode(digest))
+    }
+
     async fn deposit_info(&self, currency: Currency) -> Result<DepositInfo, LedgerError> {
         // facade `deposit_info(nat32) -> Result<DepositInfo, text>` (update) → proxies the minter's
         // `get_minter_info` + `get_deposit_fee`. Any `Err(String)` → `Transient` (§0).

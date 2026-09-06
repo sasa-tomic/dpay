@@ -7,6 +7,7 @@
 //! impl reads it from there like every other consumer.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -16,6 +17,15 @@ use dpay_core::{Currency, PUBKEY_LEN};
 use super::api::Ledger;
 use super::ckerc20::{CkErc20OnrampParams, ckerc20_onramp_from_descriptor};
 use super::types::{DepositInfo, LedgerError, TxnRecord, U64String};
+
+/// The facade module hash [`FakeLedger`] reports — a fixed sha256-shaped literal, chosen so it
+/// can never collide with a real wasm hash (all `ff`). The SAME literal is baked as the PIN for
+/// test-helpers builds (`build.rs` `bake_pinned_facade_hash`), so the integrity route's MATCH
+/// state is exercisable offline; the knobs below bend live/pin apart for MISMATCH and
+/// UNREACHABLE. The value mirrors `fake.rs`'s const by duplication (build.rs cannot import the
+/// crate) — `relay.rs`'s integrity tests assert the two never drift.
+pub const FAKE_FACADE_MODULE_HASH: &str =
+    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 struct FakeState {
     /// Composite key `(pubkey, currency)` → balance in minor units. A single account may hold
@@ -31,6 +41,13 @@ struct FakeState {
 /// same atomicity guarantee for free).
 pub struct FakeLedger {
     state: Mutex<FakeState>,
+    /// Integrity-route seam: override for [`Ledger::facade_module_hash`]. `None` (the default)
+    /// serves the deterministic [`FAKE_FACADE_MODULE_HASH`] — which the test-helpers build bakes
+    /// as the pin, so the route reads MATCH; `Some(text)` serves `text` instead (MISMATCH).
+    facade_hash: Mutex<Option<String>>,
+    /// Integrity-route seam: when set, [`Ledger::facade_module_hash`] answers `Err` — the
+    /// route's UNREACHABLE leg. Takes precedence over the override above.
+    facade_unreachable: AtomicBool,
 }
 
 impl FakeLedger {
@@ -43,7 +60,22 @@ impl FakeLedger {
                 balances: HashMap::new(),
                 txns: Vec::new(),
             }),
+            facade_hash: Mutex::new(None),
+            facade_unreachable: AtomicBool::new(false),
         }
+    }
+
+    /// Test seam for `GET /api/v1/integrity`: serve THIS text as the live facade module hash
+    /// (e.g. a value that differs from the baked pin → MISMATCH). `None` restores the
+    /// deterministic default — the MATCH state.
+    pub fn set_facade_hash(&self, hash: Option<String>) {
+        *self.facade_hash.lock().unwrap_or_else(|p| p.into_inner()) = hash;
+    }
+
+    /// Test seam for `GET /api/v1/integrity`: make `facade_module_hash` answer an error — the
+    /// UNREACHABLE state (the IC read failing degrades the route, never 5xxes it).
+    pub fn set_facade_unreachable(&self) {
+        self.facade_unreachable.store(true, Ordering::Relaxed);
     }
 
     /// Read a balance (test/demo introspection; not part of the trait). Permanently zero in the
@@ -118,5 +150,21 @@ impl Ledger for FakeLedger {
         currency: Currency,
     ) -> Result<u64, LedgerError> {
         Ok(self.balance_of(&pubkey, currency))
+    }
+
+    async fn facade_module_hash(&self) -> Result<String, LedgerError> {
+        // The integrity route's OFFLINE stand-in: never a network read. Unreachable knob first
+        // (it wins over any override), else the override or the deterministic default.
+        if self.facade_unreachable.load(Ordering::Relaxed) {
+            return Err(LedgerError::Transient(
+                "fake-IC state tree is unreachable (test knob)".to_string(),
+            ));
+        }
+        Ok(self
+            .facade_hash
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .unwrap_or_else(|| FAKE_FACADE_MODULE_HASH.to_string()))
     }
 }

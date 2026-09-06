@@ -36,7 +36,7 @@ use dpay_icp::icrc::{
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{decode_read_state_tree, request_status, RequestStatus};
 use dpay_relay::till::{iso8601_utc, QUOTE_TTL_SECS};
-use dpay_relay::{app, ic_gateway::FakeIc, AppState, FakeLedger};
+use dpay_relay::{app, ic_gateway::FakeIc, ledger::FAKE_FACADE_MODULE_HASH, AppState, FakeLedger};
 use ed25519_dalek::SigningKey;
 
 /// The compiled catalog's DEMO_USD ledger principal (currency 0 — `crate::catalog`'s
@@ -202,6 +202,101 @@ async fn version_route_reports_baked_commit() {
         date.starts_with("20") || date == "unknown",
         "commit_date must be an ISO date (git checkout) or \"unknown\", got {date:?}"
     );
+}
+
+// --- integrity (facade module-hash pinning; GOVERNANCE row 7) -----------------------------
+//
+// The route's two halves: the LIVE hash through the Ledger seam (FakeLedger here — its default
+// answers the deterministic all-ff hash, and its knobs bend live/unreachable), and the PIN baked
+// by build.rs. Test-helpers builds bake the SAME deterministic hash as the pin
+// (build.rs `TEST_HELPERS_PIN`, which cannot import this crate), so the default state reads
+// MATCH without depending on the real, upgrade-chasing `deploy/facade-module-hash.txt`.
+// `integrity_route_reports_the_baked_pin` pins that the two constants never drift.
+
+/// The PURE classifier's full matrix — all four states, including the precedence call (both
+/// halves missing → UNPINNED: without a reference there is no integrity surface at all).
+#[test]
+fn integrity_classifier_covers_all_four_states() {
+    use dpay_relay::app::classify_integrity as classify;
+    assert_eq!(classify(Some("a"), Some("a")), "MATCH");
+    assert_eq!(classify(Some("a"), Some("b")), "MISMATCH");
+    assert_eq!(classify(None, Some("b")), "UNREACHABLE");
+    assert_eq!(classify(Some("a"), None), "UNPINNED");
+    // Both halves missing: no pin is the operator's first problem — say that, not "unreachable".
+    assert_eq!(classify(None, None), "UNPINNED");
+}
+
+/// The pin baked for this (test-helpers) build is the FakeLedger's deterministic hash — the
+/// duplication build.rs cannot avoid (a build script cannot import the crate it builds) is
+/// pinned here, so the MATCH state below can never silently rot into MISMATCH.
+#[test]
+fn integrity_baked_pin_matches_the_fake_ledgers_hash() {
+    assert_eq!(env!("DPAY_PINNED_FACADE_HASH"), FAKE_FACADE_MODULE_HASH);
+}
+
+/// `GET /api/v1/integrity` with a named facade and the FakeLedger's default answer: MATCH, both
+/// hashes present and equal, the canister named, and the relay commit riding along (the same
+/// baked SHA /version reports — the two halves of an upgrade in one response).
+#[tokio::test]
+async fn integrity_route_reports_match_by_default() {
+    let (state, _led) = state_from(ledger());
+    let state = state.with_facade_canister("ssqti-wiaaa-aaaab-qhdia-cai".to_string());
+
+    let (status, body) = call(&state, get_req("/api/v1/integrity")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "MATCH", "{body}");
+    assert_eq!(body["facade_canister"], "ssqti-wiaaa-aaaab-qhdia-cai");
+    assert_eq!(body["live_module_hash"], FAKE_FACADE_MODULE_HASH);
+    assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
+    let commit = body["relay_commit"].as_str().expect("relay_commit present");
+    assert!(commit.len() == 40 || commit == "unknown", "relay_commit mirrors /version: {body}");
+}
+
+/// A live hash that differs from the pin (an unrecorded upgrade, or any drift between the two
+/// halves) is a MISMATCH — never an error: the route reports, it does not fail.
+#[tokio::test]
+async fn integrity_route_reports_mismatch_when_live_drifts() {
+    let (state, led) = state_from(ledger());
+    let state = state.with_facade_canister("ssqti-wiaaa-aaaab-qhdia-cai".to_string());
+    led.set_facade_hash(Some(
+        "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+    ));
+
+    let (status, body) = call(&state, get_req("/api/v1/integrity")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "MISMATCH", "{body}");
+    assert_eq!(
+        body["live_module_hash"], "0000000000000000000000000000000000000000000000000000000000000000"
+    );
+    assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
+}
+
+/// An unreachable IC (the ledger seam erroring) degrades to a 200 UNREACHABLE with a null live
+/// hash — the documented contract: a report, never a 5xx.
+#[tokio::test]
+async fn integrity_route_degrades_to_unreachable_not_5xx() {
+    let (state, led) = state_from(ledger());
+    let state = state.with_facade_canister("ssqti-wiaaa-aaaab-qhdia-cai".to_string());
+    led.set_facade_unreachable();
+
+    let (status, body) = call(&state, get_req("/api/v1/integrity")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "UNREACHABLE", "{body}");
+    assert!(body["live_module_hash"].is_null(), "no live hash when the IC is unreachable: {body}");
+    assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
+}
+
+/// A relay with NO facade named (the memory-ledger demo build) is honest about having no live
+/// half to compare: UNREACHABLE with a null canister, pin still reported.
+#[tokio::test]
+async fn integrity_route_without_a_facade_reports_no_live_hash() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, body) = call(&state, get_req("/api/v1/integrity")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "UNREACHABLE", "{body}");
+    assert!(body["facade_canister"].is_null(), "{body}");
+    assert!(body["live_module_hash"].is_null(), "{body}");
 }
 
 // --- faucet + balance (test-helpers fixtures over the fake-IC gateway) ------
@@ -3043,12 +3138,13 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
     assert_eq!(status, StatusCode::OK, "minting a quote to call the callback with: {details}");
     let quote = details["quote"]["id"].as_str().expect("a quote carries an id").to_string();
 
-    // The whole till surface, as its two callers reach it: the merchant's ring-up, cancel and poll,
-    // and the standard's three payer steps. Rebuilt per call because a `Request` is consumed by the
-    // router, and each rebuild signs afresh because a merchant's signature is single-use.
+    // The whole till surface, as its callers reach it: the merchant's ring-up, cancel and poll,
+    // the standard's three payer steps, and the cashier's own watch page. Rebuilt per call
+    // because a `Request` is consumed by the router, and each rebuild signs afresh because a
+    // merchant's signature is single-use.
     //
-    // The two POSTs name a DIFFERENT merchant than the charge the other four requests are about,
-    // because ringing one up voids that merchant's previous charge — the other four would then be
+    // The two POSTs name a DIFFERENT merchant than the charge the other five requests are about,
+    // because ringing one up voids that merchant's previous charge — the other five would then be
     // asking about a superseded code and meet a handler's honest 404 instead of its answer, which
     // is not what this test is measuring. They also run in this order on the serving relay: the
     // cancel has a charge to clear because the ring-up above it just made one.
@@ -3088,10 +3184,11 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
                     "/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF&tx=9f1c"
                 )),
             ),
+            (format!("GET /till/{id}"), get_req(&format!("/till/{id}"))),
         ]
     };
 
-    // Served: each of the six reaches its handler. WHAT each answers is pinned by the journey and
+    // Served: each of the seven reaches its handler. WHAT each answers is pinned by the journey and
     // golden tests; all that matters here is that these exact requests are not 404s by construction.
     for (what, req) in surface() {
         let (status, _headers, body) = call_raw(&serving, req).await;
@@ -3099,7 +3196,7 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
         assert!(!body.is_empty(), "{what}: a till handler always answers with a body");
     }
 
-    // Not served: the same six against a relay that never asked for the till.
+    // Not served: the same seven against a relay that never asked for the till.
     let unserved = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(FakeIc::from_catalog());
     for (what, req) in surface() {
         let (status, _headers, body) = call_raw(&unserved, req).await;
@@ -3109,6 +3206,46 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
             "{what}: a BARE 404 is the router refusing — a body would mean a till handler ran"
         );
     }
+}
+
+/// `GET /till/{id}` — the cashier's watch page (the plan's "web page later", 2026-09-03). 200 +
+/// HTML + `no-store` under the gate, and INDIFFERENT to the id's shape: the handler never looks
+/// the charge up, because the page renders client-side from the poll — an unknown or even
+/// nonsense id still gets the page, and its first fetch gets the poll's honest answer.
+#[tokio::test]
+async fn the_cashier_page_serves_under_the_gate_for_any_id() {
+    let (serving, _fake) = till_state();
+
+    for uri in ["/till/pl_0011223344556677", "/till/not-a-charge-id-at-all"] {
+        let (status, headers, body) = call_raw(&serving, get_req(uri)).await;
+        assert_eq!(status, StatusCode::OK, "{uri}");
+        assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-store");
+        let html = String::from_utf8(body).expect("the cashier page is utf-8");
+        assert!(html.contains("settles in VCHF"), "names the settlement asset: {uri}");
+        assert!(html.contains("/api/v1/till/"), "polls the charge by id client-side: {uri}");
+    }
+}
+
+/// The cashier page is STATIC — the server interpolates NOTHING, not even the claimed merchant
+/// name of a charge that exists on this very relay. That is the fence the page's design leans
+/// on: untrusted CLAIMED text is written by the browser via textContent (never markup), so no
+/// Rust string-building on this route ever handles it.
+#[tokio::test]
+async fn the_cashier_page_interpolates_nothing_serverside() {
+    let (serving, _fake) = till_state();
+    let merchant = SigningKey::from_bytes(&[19u8; 32]);
+    let opened =
+        open_till(&serving, &merchant, "Zuerich Shop 88", 500, "till.example", "http").await;
+    let id = opened["id"].as_str().expect("a rung-up charge carries an id").to_string();
+
+    let (status, _headers, body) = call_raw(&serving, get_req(&format!("/till/{id}"))).await;
+    assert_eq!(status, StatusCode::OK);
+    let html = String::from_utf8(body).expect("the cashier page is utf-8");
+    assert!(
+        !html.contains("Zuerich Shop 88"),
+        "the claimed merchant name must arrive via the JSON poll, never baked into the page"
+    );
 }
 
 // --- the provider half of the wire golden --------------------------------------------------------

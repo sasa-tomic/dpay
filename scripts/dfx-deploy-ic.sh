@@ -244,6 +244,28 @@ else
   echo "   (local rehearsal: leaving deploy/.env untouched; local canister id $CID)"
 fi
 
+# --- re-pin the integrity surface: record THIS upgrade's module hash ---------------------------
+# deploy/facade-module-hash.txt is the PIN the relay image bakes (GET /api/v1/integrity compares
+# it to the live hash; just integrity-check asserts MATCH). Rewriting it here is what makes the
+# pin track reality: the deploy that changes the canister is the deploy that records the change.
+# Local rehearsals never touch it (same discipline as the .env writes above).
+if [ "$NETWORK" != "local" ]; then
+  _info="$(dfx_i canister info "$CID" --network "$NETWORK")"
+  _hash="$(sed -n 's/^Module hash: 0x//p' <<<"$_info" | tr -d '\n')"
+  if [[ "$_hash" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s\n' "$_hash" > deploy/facade-module-hash.txt
+    _commit="$(git rev-parse HEAD 2>/dev/null || echo '<no-git>')"
+    echo "   pinned facade module hash $_hash (deploy/facade-module-hash.txt)"
+    echo "   REMINDER: add a docs/UPGRADES.md row for this upgrade —"
+    echo "      date, git commit ($_commit), the hash above, and what changed."
+    echo "      That row is the changelog 'just integrity-check' polices."
+  else
+    echo "WARN: could not read the fresh module hash (got '$_hash') — deploy/facade-module-hash.txt" >&2
+    echo "      was NOT updated. Record it by hand before the next relay image build:" >&2
+    echo "        dfx canister info $CID --network $NETWORK   # the 'Module hash: 0x…' line, hex only" >&2
+  fi
+fi
+
 echo
 echo "done. The catalog the app renders is NOT set here — it is compiled into the relay"
 echo "      (crates/dpay-relay/src/catalog.rs); adding a currency = relay code change + 'just up'."

@@ -241,9 +241,24 @@ verify-deploy:
 verify-relay:
     bash scripts/verify-relay-version.sh
 
+# OBJECTIVE integrity gate for the FACADE CANISTER: curls the live `/api/v1/integrity` and asserts
+# the canister's on-chain module hash matches the PIN the relay image was built with
+# (deploy/facade-module-hash.txt — GOVERNANCE row 7). MATCH = the deployed facade is the recorded
+# upgrade; MISMATCH = someone upgraded outside the recorded procedure; UNPINNED/UNREACHABLE = the
+# check itself cannot run. Deliberately OFF the hot `verify` path — it is a network probe of PROD.
+# Override the target via DPAY_RELAY_URL. The changelog this gate polices is docs/UPGRADES.md.
+integrity-check:
+    bash scripts/integrity-check.sh
+
 # operator hook: mint (credit) minor units to an account (controller-only). `just mint <64-hex-account> <cents>`
 mint account amount currency='0':
     bash scripts/mint.sh {{account}} {{amount}} {{currency}}
+
+# operator hook (FOUNDER-RUN, needs DPAY_CONTROLLER_SEED): reconcile — walk a currency's recent
+# ledger debits and repair any orphaned ones (the trap closer; docs/OPS.md says WHEN + how to read
+# the report). `just reconcile` walks every catalog currency; `just reconcile 7` walks just VCHF.
+reconcile currency='all':
+    bash scripts/reconcile.sh {{currency}}
 
 # faucet WIRING gate: asserts the relay's DPAY_CONTROLLER_SEED, the canister's IC-level
 # controllers, and the facade's internal CONTROLLER cell all refer to the deploy identity —

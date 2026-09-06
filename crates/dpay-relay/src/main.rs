@@ -29,9 +29,10 @@
 //!                           DPAY_IC_URL is a loopback/local address. See `AgentLedger::connect_with`.
 //!   DPAY_ENABLE_FAUCET      (test-helpers build only) serve `POST /api/v1/faucet`, which mints
 //!                           demo funds on the fake-IC gateway (default: true on `memory`)
-//!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's seven routes (`POST /api/v1/till`,
+//!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's eight routes (`POST /api/v1/till`,
 //!                           `POST /api/v1/till/void`, `GET /api/v1/till/{id}`,
-//!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`, `GET /pl/`). Default FALSE,
+//!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`, `GET /pl/`, `GET /till/{id}`
+//!                           — the cashier's watch page). Default FALSE,
 //!                           on every build and every ledger — the gate, and what a merchant must
 //!                           sign to reach the two POSTs: `app.rs` and `till.rs`.
 //!   DPAY_CONTROLLER_SEED    (ic, agent build) hex-encoded 32-byte Ed25519 seed of the facade
@@ -71,6 +72,14 @@ async fn main() {
     let ledger = build_ledger(&cfg).await;
     let apk = load_apk();
     let state = AppState::new(ledger.clone()).with_apk(apk).with_till(cfg.till);
+    // Name the facade for GET /api/v1/integrity: the route reads the canister's live module hash
+    // off the public state tree and compares it against the build-time pin. Only an IC-backed
+    // ledger has one; a memory demo relay honestly reports it has no live hash instead.
+    let state = if let LedgerCfg::Ic { ref canister_id, .. } = cfg.ledger {
+        state.with_facade_canister(canister_id.clone())
+    } else {
+        state
+    };
     // IC-rail cutover (test-helpers / memory mode only): attach the fake-IC `/api/v2` gateway.
     // The app signs envelopes and POSTs them HERE instead of icp-api.io; the gateway verifies the
     // real envelope signature and moves principal-keyed balances. Prod (`agent` mode) never builds

@@ -17,6 +17,9 @@
 //!   the wallet build carries its own hashed copy under /assets/).
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `GET /api/v1/health` — liveness pre-flight; consults `ledger.healthy()`.
+//! - `GET /api/v1/integrity` — the facade canister's live module hash vs the PIN baked at build
+//!   time (`deploy/facade-module-hash.txt`; GOVERNANCE row 7), so one curl detects an unrecorded
+//!   upgrade. Degrades, never 5xxes: an unreachable IC reports `status:"UNREACHABLE"`.
 //! - `GET /api/v1/transactions/{hex}?currency=N&limit=30` — the wallet's durable transaction list,
 //!   newest-first, read off the ICRC ledger's own transaction log at the user's principal.
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
@@ -73,7 +76,7 @@ pub struct AppState {
     /// worth less than the hour it lives, and settlement is re-derived from the ledger on every
     /// read — so a restart costs a cashier a re-ring, never a payment and never a double credit.
     pub tills: crate::till::SharedTills,
-    /// Whether the till's seven routes are REGISTERED at all — see the gate in [`app`]. Read once,
+    /// Whether the till's eight routes are REGISTERED at all — see the gate in [`app`]. Read once,
     /// while the router is built, so it cannot change under a live request. Set by
     /// [`AppState::with_till`]; `false` for a state that does not ask.
     till_enabled: bool,
@@ -99,6 +102,12 @@ pub struct AppState {
     /// gateway's principal-keyed ledgers instead of the facade-era `dyn Ledger`. `None` in prod.
     #[cfg(feature = "test-helpers")]
     pub fake_ic: Option<Arc<crate::ic_gateway::FakeIc>>,
+    /// The facade canister whose module hash `GET /api/v1/integrity` reads live off the IC state
+    /// tree (text principal). `None` — a memory-ledger demo relay with no facade configured —
+    /// leaves the route honest about having no live hash to compare (status `UNREACHABLE`, live
+    /// `null`; the pin is still reported). Set by [`AppState::with_facade_canister`] from
+    /// `DPAY_CANISTER_ID` in main.rs when the ledger is the agent IC path.
+    facade_canister: Option<String>,
 }
 
 impl AppState {
@@ -116,6 +125,7 @@ impl AppState {
             apk_version: String::new(),
             #[cfg(feature = "test-helpers")]
             fake_ic: None,
+            facade_canister: None,
         }
     }
 
@@ -126,10 +136,18 @@ impl AppState {
         self
     }
 
-    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the seven routes gated in [`app`].
+    /// Serve the OpenCryptoPay till (`DPAY_ENABLE_TILL`) — the eight routes gated in [`app`].
     /// Must be set BEFORE the router is built, because that is where the gate is read.
     pub fn with_till(mut self, enabled: bool) -> Self {
         self.till_enabled = enabled;
+        self
+    }
+
+    /// Name the facade canister `GET /api/v1/integrity` reads the live module hash for (text
+    /// principal). Call only for an agent/IC-backed ledger — a `None` state (memory demo)
+    /// honestly reports it has no live hash rather than pretending to read one.
+    pub fn with_facade_canister(mut self, canister: String) -> Self {
+        self.facade_canister = Some(canister);
         self
     }
 
@@ -179,12 +197,14 @@ pub fn app(state: AppState) -> Router {
         .route("/currencies", get(currencies))
         .route("/onramp/ckerc20", get(ckerc20_onramp))
         .route("/health", get(health))
-        .route("/version", get(version));
+        .route("/version", get(version))
+        .route("/integrity", get(integrity));
 
     // --- the OpenCryptoPay till, OFF unless the operator asks for it -----------------------------
     //
-    // The seven routes below (three here; the standard's three plus the camera landing page on the
-    // root router) are registered only when `DPAY_ENABLE_TILL` is set — founder decision 2026-09-04,
+    // The eight routes below (three here; the standard's three, the camera landing page and the
+    // cashier page on the root router) are registered only when `DPAY_ENABLE_TILL` is set — founder
+    // decision 2026-09-04,
     // taken against a production probe of `POST /api/v1/till`. That route was UNAUTHENTICATED:
     // anyone could ring up a charge naming any ed25519 pubkey and any merchant name, and this relay
     // then served a full payment page for it on dpay's own domain under dpay's own certificate — a
@@ -261,13 +281,16 @@ pub fn app(state: AppState) -> Router {
     // own namespace: a wallet derives the submission URL from the callback by swapping `/cb/` for
     // `/tx/`, so those segments are part of the protocol. The fourth is where a GENERIC phone camera
     // lands — the till's QR carries the LNURL inside an ordinary web address, so a camera that is
-    // not a wallet opens a page rather than a 404 (`crate::till::till_code_page`).
+    // not a wallet opens a page rather than a 404 (`crate::till::till_code_page`). The fifth is
+    // the cashier's own screen — the merchant's OTHER half, which watches the charge they rang up
+    // in the app (`crate::till::till_page`).
     let router = if state.till_enabled {
         router
             .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
             .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
             .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
             .route(crate::till::TILL_CODE_PATH, get(crate::till::till_code_page))
+            .route("/till/{id}", get(crate::till::till_page))
     } else {
         router
     };
@@ -901,6 +924,19 @@ struct VersionBody {
     commit_date: &'static str,
 }
 
+/// `GET /api/v1/integrity` response — the facade canister's live-vs-pinned module hash (both
+/// lowercase sha256 hex; `null` when the half is unknown). `status` is [`classify_integrity`]'s
+/// verdict; `relay_commit` rides along so the two halves of an upgrade (canister wasm + relay
+/// image) are readable from one response.
+#[derive(Serialize)]
+struct IntegrityBody {
+    facade_canister: Option<String>,
+    live_module_hash: Option<String>,
+    pinned_module_hash: Option<String>,
+    status: &'static str,
+    relay_commit: &'static str,
+}
+
 /// Response of BOTH faucet builds (test-helpers fake credit + agent canister mint):
 /// `{balance: <new minor-unit balance>}` — the shape Wallet.tsx's `topUp` reads.
 #[cfg(any(feature = "test-helpers", feature = "agent"))]
@@ -1003,6 +1039,58 @@ async fn version() -> Response {
         version: env!("CARGO_PKG_VERSION"),
         commit: env!("DPAY_BUILD_COMMIT"),
         commit_date: env!("DPAY_BUILD_DATE"),
+    }))
+        .into_response()
+}
+
+/// The PINNED facade module hash, baked by build.rs from tracked `deploy/facade-module-hash.txt`
+/// (test-helpers builds bake the FakeLedger's deterministic hash instead, so the offline loop
+/// reads MATCH — see build.rs). An empty env is `None`: the route then reports `UNPINNED`, the
+/// honest "there is no reference to compare against" (prod builds FAIL rather than bake empty;
+/// this branch is the documented escape hatch for deliberately unpinned builds).
+fn pinned_facade_hash() -> Option<&'static str> {
+    let pin = env!("DPAY_PINNED_FACADE_HASH");
+    if pin.is_empty() { None } else { Some(pin) }
+}
+
+/// The integrity verdict: `MATCH` (live equals the pin — the deployed facade is the recorded
+/// upgrade), `MISMATCH` (it is not — someone upgraded outside the recorded procedure, GOVERNANCE
+/// row 7's whole point), `UNPINNED` (no reference hash was baked, so nothing can be judged), or
+/// `UNREACHABLE` (the IC read failed / no facade is configured — the live half is missing).
+/// PURE so the whole matrix is unit-testable without an IC; precedence when both halves are
+/// missing: `UNPINNED` — a deployment without a pin has no integrity surface at all, which is
+/// the fact the operator must act on first.
+pub fn classify_integrity(live: Option<&str>, pinned: Option<&str>) -> &'static str {
+    match (live, pinned) {
+        (_, None) => "UNPINNED",
+        (None, Some(_)) => "UNREACHABLE",
+        (Some(l), Some(p)) if l == p => "MATCH",
+        (Some(_), Some(_)) => "MISMATCH",
+    }
+}
+
+/// `GET /api/v1/integrity` → the facade canister's live-vs-pinned module hash, the upgrade-
+/// detection primitive of GOVERNANCE row 7 (companion of `/api/v1/version`, which pins the RELAY
+/// image; this pins the CANISTER wasm). The live hash is read off the PUBLIC IC state tree
+/// (`canister/<id>/module_hash` — the same read `dfx canister info` prints; no signature needed)
+/// through the [`Ledger`] seam; the pinned half is baked at build time. Deliberately NOT on
+/// `/health`: health must stay a cheap, IC-free liveness probe, and integrity a bounded read —
+/// different jobs, different failure domains. Every failure degrades to a 200 with an honest
+/// status rather than a 5xx: this is a report, not a promise.
+async fn integrity(State(state): State<AppState>) -> Response {
+    let live: Option<String> = if state.facade_canister.is_some() {
+        state.ledger.facade_module_hash().await.ok()
+    } else {
+        None
+    };
+    let pinned = pinned_facade_hash();
+    let status = classify_integrity(live.as_deref(), pinned);
+    (StatusCode::OK, Json(IntegrityBody {
+        facade_canister: state.facade_canister.clone(),
+        live_module_hash: live,
+        pinned_module_hash: pinned.map(str::to_string),
+        status,
+        relay_commit: env!("DPAY_BUILD_COMMIT"),
     }))
         .into_response()
 }

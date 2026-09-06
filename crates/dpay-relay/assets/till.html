@@ -1,0 +1,137 @@
+<!doctype html>
+<!-- Served at /till/{id} by crates/dpay-relay/src/till.rs (`till_page`), inside the same
+     DPAY_ENABLE_TILL gate as the till's other routes. The id comes from the URL; the charge is
+     rendered CLIENT-SIDE from GET /api/v1/till/{id} — the server interpolates nothing into this
+     page (the merchant name is CLAIMED, so it never touches Rust string building on this route).
+     The states and their copy mirror ChargeState's own documentation in till.rs; every terminal
+     state names the next action. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cashier | Different Pay</title>
+<meta name="description" content="Watch a Different Pay charge from the cashier's side." />
+<meta name="color-scheme" content="light dark" />
+<meta name="theme-color" content="#F4F1E8" />
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
+<meta name="robots" content="noindex" />
+<style>
+  :root{
+    --bg:#F4F1E8; --panel:#FDFCF9; --ink:#1B1A17; --ink-2:#57534A;
+    --brand:#FF5A1F; --line:#E5DFD1; --ok:#1E7F4F;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#141210; --panel:#1D1A17; --ink:#F4F1E8; --ink-2:#B8B1A3; --line:#2E2A25; }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:32px 20px; background:var(--bg); color:var(--ink);
+    font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  main{max-width:32rem; margin:0 auto}
+  h1{font-size:1.5rem; line-height:1.25; margin:0 0 .5rem}
+  p{margin:0 0 1rem; color:var(--ink-2)}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px}
+  .price{font-size:2.4rem; font-weight:700; color:var(--ink); margin:0 0 .25rem}
+  .settles{font-size:.9rem; color:var(--ink-2); margin:0 0 1rem}
+  .state{font-size:1.1rem; font-weight:600; margin:0 0 .5rem; color:var(--ink)}
+  .state.ok{color:var(--ok)}
+  .state.idle{color:var(--ink-2)}
+  .next{margin:0; color:var(--ink-2)}
+  .note{font-size:.9rem}
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>Cashier</h1>
+  <p class="price" id="price">…</p>
+  <p class="settles">settles in VCHF — 1:1 with CHF</p>
+  <p class="state idle" id="state">Reaching the till…</p>
+  <p class="next" id="next"></p>
+  <p class="note">Paid or not, this page never rings up, cancels or refunds a charge — those
+     live in the Different Pay app, under the shop's own key. It only watches.</p>
+</main>
+<script>
+"use strict";
+// The charge id is the path's last segment — the page is served for any id, known or not.
+const id = location.pathname.split("/").filter(Boolean).pop();
+const $ = (s) => document.getElementById(s);
+const POLL_MS = 3000; // > the till's 2 s observe window, and gentle on the relay
+
+function chf(cents) {
+  const whole = Math.floor(cents / 100), rem = String(cents % 100).padStart(2, "0");
+  return `CHF ${whole}.${rem}`;
+}
+// Every server-derived string goes through textContent — the merchant name is CLAIMED
+// (anyone can ring up a charge naming anyone), so it is never parsed as markup here.
+function render(charge) {
+  $("price").textContent = `${chf(charge.cents)} · ${charge.merchant}`;
+  const next = $("next");
+  switch (charge.state) {
+    case "open":
+      $("state").className = "state";
+      $("state").textContent = "Waiting for the customer to pay…";
+      tick(charge.expires_at); // countdown below overwrites state once per second
+      next.textContent = "Keep the code on the counter until this says paid.";
+      return true; // keep polling
+    case "paid":
+      $("state").className = "state ok";
+      $("state").textContent = "Paid ✓";
+      next.textContent = charge.paid
+        ? `Credited on the ledger — block ${charge.paid.block}. Nothing more is owed.`
+        : "Credited on the ledger. Nothing more is owed.";
+      return false; // terminal: stop polling
+    case "superseded":
+      $("state").className = "state";
+      $("state").textContent = "Replaced by a newer charge";
+      next.textContent = "This code is dead — scan the new one with the customer.";
+      // Still watching: a transfer already in flight can credit even a replaced charge, and
+      // Paid outranks every void cause — the cashier must see that happen.
+      return true;
+    case "cancelled":
+      $("state").className = "state";
+      $("state").textContent = "Cancelled";
+      next.textContent = "Nothing is owed on this charge.";
+      return false; // terminal: stop polling
+    case "expired":
+      $("state").className = "state";
+      $("state").textContent = "Expired";
+      next.textContent = "Ring it up again in the app, and hand the customer the new code.";
+      // Still watching for the same reason as superseded: a late transfer credits the sale.
+      return true;
+    default:
+      $("state").textContent = "This till reported a state this page does not know.";
+      next.textContent = "Ring it up again in the app.";
+      return false;
+  }
+}
+function tick(expiresAt) {
+  const left = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
+  const mm = String(Math.floor(left / 60)).padStart(2, "0");
+  const ss = String(left % 60).padStart(2, "0");
+  $("state").textContent = `Waiting for the customer to pay… (${mm}:${ss})`;
+}
+function unknown() {
+  $("state").textContent = "No such charge on this till.";
+  $("next").textContent =
+    "This link names a charge this relay does not have — check it came from the app's " +
+    "own Share, or ring the sale up again there.";
+}
+function unreachable() {
+  $("state").textContent = "Reaching the till…";
+  $("next").textContent = "The till is not answering yet — this page keeps trying.";
+}
+async function poll() {
+  try {
+    const res = await fetch(`/api/v1/till/${encodeURIComponent(id)}`, { cache: "no-store" });
+    if (res.status === 404) { unknown(); return false; }
+    if (!res.ok) { unreachable(); return true; }
+    return render(await res.json());
+  } catch { unreachable(); return true; }
+}
+(async () => {
+  while (await poll()) await new Promise((r) => setTimeout(r, POLL_MS));
+})();
+</script>
+</body>
+</html>
