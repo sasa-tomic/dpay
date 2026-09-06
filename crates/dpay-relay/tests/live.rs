@@ -413,10 +413,11 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(hb["status"], "ok");
 
         // ---- (2) currencies: the COMPILED catalog, served without touching the facade ----
-        // v2 network-first envelope: icp mainnet (6 rows: DEMO 0, ckBTC 1, ckUSDC 2, ckETH 6,
-        // VCHF 7, ICP 8), icp testnet (the real trio ckTESTBTC 3 / ckSepoliaUSDC 4 /
-        // ckSepoliaETH 5), solana mainnet (SOL + USDC). The VCHF row must name THIS fixture's
-        // pinned principal — the fan-out target the balances/transactions routes resolve against.
+        // v2 network-first envelope: icp mainnet (7 rows: DEMO 0, ckBTC 1, ckUSDC 2, ckETH 6,
+        // VCHF 7, ICP 8, VEUR 9 — the EUR Stage-1 row), icp testnet (the real trio ckTESTBTC 3 /
+        // ckSepoliaUSDC 4 / ckSepoliaETH 5), solana mainnet (SOL + USDC + EURC). The VCHF row must
+        // name THIS fixture's pinned principal — the fan-out target the balances/transactions
+        // routes resolve against.
         let (cs, cb) = call(&state, get("/api/v1/currencies")).await;
         assert_eq!(cs, StatusCode::OK, "currencies body={cb}");
         let networks = cb["networks"]
@@ -428,8 +429,8 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(mainnet["environment"], "mainnet");
         assert_eq!(
             mainnet["assets"].as_array().map(Vec::len),
-            Some(6),
-            "the compiled mainnet section carries all 6 rows incl. VCHF 7 + ICP 8: {cb}"
+            Some(7),
+            "the compiled mainnet section carries all 7 rows incl. VCHF 7 + ICP 8 + VEUR 9: {cb}"
         );
         assert_eq!(
             networks[1]["environment"], "testnet",
@@ -461,10 +462,10 @@ fn live_read_surface_at_user_principal() {
         let (ps, pb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(payer_pk)))).await;
         assert_eq!(ps, StatusCode::OK, "payer balances body={pb}");
         assert_eq!(pb[key.as_str()], INIT_A.to_string(), "payer VCHF must read the minted amount (body={pb})");
-        // The compiled catalog carries 9 currencies, but only the PINNED fixture ledger exists on
-        // this PocketIC — every other fan-out target is an absent canister, and the batch omits
-        // those best-effort (exactly prod's behavior for unreachable ledgers). So the map is the
-        // one entry that answered: VCHF.
+        // The compiled catalog carries 10 currencies (9 IC + EURC on solana), but only the PINNED
+        // fixture ledger exists on this PocketIC — every other fan-out target is an absent canister,
+        // and the batch omits those best-effort (exactly prod's behavior for unreachable ledgers).
+        // So the map is the one entry that answered: VCHF.
         assert_eq!(
             pb.as_object().map(|m| m.len()),
             Some(1),

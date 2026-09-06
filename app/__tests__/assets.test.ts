@@ -41,7 +41,7 @@ const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency'
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
   wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, min_fraction_digits: null,
   fee: null, cap: null, chain_id: null, token_contract: null, gas_ledger: null,
-  onramp: 'Unavailable', offramp: 'Unavailable', testnet: false, ...d,
+  onramp: 'Unavailable', offramp: 'Unavailable', liquidity: null, ramp_partner: null, testnet: false, ...d,
 });
 const DEMO: CurrencyDescriptor = mk({currency: 0, mintable: true, minter_family: null, symbol: '$', decimals: 2, onramp: 'Direct', offramp: 'Unavailable'});
 const CKBTC: CurrencyDescriptor = mk({currency: 1, minter: 'm', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8, wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, onramp: 'Direct', offramp: 'Direct'});
@@ -105,8 +105,8 @@ describe('buildSelectableAssets — complete visible list', () => {
 // =============================================================================================
 describe('buildSelectableAssets — catalog-driven Solana rows (catalog v2)', () => {
   const SOL_ROWS: SolanaAsset[] = [
-    {token: 'SOL', symbol: 'SOLANA', decimals: 4, min_fraction_digits: null, mint: null},
-    {token: 'USDC', symbol: 'USDC', decimals: 5, min_fraction_digits: 2, mint: 'Mint111111111111111111111111111111111111111'},
+    {token: 'SOL', symbol: 'SOLANA', decimals: 4, min_fraction_digits: null, mint: null, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable'},
+    {token: 'USDC', symbol: 'USDC', decimals: 5, min_fraction_digits: 2, mint: 'Mint111111111111111111111111111111111111111', liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable'},
   ];
   const NETWORKS: NetworkSection[] = [
     {protocol: 'icp', name: 'Internet Computer', environment: 'mainnet', assets: []},
@@ -417,11 +417,14 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
   it('derives stable ids ic:7/ic:8 with testKeys vchf/icp — MAINNET-visible under showTestnet=false', () => {
     // No production special case: the builder maps the two no-minter rows like any IC descriptor.
     // They are stamped testnet:false by the owning icp MAINNET section, so the default wallet view
-    // (showTestnet=false) shows them in catalog order after ckETH (ic:6).
+    // (showTestnet=false) shows them in catalog order after ckETH (ic:6). VEUR (ic:9) joined the
+    // same enumeration with the EUR Stage-1 row (2026-09-06) — the chooser withholding is done by
+    // the home-currency rail map, not by this list builder.
     const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
-    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'ic:6', 'ic:7', 'ic:8']);
+    expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'ic:6', 'ic:7', 'ic:8', 'ic:9']);
     expect(assets.find(a => a.id === 'ic:7')!.testKey).toBe('vchf');
     expect(assets.find(a => a.id === 'ic:8')!.testKey).toBe('icp');
+    expect(assets.find(a => a.id === 'ic:9')!.testKey).toBe('veur');
     expect(assets.find(a => a.id === 'ic:7')!.visible).toBe(true);
     expect(assets.find(a => a.id === 'ic:8')!.visible).toBe(true);
   });
@@ -455,7 +458,7 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       ],
     };
     const parsed = parseNetworkCatalog(wire)!;
-    expect(icpCatalogOf(parsed).map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8]);
+    expect(icpCatalogOf(parsed).map(c => c.currency)).toEqual([0, 1, 2, 6, 7, 8, 9]);
     const before = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
     const after = buildSelectableAssets(icpCatalogOf(parsed), {showTestnet: false, solanaEnabled: false});
     expect(ids(after)).toEqual(ids(before));

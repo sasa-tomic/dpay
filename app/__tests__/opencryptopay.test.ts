@@ -662,12 +662,13 @@ describe('selectPayableOffers', () => {
     // Every IC asset this wallet carries, plus SOL. ckBTC and VCHF were once refused wholesale on
     // the belief that the provider verified every Internet Computer payment against the ICP ledger;
     // the real cause was the IDENTIFIER dpay reported, and it is fixed in `ocpIcTxId` — measured
-    // 2026-09-04 (`just ocp-ledger-probe`). VEUR is refused below, for the one reason that is
-    // actually about this wallet: it does not carry it.
+    // 2026-09-04 (`just ocp-ledger-probe`). VEUR joined the payable set with the EUR Stage-1 row
+    // (2026-09-06): the wallet now carries ic:9, so the till's VEUR offer is paid, not refused.
     expect(payable).toEqual([
       {method: 'InternetComputer', asset: 'ckBTC', amount: '0.000016', assetId: 'ic:1', rawAmount: '1600'},
       {method: 'InternetComputer', asset: 'VCHF', amount: '1', assetId: 'ic:7', rawAmount: '100000000'},
       {method: 'InternetComputer', asset: 'ICP', amount: '0.19', assetId: 'ic:8', rawAmount: '19000000'},
+      {method: 'InternetComputer', asset: 'VEUR', amount: '1.07', assetId: 'ic:9', rawAmount: '107000000'},
       {method: 'Solana', asset: 'SOL', amount: '0.006', assetId: 'solana:SOL', rawAmount: '6000000'},
     ]);
   });
@@ -684,9 +685,21 @@ describe('selectPayableOffers', () => {
   });
 
   it('names the offered assets this wallet does not carry', () => {
-    const {refused} = selectPayableOffers(detailsOf(), WALLET_ASSETS, BEFORE_EXPIRY);
-    // Two assets the provider takes and this wallet has no row for, one per rail.
-    expect(refused).toContainEqual({method: 'InternetComputer', asset: 'VEUR', reason: 'asset-not-in-wallet'});
+    // Since the EUR Stage-1 row (2026-09-06) the wallet carries every IC asset the default till
+    // lists, so the IC-side gap is pinned with an asset no dpay row realises (XAU): an offer the
+    // provider takes and this wallet has no row for, one per rail.
+    const details = detailsOf({
+      transferAmounts: [
+        {method: 'InternetComputer', available: true, assets: [{asset: 'VEUR', amount: 1.07}, {asset: 'XAU', amount: 0.1}]},
+        {
+          method: 'Solana',
+          available: true,
+          assets: [{asset: 'SOL', amount: 0.006}, {asset: 'USDC', amount: 1.246922}, {asset: 'USDT', amount: 1.246922}],
+        },
+      ],
+    });
+    const {refused} = selectPayableOffers(details, WALLET_ASSETS, BEFORE_EXPIRY);
+    expect(refused).toContainEqual({method: 'InternetComputer', asset: 'XAU', reason: 'asset-not-in-wallet'});
     expect(refused).toContainEqual({method: 'Solana', asset: 'USDT', reason: 'asset-not-in-wallet'});
     // ckUSDC and ckETH are dpay assets the PROVIDER does not accept: they are simply absent from
     // its offers, so nothing about them appears on either side of this split.
@@ -771,8 +784,8 @@ describe('selectPayableOffers', () => {
     expect(payable).toEqual([]);
     expect(refused).toHaveLength(7);
     expect(refused.every(r => r.reason === 'quote-expired')).toBe(true);
-    // One millisecond earlier the same quote is still live.
-    expect(selectPayableOffers(details, WALLET_ASSETS, EXPIRES_AT_MS - 1).payable).toHaveLength(4);
+    // One millisecond earlier the same quote is still live (VEUR joined the payable set 2026-09-06).
+    expect(selectPayableOffers(details, WALLET_ASSETS, EXPIRES_AT_MS - 1).payable).toHaveLength(5);
   });
 
   it('refuses a token two wallet rows both answer to, rather than guessing which was meant', () => {

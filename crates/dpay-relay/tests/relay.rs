@@ -1382,19 +1382,20 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(solana["environment"], "mainnet");
 
     // IC mainnet section: the REAL prod rows (DEMO's network None is mainnet-side). VCHF
-    // (currency 7) and ICP (currency 8) carry network "Internet Computer" — the U3 pin: the
-    // relay's server-authoritative partition must file them MAINNET-side, not testnet-side.
+    // (currency 7), ICP (currency 8) and VEUR (currency 9) carry network "Internet Computer"
+    // — the U3 pin: the relay's server-authoritative partition must file them MAINNET-side,
+    // not testnet-side.
     let rows = mainnet["assets"]
         .as_array()
         .expect("icp mainnet assets array");
     assert_eq!(
         rows.len(),
-        6,
-        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckETH + VCHF + ICP (the three Sepolia/testnet-BTC rows are testnet-side): {body}"
+        7,
+        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckETH + VCHF + ICP + VEUR (the three Sepolia/testnet-BTC rows are testnet-side): {body}"
     );
-    // Served order is the prod order: 0, 1, 2, 6, then the appended 7, 8.
+    // Served order is the prod order: 0, 1, 2, 6, then the appended 7, 8, 9.
     let mainnet_ids: Vec<u64> = rows.iter().map(|r| r["currency"].as_u64().unwrap()).collect();
-    assert_eq!(mainnet_ids, vec![0, 1, 2, 6, 7, 8], "mainnet section order: {body}");
+    assert_eq!(mainnet_ids, vec![0, 1, 2, 6, 7, 8, 9], "mainnet section order: {body}");
 
     // DEMO_USD (currency 0): the mintable $ faucet asset at the REAL DUSD ledger, no ramp.
     let dusd = rows
@@ -1565,6 +1566,42 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(icp["onramp"], "Unavailable");
     assert_eq!(icp["offramp"], "Unavailable");
 
+    // VEUR (currency 9): the EUR dual-rail Stage 1 row (2026-09-06) — a complete no-minter
+    // direct-ICRC mainnet asset in the VCHF/ICP shape, with the FIRST Partner off-ramp
+    // (DFX, named via ramp_partner) and the first liquidity tier on an IC row. The optional
+    // fields serialize ONLY when set — the ICP block above (no liquidity asserts reading
+    // Null) doubles as the old-row absence pin for this route.
+    let veur = rows
+        .iter()
+        .find(|r| r["currency"] == 9)
+        .expect("VEUR currency present");
+    assert_eq!(veur["mintable"], false);
+    assert_eq!(veur["symbol"], "VEUR");
+    assert_eq!(veur["decimals"], 8);
+    assert_eq!(veur["display_decimals"], 8);
+    assert_eq!(veur["min_fraction_digits"], 2);
+    assert_eq!(veur["wrapper_name"], "VEUR");
+    assert_eq!(veur["backing_symbol"], "VEUR"); // the issuer token — NEVER "EUR"
+    assert_eq!(veur["network"], "Internet Computer"); // files mainnet-side (U3 label)
+    assert_eq!(veur["ledger"], "wu6g4-6qaaa-aaaan-qmrza-cai"); // catalog_truth veur_ledger
+    assert_eq!(veur["fee"], "10000"); // 0.0001 VEUR raw
+    assert_eq!(veur["cap"], "1000000000000"); // 10,000 VEUR initial cap (mirrors VCHF — founder to confirm)
+    assert_eq!(veur["minter"], serde_json::Value::Null);
+    assert_eq!(veur["minter_family"], serde_json::Value::Null);
+    assert_eq!(veur["chain_id"], serde_json::Value::Null);
+    assert_eq!(veur["token_contract"], serde_json::Value::Null);
+    assert_eq!(veur["gas_ledger"], serde_json::Value::Null);
+    assert_eq!(veur["onramp"], "Unavailable"); // no compliant fiat on-ramp
+    assert_eq!(veur["offramp"], "Partner"); // DFX fiat off-ramp — the first Partner row
+    assert_eq!(veur["liquidity"], "thin");
+    assert_eq!(veur["ramp_partner"], "DFX");
+    // The pre-EUR rows on THIS served body: the optional keys are ABSENT (indexing an absent
+    // key in a serde_json Value yields Null) — the route-level half of the byte-identity pin.
+    assert_eq!(icp["liquidity"], serde_json::Value::Null);
+    assert_eq!(icp["ramp_partner"], serde_json::Value::Null);
+    assert_eq!(dusd["liquidity"], serde_json::Value::Null);
+    assert_eq!(ckbtc["ramp_partner"], serde_json::Value::Null);
+
     // IC testnet section: exactly the rows the partition rule (network Some AND not in
     // {"Bitcoin","Ethereum","Internet Computer"}) classifies as testnet — the REAL testnet trio
     // (ckTESTBTC 3, ckSepoliaUSDC 4, ckSepoliaETH 5); VCHF/ICP's "Internet Computer" is
@@ -1650,9 +1687,13 @@ async fn currencies_route_returns_demo_catalog() {
 
     // Solana mainnet section — relay-level constants mirroring app/solana.ts EXACTLY: SOL 9
     // decimals (SOL_DECIMALS, mint null — native), USDC 6 decimals (USDC_DECIMALS) + the mainnet
-    // USDC mint (USDC_MINT_ADDRESS). Direct ramps both ways, both assets; no RPC/keys served.
+    // USDC mint (USDC_MINT_ADDRESS), and (2026-09-06, EUR dual-rail Stage 1) EURC 6 decimals +
+    // its mainnet mint with liquidity "deep". Fiat-ramp semantics (corrected 2026-09-06): the
+    // onramp/offramp fields declare FIAT ramps now — SOL/USDC honestly read Unavailable (the
+    // old Direct meant structural self-custody, a tautology on the device-key rail); no
+    // RPC/keys served.
     let srows = solana["assets"].as_array().expect("solana assets array");
-    assert_eq!(srows.len(), 2, "solana mainnet = SOL + USDC: {body}");
+    assert_eq!(srows.len(), 3, "solana mainnet = SOL + USDC + EURC: {body}");
     let sol = &srows[0];
     assert_eq!(sol["token"], "SOL");
     assert_eq!(sol["symbol"], "SOL");
@@ -1662,8 +1703,9 @@ async fn currencies_route_returns_demo_catalog() {
         serde_json::Value::Null,
         "native SOL carries no SPL mint"
     );
-    assert_eq!(sol["onramp"], "Direct");
-    assert_eq!(sol["offramp"], "Direct");
+    assert_eq!(sol["onramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
+    assert_eq!(sol["offramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
+    assert_eq!(sol["liquidity"], serde_json::Value::Null, "pre-EUR row: no tier key");
     let usdc = &srows[1];
     assert_eq!(usdc["token"], "USDC");
     assert_eq!(usdc["symbol"], "USDC");
@@ -1672,25 +1714,39 @@ async fn currencies_route_returns_demo_catalog() {
         usdc["mint"], "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         "the app's USDC_MINT_ADDRESS verbatim (app/solana/spl.ts)"
     );
-    assert_eq!(usdc["onramp"], "Direct");
-    assert_eq!(usdc["offramp"], "Direct");
+    assert_eq!(usdc["onramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
+    assert_eq!(usdc["offramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
+    assert_eq!(usdc["liquidity"], serde_json::Value::Null, "pre-EUR row: no tier key");
+    // EURC: the solana half of the EUR dual-rail — deep liquidity, no fiat ramp through dpay.
+    let eurc = &srows[2];
+    assert_eq!(eurc["token"], "EURC");
+    assert_eq!(eurc["symbol"], "EURC");
+    assert_eq!(eurc["decimals"], 6);
+    assert_eq!(eurc["min_fraction_digits"], 2); // unit-denominated: '1.50'
+    assert_eq!(
+        eurc["mint"], "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+        "catalog_truth eurc_mint (Circle's native solana EURC)"
+    );
+    assert_eq!(eurc["onramp"], "Unavailable");
+    assert_eq!(eurc["offramp"], "Unavailable");
+    assert_eq!(eurc["liquidity"], "deep");
 }
 
 // --- batch balances (the N+1→1 poll fix) --------------------------------------
 //
 // Covers GET /api/v1/balances/{hex} (PLURAL) — the single-fetch batch endpoint that returns EVERY
 // currency's balance in one response, replacing the wallet's old N+1 per-poll loop (1 primary fetch
-// + 1 per-asset fetch, each a relay→IC round trip). With the 9-currency demo catalog this is 1 HTTP
-// request instead of 9. Response shape: a flat map `{<currency>: <minor-units-string>}`, currency
+// + 1 per-asset fetch, each a relay→IC round trip). With the 10-currency demo catalog this is 1 HTTP
+// request instead of 10. Response shape: a flat map `{<currency>: <minor-units-string>}`, currency
 // index as a decimal-string key, balance as a U64String (decimal string). Mirrors how the wallet
 // consumes it.
 
 /// `GET /api/v1/balances/{hex}` returns `200` with a flat map of EVERY catalog currency's balance in
 /// ONE response. The payer is funded BAL_A in DEMO_USD (currency 0); every other catalog currency is
-/// unfunded → "0". Asserts: all 9 catalog currencies present (incl. VCHF 7 + ICP 8 — zero-balance
-/// no-minter rows still enumerate), the funded primary reads BAL_A, the unfunded assets read "0",
-/// and the values are DECIMAL STRINGS (the MC1 units 2-4 shape — raw u64 across the JSON boundary as
-/// a string, never a number).
+/// unfunded → "0". Asserts: all 10 catalog currencies present (incl. VCHF 7 + ICP 8 + VEUR 9 —
+/// zero-balance no-minter rows still enumerate), the funded primary reads BAL_A, the unfunded assets
+/// read "0", and the values are DECIMAL STRINGS (the MC1 units 2-4 shape — raw u64 across the JSON
+/// boundary as a string, never a number).
 #[tokio::test]
 async fn balances_route_returns_all_currencies_in_one_response() {
     let payer = keypair();
@@ -1711,13 +1767,13 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     );
     assert_eq!(
         body.as_object().unwrap().len(),
-        9,
-        "demo catalog = 9 currencies (7 pre-existing + VCHF + ICP), all present in one batch: {body}"
+        10,
+        "demo catalog = 10 currencies (7 pre-existing + VCHF + ICP + VEUR), all present in one batch: {body}"
     );
 
     // Every catalog currency is present and unfunded → "0" (nothing pre-funds the
     // FakeLedger anymore — balances live at user principals on the fake-IC gateway).
-    for c in 0..=8u32 {
+    for c in 0..=9u32 {
         assert_eq!(
             body[c.to_string()],
             "0",
@@ -1921,6 +1977,8 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         gas_ledger: None,
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Direct,
+        liquidity: None,
+        ramp_partner: None,
     };
     let r = dpay_relay::ckerc20_onramp_from_descriptor(Some(&native))
         .expect("a CkEthErc20 with no token_contract must resolve a NATIVE-ETH onramp");
@@ -1957,6 +2015,8 @@ async fn ckerc20_onramp_native_eth_without_token_contract() {
         gas_ledger: None,
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Direct,
+        liquidity: None,
+        ramp_partner: None,
     };
     assert!(dpay_relay::ckerc20_onramp_from_descriptor(Some(&ckbtc)).is_err());
     assert!(dpay_relay::ckerc20_onramp_from_descriptor(None).is_err());
@@ -1992,6 +2052,8 @@ async fn ckerc20_onramp_helper_is_chain_scoped() {
         gas_ledger: None,
         onramp: dpay_relay::RampCapability::Direct,
         offramp: dpay_relay::RampCapability::Unavailable,
+        liquidity: None,
+        ramp_partner: None,
     };
     let r_sep = dpay_relay::ckerc20_onramp_from_descriptor(Some(&sepolia))
         .expect("Sepolia ckERC20 must resolve an onramp");

@@ -133,6 +133,20 @@ pub enum RampCapability {
     Unavailable,
 }
 
+/// Market-liquidity tier for a catalog asset (EUR dual-rail Stage 1, 2026-09-06) — DATA, not prose:
+/// lets the app (and later stages) reason about how deep an asset's market is without parsing
+/// free-text. Serialized as the LOWERCASE tier name (`"deep"`/`"thin"`), matching the app's
+/// `'deep' | 'thin' | null` catalog type. Carried on the wire as an OPTIONAL field
+/// (`#[serde(skip_serializing_if = "Option::is_none")]` at the struct sites): a row without a
+/// tier serializes BYTE-IDENTICALLY to the pre-2026-09-06 shape, so every existing row stays
+/// unchanged on the wire (pinned by the relay byte-shape tests in `catalog.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LiquidityTier {
+    Deep,
+    Thin,
+}
+
 /// One currency the wallet can hold/fund — the runtime catalog entry (canister-era wire shape,
 /// relay-owned since 2026-08-28 — see [`crate::catalog`]). `minter` is `Some` only for ck
 /// currencies with a registered ramp; `minter_family`/`symbol`/`decimals` are `None` when
@@ -185,6 +199,17 @@ pub struct CurrencyDescriptor {
     pub onramp: RampCapability,
     /// Cash-out (off-ramp) capability. `Unavailable` ⇒ wallet shows NO "Cash out" button.
     pub offramp: RampCapability,
+    /// Market-liquidity tier (EUR dual-rail Stage 1, 2026-09-06). OPTIONAL on the wire: `None`
+    /// (every pre-2026-09-06 row) serializes to an ABSENT key — the frozen byte-shape is
+    /// preserved for every existing row (pinned by the byte-shape tests in `catalog.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub liquidity: Option<LiquidityTier>,
+    /// The fiat-ramp PARTNER named by an `offramp = Partner` row (e.g. `"DFX"` on VEUR) — the
+    /// honest disclosure of who runs the off-ramp, so a later stage can surface it instead of an
+    /// anonymous "Partner". OPTIONAL on the wire (`None` ⇒ absent key, byte-shape preserved);
+    /// deliberately NOT validated against a partner registry here (the catalog is the registry).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ramp_partner: Option<&'static str>,
 }
 
 /// Ledger call outcome. `Rejected` is a permanent failure (unknown currency, no onramp

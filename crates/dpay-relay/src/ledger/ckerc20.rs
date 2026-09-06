@@ -184,6 +184,8 @@ mod ckerc20_onramp_chain_id_tests {
             gas_ledger: None,
             onramp: RampCapability::Direct,
             offramp: RampCapability::Direct,
+            liquidity: None,
+            ramp_partner: None,
         }
     }
 

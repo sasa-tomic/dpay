@@ -18,7 +18,9 @@
 //!
 //! Drift alarm: both sides stay pinned to `dfx/catalog_truth.json` — this module's
 //! `catalog_truth_tests` (principals/decimals/order/locked shape) is the RELAY half; the app's
-//! jest half (`app/__tests__/catalog.test.ts`, reading the same truth file) is unchanged.
+//! jest half (`app/__tests__/catalog.test.ts`, reading the same truth file) is extended in
+//! lockstep for the EUR dual-rail (2026-09-06). `wire_byte_shape_tests` pins the served JSON
+//! bytes: old rows byte-identical, the two new EUR rows carrying the optional fields.
 
 use dpay_core::DEMO_USD;
 use serde::Serialize;
@@ -27,7 +29,9 @@ use crate::ledger::ckerc20::{
     CKBTC_MINTER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL, CKETH_MINTER_PRINCIPAL,
     CKUSDC_ERC20_ADDRESS, CKUSDC_LEDGER_PRINCIPAL,
 };
-use crate::ledger::types::{CurrencyDescriptor, MinterFamily, RampCapability, U64String};
+use crate::ledger::types::{
+    CurrencyDescriptor, LiquidityTier, MinterFamily, RampCapability, U64String,
+};
 
 /// The DEMO LEDGER principal (mainnet) — `td2nx-oaaaa-aaaab-qhdnq-cai`, the owned DUSD ICRC-1
 /// ledger (currency 0, the `∂` faucet asset; 2 decimals). This is the REAL ledger the prod
@@ -89,13 +93,25 @@ pub(crate) const VCHF_LEDGER_PRINCIPAL: &str = "ly36x-wiaaa-aaaai-aqj7q-cai";
 /// (`principals.icp_ledger`).
 pub(crate) const ICP_LEDGER_PRINCIPAL: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 
+/// The VEUR LEDGER principal (mainnet) — `wu6g4-6qaaa-aaaan-qmrza-cai`, the live VNX Euro ICRC-1
+/// ledger (8 decimals, fee 10_000 raw). Currency 9 in BOTH compiled catalogs (this module + the
+/// app's BUNDLED_NETWORKS), appended 2026-09-06 as Stage 1 of the founder-approved EUR dual-rail:
+/// a complete NO-MINTER direct-ICRC asset exactly like VCHF/ICP (payment is an app-signed
+/// `icrc1_transfer` straight to this ledger), with the FIRST `offramp = Partner` row — the DFX
+/// fiat off-ramp (`ramp_partner: "DFX"`). Single-sourced here so the catalog row can't drift;
+/// cross-checked against `dfx/catalog_truth.json` (`principals.veur_ledger`) by the
+/// `catalog_truth_tests` module below.
+pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
+
 /// The IC section rows of the catalog — the wallet's runtime source of truth for which assets
 /// exist and how to display/fund them. REAL prod rows, fetched live from the prod relay's
 /// `/api/v1/currencies` on 2026-08-28 and transplanted VERBATIM (every field, null vs value):
 /// mainnet DEMO_USD (0, mintable, the faucet asset at the DUSD ledger) + ckBTC (1, CkBtcUtxo
 /// ramp) + ckUSDC (2, CkEthErc20 onramp) + ckETH (6, native-ETH within CkEthErc20,
-/// `token_contract` null) + the locked VCHF (7) / ICP (8) direct-ICRC rows; testnet ckTESTBTC
-/// (3) + ckSepoliaUSDC (4) + ckSepoliaETH (5). The wallet reads `currency`/`symbol`/`decimals`/
+/// `token_contract` null) + the locked VCHF (7) / ICP (8) direct-ICRC rows + the VEUR (9)
+/// direct-ICRC row (EUR dual-rail Stage 1, 2026-09-06 — offramp=Partner via DFX, liquidity
+/// `thin`); testnet ckTESTBTC (3) + ckSepoliaUSDC (4) + ckSepoliaETH (5). The wallet reads
+/// `currency`/`symbol`/`decimals`/
 /// `minter_family` + the per-currency metadata for display. Principals are TEXT consts (not
 /// built via `candid::Principal`) because `candid` is feature-gated to `agent` and this module
 /// ships in the lean offline build; every one is a REAL IC canister id pinned in
@@ -108,7 +124,8 @@ pub(crate) const ICP_LEDGER_PRINCIPAL: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 /// onramp=`Direct` (`depositEth`), offramp=`Direct` (`withdraw_eth`); the Sepolia ckUSDC keeps
 /// offramp=`Unavailable` (its cash-out is not wired); ckTESTBTC / ckSepoliaETH are Direct both
 /// ways on the TESTNET rail (free testnet funds — the row only renders under the testnet
-/// toggle).
+/// toggle); VEUR onramp=`Unavailable` (no compliant fiat on-ramp), offramp=`Partner` (DFX) —
+/// the first Partner row, carrying `ramp_partner: "DFX"`.
 pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
     vec![
         CurrencyDescriptor {
@@ -134,6 +151,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,
             onramp: RampCapability::Direct, // self-service faucet (fixed amount, rate-limited)
             offramp: RampCapability::Unavailable, // play money — no cash-out
+            liquidity: None,    // pre-EUR row — optional field unset, wire bytes unchanged
+            ramp_partner: None, // no Partner off-ramp to name
         },
         CurrencyDescriptor {
             currency: 1, // ckBTC — chain-key Bitcoin deposit/withdraw ramp asset
@@ -155,6 +174,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None, // BTC family — no ckETH gas ledger
             onramp: RampCapability::Direct,  // chain-key Bitcoin ramp
             offramp: RampCapability::Direct, // retrieve_btc_with_approval
+            liquidity: None,
+            ramp_partner: None,
         },
         CurrencyDescriptor {
             currency: 2, // ckUSDC (ckERC-20 onramp + cash-out currency)
@@ -180,6 +201,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: Some(CKETH_LEDGER_PRINCIPAL.to_string()),
             onramp: RampCapability::Direct,  // ckETH helper-contract onramp (client-side)
             offramp: RampCapability::Direct, // dual-ledger withdraw_erc20 cash-out (ckETH gas + USDC amount)
+            liquidity: None,
+            ramp_partner: None,
         },
         CurrencyDescriptor {
             // Native ETH within the CkEthErc20 family — discriminated by `token_contract == None`
@@ -210,6 +233,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,        // native ETH — its own ledger IS the gas ledger (withdraw_eth single-ledger path)
             onramp: RampCapability::Direct,  // ckETH helper `depositEth` (client-side, single payable tx)
             offramp: RampCapability::Direct, // withdraw_eth: burn ckETH → send native ETH
+            liquidity: None,
+            ramp_partner: None,
         },
         CurrencyDescriptor {
             // ckTESTBTC — the REAL testnet chain-key Bitcoin row (network "Bitcoin Testnet" is NOT
@@ -236,6 +261,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,
             onramp: RampCapability::Direct,
             offramp: RampCapability::Direct,
+            liquidity: None,
+            ramp_partner: None,
         },
         CurrencyDescriptor {
             // ckSepoliaUSDC — the REAL testnet ckERC20 row (Sepolia): per-token ERC-20 contract,
@@ -262,6 +289,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,
             onramp: RampCapability::Direct,   // Sepolia CkDeposit helper (chain_id-scoped)
             offramp: RampCapability::Unavailable, // testnet ckUSDC cash-out not wired
+            liquidity: None,
+            ramp_partner: None,
         },
         CurrencyDescriptor {
             // ckSepoliaETH — the REAL testnet native-ETH row: CkEthErc20 family +
@@ -287,6 +316,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,
             onramp: RampCapability::Direct,  // Sepolia CkDeposit `depositEth`
             offramp: RampCapability::Direct, // testnet withdraw_eth
+            liquidity: None,
+            ramp_partner: None,
         },
         CurrencyDescriptor {
             // VCHF — the first complete NO-MINTER direct-ICRC asset (currency 7, appended
@@ -319,6 +350,8 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
             onramp: RampCapability::Unavailable, // no compliant fiat rail yet — honest absence
             offramp: RampCapability::Unavailable,
+            liquidity: None,
+            ramp_partner: None,
         },
         CurrencyDescriptor {
             // ICP — native Internet Computer as a direct-ICRC asset (currency 8, appended
@@ -349,6 +382,45 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
             onramp: RampCapability::Unavailable, // no compliant fiat rail yet — honest absence
             offramp: RampCapability::Unavailable,
+            liquidity: None,
+            ramp_partner: None,
+        },
+        CurrencyDescriptor {
+            // VEUR — VNX Euro as a complete NO-MINTER direct-ICRC asset (currency 9, appended
+            // 2026-09-06 — Stage 1 of the founder-approved EUR dual-rail; the solana EURC row
+            // below is the deep-liquidity half). Exactly the VCHF/ICP shape: `minter`/
+            // `minter_family` null by design (NEVER a fake family — the app's isPayableAsset
+            // accepts a complete trusted descriptor), payment is an app-signed `icrc1_transfer`
+            // straight to the ledger. The FIRST `offramp = Partner` row: DFX runs the fiat
+            // off-ramp (`ramp_partner: "DFX"`), while the on-ramp stays honestly Unavailable —
+            // no compliant fiat rail in. `backing_symbol`/`symbol`/`wrapper_name` are all
+            // "VEUR" (the payment unit is the ISSUER token, never "EUR" — same rule as
+            // VCHF/CHF). Values are the LOCKED spec row (8 decimals, fee 10_000 raw =
+            // 0.0001 VEUR, liquidity `thin`); the cap mirrors VCHF's shape at 10,000 VEUR raw
+            // as the initial payment-policy value (flagged for founder confirmation).
+            // Single-sourced in [`VEUR_LEDGER_PRINCIPAL`], cross-checked against
+            // dfx/catalog_truth.json.
+            currency: 9, // VEUR (VNX Euro, direct ICRC-1)
+            ledger: VEUR_LEDGER_PRINCIPAL.to_string(),
+            mintable: false,
+            minter: None,
+            minter_family: None,
+            symbol: Some("VEUR".into()),
+            decimals: Some(8),
+            wrapper_name: Some("VEUR".into()),
+            backing_symbol: Some("VEUR".into()), // the issuer token — NEVER "EUR"
+            network: Some("Internet Computer".into()), // mainnet label — files mainnet-side via is_testnet_row
+            display_decimals: Some(8),
+            min_fraction_digits: Some(2), // unit-denominated — keep 2 decimals ('1.50', '0.00'), like VCHF
+            fee: Some(U64String(10_000)), // 0.0001 VEUR
+            cap: Some(U64String(1_000_000_000_000)), // initial payment-policy cap: 10,000 VEUR (mirrors VCHF's shape — founder to confirm)
+            chain_id: None,       // not EVM
+            token_contract: None, // not an ERC-20
+            gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
+            onramp: RampCapability::Unavailable, // no compliant fiat on-ramp — honest absence
+            offramp: RampCapability::Partner,    // DFX fiat off-ramp — the first Partner row
+            liquidity: Some(LiquidityTier::Thin),
+            ramp_partner: Some("DFX"),
         },
     ]
 }
@@ -375,15 +447,32 @@ fn is_testnet_row(d: &CurrencyDescriptor) -> bool {
     )
 }
 
-/// The mainnet USDC mint — mirrors `USDC_MINT_ADDRESS` (app/solana/spl.ts) verbatim; the only
-/// on-chain address the solana section carries.
+/// The mainnet USDC mint — mirrors `USDC_MINT_ADDRESS` (app/solana/spl.ts) verbatim; cross-checked
+/// against `dfx/catalog_truth.json` is NOT done for this one (the truth file pins the EUR pair
+/// only — see [`SOLANA_EURC_MINT`]).
 const SOLANA_USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/// The mainnet EURC mint — `HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr` (Circle's native
+/// EURC on solana mainnet, 6 decimals). The solana half of the EUR dual-rail (Stage 1,
+/// 2026-09-06): the DEEP-liquidity EUR asset, complementing the IC-side VEUR row (thin).
+/// Cross-checked against `dfx/catalog_truth.json` (`principals.eurc_mint`) by the
+/// `catalog_truth_tests` module below.
+const SOLANA_EURC_MINT: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
 
 /// The solana mainnet section — a relay-level constant provider (NOT a `Ledger` thing: the rail
 /// is device-key + direct RPC and never touches the IC, so it is absent from the trait and
 /// `fake.rs`). Values mirror app/solana.ts exactly: SOL 9 decimals (`SOL_DECIMALS`), USDC 6
-/// decimals + [`SOLANA_USDC_MINT`]. No RPC endpoints or API keys here — the Helius URL stays
-/// APK-side.
+/// decimals + [`SOLANA_USDC_MINT`], and (2026-09-06, EUR dual-rail Stage 1) EURC 6 decimals +
+/// [`SOLANA_EURC_MINT`] with liquidity `deep`. No RPC endpoints or API keys here — the Helius
+/// URL stays APK-side.
+///
+/// FIAT-ramp semantics (corrected 2026-09-06 in the same change that introduced `liquidity`):
+/// `onramp`/`offramp` on these rows declare FIAT ramps, not structural self-custody. The old
+/// `Direct`/`Direct` values on SOL/USDC meant "you self-custody this asset on-device" — a
+/// tautology for every solana row (the whole rail is device-key) that nothing reads app-side;
+/// under fiat-ramp semantics the honest value for both rows is `Unavailable` (dpay wires no
+/// solana fiat rail). This is the ONE deliberate wire change to a pre-existing row in the
+/// 2026-09-06 catalog edit; the byte-pin tests pin the corrected bytes.
 fn solana_network_section() -> NetworkBody {
     NetworkBody {
         protocol: "solana",
@@ -396,8 +485,12 @@ fn solana_network_section() -> NetworkBody {
                 decimals: 9, // SOL_DECIMALS (app/solana/identity.ts)
                 min_fraction_digits: None, // SOL is written trimmed ('1.5 SOL')
                 mint: None,  // native L1 asset — no SPL mint
-                onramp: RampCapability::Direct,
-                offramp: RampCapability::Direct,
+                // Fiat-ramp semantics (2026-09-06): was Direct/Direct, which described
+                // structural self-custody (true of every row on this device-key rail) — no
+                // solana fiat on/off-ramp is wired, so the honest FIAT answer is Unavailable.
+                onramp: RampCapability::Unavailable,
+                offramp: RampCapability::Unavailable,
+                liquidity: None,
             },
             SolanaAsset {
                 token: "USDC",
@@ -405,8 +498,25 @@ fn solana_network_section() -> NetworkBody {
                 decimals: 6, // USDC_DECIMALS (app/solana/spl.ts)
                 min_fraction_digits: Some(2), // unit-denominated, exactly like the IC ckUSDC row
                 mint: Some(SOLANA_USDC_MINT),
-                onramp: RampCapability::Direct,
-                offramp: RampCapability::Direct,
+                // Fiat-ramp semantics (2026-09-06): see the SOL row note above.
+                onramp: RampCapability::Unavailable,
+                offramp: RampCapability::Unavailable,
+                liquidity: None,
+            },
+            SolanaAsset {
+                // EURC — the solana half of the EUR dual-rail (Stage 1, 2026-09-06): the
+                // DEEP-liquidity EUR asset (Circle's native solana EURC), complementing the
+                // IC-side VEUR row. No fiat ramp through dpay — the honest Unavailable —
+                // and `min_fraction_digits: 2` matches the unit-denominated policy (EURC
+                // reads '1.50' like USDC/VCHF/VEUR).
+                token: "EURC",
+                symbol: "EURC",
+                decimals: 6,
+                min_fraction_digits: Some(2),
+                mint: Some(SOLANA_EURC_MINT),
+                onramp: RampCapability::Unavailable,
+                offramp: RampCapability::Unavailable,
+                liquidity: Some(LiquidityTier::Deep),
             },
         ]),
     }
@@ -467,7 +577,10 @@ pub(crate) enum NetworkAssets {
 
 /// One Solana asset row — a relay-level constant (the device-key rail never touches the IC,
 /// so this is deliberately NOT a `CurrencyDescriptor`). `mint` is null for native SOL.
-/// Ramp vocabulary is shared with the IC rows (`Direct`/`Partner`/`Unavailable`).
+/// Ramp vocabulary is shared with the IC rows (`Direct`/`Partner`/`Unavailable`) and — since
+/// the 2026-09-06 fiat-ramp semantics correction — declares FIAT ramps (see
+/// [`solana_network_section`]). `liquidity` is OPTIONAL on the wire (absent ⇒ no tier; the
+/// pre-EUR rows serialize byte-identically modulo the documented ramp correction).
 #[derive(Serialize)]
 pub(crate) struct SolanaAsset {
     token: &'static str,
@@ -479,6 +592,8 @@ pub(crate) struct SolanaAsset {
     mint: Option<&'static str>,
     onramp: RampCapability,
     offramp: RampCapability,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    liquidity: Option<LiquidityTier>,
 }
 
 #[cfg(test)]
@@ -513,6 +628,8 @@ mod environment_partition_tests {
             gas_ledger: None,
             onramp: RampCapability::Unavailable,
             offramp: RampCapability::Unavailable,
+            liquidity: None,
+            ramp_partner: None,
         }
     }
 
@@ -520,11 +637,14 @@ mod environment_partition_tests {
     fn internet_computer_rows_are_mainnet() {
         // VCHF (currency 7) and native ICP (currency 8) carry network "Internet Computer" —
         // the 2026-08-28 fix: before "Internet Computer" joined the mainnet set, both rows
-        // were mis-filed testnet-side and hidden behind the wallet's testnet toggle.
+        // were mis-filed testnet-side and hidden behind the wallet's testnet toggle. VEUR
+        // (currency 9, EUR dual-rail Stage 1 2026-09-06) rides the same label.
         let vchf = CurrencyDescriptor { currency: 7, ..row_with_network(Some("Internet Computer")) };
         let icp = CurrencyDescriptor { currency: 8, ..row_with_network(Some("Internet Computer")) };
+        let veur = CurrencyDescriptor { currency: 9, ..row_with_network(Some("Internet Computer")) };
         assert!(!is_testnet_row(&vchf), "VCHF (network \"Internet Computer\") is ICP MAINNET");
         assert!(!is_testnet_row(&icp), "ICP (network \"Internet Computer\") is ICP MAINNET");
+        assert!(!is_testnet_row(&veur), "VEUR (network \"Internet Computer\") is ICP MAINNET");
     }
 
     #[test]
@@ -636,6 +756,10 @@ mod catalog_truth_tests {
         );
         assert_eq!(VCHF_LEDGER_PRINCIPAL, p["vchf_ledger"].as_str().unwrap());
         assert_eq!(ICP_LEDGER_PRINCIPAL, p["icp_ledger"].as_str().unwrap());
+        // The EUR dual-rail pair (Stage 1, 2026-09-06): IC-side VEUR ledger + solana-side
+        // EURC mint — both money-defining, so both belt-and-suspenders pinned here too.
+        assert_eq!(VEUR_LEDGER_PRINCIPAL, p["veur_ledger"].as_str().unwrap());
+        assert_eq!(SOLANA_EURC_MINT, p["eurc_mint"].as_str().unwrap());
         assert_eq!(
             CKUSDC_ERC20_ADDRESS,
             t["erc20_contracts"]["ckusdc"].as_str().unwrap()
@@ -651,18 +775,22 @@ mod catalog_truth_tests {
     fn ic_rows_pin_every_rows_principals_ids_and_order() {
         // The REAL-catalog pin: every IC row's ledger/minter principal matches the truth file,
         // the currency ids are exactly the durable set (0,1,2,6 mainnet-real + 3,4,5
-        // testnet-real + 7,8 locked), the source order is stable, and the SERVED sections come
-        // out in the documented order (mainnet 0,1,2,6,7,8 / testnet 3,4,5).
+        // testnet-real + 7,8 locked + 9 VEUR), the source order is stable, and the SERVED
+        // sections come out in the documented order (mainnet 0,1,2,6,7,8,9 / testnet 3,4,5).
         let t = truth();
         let p = &t["principals"];
         let cat = ic_rows();
 
         // Source order + ids.
-        assert_eq!(cat.len(), 9, "9 IC rows: 4 real mainnet + 3 real testnet + VCHF + ICP");
+        assert_eq!(
+            cat.len(),
+            10,
+            "10 IC rows: 4 real mainnet + 3 real testnet + VCHF + ICP + VEUR"
+        );
         assert_eq!(
             cat.iter().map(|d| d.currency).collect::<Vec<_>>(),
-            vec![0, 1, 2, 6, 3, 4, 5, 7, 8],
-            "ids stay the durable set; source order = mainnet-real, testnet-real, locked 7/8"
+            vec![0, 1, 2, 6, 3, 4, 5, 7, 8, 9],
+            "ids stay the durable set; source order = mainnet-real, testnet-real, locked 7/8/9"
         );
 
         // Every row's ledger + minter against the truth file (None ⇒ the row is genuinely
@@ -677,6 +805,7 @@ mod catalog_truth_tests {
             (5, "testnet_cketh_ledger", Some("testnet_cketh_minter")),
             (7, "vchf_ledger", None),
             (8, "icp_ledger", None),
+            (9, "veur_ledger", None),
         ];
         for (cid, ledger_key, minter_key) in pins {
             let row = catalog_currency(&cat, *cid);
@@ -703,7 +832,7 @@ mod catalog_truth_tests {
                 NetworkAssets::Solana(_) => panic!("section {sec} must be an IC section"),
             }
         };
-        assert_eq!(section_ids(0), vec![0, 1, 2, 6, 7, 8], "icp MAINNET section order");
+        assert_eq!(section_ids(0), vec![0, 1, 2, 6, 7, 8, 9], "icp MAINNET section order");
         assert_eq!(section_ids(1), vec![3, 4, 5], "icp TESTNET section order");
         assert!(matches!(body.networks[2].assets, NetworkAssets::Solana(_)));
     }
@@ -733,6 +862,8 @@ mod catalog_truth_tests {
         assert_eq!(demo.gas_ledger, None);
         assert_eq!(demo.onramp, RampCapability::Direct);
         assert_eq!(demo.offramp, RampCapability::Unavailable);
+        assert_eq!(demo.liquidity, None, "pre-EUR row — no tier (wire bytes pinned below)");
+        assert_eq!(demo.ramp_partner, None);
 
         // --- ckBTC (currency 1) ---
         let ckbtc = catalog_currency(&cat, 1);
@@ -876,9 +1007,14 @@ mod catalog_truth_tests {
         // --- ORDER + currency ID: VCHF is id 7, ICP is id 8, appended LAST (after the real
         // mainnet 0,1,2,6 and real testnet 3,4,5), VCHF before ICP. The spec locks 7/8 in BOTH
         // compiled catalogs (this module + the app's BUNDLED_NETWORKS).
-        assert_eq!(cat.len(), 9, "4 real mainnet + 3 real testnet + VCHF + ICP");
+        assert_eq!(cat.len(), 10, "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR");
         assert_eq!(cat[7].symbol.as_deref(), Some("VCHF"), "id 7 IS the VCHF row");
         assert_eq!(cat[8].symbol.as_deref(), Some("ICP"), "id 8 IS the ICP row");
+        assert_eq!(
+            cat[9].symbol.as_deref(),
+            Some("VEUR"),
+            "id 9 IS the VEUR row (full locked-shape test below)"
+        );
 
         // --- VCHF (currency 7): every locked facet.
         let vchf = catalog_currency(&cat, 7);
@@ -928,6 +1064,9 @@ mod catalog_truth_tests {
         assert_eq!(vchf.chain_id, None);
         assert_eq!(vchf.token_contract, None);
         assert_eq!(vchf.gas_ledger, None);
+        // Pre-EUR row: both EUR-dual-rail fields unset (byte-pinned in wire_byte_shape_tests).
+        assert_eq!(vchf.liquidity, None);
+        assert_eq!(vchf.ramp_partner, None);
 
         // --- ICP (currency 8): every locked facet.
         let icp = catalog_currency(&cat, 8);
@@ -968,6 +1107,80 @@ mod catalog_truth_tests {
         assert_eq!(icp.chain_id, None);
         assert_eq!(icp.token_contract, None);
         assert_eq!(icp.gas_ledger, None);
+        assert_eq!(icp.liquidity, None);
+        assert_eq!(icp.ramp_partner, None);
+    }
+
+    #[test]
+    fn ic_rows_veur_row_matches_truth_and_locked_shape() {
+        // EUR dual-rail Stage 1 (2026-09-06): the VEUR (9) row cannot diverge from
+        // dfx/catalog_truth.json (principal, decimals) nor from the LOCKED spec record (fee,
+        // cap, units, network, no-minter shape, Partner off-ramp + named DFX partner, thin
+        // liquidity). Same drift-alarm contract as the VCHF/ICP test above — a drifted field
+        // breaks either the cold-start fallback the wallet renders offline or the exact-ledger
+        // transfer target.
+        let t = truth();
+        let cat = ic_rows();
+
+        // --- ORDER + currency ID: VEUR is id 9, appended LAST (after VCHF/ICP). The spec
+        // locks 9 in BOTH compiled catalogs (this module + the app's BUNDLED_NETWORKS).
+        assert_eq!(cat.len(), 10, "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR");
+        assert_eq!(cat[9].symbol.as_deref(), Some("VEUR"), "id 9 IS the VEUR row");
+
+        // --- VEUR (currency 9): every locked facet.
+        let veur = catalog_currency(&cat, 9);
+        assert_eq!(
+            veur.ledger.as_str(),
+            t["principals"]["veur_ledger"].as_str().unwrap(),
+            "VEUR ledger principal == catalog_truth veur_ledger"
+        );
+        assert_eq!(veur.ledger.as_str(), VEUR_LEDGER_PRINCIPAL);
+        assert_eq!(
+            veur.decimals.unwrap(),
+            t["decimals"]["veur"].as_u64().unwrap() as u8,
+            "VEUR decimals == catalog_truth decimals.veur"
+        );
+        assert_eq!(
+            veur.display_decimals.unwrap(),
+            t["decimals"]["veur"].as_u64().unwrap() as u8
+        );
+        assert_eq!(veur.fee, Some(U64String(10_000)), "locked: 0.0001 VEUR raw fee");
+        assert_eq!(
+            veur.cap,
+            Some(U64String(1_000_000_000_000)),
+            "locked: 10,000 VEUR initial cap (mirrors VCHF's shape — founder to confirm)"
+        );
+        assert_eq!(veur.wrapper_name.as_deref(), Some("VEUR"));
+        assert_eq!(
+            veur.backing_symbol.as_deref(),
+            Some("VEUR"),
+            "payment unit is VEUR (the issuer token), deliberately NOT EUR — same rule as VCHF/CHF"
+        );
+        assert_eq!(veur.symbol.as_deref(), Some("VEUR"));
+        assert_eq!(
+            veur.network.as_deref(),
+            Some("Internet Computer"),
+            "the mainnet label — anything else mis-files the row testnet-side"
+        );
+        // No-minter shape — NEVER a fake family (the rejected payability-gate shortcut).
+        assert!(!veur.mintable);
+        assert_eq!(veur.minter, None);
+        assert_eq!(veur.minter_family, None);
+        // The FIRST Partner row: no compliant fiat on-ramp (honest absence), DFX fiat
+        // off-ramp — named, so "Partner" never renders as an anonymous claim.
+        assert_eq!(veur.onramp, RampCapability::Unavailable);
+        assert_eq!(veur.offramp, RampCapability::Partner);
+        assert_eq!(veur.liquidity, Some(LiquidityTier::Thin));
+        assert_eq!(veur.ramp_partner, Some("DFX"));
+        assert_eq!(
+            veur.min_fraction_digits,
+            Some(2),
+            "unit-denominated — keep 2 decimals ('1.50', '0.00'), like VCHF"
+        );
+        // Not an EVM asset: all three chain fields null.
+        assert_eq!(veur.chain_id, None);
+        assert_eq!(veur.token_contract, None);
+        assert_eq!(veur.gas_ledger, None);
     }
 
     /// The compact-display floor, pinned per row. Exactly the unit-denominated tokens people
@@ -994,6 +1207,7 @@ mod catalog_truth_tests {
                 (5, None),        // ckSepoliaETH
                 (7, Some(2)),     // VCHF
                 (8, None),        // ICP
+                (9, Some(2)),     // VEUR — unit-denominated, like VCHF
             ]
         );
         // A floor above the display cap would ask the formatter for digits it may not show.
@@ -1019,6 +1233,134 @@ mod catalog_truth_tests {
             .iter()
             .map(|r| (r.token, r.min_fraction_digits))
             .collect();
-        assert_eq!(got, vec![("SOL", None), ("USDC", Some(2))]);
+        assert_eq!(got, vec![("SOL", None), ("USDC", Some(2)), ("EURC", Some(2))]);
+    }
+
+    /// The solana section's EUR row (EUR dual-rail Stage 1, 2026-09-06) — the DEEP-liquidity
+    /// half of the EUR pair, complementing the IC-side VEUR (thin). Truth-file mint/decimals
+    /// pins + locked shape.
+    #[test]
+    fn solana_eurc_row_matches_truth_and_locked_shape() {
+        let t = truth();
+        let NetworkAssets::Solana(rows) = solana_network_section().assets else {
+            panic!("the solana section must carry Solana rows");
+        };
+        assert_eq!(rows.len(), 3, "SOL + USDC + EURC");
+        let eurc = rows.iter().find(|r| r.token == "EURC").unwrap();
+        assert_eq!(
+            eurc.mint.as_deref().unwrap(),
+            t["principals"]["eurc_mint"].as_str().unwrap(),
+            "EURC mint == catalog_truth eurc_mint"
+        );
+        assert_eq!(
+            eurc.decimals,
+            t["decimals"]["eurc"].as_u64().unwrap() as u8,
+            "EURC decimals == catalog_truth decimals.eurc"
+        );
+        assert_eq!(eurc.symbol, "EURC");
+        assert_eq!(eurc.min_fraction_digits, Some(2), "unit-denominated: '1.50'");
+        assert_eq!(eurc.liquidity, Some(LiquidityTier::Deep));
+        assert_eq!(eurc.onramp, RampCapability::Unavailable);
+        assert_eq!(eurc.offramp, RampCapability::Unavailable);
+        // The pre-EUR rows carry no tier — the optional field stays unset for them.
+        for r in rows.iter().filter(|r| r.token != "EURC") {
+            assert_eq!(r.liquidity, None, "{} carries no liquidity tier", r.token);
+        }
+    }
+
+    /// The 2026-09-06 fiat-ramp semantics correction: the solana `onramp`/`offramp` fields
+    /// declare FIAT ramps now; SOL/USDC honestly read `Unavailable` (dpay wires no solana
+    /// fiat rail — the old `Direct` described structural self-custody, a tautology on this
+    /// device-key rail that nothing read app-side).
+    #[test]
+    fn solana_rows_declare_no_fiat_ramps() {
+        let NetworkAssets::Solana(rows) = solana_network_section().assets else {
+            panic!("the solana section must carry Solana rows");
+        };
+        for r in &rows {
+            assert_eq!(r.onramp, RampCapability::Unavailable, "{} onramp", r.token);
+            assert_eq!(r.offramp, RampCapability::Unavailable, "{} offramp", r.token);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Wire byte-shape pins (EUR dual-rail Stage 1, 2026-09-06). The new optional
+// fields (`CurrencyDescriptor::liquidity`/`ramp_partner`, `SolanaAsset::liquidity`) are
+// `Option` + `skip_serializing_if`, so every row that leaves them unset must serialize
+// BYTE-IDENTICALLY to the pre-2026-09-06 wire — the wallet + e2e depend on the frozen
+// shape. These tests pin the exact JSON bytes of representative old rows (unchanged) and
+// the two new EUR rows (the new shape), so ANY serializer regression (field reorder, new
+// key, casing) goes RED before it reaches a route test.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod wire_byte_shape_tests {
+    use super::*;
+
+    fn row_json(currency: u32) -> String {
+        serde_json::to_string(ic_rows().iter().find(|d| d.currency == currency).unwrap())
+            .unwrap()
+    }
+
+    #[test]
+    fn pre_eur_ic_rows_serialize_byte_identically() {
+        // ckBTC (1) and VCHF (7) — one minted ramp row, one direct-ICRC row: both end at
+        // "offramp" with NO liquidity/ramp_partner keys. These literals are the pre-2026-09-06
+        // wire bytes; the exact-string pins catch ANY shape drift, not just the new keys.
+        let ckbtc = row_json(1);
+        assert_eq!(
+            ckbtc,
+            "{\"currency\":1,\"ledger\":\"mxzaz-hqaaa-aaaar-qaada-cai\",\"mintable\":false,\"minter\":\"mqygn-kiaaa-aaaar-qaadq-cai\",\"minter_family\":\"CkBtcUtxo\",\"symbol\":\"₿\",\"decimals\":8,\"wrapper_name\":\"ckBTC\",\"backing_symbol\":\"BTC\",\"network\":\"Bitcoin\",\"display_decimals\":8,\"min_fraction_digits\":null,\"fee\":null,\"cap\":\"100000\",\"chain_id\":null,\"token_contract\":null,\"gas_ledger\":null,\"onramp\":\"Direct\",\"offramp\":\"Direct\"}"
+        );
+        let vchf = row_json(7);
+        assert_eq!(
+            vchf,
+            "{\"currency\":7,\"ledger\":\"ly36x-wiaaa-aaaai-aqj7q-cai\",\"mintable\":false,\"minter\":null,\"minter_family\":null,\"symbol\":\"VCHF\",\"decimals\":8,\"wrapper_name\":\"VCHF\",\"backing_symbol\":\"VCHF\",\"network\":\"Internet Computer\",\"display_decimals\":8,\"min_fraction_digits\":2,\"fee\":\"10000\",\"cap\":\"1000000000000\",\"chain_id\":null,\"token_contract\":null,\"gas_ledger\":null,\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}"
+        );
+        // Belt-and-suspenders: EVERY pre-EUR IC row (0,1,2,6,3,4,5,7,8) omits both keys.
+        for cid in [0, 1, 2, 6, 3, 4, 5, 7, 8] {
+            let j = row_json(cid);
+            assert!(!j.contains("\"liquidity\""), "currency {cid} must not carry liquidity");
+            assert!(
+                !j.contains("\"ramp_partner\""),
+                "currency {cid} must not carry ramp_partner"
+            );
+        }
+    }
+
+    #[test]
+    fn veur_row_serializes_with_the_new_optional_fields() {
+        // The LOCKED new-row wire shape: liquidity AFTER offramp (appended last), lowercase
+        // tier, ramp_partner naming the Partner.
+        let veur = row_json(9);
+        assert_eq!(
+            veur,
+            "{\"currency\":9,\"ledger\":\"wu6g4-6qaaa-aaaan-qmrza-cai\",\"mintable\":false,\"minter\":null,\"minter_family\":null,\"symbol\":\"VEUR\",\"decimals\":8,\"wrapper_name\":\"VEUR\",\"backing_symbol\":\"VEUR\",\"network\":\"Internet Computer\",\"display_decimals\":8,\"min_fraction_digits\":2,\"fee\":\"10000\",\"cap\":\"1000000000000\",\"chain_id\":null,\"token_contract\":null,\"gas_ledger\":null,\"onramp\":\"Unavailable\",\"offramp\":\"Partner\",\"liquidity\":\"thin\",\"ramp_partner\":\"DFX\"}"
+        );
+    }
+
+    #[test]
+    fn solana_rows_wire_byte_shape() {
+        // SOL/USDC: the ONE deliberate pre-EUR wire change — onramp/offramp went
+        // Direct→Unavailable (fiat-ramp semantics, documented at solana_network_section) —
+        // with NO liquidity key appended. EURC carries liquidity:"deep" as its last key.
+        let NetworkAssets::Solana(rows) = solana_network_section().assets else {
+            panic!("the solana section must carry Solana rows");
+        };
+        let sol = serde_json::to_string(&rows[0]).unwrap();
+        assert_eq!(
+            sol,
+            "{\"token\":\"SOL\",\"symbol\":\"SOL\",\"decimals\":9,\"min_fraction_digits\":null,\"mint\":null,\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}"
+        );
+        let usdc = serde_json::to_string(&rows[1]).unwrap();
+        assert_eq!(
+            usdc,
+            "{\"token\":\"USDC\",\"symbol\":\"USDC\",\"decimals\":6,\"min_fraction_digits\":2,\"mint\":\"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\"}"
+        );
+        let eurc = serde_json::to_string(&rows[2]).unwrap();
+        assert_eq!(
+            eurc,
+            "{\"token\":\"EURC\",\"symbol\":\"EURC\",\"decimals\":6,\"min_fraction_digits\":2,\"mint\":\"HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\",\"liquidity\":\"deep\"}"
+        );
     }
 }
