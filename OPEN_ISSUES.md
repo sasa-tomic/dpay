@@ -12,10 +12,15 @@ currency (CHF · USD · EUR) chosen at onboarding; a currency spanning several r
 one on price; funding by card through licensed providers; Revolut as the UI reference.
 **Objective 1 (the home currency itself) is BUILT and green on every inner-loop gate — e2e 113/113
 with the new flow 118, jest 84/1698, relay 88/88 — and is NOT deployed. Objective 2 (a currency is
-a set of rails, dpay picks one) LANDED 2026-09-05, app-only, five commits `3d44de1`→`470b0b6`,
-same not-deployed caveat (prod relay at `a913c6d`, measured 2026-09-05). Objectives 3 and 4 are
-not started**, including the Revolut information architecture itself: what landed is the currency
-model and its rail group, not the balance-first home. The objectives, the founder decisions, the
+a set of rails, dpay picks one) LANDED 2026-09-05, app-only, five commits `3d44de1`→`470b0b6`; the
+EUR dual-rail LANDED 2026-09-06, three commits `0ab1881`→`351952b` (paragraph below); Objective 4's
+first slice — the persistent bottom navigation replacing the top pills, same tabs, same landing
+(`2c90ce0`) — is landed too. Objectives 3 and the rest of 4 are not started**, including the
+balance-first home: what landed is the currency model, its rail group, and the new tab bar, not the
+Revolut home. **The one pending founder deploy now carries BOTH halves — the Objective 1+2+O4-S1 UI
+work AND the EUR rails (relay catalog + app): prod was measured at `a913c6d`, pre-EUR, on 2026-09-06
+(17 commits unshipped, `bc106b4`..HEAD); they go live with the next `just deploy-ic && just apk &&
+just up`.** The objectives, the founder decisions, the
 boundary that keeps rail-selection inside the no-swap non-negotiable, the measured venue/ramp
 evidence, the code cost, and the three UI-honesty defects this work surfaced and fixed:
 [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
@@ -38,6 +43,24 @@ Fees are facts in their own units — NO cross-token comparison anywhere; that w
 gated on Objective 3's legal decisions. New e2e flows 120–124; default suite 119/119 GREEN,
 `FLOWS.md` 120 rows. **Objectives 3 (card/bank funding) and 4 (Revolut-style home) remain NOT
 STARTED — the next work.**
+
+**The EUR dual-rail LANDED 2026-09-06 (founder decision: EUR spans BOTH rails, superseding the
+plan's "VEUR is not in the catalog and must not be added" line).** VEUR@IC is currency 9 (ledger
+`wu6g4-6qaaa-aaaan-qmrza-cai`, 8dec, fee 10 000 e8s, complete no-minter direct-ICRC row in the
+VCHF/ICP shape) with liquidity `thin` — on-chain supply is a verified stub (~1.5 VEUR) — and the
+catalog's first `offramp=Partner` row (`ramp_partner:"DFX"`; DFX lists VEUR sellable-not-buyable,
+onramp honestly Unavailable); its payment-policy cap `1_000_000_000_000` e8s = 10 000 VEUR mirrors
+VCHF's shape and awaits founder confirmation. EURC@Solana (Circle mint `HzwqbK…uBEDKtr`, 6dec,
+legacy SPL Token program) is liquidity `deep` (~105M circulating). Liquidity is DATA — an optional
+`deep|thin` catalog field, absent = no statement, old rows byte-identical (relay-pinned wire). The
+Solana engine was generalized off USDC-hardcoding (`app/solana/tokens.ts` registry; per-mint
+balances/gates/ATA; USDC goldens byte-stable). UI: a chooser detail step for multi-rail currencies
+(per-rail chain tag, fee in its own unit, liquidity line, ramp fact, default-pick reason) and a
+shared `RailLiquidityNote` (one testID) on Balances rows, the receive disclosure, and the fund
+gates (thin warns; deep renders only in the detail step). e2e flows 129–132 new, 118 inverted (EUR
+present), 120 extended; suite 123/123 GREEN, `FLOWS.md` 124 rows — superseding the counts in the
+O2 paragraph above. Same not-deployed caveat: rows render app-side from the bundled mirror; the
+relay serves them only after the founder's `just up`.
 
 Opened by that investigation, and each independently actionable:
 
@@ -130,7 +153,9 @@ Opened by that investigation, and each independently actionable:
      a blanket refusal of non-ICP Internet Computer assets, and that refusal rested on a wrong
      diagnosis of the CHF 1 loss. With the real cause fixed, the refusal and its exception are both
      gone, so there is no second-relay case left to decide.
-   - **EURC** — the last item the plan itself lists as open.
+    - ~~**EURC** — the last item the plan itself lists as open.~~ **CLOSED 2026-09-06 — both EUR
+      rails (EURC@Solana deep, VEUR@IC thin) are catalogued and landed app-side** (EUR dual-rail,
+      work order above); relay-side they ship with the pending founder deploy.
    - A relay-served merchant page (the plan's "web page later") is additive and unstarted.
    Founder ops:
    - ~~**PROD IS AT `425eb97` AND SERVES AN UNGATED, UNSIGNED TILL.**~~ **DONE — the founder

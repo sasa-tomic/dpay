@@ -82,8 +82,9 @@ across launches.
 ### O2 — a currency is a set of rails, and dpay picks one
 
 `CHF` resolves to `VCHF@InternetComputer` or `VCHF@Solana`; `USD` to `ckUSDC@InternetComputer` or
-`USDC@Solana`; `EUR` to `EURC@Solana`. The wallet chooses per operation, on measured cost, and tells
-the user which rail it chose and why.
+`USDC@Solana`; `EUR` to `EURC@Solana` — since the 2026-09-06 founder decision, `EUR` to BOTH rails
+(`EURC@Solana` and `VEUR@InternetComputer`; see the addendum below). The wallet chooses per
+operation, on measured cost, and tells the user which rail it chose and why.
 
 **LANDED 2026-09-05, app-only, five commits (`3d44de1`→`470b0b6`) — not deployed; deployment state
 lives in `OPEN_ISSUES.md`.** The group is the model, purely in `app/config/currency.ts`: `railFees`
@@ -101,6 +102,46 @@ the chooser) plus e2e flows 123 (a named-rail link pays the named rail exactly) 
 one-tap switch). Fees stay facts in their own units — no cross-token comparison anywhere; that would
 be an FX quote and waits on O3's legal decisions. New e2e flows 120–124; the default suite runs 119
 GREEN, `FLOWS.md` carries 120 rows. Objectives 3 and 4 remain not started.
+
+#### Addendum 2026-09-06 — the EUR dual-rail, landed
+
+**Founder decision 2026-09-06: EUR spans BOTH rails — VEUR on the Internet Computer *and* EURC on
+Solana.** This supersedes two things this plan said: decision 2's "EUR is EURC on Solana"
+single-rail shape, and the "VEUR is not in the catalog and must not be added" line under "What this
+costs in code" (struck there). Landed as three commits — `0ab1881` (catalog data), `b2f3998`
+(Solana engine generalization), `351952b` (rail-health UI):
+
+- **VEUR@IC** — currency 9, ledger `wu6g4-6qaaa-aaaan-qmrza-cai`, 8 decimals, fee 10 000 e8s
+  (0.0001 VEUR): a complete **no-minter direct-ICRC row in exactly the VCHF/ICP shape** (payment is
+  an app-signed `icrc1_transfer` straight to the ledger). Liquidity **`thin`** — on-chain supply is
+  a verified stub (~1.5 VEUR total). DFX lists VEUR sellable-not-buyable, encoded as the catalog's
+  first `offramp = Partner` row (`ramp_partner: "DFX"`); onramp stays `Unavailable` (no compliant
+  fiat rail in). The payment unit is the issuer token "VEUR", never "EUR" — the same rule as
+  VCHF/CHF. **Cap flag:** the row's payment-policy cap `1_000_000_000_000` e8s = 10 000 VEUR
+  mirrors VCHF's shape and **awaits founder confirmation**.
+- **EURC@Solana** — Circle mint `HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr`, 6 decimals, the
+  legacy SPL Token program (not Token-2022). Liquidity **`deep`** (~105M circulating). No fiat ramp
+  through dpay — honest `Unavailable`.
+- **Liquidity is DATA, not prose.** `liquidity: 'deep' | 'thin'` is an optional field on catalog
+  rows; absent = no statement, and old rows serialize byte-identically — the wire shape is
+  relay-pinned. Both parsers (relay + app) fail closed to null on anything unexpected.
+- **The Solana engine was generalized off USDC-hardcoding.** `app/solana/tokens.ts` is the pure
+  per-mint registry (SOL/USDC/EURC; `spl.ts` re-exports the USDC consts — no second source);
+  balances, fund gates, and ATA setup are per-mint. USDC goldens are byte-stable.
+- **UI.** A chooser **detail step** for multi-rail currencies: tapping the EUR row expands an
+  in-card panel — per rail, the chain tag, the fee in its own unit, the liquidity line, the ramp
+  fact, and the default-pick reason on the preferred rail only (EURC leads because its liquidity is
+  catalogued deep while VEUR's is thin); single-rail currencies confirm as before, and the
+  `home-currency-*` / `btn-home-currency-continue` surfaces are byte-stable. A shared
+  `RailLiquidityNote` (one testID) renders the catalog's liquidity statement on Balances rows, the
+  receive disclosure, and the fund gates — `thin` warns everywhere it appears; `deep` renders only
+  in the detail step.
+- **NOT deployed.** The rows appear app-side from the bundled mirror; the relay serves them only
+  after the founder's `just up` (prod measured at `a913c6d`, pre-EUR, 2026-09-06 — deployment state
+  in `OPEN_ISSUES.md`).
+- **E2E.** Flows 129–132 new (rail detail · Balances rails · receive rail · EURC Solana Pay); 118
+  inverted (EUR is present — the chooser offers CHF/USD/EUR); 120 extended (the EUR group). Suite
+  123/123 GREEN; `FLOWS.md` carries 124 rows (supersedes the counts above).
 
 ### O3 — funding: card and bank, several providers
 
@@ -158,7 +199,8 @@ distinguishing them already exists: `chipLabel` qualifies colliding symbols with
   (`app/lib/types.ts`). Adding VCHF and EURC on Solana means generalising the Solana rail from two
   hard-coded tokens to a mint-keyed catalog, including the single-mint assumption in
   `app/solana/spl.ts`.
-- **VEUR is not in the catalog** and must not be added; EURC is a Solana row, not an IC one.
+- ~~**VEUR is not in the catalog** and must not be added; EURC is a Solana row, not an IC one.~~
+  **SUPERSEDED 2026-09-06: both EUR rails are catalogued — see the O2 addendum.**
 - **The e2e preamble is the big mechanical cost.** `onboardWallet` waits on `∂100.00` in the header,
   which is only true if the landed asset is DEMO; 106 of the flows go through it. A new onboarding
   step and a non-DEMO default both land here.
