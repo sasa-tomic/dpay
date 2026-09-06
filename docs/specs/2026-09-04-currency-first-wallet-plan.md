@@ -274,3 +274,44 @@ existing Balances sheet. The scanner remains the landing screen (founder decisio
 preamble answers the currency question and then selects DEMO explicitly (`chooseHomeCurrencyIfPresent`
 + `selectDemoAsset` in `e2e/harness/lib.mjs`). Flows whose subject IS the demo rail say so; flow 118
 is the one that keeps its currency and checks what it bought.
+
+## What landed 2026-09-06 — objective 4 (S1–S4)
+
+Built app-only in three commits (`b5912b6` S1+S2, `711b0ef` S3, `798edc2` device-gate script),
+green on every gate (tsc clean; jest 91 suites / 1888; e2e **127/127** incl. new flows 133–136;
+`just app` + `just ondevice` + `just campreview` on the emulator). Not deployed — `OPEN_ISSUES.md`
+carries deployment state.
+
+- **The Home tab is the 4th bottom tab, leftmost** (`tab-home`, `IconHome`). The scanner stays the
+  landing screen — initial mode is still `'pay'` (founder decision 4; flow 90 pins it).
+- **Headline** (`home-headline-label` / `home-headline-amount`): the SELECTED asset's balance in its
+  own token unit, with the eyebrow mirroring the header exactly — home-currency name + `· Main`
+  when the selected asset is the home rail, `balance.of(chipLabel)` otherwise, and the offline
+  `approx.` marker OUTRANKS both (the honesty rule flow 100 fixed). No FX, no portfolio or group
+  sum — one asset's own balance.
+- **Action row** (`btn-home-pay` / `btn-home-receive` / `btn-home-add-money`): Pay and Receive
+  switch tabs; Add money is capability-dispatched — DEMO fires the existing faucet (`topUp` busy/err
+  machinery, honest fail-closed copy), every other asset lands the asset's own fund surface via
+  `goToDeposit`. One surface for every currency; no per-asset special cases.
+- **Inline accounts** (O4 S3): the BalancesSheet row list moved WHOLESALE onto Home
+  (`home-accounts` container) — every row testID preserved (`asset-<key>`, whole-row
+  `asset-<key>-select`, MAIN badge on `preferredRail` only, sibling `-rail` badges naming the rail,
+  DEMO `btn-topup`/`topup-err`, testnet toggle). Row select STAYS on Home; selection remains ONE
+  derived `selectedAsset` behind the lock-gated `handleSelect`.
+- **The Balances modal is deleted** (`BalancesSheet.tsx` gone; `balances.title/close/intro/escToClose`
+  i18n retired in all four locales). The header balance tap, the `a` hotkey, and the passport
+  `fundsReady` step all land Home now; the BackHandler close-balances branch is gone;
+  `balance.hint` copy points at the Home tab.
+- **Inline activity feed**: the first 3 ledger rows via the shared `HistoryRow` (extracted from
+  Ledger byte-stably — `Ledger.test.tsx` passed unchanged), own token unit per row, `home-hist-*`
+  testIDs, See-all → the Transactions tab, honest empty line.
+- **Harness**: `openBalances` = tap `tab-home` + wait `asset-demo-select` (name kept, 56 callers
+  unchanged); `selectCurrency` = row tap + `aria-selected` wait + tab-pay restore;
+  `CurrencyRow`'s card carries `aria-selected` directly (RNW 0.21 does NOT render
+  `accessibilityState.selected` to the DOM — probed live). Flows 133–136 new (home surface,
+  add-money dispatch, activity, the old BalancesSheet contract ported); flows 40/84 visual:
+  the `balances` baseline retired, `home` seeded light + dark; cosmetics through 118/121 etc.
+  `FLOWS.md` 128 rows (127 in the default run).
+- **Device gates green**: `just app`, `just ondevice`, and `just campreview` both rails — the
+  campreview script was taught the new onboarding (tour + rehearsal walk, currency-detail collapse,
+  below-fold row scroll, verified row select, `798edc2`).

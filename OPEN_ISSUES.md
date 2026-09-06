@@ -13,14 +13,16 @@ one on price; funding by card through licensed providers; Revolut as the UI refe
 **Objective 1 (the home currency itself) is BUILT and green on every inner-loop gate — e2e 113/113
 with the new flow 118, jest 84/1698, relay 88/88 — and is NOT deployed. Objective 2 (a currency is
 a set of rails, dpay picks one) LANDED 2026-09-05, app-only, five commits `3d44de1`→`470b0b6`; the
-EUR dual-rail LANDED 2026-09-06, three commits `0ab1881`→`351952b` (paragraph below); Objective 4's
-first slice — the persistent bottom navigation replacing the top pills, same tabs, same landing
-(`2c90ce0`) — is landed too. Objectives 3 and the rest of 4 are not started**, including the
-balance-first home: what landed is the currency model, its rail group, and the new tab bar, not the
-Revolut home. **The one pending founder deploy now carries BOTH halves — the Objective 1+2+O4-S1 UI
-work AND the EUR rails (relay catalog + app): prod was measured at `a913c6d`, pre-EUR, on 2026-09-06
-(17 commits unshipped, `bc106b4`..HEAD); they go live with the next `just deploy-ic && just apk &&
-just up`.** The objectives, the founder decisions, the
+EUR dual-rail LANDED 2026-09-06, three commits `0ab1881`→`351952b` (paragraph below); **objective 4
+S1–S4 (the Revolut IA) LANDED 2026-09-06, app-only, commits `b5912b6` + `711b0ef` + `798edc2`:
+the balance-first Home tab (4th bottom tab, leftmost) with the headline + action row, the inline
+accounts list (the Balances modal is RETIRED — `BalancesSheet.tsx` deleted, every row testID
+preserved), and a 3-row activity feed; flows 133–136 new, `FLOWS.md` 128 rows, and every gate
+green incl. the device gates (campreview taught the new onboarding, `798edc2`). NOT deployed.**
+Objective 3 (card/bank funding) is not started. **The one pending founder deploy now carries ALL
+of it — the Objective 1+2+4 UI work AND the EUR rails (relay catalog + app): prod was measured at
+`c87102f` on 2026-09-06 (5 commits unshipped, `b6b5b6e`..HEAD, the whole O4 home tab among them);
+`just deploy-ic && just apk && just up`.** The objectives, the founder decisions, the
 boundary that keeps rail-selection inside the no-swap non-negotiable, the measured venue/ramp
 evidence, the code cost, and the three UI-honesty defects this work surfaced and fixed:
 [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
