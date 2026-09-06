@@ -95,6 +95,9 @@ export const walletFr: WalletMessages = {
     from: who => `de ${who}`,
     mintCounterparty: 'la démo',
     failed: 'Échec — seuls les frais de réseau ont été prélevés',
+    dropped: count => count === 1
+      ? '1 transaction Solana n’a pas pu être lue — elle existe toujours on-chain, mais n’est pas affichée ici.'
+      : `${count} transactions Solana n’ont pas pu être lues — elles existent toujours on-chain, mais ne sont pas affichées ici.`,
   },
 
   fund: {checking: 'Vérification…', checkAgain: 'Revérifier'},

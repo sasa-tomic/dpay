@@ -172,9 +172,16 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
 
   test('unreadable transactions are counted out loud, so a short list is never silently short', async () => {
     mockedGetSolanaHistory.mockResolvedValue(history([row()], 2));
-    const {rows, tree} = await mount();
+    const {rows, tree, apiRef} = await mount();
     expect(rows()).toHaveLength(1);
+    expect(apiRef.current!.dropped).toBe(2); // the count rides to the ledger's honesty note
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('2 transaction(s) unreadable'));
+    // A CLEAN re-poll CLEARS the count (it is set on every poll, not only raised) — a note about a
+    // broken RPC must not outlive the fix, and a clean read is never re-announced.
+    mockedGetSolanaHistory.mockResolvedValue(history([row()]));
+    await act(async () => { jest.advanceTimersByTime(POLL.history); });
+    expect(apiRef.current!.dropped).toBe(0);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('0 transaction(s) unreadable'));
     act(() => { tree.unmount(); });
   });
 

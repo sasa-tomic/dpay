@@ -231,8 +231,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // The SOL rail's half of the Transactions list, read straight from the Solana RPC (no relay, no
   // canister — same device-key rail as the balances above). Gated on `solAddress` exactly as
   // `buildSelectableAssets`' `solanaEnabled` is: no device key ⇒ no rail ⇒ no polling. The two
-  // lists are merged newest-first below and rendered by the ONE Ledger surface both rails share.
-  const {history: solHistory, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
+  // lists are merged newest-first below and rendered by the ONE Ledger surface both rails share;
+  // `solDropped` (transactions the reader could not parse) rides along so the Ledger can say the
+  // list may be short — they still exist on-chain.
+  const {history: solHistory, dropped: solDropped, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(history, solHistory), [history, solHistory]);
 
   // One-time token-account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
@@ -1070,7 +1072,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   />
                 )
           )
-          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} />}
+          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the three primary tabs moved from the top pill row

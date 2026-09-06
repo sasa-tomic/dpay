@@ -48,13 +48,21 @@ function fmtRowAmount(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableA
 // and the native Solana device-key rail), and a currency u32 cannot name `solana:SOL`. `assets` is
 // the wallet's visible SelectableAsset list — the single source of the labels, decimals and symbols
 // both rails are rendered with.
-export function Ledger({history, catalog, assets}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]}) {
+//
+// `dropped` (optional, default 0): how many Solana transactions the reader could not parse. When
+// non-zero, the honesty note `M.wallet.ledger.dropped` renders in BOTH branches (empty list and
+// populated) — the unreadable transactions still exist on-chain, and a short (or empty) list must
+// never read as the whole truth. Nothing renders when it is 0.
+export function Ledger({history, catalog, assets, dropped = 0}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number}) {
   const [filter, setFilter] = useState<AssetId | null>(null);
   if (history.length === 0) {
     return (
       <View testID="ledger-view">
         <Text style={S.ledgerEmpty}>{M.wallet.ledger.empty}</Text>
         <Text style={S.dim2}>{M.wallet.ledger.emptyHint}</Text>
+        {dropped > 0 ? (
+          <Text style={S.dim2} testID="ledger-dropped-note">{M.wallet.ledger.dropped(dropped)}</Text>
+        ) : null}
       </View>
     );
   }
@@ -66,6 +74,9 @@ export function Ledger({history, catalog, assets}: {history: Txn[]; catalog: Cur
   return (
     <View style={S.ledgerWrap} testID="ledger-view">
       <Text style={S.histTitle}>{M.wallet.ledger.recent}</Text>
+      {dropped > 0 ? (
+        <Text style={S.dim2} testID="ledger-dropped-note">{M.wallet.ledger.dropped(dropped)}</Text>
+      ) : null}
       {showFilter ? (
         <View style={S.filterRow}>
           <Pressable

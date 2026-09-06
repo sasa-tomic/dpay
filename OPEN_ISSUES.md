@@ -223,9 +223,23 @@ Opened by that investigation, and each independently actionable:
 5. **Reconcile heartbeat + paging** (###5 deferral): bounded walk exists; add the deferred
    periodic heartbeat + pagination on top.
 6. **SOL v2 follow-ups (low):** source-ATA auto-create for USDC offline pay; stronger
-   `getTransaction` receipt verify. Audit flow 76 (`sol-usdc-ata-gate`) first — it may partially
-   cover the first item. (Was written as "flow 62"; there is no flow 62 — the id range has a gap
-   at 62 and the ATA flow is 76.)
+   `getTransaction` receipt verify. (Was written as "flow 62"; there is no flow 62 — the id range
+   has a gap at 62 and the ATA flow is 76.) **Audited 2026-09-06:** flow 76 covers NONE of the
+   offline pay path — it pins the RECEIVE-side tri-state (absent → one-tap online `createTokenAta`)
+   only. (a) The offline payer signs PURE (`signSplPayment`: no RPC, no source-ATA existence check,
+   no create-idempotent instruction — the source ATA is assumed as `deriveAta(payer, mint)`), and
+   the solreq scan/NFC auto-sign path has no per-request-mint absent-ATA gate; the only gates are
+   the SELECTED-asset `token-absent` UI replacement (same-mint case) and `startSpay`'s absent
+   refusal (online `solana:`-URI path only). Remaining gap: a cross-mint solreq (a request naming a
+   funded-but-not-selected SPL mint) signs offline against an ATA that may not exist → the merchant
+   broadcast fails REJECTED at the RPC (fail-closed — no funds lost, but a dead QR). (b) Receipt
+   verify: `broadcastSolPayment` already strict-verifies the signed BYTES (`verifySolPayment`:
+   single-signer, byte-equal canonical message, ed25519) and settles on `getSignatureStatuses`
+   alone; strengthening = re-reading the confirmed transaction via `getTransaction` and matching
+   its instructions/amount against the canonical message before SETTLED. Feasible app-only
+   (`rpc.getTransaction` exists; sole consumer today is `solana/history.ts`) but NOT a one-liner —
+   it adds a fixture surface to every e2e stub plus a mismatch classification (REJECTED vs
+   UNREACHABLE) to the money-critical state machine. Left unimplemented per the audit scope.
 
 ## Physical / outer-loop gates (NOT autonomous)
 
@@ -348,9 +362,12 @@ Opened by that investigation, and each independently actionable:
   against stubbed RPC responses shaped from the JSON-RPC spec; it has never run against a live
   cluster. Its balance-delta reading of direction/amount, the v0 `loadedAddresses` account
   indexing, and the USDC-row/SOL-fee-row suppression are the parts a real transaction would test.
-- **(low) `SolanaHistory.dropped` is logged, not surfaced.** A transaction the reader cannot parse
-  is counted and warned, so a short list is never silently short — but the user is not told. Needs
-  copy in 4 locales before it can be shown.
+- ~~**(low) `SolanaHistory.dropped` is logged, not surfaced.**~~ **CLOSED 2026-09-06 — surfaced.**
+  `useSolanaHistory` now returns the count (reset on every poll, so a clean read clears the note)
+  and the Ledger renders `M.wallet.ledger.dropped(n)` — copy in all four locales — under the list
+  when `dropped > 0`: a plain note that they could not be read but still exist on-chain, never an
+  error. Nothing renders when 0; both the empty and populated branches are jest-pinned
+  (`Ledger.test.tsx`).
 - **(medium) Withdrawal approve→retrieve front-running residual** (old ###9) — includes the
   inherent dual-approve partial-failure class (old O4); documented mitigation in place.
 - **WC per-`request()` unbounded** (`app/wallet.ts`) — inherent to EIP-1193 (no standard timeout

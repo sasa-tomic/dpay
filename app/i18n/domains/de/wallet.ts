@@ -94,6 +94,9 @@ export const walletDe: WalletMessages = {
     from: who => `von ${who}`,
     mintCounterparty: 'Demo-Guthaben',
     failed: 'Fehlgeschlagen — nur die Netzwerkgebühr wurde abgebucht',
+    dropped: count => count === 1
+      ? '1 Solana-Transaktion konnte nicht gelesen werden — sie existiert weiterhin on-chain, wird hier aber nicht angezeigt.'
+      : `${count} Solana-Transaktionen konnten nicht gelesen werden — sie existieren weiterhin on-chain, werden hier aber nicht angezeigt.`,
   },
 
   fund: {checking: 'Wird geprüft…', checkAgain: 'Erneut prüfen'},

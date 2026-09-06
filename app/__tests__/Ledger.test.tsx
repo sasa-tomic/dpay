@@ -57,9 +57,9 @@ function testIDs(tree: renderer.ReactTestRenderer): string[] {
   return [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
 }
 
-function mount(history: Txn[]): renderer.ReactTestRenderer {
+function mount(history: Txn[], dropped = 0): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
-  act(() => { tree = renderer.create(<Ledger history={history} catalog={CATALOG} assets={ASSETS} />); });
+  act(() => { tree = renderer.create(<Ledger history={history} catalog={CATALOG} assets={ASSETS} dropped={dropped} />); });
   return tree;
 }
 
@@ -174,6 +174,41 @@ describe('Ledger — a mixed IC + Solana list', () => {
     const tree = mount([]);
     expect(texts(tree)).toContain(M.wallet.ledger.empty);
     expect(testIDs(tree)).toEqual(['ledger-view']);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('Ledger — the dropped-transactions honesty note', () => {
+  // OPEN_ISSUES 'SolanaHistory.dropped is logged, not surfaced': the reader counts transactions it
+  // cannot parse; the note says plainly that they exist on-chain but are not shown. A note, never
+  // an error — everything the list does show is still true.
+  test('dropped > 0 renders the note naming the count, in the populated-list branch', () => {
+    const tree = mount([txn('solana:SOL', '1000000000', TS_NEW)], 2);
+    expect(testIDs(tree)).toContain('ledger-dropped-note');
+    expect(texts(tree)).toContain(M.wallet.ledger.dropped(2));
+    act(() => { tree.unmount(); });
+  });
+
+  test('dropped > 0 renders the note in the EMPTY branch too — an all-dropped poll is not "no payments"', () => {
+    const tree = mount([], 3);
+    expect(testIDs(tree)).toContain('ledger-dropped-note');
+    expect(texts(tree)).toContain(M.wallet.ledger.dropped(3));
+    act(() => { tree.unmount(); });
+  });
+
+  test('dropped = 0 (the default) renders nothing — the note is purely conditional', () => {
+    const tree = mount([txn('solana:SOL', '1', TS_NEW)]);
+    expect(testIDs(tree)).not.toContain('ledger-dropped-note');
+    act(() => { tree.unmount(); });
+    const empty = mount([]);
+    expect(testIDs(empty)).not.toContain('ledger-dropped-note');
+    act(() => { empty.unmount(); });
+  });
+
+  test('count 1 uses the singular sentence — the note is honest about ONE missing transaction', () => {
+    const tree = mount([txn('solana:SOL', '1', TS_NEW)], 1);
+    expect(texts(tree)).toContain(M.wallet.ledger.dropped(1));
+    expect(texts(tree)).not.toContain(M.wallet.ledger.dropped(2));
     act(() => { tree.unmount(); });
   });
 });

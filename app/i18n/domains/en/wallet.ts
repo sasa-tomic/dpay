@@ -171,6 +171,12 @@ export type WalletMessages = {
      * as a tiny successful payment. This line is what stops that.
      */
     failed: string;
+    /**
+     * The honesty note under the list when the Solana reader could not read some transactions
+     * (`SolanaHistory.dropped > 0`): they are missing from this list but still exist on-chain.
+     * A note, never an error — everything the list DOES show is still true.
+     */
+    dropped: (count: number) => string;
   };
 
   /** The shared "add funds before you pay" panel's recheck link (both rails). */
@@ -283,6 +289,9 @@ export const walletEn: WalletMessages = {
     from: who => `from ${who}`,
     mintCounterparty: 'Demo funds',
     failed: 'Failed — only the network fee was charged',
+    dropped: count => count === 1
+      ? '1 Solana transaction could not be read — it still exists on-chain, but is not shown here.'
+      : `${count} Solana transactions could not be read — they still exist on-chain, but are not shown here.`,
   },
 
   fund: {checking: 'Checking…', checkAgain: 'Check again'},

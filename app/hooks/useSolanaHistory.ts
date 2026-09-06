@@ -15,9 +15,14 @@ import type {Txn} from '../lib/types';
  * Best-effort exactly like the IC hook: a failed poll KEEPS the prior list (an RPC outage must never
  * blank the ledger) and is logged with the address. Fetch on mount + re-poll every `POLL.history`;
  * the interval clears on unmount. A null `address` (no device key) polls nothing.
+ *
+ * The reader also reports how many transactions it could NOT parse (`dropped`) — the hook surfaces
+ * that count alongside the rows so the ledger can say the list may be short (each unreadable
+ * transaction still exists on-chain; the short list is never silently short).
  */
-export function useSolanaHistory(address: string | null): {history: Txn[]; refreshHistory: () => Promise<void>} {
+export function useSolanaHistory(address: string | null): {history: Txn[]; dropped: number; refreshHistory: () => Promise<void>} {
   const [history, setHistory] = useState<Txn[]>([]);
+  const [dropped, setDropped] = useState(0);
 
   const refreshHistory = useCallback(async () => {
     if (address === null) return;
@@ -34,6 +39,8 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; refre
       // records the COUNT so a short list is never silently short.
       console.warn(`useSolanaHistory: ${result.dropped} transaction(s) unreadable for ${address} (each logged above)`);
     }
+    // Set on EVERY poll (not only when > 0): a clean read after a dirty one clears the note.
+    setDropped(result.dropped);
     setHistory(result.rows.map(toTxn));
   }, [address]);
 
@@ -45,7 +52,7 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; refre
     return () => { alive = false; clearInterval(id); };
   }, [refreshHistory]);
 
-  return {history, refreshHistory};
+  return {history, dropped, refreshHistory};
 }
 
 /** One `SolanaHistoryRow` as a ledger row. Pure; every honesty decision it makes is documented. */
