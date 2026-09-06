@@ -1,447 +1,204 @@
 # OPEN_ISSUES — the authoritative open list
 
 > Role: known blockers + documented follow-ups. Read top-down; work order first.
-> **Pruned 2026-08-27** (2,345 → this): every completed session record / resolved bug was
-> removed — nothing was closed by the prune itself, only re-filed or dropped as stale-duplicate.
-> Full history: `git log --follow -p OPEN_ISSUES.md` (last pre-prune state at `ad65174`).
+> **Pruned 2026-09-06** (455 lines → this): closed records removed — governance P1/P2 (`8805027`),
+> SOL 6(a) (`9c7572f`), the e2e balance-route residual (`450bdc7`), item 4 and `refresh_deposit`
+> (retired, struck below with their evidence), the completed OCP founder-ops, and the settled
+> landed-objective narratives (compressed to one line each). Nothing was closed by the prune
+> itself; every removal is evidenced by a cited commit or a struck line below. Precedent:
+> **Pruned 2026-08-27** — full history: `git log --follow -p OPEN_ISSUES.md` (last pre-prune
+> state at `ad65174`).
 
-## NEXT SESSION — work order (unblocked; do these first)
+## NEXT SESSION — work order
 
-**TOP OF THE BACKLOG — the money the user thinks in (founder direction, 2026-09-04).** A home
-currency (CHF · USD · EUR) chosen at onboarding; a currency spanning several rails with dpay picking
-one on price; funding by card through licensed providers; Revolut as the UI reference.
-**Objective 1 (the home currency itself) is BUILT and green on every inner-loop gate — e2e 113/113
-with the new flow 118, jest 84/1698, relay 88/88. Objective 2 (a currency is
-a set of rails, dpay picks one) LANDED 2026-09-05, app-only, five commits `3d44de1`→`470b0b6`; the
-EUR dual-rail LANDED 2026-09-06, three commits `0ab1881`→`351952b` (paragraph below); **objective 4
-S1–S4 (the Revolut IA) LANDED 2026-09-06, app-only, commits `b5912b6` + `711b0ef` + `798edc2`:
-the balance-first Home tab (4th bottom tab, leftmost) with the headline + action row, the inline
-accounts list (the Balances modal is RETIRED — `BalancesSheet.tsx` deleted, every row testID
-preserved), and a 3-row activity feed; flows 133–136 new, `FLOWS.md` 128 rows, and every gate
-green incl. the device gates (campreview taught the new onboarding, `798edc2`).**
-Objective 3 (card/bank funding) is not started. **Everything above is SHIPPED — the Objective 1+2+4
-UI work AND the EUR rails (relay catalog + app): shipped 2026-09-06,
-live relay measured at `face8fba` = HEAD (`just verify-relay` PASS at HEAD-equality; both EUR rows
-verified in the live catalog).** The objectives, the founder decisions, the
-boundary that keeps rail-selection inside the no-swap non-negotiable, the measured venue/ramp
-evidence, the code cost, and the three UI-honesty defects this work surfaced and fixed:
-[`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
-This outranks everything numbered below, including the OpenCryptoPay milestone — which the founder
-reframed the same day as **one interop rail among several, not the strategy**.
+**1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
+until the blockers land. THE thing that unblocks it:**
 
-**Objective 2's substance (2026-09-05):** the rail model is pure in `app/config/currency.ts` —
-`railFees` states each rail's fee as a FACT in the rail's own unit, `chooseRail` is the explainable
-policy (destination → funded → preference, first match wins, returning a reason), `railsLabel` puts
-the whole group on one line. The chooser and Settings name every rail of the group with the
-preferred rail's reason; Balances badges every sibling rail (MAIN stays on the preferred one, rows
-never merged, no group sum); Receive defaults to the chosen rail and discloses both rails'
-addresses/fees via `RailDisclosure`, and `IcrcDepositSheet` now names the settlement chain (ckUSDC
-no longer says "Ethereum"); SendSheet's route line names the rail and its fee. The funded-sibling
-pointer on all four fund gates switches via lock-gated `payRailSelect` — a user gesture, never a
-side-effect. Never-override is PINNED: `app/__tests__/rail-choice-isolation.test.ts` (structural —
-no pinned surface, `resolvePayLink`/OpenCryptoPay/Solana Pay/wire, may import or call the chooser)
-+ e2e flows 123 (a named-rail link pays the named rail exactly) and 124 (pointer + one-tap switch).
-Fees are facts in their own units — NO cross-token comparison anywhere; that would be an FX quote,
-gated on Objective 3's legal decisions. New e2e flows 120–124; default suite 119/119 GREEN,
-`FLOWS.md` 120 rows. **Objectives 3 (card/bank funding) and 4 (Revolut-style home) remain NOT
-STARTED — the next work.**
+- **(a) Onramp founder decisions — confirm-or-drop the 2026-07-30 set**
+  (`docs/specs/2026-07-30-ckusdc-onramp-offramp.md` §6, also filed DO-NOT-NAG below): Q1
+  direct-vs-partner sequencing, Q2 partner aggregator + venue list + static-vs-widget-vs-deeplink,
+  Q3 KYC surfacing, Q4 chains, Q5 fees, Q14 wrong-network recourse.
+- **(b) positioning.md decisions 1+2** (regulatory evidence: `docs/REGULATORY.md`): display a rate
+  at all (quote, or only relay the provider's quote — computing one is the broker line), and pick
+  the provider vs let the user pick (picking is routing — the clause with legal weight).
+- **(c) Counsel answers** — `docs/REGULATORY.md` §7 Q1–Q5. Gates the DFX bank half outright.
+- **(d) Card→native-ICP evidence gap** — Coinbase-Onramp-style 64-hex tx delivery is undocumented
+  against ICRC-1; needs ONE real founder purchase to measure.
+- **(e) Structural, measured 2026-09-04** — no compliant fiat rail into ANY chain-key asset exists;
+  only Solana USDC and native ICP are card-reachable at all.
 
-**The EUR dual-rail LANDED 2026-09-06 (founder decision: EUR spans BOTH rails, superseding the
-plan's "VEUR is not in the catalog and must not be added" line).** VEUR@IC is currency 9 (ledger
-`wu6g4-6qaaa-aaaan-qmrza-cai`, 8dec, fee 10 000 e8s, complete no-minter direct-ICRC row in the
-VCHF/ICP shape) with liquidity `thin` — on-chain supply is a verified stub (~1.5 VEUR) — and the
-catalog's first `offramp=Partner` row (`ramp_partner:"DFX"`; DFX lists VEUR sellable-not-buyable,
-onramp honestly Unavailable); its payment-policy cap `1_000_000_000_000` e8s = 10 000 VEUR mirrors
-VCHF's shape (founder-confirmed 2026-09-06). EURC@Solana (Circle mint `HzwqbK…uBEDKtr`, 6dec,
-legacy SPL Token program) is liquidity `deep` (~105M circulating). Liquidity is DATA — an optional
-`deep|thin` catalog field, absent = no statement, old rows byte-identical (relay-pinned wire). The
-Solana engine was generalized off USDC-hardcoding (`app/solana/tokens.ts` registry; per-mint
-balances/gates/ATA; USDC goldens byte-stable). UI: a chooser detail step for multi-rail currencies
-(per-rail chain tag, fee in its own unit, liquidity line, ramp fact, default-pick reason) and a
-shared `RailLiquidityNote` (one testID) on Balances rows, the receive disclosure, and the fund
-gates (thin warns; deep renders only in the detail step). e2e flows 129–132 new, 118 inverted (EUR
-present), 120 extended; suite 123/123 GREEN, `FLOWS.md` 124 rows — superseding the counts in the
-O2 paragraph above. Same not-deployed caveat: rows render app-side from the bundled mirror; the
-relay serves them only after the founder's `just up`.
+Adjacent but NOT O3: `docs/specs/2026-08-17-trust-wallet-fund-button.md` is a fully-spec'd
+offline-buildable transfer-in slice — a separate session item; do not book it as O3 progress.
 
-Opened by that investigation, and each independently actionable:
+**2. Item 5 — reconcile heartbeat + paging (OPEN-DEFERRED; pickup spec, do not re-derive).**
+Revisit trigger: the facade kernel re-enters the value path, OR DUSD ledger live-window pressure.
+Context: `pay()` has no production caller (kernel dormant; only the faucet mint is live, benign
+trap shape); the operational half ships as the `docs/OPS.md` runbook (`just reconcile`, `8805027`).
+- **Heartbeat:** `#[heartbeat]` cheap-guard scanning stale in-flight intent markers — written
+  before the ledger await in `pay()`, cleared after `settle_nonce` — never blind walks.
+- **Pagination:** replace the one-shot `ledger_get_transactions` (it ignores
+  `archived_transactions`) with the relay's walk pattern (1_000-block pages, `first_index`
+  anchoring, stop at the archived-boundary).
+- **PocketIC plan exists:** `advance_time`/tick heartbeat ticks; trap-simulation past 1_000
+  blocks; archive-threshold spike first.
 
-- **PROD CARRIES THE FIX FOR THE THING THAT LOST THE MONEY, AND BOTH OCP TX-ID SPELLINGS ARE
-  PAID-PROVEN.** MEASURED
-  2026-09-05: `/api/v1/version` reports `a913c6d` (commit_date 2026-09-04T14:56:39+02:00), so the
-  deployed relay includes the fix that names the ledger when reporting an OpenCryptoPay payment —
-  the defect that cost CHF 1 on 2026-09-03. The earlier report in this file of `dce8ff1` was true
-  on 2026-09-04 and is superseded. A freshly built physical-device app then paid DFX Shop order
-  `2609`: ICP block `38190401`, DFX `/tx` accepted, shop order received. Later the same day order
-  `2610` closed the prefixed half: VCHF block `81062`, submitted `ly36x-…-cai:81062`, accepted.
-  `just ocp-ledger-probe` and flow 113 stay as the regression tripwires.
-- **"No third-party wallet can settle an Internet Computer asset" — re-measured 2026-09-05, claim
-  stands (sharpened).** Oisy's `main` (pushed 2026-09-04) does ship an IC OpenCryptoPay payer
-  (`ic-open-crypto-pay.services.ts`, commit `455f16ac49ec`) with `pay: {openCryptoPay:
-  'InternetComputer'}` — but it is an Option-A wallet (`icrc2_approve` + `sender=` report; no tx id,
-  no memo), so it cannot settle a dpay till (Option-B only). The `&ref=`-dropped hazard is real at
-  source, yet nothing would move: the 5-minute approval expires unused. Not drivable past Oisy's
-  Internet Identity gate without creating an anchor (WebAuthn), so the flow itself remains
-  source-only. DFX's wallet list, re-read the same day, still names no wallet paying
-  `InternetComputer`. Details: `docs/specs/2026-09-01-opencryptopay-findings.md` § "The standard's
-  reach".
-- **dpay speaks no external payment standard, in either direction** (measured 2026-09-04 by driving
-  real URIs through `classifyScan`) — EXCEPT Solana Pay, which dpay now speaks in BOTH directions
-  (emit 2026-09-05, accept 2026-09-05, both app-only). For everything else the scanner accepts only
-  dpay's own binary wire, dpay's own https link, an OpenCryptoPay LNURL, and a bare address; it does
-  not parse BIP-21/321, EIP-681 or BOLT-11 (those get the named `coin-request` refusal below).
-  The EMIT half (`app/solana/payUri.ts` + `SolanaReceiveSheet`): the Solana "My address" QR encodes
-  a real Solana Pay URI — `solana:<addr>?reference=<fresh base58 keypair>` for SOL,
-  `solana:<owner>?spl-token=<USDC mint>&reference=…` for USDC (recipient is the OWNER, not the ATA,
-  per the spl-token spec) — while the on-screen text and copy button stay the bare address. The
-  ACCEPT half landed the same day and the interim read-back regression (dpay's camera couldn't read
-  its own SOL receive QR) is CLOSED, proven by e2e flow 45: `classifyScan` routes `solana:` to a
-  `solana-pay` verdict (colon-guarded like `coin-request`), `parseSolanaPayUri` — same module as the
-  builder, no duplicated knowledge — validates recipient/mint/reference as base58 pubkeys and the
-  amount as a plain decimal > 0, refusing unknown params **by name**; the SOL rail review is
-  EXPLICIT (never auto-sign — stranger-supplied QR, same discipline as OCP), the IC rail refuses a
-  scanned `solana:` URI by name with a switch instruction (four locales). Measured before building:
-  `assembleMessage` already accepts arbitrary `AccountMeta[]`, so `reference` keys ride the transfer
-  instruction as extra readonly account keys and the SPL memo as its own Memo-program instruction —
-  pure app TS, NO core wire change (nothing crossed Rust/UniFFI/Kotlin); the USDC path reuses the
-  send form's `deriveAta` + create-idempotent + rent pre-check exactly. Deliberately left open:
-  the Solana Pay **transaction-request** form (`solana:https://…` — refused as a damaged code; only
-  transfer requests), and non-USDC `spl-token` mints (catalog-limited, refused by name with the
-  mint's pubkey). The honesty half landed 2026-09-05: a scanned `bitcoin:`/`ethereum:`
-  (BIP-21/EIP-831) URI is now refused **by name** with a practical instruction — `coin-request`
-  verdict in `app/lib/scan.ts`, copy in all four locales, e2e flow 109 leg 3 — closing the "not a
-  payment code" dead-end violation of the 2026-08-29 founder rule.
+**3. 6(b) — stronger SOL receipt verify (the one agent-pickable line; pre-pilot hardening).** The
+settle path trusts `getSignatureStatuses` alone — RPC honesty is the residual. Strengthening =
+re-read the confirmed transaction via `getTransaction` and match its instructions/amount against
+the canonical message before SETTLED (strict pre-broadcast verify of the signed BYTES already
+exists: `verifySolPayment`). App-only (`rpc.getTransaction` exists; sole consumer today
+`app/solana/history.ts`) but not small: adds a fixture surface to every e2e stub plus a
+REJECTED-vs-UNREACHABLE mismatch classification to the money-critical state machine.
+(6(a) — the absent-ATA sign gate — CLOSED `9c7572f`: per-mint token facts persisted in
+`app/services/solTokenStatePersist.ts` — only-owner-can-close, no-downgrade on degraded polls;
+pure `solSplSignGate` fail-open on unconfirmed, refusing only live-or-persisted 'absent' and
+'unregistered' for unknown mints; QR (`SolPayMode.onScan`) + NFC card (`SolNfcTap.approve`) gated,
+founder-rule copy ×4 locales; flow 137.)
 
-0. **THE MERCHANT SIDE OF OpenCryptoPay — dpay serves its own till** (founder decision, 2026-09-02).
-   **Demoted 2026-09-04 to one interop rail among several** (founder), below the currency work above.
-   **The v1 build is COMPLETE in-tree at `702c359`**; what remains is outer-loop, founder ops, and
-   the additive items below.
-   Design, rejected alternatives and every founder decision:
-   [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md).
-   Measured provider behaviour, including which wallets can pay a till on this rail:
-   [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md)
-   — read it before quoting this milestone's value to anyone. The rules live where they are enforced
-   and are not restated here: `crates/dpay-relay/src/till.rs` (the provider), `app/services/till.ts`
-   + `app/components/TillCharge.tsx` (the counter), `dpay_core::validate_till_open` (the ring-up).
-   **Landed 2026-09-04**, in dependency order; each commit message is its own record:
-   - `23c4ebe` — the till's **seven** routes register only under `DPAY_ENABLE_TILL`, and
-     `dfx/till_wire.json` pins the wire both halves parse.
-   - `eddb32a` — dpay's payer accepts the till dpay itself serves; a `202 PENDING` is no longer
-     reported to the payer as a completed sale.
-   - `bfe18bd` — the defect sweep: one transfer credits one sale, the clock race, LUD-06 metadata
-     injection, unbounded growth, CSPRNG charge ids, log injection, and the rest.
-   - `0e206dc` (core) + `516aac4` (relay) — a ring-up, and a cancellation, must be SIGNED by the key
-     whose account gets paid.
-   - `dd51eee` — a real bech32 LNURL, the `/pl/` page a generic phone camera lands on, and a
-     per-charge `ref` credited as the ICRC-1 memo.
-   - `d623d4c` + `1155921` — the counter in the app: every asset, named refusals, 4-state NFC row.
-   - `702c359` — the ring-up answers with the charge's `reference`, so the counter arms the reader
-     with it and a TAP pays the same charge a scan would.
-   `DPAY_ENABLE_TILL` still defaults **off** on every build. That is now an operator's choice about
-   which surfaces an image serves, not a quarantine: the condition it was gated on — the relay
-   verifying the ring-up signature — is met (`TillStore::authorize` calls `validate_till_open`).
-   **Opened by this work and NOT closed:**
-   - **The till tap has never crossed a radio.** Flow 117 delivers the DPN2 bundle through the
-     harness's session seam, which is neither antenna coupling nor Android AID routing. Two physical
-     handsets are the only proof. It reuses the IC rail's HCE hop with no protocol change and that
-     hop is proven on hardware (2026-08-26), so this is a confirmation rather than a design risk —
-     but it is not proven. Filed with the other physical gates below.
-   - **The charge id is a bearer read token.** `GET /api/v1/till/{id}` is unauthenticated, so anyone
-     holding an id reads the merchant's name, price and payer. Worked through and accepted at
-     `ChargeStatus` in `till.rs` (which is why the `reference` is deliberately kept off that body).
-     Revisit before the till serves a merchant who is not the founder.
-   - ~~**The own-relay trust rule breaks the day a SECOND merchant runs a relay.**~~ **CLOSED
-     2026-09-04 by deletion, not by an answer.** The rule existed only to except dpay's own till from
-     a blanket refusal of non-ICP Internet Computer assets, and that refusal rested on a wrong
-     diagnosis of the CHF 1 loss. With the real cause fixed, the refusal and its exception are both
-     gone, so there is no second-relay case left to decide.
-    - ~~**EURC** — the last item the plan itself lists as open.~~ **CLOSED 2026-09-06 — both EUR
-      rails (EURC@Solana deep, VEUR@IC thin) are catalogued and landed app-side** (EUR dual-rail,
-      work order above); relay-side they ship with the pending founder deploy.
-   - A relay-served merchant page (the plan's "web page later") is additive and unstarted.
-   Founder ops:
-   - ~~**PROD IS AT `425eb97` AND SERVES AN UNGATED, UNSIGNED TILL.**~~ **DONE — the founder
-     deployed, re-measured 2026-09-04 later the same day.** `/api/v1/version` now reports
-     `dce8ff1` == repo HEAD, and `GET https://dpay.kalaj.org/v1/lnurlp/nope` answers an EMPTY 404
-     byte-identical to an unregistered path — i.e. the till's seven routes are not registered and
-     `DPAY_ENABLE_TILL` is off, which is the gate working. The unauthenticated-write window is
-     closed: prod now carries the gate (`23c4ebe`), the signed ring-up (`516aac4`) and the defect
-     sweep (`bfe18bd`). It also carries `e5d43ac`, so the shipped APK no longer signs a
-     Send-to-address transfer to an account other than the one it displayed.
-   - ~~**PROD SERVES A BUILD THAT CANNOT PAY ANY TILL.**~~ **STALE — corrected 2026-09-02.** It was
-     true when written (prod was at `7499b30`, before the parser fix `8912db5`); the founder
-     redeployed the same day. **The device cannot be checked, only reinstalled** — `versionName` is
-     `1.0` for every build, so there is no way to tell from a phone which build it runs. Any build
-     older than `8912db5` refuses EVERY real till.
-   - ~~**The CHF 1 live payment is still unmade.**~~ **DONE 2026-09-03 — and it FAILED, which is
-     what it was for.** The founder paid the public test till with 1.00000000 VCHF from their own
-     phone; dpay moved the money correctly and then reported it under an identifier the provider
-     resolves against the wrong ledger, so the sale was never credited. ~CHF 1 lost, buying the one
-     fact no probe could. Cause, rule and measurement:
-     `docs/specs/2026-09-01-opencryptopay-findings.md`.
-   - ~~**REPORT THE BUG TO DFX.**~~ **DONE — and it was not their bug.** DFX's engineering team
-     answered 2026-09-04 with the `tx` grammar: the string's SHAPE picks the ledger, and an ICRC
-     token must be reported `<ledgerCanisterId>:<blockIndex>`. Re-measured independently before
-     believing it (`just ocp-ledger-probe`) and fixed in `ocpIcTxId`. **Still open on their side:
-     the CHF 1.** DFX say the VCHF reached their payment address and they are checking what they can
-     do; nothing to build, but do not write it off or count it recovered until it lands.
-    - ~~**PROVE AN ACCEPTANCE — the one leg `/tx` had never returned.**~~ **CLOSED 2026-09-05, both
-       spellings.** A freshly built physical-device app paid DFX Shop order `2609` in native ICP:
-       block `38190401` moved `0.00442682 ICP` plus fee, DFX answered accepted to the one bare-index
-       submission, and WooCommerce rendered the order received. Later the same day the same phone
-       paid order `2610` in VCHF: block `81062`, submitted prefixed `ly36x-…-cai:81062`, accepted —
-       the first paid post-fix prefixed acceptance (the 2026-09-03 CHF 1 loss was the bare-index
-       bug). Exact chain/provider evidence: `docs/specs/2026-09-01-opencryptopay-findings.md`;
-       spend records: `docs/AGENT-FUNDS.md`.
-1. ~~**Add VCHF + native ICP as complete direct-payment assets.**~~ **DONE (2026-08-28)** —
-   [`docs/specs/2026-08-28-vchf-icp-support-spec.md`](docs/specs/2026-08-28-vchf-icp-support-spec.md)
-   U1–U8 complete and fully verified: catalog ids 7/8 everywhere (bundled + fake + truth-file drift
-   alarms), no-minter direct-ICRC payability, the relay's `Internet Computer` mainnet partition, an
-   official-ICP-index history adapter (`just ic-index-probe` PASS vs mainnet), idempotent
-   registration rehearsed on a full local replica (registry-era — superseded same-day by the
-   2026-08-28 founder decision removing the canister registry; catalog authority is now the
-   relay's compiled catalog, see the spec addendum), 7 new e2e flows (95–101; `FLOWS.md` = 97),
-   `just verify` EXIT=0 (96/96 e2e), jest 1160/1160, `just test-relay` 44/44, `just test-live`
-   62/62, emulator device gates green, orchestrator-verifier state-matrix audit APPROVED. Two
-   founder tails are now BOTH closed: the deploy (`just apk && just up` — the relay ships the
-   catalog; the facade wasm upgrade is optional and carries no registration), and the funded
-   mainnet transfer proof, closed 2026-09-01 by a real VCHF round trip on a physical device with
-   real funds. ICPSwap buy/sell stays a separate future phase; no automatic conversion.
-2. ~~**Faucet 422 — OPEN-VERIFY.**~~ **CLOSED 2026-08-30.** The missing evidence now exists:
-   founder ran `just faucet-verify --mint` against prod and all five legs PASSED — seed present and
-   well-formed; seed derives the relay's signing principal
-   (`2lzt4-w4qk5-…-zqe`); the canister's `admin_controller` readback EQUALS that principal (so the
-   relay's mint passes `require_admin`); the deploy identity
-   (`hhwti-hb7f7-…-rqe`) is an IC-level controller; and a LIVE relay faucet mint returned
-   200 `{"balance":"10000"}` for a throwaway account. docs/GOVERNANCE.md rows 4-5 updated from
-   "in flight" to shipped.
-3. **Governance P1/P2 pieces (agent-pickable; the stance itself is DO-NOT-NAG below):**
-   module-hash pinning, reconcile runbook wiring (###3's menu). (`lock_catalog` struck
-   2026-08-28 — the registry it targeted was removed by founder decision; catalog authority =
-   relay code behind git review + drift alarms, re-addable at a future governance handoff.)
-4. **IC chain-key receipt migration** (###2 next step): move the receipt signature to
-   `sign_with_schnorr`/`sign_with_ecdsa` before pilot so no exportable secret lives in canister
-   state (the AGENTS.md-known "chain-key receipts" blocker).
-5. **Reconcile heartbeat + paging** (###5 deferral): bounded walk exists; add the deferred
-   periodic heartbeat + pagination on top.
-6. **SOL v2 follow-ups (low):** source-ATA auto-create for USDC offline pay; stronger
-   `getTransaction` receipt verify. (Was written as "flow 62"; there is no flow 62 — the id range
-   has a gap at 62 and the ATA flow is 76.) **Audited 2026-09-06:** flow 76 covers NONE of the
-   offline pay path — it pins the RECEIVE-side tri-state (absent → one-tap online `createTokenAta`)
-   only. (a) The offline payer signs PURE (`signSplPayment`: no RPC, no source-ATA existence check,
-   no create-idempotent instruction — the source ATA is assumed as `deriveAta(payer, mint)`), and
-   the solreq scan/NFC auto-sign path has no per-request-mint absent-ATA gate; the only gates are
-   the SELECTED-asset `token-absent` UI replacement (same-mint case) and `startSpay`'s absent
-   refusal (online `solana:`-URI path only). Remaining gap: a cross-mint solreq (a request naming a
-   funded-but-not-selected SPL mint) signs offline against an ATA that may not exist → the merchant
-   broadcast fails REJECTED at the RPC (fail-closed — no funds lost, but a dead QR). (b) Receipt
-   verify: `broadcastSolPayment` already strict-verifies the signed BYTES (`verifySolPayment`:
-   single-signer, byte-equal canonical message, ed25519) and settles on `getSignatureStatuses`
-   alone; strengthening = re-reading the confirmed transaction via `getTransaction` and matching
-   its instructions/amount against the canonical message before SETTLED. Feasible app-only
-   (`rpc.getTransaction` exists; sole consumer today is `solana/history.ts`) but NOT a one-liner —
-   it adds a fixture surface to every e2e stub plus a mismatch classification (REJECTED vs
-   UNREACHABLE) to the money-critical state machine. Left unimplemented per the audit scope.
+**Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
+- **O1 home currency** — BUILT, gated green, shipped; spec
+  [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
+- **O2 rail choice** — `3d44de1`→`470b0b6`; EUR dual-rail (VEUR@IC thin + EURC@Solana deep)
+  `0ab1881`→`351952b`; same spec + its findings addenda.
+- **O4 Revolut-IA home tab** — `b5912b6` + `711b0ef` + `798edc2` (Balances modal retired, flows
+  133–136).
+- **OpenCryptoPay is one interop rail among several, not the strategy** (founder, 2026-09-04). The
+  till v1 build is complete (`702c359`; plan
+  [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md));
+  what remains of it is the two-handset tap (below) and the bearer-token revisit (below). The
+  cashier page (`8805027`) and the OCP tx-id fix are done and recorded below/inline.
+
+## PROD STATE (checked, never asserted — floor `face8fba`)
+
+Floor `face8fba` = HEAD verified live 2026-09-06 (`just verify-relay` PASS at HEAD-equality, both
+EUR rows in the live catalog). Unshipped since: `450bdc7` / `9c7572f` / `8805027` / `65eeef6`
+(+ this prune). The next `just up` ships the cashier page (`GET /till/{id}`), the integrity route
+(`GET /api/v1/integrity`), and the balance-route deletion; `just integrity-check` goes MATCH after
+that deploy without any `deploy-ic` — the facade is unchanged, so the baked pin
+(`deploy/facade-module-hash.txt`, `0978…722c`) already equals the live module hash.
+
+## Retired this prune (decision-shaped — do not re-file)
+
+- ~~**IC chain-key receipt migration** (old item 4)~~ **RETIRED as stale 2026-09-06.** The value
+  path is app-signed since the 2026-08-19/20 cutover and ZERO consumers of canister receipts
+  remain: relay receipt routes deleted + 404-pinned (`settlement_era_routes_stay_404`), the app's
+  pin/verify surface retired, and the GOVERNANCE checklist line was already struck 2026-09-04
+  ("retired by the cutover, not done"). The only canister-held secret is `RECEIPT_SECRET`, whose
+  exfiltration would forge attestations nothing verifies. PocketIC `=14.0.0` (workspace pin) has
+  no `sign_with_schnorr`/`sign_with_ecdsa` — never offline-testable under the pin. **Clause: if
+  the facade kernel ever re-enters the value path, re-derive the attestation design from scratch
+  (chain-key is one option; needs a PocketIC pin bump).** The `dpay_core`
+  `ReceiptClaim`/`sign_receipt`/`verify_receipt` + `w_verify_receipt_sig` primitives stay, kept
+  deliberately.
+- ~~**Canister-side `refresh_deposit` rate-gate**~~ **MOOT.** Nothing calls `refresh_deposit`
+  post-cutover (relay route deleted, 404-pinned); the endpoint stays in place on the dormant
+  canister (`proxy.rs`) under the same leave-in-place precedent as `BAL_CACHE`/`refresh_balances`
+  (relay `app.rs` ~535) — removal would churn the candid interface for zero value.
 
 ## Physical / outer-loop gates (NOT autonomous)
 
-- ~~**Android App Link verification**~~ **CLOSED 2026-08-30 — verified on the founder's physical
-  phone (`9cdf67b8`, MIUI), both halves.**
-  Server: `GET /.well-known/assetlinks.json` → HTTP 200, one statement for `org.kalaj.dpay`
-  carrying all 4 project certs, and the APK's actual signer
-  (`1E:5C:F5:10:…:89:D1`, the upload key) is among them — checked by pulling the installed APK and
-  running `apksigner verify --print-certs` on both it and the new build.
-  Device: the new APK installed with `-r` (signer identical to the previous install, so app data —
-  including the wallet seed — was preserved), and Android verified the domain ON INSTALL without a
-  manual re-verify: `pm get-app-links org.kalaj.dpay` reports `dpay.kalaj.org: verified`.
-  Functional: firing a real link
-  (`…/wallet/pay/3nrdb-…-4qe?asset=VCHF&network=internet-computer&amount=1.50`) resumed
-  `org.kalaj.dpay/com.dpay.MainActivity` — no browser, no chooser — on the pre-filled review screen
-  showing `1,50000000 VCHF bezahlen` to the full destination principal.
-  TRIPWIRE for whoever checks this next: `cmd package resolve-activity` reports MIUI's
-  `MiuiResolverActivity` for the same URL and looks like a FAILURE. It is not — that static query
-  does not account for the verified-domain preference. Only the real intent dispatch settles it, so
-  test with `am start` + a top-activity read, never with `resolve-activity`.
-  Incidentally proven on real hardware by the same run: the device-locale German catalog renders
-  throughout; the link did NOT auto-sign (explicit Approve, per the security invariant); and the
-  online-insufficient-balance gate fired correctly — "Dein Guthaben reicht für diese Zahlung nicht
-  aus." with Freigeben (Approve) DISABLED against a 0 VCHF balance.
-- **SOL HCE hardware tap** (AID `F06470617902`, `DpaySolNfc`) — never tapped on hardware.
-  The IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
+- **SOL HCE hardware tap** (AID `F06470617902`, `DpaySolNfc`) — never tapped on hardware. The
+  IC-rail two-phone NFC tap (payer in airplane mode) + real-camera QR scan PASSED 2026-08-26
   (founder-run retest; commit `8940b1d`).
-- **Till tap on two physical handsets** — the merchant counter arming the reader from a live charge
-  (`702c359`). Rides the IC rail's proven HCE hop unchanged; the radio hop for this use has not been
-  run. Detail and why it is a confirmation rather than a design risk: item 0.
-- **DEMO.md step 4 has never been driven.** `118e122` replaced a step that promised an "Already
-  paid" screen the shipped rail cannot produce; the invariant behind the replacement copy is proven
-  in tests, the screen the operator will point at is not. Drive it once before the next live demo.
-- ~~**VCHF/ICP go-live — founder relay + APK deploy**~~ **DONE 2026-08-30** (`just apk && just up`).
-  VERIFIED LIVE, not taken on report: `GET https://dpay.kalaj.org/api/v1/currencies` now returns the
-  `Internet Computer` mainnet section with currency 7 (VCHF, ledger `ly36x-wiaaa-aaaai-aqj7q-cai`,
-  decimals 8, fee 10_000) and currency 8 (ICP, ledger `ryjl3-tyaaa-aaaaa-aaaba-cai`, decimals 8,
-  fee 10_000). Online wallets get both rows from the relay's compiled catalog.
-  NOTE: that deploy shipped branch HEAD (`3b36585`), so the whole 2026-08-30 send-to-address work
-  went live in the WEB wallet too, not just the catalog rows. Prod has moved since — item 0 carries
-  the current commit.
-- ~~**VCHF/ICP funded mainnet payment proof**~~ **DONE 2026-09-01** — founder ran a real VCHF round
-  trip on a physical device with real funds. Production payment completeness IS claimed for these
-  assets.
-- **ckBTC live mainnet deposit→mint + withdrawal with real BTC** (old ###1/###8, low — final
-  pre-pilot confidence checks after the testnet proofs).
-- **ckUSDC live Sepolia withdraw proof** (needs funded ckUSDC + ckETH gas; PocketIC already
-  proves the dual-ledger flow).
-- **WalletConnect round trip with a REAL wallet app installed.** The dApp side is now proven live
+- **Till tap on two physical handsets** — the merchant counter arming the reader from a live
+  charge. Rides the IC rail's proven HCE hop unchanged; a confirmation, not a design risk.
+- **DEMO.md step 4 has never been driven.** `118e122` replaced a step that promised an
+  "Already paid" screen the shipped rail cannot produce; the invariant behind the replacement
+  copy is test-proven, the operator-facing screen is not. Drive it once before the next live demo.
+- **ckBTC live mainnet deposit→mint + withdrawal with real BTC** (low — final pre-pilot confidence
+  checks after the testnet proofs).
+- **ckUSDC live Sepolia withdraw proof** (needs funded ckUSDC + ckETH gas; PocketIC already proves
+  the dual-ledger flow).
+- **WalletConnect round trip with a REAL wallet app installed.** The dApp side is proven live
   (2026-08-30, emulator + R8 release APK + the real WC relay, driven by a scripted `sign-client`
-  wallet peer): session settles → the app reaches amount entry, `eth_sendTransaction` carries
-  byte-exact `depositEth` calldata to the live minter's helper (cross-checked against
-  `get_minter_info` on `sv3dd-oaaaa-aaaar-qacoa-cai`), the unknown-outcome state resolves to an
-  honest "watching", a wrong-chain approval is refused, and a stale session tears down and re-pairs.
-  Still UNPROVEN, and only a wallet on the device can prove it: a real wallet's approval UI, whether
-  Trust Wallet honours `metadata.redirect.native` at all (no public primary source says it does —
-  the bounce-back is best-effort), the named-wallet button + whether the recorded deeplink choice
-  foregrounds the wallet for a signing request, and gas estimation (dpay sends no `gas`/`nonce`; a
-  wallet with no ETH may refuse before the user sees a prompt). Calling this "outer-loop sign-off,
-  NOT a blocker" is what let four bugs sit on the only path to a ckETH/ckUSDC deposit — the flow
-  could not complete at all. Do not re-file it as a formality.
-- ~~**WalletConnect Core accumulates across re-inits** (low)~~ **CLOSED 2026-09-06 — fixed by
-  instance reuse.** Observed live 2026-08-30: `WalletConnect Core is already initialized … Init()
-  was called 2 times` then `3 times`. Every `disconnectWalletConnect()` → `initProvider()` cycle
-  (sheet re-open, and the wrong-chain tear-down) built a fresh Core while the previous one lingered
-  with its relay socket. Every flow still worked; this was resource hygiene, not correctness. The
-  fix: the provider is now a process-lifetime singleton (`ensureProvider`);
-  `disconnectWalletConnect()` drops the SESSION only (the SDK's own `disconnect()` never tears a
-  Core down), and the wrong-chain re-pair rebinds via `connect({chains, optionalChains})` on the
-  SAME instance (the SDK's `cleanupPendingPairings()` retires the abandoned pairing topic). A
-  rejected init unwedges the cache, so a relay-down first open cannot wedge the module. Unit-pinned
-  in `walletconnect.test.ts` (no second init across disconnect→get; same-instance re-pair;
-  unwedge) — confirm the warning is gone on the next device session.
+  peer): session settles, `eth_sendTransaction` carries byte-exact `depositEth` calldata to the
+  live minter, unknown-outcome resolves to honest "watching", wrong-chain approval refused, stale
+  session tears down and re-pairs. Only a wallet on the device proves the rest: a real approval
+  UI, whether Trust Wallet honours `metadata.redirect.native`, the deeplink foregrounding, and
+  no-gas refusal before a prompt. Calling this a formality is what let four bugs sit on the only
+  ckETH/ckUSDC deposit path — do not re-file it as low.
 - **Tier-2 full Testnet4 mint** — externally blocked (faucet captcha + cycle-starved minter);
   optional, proves DFINITY infra, low dpay value.
-- **Play launch ops** (old ###11/###12): pre-launch report + `just play-upload` (upload-key AAB
-  + staged `mapping.txt` ready). First upload sanity-checks the store-listed size vs baselines
+- **Play launch ops** (pre-launch report + `just play-upload` with upload-key AAB + staged
+  `mapping.txt` ready). First upload sanity-checks the store-listed size vs baselines
   (APK 93,728,358 B / AAB 39,649,424 B; pre-WC 87,540,415 / 36,233,482).
 
 ## FOUNDER-OWNED (DO NOT NAG)
 
 - **CF edge still serves the stale APK on the BARE url** `https://dpay.kalaj.org/download/dpay.apk`
   (value 7 / effort S): the cached object predates the max-age=300 fix and carries
-  `immutable, max-age=31536000` — the edge won't refetch for ~1 yr. Relay-side fix is live (new
-  objects revalidate ≤5 min via ETag/304; the landing Download button links the `?v=<sha256>`
-  URL, verified fresh). Remaining step needs a permission the repo's CF token lacks (Tunnel+DNS
-  only): **purge the cached APK** — dashboard → Caching → Purge Everything (or by URL), or create
-  a token with *Zone · Cache Purge* exported as `CF_PURGE_TOKEN` so `just up` purges
-  automatically. (`/shots/*.png` self-healed — plain 4h TTL, no `immutable`; only the APK is
-  purge-required.)
+  `immutable, max-age=31536000` — the edge won't refetch for ~1 yr. Relay-side fix is live; the
+  remaining step needs a permission the repo's CF token lacks (Tunnel+DNS only): **purge the
+  cached APK** (dashboard → Caching → Purge Everything, or a *Zone · Cache Purge* token exported
+  as `CF_PURGE_TOKEN` so `just up` purges automatically). Only the APK is purge-required.
 - **Governance stance (founder-set):** govern in place, no NNS/SNS hand-off until critical mass —
-  see docs/GOVERNANCE.md. `ADMIN_CALLERS` allowlist (old ###4) is accepted under this plan.
+  see docs/GOVERNANCE.md. `ADMIN_CALLERS` allowlist is accepted under this plan.
 - **Gatekeeper RPC URL** (`beta.helius-rpc.com`) — NO config slot exists anywhere in the
   codebase; awaiting founder clarification on its purpose (2026-08-09 note — may be stale,
   confirm-or-drop).
 - **Onramp founder launch decisions** (onramp plan §6 Q1–Q6,14): direct-vs-partner sequencing,
   partner aggregator, KYC posture, ckUSDC chains at launch, ramp fees partner-only, faucet
   retention once real ckUSDC exists, wrong-network recourse messaging (2026-07-30, pre-cutover —
-  several may be stale; confirm-or-drop).
+  several may be stale; confirm-or-drop). Same decisions gate Objective 3(a) above.
 - **Desktop-width /wallet design pass** (value 5, effort M-L — design-level, needs founder input).
-- **Conversion/swap direction — DRAFT AWAITING APPROVAL** (founder ask, 2026-09-04): `positioning.md`
-  → "Roadmap, not built: conversion the user authorizes, delegated and itemised". Four decisions are
-  listed there and none is taken; nothing is built and nothing should be.
-  The regulatory research is DONE and the questions for counsel are written out: `docs/REGULATORY.md`.
+- **Conversion/swap direction — DRAFT AWAITING APPROVAL** (founder ask, 2026-09-04):
+  `positioning.md` → "Roadmap, not built: conversion the user authorizes, delegated and
+  itemised". Four decisions listed there, none taken; nothing is built and nothing should be.
+  Regulatory research DONE, counsel questions written out: `docs/REGULATORY.md`.
 
 ## Other open issues
 
-- ~~**Rail/surface asymmetries surfaced by the 2026-08-30 send-to-address audit**~~ **ALL FIXED
-  2026-08-30.** (a) Solana transaction history now exists (`app/solana/history.ts` +
-  `useSolanaHistory`, merged into the Transactions tab, which is now keyed on `AssetId` rather than
-  an IC currency id — flow 108); (b) a confirmed send/withdraw awards `paymentTested` on both rails,
-  never on an unknown outcome; (c) the IC fund funnel records its origin and offers the
-  "Back to paying X" resume once the balance goes positive (flow 81); (d) `NfcStatusRow` is shared
-  by both Pay screens and SolPayMode takes the 4-state `NfcStatus`; (e) the sub-mode toggle no
-  longer renders mid-payment on either rail; (f) ckERC20 deposits got the manual recheck the other
-  three sheets had (flow 33). `SelectableAsset.capabilities` and `SolanaAsset.onramp/offramp` were
-  dead ramp copies and are deleted; `CurrencyDescriptor.onramp/offramp` stays (the IC fund gate
-  reads it).
-- **(low) Solana history is unit-proven, not cluster-proven.** `fetchSolanaHistory` is asserted
-  against stubbed RPC responses shaped from the JSON-RPC spec; it has never run against a live
-  cluster. Its balance-delta reading of direction/amount, the v0 `loadedAddresses` account
-  indexing, and the USDC-row/SOL-fee-row suppression are the parts a real transaction would test.
-- ~~**(low) `SolanaHistory.dropped` is logged, not surfaced.**~~ **CLOSED 2026-09-06 — surfaced.**
-  `useSolanaHistory` now returns the count (reset on every poll, so a clean read clears the note)
-  and the Ledger renders `M.wallet.ledger.dropped(n)` — copy in all four locales — under the list
-  when `dropped > 0`: a plain note that they could not be read but still exist on-chain, never an
-  error. Nothing renders when 0; both the empty and populated branches are jest-pinned
-  (`Ledger.test.tsx`).
-- **(medium) Withdrawal approve→retrieve front-running residual** (old ###9) — includes the
-  inherent dual-approve partial-failure class (old O4); documented mitigation in place.
+- **OCP tx-id fix is prod-proven, both spellings** (`a913c6d` live, measured 2026-09-05;
+  physical-device orders: `2609` native ICP block `38190401`, `2610` VCHF block `81062` submitted
+  prefixed — both accepted by DFX). Tripwires: `just ocp-ledger-probe` + flow 113. DFX still owes
+  the CHF 1 — do not write it off or count it recovered until it lands.
+- **No third-party wallet can settle an Internet Computer asset** (re-measured 2026-09-05): Oisy's
+  IC OpenCryptoPay payer is Option-A (`icrc2_approve` + sender report; no tx id, no memo), DFX's
+  wallet list names none. Source-only detail:
+  [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md).
+- **dpay speaks no external payment standard, either direction — except Solana Pay, now spoken in
+  BOTH directions** (2026-09-05, `app/solana/payUri.ts` + `parseSolanaPayUri`). Everything else is
+  refused by name with a practical instruction (BIP-21/321, EIP-681, BOLT-11 → `coin-request`;
+  transaction-request `solana:https://…` refused as damaged — transfer requests only; non-USDC
+  `spl-token` mints refused by name). Same spec.
+- **The charge id is a bearer read token** (`GET /api/v1/till/{id}` unauthenticated; worked
+  through and accepted at `ChargeStatus` — the `reference` is deliberately off that body).
+  Revisit before the till serves a merchant who is not the founder.
+- **(medium) Withdrawal approve→retrieve front-running residual** — includes the inherent
+  dual-approve partial-failure class; documented mitigation in place.
 - **WC per-`request()` unbounded** (`app/wallet.ts`) — inherent to EIP-1193 (no standard timeout
   param); pairing bounded at 5 min.
-- **Harness residuals (2026-08-20 harness-debt pass):** ~~the e2e suite rides a test-helpers-only
-  singular balance route (30+ flows)~~ **CLOSED 2026-09-06 — migrated.** The harness's `getBalance`
-  now reads the always-on batch `GET /api/v1/balances/{hex}` (a missing currency key THROWS, never
-  a silent '0') and the singular fixture route is deleted from the relay; flow-41 timeout is 30 s
-  authored;
-  `goOffline` kills the IC gateway too (flows 20 + stage-landing-shots use `{keepGateway:true}`);
-  MIUI physical device blocks test-APK installs (`just ondevice` stays emulator-only).
-- **Deploy-script candid-literal drift (ops-only):** `dfx-deploy.sh`'s ICRC Init args literal is
-  not factored the way staging's is (3 genuinely incompatible per-script strategies; bash
-  literals can't be cross-checked offline without a fragile grep). Both scripts byte-faithful
-  today; low priority, no runtime impact.
-- **FakeLedger has no rate-limit** (N1) — accepted simplification; the real cooldown is surfaced
-  in the UI.
+- **(low) Solana history is unit-proven, not cluster-proven** — asserted against stubbed RPC
+  responses only; a real transaction would test direction/amount from balance-deltas, v0
+  `loadedAddresses` indexing, and the USDC/SOL row suppression.
 - **Helius API key baked as a literal** — rate-limit key, not a fund key (non-custodial, device
   key signs). Rotate if the repo ever goes public.
-- **Canister-side `refresh_deposit` rate-gate NOT implemented** — moot post-cutover: nothing calls
-  `refresh_deposit`. The relay route was deleted (404-pinned by `settlement_era_routes_stay_404`)
-  and the app queries the minter at the user principal instead. (The "relay-side TTL cache
-  suffices" rationale this row used to carry was itself stale — that cache no longer exists.)
-- **Receipt-poll 404 console lines** — cosmetic, by-design not-yet-settled poll
-  (`GET /api/v1/receipt/<nonce>`; Chrome auto-logs non-2xx). Invisible to users.
+- **FakeLedger has no rate-limit** (N1) — accepted simplification; the real cooldown is surfaced
+  in the UI.
+- **Receipt-poll 404 console lines** — cosmetic, by-design not-yet-settled poll; invisible to
+  users.
 - **History names stay PRINCIPAL-prefix by design** post-cutover (ledger memo is the frozen
   16-byte nonce reconciliation key — extending it was REJECTED); a signed name registry is a
   founder follow-up, NOT in-tree.
-- **Default-tab/first-impression** — the walkthrough shapes the first run; the post-onboarding
-  landing on the Pay scanner remains the intended default (flow 90 pins
-  `pay-tab-default-landing`). Deliberate, not an oversight.
+- **Default-tab/first-impression** — post-onboarding landing on the Pay scanner is the intended
+  default (flow 90 pins `pay-tab-default-landing`). Deliberate, not an oversight.
 - **SOL glyph `◎` relies on system font fallback** (U+25CE absent from every bundled font —
   fontTools cmap-verified; renders acceptably on MIUI/Android today). If a device ever shows a
-  fallback artifact, swap to an in-font covered glyph (`○`/`●` basics covered; `Δ Ω`
-  grotesk-only). Low, visual-only.
-- ~~**(medium) Doc rot found by the 2026-09-04 sweep and deliberately NOT fixed in it.**~~
-  **CLEARED 2026-09-04 by a six-agent audit, every finding grounded in code at HEAD or a live
-  primary source.** `FUNDING.md`
-  rewritten — it now owns the Add money *shape* and points at one owner per mechanism instead of
-  restating a pre-cutover custody model. `CODEBASE_ANALYSIS.md` reconciled across all three ranges;
-  the rot-generating COPIES are deleted rather than updated (line counts, module enumerations, test
-  and flow counts, and the duplicated priority/R1-R4 backlog, which now points here). `docs/REACHOUT.md`
-  calendar re-verified against each event's own site. `genai-video-brief.md` re-measured against
-  vendor pricing pages.
-  **Two follow-ups the audit opened, both since CLOSED (2026-09-04, founder-directed):**
-  - `dpay_core::Receipt` + `RECEIPT_LEN` + its three status consts (the unsigned 17-byte outcome
-    receipt) are DELETED. They had no consumer anywhere — superseded by the merchant-SIGNED
-    114-byte `NfcResult` in `crates/dpay-core/src/nfc/message.rs`, which is the hardening the old
-    type's own doc comment anticipated. NOT part of the frozen surface: the wasm ABI guard still
-    passes 144/144, and `w_verify_receipt_sig` is about the unrelated 108-byte `ReceiptClaim`.
-  - `UX_AUDIT_FINDINGS.md` is DELETED (its 23 findings were all closed, all 23 `location:` pointers
-    addressed the pre-split monolith, and its resolution-detail pointer had been pruned away). The
-    durable part — the issue CLASSES that UI can reintroduce — moved into `CODEBASE_ANALYSIS.md`'s
-    "UX audit" section. Recoverable at `824b43e`.
-  **Still NOT audited:** `docs/specs/` session reports — historical records, but several are cited by
-  living docs and may carry the same drift.
-- ~~**(low) `deploy/.env.example` says the till gate turns off "all six" routes.**~~ **FIXED by
-  `dce8ff1`** — the file says seven; this row outlived its defect by one commit.
-- ~~**Campaign line is dual-sourced.**~~ **NOT TRUE as written (corrected 2026-09-04).** The literal
-  has exactly ONE home, `M.education.campaignLine` in `app/i18n/domains/en/wallet.ts`;
-  `app/config/education.ts` holds structure only, and `landing.html` carries a pointer COMMENT, not
-  a copy of the words — which is what `landing_page_tells_the_offline_payment_story` pins.
+  fallback artifact, swap to an in-font covered glyph (`○`/`●`). Low, visual-only.
+- **Deploy-script candid-literal drift (ops-only)** — `dfx-deploy.sh`'s ICRC init args literal is
+  not factored the way staging's is (3 genuinely incompatible per-script strategies). Both scripts
+  byte-faithful today; low priority, no runtime impact.
+- **Doc-rot**: living docs verified clean 2026-09-06 (the 2026-09-04 six-agent audit + the
+  session landings since); `docs/specs/` session reports remain historical records, not re-audited.
 
 ## Documented decisions / tripwires
 
 - **ckETH `eip_1559_transaction_price` — no code change.** The app path is functionally correct
-  against prod (same estimate the semantically-pure `None` call returns). Sending `None` would
-  need a frozen-ABI FFI change or a JS-side DIDL byte constant — both cost more than they buy.
-  The probe test is the regression tripwire: if the minter ever starts rejecting unregistered
-  ledgers (the assert-printed `MEASURED:` line flips), flip `fetchGasFeeWei`'s native call site
-  to the `None` arg. Launch check: a native-ETH withdrawal failing on prod with a minter reject
-  mentioning `eip_1559_transaction_price` → look here first.
+  against prod (same estimate the semantically-pure `None` call returns). The probe test is the
+  regression tripwire: if the minter ever starts rejecting unregistered ledgers (the
+  assert-printed `MEASURED:` line flips), flip `fetchGasFeeWei`'s native call site to the `None`
+  arg. Launch check: a native-ETH withdrawal failing on prod with a minter reject mentioning
+  `eip_1559_transaction_price` → look here first.
 - **Live ckUSDC onramp params (O6)** — always READ AT RUNTIME via `get_minter_info`, never
   hardcode (verified live 2026-07-31; the full param table lives in this file's git history at
   `ad65174`).

@@ -67,7 +67,7 @@ community to vote on our upgrades is unrealistic until critical mass. Therefore:
 | # | Item | Closes |
 |---|------|--------|
 | 10 | **Timelock canister as IC-level controller** (self-governance, "poor man's DAO"): upgrades execute only after a public delay — users get exit time; no community vote needed | O1(c), O3 |
-| 11 | Receipt/audit hardening: app verifies canister-signed receipts (R2) before "Paid ✓" | O3 |
+| 11 | ~~**Receipt/audit hardening: app verifies canister-signed receipts (R2) before "Paid ✓"**~~ — **struck 2026-09-06: retired by the cutover; the post-cutover audit surface is ICRC-3 history + sender-authorized read_state.** | ~~O3~~ closed structurally |
 | 12 | Optional per-surface blackholing once a canister surface is feature-complete forever | O1 |
 
 ### Honest residual (accepted, revisit at critical mass)
