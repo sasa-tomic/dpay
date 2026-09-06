@@ -13,10 +13,14 @@
  *     escape hatch (btn-sol-ata-fund) when SOL is short.
  */
 import {describe, it, expect} from '@jest/globals';
-import {solPayGate} from '../config/assets';
+import {solPayGate, solSplSignGate} from '../config/assets';
+import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 
 const sol = (status: string, balance: string | null) => ({status, balance});
 const token = (status: string, amount: string | null) => ({status, amount});
+
+// A real mainnet mint dpay does NOT carry (wrapped SOL) — registered-mint checks must refuse it.
+const UNREGISTERED_MINT = 'So11111111111111111111111111111111111111112';
 
 describe('solPayGate — derivation table', () => {
   it('SOL: known ok + zero balance gates', () => {
@@ -56,5 +60,44 @@ describe('solPayGate — derivation table', () => {
 
   it('token: null amount on balance status (defensive) fails OPEN', () => {
     expect(solPayGate('USDC', sol('ok', '5'), token('balance', null))).toBe('none');
+  });
+});
+
+describe('solSplSignGate — per-request-mint solreq sign gate (OPEN_ISSUES 6(a))', () => {
+  // The solreq auto-sign paths sign PURE against an ASSUMED source ATA; a KNOWN-absent mint is
+  // refused before signing, everything UNCONFIRMED fails open (offline-first — same rule as
+  // solPayGate). 'balance' of ANY amount (including '0') proves the ATA exists — only the owner
+  // can close an ATA, and dpay never builds a close instruction.
+  it('a native-SOL request (mint null) always allows — no ATA involved', () => {
+    expect(solSplSignGate(null, {})).toBe('allow');
+    expect(solSplSignGate(null, {[USDC_MINT_ADDRESS]: token('absent', null)})).toBe('allow');
+  });
+
+  it('a mint outside the registry is unregistered — even one the states happen to carry', () => {
+    expect(solSplSignGate(UNREGISTERED_MINT, {})).toBe('unregistered');
+    expect(solSplSignGate(UNREGISTERED_MINT, {[UNREGISTERED_MINT]: token('absent', null)})).toBe('unregistered');
+  });
+
+  it('a KNOWN-absent mint refuses', () => {
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('absent', null)})).toBe('absent');
+  });
+
+  it('any confirmed balance allows — including a known zero (the ATA exists)', () => {
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('balance', '0')})).toBe('allow');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('balance', '2500000')})).toBe('allow');
+  });
+
+  it('loading / unavailable / error / never-polled fail OPEN (offline-first)', () => {
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {})).toBe('unknown');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('loading', null)})).toBe('unknown');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('unavailable', null)})).toBe('unknown');
+    // a degraded poll observes NOTHING — even one that preserved an amount is not an existence fact
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', '0')})).toBe('unknown');
+  });
+
+  it('the gate reads ONLY the request\'s mint — sibling mint states are irrelevant', () => {
+    const states = {[USDC_MINT_ADDRESS]: token('balance', '5'), [EURC_MINT_ADDRESS]: token('absent', null)};
+    expect(solSplSignGate(USDC_MINT_ADDRESS, states)).toBe('allow');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, states)).toBe('absent');
   });
 });

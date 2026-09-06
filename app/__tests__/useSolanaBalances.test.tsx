@@ -31,6 +31,8 @@ import {getSolanaBalance, getSolanaTokenBalance} from '../solana';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 import {POLL} from '../config/constants';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
+import {resetSolTokenStateCache} from '../services/solTokenStatePersist';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const mockedGetSolanaBalance = getSolanaBalance as jest.MockedFunction<typeof getSolanaBalance>;
 const mockedGetSolanaTokenBalance = getSolanaTokenBalance as jest.MockedFunction<typeof getSolanaTokenBalance>;
@@ -79,10 +81,14 @@ async function flushMicrotasks() {
 }
 
 describe('useSolanaBalances', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.useFakeTimers();
     mockedGetSolanaBalance.mockReset();
     mockedGetSolanaTokenBalance.mockReset();
+    // The per-mint fact store is module-cached + AsyncStorage-backed — both leak across tests
+    // unless reset (a stored fact from an earlier test would seed this test's rows).
+    resetSolTokenStateCache();
+    await AsyncStorage.clear();
   });
   afterEach(() => {
     jest.useRealTimers();
@@ -172,7 +178,9 @@ describe('useSolanaBalances', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('token RPC failure preserves the prior amount (status "error", amount kept — NEVER zeroed)', async () => {
+  test('a degraded poll NEVER downgrades a confirmed fact (status stays "balance", amount kept)', async () => {
+    // OPEN_ISSUES 6(a): an existence fact is sticky — only the owner can close an ATA, so an RPC
+    // error after a confirmed balance must leave the FACT intact (the sign gate trusts it).
     mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
     mockedGetSolanaTokenBalance.mockResolvedValueOnce({kind: 'balance', amount: '7000000', decimals: 6});
     mockedGetSolanaTokenBalance.mockResolvedValueOnce({kind: 'error'});
@@ -180,7 +188,16 @@ describe('useSolanaBalances', () => {
     await act(async () => { await flushMicrotasks(); }); // first poll → balance
     expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '7000000', decimals: 6, status: 'balance'});
     await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); }); // second poll → error
-    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '7000000', decimals: 6, status: 'error'}); // amount PRESERVED
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '7000000', decimals: 6, status: 'balance'}); // fact PRESERVED
+    act(() => { tree.unmount(); });
+  });
+
+  test('a degraded first poll with NO known fact still reports the honest degraded status', async () => {
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'error'});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('error');
     act(() => { tree.unmount(); });
   });
 
@@ -297,6 +314,116 @@ describe('useSolanaBalances', () => {
     await act(async () => { await flushMicrotasks(); });
     expect(mockedGetSolanaTokenBalance).not.toHaveBeenCalled();
     expect(apiRef.current!.tokens).toEqual({});
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('useSolanaBalances — per-mint fact persistence (OPEN_ISSUES 6(a))', () => {
+  const STORE_KEY = 'dpay.sol.tokenState.v1';
+
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    mockedGetSolanaBalance.mockReset();
+    mockedGetSolanaTokenBalance.mockReset();
+    resetSolTokenStateCache();
+    await AsyncStorage.clear();
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('a confirmed balance is persisted (fact write)', async () => {
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'balance', amount: '1234567', decimals: 6});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('balance');
+    const raw = await AsyncStorage.getItem(STORE_KEY);
+    expect(raw).toBeTruthy();
+    const store = JSON.parse(raw!) as Record<string, {status: string; amount: string | null; decimals: number | null; at: number}>;
+    expect(store[USDC_MINT_ADDRESS]).toEqual({status: 'balance', amount: '1234567', decimals: 6, at: expect.any(Number)});
+    act(() => { tree.unmount(); });
+  });
+
+  test('a confirmed absence is persisted too (the sign gate trusts exactly this fact)', async () => {
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'absent'});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('absent');
+    const store = JSON.parse((await AsyncStorage.getItem(STORE_KEY))!) as Record<string, {status: string}>;
+    expect(store[USDC_MINT_ADDRESS].status).toBe('absent');
+    act(() => { tree.unmount(); });
+  });
+
+  test('a degraded poll NEVER writes a fact', async () => {
+    const setSpy = jest.spyOn(AsyncStorage, 'setItem');
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockResolvedValueOnce({kind: 'error'});
+    mockedGetSolanaTokenBalance.mockResolvedValueOnce({kind: 'offline'});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('error');
+    await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('unavailable');
+    expect(setSpy).not.toHaveBeenCalled();
+    expect(await AsyncStorage.getItem(STORE_KEY)).toBeNull();
+    setSpy.mockRestore();
+    act(() => { tree.unmount(); });
+  });
+
+  test('an offline restart seeds rows from the persisted store — the gate works offline', async () => {
+    // The wallet saw USDC absent in an earlier session; now it is offline from the very first
+    // render. The row must seed the persisted FACT (not 'loading'), so the per-request-mint
+    // sign gate refuses instead of failing open.
+    await AsyncStorage.setItem(STORE_KEY, JSON.stringify({
+      [USDC_MINT_ADDRESS]: {status: 'absent', amount: null, decimals: null, at: 1},
+    }));
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockReturnValue(new Promise(() => {})); // no poll ever lands
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: null, decimals: null, status: 'absent'});
+    act(() => { tree.unmount(); });
+  });
+
+  test('a persisted fact survives a degraded first poll that races the storage read', async () => {
+    await AsyncStorage.setItem(STORE_KEY, JSON.stringify({
+      [USDC_MINT_ADDRESS]: {status: 'balance', amount: '9', decimals: 6, at: 1},
+    }));
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'offline'});
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); }); // offline poll + the storage load both land
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '9', decimals: 6, status: 'balance'});
+    act(() => { tree.unmount(); });
+  });
+
+  test('mint-list churn: a dropped mint keeps its fact and re-seeds on return', async () => {
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockImplementation((_secret, mint) =>
+      mint === USDC_MINT_ADDRESS ? Promise.resolve({kind: 'balance', amount: '5', decimals: 6}) : Promise.resolve({kind: 'absent'}));
+    const apiRef: React.MutableRefObject<Api | null> = {current: null};
+    let tree!: renderer.ReactTestRenderer;
+    act(() => {
+      tree = renderer.create(<Harness secretHex={SECRET_HEX} solAddress={SOL_ADDRESS} mints={[USDC_MINT_ADDRESS]} apiRef={apiRef} />);
+    });
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '5', decimals: 6, status: 'balance'});
+    // Drop the membership entirely — the record empties but the FACT stays persisted.
+    act(() => {
+      tree.update(<Harness secretHex={SECRET_HEX} solAddress={SOL_ADDRESS} mints={[]} apiRef={apiRef} />);
+    });
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens).toEqual({});
+    // Return with the RPC degraded: the effect re-seeds from the store, the poll must not
+    // downgrade the fact.
+    mockedGetSolanaTokenBalance.mockResolvedValue({kind: 'error'});
+    act(() => {
+      tree.update(<Harness secretHex={SECRET_HEX} solAddress={SOL_ADDRESS} mints={[USDC_MINT_ADDRESS]} apiRef={apiRef} />);
+    });
+    await act(async () => { await flushMicrotasks(); });
+    expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '5', decimals: 6, status: 'balance'});
     act(() => { tree.unmount(); });
   });
 });

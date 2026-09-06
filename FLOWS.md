@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **128 flows**
-> (127 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **129 flows**
+> (128 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw (11) · nfc (10) · system (24) · tour (6)
+wire (1) · onboard (18) · pay (38) · offline (10) · deposit (11) · withdraw (11) · nfc (10) · system (24) · tour (6)
 
 ---
 
@@ -80,6 +80,7 @@ wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw
 | 123 | pay-link-named-rail | A payment link naming USDC@Solana pays exactly that rail with home=USD/preferred ckUSDC selected — no rail-selection copy on the pinned path. | pay-link, url-routing, rail-choice, never-override |
 | 124 | fund-gate-sibling-rail | The IC fund-first gate names a funded USDC@Solana sibling rail and one tap switches to it (user gesture, selection unlocked). | fund-gate, rail-choice, home-currency, solana |
 | 132 | eurc-solana-pay | home=EUR on the EURC rail: a scanned solana: URI naming EURC's mint reviews and pays EURC (named token, own 6 decimals, ATA rent disclosed); a non-catalog mint is refused BY NAME with its pubkey. | solana-pay, eur, eurc, scan, refusal, fees |
+| 137 | sol-cross-mint-sign-gate | OPEN_ISSUES 6(a): a solreq naming a KNOWN-absent mint (per-mint state from the balance rail, persisted across restarts) is refused at the scan by name before any sign; a fundable request-mint still signs. | solreq, cross-mint, absent-ata, refusal, fail-open, offline-sign |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |

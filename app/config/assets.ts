@@ -35,6 +35,7 @@ import {IS_SOLANA_DEVNET, SOLANA_RPC_URL} from './constants';
 import {parseDecimalToUnits} from '../lib/amount';
 import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
+import {solanaTokenOfMint} from '../solana/tokens';
 import {M} from '../i18n';
 
 // A resolved, display-ready view of one selectable asset. Built fresh from the current catalog +
@@ -502,4 +503,37 @@ export function solPayGate(
   if (token.status === 'absent') return 'token-absent';
   if (token.status === 'balance' && token.amount != null && token.amount === '0') return 'token-zero';
   return 'none';
+}
+
+// The per-request-mint solreq sign gate (OPEN_ISSUES 6(a), 2026-09-06). The solreq auto-sign
+// paths (QR scan + NFC card) sign PURE, offline, against an ASSUMED source ATA —
+// buildCanonicalSplMessage derives sourceAta = deriveAta(payer, mint) and never checks it
+// exists. A cross-mint solreq naming a mint whose ATA this wallet never created would sign
+// "successfully", and the merchant's broadcast would be REJECTED on-chain — a dead QR the payer
+// cannot see (they showed a signed payment; settlement just never happens). So the sign path
+// must refuse BEFORE signing when the REQUEST's mint is KNOWN to have no account here.
+//
+// The knowledge is the useSolanaBalances per-mint state — which is exactly why an 'absent' fact
+// is trustworthy enough to refuse on, and why every UNCONFIRMED state must fail open:
+//   ONLY THE OWNER CAN CLOSE AN ATA (close_authority defaults to the owner under Solana program
+//   rules), and dpay never builds a close instruction anywhere in app/solana/ — so once a mint
+//   has been observed 'absent', it stays absent until this wallet creates the account (Receive ▸
+//   createTokenAccount), and once observed 'balance' (ANY amount, including '0') the account
+//   existed at poll time and cannot have disappeared. The hook persists these facts across
+//   restarts (services/solTokenStatePersist), so they hold offline too. A mint never confirmed
+//   either way ('loading' / 'unavailable' / 'error' / never-polled) observes nothing — refusing
+//   there would break offline signing for wallets that DO hold the account, violating the
+//   offline-first rule (same fail-open contract as solPayGate above).
+export type SolSplSignGate = 'allow' | 'absent' | 'unknown' | 'unregistered';
+export function solSplSignGate(
+  mint: string | null,
+  states: Record<string, {amount: string | null; status: string}>,
+): SolSplSignGate {
+  if (mint == null) return 'allow';
+  if (solanaTokenOfMint(mint) == null) return 'unregistered';
+  const state = states[mint];
+  if (state == null) return 'unknown';
+  if (state.status === 'absent') return 'absent';
+  if (state.status === 'balance') return 'allow';
+  return 'unknown';
 }

@@ -6,7 +6,8 @@ import {SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import type {SolNfcEvent, Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {solanaTokenInfo} from '../solana/tokens';
+import {solanaTokenInfo, solanaTokenOfMint} from '../solana/tokens';
+import {solSplSignGate} from '../config/assets';
 import {decodeSolReq, decodeSolPay, encodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {extractSignedTxParts} from '../solana/tx';
@@ -40,11 +41,15 @@ function solUnit(cur: string): {decimals: number; unit: string} {
  * lives in `useNfcTapState`; this adapter fills ONLY the SOL protocol: signSolPayment/
  * signSplPayment + RPC broadcast + rid/sig receipt matching.
  */
-export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onActive, onClose}: {
+export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome, onResult, onActive, onClose}: {
   role: 'card' | 'reader';
   identity: Identity;
   req?: SolReqV2;
   reqUri?: string;
+  /** Per-mint token states (useSolanaBalances tokens) for the per-request-mint sign gate —
+   *  card role only (the reader/broadcast side signs nothing). Optional: readers and legacy
+   *  mounts fail open exactly like an unpolled mint. */
+  tokenBalances?: Record<string, {amount: string | null; status: string}>;
   onOutcome?: (o: 'success' | 'pending' | 'declined') => void;
   onResult?: (r: {amount: string; cur: string; sig: string} | null) => void;
   onActive?: () => void;
@@ -188,6 +193,22 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       ctx.finalize('declined', M.errors.tap.paymentRequestExpired);
       return;
     }
+    // Per-request-mint absent-ATA gate (OPEN_ISSUES 6(a)): the request names its OWN mint, which
+    // need not be the armed asset's — a KNOWN-absent mint would sign pure against an ATA that
+    // doesn't exist and the merchant's broadcast would be REJECTED (dead tap). Decline the card
+    // with the named instruction (same shape as the expired decline above). Unconfirmed states
+    // fail open — see solSplSignGate.
+    const signGate = solSplSignGate(decoded.mint, tokenBalances ?? {});
+    if (signGate === 'unregistered' || signGate === 'absent') {
+      try { await DpaySolNfc.declineSolCard(); } catch (e: unknown) { console.warn('DpaySolNfc.declineSolCard failed (sign gate)', e); }
+      ctx.finalize(
+        'declined',
+        signGate === 'unregistered'
+          ? M.pay.spay.unknownMint(decoded.mint ?? '')
+          : M.errors.solana.senderNoTokenAccount(solanaTokenOfMint(decoded.mint) ?? decoded.mint ?? ''),
+      );
+      return;
+    }
     advance('exchanging');
     try {
       const solpay: SolPayV2 = decoded.cur === 'SOL'
@@ -206,7 +227,7 @@ export function SolNfcTap({role, identity, req, reqUri, onOutcome, onResult, onA
       console.warn('SolNfcTap approve failed:', raw);
       ctx.finalize('error', friendlySolTapError(raw));
     }
-  }, [advance, identity.secretHex]);
+  }, [advance, identity.secretHex, tokenBalances]);
   approveRef.current = approve;
 
   // While merely armed/listening (no tap yet) render nothing, so the parent's QR shows and the phone

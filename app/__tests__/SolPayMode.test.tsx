@@ -20,8 +20,15 @@ import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Share, Platform, Text} from 'react-native';
 
+// Scanner mount counter — the per-request-mint refusal must REMOUNT the camera (scanKey++), the
+// same dead-camera fix as every other scan refusal. `mock` prefix = jest.mock hoisting rule.
+const mockScannerMounts = {n: 0};
 jest.mock('../components/QrScanner', () => ({
-  QrScanner: (_props: {onScan: (raw: string) => void}) => null,
+  QrScanner: (_props: {onScan: (raw: string) => void}) => {
+    const {useEffect} = jest.requireActual('react') as {useEffect: (fn: () => void, deps: unknown[]) => void};
+    useEffect(() => { mockScannerMounts.n += 1; }, []);
+    return null;
+  },
 }));
 jest.mock('../components/SolNfcTap', () => ({
   SolNfcTap: (_props: {role: string}) => null,
@@ -61,10 +68,10 @@ jest.mock('../services/opencryptopay', () => ({
 }));
 
 import {encodeSolReq, type SolReqInput} from '../solana/qr';
-import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, type SolanaSignatureStatus} from '../solana';
+import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, signSplPayment, type SolanaSignatureStatus} from '../solana';
 import {payAndReport, resolveOcpOffer, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {buildSelectableAssets} from '../config/assets';
-import {USDC_MINT_ADDRESS} from '../solana/tokens';
+import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 import {POLL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {SolPayMode} from '../components/SolPayMode';
@@ -202,6 +209,7 @@ beforeEach(() => {
   // Fake timers keep jest's loop clean; Date stays real — the v2 request's iat/exp math (and the
   // decoder's freshness check) reads Date.now().
   jest.useFakeTimers({doNotFake: ['Date']});
+  mockScannerMounts.n = 0;
   shareSpy.mockReset().mockResolvedValue({action: 'sharedAction' as const});
   // The signer mock defaults to the REAL implementation each test (the U-F5 suite swaps in a
   // throwing one to park the sign surface — without this reset it leaks into later suites).
@@ -1142,6 +1150,110 @@ describe('SolPayMode — the funded-sibling pointer on the fund gates (Objective
     });
     expect(hasTestID(tree, 'sol-pay-fund')).toBe(true);
     expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('SolPayMode — per-request-mint solreq sign gate (OPEN_ISSUES 6(a))', () => {
+  // The solreq names its OWN mint, which need not be the selected asset's: a KNOWN-absent mint
+  // would sign pure against an ATA that doesn't exist and the merchant's broadcast would be
+  // REJECTED (dead QR). The gate refuses at the scan, by name; unconfirmed states fail open.
+  const SPL_DEST_ATA = '9AkkgHAxGYiX6RXhXbkVhFiyMAK81GYcj4zDtk9wbT4u'; // golden-vector ATA — any valid pubkey works as the merchant's destination
+  const UNREGISTERED_MINT = 'So11111111111111111111111111111111111111112'; // wrapped SOL — a real mainnet mint dpay doesn't carry
+
+  /** A cross-mint SPL solreq — same shape as solReqUri but cur/mint/toAta name the REQUEST's token. */
+  function splReqUri(mint: string, cur: string): string {
+    const iat = Math.floor(Date.now() / 1000) - 30;
+    const input: SolReqInput = {
+      rid: '0123456789abcdef0123456789abcdef',
+      net: 'mainnet-beta',
+      bh: BLOCKHASH,
+      lvh: 300_000_000,
+      slot: 290_000_000,
+      iat,
+      exp: iat + 90,
+      to: MERCHANT,
+      amt: '1500000',
+      cur,
+      mint,
+      toAta: SPL_DEST_ATA,
+      name: 'Cafe Sol',
+      memo: '',
+    };
+    return encodeSolReq(input);
+  }
+
+  test('a cross-mint solreq naming a KNOWN-absent mint is refused at the scan, by name — nothing signs', async () => {
+    jest.mocked(signSplPayment).mockClear();
+    const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: {amount: null, status: 'absent'}}});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    expect(textByTestID(tree, 'sol-pay-err')).toBe(M.errors.solana.senderNoTokenAccount('EURC'));
+    expect(jest.mocked(signSplPayment)).not.toHaveBeenCalled();
+    expect(hasTestID(tree, 'sol-pay-qr')).toBe(false); // never reached the signed-QR phase
+    expect(hasTestID(tree, 'sol-pay-scan')).toBe(true); // still on the scan surface
+    act(() => { tree.unmount(); });
+  });
+
+  test('the refusal REMOUNTS the camera and a fresh scan of a fundable request signs right after', async () => {
+    jest.mocked(signSplPayment).mockClear();
+    const tree = mountSolPay({tokenBalances: {
+      [USDC_MINT_ADDRESS]: {amount: '2500000', status: 'balance'},
+      [EURC_MINT_ADDRESS]: {amount: null, status: 'absent'},
+    }});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    await act(async () => {}); // let the remount's passive effect flush
+    expect(textByTestID(tree, 'sol-pay-err')).toBe(M.errors.solana.senderNoTokenAccount('EURC'));
+    // Exactly TWO scanner mounts so far: the arm (btn-sol-start-scan) + ONE refusal remount
+    // (scanKey++). A dead camera would read 1; a remount loop would read 3+.
+    expect(mockScannerMounts.n).toBe(2);
+    // Same wallet, fundable cross-mint request (USDC funded) — the REMOUNTED camera is live
+    // (the surface stays armed), so this scan rides the mounted scanner, not the CTA.
+    const scanner = tree.root.find((n: renderer.ReactTestInstance) => typeof n.props.onScan === 'function');
+    await act(async () => { await scanner.props.onScan(splReqUri(USDC_MINT_ADDRESS, 'USDC')); });
+    expect(jest.mocked(signSplPayment)).toHaveBeenCalledTimes(1);
+    expect(hasTestID(tree, 'sol-pay-qr')).toBe(true);
+    expect(textByTestID(tree, 'sol-pay-err')).toBe('');
+    act(() => { tree.unmount(); });
+  });
+
+  test('fail-open: an UNCONFIRMED request-mint state signs anyway (offline-first)', async () => {
+    for (const state of [
+      {amount: null, status: 'loading'},
+      {amount: null, status: 'unavailable'},
+      {amount: '0', status: 'error'},
+    ]) {
+      jest.mocked(signSplPayment).mockClear();
+      const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: state}});
+      await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+      expect(jest.mocked(signSplPayment)).toHaveBeenCalledTimes(1);
+      expect(hasTestID(tree, 'sol-pay-qr')).toBe(true);
+      act(() => { tree.unmount(); });
+    }
+    // never-polled mint (no state at all) fails open too
+    jest.mocked(signSplPayment).mockClear();
+    const tree = mountSolPay({tokenBalances: {}});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    expect(jest.mocked(signSplPayment)).toHaveBeenCalledTimes(1);
+    expect(hasTestID(tree, 'sol-pay-qr')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('fail-open inverse: a funded request-mint signs — even a known-zero balance (ATA exists)', async () => {
+    jest.mocked(signSplPayment).mockClear();
+    const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: {amount: '0', status: 'balance'}}});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    expect(jest.mocked(signSplPayment)).toHaveBeenCalledTimes(1);
+    expect(hasTestID(tree, 'sol-pay-qr')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('an unregistered mint is refused with the named unknown-mint copy — not a raw signer crash', async () => {
+    jest.mocked(signSplPayment).mockClear();
+    const tree = mountSolPay({tokenBalances: {}});
+    await scanToSign(tree, splReqUri(UNREGISTERED_MINT, 'USDC'));
+    expect(textByTestID(tree, 'sol-pay-err')).toBe(M.pay.spay.unknownMint(UNREGISTERED_MINT));
+    expect(jest.mocked(signSplPayment)).not.toHaveBeenCalled(); // the old honesty bug: the raw throw rendered verbatim
+    expect(hasTestID(tree, 'sol-pay-qr')).toBe(false);
     act(() => { tree.unmount(); });
   });
 });

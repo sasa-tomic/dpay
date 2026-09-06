@@ -7,7 +7,7 @@ import {S} from '../styles';
 import {C} from '../config/palette';
 import {IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {POLL, QR_SIZE} from '../config/constants';
-import type {SolPayGate} from '../config/assets';
+import {solSplSignGate, type SolPayGate} from '../config/assets';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short, toUnits} from '../lib/format';
 import {parseDecimalToUnits} from '../lib/amount';
@@ -335,6 +335,22 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       if (isSolReqV2Expired(r)) {
         setReq(null);
         refuseScan(M.pay.solRequestExpired);
+        return;
+      }
+      // Per-request-mint absent-ATA gate (OPEN_ISSUES 6(a)): the solreq names its OWN mint, which
+      // need not be the selected asset's — a KNOWN-absent mint would sign pure against an ATA
+      // that doesn't exist and the merchant's broadcast would be REJECTED (dead QR). Refuse at
+      // the scan, by name, exactly like startSpay's absent refusal; unknown mints (dpay carries
+      // no registry entry) get the same honest unknown-mint copy. Every UNCONFIRMED state fails
+      // open — see solSplSignGate.
+      const signGate = solSplSignGate(r.mint, tokenBalances);
+      if (signGate === 'unregistered' || signGate === 'absent') {
+        setReq(null);
+        refuseScan(
+          signGate === 'unregistered'
+            ? M.pay.spay.unknownMint(r.mint ?? '')
+            : M.errors.solana.senderNoTokenAccount(solanaTokenOfMint(r.mint) ?? r.mint ?? ''),
+        );
         return;
       }
       setReq(r);
@@ -736,6 +752,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         {scanArmed && nfcReady && DpaySolNfc ? (
           <SolNfcTap
             key={nfcKey} role="card" identity={identity}
+            tokenBalances={tokenBalances}
             onOutcome={onNfcOutcome}
             onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}
           />

@@ -32,7 +32,9 @@ import {NfcTap} from '../components/NfcTap';
 import {SolNfcTap} from '../components/SolNfcTap';
 import {DpayNfc, DpaySolNfc} from '../services/native';
 import {prepareNfcTransfer} from '../services/rail';
-import {signSolPayment} from '../solana';
+import {signSolPayment, signSplPayment} from '../solana';
+import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
+import {M} from '../i18n';
 import {nowSecs} from '../lib/format';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {JOURNEY_STAMPS, hasStamp, loadJourney} from '../lib/journey';
@@ -147,10 +149,10 @@ function solreqUri(over: Record<string, unknown> = {}): string {
     name: 'merchant', memo: '', ...over,
   } as never);
 }
-async function mountSol() {
+async function mountSol(tokenBalances?: Record<string, {amount: string | null; status: string}>) {
   await act(async () => {
     tree = Renderer.create(
-      <SolNfcTap role="card" identity={IDENTITY} onClose={() => {}} />,
+      <SolNfcTap role="card" identity={IDENTITY} tokenBalances={tokenBalances} onClose={() => {}} />,
     );
   });
 }
@@ -258,6 +260,57 @@ describe('SolNfcTap (SOL) auto-sign (one-press rule)', () => {
     expect(DpaySolNfc.approveSolCard).not.toHaveBeenCalled();
     expect(DpaySolNfc.declineSolCard).toHaveBeenCalled();
     expect(hasText('This payment request has expired')).toBe(true);
+  });
+
+  // ── Per-request-mint sign gate (OPEN_ISSUES 6(a)) ─────────────────────────────────────────
+  // The solreq names its OWN mint; a KNOWN-absent mint would sign pure against an ATA that
+  // doesn't exist and the merchant's broadcast would be REJECTED (dead tap). Decline by name.
+  const SPL_DEST_ATA = '9AkkgHAxGYiX6RXhXbkVhFiyMAK81GYcj4zDtk9wbT4u'; // any valid base58 pubkey
+  const UNREGISTERED_MINT = 'So11111111111111111111111111111111111111112'; // wrapped SOL — real mainnet mint dpay doesn't carry
+  const splReq = (mint: string, cur: string) => solreqUri({cur, mint, toAta: SPL_DEST_ATA, amt: '1500000'});
+
+  it('a solreq naming a KNOWN-absent mint auto-declines at the sign gate — nothing ever signs', async () => {
+    await mountSol({[EURC_MINT_ADDRESS]: {amount: null, status: 'absent'}});
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(EURC_MINT_ADDRESS, 'EURC')});
+    expect(signSolPayment).not.toHaveBeenCalled();
+    expect(signSplPayment).not.toHaveBeenCalled();
+    expect(DpaySolNfc.approveSolCard).not.toHaveBeenCalled();
+    expect(DpaySolNfc.declineSolCard).toHaveBeenCalled();
+    expect(hasText(M.errors.solana.senderNoTokenAccount('EURC'))).toBe(true);
+  });
+
+  it('an unregistered mint auto-declines with the named unknown-mint copy', async () => {
+    await mountSol({});
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(UNREGISTERED_MINT, 'USDC')});
+    expect(signSplPayment).not.toHaveBeenCalled();
+    expect(DpaySolNfc.declineSolCard).toHaveBeenCalled();
+    expect(hasText(M.pay.spay.unknownMint(UNREGISTERED_MINT))).toBe(true);
+  });
+
+  it('a FUNDED request-mint still signs (balance of any amount ⇒ the ATA exists)', async () => {
+    await mountSol({[USDC_MINT_ADDRESS]: {amount: '0', status: 'balance'}});
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(USDC_MINT_ADDRESS, 'USDC')});
+    expect(signSplPayment).toHaveBeenCalledTimes(1);
+    expect(DpaySolNfc.approveSolCard).toHaveBeenCalledWith(expect.stringMatching(/^solpay:v2\?/));
+    expect(DpaySolNfc.declineSolCard).not.toHaveBeenCalled();
+  });
+
+  it('fail-open: an unconfirmed request-mint state (and a legacy mount with no states) signs', async () => {
+    for (const states of [
+      {[EURC_MINT_ADDRESS]: {amount: null, status: 'loading'}},
+      {[EURC_MINT_ADDRESS]: {amount: null, status: 'unavailable'}},
+      {[EURC_MINT_ADDRESS]: {amount: '0', status: 'error'}},
+    ] as Record<string, {amount: string | null; status: string}>[]) {
+      await mountSol(states);
+      await emitSol({type: 'request', role: 'card', solreqUri: splReq(EURC_MINT_ADDRESS, 'EURC')});
+      expect(signSplPayment).toHaveBeenCalledTimes(1);
+      expect(DpaySolNfc.declineSolCard).not.toHaveBeenCalled();
+      if (tree) { const t = tree; tree = null; await act(async () => { t.unmount(); }); }
+      jest.clearAllMocks();
+    }
+    await mountSol(); // no tokenBalances at all (reader-style/legacy mount)
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(EURC_MINT_ADDRESS, 'EURC')});
+    expect(signSplPayment).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -116,7 +116,8 @@ export const errorsEn: ErrorMessages = {
   solana: {
     offline: 'Solana is offline (no RPC endpoint configured)',
     tokenUnavailable: asset => `Solana ${asset} is not available (no RPC endpoint configured)`,
-    senderNoTokenAccount: asset => `Your wallet doesn't have a ${asset} account yet`,
+    senderNoTokenAccount: asset =>
+      `Your wallet doesn't have a ${asset} account yet. Get online once and open Receive ▸ Create my ${asset} account to set it up — or pay this merchant with an asset you already hold`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `They don't have a ${asset} account yet — creating it needs about ${solAmount} of SOL in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`,
     ownTokenAccountRent: (solAmount, asset) =>

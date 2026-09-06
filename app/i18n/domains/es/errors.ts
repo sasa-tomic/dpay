@@ -18,7 +18,8 @@ export const errorsEs: ErrorMessages = {
   solana: {
     offline: 'Solana está sin conexión (no hay endpoint RPC configurado)',
     tokenUnavailable: asset => `El ${asset} de Solana no está disponible (no hay endpoint RPC configurado)`,
-    senderNoTokenAccount: asset => `Tu billetera aún no tiene una cuenta de ${asset}`,
+    senderNoTokenAccount: asset =>
+      `Tu billetera aún no tiene una cuenta de ${asset}. Conéctate una vez a internet y abre Recibir ▸ «Crear mi cuenta de ${asset}» para crearla — o paga a este comercio con un activo que ya tengas`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `Aún no tiene una cuenta de ${asset}: crearla requiere unos ${solAmount} de SOL en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
     ownTokenAccountRent: (solAmount, asset) =>

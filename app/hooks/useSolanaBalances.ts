@@ -2,6 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {POLL} from '../config/constants';
 import {getSolanaBalance, getSolanaTokenBalance} from '../solana';
 import type {SolanaTokenBalanceResult} from '../solana';
+import {loadSolTokenState, recordSolTokenFact} from '../services/solTokenStatePersist';
 
 /** SOL rail balance status — distinct from the token status (plan invariant #10). */
 export type SolBalanceStatus = 'loading' | 'ok' | 'unavailable' | 'error';
@@ -38,10 +39,17 @@ const TOKEN_IDLE: SolTokenBalanceState = {amount: null, decimals: null, status: 
  *
  * Invariants honored (plan Phase 2, per mint):
  *  - missing token account → `status: 'absent'` (NOT 'error', NOT a zeroed balance — a known zero).
- *  - RPC failure preserves the prior amount (status flips to 'error', the amount is kept — it
- *    NEVER turns a prior value into zero).
- *  - offline (RPC URL empty / mint incoherent) → `status: 'unavailable'`; the seam no-ops without
- *    touching the network (the hook does not re-verify that — it's the seam's job).
+ *  - a CONFIRMED result ('absent' | 'balance') is a FACT and is persisted (services/
+ *    solTokenStatePersist) + never downgraded: a later degraded poll ('offline'/'error') keeps
+ *    the last fact instead of flipping the status (only the owner can close an ATA, and dpay has
+ *    no close path — so an existence fact cannot silently go stale).
+ *  - on (re)start the rows seed from the persisted store — an offline restart keeps the gate
+ *    (config/assets.ts solSplSignGate) working instead of failing open from 'loading'.
+ *  - RPC failure with NO known fact preserves the prior amount (status flips to 'error', the
+ *    amount is kept — it NEVER turns a prior value into zero).
+ *  - offline (RPC URL empty / mint incoherent) → `status: 'unavailable'` (same no-fact rule);
+ *    the seam no-ops without touching the network (the hook does not re-verify that — it's the
+ *    seam's job).
  *  - generation guard: changing `solAddress` / `secretHex` / the mint list aborts in-flight
  *    requests and drops any stale result that resolves after the switch.
  *
@@ -116,29 +124,73 @@ export function useSolanaBalances(
     const gen = ++tokenGenRef.current;
     const ctrl = new AbortController();
     const fresh = () => alive && gen === tokenGenRef.current;
+    // Persisted last-known facts (memoized storage read). Populated async; until it lands, rows
+    // poll as before ('loading' → first result). A fact here is a sticky existence proof — see
+    // services/solTokenStatePersist.ts.
+    const persistedFacts: Record<string, SolTokenBalanceState> = {};
+    void loadSolTokenState().then((store) => {
+      if (!fresh()) return;
+      for (const [mint, f] of Object.entries(store)) {
+        persistedFacts[mint] = {amount: f.amount, decimals: f.decimals, status: f.status};
+      }
+      // Re-seed any row still in a NON-fact state (loading, or degraded by a first poll that
+      // raced this load) with its persisted fact — the offline-restart seeding path.
+      setTokens((prev) => {
+        const next: Record<string, SolTokenBalanceState> = {};
+        let changed = false;
+        for (const mint of mints) {
+          const live = prev[mint];
+          const pf = persistedFacts[mint];
+          if (live != null && (live.status === 'absent' || live.status === 'balance')) {
+            next[mint] = live;
+          } else if (pf) {
+            next[mint] = pf;
+            changed = true;
+          } else {
+            next[mint] = live ?? TOKEN_IDLE;
+          }
+        }
+        return changed ? next : prev;
+      });
+    });
     const pollMint = async (mint: string) => {
       try {
         const r: SolanaTokenBalanceResult = await getSolanaTokenBalance(secretHex, mint, ctrl.signal);
         if (!fresh()) return;
         switch (r.kind) {
-          case 'offline':
-            setTokens((prev) => ({...prev, [mint]: {amount: null, decimals: null, status: 'unavailable'}}));
-            break;
           case 'absent':
             setTokens((prev) => ({...prev, [mint]: {amount: null, decimals: null, status: 'absent'}}));
+            void recordSolTokenFact(mint, {status: 'absent', amount: null, decimals: null, at: Date.now()});
             break;
           case 'balance':
             setTokens((prev) => ({...prev, [mint]: {amount: r.amount, decimals: r.decimals, status: 'balance'}}));
+            void recordSolTokenFact(mint, {status: 'balance', amount: r.amount, decimals: r.decimals, at: Date.now()});
             break;
-          case 'error':
-            // Preserve the prior amount + decimals (do NOT zero — plan line ~189).
-            setTokens((prev) => ({...prev, [mint]: {...(prev[mint] ?? TOKEN_IDLE), status: 'error'}}));
+          case 'offline':
+          case 'error': {
+            // Degraded result — it observes NOTHING. A live fact stays (never downgraded);
+            // else a persisted fact seeds the row; else today's degraded shape.
+            const status = r.kind === 'offline' ? 'unavailable' : 'error';
+            setTokens((prev) => {
+              const live = prev[mint];
+              if (live != null && (live.status === 'absent' || live.status === 'balance')) return prev;
+              const pf = persistedFacts[mint];
+              if (pf) return {...prev, [mint]: pf};
+              return {...prev, [mint]: {...(live ?? TOKEN_IDLE), status}};
+            });
             break;
+          }
         }
       } catch (e) {
         console.warn(`useSolanaBalances token poll failed for mint ${mint}:`, e instanceof Error ? e.message : String(e));
         if (!fresh()) return;
-        setTokens((prev) => ({...prev, [mint]: {...(prev[mint] ?? TOKEN_IDLE), status: 'error'}}));
+        setTokens((prev) => {
+          const live = prev[mint];
+          if (live != null && (live.status === 'absent' || live.status === 'balance')) return prev;
+          const pf = persistedFacts[mint];
+          if (pf) return {...prev, [mint]: pf};
+          return {...prev, [mint]: {...(live ?? TOKEN_IDLE), status: 'error'}};
+        });
       }
     };
     pollMintRef.current = (mint: string) => { pollMint(mint); };
