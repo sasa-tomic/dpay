@@ -79,7 +79,7 @@ export async function run() {
     await skipRehearsalIfPresent(driver);
 
     // 3. The Wallet screen mounts. The balance Text (testID="balance") is the gate. The app polls
-    //    /api/v1/balance every 2.5s; the faucet funds the account synchronously in create(), so by
+    //    /api/v1/balances every 2.5s; the faucet funds the account synchronously in create(), so by
     //    the time the Wallet mounts the balance is ∂100.00 (the brief's ∂0.00 is wrong with a working
     //    relay — see file header).
     console.log('[01-onboard] wallet screen — waiting for balance…');

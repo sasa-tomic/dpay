@@ -214,15 +214,13 @@ pub fn app(state: AppState) -> Router {
         api
     };
 
-    // Test-only value fixtures (test-helpers, WITHOUT agent — the e2e/test-relay build): the
-    // faucet credits the fake-IC gateway at the user's principal, and the single-currency
-    // /balance reads it back — e2e assertion sugar. Prod gets balances through the batch route
-    // above (direct ledger reads). When BOTH features are on (the live-test config) the AGENT
-    // faucet below owns the route instead, so the live tests drive the production branch.
+    // Test-only value fixture (test-helpers, WITHOUT agent — the e2e/test-relay build): the
+    // faucet credits the fake-IC gateway at the user's principal; e2e assertion sugar reads it
+    // back through the always-on batch /balances route above (the same gateway snapshot under
+    // test-helpers). When BOTH features are on (the live-test config) the AGENT faucet below owns
+    // the route instead, so the live tests drive the production branch.
     #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
     let api = api.route("/faucet", axum::routing::post(faucet));
-    #[cfg(feature = "test-helpers")]
-    let api = api.route("/balance/{hex}", get(balance));
     // Test seam for the honest-unknown recovery flow (2026-08-21 mainnet NFC bug): arm
     // "hide this request_id's outcome for the next N read_states" on the fake-IC gateway —
     // see `FakeIc::hidden_outcomes`. RID-scoped, so concurrent flows on the shared relay are
@@ -401,29 +399,6 @@ async fn faucet_agent(State(state): State<AppState>, Json(req): Json<FaucetReque
             err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
         }
     }
-}
-
-/// `GET /api/v1/balance/{hex}?currency=<u32>` → `{"balance": <minor units>}` for a 32-byte
-/// pubkey (hex). Test fixture (test-helpers only): reads the fake-IC gateway's principal-keyed
-/// ledger so e2e assertions can check where funds landed. Prod reads balances through the app's
-/// own signed icrc1_balance_of queries — this route does not exist there.
-#[cfg(feature = "test-helpers")]
-async fn balance(
-    State(state): State<AppState>,
-    Path(hex_pk): Path<String>,
-    Query(qs): Query<BalanceQuery>,
-) -> Response {
-    let pk = ok_or_bail!(parse_pubkey_hex(&hex_pk));
-    let currency = qs.currency.unwrap_or(DEMO_USD);
-    // Read the gateway's principal-keyed balance (same mapping the faucet credits and signed
-    // transfers move — the pubkey's self_authenticating principal).
-    let Some(fake) = state.fake_ic.clone() else {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
-    };
-    use dpay_icp::principal::Principal as IcpPrincipal;
-    let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
-    let bal = fake.balance_for(currency, &owner);
-    (StatusCode::OK, Json(BalanceBody { balance: U64String(bal) })).into_response()
 }
 
 /// `POST /api/v1/test/hide_outcome` JSON `{request_id: <32-byte hex>, polls: <u32>}` → `{ok: true}`
@@ -883,7 +858,7 @@ struct HideOutcomeRequest {
     polls: Option<u32>,
 }
 
-/// `?currency=N` for `GET /api/v1/balance/{hex}`. Absent → `DEMO_USD`.
+/// `?currency=N` for `GET /api/v1/deposit/info`. Absent → `DEMO_USD`.
 #[derive(Deserialize)]
 struct BalanceQuery {
     currency: Option<Currency>,

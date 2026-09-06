@@ -792,23 +792,26 @@ export async function assertDisabled(driver, testID, label) {
 // failures. These hit the REAL test relay the harness spawned (FakeLedger offline), proving the
 // credited/settled path end-to-end rather than mocking it.
 
-/** GET `/api/v1/balance/<hex>?currency=N` → the balance in minor units. MC1 units 2-4: the relay
- *  serializes the balance as a DECIMAL STRING (raw u64), so the helper returns a string.
- *
- *  DEPENDENCE NOTE: this route lives on the relay's TEST-HELPERS-ONLY router (alongside /faucet) —
- *  it is NOT part of the prod API surface (the app itself reads balances via the batch
- *  `/api/v1/balances/<hex>`). 30+ flows ride this sugar. Deleting the helpers route later requires
- *  migrating this helper to `/balances` (or the gateway directly) first — see OPEN_ISSUES residuals. */
+/** GET `/api/v1/balances/<hex>` (the always-on batch route the app itself polls) → the balance in
+ *  minor units for `currency`. The response is a map keyed by DECIMAL-STRING currency id whose
+ *  values are DECIMAL STRINGS (MC1 units 2-4: raw u64 across the JSON boundary as a string), so
+ *  the helper returns a string. Under the test-helpers relay the route reads the fake-IC gateway
+ *  snapshot — exactly where the faucet credits and signed transfers move, so assertions see real
+ *  settled state. A currency MISSING from the map THROWS (the route is best-effort per currency) —
+ *  never a silent '0'. */
 export async function getBalance(relayBaseURL, accountHex, currency = 0, timeoutMs = 4000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  const url = `${relayBaseURL}/api/v1/balance/${accountHex}?currency=${currency}`;
+  const url = `${relayBaseURL}/api/v1/balances/${accountHex}`;
   try {
     const r = await fetch(url, { signal: ctrl.signal });
     if (!r.ok) throw new Error(`GET ${url} → HTTP ${r.status}: ${(await r.text().catch(() => '')).slice(0, 500)}`);
     const j = await r.json();
-    if (typeof j.balance !== 'string') throw new Error(`GET ${url}: unexpected body ${JSON.stringify(j).slice(0, 500)}`);
-    return j.balance;
+    const bal = j?.[String(currency)];
+    if (typeof bal !== 'string') {
+      throw new Error(`GET ${url}: no balance entry for currency ${currency} in ${JSON.stringify(j).slice(0, 500)}`);
+    }
+    return bal;
   } catch (e) {
     // Re-throw already-enriched errors verbatim; wrap a bare transport failure (abort/network) with
     // method + URL so the failure names the endpoint instead of an opaque "operation was aborted".

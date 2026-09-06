@@ -374,9 +374,11 @@ Opened by that investigation, and each independently actionable:
   inherent dual-approve partial-failure class (old O4); documented mitigation in place.
 - **WC per-`request()` unbounded** (`app/wallet.ts`) — inherent to EIP-1193 (no standard timeout
   param); pairing bounded at 5 min.
-- **Harness residuals (2026-08-20 harness-debt pass):** the e2e suite rides the relay's
-  test-helpers-only `GET /api/v1/balance/{hex}` route (30+ flows) — deleting that route requires
-  migrating the harness to `/balances` or the gateway first; flow-41 timeout is 30 s authored;
+- **Harness residuals (2026-08-20 harness-debt pass):** ~~the e2e suite rides a test-helpers-only
+  singular balance route (30+ flows)~~ **CLOSED 2026-09-06 — migrated.** The harness's `getBalance`
+  now reads the always-on batch `GET /api/v1/balances/{hex}` (a missing currency key THROWS, never
+  a silent '0') and the singular fixture route is deleted from the relay; flow-41 timeout is 30 s
+  authored;
   `goOffline` kills the IC gateway too (flows 20 + stage-landing-shots use `{keepGateway:true}`);
   MIUI physical device blocks test-APK installs (`just ondevice` stays emulator-only).
 - **Deploy-script candid-literal drift (ops-only):** `dfx-deploy.sh`'s ICRC Init args literal is

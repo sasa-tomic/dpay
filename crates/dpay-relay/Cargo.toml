@@ -26,7 +26,7 @@ agent = ["dep:ic-agent", "dep:candid", "dep:pocket-ic", "dep:icrc-ledger-types",
 
 # Test-only HTTP surface for the e2e harness: the fake-IC `/api/v2` gateway (the offline
 # stand-in for icp-api.io — the app signs envelopes and POSTs them HERE), plus the `POST /api/v1/faucet`
-# + `GET /api/v1/balance/{hex}` fixture routes the 78-flow suite rides. OFF by default and
+# fixture route the suite rides. OFF by default and
 # **MUST NOT** be enabled in the prod image (`just image` never passes it): everything it gates is
 # `#[cfg(feature = "test-helpers")]`, so it does not compile into the prod binary. The local e2e
 # harness and the relay test suite build with `--features test-helpers`.

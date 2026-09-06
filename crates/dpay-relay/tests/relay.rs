@@ -80,7 +80,8 @@ fn state_from(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>) {
 }
 
 /// A state with the fake-IC gateway attached (test-helpers): `/api/v2/canister/*` is served and
-/// the faucet/balance/transactions fixtures read the gateway's principal-keyed ledgers.
+/// the faucet fixture + the balances/transactions routes read the gateway's principal-keyed
+/// ledgers.
 async fn state_with_fake(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>, Arc<FakeIc>) {
     let arc = Arc::new(ledger);
     let fake = FakeIc::from_catalog();
@@ -236,7 +237,7 @@ async fn faucet_disabled_mints_nothing() {
 }
 
 /// …and enabled (the demo default) it credits the USER PRINCIPAL on the fake-IC gateway — exactly
-/// where a signed icrc1_transfer spends from. The response balance and GET /api/v1/balance/{hex}
+/// where a signed icrc1_transfer spends from. The response balance and the batch balances route
 /// agree, and the amount is the requested one; an omitted amount is the demo's default 10_000
 /// ($100.00 in minor units).
 #[cfg(not(feature = "agent"))]
@@ -252,14 +253,10 @@ async fn faucet_enabled_mints() {
     assert_eq!(body["balance"], "999", "{body}");
     assert_eq!(fake.balance_for(DEMO_USD, &merch_owner), 999);
 
-    // The test-only read-back route agrees (same principal mapping), explicit currency included.
-    let (bs, bb) = call(
-        &state,
-        get_req(&format!("/api/v1/balance/{merch_hex}?currency=0")),
-    )
-    .await;
+    // The batch balances route agrees (same principal mapping), currency key included.
+    let (bs, bb) = call(&state, get_req(&format!("/api/v1/balances/{merch_hex}"))).await;
     assert_eq!(bs, StatusCode::OK, "{bb}");
-    assert_eq!(bb["balance"], "999", "{bb}");
+    assert_eq!(bb["0"], "999", "{bb}");
 
     // An omitted amount is the demo's default top-up: +10_000 on the same principal.
     let (ds, db) = call(&state, faucet_json(&merch_hex, None)).await;
@@ -1797,9 +1794,10 @@ async fn balances_route_returns_all_currencies_in_one_response() {
 
 /// The settlement-era routes stay DEAD (2026-08-19 cutover): everything value-bearing left the
 /// relay for the app's own signed /api/v2 envelopes. This pins the tombstone — a reintroduced
-/// route here would silently put the relay back in the value path. Note /api/v1/faucet and
-/// /api/v1/balance/{hex} legitimately exist under test-helpers (fixture routes, separately
-/// tested); everything below must 404 in EVERY build.
+/// route here would silently put the relay back in the value path. The test-helpers-only
+/// single-currency balance fixture joined them (deleted 2026-09-06 — the e2e harness migrated to
+/// the always-on batch route). Note /api/v1/faucet legitimately exists under test-helpers
+/// (fixture route, separately tested); everything below must 404 in EVERY build.
 #[tokio::test]
 async fn settlement_era_routes_stay_404() {
     let (state, _led) = state_from(ledger());
@@ -1811,6 +1809,7 @@ async fn settlement_era_routes_stay_404() {
         "/api/v1/deposit/address/00",
         "/api/v1/deposit/refresh/00",
         "/api/v1/test/deposit/seed",
+        "/api/v1/balance/00",
     ];
     for path in gone {
         // call_raw, not call: a 404 carries no JSON body to parse.
@@ -1819,8 +1818,7 @@ async fn settlement_era_routes_stay_404() {
     }
 }
 
-/// A bad account (not 32 bytes hex) is a clean `400` — matches the single `/balance` endpoint's
-/// parsing contract (the batch route shares the same hex-decode path).
+/// A bad account (not 32 bytes hex) is a clean `400` — the shared pubkey hex-decode contract.
 #[tokio::test]
 async fn balances_route_rejects_bad_pubkey() {
     let (state, _led) = state_from(ledger());

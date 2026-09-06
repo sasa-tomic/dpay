@@ -227,8 +227,9 @@ impl FakeIc {
     }
 
     /// Per-currency balance map for an account across the catalog's ledgers (relay `/balances`).
-    /// Balance of a currency's home ledger at `owner` (principal-keyed) — the /balance route's
-    /// gateway twin. Returns 0 for unregistered currencies/fresh accounts (ICRC semantics).
+    /// Balance of a currency's home ledger at `owner` (principal-keyed) — the single-currency
+    /// twin of one `/balances` map entry. Returns 0 for unregistered currencies/fresh accounts
+    /// (ICRC semantics).
     pub fn balance_for(&self, currency: Currency, owner: &Principal) -> u64 {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         for (text, st) in &s.ledgers {
