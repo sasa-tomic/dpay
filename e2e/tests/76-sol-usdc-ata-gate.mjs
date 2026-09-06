@@ -61,7 +61,6 @@ export async function run() {
     console.log('[76-sol-usdc-ata-gate] selecting solana:USDC as the active asset…');
     await openBalances(driver);
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
     // ---- 1. ABSENT: the request form shows the inline setup card and Request is BLOCKED ----
     console.log('[76-sol-usdc-ata-gate] request form: inline setup card + Request blocked…');

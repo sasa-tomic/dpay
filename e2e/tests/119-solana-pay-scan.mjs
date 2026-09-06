@@ -75,7 +75,6 @@ export async function run() {
     await openBalances(driver);
     await driver.findByTestID('asset-sol-select', {timeoutMs: 8_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
 

@@ -53,7 +53,6 @@ export async function run() {
     //    populated and selecting SOL arms the SOL engine.
     await openBalances(driver);
     await driver.click('asset-sol-select', { timeoutMs: 5_000 });
-    await driver.waitGone('btn-balances-close', { timeoutMs: 5_000 });
     assertEq(await driver.readText('active-asset-label'), 'SOL balance', 'SOL selected (label "SOL balance")');
 
     // 3. The Pay tab now mounts SolPayMode (the SOL scan surface). This is the failure precondition:

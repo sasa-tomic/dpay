@@ -92,7 +92,6 @@ export async function run() {
     await openBalances(driver);
     await driver.findByTestID('asset-sol-usdc-select', {timeoutMs: 8_000});
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
     // 2. Switch to the Pay tab. SolPayMode mounts; it reads the seeded nonce (if any) → phase='setup'
     //    (first-use gate) since we did NOT seed a nonce. That's fine — we're driving the "Send to

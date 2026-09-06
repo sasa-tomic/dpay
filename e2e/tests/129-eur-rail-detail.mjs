@@ -117,7 +117,8 @@ export async function run() {
     assertIncludes(label, 'uros', 'the header names the CURRENCY (euros), not the token');
     assert(!(await driver.isPresent('home-currency-detail')),
       'the detail panel is a chooser surface — it must not leak into the wallet');
-    // The home screen names the currency, not the token; the landed RAIL is proven in Balances,
+    // The home screen names the currency, not the token; the landed RAIL is proven in the Home
+    // accounts list,
     // where the main badge sits on the EURC row (chooseRail's preference — the deep rail).
     await openBalances(driver);
     assert(await driver.isPresent('asset-sol-eurc-main'),

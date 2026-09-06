@@ -16,7 +16,7 @@
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the BTC row whole-row
 // select Pressable), `asset-sol-select` (the SOL row's select Pressable), `active-asset-label`
-// (the header asset label), `btn-balances-close` (sheet-open gate).
+// (the header asset label), `tab-home` (bottom tab → the accounts list).
 import { setup, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -68,7 +68,6 @@ export async function run() {
     console.log('[55-balances-select-asset] selecting SOL…');
     await openBalances(driver);
     await driver.click('asset-sol-select', { timeoutMs: 5_000 });
-    await driver.waitGone('btn-balances-close', { timeoutMs: 5_000 });
 
     // 7. Primary: the label switches to 'SOL balance' (selectedAsset.symbol).
     label = await driver.readText('active-asset-label');

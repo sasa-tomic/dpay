@@ -13,8 +13,8 @@
 //         are absent.
 //   - H4: the header shows ONLY the username.
 //
-// Selector contract: `header-who` (username line), `balance` (header → Balances),
-// `asset-ckusdc` / `asset-ckbtc` (the currency rows in Balances), `btn-balances-close`.
+// Selector contract: `header-who` (username line), `balance` (header → Home tab),
+// `asset-ckusdc` / `asset-ckbtc` (the currency rows in the Home accounts list), `tab-pay`.
 import { setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, railTransfer, railPrincipalText, openBalances } from '../harness/lib.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 
@@ -67,7 +67,7 @@ export async function run() {
     const ckbtcTxt = await ckbtcRow.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(ckbtcTxt, 'BTC', 'BTC row must be labeled "BTC"');
     console.log(`[24-wallet-cleanup] ✓ Balances rows name-first (H1): USDC="${ckusdcTxt}" / BTC="${ckbtcTxt}"`);
-    await driver.click('btn-balances-close', { timeoutMs: 5_000 });
+    await driver.click('tab-pay', { timeoutMs: 5_000 });
     await driver.waitGone('asset-ckusdc', { timeoutMs: 3_000 });
 
     // --- H2 prep: fund A with ckBTC via the rail faucet (test-helper on the fake-IC ledger). -----

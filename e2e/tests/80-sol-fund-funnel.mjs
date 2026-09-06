@@ -60,7 +60,6 @@ export async function run() {
     // ---- 1. USDC absent + SOL zero: setup card + warning + escape hatch (no dead end) ----
     console.log('[80-sol-fund-funnel] selecting USDC; setup card with fund hatch…');
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const instr = await driver.findByTestID('sol-pay-ata-instructions', {timeoutMs: 10_000});
     const instrText = await instr.evaluate((n) => n.textContent);
@@ -89,7 +88,6 @@ export async function run() {
     // funnel as the user would (Balances → USDC → Pay).
     await openBalances(driver);
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const createBtn2 = await driver.findByTestID('btn-sol-pay-ata-create', {timeoutMs: 10_000});
     await driver.waitGone('sol-ata-insufficient', {timeoutMs: 10_000});

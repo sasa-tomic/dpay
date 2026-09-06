@@ -775,7 +775,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // MC5 — fail closed BEFORE signing: a payment carrying an unknown/unsupported currency (a
     // garbage/retired id, or a CkSol-family currency with no ramp config) must NEVER reach the
     // envelope signer (prepareTransfer). The ledger also rejects these, but the app should never
-    // let the user Approve a sign for an unsupported asset. Mirror the BalancesSheet "Unsupported asset" pattern:
+    // let the user Approve a sign for an unsupported asset. Mirror the accounts-list "Unsupported asset" pattern:
     // honest copy + NO sign button + a back-to-scan affordance. dpay never swaps, so we do NOT
     // offer to substitute another asset — the request is for this asset or none.
     if (!isPayableAsset(catalog, intent.currency)) {

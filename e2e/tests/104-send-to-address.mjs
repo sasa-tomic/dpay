@@ -123,12 +123,15 @@ export async function run() {
 
     await driver.screenshot('104-send-to-address');
 
-    // The wallet SURFACE agrees with the gateway (a stale balance cache would fail here).
+    // The wallet SURFACE agrees with the gateway (a stale balance cache would fail here). The
+    // negative assert is scoped to the ACCOUNTS LIST: the Home activity feed legitimately keeps
+    // the +5.00 VCHF faucet-seed row (its own token unit, O4 S2) — that is history, not a stale
+    // balance (O4 S3: the Balances sheet is gone; the rows live on the Home tab).
     await driver.click('btn-send-done', { timeoutMs: 5_000 });
     await openBalances(driver);
     const reduced = await driver.waitForText('3.7499 VCHF', { timeoutMs: 10_000 });
-    const balBody = await driver.bodyText();
-    assert(reduced, `Balances VCHF row should show the reduced 3.7499 VCHF. body excerpt:\n${balBody.slice(0, 500)}`);
+    const balBody = await driver.readText('home-accounts');
+    assert(reduced, `Balances VCHF row should show the reduced 3.7499 VCHF. accounts excerpt:\n${balBody.slice(0, 500)}`);
     assert(!balBody.includes('5.00 VCHF'), 'Balances must NOT still show the pre-send 5.00 VCHF (stale cache?)');
     console.log('[104-send-to-address] ✓ UI VCHF balance dropped to 3.7499 VCHF');
 

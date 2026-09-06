@@ -113,7 +113,6 @@ const setSolStatus = (driver, mode) => driver.eval((m) => { globalThis.__E2E_SOL
 async function selectAndScan(driver, assetKey) {
   await openBalances(driver);
   await driver.click(`asset-${assetKey}-select`, {timeoutMs: 8_000});
-  await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
   await driver.click('tab-pay', {timeoutMs: 5_000});
   await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
   await armPayScan(driver); // the pay-intent gate — the shared choke point for every injected scan

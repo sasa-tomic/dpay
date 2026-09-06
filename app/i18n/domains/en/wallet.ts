@@ -144,6 +144,12 @@ export type WalletMessages = {
       seeAllHint: string;
       empty: string;
     };
+    /** The inline accounts list — the full per-asset balance list (the retired Balances sheet's
+     *  body), one row per rail, never summed. */
+    accounts: {
+      title: string;
+      intro: string;
+    };
   };
 
   /** The fund-funnel resume link on Receive → My address. */
@@ -157,11 +163,9 @@ export type WalletMessages = {
     offline: string;
   };
 
-  /** The Balances sheet — the wallet's asset hub. */
+  /** The asset hub — the Home tab's inline accounts list (the Balances sheet's successor; O4 S3).
+   *  The sheet-chrome keys (title/close/escToClose) retired with the sheet; the row copy lives on. */
   balances: {
-    title: string;
-    close: string;
-    intro: string;
     demoFunds: string;
     demoFundsLabel: string;
     demoFundsHint: string;
@@ -173,7 +177,6 @@ export type WalletMessages = {
     hideTestnet: string;
     showTestnetHint: string;
     hideTestnetHint: string;
-    escToClose: string;
   };
 
   /** The Transactions tab. */
@@ -242,7 +245,7 @@ export const walletEn: WalletMessages = {
 
   balance: {
     label: 'Balances — switch currency or receive',
-    hint: 'Open the full asset list, switch the displayed currency, or receive',
+    hint: 'Open the Home tab to see every asset, switch the displayed currency, or receive',
     lockedHint: 'Finish or cancel the current payment first',
     of: asset => `${asset} balance`,
     approx: asset => `~ ${asset} approx.`,
@@ -295,6 +298,10 @@ export const walletEn: WalletMessages = {
       seeAllHint: 'Open the full transactions list',
       empty: 'No payments yet.',
     },
+    accounts: {
+      title: 'Accounts',
+      intro: 'Tap a currency to show it on your home screen. Receive or send it from the Receive and Pay tabs.',
+    },
   },
 
   backToPaying: asset => `Back to paying ${asset}`,
@@ -307,9 +314,6 @@ export const walletEn: WalletMessages = {
   },
 
   balances: {
-    title: 'Balances',
-    close: 'Close balances',
-    intro: 'Tap a currency to show it on your home screen. Receive or send it from the Receive and Pay tabs.',
     demoFunds: 'Demo funds',
     demoFundsLabel: 'Get demo funds',
     demoFundsHint: 'Add ∂100 of demo money to this wallet',
@@ -321,7 +325,6 @@ export const walletEn: WalletMessages = {
     hideTestnet: 'Hide testnet assets',
     showTestnetHint: 'Reveal testnet currencies in this list',
     hideTestnetHint: 'Hide testnet currencies from this list',
-    escToClose: 'Press Esc to close',
   },
 
   ledger: {

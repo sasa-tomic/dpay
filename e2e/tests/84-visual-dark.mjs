@@ -30,7 +30,7 @@ const SURFACES = [
   // request-qr is masked in BOTH flows: the QR encodes a per-run signed request (fresh key +
   // timestamp), so its module pixels can never be deterministic.
   { capture: '84-vr-dark-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
-  { capture: '84-vr-dark-balances', baseline: 'balances' },
+  { capture: '84-vr-dark-home', baseline: 'home' },
   { capture: '84-vr-dark-settings', baseline: 'settings' },
   { capture: '84-vr-dark-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
 ];
@@ -105,11 +105,12 @@ export async function run() {
     masks['request-qr'] = await getTestIDRectDevicePx(driver, 'request-qr');
     await driver.screenshot(SURFACES[1].capture);
 
-    // 4. Balances hub (header balance tap — also dismisses the request screen).
-    await driver.click('balance', { timeoutMs: 5_000 });
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
+    // 4. Home tab (the balance-first surface; also dismisses the request screen via the
+    //    ever-present bottom tab bar).
+    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
     await driver.screenshot(SURFACES[2].capture);
-    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // 5. Settings (Advanced disclosure defaults COLLAPSED — matches flow 40's baseline state).
     await driver.click('btn-settings', { timeoutMs: 4_000 });

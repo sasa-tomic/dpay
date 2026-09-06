@@ -93,7 +93,6 @@ export async function run() {
     console.log('[108-sol-transactions] selecting SOL and reading its derived address…');
     await openBalances(driver);
     await driver.click('asset-sol-select', {timeoutMs: 8_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await openReceiveAddress(driver);
     const solAddress = await driver.readText('sol-receive-address');
     assert(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(solAddress), `expected a base58 Solana address, got "${solAddress}"`);

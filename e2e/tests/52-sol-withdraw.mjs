@@ -69,7 +69,6 @@ export async function run() {
     await openBalances(driver);
     await driver.findByTestID('asset-sol-select', {timeoutMs: 8_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
     // 2. Switch to the Pay tab. SolPayMode mounts; its mount effect reads the seeded nonce →
     //    phase='scan' (the scan screen, not the setup gate).

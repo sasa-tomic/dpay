@@ -17,7 +17,7 @@
 // unsafe-port block, to lock in the right reason.)
 //
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
-// Balances), `btn-topup` (inside Balances), `btn-balances-close`.
+// Balances), `btn-topup` (inside the Home tab's accounts list).
 import { setup, assert, onboardWallet, openBalances, goOffline } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -54,9 +54,10 @@ export async function run() {
     // reason (ECONNREFUSED — a real connection refusal), not the ERR_UNSAFE_PORT artifact.
     const failures = driver.recordRequestFailures();
 
-    // Trigger a faucet top-up against the dead relay from the Balances sheet → the app catches the
-    // failure and surfaces a clear, honest offline message (NOT a false success, NOT a crash).
-    console.log('[13-offline] opening Balances to trigger the faucet against the dead relay…');
+    // Trigger a faucet top-up against the dead relay from the Home tab's accounts list → the app
+    // catches the failure and surfaces a clear, honest offline message (NOT a false success, NOT a
+    // crash).
+    console.log('[13-offline] opening Home (accounts) to trigger the faucet against the dead relay…');
     await openBalances(driver);
     console.log('[13-offline] clicking btn-topup against the dead relay…');
     await driver.click('btn-topup', { timeoutMs: 4_000 });
@@ -77,11 +78,11 @@ export async function run() {
       `dead relay must NOT be an unsafe-port artifact (that's the wrong failure mode), got "${errText}"`);
     console.log(`[13-offline] ✓ dead relay failed for the right reason: ${errText}`);
 
-    // Close Balances — the balance poll has been failing underneath; the header should now show the
-    // offline indicator ("~ DEMO approx." — the asset name is prefixed after D3; substring 'approx.'
-    // is what the assertion matches).
-    console.log('[13-offline] closing Balances to verify the wallet surface…');
-    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
+    // Back to the wallet surface — the balance poll has been failing underneath; the header should
+    // now show the offline indicator ("~ DEMO approx." — the asset name is prefixed after D3;
+    // substring 'approx.' is what the assertion matches).
+    console.log('[13-offline] back to Pay to verify the wallet surface…');
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
     assert(approx, 'the header should show the offline indicator ("~ DEMO approx.") once the relay is unreachable');
     console.log('[13-offline] ✓ header shows the offline indicator (graceful, no crash)');

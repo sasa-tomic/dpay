@@ -11,8 +11,8 @@
 // (DPAY_E2E_REGEN_BASELINES=1) and the diff is reviewable in the commit. Mirrors the
 // DPAY_E2E_REGEN_LAYOUT pattern (lib.mjs) for the wire-layout golden.
 //
-// Navigation mirrors flow 35 EXACTLY (already tuned — `balance` tap → Balances hub,
-// `btn-balances-close`/`btn-settings-close` to dismiss). Capture filenames are DISTINCT from flow 35
+// Navigation mirrors flow 35 EXACTLY (already tuned — `tab-home` for the Home surface,
+// `btn-settings-close` to dismiss the Settings sheet). Capture filenames are DISTINCT from flow 35
 // (40-vr-<surface> vs 35-tour-<surface>) so the two flows never collide on disk.
 import { setup, onboardWallet, assert } from '../harness/lib.mjs';
 import { comparePng } from '../harness/pixel.mjs';
@@ -36,7 +36,7 @@ const BASELINES_DIR = join(SHOTS_DIR, 'baselines');
 const SURFACES = [
   { capture: '40-vr-wallet-pay', baseline: 'wallet-pay' },
   { capture: '40-vr-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
-  { capture: '40-vr-balances', baseline: 'balances' },
+  { capture: '40-vr-home', baseline: 'home' },
   { capture: '40-vr-settings', baseline: 'settings' },
   { capture: '40-vr-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
 ];
@@ -54,7 +54,7 @@ export const meta = {
   name: 'visual-regression',
   journey: 'tour',
   covers: ['visual-regression', 'pixel-diff'],
-  verifies: 'Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Balances, Settings, Ledger) vs committed baselines; fails on drift >0.5%.',
+  verifies: 'Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Home, Settings, Ledger) vs committed baselines; fails on drift >0.5%.',
   timeoutMs: 25_000,
 };
 
@@ -105,12 +105,13 @@ export async function run() {
     masks['request-qr'] = await getTestIDRectDevicePx(driver, 'request-qr');
     await driver.screenshot(SURFACES[1].capture);
 
-    // 4. Balances hub — opened by tapping the header balance (mirrors flow 35). The header balance
-    //    is always present (even over the request card), so this also dismisses the request screen.
-    await driver.click('balance', { timeoutMs: 5_000 });
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
+    // 4. Home tab — the balance-first surface (O4; the Balances SHEET is retired, the accounts
+    //    list lives inline here). The bottom tab bar is always present, so this also dismisses the
+    //    request screen.
+    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
     await driver.screenshot(SURFACES[2].capture);
-    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // 5. Settings (relay config + reset). The "Advanced" disclosure defaults COLLAPSED now (the
     //    founder-directed consumer posture: relay URL hidden unless explicitly expanded). The

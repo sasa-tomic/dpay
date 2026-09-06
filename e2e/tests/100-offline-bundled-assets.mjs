@@ -56,8 +56,8 @@ export async function run() {
 
     // The shared asset selector must show BOTH bundled native rows with exact unit · network.
     console.log('[100-offline-bundled-assets] assert bundled VCHF + ICP rows offline…');
-    await driver.click('balance', { timeoutMs: 5_000 });
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
+    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await driver.findByTestID('asset-demo-select', { timeoutMs: 5_000 });
     const vchfRow = await driver.findByTestID('asset-vchf', { timeoutMs: 6_000 });
     assert(vchfRow != null, 'offline cold start renders the bundled VCHF row');
     assertIncludes(await driver.readText('asset-vchf'), 'VCHF · Internet Computer', 'offline VCHF row unit · network');
@@ -66,7 +66,10 @@ export async function run() {
     assertIncludes(await driver.readText('asset-icp'), 'ICP · Internet Computer', 'offline ICP row unit · network');
     assertIncludes(await driver.bodyText(), 'Internet Computer', 'selector shows the IC network name');
 
-    const sheetBody = await driver.bodyText();
+    // No per-asset ramp actions offline — scoped to the ACCOUNTS LIST: the Home action row above
+    // it legitimately carries the wallet-level "Add money" capability dispatch (O4 S3), which is
+    // not a rail on/off-ramp action and must not muddy this assert.
+    const sheetBody = await driver.readText('home-accounts');
     assert(!sheetBody.includes('Add money'), 'no on-ramp action rendered offline either');
     assert(!sheetBody.includes('Cash out'), 'no off-ramp action rendered offline either');
 

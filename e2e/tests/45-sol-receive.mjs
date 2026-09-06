@@ -51,7 +51,6 @@ export async function run() {
     //    buttons anymore). The Balances sheet auto-closes; SOL becomes the active rail.
     console.log('[45-sol-receive] selecting SOL as the active asset…');
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
     // 3. Switch to the Receive tab. SolReceiveMode mounts; the "My address" sub-mode toggle (the
     //    right segment of the receive-mode-toggle) is always rendered for SOL.

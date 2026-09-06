@@ -1,20 +1,22 @@
 // Flow 121 — the BALANCES half of the currency group: every rail of the home currency is MARKED,
 // never summed (Objective 2, docs/specs/2026-09-04-currency-first-wallet-plan.md).
 //
-// Flow 120 pinned that the CHOOSER names every rail of a currency; this flow pins that the Balances
-// sheet — where the money actually lives — keeps the two USD rails as two DISTINCT rows, each
-// wearing its own badge, with no group total anywhere:
+// Flow 120 pinned that the CHOOSER names every rail of a currency; this flow pins that the Home
+// tab's accounts list — where the money actually lives — keeps the two USD rails as two DISTINCT
+// rows, each wearing its own badge, with no group total anywhere:
 //
 //   * home=USD: BOTH rails stay visible as their own rows (ckUSDC AND USDC·Solana) — the founder's
 //     honesty rule is that same-currency rails on different chains must never read as one balance,
-//     so the sheet's answer to a two-rail currency is two named rows, not one summed line.
+//     so the answer to a two-rail currency is two named rows, not one summed line.
 //   * The MAIN badge stays on the PREFERRED rail only (ckUSDC); the sibling does NOT wear a second
 //     MAIN — two "Main" badges would read as one merged account. Instead the sibling wears a badge
 //     NAMING its rail ("USDC · Solana", the S1 rail-line vocabulary).
-//   * NO summed/combined-total line exists for the group — the only USD numbers on the sheet are
+//   * NO summed/combined-total line exists for the group — the only USD numbers on the surface are
 //     the two rows' own balances.
 //   * home=CHF: a single-rail currency renders EXACTLY as before — MAIN on VCHF, and no rail badge
 //     anywhere (a badge on a one-rail group would be noise naming the obvious).
+//
+// (O4 S3: the Balances SHEET is retired — the accounts list lives inline on the Home tab.)
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
   openBalances,
@@ -25,7 +27,7 @@ export const meta = {
   name: 'home-currency-balance-rails',
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'ckusdc', 'solana-usdc', 'vchf', 'group-model'],
-  verifies: 'Balances marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges).',
+  verifies: 'The Home tab accounts list marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges).',
   timeoutMs: 30000,
 };
 
@@ -54,7 +56,7 @@ export async function run() {
     // --- 2. home=USD: BOTH rails visible, MAIN on ckUSDC only, sibling named, nothing summed ------
     await openBalances(driver);
     assert(await driver.isPresent('asset-ckusdc'),
-      'the IC rail of the USD group must have its own row in Balances');
+      'the IC rail of the USD group must have its own row in the Home accounts list');
     assert(await driver.isPresent('asset-sol-usdc'),
       'the Solana rail of the USD group must ALSO have its own row — a two-rail currency is two rows, never one');
     assert(await driver.isPresent('asset-ckusdc-main'),
@@ -80,7 +82,7 @@ export async function run() {
     await driver.screenshot('121-balance-rails-usd');
 
     // --- 3. home=CHF: single rail, nothing changed vs before ---------------------------------------
-    await driver.click('btn-balances-close', {timeoutMs: 5_000});
+    await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.click('btn-settings', {timeoutMs: 5_000});
     await driver.click('btn-currency-CHF', {timeoutMs: 5_000});
     await driver.click('btn-settings-close', {timeoutMs: 5_000});

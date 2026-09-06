@@ -118,7 +118,7 @@ export function buildSelectableAssets(
     // produce two rows for one logical asset — ambiguous selection + a duplicate testID.
     if (seenCurrencyIds.has(desc.currency)) continue;
     // Testnet visibility filter: hide testnet currencies unless opted in app-wide. Mirrors the
-    // former BalancesSheet filter (now centralized here so every selector gets identical filtering).
+    // former accounts-list filter (now centralized here so every selector gets identical filtering).
     if (!showTestnet && isTestnetCurrency(desc)) continue;
     seenCurrencyIds.add(desc.currency);
     assets.push(icAsset(desc));

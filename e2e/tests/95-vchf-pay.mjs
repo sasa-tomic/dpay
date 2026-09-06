@@ -189,10 +189,9 @@ export async function run() {
     await driver.waitForText('1.0999 VCHF', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('asset-vchf'), '1.0999 VCHF', 'balances sheet VCHF row refreshed to post-pay amount');
-    assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the sheet');
-    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
-    await driver.waitGone('btn-balances-close', { timeoutMs: 4_000 });
+    assertIncludes(await driver.readText('asset-vchf'), '1.0999 VCHF', 'Home accounts VCHF row refreshed to post-pay amount');
+    assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the accounts list');
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // --- (7) Ledger outgoing row ---------------------------------------------------------------
     console.log('[95-vchf-pay] assert Ledger outgoing row…');

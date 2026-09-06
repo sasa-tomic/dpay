@@ -5,7 +5,7 @@
 // and the reason with the chooser's exact vocabulary, states the rail's fee fact in the rail's OWN
 // unit (never converted, never merged with the sibling's), and offers the sibling rail's OWN
 // address one toggle away with ITS fee fact. The toggle flip keeps the "My address" sub-mode
-// mounted (it is the rail switch, not the Balances row selection that resets sub-modes) — the
+// mounted (it is the rail switch, not the Home accounts row selection that resets sub-modes) — the
 // Solana sheet must appear WITHOUT re-tapping "My address".
 //
 // Ownership: the IC address must equal railPrincipalText(account.publicHex) — the wallet's own

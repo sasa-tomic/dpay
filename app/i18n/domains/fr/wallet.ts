@@ -20,7 +20,7 @@ export const walletFr: WalletMessages = {
 
   balance: {
     label: 'Soldes — changer de monnaie ou recevoir',
-    hint: 'Ouvre la liste complète des actifs, change la monnaie affichée ou permet de recevoir',
+    hint: 'Ouvre l’onglet Accueil avec tous les actifs, change la monnaie affichée ou permet de recevoir',
     lockedHint: 'Terminez ou annulez d’abord le paiement en cours',
     of: asset => `Solde ${asset}`,
     approx: asset => `~ ${asset} environ`,
@@ -73,6 +73,10 @@ export const walletFr: WalletMessages = {
       seeAllHint: 'Ouvrir la liste complète des transactions',
       empty: 'Aucun paiement pour l’instant.',
     },
+    accounts: {
+      title: 'Comptes',
+      intro: 'Appuyez sur une monnaie pour l’afficher sur votre écran d’accueil. Recevez-la ou envoyez-la depuis les onglets Recevoir et Payer.',
+    },
   },
 
   backToPaying: asset => `Retour au paiement en ${asset}`,
@@ -85,9 +89,6 @@ export const walletFr: WalletMessages = {
   },
 
   balances: {
-    title: 'Soldes',
-    close: 'Fermer les soldes',
-    intro: 'Appuyez sur une monnaie pour l’afficher sur votre écran d’accueil. Recevez-la ou envoyez-la depuis les onglets Recevoir et Payer.',
     demoFunds: 'Fonds de démo',
     demoFundsLabel: 'Obtenir des fonds de démo',
     demoFundsHint: 'Ajoute ∂100 d’argent de démo à ce portefeuille',
@@ -99,7 +100,6 @@ export const walletFr: WalletMessages = {
     hideTestnet: 'Masquer les actifs testnet',
     showTestnetHint: 'Affiche les monnaies testnet dans cette liste',
     hideTestnetHint: 'Masque les monnaies testnet de cette liste',
-    escToClose: 'Appuyez sur Échap pour fermer',
   },
 
   ledger: {

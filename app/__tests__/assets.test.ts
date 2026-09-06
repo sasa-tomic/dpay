@@ -490,7 +490,7 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
   it('NO Add money / Cash out actions for VCHF/ICP: ramps Unavailable, no minter, not mintable', () => {
     // The catalog-level mirror of the UI action gates: PayMode's Add-money predicate
     // (gateDepositable = !mintable && onramp !== 'Unavailable' && minter != null) and the
-    // BalancesSheet/WithdrawSheet cash-out family gate both read exactly these DESCRIPTOR fields —
+    // accounts-list/WithdrawSheet cash-out family gate both read exactly these DESCRIPTOR fields —
     // the view model carries no ramp copy. VCHF/ICP fail every leg ⇒ no action button is ever
     // emitted, while remaining selectable/payable (rows asserted above).
     for (const currency of [7, 8] as const) {
@@ -502,7 +502,7 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       expect(d.minter_family).toBeNull();
       // PayMode gateDepositable mirror — the Add-money predicate is FALSE for both rows.
       expect(!d.mintable && d.onramp !== 'Unavailable' && d.minter != null).toBe(false);
-      // BalancesSheet/WithdrawSheet cash-out family gate mirror — FALSE for both rows.
+      // accounts-list/WithdrawSheet cash-out family gate mirror — FALSE for both rows.
       expect(d.offramp !== 'Unavailable' && (d.minter_family === 'CkBtcUtxo' || d.minter_family === 'CkEthErc20')).toBe(false);
     }
   });

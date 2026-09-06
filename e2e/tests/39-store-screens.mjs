@@ -76,14 +76,13 @@ export async function run() {
     await driver.screenshot('39-store-request');
     console.log('[39-store-screens] ✓ request QR');
 
-    // === CAPTURE 3: Balances hub — shows all assets with actions ===
-    await driver.click('balance', { timeoutMs: 5_000 });
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
-    await driver.screenshot('39-store-balances');
-    console.log('[39-store-screens] ✓ balances hub');
+    // === CAPTURE 3: Home tab — the accounts list + activity (O4; the ex-Balances sheet, inline) ===
+    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
+    await driver.screenshot('39-store-home');
+    console.log('[39-store-screens] ✓ home accounts');
 
     // === CAPTURE 4: Ledger — transaction history (faucet credit + payment) ===
-    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
     // Wait for the payment ITSELF to land in history rather than for a duration — a store shot of
     // an empty ledger is the failure this guards, and 600ms only avoided it while the host was
@@ -95,8 +94,7 @@ export async function run() {
 
     // === CAPTURE 5: Deposit address (ckBTC) — shows the deposit flow ===
     await driver.click('tab-pay', { timeoutMs: 4_000 });
-    await driver.click('balance', { timeoutMs: 5_000 });
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
+    await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');
     await openReceiveAddress(driver);
     await driver.waitForText('bc1', { timeoutMs: 12_000 }).catch(() => {});

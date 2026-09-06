@@ -14,11 +14,12 @@
 // flow catches. A bare <Text>/<View> renders as <div> with NO role/aria (correct: not interactive).
 //
 // The census walks the same primary surfaces flow 35 (UX tour) screenshots: wallet home (Pay),
-// Receive + currency picker, Balances hub, Settings, Transactions, and Pay → "Send to address"
+// Receive + currency picker, Home tab (the accounts list, inline since O4 S3), Settings,
+// Transactions, and Pay → "Send to address"
 // (which needs a funded asset to reach — see `paySend`). On each surface it queries the
 // DOM for every [data-testid] matching a known-interactive prefix (btn-* / tab-* / req-* /
 // req-pick-* / settings-relay / amount-input / memo-input / privacy-policy / ledger-filter-* /
-// asset-add-* / btn-withdraw / btn-topup / btn-balances-close / btn-settings-close / balance /
+// asset-add-* / btn-withdraw / btn-topup / btn-settings-close / balance /
 // btn-settings), then asserts EACH has BOTH:
 //   - a non-empty aria-label, AND
 //   - a non-empty role (button/link/etc.) — inputs implicitly carry their HTML kind; we accept the
@@ -29,7 +30,7 @@
 // alongside the new testID).
 //
 // Selector contract: surfaces are reached by the same taps a user makes — `tab-home`,
-// `tab-receive`, `req-prefix`, `balance`, `btn-settings`, `tab-transactions`, `asset-vchf-select`,
+// `tab-receive`, `req-prefix`, `btn-settings`, `tab-transactions`, `asset-vchf-select`,
 // `btn-pay-send`.
 import {
   setup, onboardWallet, assert, accountOf, faucetAccount, openBalances, selectCurrency, openPaySend,
@@ -60,8 +61,16 @@ const SURFACES = {
   home: [],
   // Home tab (O4) — the balance-first surface: the three uniform action-row buttons (capability-
   // dispatched: Pay/Receive navigate, Add money fires the DEMO faucet or lands the deposit
-  // surface) plus the activity feed's See-all link. The headline block itself is informational.
-  homeTab: ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money', 'btn-home-activity-all'],
+  // surface) plus the activity feed's See-all link, and (O4 S3) the inline ACCOUNTS list — the
+  // retired Balances sheet's body: btn-topup is the DEMO row's faucet button; `asset-*-select`
+  // is each row's whole-row select Pressable; btn-toggle-testnet reveals the testnet rows.
+  // The headline block itself is informational. SOL is uniform with the IC rows (whole-row
+  // select — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
+  homeTab: ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money', 'btn-home-activity-all',
+            'btn-topup', 'btn-toggle-testnet',
+            'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select',
+            'asset-cketh-select', 'asset-vchf-select', 'asset-icp-select',
+            'asset-sol-select'],
   // Receive tab + currency picker (open via req-prefix). The picker rows are req-pick-<assetTestKey>;
   // the wallet's IC-mainnet catalog ships DEMO/ckBTC/ckUSDC/ckETH/VCHF/ICP (the REAL prod rows —
   // six mainnet IC assets since the 2026-08-28 catalog transplant), so all six picker rows assert.
@@ -69,17 +78,11 @@ const SURFACES = {
   receive: ['req-prefix', 'amount-input', 'memo-input', 'btn-request',
             'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-cketh',
             'req-pick-vchf', 'req-pick-icp', 'req-pick-sol'],
-  // Balances hub (open via `balance` tap). btn-topup is the DEMO row's faucet button; `asset-*-select`
-  // is each row's whole-row select Pressable. SOL is uniform with the IC rows now (whole-row select,
-  // no per-row Receive/Send buttons — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
-  balances: ['btn-balances-close', 'btn-topup',
-             'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select',
-             'asset-cketh-select', 'asset-vchf-select', 'asset-icp-select',
-             'asset-sol-select'],
+  // Balances hub — RETIRED with the sheet (O4 S3); its rows are censused on `homeTab` above.
   // Settings sheet (open via `btn-settings`). btn-reset-* are revealed only after tapping btn-reset
   // (the confirmation dialog); listed separately below to keep this census aligned with the visible
   // surface at first open. btn-backup + btn-settings-restore are the always-visible section entries
-  // (Backup and Restore); their confirm-gate children are censused separately (settingsBackupConfirm
+  // (Backup and Restore); their confirm-gate children are censused separately — the Backup path
   // is covered inline by the Backup flow's own census path; settingsRestoreConfirm below). The theme
   // control is the Wave-8 three-way segmented control (Light / Dark / Auto radio segments).
   // Trip Ready J5b: `btn-trip-readiness` (Learn section — the passport archive modal).
@@ -205,14 +208,7 @@ export async function run() {
     // Dismiss the picker (Esc is wired via useEscapeToClose in ReceiveMode).
     await driver.pressKey('Escape');
 
-    // 3. Balances hub (open via header balance tap).
-    await driver.click('balance', { timeoutMs: 5_000 });
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
-    await census('balances');
-    console.log('[41-a11y-census] ✓ census: balances hub');
-    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
-
-    // 4. Settings sheet (open via btn-settings). Expand the Advanced disclosure so the census
+    // 3. Settings sheet (open via btn-settings). Expand the Advanced disclosure so the census
     //    covers settings-relay + btn-relay-apply (the founder-directed default is collapsed).
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 });
@@ -220,7 +216,7 @@ export async function run() {
     await census('settings');
     console.log('[41-a11y-census] ✓ census: settings');
 
-    // 4b. Settings → Reset confirmation dialog (tapping btn-reset reveals btn-reset-confirm + -cancel).
+    // 3b. Settings → Reset confirmation dialog (tapping btn-reset reveals btn-reset-confirm + -cancel).
     await driver.click('btn-reset', { timeoutMs: 4_000 });
     await driver.findByTestID('btn-reset-confirm', { timeoutMs: 4_000 });
     await census('settingsResetConfirm');
@@ -234,7 +230,7 @@ export async function run() {
     await driver.click('btn-reset-cancel', { timeoutMs: 4_000 });
     await driver.waitGone('btn-reset-confirm', { timeoutMs: 6_000 });
 
-    // 4c. Settings → Restore confirmation form (tapping btn-settings-restore reveals the seed input
+    // 3c. Settings → Restore confirmation form (tapping btn-settings-restore reveals the seed input
     //     + btn-settings-restore-confirm + -cancel). Mirrors the reset-confirm census above for the
     //     new Restore section (Issue 1: wallet recovery is barely visible). Cancel collapses the form.
     await driver.findByTestID('btn-settings-restore', { timeoutMs: 4_000 });
@@ -245,7 +241,7 @@ export async function run() {
     await driver.click('btn-settings-restore-cancel', { timeoutMs: 4_000 });
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
-    // 5. Transactions tab (empty for a fresh wallet).
+    // 4. Transactions tab (empty for a fresh wallet).
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     // Empty wallet renders "No payments yet." — a brief best-effort wait (no assertion; the census
     // only counts interactive controls, and the empty state has none beyond chrome).
@@ -253,9 +249,10 @@ export async function run() {
     await census('transactions');
     console.log('[41-a11y-census] ✓ census: transactions (empty wallet)');
 
-    // 6. Pay → "Send to address" for the funded VCHF row. Selecting the asset in Balances is the
-    //    only way to make it active (the row is one whole select Pressable), and the sub-mode
-    //    toggle is what opens the send form. Run LAST so it cannot perturb the surfaces above.
+    // 5. Pay → "Send to address" for the funded VCHF row. Selecting the asset on the Home tab's
+    //    accounts list is the only way to make it active (the row is one whole select Pressable),
+    //    and the sub-mode toggle is what opens the send form. Run LAST so it cannot perturb the
+    //    surfaces above.
     await openBalances(driver);
     await selectCurrency(driver, SEND_ASSET_KEY);
     await openPaySend(driver);
@@ -263,7 +260,7 @@ export async function run() {
     await census('paySend');
     console.log('[41-a11y-census] ✓ census: pay → send to address');
 
-    // 6b. The same form once a destination resolves — the address book's optional name field
+    // 5b. The same form once a destination resolves — the address book's optional name field
     //     appears only then, exactly as the settings confirm-gates reveal their children.
     await driver.type('send-address-input', await railPrincipalText(SEND_RECIPIENT_PUBKEY), { timeoutMs: 4_000 });
     await driver.findByTestID('send-save-name', { timeoutMs: 6_000 });

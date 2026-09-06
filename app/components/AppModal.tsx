@@ -10,7 +10,7 @@
  *
  * The fix is the house pattern, not a new one: on web the surface renders inside a
  * <SheetOverlay> — an absolutely-positioned layer WITHIN the app tree (the exact discipline
- * BalancesSheet/SettingsSheet already use, which is why they never escape). On native, RN
+ * SettingsSheet already uses, which is why it never escapes). On native, RN
  * <Modal> stays the platform-correct host (full-screen slide + hardware-back via
  * onRequestClose). Callers keep the full-mount/unmount discipline: render <AppModal> only while
  * open (never visible=false + animate-out — RNW keeps hidden children alive when animationend

@@ -5,7 +5,7 @@ import {AssetGlyph} from './AssetGlyph';
 import {IconCheck} from './icons';
 import type {SelectableAsset} from '../config/assets';
 
-// Shared currency row — the single presentational component consumed by BOTH the BalancesSheet
+// Shared currency row — the single presentational component consumed by BOTH the Home tab accounts list
 // (variant='card') and the ReceiveMode CurrencyPicker via AssetPicker (variant='plain'). Closes
 // founder issues #2 (unify IC + SOL in one list) + #3 (two selectors must look/work the same):
 // one component, one active indicator (trailing IconCheck), one subtitle logic.
@@ -66,17 +66,21 @@ export function CurrencyRow({testId, asset, amount, active, onPress, accessibili
     );
   }
 
-  // Card variant (BalancesSheet): the WHOLE row block is the select hit target (founder fix
-  // 2026-08-14 — "click ANYWHERE on the row to select"; was only the tight inner row, so
-  // subtitle/padding taps fell through). The select Pressable (testID `asset-<key>-select`,
+  // Card variant (the Home tab's accounts list): the WHOLE row block is the select hit target
+  // (founder fix 2026-08-14 — "click ANYWHERE on the row to select"; was only the tight inner
+  // row, so subtitle/padding taps fell through). The select Pressable (testID `asset-<key>-select`,
   // flex:1) stacks the glyph-led row content + children; the DEMO faucet `actions` stay a
   // row SIBLING (never nested — RN-web renders Pressables as <button>, and a button cannot
   // contain a button), so the faucet keeps its own taps and everything else selects.
   // Inside the row, the text column (pickTextCol — shared with the plain variant) stacks the
   // title line (name + right-aligned mono amount + trailing check) over the subtitle + children,
   // so the sub/annotations align under the NAME, not under the glyph chip.
+  // O4 S3: the card carries its selected state — the row IS the selection state (the inline list
+  // has no sheet chrome to wait on; e2e waits on aria-selected). The DIRECT prop is required:
+  // RNW 0.21 forwards `aria-selected` verbatim but does NOT render accessibilityState.selected
+  // to the DOM (probed live), and RN 0.86 supports the direct prop natively.
   return (
-    <View testID={testId} style={[S.assetCard, active && S.assetCardActive]}>
+    <View testID={testId} style={[S.assetCard, active && S.assetCardActive]} aria-selected={active}>
       <View style={S.assetRow}>
         <Pressable
           testID={`${testId}-select`}

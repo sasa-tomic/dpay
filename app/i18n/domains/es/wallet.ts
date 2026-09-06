@@ -19,7 +19,7 @@ export const walletEs: WalletMessages = {
 
   balance: {
     label: 'Saldos: cambia de moneda o recibe',
-    hint: 'Abre la lista completa de activos, cambia la moneda mostrada o recibe',
+    hint: 'Abre la pestaña Inicio con todos los activos, cambia la moneda mostrada o recibe',
     lockedHint: 'Primero termina o cancela el pago en curso',
     of: asset => `Saldo de ${asset}`,
     approx: asset => `~ ${asset} aprox.`,
@@ -72,6 +72,10 @@ export const walletEs: WalletMessages = {
       seeAllHint: 'Abrir la lista completa de transacciones',
       empty: 'Aún no hay pagos.',
     },
+    accounts: {
+      title: 'Cuentas',
+      intro: 'Toca una moneda para mostrarla en tu pantalla de inicio. Recíbela o envíala desde las pestañas Recibir y Pagar.',
+    },
   },
 
   backToPaying: asset => `Volver a pagar con ${asset}`,
@@ -84,9 +88,6 @@ export const walletEs: WalletMessages = {
   },
 
   balances: {
-    title: 'Saldos',
-    close: 'Cerrar saldos',
-    intro: 'Toca una moneda para mostrarla en tu pantalla de inicio. Recíbela o envíala desde las pestañas Recibir y Pagar.',
     demoFunds: 'Fondos de prueba',
     demoFundsLabel: 'Conseguir fondos de prueba',
     demoFundsHint: 'Añade ∂100 de dinero de prueba a esta billetera',
@@ -98,7 +99,6 @@ export const walletEs: WalletMessages = {
     hideTestnet: 'Ocultar activos de testnet',
     showTestnetHint: 'Muestra las monedas de testnet en esta lista',
     hideTestnetHint: 'Oculta las monedas de testnet de esta lista',
-    escToClose: 'Pulsa Esc para cerrar',
   },
 
   ledger: {

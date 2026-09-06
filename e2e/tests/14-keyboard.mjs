@@ -2,7 +2,7 @@
 //
 // The wallet is fully keyboard-driveable on web (desktop power-user feature; on mobile the NFC/tap
 // is the input, so the shortcuts + hints are web-only). The first letters map to the main actions:
-//   P → Pay tab · R → Receive tab · T → Top-up (demo money) · A → Balances (the money hub)
+//   P → Pay tab · R → Receive tab · T → Top-up (demo money) · A → Home (the money hub)
 //   L → Ledger (transactions)
 // Esc closes whatever sheet/overlay is open (the seed affordance, built in Wave U / useEscapeToClose,
 // now shared with the wallet shortcuts via one `useHotkeys` source of truth).
@@ -11,7 +11,7 @@
 // Typing into the amount field must NOT trip a shortcut (activeElement INPUT/TEXTAREA guard).
 //
 // Selector contract: `pay-scan` (Pay scan screen), `btn-request` (Receive affordance), `balance`,
-// `btn-balances-close` (Balances open), `asset-ckbtc-select` (BTC row whole-row select),
+// `home-accounts` (Home tab's inline accounts list), `asset-ckbtc-select` (BTC row whole-row select),
 // `btn-receive-address` (Receive → "My address"), `deposit-address` (inline deposit body),
 // `amount-input`.
 import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
@@ -67,16 +67,16 @@ export async function run() {
     assert(topped, 'T should add demo money (balance ∂100.00 → ∂200.00)');
     console.log('[14-keyboard] ✓ T triggered the top-up');
 
-    // --- A : single-key Balances (the money hub) + Esc closes it -------------------
-    console.log('[14-keyboard] pressing A (→ open Balances)…');
+    // --- A : single-key Home (the money hub — the accounts list lives inline; O4 S3) -----------
+    console.log('[14-keyboard] pressing A (→ Home)…');
     await driver.pressKey('a');
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 3_000 });
-    console.log('[14-keyboard] ✓ A opened Balances');
+    await driver.findByTestID('home-accounts', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ A landed Home (accounts list inline)');
 
-    console.log('[14-keyboard] pressing Escape (close Balances)…');
-    await driver.pressKey('Escape');
-    await driver.waitGone('btn-balances-close', { timeoutMs: 3_000 });
-    console.log('[14-keyboard] ✓ Escape closed Balances');
+    // Back to Pay via the P shortcut (the sheet-era Esc-close is gone with the sheet).
+    await driver.pressKey('p');
+    await driver.findByTestID('pay-scan', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ P returned to Pay');
 
     // --- Input guard: shortcuts must NOT fire while typing in a field ----------------
     console.log('[14-keyboard] input-guard: typing in amount-input must not trip shortcuts…');

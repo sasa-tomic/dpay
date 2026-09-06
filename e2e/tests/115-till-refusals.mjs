@@ -68,7 +68,6 @@ export async function run() {
     console.log('[115-till-refusals] SOL selected → the same control, refused on the other rail…');
     await openBalances(driver);
     await driver.click('asset-sol-select', { timeoutMs: 5_000 });
-    await driver.waitGone('btn-balances-close', { timeoutMs: 5_000 });
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     assert(await driver.isPresent('receive-code-form'), 'the code form renders on the Solana Receive form as well');
     // The till form is STILL the chosen one — the wallet owns the choice across the rail re-mount.

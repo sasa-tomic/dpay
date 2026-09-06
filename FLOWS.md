@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **127 flows**
-> (126 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **128 flows**
+> (127 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw (11) · nfc (10) · system (23) · tour (6)
+wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw (11) · nfc (10) · system (24) · tour (6)
 
 ---
 
@@ -41,9 +41,9 @@ wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw
 | 02 | faucet | Returning user taps 'Add demo money' → faucet top-up works, balance increases. | faucet, topup, balance-delta |
 | 118 | home-currency | The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD/EUR) with each row naming exactly its catalogued rails as token · chain, names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload. | home-currency, onboard, vchf, ckusdc, settings, asset-selector, persistence |
 | 120 | home-currency-rails | The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; EUR: EURC · Solana first — the deep-liquidity preference — then VEUR · Internet Computer; CHF: VCHF only), preferred rail first with its reason, Settings shows the same group for the main currency, and Continue still works. | home-currency, onboard, ckusdc, solana-usdc, eur, eurc, veur, settings, group-model |
-| 121 | home-currency-balance-rails | Balances marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges). | home-currency, balances, ckusdc, solana-usdc, vchf, group-model |
+| 121 | home-currency-balance-rails | The Home tab accounts list marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges). | home-currency, balances, ckusdc, solana-usdc, vchf, group-model |
 | 129 | eur-rail-detail | Tapping the EUR row expands an in-card detail panel: both rails preferred-first (EURC reason on the pick only), fee facts in each rail's own units, thin-warn on VEUR vs deep on EURC, DFX sell-only ramp on VEUR; Back collapses without unpicking; CHF never expands; Continue lands the wallet on EURC@Solana. | home-currency, onboard, eur, eurc, veur, group-model, rail-detail, fees |
-| 130 | eur-balances-rails | home=EUR in Balances: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none. | home-currency, balances, eur, eurc, veur, vchf, group-model, rail-health |
+| 130 | eur-balances-rails | home=EUR in the Home accounts list: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none. | home-currency, balances, eur, eurc, veur, vchf, group-model, rail-health |
 | 23 | username-default | New user leaves name empty → creates → defaults to 'me', onboards + funds. | onboard, default-username |
 | 37 | onboard-no-faucet | Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ … approx." offline indicator, faucet fails with ECONNREFUSED. | onboard, faucet-failure, offline, dead-relay, right-reason, zero-balance |
 | 54 | testnet-toggle | Balances testnet toggle reveals + hides all three testnet rows (BTC/USDC/ETH testnet — catalog-driven testnet detection). | testnet, catalog, toggle, balances |
@@ -168,6 +168,7 @@ wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw
 | 13 | offline | Relay down → faucet top-up surfaces honest 'Offline' (ECONNREFUSED, not unsafe-port), no crash; retry path. | offline, econnrefused, graceful, retry, right-reason |
 | 133 | home-surface | Landing stays the Pay scanner; tab-home lands Home: headline shows the selected asset balance in its own token unit with the correct eyebrow; the action row navigates to Pay and Receive | home-tab, action-row, landing |
 | 135 | home-activity | Home activity shows the newest ledger rows in their own token units, capped at 3; See all opens the full Transactions tab | home-tab, activity-feed |
+| 136 | home-accounts | The Home tab accounts list keeps the Balances-sheet contract inline: zero-balance rows visible, MAIN on the preferred rail only with the sibling rail named (never a second MAIN, never a group total), whole-row select switches the headline to the asset own unit and persists, and the testnet toggle is reachable. | home-tab, balances, group-model, rail-health |
 | 14 | keyboard | Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4). | keyboard-shortcuts, tabs, sheet-guard, input-guard, focus-visible |
 | 17 | scan-cleanup | Pay tab starts gated (0 listeners until "Pay Now"); armed → 1; Pay→Receive→Pay tears down cleanly (no leak; re-mount re-gates then re-arms). | qr-scanner, teardown, unmount, listener-leak, pay-intent-gate |
 | 24 | wallet-cleanup | Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties. | asset-cards, labels, symbols |
@@ -194,7 +195,7 @@ wire (1) · onboard (18) · pay (37) · offline (10) · deposit (11) · withdraw
 |---|------|----------|--------|
 | 35 | ux-tour | Visual capture: screenshots of every major screen (Pay, Receive+QR, Balances, Settings, Ledger) for review. | visual-capture, screen-census, screenshots |
 | 39 | store-screens — optional (`just e2e-store`) | Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit), rail-funded. | visual-capture, store-screenshots |
-| 40 | visual-regression | Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Balances, Settings, Ledger) vs committed baselines; fails on drift >0.5%. | visual-regression, pixel-diff |
+| 40 | visual-regression | Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Home, Settings, Ledger) vs committed baselines; fails on drift >0.5%. | visual-regression, pixel-diff |
 | 78 | qr-scannable | every rendered <QrCode> stays machine-decodable: request-qr (244/M + brand mark) decodes to the exact encoded value (__DPAY_QR_LAST byte-for-byte) and sol-receive-qr (200/L) decodes to the Solana Pay URI — solana:<address>?reference=<base58> for SOL, solana:<owner>?spl-token=<USDC mint>&reference=<base58> for USDC — rasterized pixels through the same vendored jsQR the prod web wallet ships | qr-scannable, qr-brand-mark, quiet-zone, solana-pay |
 | 84 | visual-dark | Pixel-diff the 5 primary surfaces under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks. | visual-regression, pixel-diff, dark-theme |
 | 85 | theme-toggle | Two-tier theme: header flip toggles Light↔Dark on a single click (target-state label), root bg flips, choice survives reload; Settings 3-way control (Light/Dark/Auto) drives the same state and Auto returns to the OS scheme. | theme-toggle, dark-theme, persistence, settings, auto-theme |

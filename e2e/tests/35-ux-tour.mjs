@@ -52,12 +52,14 @@ export async function run() {
     // path). The header `balance` is always present (even over the request card), and tapping it
     // opens the Balances hub directly — the next destination anyway. One click, zero wasted seconds.
 
-    // 3. Balances hub (full currency list + per-asset actions) — opened by tapping the header balance.
-    await driver.click('balance', { timeoutMs: 5_000 });
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
-    await driver.screenshot('35-tour-balances');
-    console.log('[35-ux-tour] ✓ shot: balances hub');
-    await driver.click('btn-balances-close', { timeoutMs: 4_000 });
+    // 3. Home tab (O4 — the balance-first surface; the accounts list lives inline, the Balances
+    //    sheet is retired). The bottom tab bar is always present, so this also dismisses the
+    //    request card.
+    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
+    await driver.screenshot('35-tour-home');
+    console.log('[35-ux-tour] ✓ shot: home (accounts + activity)');
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // 4. Settings (relay config + reset). Expand the Advanced disclosure so the relay input is
     //    captured (the founder-directed default is collapsed).

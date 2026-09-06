@@ -79,7 +79,7 @@ const FILE_JOURNEY = [
   ['app/components/Wallet.tsx',              'pay'],       // wallet home — pay is the most active surface (history + scan + request)
   ['app/components/Onboarding.tsx',          'onboard'],   // the onboarding screen
   ['app/components/Logo.tsx',                'onboard'],   // brand mark, only on onboarding
-  ['app/components/BalancesSheet.tsx',       'deposit'],   // the money hub — deposit/withdraw/asset surfaces reach it
+  ['app/components/HomeTab.tsx',            'deposit'],   // the money hub — the accounts list (ex-Balances sheet) every deposit/asset surface reaches
   ['app/components/DepositSheet.tsx',        'deposit'],
   ['app/components/CkErc20DepositSheet.tsx', 'deposit'],
   ['app/components/SettingsSheet.tsx',       'system'],    // settings flow

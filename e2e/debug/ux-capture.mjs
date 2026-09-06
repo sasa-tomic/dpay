@@ -69,12 +69,12 @@ async function run() {
     await sleep(1200);
     await shoot(driver, 'A11-phone-receive-coach');
 
-    // Balances (UX round 4: passport card GONE — the sheet is the asset list only).
+    // Home tab accounts list (O4 S3 — the ex-Balances sheet, inline now).
     await driver.click('tab-pay');
     await openBalances(driver);
     await sleep(700);
-    await shoot(driver, 'A12-phone-balances-sheet');
-    await driver.click('btn-balances-close');
+    await shoot(driver, 'A12-phone-home-accounts');
+    await driver.click('tab-pay');
 
     // TripStrip (home) → the archive (the strip is the live entry; the archive the record).
     await driver.findByTestID('trip-strip', { timeoutMs: 5_000 });
@@ -122,12 +122,12 @@ async function run() {
     await sleep(800);
     await shoot(driver, 'B04-desktop-passport-archive');
     await driver.click('btn-passport-close');
-    // Balances sheet at desktop for comparison (another Modal).
+    // Home tab accounts list at desktop for comparison.
     await driver.click('btn-settings-close');
-    await openBalances(driver);
+    await driver.click('tab-home');
     await sleep(700);
-    await shoot(driver, 'B05-desktop-balances-sheet');
-    await driver.click('btn-balances-close');
+    await shoot(driver, 'B05-desktop-home-accounts');
+    await driver.click('tab-pay');
 
     console.log(`[ux-capture] done — ${OUT}`);
   } finally {

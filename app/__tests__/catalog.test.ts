@@ -658,7 +658,7 @@ describe('ledgerToCurrency — ICRC ledger principal → currency id', () => {
 });
 
 // --- MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol advertising) ---------
-// MC1 unit 5 + MC5 item 2 closed false ramp advertising: BalancesSheet.tsx AND-gates the Cash
+// MC1 unit 5 + MC5 item 2 closed false ramp advertising: the accounts list AND-gates the Cash
 // out button on `funded && offramp !== 'Unavailable' && (minter_family === 'CkBtcUtxo' ||
 // minter_family === 'CkEthErc20')`, and familyDisplay returns null for unknown families (CkSol).
 // ckUSDC (`offramp: 'Direct'` + `gas_ledger` set) now shows Cash-out (the dual-ledger
@@ -666,7 +666,7 @@ describe('ledgerToCurrency — ICRC ledger principal → currency id', () => {
 // appears only in tests. This block pins those invariants so a future edit can't silently reopen a
 // false-advertising path. NO behavior change — pins only.
 //
-// The cash-out predicate mirrors BalancesSheet.tsx at the CATALOG level (the `funded` leg is
+// The cash-out predicate mirrors the accounts list at the CATALOG level (the `funded` leg is
 // runtime balance state, out of catalog scope). A currency is cash-out-ELIGIBLE at the catalog
 // level iff `offramp !== 'Unavailable' && (CkBtcUtxo || CkEthErc20)`.
 describe('MC8 U7 — ramp-honesty regression pins (no false cash-out / no CkSol advertising)', () => {

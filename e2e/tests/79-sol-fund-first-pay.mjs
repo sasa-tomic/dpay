@@ -51,7 +51,6 @@ export async function run() {
     console.log('[79-sol-fund-first-pay] selecting solana:SOL as the active asset…');
     await openBalances(driver);
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
     // ---- 1. KNOWN-ZERO: the fund panel replaces the scanner + NFC ----
     console.log('[79-sol-fund-first-pay] known-zero: fund panel replaces the scanner…');
@@ -85,7 +84,6 @@ export async function run() {
     // appears on My-address and returns to the USDC Pay tab in one tap.
     await openBalances(driver);
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-fund', {timeoutMs: 10_000});
     // "Show my SOL address" secondary on the USDC panel carries the USDC origin.
@@ -104,7 +102,6 @@ export async function run() {
     // Now the plain zero→scan release from the SOL rail (original invariant).
     await openBalances(driver);
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 15_000});
     await driver.waitGone('sol-pay-fund', {timeoutMs: 5_000});
@@ -122,7 +119,6 @@ export async function run() {
     console.log('[79-sol-fund-first-pay] USDC zero: panel + SOL-address secondary…');
     await openBalances(driver);
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const usdcPanel = await driver.findByTestID('sol-pay-fund', {timeoutMs: 10_000});
     const usdcText = await usdcPanel.evaluate((n) => n.textContent);

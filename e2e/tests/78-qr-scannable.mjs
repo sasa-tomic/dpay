@@ -67,7 +67,6 @@ export async function run() {
     await driver.page.click('[aria-label="New request"]');
     await openBalances(driver);
     await driver.click('asset-sol-select', { timeoutMs: 5_000 });
-    await driver.waitGone('btn-balances-close', { timeoutMs: 5_000 });
     await driver.click('tab-receive', { timeoutMs: 5_000 });
     await driver.findByTestID('receive-mode-toggle', { timeoutMs: 5_000 });
     await driver.click('btn-receive-address', { timeoutMs: 5_000 });
@@ -92,7 +91,6 @@ export async function run() {
     });
     await openBalances(driver);
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
     await driver.click('tab-receive', {timeoutMs: 5_000});
     await driver.findByTestID('receive-mode-toggle', {timeoutMs: 5_000});
     await driver.click('btn-receive-address', {timeoutMs: 5_000});

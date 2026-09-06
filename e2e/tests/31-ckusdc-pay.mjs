@@ -28,7 +28,7 @@
 // 6-decimal precision.
 //
 // Selector contract: `balance` (header → Balances), `asset-ckusdc` (the USDC row),
-// `btn-balances-close`, `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
+// `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
 // Value seam: POST /api/v1/faucet {account, currency: 2, amount}.
 import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '../harness/wire.mjs';
@@ -78,9 +78,8 @@ export async function run() {
     const seededShown = await driver.waitForText('0.06 USDC', { timeoutMs: 10_000 });
     assert(seededShown, 'A should render 0.06 USDC in the Balances USDC row after funding (assetBalances[2] populated)');
     console.log('[31-ckusdc-pay] ✓ A’s ckUSDC balance visible (assetBalances[2] populated)');
-    // Close Balances so the Pay tab's QrScanner is the top surface again before the camera scan.
-    await driver.click('btn-balances-close', { timeoutMs: 5_000 });
-    await driver.waitGone('btn-balances-close', { timeoutMs: 4_000 });
+    // Back to Pay so the scanner is the top surface again before the camera scan.
+    await driver.click('tab-pay', { timeoutMs: 5_000 });
 
     // --- B (the payee) builds a ckUSDC request: 0.050000 USDC = 50_000 raw 6-decimal units. -------
     // The raw amount is byte-exact: 0.05 × 10^6 = 50_000 (well below 2^53; no float loss). The

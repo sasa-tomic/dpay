@@ -26,7 +26,7 @@
 //   - The payer's Ledger row renders the ckBTC units ("0.0005 BTC" compact, no `$`).
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in Balances),
-// `btn-balances-close`, `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
+// `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
 // Value seam: POST /api/v1/faucet {account, currency: 1, amount}.
 import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
@@ -76,9 +76,8 @@ export async function run() {
     const seededShown = await driver.waitForText('0.0006 BTC', { timeoutMs: 10_000 });
     assert(seededShown, 'A should render 0.0006 BTC in the Balances BTC row after funding (assetBalances[1] populated)');
     console.log('[27-asset-pay] ✓ A’s ckBTC balance visible (assetBalances[1] populated)');
-    // Close Balances so the Pay tab's QrScanner is the top surface again before the camera scan.
-    await driver.click('btn-balances-close', { timeoutMs: 5_000 });
-    await driver.waitGone('btn-balances-close', { timeoutMs: 4_000 });
+    // Back to Pay so the scanner is the top surface again before the camera scan.
+    await driver.click('tab-pay', { timeoutMs: 5_000 });
 
     // --- B (the payee) builds a ckBTC request: 50000 sats. ---------------------------------------
     const bob = await generateKeypair();

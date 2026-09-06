@@ -38,7 +38,6 @@ import {HomeTab} from './HomeTab';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
-import {BalancesSheet} from './BalancesSheet';
 import {PassportArchive} from './TripPassport';
 import {Walkthrough} from './Walkthrough';
 import {AppModal} from './AppModal';
@@ -95,7 +94,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     explicitlySelected.current = true;
     setSelectedAssetId(id);
   }, []);
-  const [balancesOpen, setBalancesOpen] = useState(false);
   const [passportOpen, setPassportOpen] = useState(false);
   // Phase 5 — selection lock. While the mounted Pay/Receive engine is mid-flight (a pay review/qr/
   // paid, or a receive request-QR/result), it reports `true` via `onLockChange`. A USER-initiated
@@ -454,14 +452,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     if (!parsed.ok) setLinkError(M.pay.link.malformed(M.pay.link.part[parsed.err]));
     else setPendingLink(parsed.link);
     setMode('pay');
-    // A6 — an incoming link targets a specific Pay/Receive flow, so dismiss the Balances landing
-    // sheet (it would otherwise overlay the linked screen).
-    setBalancesOpen(false);
   }, []);
   const applyReceipt = useCallback((blob: string) => {
     setPrefillReceipt(blob);
     setMode('receive');
-    setBalancesOpen(false);
   }, []);
   const handleUrl = useCallback((url: string) => {
     const link = parsePayLink(url);
@@ -617,7 +611,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       selectAsset(`ic:${currency}`);
       setMode('receive');
       setReceiveSubMode('address');
-      setBalancesOpen(false);
     };
     if (readDepositDeepLink()) { seedDeposit(ckBtcCurrency); return; } // deep link → ckBTC deposit
     let alive = true;
@@ -734,15 +727,15 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   }, [topUpBusy, faucetAvailable, relayUrl, identity.publicHex, setBalance, setOnline, resetDeduction]);
 
   // Web keyboard shortcuts (plan 1b / UX-V5): the first letters of the main actions —
-  // P=Pay, R=Receive, T=Top-up (demo money), A=Balances (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
+  // P=Pay, R=Receive, T=Top-up (demo money), A=Home (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
   // main view with no text input focused and no sheet/overlay open (Esc is handled per-sheet by
   // useEscapeToClose). Native (no physical keyboard) is a no-op; the on-UI hints are web-only too.
-  const anySheetOpen = balancesOpen || settingsOpen || passportOpen || howItWorksOpen;
-  // Phase 5 (concern B) — the Balances header button is disabled only while a PAY engine holds the
-  // lock (review/QR/paid = money-critical mid-transaction; opening the sheet over a review is a
+  const anySheetOpen = settingsOpen || passportOpen || howItWorksOpen;
+  // Phase 5 (concern C) — the Balances-header tap is disabled only while a PAY engine holds the
+  // lock (review/QR/paid = money-critical mid-transaction; switching surfaces over a review is a
   // distraction and tapping a row would be a no-op anyway). During a RECEIVE lock (request QR shown /
-  // result) the button STAYS tappable: the Balances sheet is a harmless modal overlay that does NOT
-  // unmount the engine, and the tour/screen-capture flows legitimately open it over a request QR.
+  // result) the button STAYS tappable: the Home tab is a sibling surface that does NOT unmount the
+  // engine, and the tour/screen-capture flows legitimately visit it over a request QR.
   // The actual protection on the receive side is handleSelect bailing on the lock — a cross-protocol
   // selection (the only thing that would unmount the engine) is suppressed regardless.
   const balancesDisabled = selectionLocked && mode === 'pay';
@@ -751,7 +744,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     p: () => setMode('pay'),
     r: () => setMode('receive'),
     t: topUp,
-    a: () => { if (!balancesDisabled) setBalancesOpen(true); },
+    a: () => { if (!balancesDisabled) setMode('home'); },
     l: () => setMode('ledger'),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
@@ -768,7 +761,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     // e2e driver treats unexpected console.error as RED).
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (balancesOpen) { setBalancesOpen(false); return true; }
       if (settingsOpen) { setSettingsOpen(false); return true; }
       if (Date.now() - lastBackRef.current < 2000) { BackHandler.exitApp(); return true; }
       lastBackRef.current = Date.now();
@@ -781,7 +773,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       sub.remove();
       if (backHintTimerRef.current) { clearTimeout(backHintTimerRef.current); backHintTimerRef.current = null; }
     };
-  }, [balancesOpen, settingsOpen]);
+  }, [settingsOpen]);
 
   // The ONE selection setter. Setting the selection is a deliberate user action, so it dismisses the
   // Balances sheet AND resets the within-tab sub-modes + clears any idle draft (the scan/send +
@@ -795,7 +787,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   const handleSelect = useCallback((id: AssetId) => {
     if (!shouldAllowUserSelect(selectionLocked)) return;
     selectAsset(id);
-    setBalancesOpen(false);
     setReceiveSubMode('request');
     setPaySubMode('scan');
     setDepositReturnTo(null); // a manual switch supersedes any fund-funnel resume origin
@@ -838,7 +829,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     selectAsset(id);
     setMode('receive');
     setReceiveSubMode('address');
-    setBalancesOpen(false);
     // Remember the origin Pay sub-mode too, so the resume link returns to scan OR send exactly
     // where the user was (UX review r2 finding 3) — not always the scanner.
     setDepositReturnTo(returnTo ? {id: returnTo, subMode: paySubMode} : null);
@@ -849,7 +839,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     setPaySubMode(depositReturnTo.subMode);
     setDepositReturnTo(null);
     setMode('pay');
-    setBalancesOpen(false);
   }, [depositReturnTo]);
 
   // Dismissing the link refusal drops the link with it: the resolve effect re-runs on every
@@ -875,7 +864,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         setHowItWorksOpen(true);
         break;
       case 'fundsReady':
-        setBalancesOpen(true);
+        setMode('home');
         break;
       case 'paymentTested':
         setMode('pay');
@@ -937,7 +926,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           testID="balance"
           style={[S.balBox, balancesDisabled && S.dim]}
           disabled={balancesDisabled}
-          onPress={() => setBalancesOpen(true)}
+          onPress={() => setMode('home')}
           accessibilityRole="button"
           accessibilityLabel={M.wallet.balance.label}
           accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : M.wallet.balance.hint}
@@ -957,8 +946,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                     map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
                     polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
                 <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
-                {/* P1 — chevron signals the balance pressable opens the Balances sheet (SVG: no textContent,
-                    so the e2e balance includes-matches are untouched). */}
+                {/* P1 — chevron signals the balance pressable lands the Home tab (the asset hub). */}
                 <IconChevronDown size={16} color={C.sub2} />
               </View>
             </View>
@@ -985,6 +973,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           ? <HomeTab
               assets={assets}
               selectedAsset={selectedAsset}
+              selectedId={effectiveSelectedId}
               balances={balances}
               catalog={catalog}
               homeCurrency={homeCurrency}
@@ -993,10 +982,14 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               history={ledgerHistory}
               topUpBusy={topUpBusy}
               topUpErr={topUpErr}
+              hasTestnet={hasTestnet}
+              showTestnet={showTestnet}
+              onToggleTestnet={toggleTestnet}
               onPay={() => setMode('pay')}
               onReceive={() => setMode('receive')}
               onDeposit={goToDeposit}
               onTopUp={topUp}
+              onSelect={handleSelect}
               onSeeAll={() => setMode('ledger')}
             />
           : mode === 'pay'
@@ -1106,22 +1099,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         <Tab variant="bottom" testId="tab-transactions" label={M.wallet.tab.transactions} active={mode === 'ledger'} onPress={() => setMode('ledger')} icon={c => <IconClock size={22} color={c} />} />
       </View>
 
-      {balancesOpen ? (
-        <BalancesSheet
-          assets={assets}
-          balances={balances}
-          selectedId={effectiveSelectedId}
-          homeCurrency={homeCurrency}
-          onSelect={handleSelect}
-          hasTestnet={hasTestnet}
-          onTopUp={topUp}
-          topUpBusy={topUpBusy}
-          topUpErr={topUpErr}
-          showTestnet={showTestnet}
-          onToggleTestnet={toggleTestnet}
-          onClose={() => setBalancesOpen(false)}
-        />
-      ) : null}
       {settingsOpen ? (
         <SettingsSheet
           relayUrl={relayUrl}

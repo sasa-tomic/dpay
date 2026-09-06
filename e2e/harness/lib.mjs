@@ -420,10 +420,23 @@ export async function chooseHomeCurrencyIfPresent(driver, currency = 'CHF', opts
 export async function selectDemoAsset(driver, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 8_000;
   await driver.click('balance', {timeoutMs});
-  // Selecting a row closes the sheet itself (Wallet's `handleSelect`), so there is no close to press
-  // — pressing one would wait on a button that is correctly already gone.
+  // The header balance lands the Home tab (O4 S3 — the sheet is retired; the accounts list lives
+  // inline). Selecting a row no longer closes any chrome, so this helper OWNS the return trip:
+  // confirm the row's aria-selected state, then restore Pay so every caller keeps the shared
+  // "onboard ends on the Pay scanner" assumption.
   await driver.click('asset-demo-select', {timeoutMs});
-  await driver.findByTestID('balance', {timeoutMs});
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const selected = await driver.eval((t) => {
+      const el = document.querySelector(`[data-testid="${t}"]`);
+      return el ? el.getAttribute('aria-selected') === 'true' : null;
+    }, 'asset-demo');
+    if (selected === true) break;
+    if (Date.now() > deadline) throw new Error('selectDemoAsset: asset-demo is not selected');
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await driver.click('tab-pay', {timeoutMs});
+  await driver.findByTestID('pay-scan', {timeoutMs});
 }
 
 /**
@@ -488,27 +501,45 @@ export async function accountOf(driver) {
 }
 
 /**
- * Open the Balances sheet (the wallet's single money hub) by tapping the header balance. The sheet is
- * the sole home for the full currency list + every top-up, so most deposit/withdraw/asset flows now
- * start here. Waits for the close button so callers can assume the sheet is mounted. Mirrors how a
- * user reaches it (a header-balance tap), not an internal hook.
+ * Open the wallet's money hub — the Home tab's inline accounts list (O4 S3; the Balances SHEET is
+ * retired) — by tapping the bottom Home tab. The name/contract are kept from the sheet era: this
+ * is still how most deposit/withdraw/asset flows reach the full currency list + the faucet row.
+ * Waits for the DEMO row's select Pressable so callers can assume the list is mounted. Mirrors how
+ * a user reaches it (a tab tap), not an internal hook.
  */
 export async function openBalances(driver, opts = {}) {
-  await driver.click('balance', { timeoutMs: opts.timeoutMs ?? 5_000 });
-  await driver.findByTestID('btn-balances-close', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('tab-home', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.findByTestID('asset-demo-select', { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
 /**
- * Select an IC catalog currency in the Balances sheet via its whole-row select Pressable
- * (`asset-<key>-select`). Closes the sheet (onSelect auto-closes) + waits for it to unmount, then
- * waits for the wallet header to reflect the new active asset. The new Send/Receive IA moved the
- * on-chain deposit/withdraw entry out of Balances into the Pay/Receive tabs, so this is the SOLE way
- * to make a currency the active asset (the row is one big select Pressable). `key` is the
+ * Select an IC catalog currency in the Home tab's accounts list via its whole-row select Pressable
+ * (`asset-<key>-select`). Waits for the row's aria-selected (the inline list has no sheet chrome to
+ * close), then restores the Pay tab — the context every caller assumes after selecting. This is the
+ * SOLE way to make a currency the active asset (the row is one big select Pressable). `key` is the
  * assetTestKey (e.g. 'ckbtc', 'ckusdc', 'cketh'); 'demo' for the DEMO row.
  */
 export async function selectCurrency(driver, key, opts = {}) {
   await driver.click(`asset-${key}-select`, { timeoutMs: opts.timeoutMs ?? 5_000 });
-  await driver.waitGone('btn-balances-close', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  // Poll until the row reports aria-selected="true" — the selection is React state, so the
+  // attribute can lag the click by a render under pool contention (the inline list has no sheet
+  // chrome whose unmount could serve as the signal).
+  const deadline = Date.now() + (opts.timeoutMs ?? 5_000);
+  for (;;) {
+    const v = await driver.eval(
+      (sel) => {
+        const el = document.querySelector(sel);
+        return el ? el.getAttribute('aria-selected') : null;
+      },
+      `[data-testid="asset-${key}"]`,
+    );
+    if (v === 'true') break;
+    if (Date.now() > deadline) {
+      throw new Error(`selectCurrency: asset-${key} is not selected (aria-selected=${v}) after ${opts.timeoutMs ?? 5_000}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  await driver.click('tab-pay', { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
 /**

@@ -152,8 +152,10 @@ export async function run() {
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
     const reduced = await driver.waitForText('998.99 USDC', { timeoutMs: 10_000 });
-    const balBody = await driver.bodyText();
-    assert(reduced, `Balances ckUSDC row should show the reduced 998.99 USDC (998990000 raw remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    // Scoped to the ACCOUNTS LIST: the Home activity feed legitimately keeps the +1,000.00 USDC
+    // faucet-seed row — history, not a stale balance (O4 S3: rows live on the Home tab).
+    const balBody = await driver.readText('home-accounts');
+    assert(reduced, `Balances ckUSDC row should show the reduced 998.99 USDC (998990000 raw remaining) after the withdraw. accounts excerpt:\n${balBody.slice(0, 500)}`);
     assert(!balBody.includes('1,000.00 USDC'), 'Balances must NOT still show the pre-withdraw 1,000.00 USDC (stale balance cache?)');
     console.log('[48-ckusdc-withdraw] ✓ UI ckUSDC balance dropped to 998.99 USDC (matches the gateway delta)');
 

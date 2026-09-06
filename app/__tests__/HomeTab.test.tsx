@@ -92,6 +92,7 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
       <HomeTab
         assets={ASSETS}
         selectedAsset={DEMO}
+        selectedId={DEMO.id}
         balances={balancesFor()}
         catalog={CATALOG}
         homeCurrency={HOME}
@@ -100,10 +101,14 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
         history={[]}
         topUpBusy={false}
         topUpErr={null}
+        hasTestnet={false}
+        showTestnet={false}
+        onToggleTestnet={jest.fn()}
         onPay={jest.fn()}
         onReceive={jest.fn()}
         onDeposit={jest.fn()}
         onTopUp={jest.fn()}
+        onSelect={jest.fn()}
         onSeeAll={jest.fn()}
         {...props}
       />,
@@ -202,6 +207,21 @@ describe('HomeTab — the capability-dispatched action row', () => {
     act(() => { pressable(tree, 'btn-home-receive').props.onPress(); });
     expect(onPay).toHaveBeenCalledTimes(1);
     expect(onReceive).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('HomeTab — the inline accounts list (O4 S3, the retired Balances sheet)', () => {
+  test('every row renders under home-accounts; tapping a row hands the id to onSelect', () => {
+    const onSelect = jest.fn();
+    const tree = mountHome({onSelect});
+    expect(testIDs(tree)).toContain('home-accounts');
+    // The DEMO row keeps its faucet button; a row select fires the ONE selection callback with
+    // that row's id (Wallet owns the lock gate — the Home tab never re-implements it).
+    expect(testIDs(tree)).toContain('btn-topup');
+    const row = pressable(tree, 'asset-vchf-select');
+    act(() => { row.props.onPress(); });
+    expect(onSelect).toHaveBeenCalledWith('ic:7');
     act(() => { tree.unmount(); });
   });
 });

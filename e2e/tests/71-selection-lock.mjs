@@ -7,21 +7,26 @@
 // (testID `balance` carries accessibilityState.disabled + Pressable.disabled), and handleSelect bails.
 //
 // This flow enters the PayMode sign-blocked surface (an ONLINE insufficient request — the
-// auto-sign refuses to fire, so the read-only review stands) via the camera scan seam
-// (`__DPAY_TEST_SCAN`), then asserts the
+// auto-sign refuses to fire, so the read-only review stands) via the camera scan
+// seam (`__DPAY_TEST_SCAN`), then asserts the
 // lock from both angles:
 //   1. assertDisabled('balance') — the button reports a disabled state.
-//   2. tapping it anyway is a no-op — the Balances sheet (btn-balances-close) does NOT open and the
+//   2. tapping it anyway is a no-op — the mode STAYS Pay (no Home headline) and the
 //      review (pay-amount) is still showing.
 // Canceling the review (btn-review-cancel) returns to scan, releases the lock, and the Balances
-// button is re-enabled + opens normally. The decoded request is immutable either way (this is a
-// UX/state-preservation + NFC-arming lock, not a money-correctness fix — the plan is explicit).
+// button is re-enabled + lands the Home tab's accounts list normally.
+// (O4 S3) The ex-Balances SHEET is retired — the accounts list lives inline on the Home tab. While
+// the review holds the lock the rows are unreachable BY CONSTRUCTION (reaching Home means leaving
+// the review, and the engine's unmount releases the lock — useReportLock resets on unmount), so
+// this flow also pins that seam: navigating Home mid-review abandons the review (engine unmounted,
+// lock released) and rows then select again — the sheet-era "overlay never unmounts the engine"
+// guarantee is gone with the sheet, exactly like the pre-existing tab-receive/ledger navigation.
 // (One-press rule 2026-08-24: a PAYABLE scan would auto-sign straight through review→qr/paid, so
 // this flow pins the lock on the blocked-insufficient leg — a stable review surface.)
 //
 // Selector contract: `pay-scan` (scan surface present before the seam fires), `pay-amount` (review),
-// `balance` (header → Balances, disabled while locked), `btn-balances-close` (sheet-open gate),
-// `btn-review-cancel` (review → scan, releases the lock).
+// `balance` (header → Home tab, disabled while locked), `home-headline-amount` (Home landed),
+// `asset-vchf-select` (row whole-row select), `btn-review-cancel` (review → scan, releases the lock).
 import { setup, assert, assertIncludes, assertDisabled, waitForEnabled, openBalances, onboardWallet , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
@@ -70,24 +75,38 @@ export async function run() {
     // 4. LOCKED (assertion 1): the header Balances button reports a disabled state.
     await assertDisabled(driver, 'balance', 'Balances button disabled while PayMode review is in flight');
 
-    // 5. LOCKED (assertion 2): tapping it anyway is a no-op. The sheet does NOT open and the review
-    //    is still showing — the active engine was not unmounted.
+    // 5. LOCKED (assertion 2): tapping it anyway is a no-op. The mode STAYS Pay (the disabled
+    //    Pressable never navigates — no Home headline renders) and the review is still showing —
+    //    the active engine was not unmounted.
     await driver.click('balance', { timeoutMs: 5_000 });
-    const sheetOpen = await driver.eval((id) => !!document.querySelector(`[data-testid="${id}"]`), 'btn-balances-close');
-    assert(!sheetOpen, 'Balances sheet must NOT open while the selection is locked');
+    const homeLanded = await driver.eval((id) => !!document.querySelector(`[data-testid="${id}"]`), 'home-headline-amount');
+    assert(!homeLanded, 'Home must NOT land while the selection is locked (balance button is a no-op)');
     const stillReview = await driver.eval((id) => !!document.querySelector(`[data-testid="${id}"]`), 'pay-amount');
     assert(stillReview, 'PayMode review must still be showing after a locked Balances tap (engine not unmounted)');
     console.log('[71-selection-lock] ✓ Balances disabled + no-op during review');
 
-    // 6. Cancel the review → back to scan → the engine reports onLockChange(false) → lock released.
-    await driver.click('btn-review-cancel', { timeoutMs: 5_000 });
-    await driver.waitGone('pay-amount', { timeoutMs: 5_000 });
+    // 5b. LOCKED → row-select suppression is BY CONSTRUCTION now (O4 S3): the inline accounts list
+    //     is only reachable by LEAVING the review, and the engine's unmount releases the lock
+    //     (useReportLock resets on unmount). Pin that seam: navigate Home mid-review — the review
+    //     unmounts (pay-amount gone) — and the rows then select freely again. If a future change
+    //     keeps the engine mounted across mode switches, this is the assert that catches it.
+    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    const reviewGone = await driver.eval((id) => !document.querySelector(`[data-testid="${id}"]`), 'pay-amount');
+    assert(reviewGone, 'navigating Home mid-review abandons the review (engine unmounted — pre-existing tab semantics)');
+    await driver.click('asset-vchf-select', { timeoutMs: 5_000 });
+    const vchfSelected = await driver.eval((id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      return el ? el.getAttribute('aria-selected') : null;
+    }, 'asset-vchf');
+    assert(vchfSelected === 'true', 'rows select again once the engine unmount released the lock (aria-selected=true)');
+    console.log('[71-selection-lock] ✓ lock releases on engine unmount; rows selectable on Home');
 
-    // 7. UNLOCKED: the Balances button is re-enabled and opens normally.
+    // 6. Back to Pay (scan) — the released lock left the button re-enabled.
+    await driver.click('tab-pay', { timeoutMs: 5_000 });
     await waitForEnabled(driver, 'balance', { timeoutMs: 5_000 });
     await openBalances(driver);
-    await driver.findByTestID('btn-balances-close', { timeoutMs: 5_000 });
-    console.log('[71-selection-lock] ✓ cancel released the lock; Balances re-opened');
+    console.log('[71-selection-lock] ✓ lock released; balance lands Home (accounts list)');
 
     await driver.screenshot('71-selection-lock');
 

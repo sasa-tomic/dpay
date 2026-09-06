@@ -1,27 +1,29 @@
 /**
- * BalancesSheet — the bundled VCHF/ICP rows, rendered (U5 app half, 2026-08-28).
+ * HomeTab accounts list — the bundled VCHF/ICP rows, rendered (U5 app half, 2026-08-28; moved
+ * wholesale from the retired Balances sheet to the Home tab in O4 S3, tests ported verbatim).
  *
- * The Balances sheet is a PURE renderer over the Wallet-owned selection contract. These tests pin
+ * The accounts list is a PURE renderer over the Wallet-owned selection contract. These tests pin
  * the two no-minter direct-ICRC rows' RENDERING invariants (the pure-level gates live in
  * catalog.test.ts / assets.test.ts):
  *   • zero-balance VCHF/ICP rows REMAIN VISIBLE with honest "0 VCHF"/"0 ICP" amounts;
- *   • NEITHER row emits an action — the DEMO faucet (`btn-topup`) is the sheet's ONLY per-row
+ *   • NEITHER row emits an action — the DEMO faucet (`btn-topup`) is the list's ONLY per-row
  *     action, and "Add money"/"Cash out" are ramp-gated (VCHF/ICP: onramp/offramp Unavailable,
  *     minter null), so no button is emitted for either row.
  *
- * Uses react-test-renderer (the project's only renderer); no module mocks needed — the sheet is a
+ * Uses react-test-renderer (the project's only renderer); no module mocks needed — the list is a
  * pure renderer and the assets/balances inputs are built with the REAL pure builders.
  */
 import {describe, test, expect, jest} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
-import {BalancesSheet} from '../components/BalancesSheet';
+import {HomeTab} from '../components/HomeTab';
 import {buildSelectableAssets} from '../config/assets';
+import {preferredRail} from '../config/currency';
 import {buildAssetBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 
-describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp actions)', () => {
+describe('HomeTab accounts — bundled VCHF/ICP rows (zero-balance visible, no ramp actions)', () => {
   const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
   const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: false});
   // Never-polled IC balances: every IC asset (incl. VCHF/ICP) reads '0' → status 'zero' (dimmed)
@@ -36,23 +38,31 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
     tokenStates: {},
   });
 
-  function mountSheet(): renderer.ReactTestRenderer {
+  function mountAccounts(): renderer.ReactTestRenderer {
     let tree!: renderer.ReactTestRenderer;
     act(() => {
       tree = renderer.create(
-        <BalancesSheet
+        <HomeTab
           assets={assets}
-          balances={balances}
+          selectedAsset={assets[0]!}
           selectedId="ic:0"
+          balances={balances}
+          catalog={BUNDLED}
           homeCurrency="CHF"
-          onSelect={jest.fn()}
-          hasTestnet={false}
-          onTopUp={jest.fn()}
+          homeAsset={preferredRail('CHF', assets)}
+          online={true}
+          history={[]}
           topUpBusy={false}
           topUpErr={null}
+          hasTestnet={false}
           showTestnet={false}
           onToggleTestnet={jest.fn()}
-          onClose={jest.fn()}
+          onPay={jest.fn()}
+          onReceive={jest.fn()}
+          onDeposit={jest.fn()}
+          onTopUp={jest.fn()}
+          onSelect={jest.fn()}
+          onSeeAll={jest.fn()}
         />,
       );
     });
@@ -67,7 +77,7 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
       .join(' ');
 
   test('zero-balance VCHF + ICP rows remain visible with honest "0 VCHF"/"0 ICP" amounts', () => {
-    const tree = mountSheet();
+    const tree = mountAccounts();
     const vchf = rowText(tree, 'asset-vchf');
     const icp = rowText(tree, 'asset-icp');
     expect(vchf).toContain('0.00 VCHF');
@@ -81,8 +91,8 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
   });
 
   test('NO Add money / Cash out action is emitted for VCHF/ICP (only DEMO keeps its faucet)', () => {
-    const tree = mountSheet();
-    // The DEMO faucet (`btn-topup`) is the sheet's ONLY per-row action: it renders inside the DEMO
+    const tree = mountAccounts();
+    // The DEMO faucet (`btn-topup`) is the list's ONLY per-row action: it renders inside the DEMO
     // row (findAll matches layered composite+host nodes per Pressable, so presence — not count — is
     // the assertion) and inside NEITHER direct-ICRC row: no action of any kind for VCHF/ICP.
     const demoRow = tree.root.findAll(node => node.props && node.props.testID === 'asset-demo')[0]!;
@@ -95,7 +105,7 @@ describe('BalancesSheet — bundled VCHF/ICP rows (zero-balance visible, no ramp
   });
 });
 
-describe('BalancesSheet — home-currency rail badges (mark every rail, never sum the group)', () => {
+describe('HomeTab accounts — home-currency rail badges (mark every rail, never sum the group)', () => {
   const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
   // The full two-rail USD group: ckUSDC on the IC + USDC on Solana (solanaUsdc forced on so the
   // row is present regardless of the offline test loop's empty RPC URL).
@@ -110,23 +120,31 @@ describe('BalancesSheet — home-currency rail badges (mark every rail, never su
     tokenStates: {},
   });
 
-  function mountSheet(home: 'CHF' | 'USD'): renderer.ReactTestRenderer {
+  function mountAccounts(home: 'CHF' | 'USD'): renderer.ReactTestRenderer {
     let tree!: renderer.ReactTestRenderer;
     act(() => {
       tree = renderer.create(
-        <BalancesSheet
+        <HomeTab
           assets={assets}
-          balances={balances}
+          selectedAsset={assets[0]!}
           selectedId="ic:0"
+          balances={balances}
+          catalog={BUNDLED}
           homeCurrency={home}
-          onSelect={jest.fn()}
-          hasTestnet={false}
-          onTopUp={jest.fn()}
+          homeAsset={preferredRail(home, assets)}
+          online={true}
+          history={[]}
           topUpBusy={false}
           topUpErr={null}
+          hasTestnet={false}
           showTestnet={false}
           onToggleTestnet={jest.fn()}
-          onClose={jest.fn()}
+          onPay={jest.fn()}
+          onReceive={jest.fn()}
+          onDeposit={jest.fn()}
+          onTopUp={jest.fn()}
+          onSelect={jest.fn()}
+          onSeeAll={jest.fn()}
         />,
       );
     });
@@ -144,7 +162,7 @@ describe('BalancesSheet — home-currency rail badges (mark every rail, never su
     tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
 
   test('home=USD: MAIN on ckUSDC only; the Solana sibling wears a badge NAMING its rail', () => {
-    const tree = mountSheet('USD');
+    const tree = mountAccounts('USD');
     // The preferred rail keeps the one MAIN badge.
     expect(hasBadge(tree, 'asset-ckusdc-main')).toBe(true);
     expect(hasBadge(tree, 'asset-sol-usdc-main')).toBe(false);
@@ -161,7 +179,7 @@ describe('BalancesSheet — home-currency rail badges (mark every rail, never su
   });
 
   test('home=CHF: single-rail group renders exactly as before — MAIN on VCHF, no rail badges', () => {
-    const tree = mountSheet('CHF');
+    const tree = mountAccounts('CHF');
     expect(hasBadge(tree, 'asset-vchf-main')).toBe(true);
     for (const key of ['asset-vchf', 'asset-ckusdc', 'asset-sol-usdc', 'asset-icp', 'asset-cketh', 'asset-sol', 'asset-sol-eurc', 'asset-demo']) {
       expect(hasBadge(tree, `${key}-rail`)).toBe(false);

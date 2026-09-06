@@ -20,7 +20,7 @@
 //   - No existing visible asset is affected (mainnet set is 0 DEMO / 1 ckBTC / 2 ckUSDC /
 //     6 ckETH / 7 VCHF / 8 ICP → always visible).
 //
-// Selector contract: `balance` (header → Balances), `btn-balances-close`, `btn-toggle-testnet`,
+// Selector contract: `tab-home` (bottom tab → the accounts list), `btn-toggle-testnet`,
 // `asset-ckbtc-testnet`, `asset-cksepoliausdc-testnet`, `asset-cksepoliaeth-testnet`.
 import {setup, assert, onboardWallet, openBalances} from '../harness/lib.mjs';
 

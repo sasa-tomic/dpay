@@ -87,7 +87,6 @@ export async function run() {
     await openBalances(driver);
     await driver.findByTestID('asset-sol-usdc-select', {timeoutMs: 8_000});
     await driver.click('asset-sol-usdc-select', {timeoutMs: 5_000});
-    await driver.waitGone('btn-balances-close', {timeoutMs: 5_000});
 
     // 2. Pay tab → "Send to address": the sheet mounts with token='USDC' (device ATA exists → no
     //    gate) and renders in USDC units.

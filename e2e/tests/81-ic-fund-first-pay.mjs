@@ -39,7 +39,6 @@ export async function run() {
     // Select ckBTC (a fresh wallet holds DEMO ∂100 from the faucet but zero ckBTC).
     await openBalances(driver);
     await driver.click('asset-ckbtc-select');
-    await driver.waitGone('btn-balances-close');
 
     // (1) Online + known zero → the fund panel replaces the scanner.
     await driver.click('tab-pay');

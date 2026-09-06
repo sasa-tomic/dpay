@@ -86,6 +86,9 @@ export async function run() {
     await driver.click('balance', {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    // The accounts list is inline on Home (O4 S3) — the row select no longer closes any sheet,
+    // so the flow owns the return to Pay.
+    await driver.click('tab-pay', {timeoutMs: 5_000});
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
     console.log('[66-sol-nfc-error] ✓ SOL selected, card armed (no setup)');
 

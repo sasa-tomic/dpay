@@ -18,7 +18,7 @@ export const walletDe: WalletMessages = {
 
   balance: {
     label: 'Guthaben — Währung wechseln oder empfangen',
-    hint: 'Öffnet die volle Asset-Liste, wechselt die angezeigte Währung oder empfängt',
+    hint: 'Öffnet den Home-Tab mit jedem Asset, wechselt die angezeigte Währung oder empfängt',
     lockedHint: 'Beende oder brich zuerst die laufende Zahlung ab',
     of: asset => `${asset}-Guthaben`,
     approx: asset => `~ ${asset} ca.`,
@@ -71,6 +71,10 @@ export const walletDe: WalletMessages = {
       seeAllHint: 'Die vollständige Transaktionsliste öffnen',
       empty: 'Noch keine Zahlungen.',
     },
+    accounts: {
+      title: 'Konten',
+      intro: 'Tippe auf eine Währung, um sie auf deinem Startbildschirm zu zeigen. Empfangen und senden kannst du sie in den Tabs Empfangen und Bezahlen.',
+    },
   },
 
   backToPaying: asset => `Zurück zum Bezahlen mit ${asset}`,
@@ -83,10 +87,6 @@ export const walletDe: WalletMessages = {
   },
 
   balances: {
-    title: 'Guthaben',
-    close: 'Guthaben schließen',
-    intro:
-      'Tippe auf eine Währung, um sie auf deinem Startbildschirm zu zeigen. Empfangen und senden kannst du sie in den Tabs Empfangen und Bezahlen.',
     demoFunds: 'Demo-Guthaben',
     demoFundsLabel: 'Demo-Guthaben holen',
     demoFundsHint: 'Fügt dieser Wallet ∂100 Demo-Geld hinzu',
@@ -98,7 +98,6 @@ export const walletDe: WalletMessages = {
     hideTestnet: 'Testnet-Assets verbergen',
     showTestnetHint: 'Blendet Testnet-Währungen in dieser Liste ein',
     hideTestnetHint: 'Blendet Testnet-Währungen aus dieser Liste aus',
-    escToClose: 'Esc drücken zum Schließen',
   },
 
   ledger: {

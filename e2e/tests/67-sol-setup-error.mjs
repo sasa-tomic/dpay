@@ -67,6 +67,9 @@ export async function run() {
     await driver.click('balance', {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
+    // The accounts list is inline on Home (O4 S3) — the row select no longer closes any sheet,
+    // so the flow owns the return to Pay.
+    await driver.click('tab-pay', {timeoutMs: 5_000});
 
     // -------- Part A: no-setup scan → AUTO-SIGN → solpay:v2. ------------------------------
     //

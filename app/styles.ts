@@ -204,6 +204,7 @@ function buildStyles(p: Palette) {
   homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, borderRadius: 16, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 72},
   homeActionLabel: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   homeFaucetErr: {fontSize: 13, color: p.bad, marginTop: 10, textAlign: 'center', fontFamily: FONT.sans},
+  homeAccounts: {alignSelf: 'stretch', marginTop: 24},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
   homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   // Mode toggle — a joined two-segment pill control at the top of the Pay/Receive tab bodies:
