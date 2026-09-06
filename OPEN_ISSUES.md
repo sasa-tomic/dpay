@@ -52,7 +52,7 @@ plan's "VEUR is not in the catalog and must not be added" line).** VEUR@IC is cu
 VCHF/ICP shape) with liquidity `thin` — on-chain supply is a verified stub (~1.5 VEUR) — and the
 catalog's first `offramp=Partner` row (`ramp_partner:"DFX"`; DFX lists VEUR sellable-not-buyable,
 onramp honestly Unavailable); its payment-policy cap `1_000_000_000_000` e8s = 10 000 VEUR mirrors
-VCHF's shape and awaits founder confirmation. EURC@Solana (Circle mint `HzwqbK…uBEDKtr`, 6dec,
+VCHF's shape (founder-confirmed 2026-09-06). EURC@Solana (Circle mint `HzwqbK…uBEDKtr`, 6dec,
 legacy SPL Token program) is liquidity `deep` (~105M circulating). Liquidity is DATA — an optional
 `deep|thin` catalog field, absent = no statement, old rows byte-identical (relay-pinned wire). The
 Solana engine was generalized off USDC-hardcoding (`app/solana/tokens.ts` registry; per-mint
