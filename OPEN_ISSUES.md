@@ -27,8 +27,12 @@ until the blockers land. THE thing that unblocks it:**
 - **(e) Structural, measured 2026-09-04** — no compliant fiat rail into ANY chain-key asset exists;
   only Solana USDC and native ICP are card-reachable at all.
 
-Adjacent but NOT O3: `docs/specs/2026-08-17-trust-wallet-fund-button.md` is a fully-spec'd
-offline-buildable transfer-in slice — a separate session item; do not book it as O3 progress.
+Adjacent but NOT O3: the Trust Wallet fund-button
+(`docs/specs/2026-08-17-trust-wallet-fund-button.md`) — CLOSED `43b1f09` (2026-08-22):
+`app/trustwallet.ts` deeplink builder + android-gated ghost button on the mainnet-BTC DepositSheet
+and the SOL/SPL receive sheet, jest-pinned (golden URLs, eligibility, gate matrix); re-verified
+2026-09-06. Never O3 progress (no onramp, no fiat). The plan's optional stretch (Trust-specific WC
+entry on the ckERC20 sheet) remains NOT done by choice — optional, out of boundary.
 
 **2. Item 5 — reconcile heartbeat + paging (OPEN-DEFERRED; pickup spec, do not re-derive).**
 Revisit trigger: the facade kernel re-enters the value path, OR DUSD ledger live-window pressure.

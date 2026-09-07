@@ -3,7 +3,7 @@
 > Goal: one-tap "fund my dpay account from Trust Wallet" — a button on the Add-money / My-address
 > surfaces that deep-links Trust Wallet's send screen with the user's dpay deposit address
 > pre-filled. Research concluded 2026-08-17 (Trust developer docs + `third_party/wallet-core`
-> registry analysis). **Status: NOT STARTED — picked up from the OPEN_ISSUES work order.**
+> registry analysis). **Status: DONE — shipped in `43b1f09` (2026-08-22), re-verified 2026-09-06.**
 
 ## Research findings (verified 2026-08-17, do NOT re-derive)
 
