@@ -28,10 +28,13 @@ use dpay_core::{
     sign_till_open, validate_till_open, Currency, TillOpen, DEMO_USD, NONCE_LEN, SIG_LEN,
     TILL_OPEN_MAX_SKEW_SECS,
 };
-use dpay_icp::envelope::{ingress_expiry, sign_read_state, sign_update, verify_envelope, CallRequest};
+use dpay_icp::envelope::{
+    ingress_expiry, sign_read_state, sign_update, verify_envelope, CallRequest,
+};
 use dpay_icp::icrc::{
-    decode_legacy_transfer_result, legacy_transfer_arg, transfer_arg, LegacyTransferError,
-    LegacyTransferResult,
+    approve_arg, decode_approve_result, decode_legacy_transfer_result, decode_swap_result,
+    deposit_and_swap_arg, legacy_transfer_arg, transfer_arg, ApproveResult, LegacyTransferError,
+    LegacyTransferResult, PoolSwapError,
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{decode_read_state_tree, request_status, RequestStatus};
@@ -249,7 +252,10 @@ async fn integrity_route_reports_match_by_default() {
     assert_eq!(body["live_module_hash"], FAKE_FACADE_MODULE_HASH);
     assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
     let commit = body["relay_commit"].as_str().expect("relay_commit present");
-    assert!(commit.len() == 40 || commit == "unknown", "relay_commit mirrors /version: {body}");
+    assert!(
+        commit.len() == 40 || commit == "unknown",
+        "relay_commit mirrors /version: {body}"
+    );
 }
 
 /// A live hash that differs from the pin (an unrecorded upgrade, or any drift between the two
@@ -266,7 +272,8 @@ async fn integrity_route_reports_mismatch_when_live_drifts() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["status"], "MISMATCH", "{body}");
     assert_eq!(
-        body["live_module_hash"], "0000000000000000000000000000000000000000000000000000000000000000"
+        body["live_module_hash"],
+        "0000000000000000000000000000000000000000000000000000000000000000"
     );
     assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
 }
@@ -282,7 +289,10 @@ async fn integrity_route_degrades_to_unreachable_not_5xx() {
     let (status, body) = call(&state, get_req("/api/v1/integrity")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["status"], "UNREACHABLE", "{body}");
-    assert!(body["live_module_hash"].is_null(), "no live hash when the IC is unreachable: {body}");
+    assert!(
+        body["live_module_hash"].is_null(),
+        "no live hash when the IC is unreachable: {body}"
+    );
     assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
 }
 
@@ -635,7 +645,11 @@ async fn legacy_transfer_outcome(
         .body(Body::from(read))
         .unwrap();
     let (status, _h, body) = call_raw(state, req).await;
-    assert_eq!(status, StatusCode::OK, "read_state must serve a certificate");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "read_state must serve a certificate"
+    );
     let tree = decode_read_state_tree(&body).expect("certificate decodes");
     request_status(&tree, &rid).expect("request_status decodes")
 }
@@ -682,7 +696,11 @@ async fn signed_legacy_transfer_pays_an_account_identifier() {
     // ledger, and the gateway numbers them like one so a minted row and a transferred row can
     // never claim the same identity. The index rides the ledger's own Ok encoding.
     assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(2));
-    assert_eq!(fake.balance_for(ICP, &merch_owner), 1 + 250, "payee credited");
+    assert_eq!(
+        fake.balance_for(ICP, &merch_owner),
+        1 + 250,
+        "payee credited"
+    );
     assert_eq!(
         fake.balance_for(ICP, &payer_owner),
         100_000_000 - 250 - ICP_FEE_E8S,
@@ -696,7 +714,14 @@ async fn signed_legacy_transfer_pays_an_account_identifier() {
         &state,
         &payer,
         ICP_LEDGER,
-        legacy_transfer_arg(external.as_bytes(), None, 400, ICP_FEE_E8S, 0xdeadbeef, None),
+        legacy_transfer_arg(
+            external.as_bytes(),
+            None,
+            400,
+            ICP_FEE_E8S,
+            0xdeadbeef,
+            None,
+        ),
     )
     .await;
     assert_eq!(legacy_result(outcome), LegacyTransferResult::Ok(3));
@@ -751,8 +776,16 @@ async fn legacy_transfer_refusals_move_no_funds() {
     fake.faucet_credit(DEMO_USD, &payer_owner, 1_000);
     let to = AccountIdentifier::from_principal(&merch_owner, &[0u8; 32]);
     let unchanged = |what: &str| {
-        assert_eq!(fake.balance_for(ICP, &payer_owner), 1_000, "{what}: sender untouched");
-        assert_eq!(fake.balance_for(ICP, &merch_owner), 0, "{what}: payee untouched");
+        assert_eq!(
+            fake.balance_for(ICP, &payer_owner),
+            1_000,
+            "{what}: sender untouched"
+        );
+        assert_eq!(
+            fake.balance_for(ICP, &merch_owner),
+            0,
+            "{what}: payee untouched"
+        );
     };
 
     // Fee below the ledger's exact fee → BadFee carrying the fee it wants.
@@ -765,7 +798,9 @@ async fn legacy_transfer_refusals_move_no_funds() {
     .await;
     assert_eq!(
         legacy_result(outcome),
-        LegacyTransferResult::Err(LegacyTransferError::BadFee { expected_fee: ICP_FEE_E8S }),
+        LegacyTransferResult::Err(LegacyTransferError::BadFee {
+            expected_fee: ICP_FEE_E8S
+        }),
     );
     unchanged("bad fee");
 
@@ -786,9 +821,16 @@ async fn legacy_transfer_refusals_move_no_funds() {
     // A malformed arg is REJECTED, never decoded into a plausible-looking payment.
     let outcome = legacy_transfer_outcome(&state, &payer, ICP_LEDGER, vec![0u8; 8]).await;
     match outcome {
-        RequestStatus::Rejected { reject_code, reject_message, .. } => {
+        RequestStatus::Rejected {
+            reject_code,
+            reject_message,
+            ..
+        } => {
             assert_eq!(reject_code, 5, "{reject_message}");
-            assert!(reject_message.contains("malformed transfer arg"), "{reject_message}");
+            assert!(
+                reject_message.contains("malformed transfer arg"),
+                "{reject_message}"
+            );
         }
         other => panic!("expected a rejection, got {other:?}"),
     }
@@ -803,7 +845,11 @@ async fn legacy_transfer_refusals_move_no_funds() {
     )
     .await;
     match outcome {
-        RequestStatus::Rejected { reject_code, reject_message, .. } => {
+        RequestStatus::Rejected {
+            reject_code,
+            reject_message,
+            ..
+        } => {
             assert_eq!(reject_code, 3, "{reject_message}");
             assert!(
                 reject_message.contains("no update method 'transfer'"),
@@ -812,7 +858,11 @@ async fn legacy_transfer_refusals_move_no_funds() {
         }
         other => panic!("expected a rejection, got {other:?}"),
     }
-    assert_eq!(fake.balance_for(DEMO_USD, &payer_owner), 1_000, "DEMO untouched");
+    assert_eq!(
+        fake.balance_for(DEMO_USD, &payer_owner),
+        1_000,
+        "DEMO untouched"
+    );
     unchanged("wrong ledger");
 }
 
@@ -1486,8 +1536,15 @@ async fn currencies_route_returns_demo_catalog() {
         "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckETH + VCHF + ICP + VEUR (the three Sepolia/testnet-BTC rows are testnet-side): {body}"
     );
     // Served order is the prod order: 0, 1, 2, 6, then the appended 7, 8, 9.
-    let mainnet_ids: Vec<u64> = rows.iter().map(|r| r["currency"].as_u64().unwrap()).collect();
-    assert_eq!(mainnet_ids, vec![0, 1, 2, 6, 7, 8, 9], "mainnet section order: {body}");
+    let mainnet_ids: Vec<u64> = rows
+        .iter()
+        .map(|r| r["currency"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        mainnet_ids,
+        vec![0, 1, 2, 6, 7, 8, 9],
+        "mainnet section order: {body}"
+    );
 
     // DEMO_USD (currency 0): the mintable $ faucet asset at the REAL DUSD ledger, no ramp.
     let dusd = rows
@@ -1506,7 +1563,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(dusd["display_decimals"], serde_json::Value::Null);
     assert_eq!(dusd["fee"], serde_json::Value::Null);
     assert_eq!(dusd["cap"], "100000"); // $1,000.00 per-tx cap
-    // MC1 unit 5: DEMO ramp honesty — onramp=Direct (faucet), offramp=Unavailable (no cash-out).
+                                       // MC1 unit 5: DEMO ramp honesty — onramp=Direct (faucet), offramp=Unavailable (no cash-out).
     assert_eq!(dusd["onramp"], "Direct");
     assert_eq!(dusd["offramp"], "Unavailable");
 
@@ -1523,7 +1580,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckbtc["minter_family"], "CkBtcUtxo");
     assert_eq!(ckbtc["ledger"], "mxzaz-hqaaa-aaaar-qaada-cai"); // catalog_truth ckbtc_ledger
     assert_eq!(ckbtc["minter"], "mqygn-kiaaa-aaaar-qaadq-cai"); // catalog_truth ckbtc_minter
-    // MC1 unit 5: authoritative per-currency metadata (no family-level assumption).
+                                                                // MC1 unit 5: authoritative per-currency metadata (no family-level assumption).
     assert_eq!(ckbtc["wrapper_name"], "ckBTC");
     assert_eq!(ckbtc["backing_symbol"], "BTC");
     assert_eq!(ckbtc["network"], "Bitcoin");
@@ -1544,7 +1601,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckusdc["minter_family"], "CkEthErc20");
     assert_eq!(ckusdc["ledger"], "xevnm-gaaaa-aaaar-qafnq-cai"); // catalog_truth ckusdc_ledger
     assert_eq!(ckusdc["minter"], "sv3dd-oaaaa-aaaar-qacoa-cai"); // catalog_truth cketh_minter
-    // MC1 unit 5: per-token ckERC20 facts (O6) replace the old hardcoded currency-2 params.
+                                                                 // MC1 unit 5: per-token ckERC20 facts (O6) replace the old hardcoded currency-2 params.
     assert_eq!(ckusdc["wrapper_name"], "ckUSDC");
     assert_eq!(ckusdc["backing_symbol"], "USDC");
     assert_eq!(ckusdc["network"], "Ethereum");
@@ -1622,7 +1679,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(vchf["ledger"], "ly36x-wiaaa-aaaai-aqj7q-cai"); // catalog_truth vchf_ledger
     assert_eq!(vchf["fee"], "10000"); // 0.0001 VCHF raw
     assert_eq!(vchf["cap"], "1000000000000"); // 10,000 VCHF initial cap
-    // No-minter shape: null minter + null family (no fake family to pass any gate).
+                                              // No-minter shape: null minter + null family (no fake family to pass any gate).
     assert_eq!(vchf["minter"], serde_json::Value::Null);
     assert_eq!(vchf["minter_family"], serde_json::Value::Null);
     // Not EVM: all three chain fields null.
@@ -1706,7 +1763,10 @@ async fn currencies_route_returns_demo_catalog() {
         3,
         "exactly the real testnet trio is testnet-side (ckTESTBTC/ckSepoliaUSDC/ckSepoliaETH; VCHF/ICP are mainnet): {body}"
     );
-    let testnet_ids: Vec<u64> = trows.iter().map(|r| r["currency"].as_u64().unwrap()).collect();
+    let testnet_ids: Vec<u64> = trows
+        .iter()
+        .map(|r| r["currency"].as_u64().unwrap())
+        .collect();
     assert_eq!(testnet_ids, vec![3, 4, 5], "testnet section order: {body}");
 
     // ckTESTBTC (currency 3): the REAL testnet chain-key Bitcoin row — its OWN testnet ledger +
@@ -1747,8 +1807,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(sep_usdc["cap"], "100000");
     assert_eq!(sep_usdc["chain_id"], 11155111); // Sepolia
     assert_eq!(
-        sep_usdc["token_contract"],
-        "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+        sep_usdc["token_contract"], "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
         "the TESTNET USDC contract — NOT the mainnet address"
     );
     assert_eq!(sep_usdc["gas_ledger"], serde_json::Value::Null);
@@ -1797,7 +1856,11 @@ async fn currencies_route_returns_demo_catalog() {
     );
     assert_eq!(sol["onramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
     assert_eq!(sol["offramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
-    assert_eq!(sol["liquidity"], serde_json::Value::Null, "pre-EUR row: no tier key");
+    assert_eq!(
+        sol["liquidity"],
+        serde_json::Value::Null,
+        "pre-EUR row: no tier key"
+    );
     let usdc = &srows[1];
     assert_eq!(usdc["token"], "USDC");
     assert_eq!(usdc["symbol"], "USDC");
@@ -1808,7 +1871,11 @@ async fn currencies_route_returns_demo_catalog() {
     );
     assert_eq!(usdc["onramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
     assert_eq!(usdc["offramp"], "Unavailable"); // fiat-ramp semantics (was Direct)
-    assert_eq!(usdc["liquidity"], serde_json::Value::Null, "pre-EUR row: no tier key");
+    assert_eq!(
+        usdc["liquidity"],
+        serde_json::Value::Null,
+        "pre-EUR row: no tier key"
+    );
     // EURC: the solana half of the EUR dual-rail — deep liquidity, no fiat ramp through dpay.
     let eurc = &srows[2];
     assert_eq!(eurc["token"], "EURC");
@@ -1998,8 +2065,7 @@ async fn ckerc20_onramp_is_token_specific() {
     let (s_sep, body_sep) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=4")).await;
     assert_eq!(s_sep, StatusCode::OK, "{body_sep}");
     assert_eq!(
-        body_sep["helper_address"],
-        "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38",
+        body_sep["helper_address"], "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38",
         "chain_id 11155111 selects the Sepolia CkDeposit helper"
     );
     assert_eq!(
@@ -2030,7 +2096,10 @@ async fn ckerc20_onramp_is_token_specific() {
     assert_eq!(s_eth, StatusCode::OK, "{body_eth}");
     assert_eq!(body_eth["kind"], "native_eth");
     assert!(body_eth["erc20_address"].is_null());
-    assert_eq!(body_eth["helper_address"], "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68");
+    assert_eq!(
+        body_eth["helper_address"],
+        "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68"
+    );
 
     // DEMO (currency 0) → 503: no minter family — no ckERC-20 onramp.
     let (s_demo, _body_demo) = call(&state, get_req("/api/v1/onramp/ckerc20?currency=0")).await;
@@ -2273,15 +2342,22 @@ async fn wallet_pay_link_serves_the_wallet_page() {
     let (plain_status, _h, plain) = call_raw(&state, get_req("/wallet")).await;
     assert_eq!(plain_status, StatusCode::OK);
 
-    let link = "/wallet/pay/ryjl3-tyaaa-aaaaa-aaaba-cai?asset=VCHF&network=internet-computer&amount=12.50";
+    let link =
+        "/wallet/pay/ryjl3-tyaaa-aaaaa-aaaba-cai?asset=VCHF&network=internet-computer&amount=12.50";
     let (status, headers, bytes) = call_raw(&state, get_req(link)).await;
-    assert_eq!(status, StatusCode::OK, "a payment link must serve the wallet");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "a payment link must serve the wallet"
+    );
     assert_eq!(
         headers.get(header::CONTENT_TYPE).unwrap(),
         "text/html; charset=utf-8"
     );
     assert_eq!(
-        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CACHE_CONTROL)
+            .map(|v| v.to_str().unwrap()),
         Some("no-cache"),
         "the payment-link page pins hashed assets exactly like /wallet — it must not be cached"
     );
@@ -2319,9 +2395,14 @@ async fn assetlinks_json_declares_every_signing_certificate() {
 
     let (status, headers, bytes) = call_raw(&state, get_req("/.well-known/assetlinks.json")).await;
     assert_eq!(status, StatusCode::OK, "assetlinks.json must serve");
-    assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "application/json");
     assert_eq!(
-        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
+    assert_eq!(
+        headers
+            .get(header::CACHE_CONTROL)
+            .map(|v| v.to_str().unwrap()),
         Some("no-cache"),
         "Android re-verifies on install/update — a cached copy would outlive a cert rotation"
     );
@@ -2446,7 +2527,13 @@ fn fresh_nonce() -> [u8; NONCE_LEN] {
 /// A merchant's SIGNED till request as the wire carries it. The ONE builder for both merchant
 /// routes and for every forgery below, so a test that means to send a bad SIGNATURE cannot
 /// accidentally send a bad-shaped body and pass for the wrong reason.
-fn till_body(key: &SigningKey, cents: u64, name: &str, nonce: [u8; NONCE_LEN], issued_at: u64) -> Value {
+fn till_body(
+    key: &SigningKey,
+    cents: u64,
+    name: &str,
+    nonce: [u8; NONCE_LEN],
+    issued_at: u64,
+) -> Value {
     let open = TillOpen {
         merchant_pubkey: key.verifying_key().to_bytes(),
         cents,
@@ -2507,8 +2594,18 @@ async fn vchf_ledger(state: &AppState) -> (String, u64) {
         .flat_map(|n| n["assets"].as_array().cloned().unwrap_or_default())
         .find(|a| a["currency"] == 7)
         .expect("the served catalog must carry VCHF as currency 7");
-    let fee = row["fee"].as_str().expect("the VCHF row states a fee").parse().expect("a decimal fee");
-    (row["ledger"].as_str().expect("the VCHF row names a ledger").to_string(), fee)
+    let fee = row["fee"]
+        .as_str()
+        .expect("the VCHF row states a fee")
+        .parse()
+        .expect("a decimal fee");
+    (
+        row["ledger"]
+            .as_str()
+            .expect("the VCHF row names a ledger")
+            .to_string(),
+        fee,
+    )
 }
 
 /// The `ref` this till minted for one charge, read off the RING-UP the merchant signed — the one
@@ -2522,7 +2619,12 @@ fn charge_reference(opened: &Value) -> String {
         .unwrap_or_else(|| panic!("a ring-up answer must name the charge's reference: {opened}"))
         .to_string();
     assert_eq!(reference.len(), 32, "{opened}");
-    assert!(reference.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')), "{opened}");
+    assert!(
+        reference
+            .chars()
+            .all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+        "{opened}"
+    );
     reference
 }
 
@@ -2544,7 +2646,11 @@ async fn pay_till(
     let payer = keypair();
     let payer_owner = user_principal(&pubkey(&payer));
     let before = fake.balance_for(Currency::from(7u32), &user_principal(&merchant_pk));
-    fake.faucet_credit(Currency::from(7u32), &payer_owner, u128::from(raw) + u128::from(fee));
+    fake.faucet_credit(
+        Currency::from(7u32),
+        &payer_owner,
+        u128::from(raw) + u128::from(fee),
+    );
     let arg = transfer_arg(
         &Account::new(user_principal(&merchant_pk)),
         None,
@@ -2586,7 +2692,9 @@ async fn pay_till(
     let merchant_hex = hex::encode(merchant_pk);
     let (status, rows) = call(
         state,
-        get_req(&format!("/api/v1/transactions/{merchant_hex}?currency=7&memo={reference}")),
+        get_req(&format!(
+            "/api/v1/transactions/{merchant_hex}?currency=7&memo={reference}"
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{rows}");
@@ -2594,7 +2702,9 @@ async fn pay_till(
         .as_array()
         .and_then(|r| r.first())
         .unwrap_or_else(|| panic!("the transfer carrying {reference} must be in history: {rows}"));
-    row["block"].as_u64().unwrap_or_else(|| panic!("a history row names its block: {row}"))
+    row["block"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("a history row names its block: {row}"))
 }
 
 /// A GET carrying the same origin pair, for the one provider route that builds absolute URLs.
@@ -2618,9 +2728,20 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
     let merchant_account = Principal::self_authenticating_ed25519(&merchant_pk).to_text();
 
-    let opened = open_till(&state, &merchant, "Test Shop", 1_000, "till.example", "http").await;
+    let opened = open_till(
+        &state,
+        &merchant,
+        "Test Shop",
+        1_000,
+        "till.example",
+        "http",
+    )
+    .await;
     let id = opened["id"].as_str().unwrap().to_string();
-    assert!(id.starts_with("pl_"), "the link id is the standard's shape: {id}");
+    assert!(
+        id.starts_with("pl_"),
+        "the link id is the standard's shape: {id}"
+    );
     // CHF 10 is ten francs of a franc-denominated token. No rate anywhere.
     assert_eq!(opened["amount"], "10.");
     assert_eq!(opened["asset"], "VCHF");
@@ -2640,7 +2761,10 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // The callback MUST carry `/cb/`: a wallet derives the submission URL by swapping it for
     // `/tx/`, so this segment is protocol, not decoration.
     let callback = details["callback"].as_str().unwrap().to_string();
-    assert!(callback.contains("/cb/"), "the callback must be swappable to /tx/: {callback}");
+    assert!(
+        callback.contains("/cb/"),
+        "the callback must be swappable to /tx/: {callback}"
+    );
     // The asymmetry the measured provider has and every parser must handle: the fiat ask is a JSON
     // NUMBER while the per-asset amount is a decimal STRING, trailing bare point and all.
     assert_eq!(details["requestedAmount"]["asset"], "CHF");
@@ -2654,7 +2778,10 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // One accepted expiry spelling — ISO-8601 UTC with the Z. A local-time spelling would be read
     // as device-local by a lenient wallet: up to 14 hours of skew on a 300-second quote.
     let expiry = details["quote"]["expiration"].as_str().unwrap();
-    assert!(expiry.ends_with('Z') && expiry.contains('T'), "expiry spelling: {expiry}");
+    assert!(
+        expiry.ends_with('Z') && expiry.contains('T'),
+        "expiry spelling: {expiry}"
+    );
 
     // --- step 3: where to send it ----------------------------------------------------------------
     let cb = format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=VCHF");
@@ -2666,15 +2793,30 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // The LIVE URI shape, naming the ledger EXPLICITLY — which is exactly what the measured
     // provider fails to honour on its own verification side.
     assert!(uri.starts_with("icp:"), "{uri}");
-    assert!(uri.contains(&format!("/transfer?to={merchant_account}&amount=10.")), "{uri}");
+    assert!(
+        uri.contains(&format!("/transfer?to={merchant_account}&amount=10.")),
+        "{uri}"
+    );
     // …and this charge's own reference, which is what the payer echoes as the transfer's memo and
     // what the till matches on. 32 hex characters — the 16-byte width dpay's reconciliation memo
     // has everywhere else — and different from the charge's id, which is a read token and not a
     // claim on a ledger row.
-    let reference = uri.rsplit_once("&ref=").unwrap_or_else(|| panic!("{uri}")).1.to_string();
+    let reference = uri
+        .rsplit_once("&ref=")
+        .unwrap_or_else(|| panic!("{uri}"))
+        .1
+        .to_string();
     assert_eq!(reference.len(), 32, "{uri}");
-    assert!(reference.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')), "{uri}");
-    assert!(!id.contains(&reference), "the reference is not the charge id in another spelling");
+    assert!(
+        reference
+            .chars()
+            .all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+        "{uri}"
+    );
+    assert!(
+        !id.contains(&reference),
+        "the reference is not the charge id in another spelling"
+    );
     // ONE reference per charge, whichever side of the counter asks for it. Two spellings would mean
     // the merchant's own payment and the customer's could not both be credited to the same sale.
     assert_eq!(
@@ -2686,7 +2828,9 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // holding an exchange rate, which v1 deliberately does not.
     let (status, body) = call(
         &state,
-        get_req(&format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=ICP")),
+        get_req(&format!(
+            "/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=ICP"
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -2695,12 +2839,20 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // --- step 4: reporting, BEFORE the money exists ----------------------------------------------
     // The payer claims to have paid and has not. A provider that trusted the report would credit a
     // sale for nothing; this one reads the ledger and answers an honest, retryable PENDING.
-    let tx = format!("/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF&tx=999999");
+    let tx =
+        format!("/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF&tx=999999");
     let (status, body) = call(&state, get_req(&tx)).await;
-    assert_eq!(status, StatusCode::ACCEPTED, "a lying payer must not credit a sale: {body}");
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "a lying payer must not credit a sale: {body}"
+    );
     assert_eq!(body["status"], "PENDING");
     let (_, status_body) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
-    assert!(status_body["paid"].is_null(), "nothing may be credited before a transfer exists");
+    assert!(
+        status_body["paid"].is_null(),
+        "nothing may be credited before a transfer exists"
+    );
     // …and this route is UNAUTHENTICATED, so it says only what an id-holder may hear. The reference
     // reaches the merchant on the ring-up they SIGNED and is not repeated here — least authority,
     // the reasoning in full at `ChargeStatus`.
@@ -2772,7 +2924,10 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     let (status, refused) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert!(
-        refused["message"].as_str().unwrap_or_default().contains("already been paid"),
+        refused["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("already been paid"),
         "the refusal says what happened and what to do: {refused}"
     );
 }
@@ -2803,7 +2958,10 @@ async fn one_transfer_credits_exactly_one_sale() {
     assert_ne!(first_id, second_id, "two ring-ups are two charges, not one");
     // The two charges are handed DIFFERENT references, which is the whole mechanism: each customer
     // is told what to write on their payment, so the shop can tell two identical prices apart.
-    assert_ne!(first_ref, second_ref, "each charge names itself, or none of this works");
+    assert_ne!(
+        first_ref, second_ref,
+        "each charge names itself, or none of this works"
+    );
 
     // ONE payment of exactly CHF 4.50 lands at the merchant, carrying the FIRST charge's reference
     // — the code the customer was actually holding when they paid.
@@ -2812,7 +2970,10 @@ async fn one_transfer_credits_exactly_one_sale() {
     let status_of = |id: &str| format!("/api/v1/till/{id}");
     let (_, a) = call(&state, get_req(&status_of(first_id))).await;
     let (_, b) = call(&state, get_req(&status_of(second_id))).await;
-    let paid: Vec<&Value> = [&a, &b].into_iter().filter(|v| !v["paid"].is_null()).collect();
+    let paid: Vec<&Value> = [&a, &b]
+        .into_iter()
+        .filter(|v| !v["paid"].is_null())
+        .collect();
     assert_eq!(
         paid.len(),
         1,
@@ -2831,13 +2992,20 @@ async fn one_transfer_credits_exactly_one_sale() {
     // Polling again does not change any of that: a row that paid is spent, not re-offered.
     let (_, a2) = call(&state, get_req(&status_of(first_id))).await;
     let (_, b2) = call(&state, get_req(&status_of(second_id))).await;
-    assert_eq!((a2["paid"].clone(), b2["paid"].clone()), (a["paid"].clone(), b["paid"].clone()));
+    assert_eq!(
+        (a2["paid"].clone(), b2["paid"].clone()),
+        (a["paid"].clone(), b["paid"].clone())
+    );
 
     // Nobody new may be sent to pay a settled charge, and the refusal names the next move.
-    let (status, refused) = call(&state, get_req(&format!("/v1/lnurlp/{first_id}?timeout=0"))).await;
+    let (status, refused) =
+        call(&state, get_req(&format!("/v1/lnurlp/{first_id}?timeout=0"))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert!(
-        refused["message"].as_str().unwrap_or_default().contains("already been paid"),
+        refused["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("already been paid"),
         "{refused}"
     );
 
@@ -2845,10 +3013,17 @@ async fn one_transfer_credits_exactly_one_sale() {
     // third ring-up voids the second, which was never paid.
     let third = open_till(&state, &merchant, "Test Shop", 450, "till.example", "http").await;
     assert_ne!(third["id"], second["id"]);
-    let (status, replaced) = call(&state, get_req(&format!("/v1/lnurlp/{second_id}?timeout=0"))).await;
+    let (status, replaced) = call(
+        &state,
+        get_req(&format!("/v1/lnurlp/{second_id}?timeout=0")),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{replaced}");
     assert!(
-        replaced["message"].as_str().unwrap_or_default().contains("ask the cashier"),
+        replaced["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("ask the cashier"),
         "a superseded code sends the payer to the counter for the current one: {replaced}"
     );
     let (_, second_view) = call(&state, get_req(&status_of(second_id))).await;
@@ -2870,10 +3045,18 @@ async fn a_merchant_name_cannot_forge_a_second_metadata_entry() {
     let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
     assert_eq!(status, StatusCode::OK, "{details}");
 
-    let metadata = details["metadata"].as_str().expect("metadata is a JSON string");
+    let metadata = details["metadata"]
+        .as_str()
+        .expect("metadata is a JSON string");
     let parsed: Value = serde_json::from_str(metadata).expect("metadata is a JSON document");
-    let entries = parsed.as_array().expect("LUD-06 metadata is an array of entries");
-    assert_eq!(entries.len(), 1, "one entry, whatever the name tried to open: {metadata}");
+    let entries = parsed
+        .as_array()
+        .expect("LUD-06 metadata is an array of entries");
+    assert_eq!(
+        entries.len(),
+        1,
+        "one entry, whatever the name tried to open: {metadata}"
+    );
     assert_eq!(entries[0][0], "text/plain");
     assert_eq!(
         entries[0][1],
@@ -2881,7 +3064,10 @@ async fn a_merchant_name_cannot_forge_a_second_metadata_entry() {
         "the name survives INSIDE the entry, escaped — the till does not censor it, it contains it"
     );
     // And the human text is a human's spelling: `CHF 1`, never the wire's bare `CHF 1.`.
-    assert!(!metadata.contains("CHF 1."), "the wire's trailing point must not leak into a receipt");
+    assert!(
+        !metadata.contains("CHF 1."),
+        "the wire's trailing point must not leak into a receipt"
+    );
 }
 
 #[tokio::test]
@@ -2901,7 +3087,9 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
     let id = opened["id"].as_str().unwrap();
     let (status, body) = call(
         &state,
-        get_req(&format!("/v1/lnurlp/cb/{id}?quote=plq_invented&method=InternetComputer&asset=VCHF")),
+        get_req(&format!(
+            "/v1/lnurlp/cb/{id}?quote=plq_invented&method=InternetComputer&asset=VCHF"
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -2910,11 +3098,17 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
     // A charge of nothing is not a charge — and the refusal names where a signed `cents = 0` DOES
     // belong, because that spelling is not a mistake anywhere: it is how the till is cleared.
     let nothing = till_body(&merchant, 0, "Test Shop", fresh_nonce(), unix_secs());
-    let (status, body) =
-        call(&state, till_post("/api/v1/till", &nothing, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till", &nothing, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        body["message"].as_str().unwrap_or_default().contains("/api/v1/till/void"),
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("/api/v1/till/void"),
         "a charge of nothing points the cashier at the route that clears the till: {body}"
     );
 
@@ -2943,8 +3137,19 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
     let now = unix_secs();
 
     // The merchant's own, honest ring-up: a live charge for the forgeries below to fail to disturb.
-    let mine = open_till(&state, &merchant, "Bahnhof Kiosk", 450, "till.example", "http").await;
-    let id = mine["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let mine = open_till(
+        &state,
+        &merchant,
+        "Bahnhof Kiosk",
+        450,
+        "till.example",
+        "http",
+    )
+    .await;
+    let id = mine["id"]
+        .as_str()
+        .expect("a rung-up charge carries an id")
+        .to_string();
 
     // A body with no proof in it at all — the shape an integrator sends first. The refusal names
     // both the diagnosis and the shape a request must have, because "what do I send instead" is the
@@ -2954,20 +3159,37 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
         "merchant_name": "Bahnhof Kiosk",
         "cents": 450,
     });
-    let (status, body) = call(&state, till_post("/api/v1/till", &bare, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till", &bare, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     let message = body["message"].as_str().unwrap_or_default();
-    assert!(message.contains("nonce"), "the refusal names the field it choked on: {body}");
-    assert!(message.contains("signature"), "…and the shape a request must carry: {body}");
+    assert!(
+        message.contains("nonce"),
+        "the refusal names the field it choked on: {body}"
+    );
+    assert!(
+        message.contains("signature"),
+        "…and the shape a request must carry: {body}"
+    );
 
     // Someone else's signature over the merchant's own key: the exact impersonation the signature
     // exists to refuse, and the one a stranger with the merchant's public key can attempt.
     let mut forged = till_body(&attacker, 450, "Bahnhof Kiosk", fresh_nonce(), now);
     forged["merchant_pubkey"] = Value::String(hex::encode(merchant.verifying_key().to_bytes()));
-    let (status, body) = call(&state, till_post("/api/v1/till", &forged, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till", &forged, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert!(
-        body["message"].as_str().unwrap_or_default().contains("does not verify"),
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("does not verify"),
         "{body}"
     );
 
@@ -2976,10 +3198,17 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
     // derives from it. A merchant who pasted a placeholder must hear about their KEY.
     let mut placeholder = till_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now);
     placeholder["merchant_pubkey"] = Value::String("deadbeef".repeat(8));
-    let (status, body) = call(&state, till_post("/api/v1/till", &placeholder, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till", &placeholder, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert!(
-        body["message"].as_str().unwrap_or_default().contains("not an Ed25519 public key"),
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("not an Ed25519 public key"),
         "a placeholder key is diagnosed as a key, not as a bad signature: {body}"
     );
 
@@ -2987,17 +3216,34 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
     // character count the caller typed — "32-byte hex" reads wrong to someone holding 128 chars.
     let mut short = till_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now);
     short["signature"] = Value::String("ab".repeat(63));
-    let (status, body) = call(&state, till_post("/api/v1/till", &short, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till", &short, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(body["message"].as_str().unwrap_or_default().contains("signature must be 64 bytes"), "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("signature must be 64 bytes"),
+        "{body}"
+    );
 
     // A capture replayed a day later. The clock refuses it, and says by how much and against what —
     // the merchant cannot see this relay's clock, and the gap is the whole diagnosis.
     let stale = till_body(&merchant, 450, "Bahnhof Kiosk", fresh_nonce(), now - 86_400);
-    let (status, body) = call(&state, till_post("/api/v1/till", &stale, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till", &stale, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
     assert!(
-        body["message"].as_str().unwrap_or_default().contains("issued_at is 86400 s"),
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("issued_at is 86400 s"),
         "{body}"
     );
 
@@ -3005,20 +3251,38 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
     // requests would have opened a charge — and voided this one on the way past, forcing the
     // cashier to ring up again.
     let (_, still) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
-    assert_eq!(still["state"], "open", "a refused ring-up must not disturb a real one: {still}");
+    assert_eq!(
+        still["state"], "open",
+        "a refused ring-up must not disturb a real one: {still}"
+    );
     let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
-    assert_eq!(status, StatusCode::OK, "…and it is still payable: {details}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "…and it is still payable: {details}"
+    );
 
     // A signature is good exactly ONCE. The replay is refused as a duplicate rather than as a
     // forgery, and the answer sends the merchant to the charge it already opened instead of to
     // sign again — signing again with the same nonce would only land here a third time.
     let honest = till_body(&merchant, 900, "Bahnhof Kiosk", fresh_nonce(), now);
-    let (status, first) = call(&state, till_post("/api/v1/till", &honest, "till.example", "http")).await;
+    let (status, first) = call(
+        &state,
+        till_post("/api/v1/till", &honest, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{first}");
-    let (status, replay) = call(&state, till_post("/api/v1/till", &honest, "till.example", "http")).await;
+    let (status, replay) = call(
+        &state,
+        till_post("/api/v1/till", &honest, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{replay}");
     assert!(
-        replay["message"].as_str().unwrap_or_default().contains("GET /api/v1/till/{id}"),
+        replay["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("GET /api/v1/till/{id}"),
         "a replay is pointed at the charge it already opened: {replay}"
     );
 }
@@ -3035,24 +3299,51 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
     let merchant_pk: [u8; 32] = merchant.verifying_key().to_bytes();
     let now = unix_secs();
 
-    let oops = open_till(&state, &merchant, "Bahnhof Kiosk", 10_000, "till.example", "http").await;
-    let id = oops["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let oops = open_till(
+        &state,
+        &merchant,
+        "Bahnhof Kiosk",
+        10_000,
+        "till.example",
+        "http",
+    )
+    .await;
+    let id = oops["id"]
+        .as_str()
+        .expect("a rung-up charge carries an id")
+        .to_string();
 
     // A ring-up signature aimed at the cancel route is refused before anything else happens: the
     // two actions are told apart by the SIGNED `cents`, which is what stops one being replayed as
     // the other. (The reverse is pinned by the `cents = 0` case in the refusals test.)
     let ring_up = till_body(&merchant, 10_000, "Bahnhof Kiosk", fresh_nonce(), now);
-    let (status, body) =
-        call(&state, till_post("/api/v1/till/void", &ring_up, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till/void", &ring_up, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
-    assert!(body["message"].as_str().unwrap_or_default().contains("cents = 0"), "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("cents = 0"),
+        "{body}"
+    );
 
     // The cancellation itself, signed by the same key as the ring-up.
     let clear = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), now);
-    let (status, cleared) =
-        call(&state, till_post("/api/v1/till/void", &clear, "till.example", "http")).await;
+    let (status, cleared) = call(
+        &state,
+        till_post("/api/v1/till/void", &clear, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{cleared}");
-    assert_eq!(cleared["id"], id.as_str(), "the answer names the charge it cleared");
+    assert_eq!(
+        cleared["id"],
+        id.as_str(),
+        "the answer names the charge it cleared"
+    );
     assert_eq!(cleared["state"], "cancelled");
 
     // What the payer standing at the counter is told. NOT the superseded message: that one says
@@ -3068,8 +3359,11 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
     // failed at anything, and inventing an error for it would be noise at the counter. A FRESH
     // nonce, because a signature is single-use whatever it authorises.
     let again = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), now);
-    let (status, twice) =
-        call(&state, till_post("/api/v1/till/void", &again, "till.example", "http")).await;
+    let (status, twice) = call(
+        &state,
+        till_post("/api/v1/till/void", &again, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{twice}");
     assert_eq!(twice["state"], "cancelled");
 
@@ -3077,33 +3371,56 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
     let stranger = SigningKey::from_bytes(&[42u8; 32]);
     let mut forged = till_body(&stranger, 0, "Bahnhof Kiosk", fresh_nonce(), now);
     forged["merchant_pubkey"] = Value::String(hex::encode(merchant_pk));
-    let (status, body) =
-        call(&state, till_post("/api/v1/till/void", &forged, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till/void", &forged, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
 
     // A till with nothing rung up on it has nothing to clear, and is told what to do instead of
     // being handed a success that describes no charge.
     let idle = SigningKey::from_bytes(&[43u8; 32]);
     let nothing = till_body(&idle, 0, "Kiosk", fresh_nonce(), now);
-    let (status, body) =
-        call(&state, till_post("/api/v1/till/void", &nothing, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till/void", &nothing, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     assert!(
-        body["message"].as_str().unwrap_or_default().contains("POST /api/v1/till"),
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("POST /api/v1/till"),
         "an idle till is pointed at the route that rings one up: {body}"
     );
 
     // A CREDITED charge is not cancellable, and the refusal names the block that paid. Telling a
     // merchant "cancelled" here would have them hand over goods they have already been paid for.
-    let paid = open_till(&state, &merchant, "Bahnhof Kiosk", 100, "till.example", "http").await;
-    let paid_id = paid["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let paid = open_till(
+        &state,
+        &merchant,
+        "Bahnhof Kiosk",
+        100,
+        "till.example",
+        "http",
+    )
+    .await;
+    let paid_id = paid["id"]
+        .as_str()
+        .expect("a rung-up charge carries an id")
+        .to_string();
     let paid_ref = charge_reference(&paid);
     pay_till(&state, &fake, merchant_pk, 100_000_000, &paid_ref).await;
     let (_, settled) = call(&state, get_req(&format!("/api/v1/till/{paid_id}"))).await;
     assert_eq!(settled["state"], "paid", "{settled}");
     let too_late = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), unix_secs());
-    let (status, body) =
-        call(&state, till_post("/api/v1/till/void", &too_late, "till.example", "http")).await;
+    let (status, body) = call(
+        &state,
+        till_post("/api/v1/till/void", &too_late, "till.example", "http"),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     let message = body["message"].as_str().unwrap_or_default();
     assert!(message.contains("already paid"), "{body}");
@@ -3112,7 +3429,10 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
         "the merchant is told WHICH block paid them, so they can check it on the ledger: {body}"
     );
     let (_, unchanged) = call(&state, get_req(&format!("/api/v1/till/{paid_id}"))).await;
-    assert_eq!(unchanged["state"], "paid", "a credited sale is not cancelled away: {unchanged}");
+    assert_eq!(
+        unchanged["state"], "paid",
+        "a credited sale is not cancelled away: {unchanged}"
+    );
 }
 
 /// The till is served ONLY by a relay that was told to serve it, and "not served" means the eight
@@ -3131,12 +3451,37 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
 
     // A serving relay, used to mint the exact URLs a wallet and a merchant screen would call.
     let (serving, _fake) = till_state();
-    let opened = open_till(&serving, &merchant, "Test Shop", 500, "till.example", "http").await;
-    let id = opened["id"].as_str().expect("a rung-up charge carries an id").to_string();
-    let (status, details) =
-        call(&serving, till_get(&format!("/v1/lnurlp/{id}?timeout=0"), "till.example", "http")).await;
-    assert_eq!(status, StatusCode::OK, "minting a quote to call the callback with: {details}");
-    let quote = details["quote"]["id"].as_str().expect("a quote carries an id").to_string();
+    let opened = open_till(
+        &serving,
+        &merchant,
+        "Test Shop",
+        500,
+        "till.example",
+        "http",
+    )
+    .await;
+    let id = opened["id"]
+        .as_str()
+        .expect("a rung-up charge carries an id")
+        .to_string();
+    let (status, details) = call(
+        &serving,
+        till_get(
+            &format!("/v1/lnurlp/{id}?timeout=0"),
+            "till.example",
+            "http",
+        ),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "minting a quote to call the callback with: {details}"
+    );
+    let quote = details["quote"]["id"]
+        .as_str()
+        .expect("a quote carries an id")
+        .to_string();
 
     // The whole till surface, as its callers reach it: the merchant's ring-up, cancel and poll,
     // the standard's three payer steps, the page a generic camera lands on, and the cashier's own
@@ -3169,14 +3514,23 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
                     "http",
                 ),
             ),
-            (format!("GET /api/v1/till/{id}"), get_req(&format!("/api/v1/till/{id}"))),
+            (
+                format!("GET /api/v1/till/{id}"),
+                get_req(&format!("/api/v1/till/{id}")),
+            ),
             (
                 format!("GET /v1/lnurlp/{id}"),
-                till_get(&format!("/v1/lnurlp/{id}?timeout=0"), "till.example", "http"),
+                till_get(
+                    &format!("/v1/lnurlp/{id}?timeout=0"),
+                    "till.example",
+                    "http",
+                ),
             ),
             (
                 format!("GET /v1/lnurlp/cb/{id}"),
-                get_req(&format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=VCHF")),
+                get_req(&format!(
+                    "/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=VCHF"
+                )),
             ),
             (
                 format!("GET /v1/lnurlp/tx/{id}"),
@@ -3193,15 +3547,26 @@ async fn the_till_is_not_served_unless_the_relay_is_told_to() {
     // golden tests; all that matters here is that these exact requests are not 404s by construction.
     for (what, req) in surface() {
         let (status, _headers, body) = call_raw(&serving, req).await;
-        assert_ne!(status, StatusCode::NOT_FOUND, "{what} must be served when the till is on");
-        assert!(!body.is_empty(), "{what}: a till handler always answers with a body");
+        assert_ne!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{what} must be served when the till is on"
+        );
+        assert!(
+            !body.is_empty(),
+            "{what}: a till handler always answers with a body"
+        );
     }
 
     // Not served: the same eight against a relay that never asked for the till.
     let unserved = AppState::new(Arc::new(FakeLedger::new())).with_fake_ic(FakeIc::from_catalog());
     for (what, req) in surface() {
         let (status, _headers, body) = call_raw(&unserved, req).await;
-        assert_eq!(status, StatusCode::NOT_FOUND, "{what} must not exist unless the till is turned on");
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{what} must not exist unless the till is turned on"
+        );
         assert!(
             body.is_empty(),
             "{what}: a BARE 404 is the router refusing — a body would mean a till handler ran"
@@ -3220,11 +3585,20 @@ async fn the_cashier_page_serves_under_the_gate_for_any_id() {
     for uri in ["/till/pl_0011223344556677", "/till/not-a-charge-id-at-all"] {
         let (status, headers, body) = call_raw(&serving, get_req(uri)).await;
         assert_eq!(status, StatusCode::OK, "{uri}");
-        assert_eq!(headers.get(header::CONTENT_TYPE).unwrap(), "text/html; charset=utf-8");
+        assert_eq!(
+            headers.get(header::CONTENT_TYPE).unwrap(),
+            "text/html; charset=utf-8"
+        );
         assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-store");
         let html = String::from_utf8(body).expect("the cashier page is utf-8");
-        assert!(html.contains("settles in VCHF"), "names the settlement asset: {uri}");
-        assert!(html.contains("/api/v1/till/"), "polls the charge by id client-side: {uri}");
+        assert!(
+            html.contains("settles in VCHF"),
+            "names the settlement asset: {uri}"
+        );
+        assert!(
+            html.contains("/api/v1/till/"),
+            "polls the charge by id client-side: {uri}"
+        );
     }
 }
 
@@ -3236,9 +3610,19 @@ async fn the_cashier_page_serves_under_the_gate_for_any_id() {
 async fn the_cashier_page_interpolates_nothing_serverside() {
     let (serving, _fake) = till_state();
     let merchant = SigningKey::from_bytes(&[19u8; 32]);
-    let opened =
-        open_till(&serving, &merchant, "Zuerich Shop 88", 500, "till.example", "http").await;
-    let id = opened["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let opened = open_till(
+        &serving,
+        &merchant,
+        "Zuerich Shop 88",
+        500,
+        "till.example",
+        "http",
+    )
+    .await;
+    let id = opened["id"]
+        .as_str()
+        .expect("a rung-up charge carries an id")
+        .to_string();
 
     let (status, _headers, body) = call_raw(&serving, get_req(&format!("/till/{id}"))).await;
     assert_eq!(status, StatusCode::OK);
@@ -3269,9 +3653,15 @@ fn assert_minted_like(observed: &str, golden: &str, what: &str) {
     let (observed_prefix, observed_tail) = split(observed, what, "observed");
     let (golden_prefix, golden_tail) = split(golden, what, "golden");
     assert_eq!(observed_prefix, golden_prefix, "{what}: prefix");
-    assert_eq!(observed_tail.len(), golden_tail.len(), "{what}: length ({observed})");
+    assert_eq!(
+        observed_tail.len(),
+        golden_tail.len(),
+        "{what}: length ({observed})"
+    );
     assert!(
-        observed_tail.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+        observed_tail
+            .chars()
+            .all(|c| matches!(c, '0'..='9' | 'a'..='f')),
         "{what}: the tail must be lowercase hex, got {observed}"
     );
 }
@@ -3282,12 +3672,18 @@ fn assert_minted_like(observed: &str, golden: &str, what: &str) {
 /// own instant is held to the same spelling by its length here; the payer's strict reader owns the
 /// rest of it (`app/__tests__/tillWire.test.ts`).
 fn assert_deadline(observed: &str, golden: &str, from_secs: u64, to_secs: u64, what: &str) {
-    let expected: Vec<String> = (from_secs..=to_secs).map(|t| iso8601_utc(t + QUOTE_TTL_SECS)).collect();
+    let expected: Vec<String> = (from_secs..=to_secs)
+        .map(|t| iso8601_utc(t + QUOTE_TTL_SECS))
+        .collect();
     assert!(
         expected.iter().any(|e| e == observed),
         "{what}: {observed} must be one of {expected:?}"
     );
-    assert_eq!(observed.len(), golden.len(), "{what}: the golden must spell an instant the till spells");
+    assert_eq!(
+        observed.len(),
+        golden.len(),
+        "{what}: the golden must spell an instant the till spells"
+    );
 }
 
 /// The observed body with every freshly-minted value replaced by the golden's own, rendered
@@ -3299,7 +3695,8 @@ fn pinned(observed: &Value, subs: &[(&str, &str)]) -> String {
     for (from, to) in subs {
         text = text.replace(from, to);
     }
-    let value: Value = serde_json::from_str(&text).expect("substituting an id must leave valid JSON");
+    let value: Value =
+        serde_json::from_str(&text).expect("substituting an id must leave valid JSON");
     serde_json::to_string_pretty(&value).expect("a JSON value renders")
 }
 
@@ -3310,24 +3707,36 @@ fn golden_body(golden: &Value, key: &str) -> String {
 
 #[tokio::test]
 async fn till_wire_matches_the_golden_the_payer_parses() {
-    let golden: Value = serde_json::from_str(TILL_WIRE).expect("dfx/till_wire.json must be valid JSON");
+    let golden: Value =
+        serde_json::from_str(TILL_WIRE).expect("dfx/till_wire.json must be valid JSON");
     let field = |path: &[&str]| -> String {
         let mut at = &golden;
         for key in path {
             at = &at[*key];
         }
         at.as_str()
-            .unwrap_or_else(|| panic!("dfx/till_wire.json must carry {} as a string", path.join(".")))
+            .unwrap_or_else(|| {
+                panic!(
+                    "dfx/till_wire.json must carry {} as a string",
+                    path.join(".")
+                )
+            })
             .to_string()
     };
     let hex_field = |path: &[&str], len: usize| -> Vec<u8> {
-        let raw = hex::decode(field(path)).unwrap_or_else(|e| panic!("{} is hex: {e}", path.join(".")));
+        let raw =
+            hex::decode(field(path)).unwrap_or_else(|e| panic!("{} is hex: {e}", path.join(".")));
         assert_eq!(raw.len(), len, "{} is {len} bytes", path.join("."));
         raw
     };
-    let (host, proto) = (field(&["input", "host"]), field(&["input", "forwarded_proto"]));
+    let (host, proto) = (
+        field(&["input", "host"]),
+        field(&["input", "forwarded_proto"]),
+    );
     let merchant_name = field(&["input", "merchant_name"]);
-    let cents = golden["input"]["cents"].as_u64().expect("input.cents must be a number");
+    let cents = golden["input"]["cents"]
+        .as_u64()
+        .expect("input.cents must be a number");
     let merchant = SigningKey::from_bytes(
         &<[u8; 32]>::try_from(hex_field(&["input", "merchant_secret"], 32).as_slice())
             .expect("32 bytes"),
@@ -3346,11 +3755,14 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
         cents,
         nonce: <[u8; NONCE_LEN]>::try_from(hex_field(&["input", "nonce"], NONCE_LEN).as_slice())
             .expect("16 bytes"),
-        issued_at: golden["input"]["issued_at"].as_u64().expect("input.issued_at is a number"),
+        issued_at: golden["input"]["issued_at"]
+            .as_u64()
+            .expect("input.issued_at is a number"),
         merchant_name: merchant_name.clone(),
     };
-    let recorded_sig = <[u8; SIG_LEN]>::try_from(hex_field(&["input", "signature"], SIG_LEN).as_slice())
-        .expect("64 bytes");
+    let recorded_sig =
+        <[u8; SIG_LEN]>::try_from(hex_field(&["input", "signature"], SIG_LEN).as_slice())
+            .expect("64 bytes");
     assert_eq!(
         validate_till_open(&recorded, &recorded_sig, recorded.issued_at, false),
         Ok(()),
@@ -3361,7 +3773,12 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     // moment it is committed. The bodies are therefore recorded from a FRESH signature by the same
     // key — which is exactly how the file itself was produced.
     assert_eq!(
-        validate_till_open(&recorded, &recorded_sig, recorded.issued_at + TILL_OPEN_MAX_SKEW_SECS + 1, false),
+        validate_till_open(
+            &recorded,
+            &recorded_sig,
+            recorded.issued_at + TILL_OPEN_MAX_SKEW_SECS + 1,
+            false
+        ),
         Err(dpay_core::TillOpenError::Stale),
     );
 
@@ -3371,7 +3788,10 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     let rung_at = now_ns() / 1_000_000_000;
     let opened = open_till(&state, &merchant, &merchant_name, cents, &host, &proto).await;
     let rung_done = now_ns() / 1_000_000_000;
-    let charge_id = opened["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let charge_id = opened["id"]
+        .as_str()
+        .expect("a rung-up charge carries an id")
+        .to_string();
     let golden_charge = field(&["open", "id"]);
     assert_minted_like(&charge_id, &golden_charge, "the payment-link id");
 
@@ -3381,21 +3801,49 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     // must encode the golden's — which pins the recorded string as the till's own output rather
     // than as a value somebody typed. What the CROSS-LANGUAGE proof is remains the payer's half:
     // `app/__tests__/tillWire.test.ts` decodes this very string with the wallet's own bech32.
-    let lnurl = opened["lnurl"].as_str().expect("a ring-up answer carries the bech32 code").to_string();
-    assert_eq!(lnurl, dpay_relay::till::lnurl_of(&field(&["open", "url"]).replace(&golden_charge, &charge_id)));
-    assert_eq!(field(&["open", "lnurl"]), dpay_relay::till::lnurl_of(&field(&["open", "url"])));
+    let lnurl = opened["lnurl"]
+        .as_str()
+        .expect("a ring-up answer carries the bech32 code")
+        .to_string();
+    assert_eq!(
+        lnurl,
+        dpay_relay::till::lnurl_of(&field(&["open", "url"]).replace(&golden_charge, &charge_id))
+    );
+    assert_eq!(
+        field(&["open", "lnurl"]),
+        dpay_relay::till::lnurl_of(&field(&["open", "url"]))
+    );
     // …and the QR string is that code inside the wrapper a generic camera can open, so pinning the
     // code pins the QR with it.
-    assert!(opened["qr"].as_str().unwrap_or_default().ends_with(&format!("?lightning={lnurl}")), "{opened}");
+    assert!(
+        opened["qr"]
+            .as_str()
+            .unwrap_or_default()
+            .ends_with(&format!("?lightning={lnurl}")),
+        "{opened}"
+    );
 
     // The charge's clock: `created_secs` is when this request was served, and `expires_at` is the
     // ONE lifetime rule applied to it — asserted as a derivation, not as a shape, so the golden's
     // pair cannot drift from the store's own deadline.
-    let created = opened["created_secs"].as_u64().expect("a ring-up answer states when it was rung up");
-    assert!((rung_at..=rung_done).contains(&created), "created_secs {created} ∉ [{rung_at}, {rung_done}]");
-    assert_eq!(opened["expires_at"], created + dpay_relay::till::CHARGE_TTL_SECS);
-    let golden_created = golden["open"]["created_secs"].as_u64().expect("the golden states created_secs");
-    assert_eq!(golden["open"]["expires_at"], golden_created + dpay_relay::till::CHARGE_TTL_SECS);
+    let created = opened["created_secs"]
+        .as_u64()
+        .expect("a ring-up answer states when it was rung up");
+    assert!(
+        (rung_at..=rung_done).contains(&created),
+        "created_secs {created} ∉ [{rung_at}, {rung_done}]"
+    );
+    assert_eq!(
+        opened["expires_at"],
+        created + dpay_relay::till::CHARGE_TTL_SECS
+    );
+    let golden_created = golden["open"]["created_secs"]
+        .as_u64()
+        .expect("the golden states created_secs");
+    assert_eq!(
+        golden["open"]["expires_at"],
+        golden_created + dpay_relay::till::CHARGE_TTL_SECS
+    );
 
     // The fourth thing this provider mints fresh, and the one the MERCHANT is served: the charge's
     // reference. `charge_reference` holds the observed value to the shape its pinned counterpart
@@ -3406,7 +3854,9 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     let golden_uri = field(&["callback", "uri"]);
     let golden_reference = golden_uri
         .rsplit_once("&ref=")
-        .unwrap_or_else(|| panic!("dfx/till_wire.json's callback URI must name a ref: {golden_uri}"))
+        .unwrap_or_else(|| {
+            panic!("dfx/till_wire.json's callback URI must name a ref: {golden_uri}")
+        })
         .1;
     assert_eq!(
         field(&["open", "reference"]),
@@ -3421,9 +3871,15 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
                 (charge_id.as_str(), golden_charge.as_str()),
                 (lnurl.as_str(), &field(&["open", "lnurl"])),
                 (reference.as_str(), golden_reference),
-                (&format!("\"created_secs\":{created}"), &format!("\"created_secs\":{golden_created}")),
                 (
-                    &format!("\"expires_at\":{}", created + dpay_relay::till::CHARGE_TTL_SECS),
+                    &format!("\"created_secs\":{created}"),
+                    &format!("\"created_secs\":{golden_created}")
+                ),
+                (
+                    &format!(
+                        "\"expires_at\":{}",
+                        created + dpay_relay::till::CHARGE_TTL_SECS
+                    ),
                     &format!("\"expires_at\":{}", golden["open"]["expires_at"]),
                 ),
             ],
@@ -3434,22 +3890,40 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
 
     // --- step 2: the payment details a wallet parses ----------------------------------------------
     let details_at = now_ns() / 1_000_000_000;
-    let (status, details) =
-        call(&state, till_get(&format!("/v1/lnurlp/{charge_id}?timeout=0"), &host, &proto)).await;
+    let (status, details) = call(
+        &state,
+        till_get(&format!("/v1/lnurlp/{charge_id}?timeout=0"), &host, &proto),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "step 2: {details}");
     let served_at = now_ns() / 1_000_000_000;
-    let quote_id = details["quote"]["id"].as_str().expect("a quote carries an id").to_string();
-    let expiration = details["quote"]["expiration"].as_str().expect("a quote carries an expiry").to_string();
+    let quote_id = details["quote"]["id"]
+        .as_str()
+        .expect("a quote carries an id")
+        .to_string();
+    let expiration = details["quote"]["expiration"]
+        .as_str()
+        .expect("a quote carries an expiry")
+        .to_string();
     let golden_quote = field(&["details", "quote", "id"]);
     assert_minted_like(&quote_id, &golden_quote, "the quote id");
-    assert_deadline(&expiration, &field(&["details", "quote", "expiration"]), details_at, served_at, "the quote expiry");
+    assert_deadline(
+        &expiration,
+        &field(&["details", "quote", "expiration"]),
+        details_at,
+        served_at,
+        "the quote expiry",
+    );
     assert_eq!(
         pinned(
             &details,
             &[
                 (charge_id.as_str(), golden_charge.as_str()),
                 (quote_id.as_str(), golden_quote.as_str()),
-                (expiration.as_str(), &field(&["details", "quote", "expiration"])),
+                (
+                    expiration.as_str(),
+                    &field(&["details", "quote", "expiration"])
+                ),
             ],
         ),
         golden_body(&golden, "details"),
@@ -3460,19 +3934,39 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     let called_at = now_ns() / 1_000_000_000;
     let (status, transfer) = call(
         &state,
-        get_req(&format!("/v1/lnurlp/cb/{charge_id}?quote={quote_id}&method=InternetComputer&asset=VCHF")),
+        get_req(&format!(
+            "/v1/lnurlp/cb/{charge_id}?quote={quote_id}&method=InternetComputer&asset=VCHF"
+        )),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "step 3: {transfer}");
     let answered_at = now_ns() / 1_000_000_000;
-    let expiry_date = transfer["expiryDate"].as_str().expect("a transfer instruction carries an expiry").to_string();
-    assert_deadline(&expiry_date, &field(&["callback", "expiryDate"]), called_at, answered_at, "the transfer expiry");
+    let expiry_date = transfer["expiryDate"]
+        .as_str()
+        .expect("a transfer instruction carries an expiry")
+        .to_string();
+    assert_deadline(
+        &expiry_date,
+        &field(&["callback", "expiryDate"]),
+        called_at,
+        answered_at,
+        "the transfer expiry",
+    );
     // The payer is instructed to carry the reference the MERCHANT was already served. One value,
     // two audiences — a second one here would mean a shop's own tap and its customer's scan could
     // not both credit the same sale.
-    let uri = transfer["uri"].as_str().expect("a transfer instruction carries a uri").to_string();
-    let served = uri.rsplit_once("&ref=").unwrap_or_else(|| panic!("step 3 must name a ref: {uri}")).1;
-    assert_eq!(served, reference, "the ring-up and step 3 must name ONE reference: {uri}");
+    let uri = transfer["uri"]
+        .as_str()
+        .expect("a transfer instruction carries a uri")
+        .to_string();
+    let served = uri
+        .rsplit_once("&ref=")
+        .unwrap_or_else(|| panic!("step 3 must name a ref: {uri}"))
+        .1;
+    assert_eq!(
+        served, reference,
+        "the ring-up and step 3 must name ONE reference: {uri}"
+    );
     assert_eq!(
         pinned(
             &transfer,
@@ -3488,7 +3982,9 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
 
     // --- step 4: the answer before the transfer has been seen --------------------------------------
     // Nothing minted here, so the body is compared as served.
-    let submit = format!("/v1/lnurlp/tx/{charge_id}?quote={quote_id}&method=InternetComputer&asset=VCHF&tx=9f1c");
+    let submit = format!(
+        "/v1/lnurlp/tx/{charge_id}?quote={quote_id}&method=InternetComputer&asset=VCHF&tx=9f1c"
+    );
     let (status, pending) = call(&state, get_req(&submit)).await;
     assert_eq!(status, StatusCode::ACCEPTED, "step 4: {pending}");
     assert_eq!(
@@ -3508,9 +4004,14 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     // polled (the amplification bound). Ringing up again is what a cashier does anyway, and it
     // keeps this test free of a sleep it would otherwise have to spend. The payment carries THAT
     // charge's own reference, because a transfer that names no charge credits none.
-    let raw: u64 = field(&["amount_raw"]).parse().expect("amount_raw is an integer");
+    let raw: u64 = field(&["amount_raw"])
+        .parse()
+        .expect("amount_raw is an integer");
     let reopened = open_till(&state, &merchant, &merchant_name, cents, &host, &proto).await;
-    let reopened_id = reopened["id"].as_str().expect("a rung-up charge carries an id").to_string();
+    let reopened_id = reopened["id"]
+        .as_str()
+        .expect("a rung-up charge carries an id")
+        .to_string();
     let reopened_ref = charge_reference(&reopened);
     pay_till(&state, &fake, pk, raw, &reopened_ref).await;
     let (status, paid) = call(
@@ -3520,6 +4021,340 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
         )),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "the golden's raw amount must be what credits this sale: {paid}");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the golden's raw amount must be what credits this sale: {paid}"
+    );
     assert_eq!(paid["paid"]["amount_raw"], field(&["amount_raw"]));
+}
+
+// --- delegated-conversion PoC: /api/v1/swap_quote + the fake-IC stub ICPSwap pool ----------
+//
+// Spec 2026-09-07 §2/§6: the relay's quote route is a READ PROXY (the pool's own quote
+// VERBATIM + fetched_at, never a relay-computed rate) and the fake-IC gateway carries a stub
+// ICPSwap pool (deterministic curve, icrc2-approved `depositFromAndSwap`, a pending_withdrawal
+// knob). These tests pin the route contract, the venue refusals, and the full approve→swap
+// happy path through the SAME signed /api/v2 rail the app uses.
+
+/// The PoC venue (catalog::SWAP_POOL_PRINCIPAL's twin — pub(crate), pinned by catalog_truth).
+const SWAP_POOL: &str = "65mrh-fqaaa-aaaar-qapoa-cai";
+const VCHF_LEDGER: &str = "ly36x-wiaaa-aaaai-aqj7q-cai";
+const VCHF: Currency = 7;
+/// A principal that is NOT a known venue (the ICPSwap factory — must be refused by name).
+const NOT_A_VENUE: &str = "4mmnk-kiaaa-aaaag-qbllq-cai";
+
+/// Sign + POST an arbitrary canister call, then read the outcome back the app's way
+/// (read_state → certificate → request_status). The generic twin of
+/// [`legacy_transfer_outcome`], which this PoC's pool calls reuse.
+async fn signed_call_outcome(
+    state: &AppState,
+    sk: &SigningKey,
+    canister: &str,
+    method: &str,
+    arg: Vec<u8>,
+) -> RequestStatus {
+    let req = CallRequest {
+        canister: Principal::from_text(canister).expect("canister principal parses"),
+        method_name: method.to_string(),
+        arg,
+        ingress_expiry_ns: ingress_expiry(now_ns(), 300),
+        nonce: None,
+    };
+    let envelope = sign_update(sk, &req);
+    let rid = verify_envelope(&envelope)
+        .expect("our own envelope verifies")
+        .request_id;
+    let post = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v2/canister/{canister}/call"))
+        .body(Body::from(envelope))
+        .unwrap();
+    let (status, _h, body) = call_raw(state, post).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(body.is_empty(), "call replies with an empty 202 body");
+
+    let path: &[&[u8]] = &[b"request_status", &rid];
+    let read = sign_read_state(sk, &[path], ingress_expiry(now_ns(), 300));
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v2/canister/{canister}/read_state"))
+        .body(Body::from(read))
+        .unwrap();
+    let (status, _h, body) = call_raw(state, req).await;
+    assert_eq!(status, StatusCode::OK, "read_state must serve a certificate");
+    let tree = decode_read_state_tree(&body).expect("certificate decodes");
+    request_status(&tree, &rid).expect("request_status decodes")
+}
+
+/// The swap Result carried by a replied depositFromAndSwap outcome.
+fn swap_result(outcome: RequestStatus) -> dpay_icp::icrc::PoolSwapResult {
+    match outcome {
+        RequestStatus::Replied(arg) => {
+            decode_swap_result(&arg).expect("pool swap reply decodes")
+        }
+        other => panic!("expected a replied outcome, got {other:?}"),
+    }
+}
+
+/// POST /api/v1/test/swap_pool — the stub pool's knobs.
+async fn set_swap_pool_knobs(state: &AppState, body: &str) {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/test/swap_pool")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let (status, json) = call(state, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["ok"], true);
+}
+
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+fn swap_quote_uri(pool: &str, token_in: &str, token_out: &str, amount_in: u64) -> String {
+    format!("/api/v1/swap_quote?pool={pool}&token_in={token_in}&token_out={token_out}&amount_in={amount_in}")
+}
+
+/// The route serves the pool's OWN quote verbatim: `amount_out` equals the stub pool's curve
+/// (read directly through the same `FakeIc` the gateway serves), `zero_for_one` follows the
+/// pool's OWN token pair (ICP is token0), and the response carries the echo fields + a
+/// wall-clock `fetched_at`. Deterministic: identical inputs ⇒ identical outputs.
+/// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
+/// faucet tests.)
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+#[tokio::test]
+async fn swap_quote_serves_the_pools_own_quote_verbatim() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+
+    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["pool"], SWAP_POOL);
+    assert_eq!(body["token_in"], ICP_LEDGER);
+    assert_eq!(body["token_out"], VCHF_LEDGER);
+    assert_eq!(body["amount_in"], "100000000", "e8s as decimal string");
+    assert_eq!(body["zero_for_one"], true, "ICP is the pool's token0");
+    assert!(
+        body["fetched_at"].as_u64().is_some_and(|t| t > 0),
+        "fetched_at is wall-clock seconds"
+    );
+    let amount_out = body["amount_out"].as_str().expect("amount_out is a string");
+    let (pool_quote, zero_for_one) = fake
+        .swap_pool_quote(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000)
+        .expect("the stub pool serves this pair");
+    assert_eq!(amount_out, pool_quote.to_string(), "the route's number IS the pool's number");
+    assert!(pool_quote > 0);
+    assert!(zero_for_one);
+
+    // Determinism: an identical quote is an identical number (no clock blending).
+    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let (status, again) = call(&state, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(again["amount_out"], body["amount_out"]);
+
+    // The REVERSE direction quotes the other curve side (VCHF → ICP: zero_for_one false).
+    let req = get_req(&swap_quote_uri(SWAP_POOL, VCHF_LEDGER, ICP_LEDGER, 193_000_000));
+    let (status, rev) = call(&state, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(rev["zero_for_one"], false);
+    assert!(rev["amount_out"].as_str().is_some_and(|v| v != "0"));
+}
+
+/// The route refuses unknown pools and non-pool pairs BY NAME, and refuses a venue whose pair
+/// isn't the pool's own — fail-closed on anything the venue table doesn't know.
+/// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
+/// faucet tests.)
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+#[tokio::test]
+async fn swap_quote_refuses_unknown_pools_and_pairs() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+
+    let req = get_req(&swap_quote_uri(NOT_A_VENUE, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "unknown_pool", "the named refusal");
+
+    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, ICP_LEDGER, 100_000_000));
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "unsupported_pair");
+
+    // A KNOWN venue but a pair the pool doesn't serve (DEMO is not in the ICP/VCHF pool).
+    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, DEMO_LEDGER, 100_000_000));
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "unsupported_pair");
+}
+
+/// The full happy path through the SAME signed /api/v2 rail the app uses: icrc2_approve of the
+/// POOL on the ICP ledger (exact amount + fee + expiry) → depositFromAndSwap pulls the input
+/// (charging the input ledger's fee) and pays the QUOTED output to the caller's principal on
+/// the VCHF ledger — the payout equals the route's earlier quote exactly (both evaluate the
+/// curve against the same pre-swap reserves), and the reply is the pool's own ok(amountOut).
+#[tokio::test]
+async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000); // 100 ICP
+
+    // The expected payout, straight from the fake pool's own quote — the number the swap must
+    // pay out verbatim. (The HTTP route's verbatim passthrough is pinned by the gated test
+    // above; this oracle keeps the approve→swap path runnable under the `agent` build too,
+    // where the route serves the live pool query by design.)
+    let (quoted, zero_for_one) = fake
+        .swap_pool_quote(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000)
+        .expect("the stub pool serves this pair");
+    let quoted: u128 = quoted.into();
+    assert!(quoted > 0);
+    assert!(zero_for_one);
+
+    // icrc2_approve: exact swap amount, approve fee, 5-min expiry — spec §3's bounds.
+    let spender = Account { owner: Principal::from_text(SWAP_POOL).unwrap(), subaccount: [0; 32] };
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert!(matches!(
+        swap_result_or_approve(&outcome),
+        ApproveCheck::Approved
+    ));
+
+    // depositFromAndSwap on the pool canister: 1 ICP in, no minimum, fees declared.
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
+    assert_eq!(swap_result(outcome), Ok(quoted), "the swap pays the quoted output, verbatim");
+
+    // Balances: ICP −(amount + approve fee + transfer_from fee); VCHF +quoted (gross).
+    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 100_000_000 - 10_000 - 10_000);
+    assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), quoted);
+
+    // The approval was EXACT-amount: a second identical swap is refused by the pool (#err,
+    // not a reject — the pool's own shape), and no balances move.
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
+    assert_eq!(swap_result(outcome), Err(PoolSwapError::InsufficientFunds));
+    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 100_000_000 - 20_000);
+    assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), quoted);
+}
+
+/// The approve-outcome shim: an icrc2_approve reply is an ApproveResult, not a swap Result.
+enum ApproveCheck {
+    Approved,
+}
+fn swap_result_or_approve(outcome: &RequestStatus) -> ApproveCheck {
+    match outcome {
+        RequestStatus::Replied(arg) => match decode_approve_result(arg).expect("approve reply decodes") {
+            ApproveResult::Ok(_) => ApproveCheck::Approved,
+            ApproveResult::Err(e) => panic!("approve refused: {e:?}"),
+        },
+        other => panic!("expected a replied outcome, got {other:?}"),
+    }
+}
+
+/// The pending_withdrawal knob (spec §4): with `fail_withdrawal` armed, a successful swap
+/// consumes the input and reserves but QUEUES the output — the reply is still ok(amountOut),
+/// the VCHF balance does NOT move. `settle_pending` is the resolution: the queue drains and
+/// the caller's VCHF lands.
+#[tokio::test]
+async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+
+    set_swap_pool_knobs(&state, r#"{"fail_withdrawal": true}"#).await;
+
+    let spender = Account { owner: Principal::from_text(SWAP_POOL).unwrap(), subaccount: [0; 32] };
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert!(matches!(swap_result_or_approve(&outcome), ApproveCheck::Approved));
+
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
+    let Ok(queued_out) = swap_result(outcome) else {
+        panic!("the swap itself succeeds; only the withdrawal 'fails'")
+    };
+    // Input consumed, output NOT paid: the pool's unused-balance state (spec §4).
+    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 100_000_000 - 10_000 - 10_000);
+    assert_eq!(fake.balance_for(VCHF, &owner), 0, "pending_withdrawal: nothing on the output ledger yet");
+
+    // The resolution: the async withdrawal eventually lands.
+    set_swap_pool_knobs(&state, r#"{"settle_pending": true}"#).await;
+    assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), queued_out);
+}
+
+/// Allowances are EXPIRY-AWARE at every read (spec §3: expires_at is enforced, not recorded):
+/// an approval whose expiry already passed reads as zero and the pool refuses the pull —
+/// nothing moves.
+#[tokio::test]
+async fn expired_allowance_blocks_the_swap() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+
+    let spender = Account { owner: Principal::from_text(SWAP_POOL).unwrap(), subaccount: [0; 32] };
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() - 1_000_000_000), // already expired
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert!(matches!(swap_result_or_approve(&outcome), ApproveCheck::Approved));
+
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
+    assert_eq!(swap_result(outcome), Err(PoolSwapError::InsufficientFunds));
+    // Only the two approve fees ever left (approve itself, then nothing): balance untouched by
+    // the refused swap — input, not even a partial leg, moved.
+    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 10_000);
+    assert_eq!(fake.balance_for(VCHF, &owner), 0);
+}
+
+/// The knobs shape the curve the pool itself serves: fee_millionths 0 quotes above the
+/// default 3000 tier for the same input; impact_bps 10_000 floors the payout at 0.
+/// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
+/// faucet tests.)
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+#[tokio::test]
+async fn swap_pool_knobs_shape_the_quote_curve() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+    let uri = swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000);
+
+    let (status, base) = call(&state, get_req(&uri)).await;
+    assert_eq!(status, StatusCode::OK);
+    let base: u128 = base["amount_out"].as_str().unwrap().parse().unwrap();
+
+    set_swap_pool_knobs(&state, r#"{"fee_millionths": 0}"#).await;
+    let (status, zero_fee) = call(&state, get_req(&uri)).await;
+    assert_eq!(status, StatusCode::OK);
+    let zero_fee: u128 = zero_fee["amount_out"].as_str().unwrap().parse().unwrap();
+    assert!(zero_fee > base, "no fee tier quotes strictly above the 0.30% tier");
+
+    set_swap_pool_knobs(&state, r#"{"impact_bps": 10000}"#).await;
+    let (status, floored) = call(&state, get_req(&uri)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(floored["amount_out"], "0", "a 100% impact haircut floors the quote");
 }

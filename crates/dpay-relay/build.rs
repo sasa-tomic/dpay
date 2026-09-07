@@ -55,8 +55,16 @@ fn bake_commit() {
     let mut lines = out.lines();
     let commit_raw = lines.next().unwrap_or("").trim();
     let date_raw = lines.next().unwrap_or("").trim();
-    let commit = if commit_raw.is_empty() { "unknown" } else { commit_raw };
-    let date = if date_raw.is_empty() { "unknown" } else { date_raw };
+    let commit = if commit_raw.is_empty() {
+        "unknown"
+    } else {
+        commit_raw
+    };
+    let date = if date_raw.is_empty() {
+        "unknown"
+    } else {
+        date_raw
+    };
 
     println!("cargo:rustc-env=DPAY_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=DPAY_BUILD_DATE={date}");
@@ -96,7 +104,10 @@ fn bake_pinned_facade_hash() {
         )
     });
     let pin = raw.trim();
-    let well_formed = pin.len() == 64 && pin.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    let well_formed = pin.len() == 64
+        && pin
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
     if !well_formed {
         panic!(
             "deploy/facade-module-hash.txt must hold ONE sha256 as 64 lowercase hex chars (the \
@@ -129,10 +140,14 @@ fn content_type(path: &str) -> &'static str {
 /// Walk `dir` recursively → sorted map of (route path → absolute file path). BTreeMap keeps the
 /// generated table byte-deterministic (same dist ⇒ same generated source ⇒ cache-friendly).
 fn walk(dir: &PathBuf, prefix: &str, out: &mut BTreeMap<String, PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        let Ok(name) = entry.file_name().into_string() else { continue };
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
         let route = format!("{prefix}/{name}");
         if path.is_dir() {
             walk(&path, &route, out);
@@ -176,9 +191,15 @@ fn embed_web_dist() {
     for (route, path) in &files {
         // wallet.html is the /wallet entry page; everything else serves at its dist-relative path
         // (assets/<hashed> under /assets/<hashed>). Only hashed assets/ files get `immutable`.
-        let served = if route == "/wallet.html" { "/wallet" } else { route.as_str() };
+        let served = if route == "/wallet.html" {
+            "/wallet"
+        } else {
+            route.as_str()
+        };
         let immutable = route.starts_with("/assets/");
-        let abs = path.canonicalize().unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
+        let abs = path
+            .canonicalize()
+            .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
         assert!(abs.is_absolute(), "{} must be absolute", abs.display());
         rs.push_str(&format!(
             "    WebAsset {{ route: {served:?}, content_type: {:?}, immutable: {immutable}, bytes: include_bytes!(r\"{}\") }},\n",

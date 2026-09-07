@@ -22,6 +22,10 @@
 //!   upgrade. Degrades, never 5xxes: an unreachable IC reports `status:"UNREACHABLE"`.
 //! - `GET /api/v1/transactions/{hex}?currency=N&limit=30` — the wallet's durable transaction list,
 //!   newest-first, read off the ICRC ledger's own transaction log at the user's principal.
+//! - `GET /api/v1/swap_quote?pool=&token_in=&token_out=&amount_in=` — the delegated-conversion
+//!   PoC's venue quote (spec 2026-09-07 §2): the pool's OWN quote VERBATIM + `fetched_at`; the
+//!   relay never computes a rate. Served under `agent` (real ICPSwap pool) or `test-helpers`
+//!   (the fake-IC stub pool); absent from the no-feature build.
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
 //!   min amount) so the "Add money" sheet can render them.
 //! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7), served
@@ -247,6 +251,23 @@ pub fn app(state: AppState) -> Router {
     // unaffected.
     #[cfg(feature = "test-helpers")]
     let api = api.route("/test/hide_outcome", axum::routing::post(hide_outcome));
+    // Test seam for the stub ICPSwap pool (delegated-conversion PoC): the fake pool's knobs —
+    // fee tier / price-impact overrides, the pending_withdrawal arm (`fail_withdrawal`) and
+    // its resolution (`settle_pending`). See `FakeIc::set_swap_pool_knobs`.
+    #[cfg(feature = "test-helpers")]
+    let api = api.route("/test/swap_pool", axum::routing::post(test_swap_pool));
+
+    // `GET /api/v1/swap_quote` — the delegated-conversion PoC's venue quote (spec 2026-09-07
+    // §2, the FIXED contract): the relay is a READ PROXY (same class as the balance fan-out) —
+    // it validates the venue (known pool + the pool's OWN token pair) and returns the pool's
+    // own `quote` amountOut VERBATIM plus the relay wall-clock `fetched_at`. It NEVER computes
+    // or blends a rate. Two builds, one route shape (mirroring the faucet split): the offline
+    // image (test-helpers, without agent) reads the fake-IC stub pool; the agent build queries
+    // the real ICPSwap pool anonymously.
+    #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+    let api = api.route("/swap_quote", axum::routing::get(swap_quote_fake));
+    #[cfg(feature = "agent")]
+    let api = api.route("/swap_quote", axum::routing::get(swap_quote_agent));
 
     // The PRODUCTION faucet (agent build — also the owner when test-helpers is co-enabled for
     // the live tests; the offline e2e image above keeps the fake-IC branch): the relay enforces
@@ -441,6 +462,124 @@ async fn hide_outcome(
     let polls = req.polls.unwrap_or(1).min(64) as usize;
     fake.arm_hidden_outcome(rid, polls);
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/test/swap_pool` JSON `{fee_millionths?, impact_bps?, fail_withdrawal?,
+/// settle_pending?}` → `{ok: true}` (test-helpers only) — the fake-IC stub ICPSwap pool's
+/// knobs. `fail_withdrawal: true` arms spec §4's pending_withdrawal path (swaps consume the
+/// input, queue the output, never pay it); `settle_pending: true` drains the queue — the
+/// eventual resolution the pending_withdrawal e2e flow needs. `fee_millionths` (default 3000 =
+/// the PoC pool's 0.30% tier) and `impact_bps` (default 0) shape the deterministic quote curve.
+#[cfg(feature = "test-helpers")]
+async fn test_swap_pool(
+    State(state): State<AppState>,
+    Json(req): Json<SwapPoolKnobs>,
+) -> Response {
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+    };
+    fake.set_swap_pool_knobs(
+        req.fee_millionths,
+        req.impact_bps,
+        req.fail_withdrawal,
+        req.settle_pending,
+    );
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+}
+
+/// Venue validation for `GET /api/v1/swap_quote`, shared by both builds: the pool must be a
+/// KNOWN venue (`catalog::venue_for_pool`) and the pair must be that pool's OWN token pair —
+/// `zero_for_one` is DERIVED from the match (token_in == token0), exactly the wallet-side
+/// convention (`zeroForOne: pool.token0.address === token_in`), never assumed from pair order.
+/// The named refusals: 400 `unknown_pool` / 400 `unsupported_pair`.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+fn swap_quote_direction(
+    pool: &str,
+    token_in: &str,
+    token_out: &str,
+) -> Result<(bool, &'static crate::catalog::SwapVenue), Response> {
+    let Some(venue) = crate::catalog::venue_for_pool(pool) else {
+        return Err(err(StatusCode::BAD_REQUEST, "unknown_pool"));
+    };
+    if token_in == venue.token0_ledger && token_out == venue.token1_ledger {
+        Ok((true, venue))
+    } else if token_in == venue.token1_ledger && token_out == venue.token0_ledger {
+        Ok((false, venue))
+    } else {
+        Err(err(StatusCode::BAD_REQUEST, "unsupported_pair"))
+    }
+}
+
+/// `GET /api/v1/swap_quote?pool=<id>&token_in=<ledger>&token_out=<ledger>&amount_in=<e8s>` —
+/// see the route comment above for the fixed contract. This build reads the fake-IC stub pool
+/// (the offline e2e image); the pair validation and the response shape are byte-identical to
+/// the agent build's.
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+async fn swap_quote_fake(
+    State(state): State<AppState>,
+    Query(qs): Query<SwapQuoteQuery>,
+) -> Response {
+    if let Err(resp) = swap_quote_direction(&qs.pool, &qs.token_in, &qs.token_out) {
+        return resp;
+    }
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+    };
+    // The stub validates the pair against the POOL's own metadata — same rule, and its
+    // zero_for_one is the reply's.
+    match fake.swap_pool_quote(&qs.pool, &qs.token_in, &qs.token_out, u128::from(qs.amount_in.0)) {
+        Ok((amount_out, zero_for_one)) => {
+            (StatusCode::OK, Json(SwapQuoteBody {
+                pool: qs.pool,
+                token_in: qs.token_in,
+                token_out: qs.token_out,
+                amount_in: qs.amount_in,
+                amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
+                zero_for_one,
+                fetched_at: crate::now_secs(),
+            }))
+            .into_response()
+        }
+        Err(code) => err(StatusCode::BAD_REQUEST, code),
+    }
+}
+/// `GET /api/v1/swap_quote` — the production branch (agent build; also the owner when
+/// test-helpers is co-enabled for the live tests): queries the REAL ICPSwap pool's own `quote`
+/// through the agent stack (`AgentLedger::swap_pool_quote`, anonymous read) and passes its
+/// amountOut through VERBATIM. The pool's own `#err` text surfaces verbatim at 422 (the
+/// house convention), transport trouble at 503.
+#[cfg(feature = "agent")]
+async fn swap_quote_agent(
+    State(state): State<AppState>,
+    Query(qs): Query<SwapQuoteQuery>,
+) -> Response {
+    let (zero_for_one, _venue) = match swap_quote_direction(&qs.pool, &qs.token_in, &qs.token_out)
+    {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    match state
+        .ledger
+        .swap_pool_quote(&qs.pool, zero_for_one, u128::from(qs.amount_in.0))
+        .await
+    {
+        Ok(amount_out) => {
+            (StatusCode::OK, Json(SwapQuoteBody {
+                pool: qs.pool,
+                token_in: qs.token_in,
+                token_out: qs.token_out,
+                amount_in: qs.amount_in,
+                amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
+                zero_for_one,
+                fetched_at: crate::now_secs(),
+            }))
+            .into_response()
+        }
+        Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
+        Err(LedgerError::Transient(msg)) => {
+            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
+    }
 }
 
 /// Per-currency balance-query timeout for the batch endpoint. Bounds a SINGLE ledger query inside
@@ -879,6 +1018,53 @@ struct HideOutcomeRequest {
     /// enough to exhaust any in-tap poll budget without pinning a relay-wide global.
     #[serde(default)]
     polls: Option<u32>,
+}
+
+/// Body for `POST /api/v1/test/swap_pool` (test-helpers only) — the fake-IC stub ICPSwap
+/// pool's knobs; every field optional, absent = untouched.
+#[cfg(feature = "test-helpers")]
+#[derive(Deserialize)]
+struct SwapPoolKnobs {
+    /// Swap fee in millionths of the input (default 3000 = 0.30%).
+    #[serde(default)]
+    fee_millionths: Option<u128>,
+    /// Extra price-impact haircut on the quoted output, basis points (default 0).
+    #[serde(default)]
+    impact_bps: Option<u16>,
+    /// `true` = the pending_withdrawal arm: swaps consume the input and QUEUE the output.
+    #[serde(default)]
+    fail_withdrawal: Option<bool>,
+    /// `true` = drain the queued outputs now (the pending_withdrawal resolution).
+    #[serde(default)]
+    settle_pending: bool,
+}
+
+/// `?pool=&token_in=&token_out=&amount_in=` for `GET /api/v1/swap_quote` — all required.
+/// `amount_in` is e8s (U64String: decimal string or bare number in query position).
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[derive(Deserialize)]
+struct SwapQuoteQuery {
+    pool: String,
+    token_in: String,
+    token_out: String,
+    amount_in: U64String,
+}
+
+/// `GET /api/v1/swap_quote` response — the pool's own quote VERBATIM (amount_out is the
+/// pool's `quote` reply, GROSS — the app computes net by subtracting the output ledger's
+/// fee; the relay adds/blends NOTHING) plus `fetched_at` (relay wall-clock seconds, for the
+/// app's staleness line). The echo fields let the app key the quote without re-deriving
+/// direction; `zero_for_one` comes from the venue's OWN token pair.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[derive(Serialize)]
+struct SwapQuoteBody {
+    pool: String,
+    token_in: String,
+    token_out: String,
+    amount_in: U64String,
+    amount_out: U64String,
+    zero_for_one: bool,
+    fetched_at: u64,
 }
 
 /// `?currency=N` for `GET /api/v1/deposit/info`. Absent → `DEMO_USD`.

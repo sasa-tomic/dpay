@@ -71,11 +71,16 @@ async fn main() {
 
     let ledger = build_ledger(&cfg).await;
     let apk = load_apk();
-    let state = AppState::new(ledger.clone()).with_apk(apk).with_till(cfg.till);
+    let state = AppState::new(ledger.clone())
+        .with_apk(apk)
+        .with_till(cfg.till);
     // Name the facade for GET /api/v1/integrity: the route reads the canister's live module hash
     // off the public state tree and compares it against the build-time pin. Only an IC-backed
     // ledger has one; a memory demo relay honestly reports it has no live hash instead.
-    let state = if let LedgerCfg::Ic { ref canister_id, .. } = cfg.ledger {
+    let state = if let LedgerCfg::Ic {
+        ref canister_id, ..
+    } = cfg.ledger
+    {
         state.with_facade_canister(canister_id.clone())
     } else {
         state
@@ -203,7 +208,9 @@ impl Config {
         let kind = match non_empty("DPAY_LEDGER").as_deref() {
             Some("ic") => "ic",
             Some("memory") => "memory",
-            Some(other) => return Err(format!("DPAY_LEDGER={other:?} — expected `ic` or `memory`")),
+            Some(other) => {
+                return Err(format!("DPAY_LEDGER={other:?} — expected `ic` or `memory`"))
+            }
             None if canister_id.is_some() => "ic",
             None => "memory",
         };
@@ -290,9 +297,15 @@ fn parse_bool(key: &str, raw: &str) -> Result<bool, String> {
 /// Is this URL a replica we're running ourselves (loopback / the docker host)?
 fn is_local_url(url: &str) -> bool {
     let u = url.to_ascii_lowercase();
-    ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "host.docker.internal"]
-        .iter()
-        .any(|h| u.contains(h))
+    [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "[::1]",
+        "host.docker.internal",
+    ]
+    .iter()
+    .any(|h| u.contains(h))
 }
 
 /// Known public IC endpoints. Deliberately a denylist for the *guard* only: an unrecognised host
@@ -345,7 +358,11 @@ async fn connect_ic(url: &str, canister_id: &str, fetch_root_key: bool) -> Arc<d
         Ok(l) => {
             println!(
                 "reading facade {canister_id} via {url} (root key: {}, identity: {})",
-                if fetch_root_key { "fetched — local replica" } else { "pinned — mainnet" },
+                if fetch_root_key {
+                    "fetched — local replica"
+                } else {
+                    "pinned — mainnet"
+                },
                 if seed.is_some() {
                     "controller — faucet ENABLED (authenticated mint)"
                 } else {

@@ -158,12 +158,17 @@ fn ledger_wasm() -> Vec<u8> {
         .unwrap_or_else(|_| {
             workspace_root().join("third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm")
         });
-    std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read ledger wasm at {}: {e}", path.display()))
+    std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("cannot read ledger wasm at {}: {e}", path.display()))
 }
 
 /// A plain GET request for `uri` (every assertion here is a read — the value-path routes are gone).
 fn get(uri: &str) -> Request<Body> {
-    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap()
 }
 
 async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
@@ -204,8 +209,11 @@ fn mint_at_user_principal(
     let owner = dpay_icp::principal::Principal::self_authenticating_ed25519(pubkey);
     let arg = TransferArg {
         from_subaccount: None, // the minting account's default subaccount
-        to: Account { owner: Principal::from_slice(owner.as_slice()), subaccount: None },
-        fee: None, // transfer_fee is 0; mints carry no fee
+        to: Account {
+            owner: Principal::from_slice(owner.as_slice()),
+            subaccount: None,
+        },
+        fee: None,             // transfer_fee is 0; mints carry no fee
         created_at_time: None, // no dedup window wanted between distinct test mints
         memo: None,
         amount: Nat::from(amount),
@@ -235,14 +243,24 @@ fn rail_transfer(
     let to_owner = dpay_icp::principal::Principal::self_authenticating_ed25519(to_pk);
     let arg = TransferArg {
         from_subaccount: None,
-        to: Account { owner: Principal::from_slice(to_owner.as_slice()), subaccount: None },
+        to: Account {
+            owner: Principal::from_slice(to_owner.as_slice()),
+            subaccount: None,
+        },
         fee: None,
         created_at_time: None,
-        memo: Some(icrc_ledger_types::icrc1::transfer::Memo::from(memo.to_vec())),
+        memo: Some(icrc_ledger_types::icrc1::transfer::Memo::from(
+            memo.to_vec(),
+        )),
         amount: Nat::from(amount),
     };
     let reply = pic
-        .update_call(ledger, Principal::from_slice(sender.as_slice()), "icrc1_transfer", encode_one(&arg).unwrap())
+        .update_call(
+            ledger,
+            Principal::from_slice(sender.as_slice()),
+            "icrc1_transfer",
+            encode_one(&arg).unwrap(),
+        )
         .expect("icrc1_transfer update_call rejected");
     match decode_one::<Result<Nat, TransferError>>(&reply).unwrap() {
         Ok(_) => {}
@@ -281,7 +299,10 @@ fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
         .expect("reserve the pinned VCHF ledger principal on PocketIC");
     pic.0.add_cycles(ledger, 10_000_000_000_000);
     let ledger_init = LedgerArg::Init(LedgerInitArgs {
-        minting_account: Account { owner: dpay, subaccount: None },
+        minting_account: Account {
+            owner: dpay,
+            subaccount: None,
+        },
         fee_collector_account: None,
         transfer_fee: Nat::from(0u64),
         decimals: Some(8),
@@ -290,7 +311,10 @@ fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
         token_name: "dpay live-test VCHF".into(),
         metadata: vec![],
         initial_balances: vec![],
-        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
+        feature_flags: Some(FeatureFlags {
+            icrc2: true,
+            icrc152: false,
+        }),
         archive_options: ArchiveOptions {
             num_blocks_to_archive: 10_000,
             max_transactions_per_response: None,
@@ -303,15 +327,25 @@ fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
         },
         index_principal: None,
     });
-    pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
+    pic.0.install_canister(
+        ledger,
+        ledger_wasm(),
+        encode_one(&ledger_init).unwrap(),
+        None,
+    );
 
     // The facade's remaining role in the READ tests: owning the ledger's minting account (the
     // rail mint path above) — the read routes never consult it (the catalog is compiled into the
     // relay). The pinned VCHF ledger doubles as the facade's `demo_ledger` (init shape only; the
     // DEMO currency is never queried on this read-surface fixture).
     let admin = Principal::management_canister();
-    let dpay_init = DpayInitArg { controller: Some(admin), demo_ledger: ledger, per_tx_cap: CAP };
-    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+    let dpay_init = DpayInitArg {
+        controller: Some(admin),
+        demo_ledger: ledger,
+        per_tx_cap: CAP,
+    };
+    pic.0
+        .install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
 
     (pic, ledger, dpay, gateway_url)
 }
@@ -321,8 +355,7 @@ fn stand_up() -> (LivePocketIc, Principal, Principal, String) {
 /// the founder's `DPAY_DFX_IDENTITY` key is the controller and the relay borrows the same seed via
 /// `DPAY_CONTROLLER_SEED` to sign the faucet's `mint`. Returns the seed too, so the test can
 /// construct the relay-side agent with that identity.
-fn stand_up_with_controller_seed()
--> (LivePocketIc, Principal, Principal, String, [u8; 32]) {
+fn stand_up_with_controller_seed() -> (LivePocketIc, Principal, Principal, String, [u8; 32]) {
     std::env::set_var("POCKET_IC_MUTE_SERVER", "1");
 
     // Fixed test seed — NOT secret; any 32 bytes work for Ed25519.
@@ -348,7 +381,10 @@ fn stand_up_with_controller_seed()
     let ledger = pic.0.create_canister();
     pic.0.add_cycles(ledger, 10_000_000_000_000);
     let ledger_init = LedgerArg::Init(LedgerInitArgs {
-        minting_account: Account { owner: dpay, subaccount: None },
+        minting_account: Account {
+            owner: dpay,
+            subaccount: None,
+        },
         fee_collector_account: None,
         transfer_fee: Nat::from(0u64),
         decimals: Some(2),
@@ -357,7 +393,10 @@ fn stand_up_with_controller_seed()
         token_name: "dpay demo USD".into(),
         metadata: vec![],
         initial_balances: vec![],
-        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
+        feature_flags: Some(FeatureFlags {
+            icrc2: true,
+            icrc152: false,
+        }),
         archive_options: ArchiveOptions {
             num_blocks_to_archive: 10_000,
             max_transactions_per_response: None,
@@ -370,10 +409,20 @@ fn stand_up_with_controller_seed()
         },
         index_principal: None,
     });
-    pic.0.install_canister(ledger, ledger_wasm(), encode_one(&ledger_init).unwrap(), None);
+    pic.0.install_canister(
+        ledger,
+        ledger_wasm(),
+        encode_one(&ledger_init).unwrap(),
+        None,
+    );
 
-    let dpay_init = DpayInitArg { controller: Some(controller), demo_ledger: ledger, per_tx_cap: CAP };
-    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+    let dpay_init = DpayInitArg {
+        controller: Some(controller),
+        demo_ledger: ledger,
+        per_tx_cap: CAP,
+    };
+    pic.0
+        .install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
 
     (pic, ledger, dpay, gateway_url, seed)
 }
@@ -423,7 +472,11 @@ fn live_read_surface_at_user_principal() {
         let networks = cb["networks"]
             .as_array()
             .unwrap_or_else(|| panic!("networks must be an array: {cb}"));
-        assert_eq!(networks.len(), 3, "icp mainnet + icp testnet + solana mainnet: {cb}");
+        assert_eq!(
+            networks.len(),
+            3,
+            "icp mainnet + icp testnet + solana mainnet: {cb}"
+        );
         let mainnet = &networks[0];
         assert_eq!(mainnet["protocol"], "icp");
         assert_eq!(mainnet["environment"], "mainnet");
@@ -441,14 +494,19 @@ fn live_read_surface_at_user_principal() {
             Some(3),
             "exactly ckTESTBTC (3) + ckSepoliaUSDC (4) + ckSepoliaETH (5) on the testnet side: {cb}"
         );
-        assert_eq!(networks[2]["protocol"], "solana", "the solana section is present: {cb}");
+        assert_eq!(
+            networks[2]["protocol"], "solana",
+            "the solana section is present: {cb}"
+        );
         let rows = mainnet["assets"]
             .as_array()
             .unwrap_or_else(|| panic!("icp mainnet assets must be an array: {cb}"));
         let vchf = rows
             .iter()
             .find(|d| d["currency"].as_u64() == Some(u64::from(CATALOG_VCHF)))
-            .unwrap_or_else(|| panic!("compiled catalog must contain the VCHF (currency {CATALOG_VCHF}) row: {cb}"));
+            .unwrap_or_else(|| {
+                panic!("compiled catalog must contain the VCHF (currency {CATALOG_VCHF}) row: {cb}")
+            });
         assert_eq!(
             vchf["ledger"].as_str(),
             Some(ledger_text.as_str()),
@@ -459,9 +517,17 @@ fn live_read_surface_at_user_principal() {
         // The mints in §2 landed at Account{owner: self_auth(pk), subaccount: None}; the batch
         // route fans `balance_on_ledger` out per catalog currency with the SAME derivation. An
         // account-shape regression on either side reads 0 here — that is the tripwire.
-        let (ps, pb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(payer_pk)))).await;
+        let (ps, pb) = call(
+            &state,
+            get(&format!("/api/v1/balances/{}", hex::encode(payer_pk))),
+        )
+        .await;
         assert_eq!(ps, StatusCode::OK, "payer balances body={pb}");
-        assert_eq!(pb[key.as_str()], INIT_A.to_string(), "payer VCHF must read the minted amount (body={pb})");
+        assert_eq!(
+            pb[key.as_str()],
+            INIT_A.to_string(),
+            "payer VCHF must read the minted amount (body={pb})"
+        );
         // The compiled catalog carries 10 currencies (9 IC + EURC on solana), but only the PINNED
         // fixture ledger exists on this PocketIC — every other fan-out target is an absent canister,
         // and the batch omits those best-effort (exactly prod's behavior for unreachable ledgers).
@@ -473,20 +539,44 @@ fn live_read_surface_at_user_principal() {
         );
 
         // Second user: independent balance (different amount, different principal).
-        let (ss, sb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(second_pk)))).await;
+        let (ss, sb) = call(
+            &state,
+            get(&format!("/api/v1/balances/{}", hex::encode(second_pk))),
+        )
+        .await;
         assert_eq!(ss, StatusCode::OK, "second-user balances body={sb}");
-        assert_eq!(sb[key.as_str()], INIT_B.to_string(), "second user must read their OWN mint (body={sb})");
+        assert_eq!(
+            sb[key.as_str()],
+            INIT_B.to_string(),
+            "second user must read their OWN mint (body={sb})"
+        );
 
         // Independence cross-check: the second mint must not have touched the first user.
-        let (rs, rb) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(payer_pk)))).await;
+        let (rs, rb) = call(
+            &state,
+            get(&format!("/api/v1/balances/{}", hex::encode(payer_pk))),
+        )
+        .await;
         assert_eq!(rs, StatusCode::OK, "payer re-read body={rb}");
-        assert_eq!(rb[key.as_str()], INIT_A.to_string(), "payer balance must be unchanged by the second mint (body={rb})");
+        assert_eq!(
+            rb[key.as_str()],
+            INIT_A.to_string(),
+            "payer balance must be unchanged by the second mint (body={rb})"
+        );
 
         // An UNFUNDED principal reads a clean "0" — not an error, not a missing key.
         let unfunded_pk = generate_keypair().verifying_key().to_bytes();
-        let (us, ub) = call(&state, get(&format!("/api/v1/balances/{}", hex::encode(unfunded_pk)))).await;
+        let (us, ub) = call(
+            &state,
+            get(&format!("/api/v1/balances/{}", hex::encode(unfunded_pk))),
+        )
+        .await;
         assert_eq!(us, StatusCode::OK, "unfunded balances body={ub}");
-        assert_eq!(ub[key.as_str()], "0", "an unfunded principal must read \"0\" (body={ub})");
+        assert_eq!(
+            ub[key.as_str()],
+            "0",
+            "an unfunded principal must read \"0\" (body={ub})"
+        );
 
         // ---- (4) transactions: shape for an account with no VCHF rows ----
         // The payer HAS history rows now (the mints above — see the icrc3 test below for the
@@ -543,7 +633,14 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
     let merchant_pk = generate_keypair().verifying_key().to_bytes();
     mint_at_user_principal(&pic.0, ledger, dpay, &payer_pk, 10_000);
     let settlement_memo = b"0123456789abcdef";
-    rail_transfer(&pic.0, ledger, &payer_pk, &merchant_pk, 250, settlement_memo);
+    rail_transfer(
+        &pic.0,
+        ledger,
+        &payer_pk,
+        &merchant_pk,
+        250,
+        settlement_memo,
+    );
     rail_transfer(&pic.0, ledger, &merchant_pk, &payer_pk, 100, b"change");
 
     let payer_owner = Principal::from_slice(
@@ -578,11 +675,19 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         let rows = b["transactions"]
             .as_array()
             .unwrap_or_else(|| panic!("transactions must be an array: {b}"));
-        assert_eq!(rows.len(), 3, "mint + out-transfer + in-transfer (body={b})");
+        assert_eq!(
+            rows.len(),
+            3,
+            "mint + out-transfer + in-transfer (body={b})"
+        );
 
         // Newest-first: the in-transfer (100) landed last.
         let r0 = &rows[0];
-        assert_eq!(r0["amount"].as_str(), Some("100"), "newest row is the 100 in-transfer");
+        assert_eq!(
+            r0["amount"].as_str(),
+            Some("100"),
+            "newest row is the 100 in-transfer"
+        );
         assert_eq!(r0["from"].as_str(), Some(merchant_owner.to_text().as_str()));
         assert_eq!(r0["to"].as_str(), Some(payer_owner.to_text().as_str()));
         assert_eq!(
@@ -606,12 +711,19 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         assert_eq!(r1["amount"].as_str(), Some("250"));
         assert_eq!(r1["from"].as_str(), Some(payer_owner.to_text().as_str()));
         assert_eq!(r1["to"].as_str(), Some(merchant_owner.to_text().as_str()));
-        assert_eq!(r1["memo"].as_str(), Some(hex::encode(settlement_memo).as_str()));
+        assert_eq!(
+            r1["memo"].as_str(),
+            Some(hex::encode(settlement_memo).as_str())
+        );
 
         // Oldest: the mint (10_000) — `from` is the empty mint sentinel, `to` = payer.
         let r2 = &rows[2];
         assert_eq!(r2["amount"].as_str(), Some("10000"));
-        assert_eq!(r2["from"].as_str(), Some(""), "mint renders the empty-from sentinel");
+        assert_eq!(
+            r2["from"].as_str(),
+            Some(""),
+            "mint renders the empty-from sentinel"
+        );
         assert_eq!(r2["to"].as_str(), Some(payer_owner.to_text().as_str()));
 
         // ---- (2) limit clamp: ?limit=1 keeps exactly the NEWEST row ----
@@ -627,7 +739,11 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         assert_eq!(ls, StatusCode::OK, "limit body={lb}");
         let lrows = lb["transactions"].as_array().unwrap();
         assert_eq!(lrows.len(), 1, "limit=1 clamps to one row");
-        assert_eq!(lrows[0]["amount"].as_str(), Some("100"), "the kept row is the NEWEST");
+        assert_eq!(
+            lrows[0]["amount"].as_str(),
+            Some("100"),
+            "the kept row is the NEWEST"
+        );
 
         // ---- (3) exact settlement memo: production AgentLedger filters DURING its ICRC-3 walk,
         // before limit, so the older 250 row survives limit=1 despite a newer 100 row. ----
@@ -707,11 +823,21 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         .await;
         assert_eq!(s, StatusCode::OK, "late-user post-seed body={b}");
         let rows = b["transactions"].as_array().unwrap();
-        assert_eq!(rows.len(), 1, "the post-call transfer must be visible (body={b})");
+        assert_eq!(
+            rows.len(),
+            1,
+            "the post-call transfer must be visible (body={b})"
+        );
         assert_eq!(rows[0]["amount"].as_str(), Some("777"));
-        assert_eq!(rows[0]["from"].as_str(), Some(payer_owner.to_text().as_str()));
+        assert_eq!(
+            rows[0]["from"].as_str(),
+            Some(payer_owner.to_text().as_str())
+        );
         assert_eq!(rows[0]["to"].as_str(), Some(late_owner.to_text().as_str()));
-        assert_eq!(rows[0]["memo"].as_str(), Some(hex::encode("late-drift").as_str()));
+        assert_eq!(
+            rows[0]["memo"].as_str(),
+            Some(hex::encode("late-drift").as_str())
+        );
     });
 
     // And the ORIGINAL account's re-read must now show 4 rows with the late transfer newest.
@@ -727,8 +853,16 @@ fn live_icrc3_history_walks_the_real_ledger_log() {
         .await;
         assert_eq!(s, StatusCode::OK, "payer re-read body={b}");
         let rows = b["transactions"].as_array().unwrap();
-        assert_eq!(rows.len(), 4, "3 original rows + the late out-transfer (body={b})");
-        assert_eq!(rows[0]["amount"].as_str(), Some("777"), "late transfer is the NEWEST row");
+        assert_eq!(
+            rows.len(),
+            4,
+            "3 original rows + the late out-transfer (body={b})"
+        );
+        assert_eq!(
+            rows[0]["amount"].as_str(),
+            Some("777"),
+            "late transfer is the NEWEST row"
+        );
         assert_eq!(rows[0]["to"].as_str(), Some(late_owner.to_text().as_str()));
     });
 }
@@ -756,13 +890,18 @@ fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
 
     // Direct rail read for ground truth (query; safe outside the runtime).
     let user_balance = |pic: &PocketIc, ledger: &Principal| -> u64 {
-        let res = pic.query_call(
-            *ledger,
-            Principal::anonymous(),
-            "icrc1_balance_of",
-            encode_one(Account { owner: user_owner, subaccount: None }).unwrap(),
-        )
-        .expect("icrc1_balance_of query must succeed");
+        let res = pic
+            .query_call(
+                *ledger,
+                Principal::anonymous(),
+                "icrc1_balance_of",
+                encode_one(Account {
+                    owner: user_owner,
+                    subaccount: None,
+                })
+                .unwrap(),
+            )
+            .expect("icrc1_balance_of query must succeed");
         decode_one::<Nat>(&res)
             .expect("balance decodes as Nat")
             .0
@@ -825,7 +964,9 @@ fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
     rt.block_on(async {
         let (s, b) = call(&state, faucet_req(&hex_pk, "10000")).await;
         assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "cooldown body={b}");
-        let reason = b["error"].as_str().unwrap_or_else(|| panic!("cooldown error must be a string (body={b})"));
+        let reason = b["error"]
+            .as_str()
+            .unwrap_or_else(|| panic!("cooldown error must be a string (body={b})"));
         assert!(
             reason.starts_with("faucet cooldown: try again in ~") && reason.ends_with(" s"),
             "verbatim old-canon cooldown text, not {reason:?}"
@@ -844,8 +985,14 @@ fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
     // ---- (4) wrong amount is refused BEFORE any mint (fixed-denomination policy) ----
     rt.block_on(async {
         let (s, b) = call(&state, faucet_req(&hex_pk, "500")).await;
-        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "amount-pinning body={b}");
-        let reason = b["error"].as_str().unwrap_or_else(|| panic!("error must be a string (body={b})"));
+        assert_eq!(
+            s,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "amount-pinning body={b}"
+        );
+        let reason = b["error"]
+            .as_str()
+            .unwrap_or_else(|| panic!("error must be a string (body={b})"));
         assert!(reason.contains("faucet amount is fixed"), "got {reason:?}");
     });
 
@@ -854,7 +1001,11 @@ fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
     rt.block_on(async {
         let (s, b) = call(&state, faucet_req(&hex_pk, "10000")).await;
         assert_eq!(s, StatusCode::OK, "post-window faucet body={b}");
-        assert_eq!(b["balance"].as_str(), Some("20000"), "second top-up stacks (body={b})");
+        assert_eq!(
+            b["balance"].as_str(),
+            Some("20000"),
+            "second top-up stacks (body={b})"
+        );
     });
     assert_eq!(user_balance(&pic.0, &ledger), 20_000u64);
 }
@@ -883,7 +1034,12 @@ fn live_faucet_refuses_non_controller_identities_verbatim() {
         .block_on(AgentLedger::connect(&gateway_url, dpay))
         .expect("anonymous agent connects");
     let wrong_seed = rt
-        .block_on(AgentLedger::connect_with_identity(&gateway_url, dpay, true, [9u8; 32]))
+        .block_on(AgentLedger::connect_with_identity(
+            &gateway_url,
+            dpay,
+            true,
+            [9u8; 32],
+        ))
         .expect("wrong-seed agent connects");
 
     for (name, ledger) in [("anonymous", anonymous), ("wrong seed", wrong_seed)] {
@@ -897,7 +1053,11 @@ fn live_faucet_refuses_non_controller_identities_verbatim() {
             .unwrap();
         rt.block_on(async {
             let (s, b) = call(&state, req).await;
-            assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{name}: faucet body={b}");
+            assert_eq!(
+                s,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{name}: faucet body={b}"
+            );
             assert_eq!(
                 b["error"].as_str(),
                 Some("unauthorized: admin ops require the controller principal"),
@@ -986,7 +1146,11 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
     pic.0.install_canister(
         cketh_minter,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { amount_ledger: dpay, gas_ledger: None }).unwrap(),
+        encode_one(&MockMinterInit {
+            amount_ledger: dpay,
+            gas_ledger: None,
+        })
+        .unwrap(),
         None,
     );
     pic.0
@@ -1012,11 +1176,10 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
     });
 
     // ---- (1) runtime read wins: the pinned minter's sentinel (≠ every compiled constant) ----
-    let (s, b) = rt
-        .block_on(call(
-            &state,
-            get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
-        ));
+    let (s, b) = rt.block_on(call(
+        &state,
+        get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
+    ));
     assert_eq!(s, StatusCode::OK, "onramp sentinel body={b}");
     assert_eq!(
         b["helper_address"].as_str(),
@@ -1046,11 +1209,10 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
             encode_one(RUNTIME_HELPER_SENTINEL_B).unwrap(),
         )
         .expect("set_deposit_helper_address (B) update_call rejected");
-    let (s, b) = rt
-        .block_on(call(
-            &state,
-            get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
-        ));
+    let (s, b) = rt.block_on(call(
+        &state,
+        get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
+    ));
     assert_eq!(s, StatusCode::OK, "onramp sentinel-B body={b}");
     assert_eq!(
         b["helper_address"].as_str(),
@@ -1062,11 +1224,10 @@ fn live_ckerc20_onramp_helper_read_at_runtime_with_constant_fallback() {
     // ---- (3) fallback: the minter read FAILS (mock uninstalled) ⇒ verified mainnet constant ----
     // (an uninstall failure would leave the sentinel live and fail the assert below loudly)
     let _ = pic.0.uninstall_canister(cketh_minter, None);
-    let (s, b) = rt
-        .block_on(call(
-            &state,
-            get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
-        ));
+    let (s, b) = rt.block_on(call(
+        &state,
+        get(&format!("/api/v1/onramp/ckerc20?currency={CATALOG_CKUSDC}")),
+    ));
     assert_eq!(s, StatusCode::OK, "onramp fallback body={b}");
     assert_eq!(
         b["helper_address"].as_str(),
@@ -1109,8 +1270,13 @@ fn live_deposit_info_is_ttl_cached_not_recalled_per_request() {
     let ledger = pic.0.create_canister();
     pic.0.add_cycles(ledger, 1_000_000_000_000);
 
-    let dpay_init = DpayInitArg { controller: Some(admin), demo_ledger: ledger, per_tx_cap: CAP };
-    pic.0.install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
+    let dpay_init = DpayInitArg {
+        controller: Some(admin),
+        demo_ledger: ledger,
+        per_tx_cap: CAP,
+    };
+    pic.0
+        .install_canister(dpay, facade_wasm(), encode_one(&dpay_init).unwrap(), None);
 
     // The mock ckBTC-shaped minter, pinned AT the principal the facade's compile-time table names
     // for currency 1 (the registry-era `register_minter` call is gone with the registry — pinning
@@ -1127,7 +1293,11 @@ fn live_deposit_info_is_ttl_cached_not_recalled_per_request() {
     pic.0.install_canister(
         minter,
         mock_minter_wasm(),
-        encode_one(&MockMinterInit { amount_ledger: ledger, gas_ledger: None }).unwrap(),
+        encode_one(&MockMinterInit {
+            amount_ledger: ledger,
+            gas_ledger: None,
+        })
+        .unwrap(),
         None,
     );
 
@@ -1146,18 +1316,33 @@ fn live_deposit_info_is_ttl_cached_not_recalled_per_request() {
     // ---- (1) cache MISS: real facade update through the minter → the mock's BTC-shaped info ----
     let (s, b) = rt.block_on(call(
         &state,
-        get(&format!("/api/v1/deposit/info?currency={DEPOSIT_CACHE_CURRENCY}")),
+        get(&format!(
+            "/api/v1/deposit/info?currency={DEPOSIT_CACHE_CURRENCY}"
+        )),
     ));
     assert_eq!(s, StatusCode::OK, "first deposit_info call body={b}");
-    assert_eq!(b["min_confirmations"], 1, "mock minter min_confirmations=1 (body={b})");
-    assert_eq!(b["deposit_fee"], "0", "mock get_deposit_fee=0, U64String-rendered (body={b})");
-    assert_eq!(b["deposit_min_amount"], "0", "mock deposit_btc_min_amount=Some(0) (body={b})");
+    assert_eq!(
+        b["min_confirmations"], 1,
+        "mock minter min_confirmations=1 (body={b})"
+    );
+    assert_eq!(
+        b["deposit_fee"], "0",
+        "mock get_deposit_fee=0, U64String-rendered (body={b})"
+    );
+    assert_eq!(
+        b["deposit_min_amount"], "0",
+        "mock deposit_btc_min_amount=Some(0) (body={b})"
+    );
 
     // ---- (2) cache HIT: minter UNINSTALLED — only the relay's TTL cache can still answer ----
-    pic.0.uninstall_canister(minter, None).expect("uninstall_canister rejected");
+    pic.0
+        .uninstall_canister(minter, None)
+        .expect("uninstall_canister rejected");
     let (s2, b2) = rt.block_on(call(
         &state,
-        get(&format!("/api/v1/deposit/info?currency={DEPOSIT_CACHE_CURRENCY}")),
+        get(&format!(
+            "/api/v1/deposit/info?currency={DEPOSIT_CACHE_CURRENCY}"
+        )),
     ));
     assert_eq!(
         s2,

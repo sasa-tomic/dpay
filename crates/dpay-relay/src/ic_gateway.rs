@@ -34,13 +34,15 @@ use axum::response::{IntoResponse, Response};
 use dpay_icp::envelope::verify_envelope;
 use dpay_icp::icrc::{
     ApproveArg,
-    decode_account_arg, decode_approve_arg, decode_legacy_transfer_arg, decode_minter_account_arg,
-    decode_retrieve_btc_arg, decode_transfer_arg, decode_withdraw_erc20_arg,
-    decode_withdraw_eth_arg, encode_approve_ok, encode_eip1559_price,
+    decode_account_arg, decode_allowance_args, decode_approve_arg, decode_deposit_and_swap_arg,
+    decode_legacy_transfer_arg, decode_minter_account_arg, decode_retrieve_btc_arg,
+    decode_swap_arg, decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg,
+    encode_allowance_record, encode_approve_ok, encode_eip1559_price,
     encode_legacy_transfer_bad_fee, encode_legacy_transfer_insufficient_funds,
     encode_legacy_transfer_ok, encode_minter_ok, encode_nat8_reply, encode_nat_reply,
-    encode_text_reply, encode_transfer_bad_fee, encode_transfer_insufficient_funds,
-    encode_transfer_ok, uleb_bytes, Eip1559Price, RetrieveBtcArg, WithdrawEthArg,
+    encode_pool_metadata, encode_swap_result_err, encode_swap_result_ok, encode_text_reply,
+    encode_transfer_bad_fee, encode_transfer_insufficient_funds, encode_transfer_ok,
+    uleb_bytes, Eip1559Price, PoolSwapError, RetrieveBtcArg, WithdrawEthArg,
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
@@ -63,6 +65,24 @@ enum RequestState {
     Rejected { code: u64, message: String },
 }
 
+/// Allowance-map key: ((ledger text, from account), (spender owner text, spender subaccount)).
+/// Spenders in this gateway are canisters (minters, the swap pool) — always default subaccount.
+type AllowanceKey = ((String, (String, [u8; 32])), (String, [u8; 32]));
+
+/// The value stored per allowance: `(amount_e8s, expires_at_ns)` — EXACT-amount (the approve
+/// REPLACES the allowance, never adds), expiry-aware at every read ([`effective_allowance`]).
+type AllowanceValue = (u128, Option<u64>);
+
+/// The effective allowance at `now`: an expiry that has passed reads as 0 (ICRC-2 semantics —
+/// an expired allowance is spent-by-nobody), everything else reads verbatim.
+fn effective_allowance(s: &FakeIcState, key: &AllowanceKey) -> AllowanceValue {
+    match s.allowances.get(key) {
+        Some((amount, Some(exp))) if *exp <= now_ns() => (0, Some(*exp)),
+        Some(v) => *v,
+        None => (0, None),
+    }
+}
+
 #[derive(Default)]
 struct FakeIcState {
     /// canister text → ledger config (one per catalog currency with a rail).
@@ -74,11 +94,82 @@ struct FakeIcState {
     /// per-principal pot would cross-contaminate currencies (fauceting ckBTC would inflate
     /// ckUSDC).
     balances: HashMap<(String, (String, [u8; 32])), u128>,
-    /// Allowances, likewise scoped to the ledger they were granted on.
-    allowances: HashMap<((String, (String, [u8; 32])), (String, [u8; 32])), u128>,
+    /// Allowances, likewise scoped to the ledger they were granted on (see [`AllowanceValue`]).
+    allowances: HashMap<AllowanceKey, AllowanceValue>,
+    /// The stub ICPSwap pool (delegated-conversion PoC) — `quote`/`metadata` queries and the
+    /// `depositFromAndSwap` update, over a deterministic curve. Registered by
+    /// [`FakeIc::from_catalog`] at [`crate::catalog::SWAP_POOL_PRINCIPAL`].
+    pool: FakePoolState,
     requests: HashMap<[u8; 32], RequestState>,
     txns: Vec<FakeTxn>,
     next_block: u64,
+}
+
+/// The stub ICPSwap V3 pool (delegated-conversion PoC, spec 2026-09-07 §6): a DETERMINISTIC
+/// constant-product curve over its own reserves — deliberately not a real AMM. Determinism
+/// beats realism: same reserves + same amount_in ⇒ same amount_out, forever. The knobs
+/// (`fee_millionths`, `impact_bps`, `fail_withdrawal`) are the test surface
+/// (`POST /api/v1/test/swap_pool`).
+struct FakePoolState {
+    /// The pool's OWN metadata pair (what `metadata` replies and pair validation reads).
+    token0_ledger: String,
+    token1_ledger: String,
+    /// Genesis reserves: 1M ICP / 1.93M VCHF e8s — deep enough that PoC-size swaps barely move
+    /// the price (stable, deterministic quotes; matching the historical band is NOT a goal).
+    reserve0_e8s: u128,
+    reserve1_e8s: u128,
+    /// Swap fee in millionths (default 3000 = the PoC pool's 0.30% tier), applied to amount_in.
+    fee_millionths: u128,
+    /// Extra price-impact haircut in basis points on the quoted output (default 0 = pure curve).
+    impact_bps: u16,
+    /// TEST KNOB — the pending_withdrawal path (spec §4): when set, a successful swap consumes
+    /// the input and updates reserves but QUEUES the output instead of paying it (the pool's
+    /// async withdrawal "fails"); `settle_pending` drains the queue (the eventual resolution).
+    fail_withdrawal: bool,
+    /// Queued unpaid outputs: (caller principal text, out ledger text, amount_out e8s).
+    pending: Vec<(String, String, u128)>,
+    swaps: u64,
+}
+
+impl Default for FakePoolState {
+    /// Pre-`from_catalog` placeholder (empty pair): every pool method gates on the canister
+    /// being [`crate::catalog::SWAP_POOL_PRINCIPAL`] first, so an unregistered pool can only
+    /// reject, never swap.
+    fn default() -> Self {
+        Self::new("", "")
+    }
+}
+
+impl FakePoolState {
+    fn new(token0_ledger: &str, token1_ledger: &str) -> Self {
+        FakePoolState {
+            token0_ledger: token0_ledger.to_string(),
+            token1_ledger: token1_ledger.to_string(),
+            reserve0_e8s: 100_000_000_000_000,          // 1M ICP
+            reserve1_e8s: 193_000_000_000_000,          // 1.93M VCHF
+            fee_millionths: 3000,                       // the PoC pool's 0.30% tier
+            impact_bps: 0,
+            fail_withdrawal: false,
+            pending: Vec::new(),
+            swaps: 0,
+        }
+    }
+
+    /// The deterministic curve (pure — no state change): fee on the input, constant product
+    /// `out = in_eff * r_out / (r_in + in_eff)` floored, then the optional impact haircut.
+    /// Saturating on u128 overflow (a hostile amount_in quotes u128::MAX, never panics).
+    fn quote(&self, amount_in_e8s: u128, zero_for_one: bool) -> u128 {
+        let (r_in, r_out) = if zero_for_one {
+            (self.reserve0_e8s, self.reserve1_e8s)
+        } else {
+            (self.reserve1_e8s, self.reserve0_e8s)
+        };
+        let in_eff = amount_in_e8s
+            .saturating_mul(1_000_000 - self.fee_millionths.min(1_000_000))
+            / 1_000_000;
+        let out = in_eff.saturating_mul(r_out) / (r_in.saturating_add(in_eff));
+        out.saturating_mul(10_000 - u128::from(self.impact_bps.min(10_000))) / 10_000
+    }
 }
 
 #[derive(Clone)]
@@ -168,6 +259,12 @@ impl FakeIc {
                 st.minters.insert(m, d.ledger.clone());
             }
         }
+        // The stub ICPSwap pool at the PoC venue principal — token0 = ICP, token1 = VCHF
+        // (the relay-side venue pin, `crate::catalog::ICP_VCHF_VENUE`).
+        st.pool = FakePoolState::new(
+            crate::catalog::ICP_LEDGER_PRINCIPAL,
+            crate::catalog::VCHF_LEDGER_PRINCIPAL,
+        );
         Arc::new(FakeIc {
             state: Mutex::new(st),
             hidden_outcomes: Mutex::new(std::collections::HashMap::new()),
@@ -240,6 +337,73 @@ impl FakeIc {
         0
     }
 
+    /// The stub pool's quote for the relay's `/api/v1/swap_quote` (test-helpers): validates the
+    /// venue the SAME way the agent build does (known pool; token_in/token_out must be the
+    /// pool's OWN pair — `zero_for_one` derived from that, never assumed), then serves the
+    /// deterministic curve. The amount_out is the POOL's quote verbatim — the relay blends
+    /// nothing. Errors are the route's named refusal codes (`unknown_pool`/`unsupported_pair`).
+    pub fn swap_pool_quote(
+        &self,
+        pool: &str,
+        token_in: &str,
+        token_out: &str,
+        amount_in_e8s: u128,
+    ) -> Result<(u128, bool), &'static str> {
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if pool != crate::catalog::SWAP_POOL_PRINCIPAL {
+            return Err("unknown_pool");
+        }
+        let p = &s.pool;
+        if token_in == p.token0_ledger && token_out == p.token1_ledger {
+            Ok((p.quote(amount_in_e8s, true), true))
+        } else if token_in == p.token1_ledger && token_out == p.token0_ledger {
+            Ok((p.quote(amount_in_e8s, false), false))
+        } else {
+            Err("unsupported_pair")
+        }
+    }
+
+    /// The test knobs for the stub pool (`POST /api/v1/test/swap_pool`): fee tier / impact
+    /// overrides, the `fail_withdrawal` arm (pending_withdrawal), and the `settle_pending`
+    /// resolution — queued outputs land on their caller's principal on the output ledger.
+    pub fn set_swap_pool_knobs(
+        &self,
+        fee_millionths: Option<u128>,
+        impact_bps: Option<u16>,
+        fail_withdrawal: Option<bool>,
+        settle_pending: bool,
+    ) {
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(f) = fee_millionths {
+            s.pool.fee_millionths = f;
+        }
+        if let Some(i) = impact_bps {
+            s.pool.impact_bps = i;
+        }
+        if let Some(fw) = fail_withdrawal {
+            s.pool.fail_withdrawal = fw;
+        }
+        if settle_pending {
+            let pending = std::mem::take(&mut s.pool.pending);
+            for (caller, ledger, amount) in pending {
+                let currency = s.ledgers.get(&ledger).map(|l| l.currency).unwrap_or(0u32);
+                let block = s.next_block;
+                s.next_block += 1;
+                *s.balances.entry((ledger.clone(), (caller.clone(), [0u8; 32]))).or_insert(0) += amount;
+                s.txns.push(FakeTxn {
+                    kind: "transfer",
+                    from: crate::catalog::SWAP_POOL_PRINCIPAL.to_string(),
+                    to: caller,
+                    amount,
+                    currency,
+                    memo_hex: String::new(),
+                    timestamp: now_secs(),
+                    block,
+                });
+            }
+        }
+    }
+
     pub fn balances_of(
         &self,
         catalog: &[crate::ledger::CurrencyDescriptor],
@@ -303,6 +467,7 @@ impl FakeIc {
             "icrc1_transfer" => Self::icrc1_transfer(s, &canister, &from_key, &sender, arg, block),
             "transfer" => Self::legacy_transfer(s, &canister, &from_key, &sender, arg, block),
             "icrc2_approve" => Self::icrc2_approve(s, &canister, &env.sender, arg, block),
+            "depositFromAndSwap" => Self::pool_deposit_from_and_swap(s, &canister, &env.sender, arg, block),
             "retrieve_btc_with_approval" => {
                 Self::burn_via_minter(s, &canister, &env.sender, "retrieve_btc_with_approval", arg, block)
             }
@@ -474,8 +639,111 @@ impl FakeIc {
         if fee > 0 {
             *s.balances.entry(from.clone()).or_insert(0) -= fee;
         }
-        s.allowances.insert((from, account_owner(&spender)), amount.unwrap_or(0));
+        s.allowances.insert(
+            (from, account_owner(&spender)),
+            (amount.unwrap_or(0), arg.expires_at_ns),
+        );
         RequestState::Replied(encode_approve_ok(block))
+    }
+
+    /// `depositFromAndSwap` on the stub ICPSwap pool (delegated-conversion PoC): validate the
+    /// caller's icrc2 allowance of the POOL on the input ledger → pull `amountIn` (+ the input
+    /// ledger's transfer fee, charged to the caller) into the reserves → quote the SAME
+    /// deterministic curve `quote` serves → refuse below `amountOutMinimum` → pay the output
+    /// GROSS to the caller's principal on the output ledger — or QUEUE it when the
+    /// `fail_withdrawal` knob is armed (spec §4's pending_withdrawal; `settle_pending` resolves
+    /// it). Domain refusals are the pool's OWN `#err` shapes (InsufficientFunds /
+    /// InternalError), transport-shaped ones are replica rejects.
+    fn pool_deposit_from_and_swap(
+        s: &mut FakeIcState,
+        canister: &str,
+        sender: &Principal,
+        arg: &[u8],
+        block: u64,
+    ) -> RequestState {
+        if canister != crate::catalog::SWAP_POOL_PRINCIPAL {
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} is not a swap pool"),
+            };
+        }
+        let Ok(arg) = decode_deposit_and_swap_arg(arg) else {
+            return RequestState::Rejected { code: 5, message: "malformed depositFromAndSwap arg".into() };
+        };
+        let (in_ledger, out_ledger) = if arg.zero_for_one {
+            (s.pool.token0_ledger.clone(), s.pool.token1_ledger.clone())
+        } else {
+            (s.pool.token1_ledger.clone(), s.pool.token0_ledger.clone())
+        };
+        let Some(in_cfg) = s.ledgers.get(&in_ledger).cloned() else {
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("ledger {in_ledger} is not registered on this gateway"),
+            };
+        };
+        let out_currency = s.ledgers.get(&out_ledger).map(|l| l.currency);
+        // The user pre-approved THE POOL as spender on the input ledger (icrc2_approve);
+        // transfer_from semantics: exact-amount, expiry-aware.
+        let user = (sender.to_text(), [0u8; 32]);
+        let akey: AllowanceKey = ((in_ledger.clone(), user.clone()), (canister.to_string(), [0u8; 32]));
+        let (allowed, exp) = effective_allowance(s, &akey);
+        if allowed < arg.amount_in {
+            return RequestState::Replied(encode_swap_result_err(&PoolSwapError::InsufficientFunds));
+        }
+        let from_bal_key = (in_ledger.clone(), user.clone());
+        let bal = *s.balances.get(&from_bal_key).unwrap_or(&0);
+        // The input ledger's own fee is what actually leaves the caller (the arg's tokenInFee
+        // is the caller's belief; the fake charges the ledger's truth).
+        let in_fee = in_cfg.fee.unwrap_or(0);
+        if bal < arg.amount_in.saturating_add(in_fee) {
+            return RequestState::Replied(encode_swap_result_err(&PoolSwapError::InsufficientFunds));
+        }
+        let out = s.pool.quote(arg.amount_in, arg.zero_for_one);
+        if out < arg.amount_out_minimum {
+            return RequestState::Replied(encode_swap_result_err(&PoolSwapError::InternalError(
+                "amountOutMinimum not met".into(),
+            )));
+        }
+        // Commit: allowance (exact-amount, expiry preserved), input leg, reserves.
+        s.allowances.insert(akey, (allowed - arg.amount_in, exp));
+        *s.balances.entry(from_bal_key).or_insert(0) -= arg.amount_in + in_fee;
+        if arg.zero_for_one {
+            s.pool.reserve0_e8s += arg.amount_in;
+            s.pool.reserve1_e8s -= out;
+        } else {
+            s.pool.reserve1_e8s += arg.amount_in;
+            s.pool.reserve0_e8s -= out;
+        }
+        s.pool.swaps += 1;
+        s.txns.push(FakeTxn {
+            kind: "burn",
+            from: user.0.clone(),
+            to: String::new(),
+            amount: arg.amount_in,
+            currency: in_cfg.currency,
+            memo_hex: String::new(),
+            timestamp: now_secs(),
+            block,
+        });
+        // Output leg: pay the caller GROSS on the output ledger — the pool's quote semantics
+        // (the app computes net by subtracting the output ledger's fee) — or queue it.
+        if s.pool.fail_withdrawal {
+            s.pool.pending.push((user.0.clone(), out_ledger, out));
+        } else {
+            let out_currency = out_currency.unwrap_or(in_cfg.currency);
+            *s.balances.entry((out_ledger, user.clone())).or_insert(0) += out;
+            s.txns.push(FakeTxn {
+                kind: "transfer",
+                from: canister.to_string(),
+                to: user.0,
+                amount: out,
+                currency: out_currency,
+                memo_hex: String::new(),
+                timestamp: now_secs(),
+                block,
+            });
+        }
+        RequestState::Replied(encode_swap_result_ok(out))
     }
 
     /// `retrieve_btc_with_approval` / `withdraw_eth`: burn the user's pre-approved funds on the
@@ -596,6 +864,51 @@ impl FakeIc {
                 let f = s.ledgers.get(&canister).and_then(|l| l.fee).unwrap_or(0);
                 Ok(encode_nat_reply(f))
             }
+            "icrc2_allowance" => {
+                // Any ledger canister: unknown keys read (0, None) — same silence as
+                // icrc1_balance_of on an unknown account.
+                let Ok((account, spender)) = decode_allowance_args(arg) else {
+                    return Err((5, "malformed icrc2_allowance arg".into()));
+                };
+                let key: AllowanceKey = (
+                    (canister.clone(), account_owner(&account)),
+                    account_owner(&spender),
+                );
+                let (allowance, expires_at) = effective_allowance(&s, &key);
+                Ok(encode_allowance_record(&dpay_icp::icrc::PoolAllowance {
+                    allowance_e8s: allowance,
+                    expires_at_ns: expires_at,
+                }))
+            }
+            "quote" => {
+                // The stub pool's own quote — pool canister only, exactly like the real
+                // ICPSwap canister shape (ok(nat) / err(Error)).
+                if canister != crate::catalog::SWAP_POOL_PRINCIPAL {
+                    return Err((3, format!("Canister {canister} has no query method 'quote'")));
+                }
+                let Ok(a) = decode_swap_arg(arg) else {
+                    return Err((5, "malformed quote arg".into()));
+                };
+                let out = s.pool.quote(a.amount_in_e8s, a.zero_for_one);
+                if out < a.amount_out_minimum_e8s {
+                    return Ok(encode_swap_result_err(&PoolSwapError::InternalError(
+                        "amountOutMinimum not met".into(),
+                    )));
+                }
+                Ok(encode_swap_result_ok(out))
+            }
+            "metadata" => {
+                if canister != crate::catalog::SWAP_POOL_PRINCIPAL {
+                    return Err((3, format!("Canister {canister} has no query method 'metadata'")));
+                }
+                let p = &s.pool;
+                Ok(encode_pool_metadata(
+                    p.fee_millionths,
+                    &format!("{}-{}-{}", p.token0_ledger, p.token1_ledger, p.fee_millionths),
+                    &p.token0_ledger,
+                    &p.token1_ledger,
+                ))
+            }
             "get_btc_address" => {
                 // Mainnet-true: the real ckBTC minter exposes get_btc_address as an UPDATE
                 // only (verified against its candid) — the signed QUERY dies on prod with
@@ -686,7 +999,7 @@ fn burn_approved(
     };
     let from = (ledger_text.to_string(), (sender.to_text(), from_subaccount.unwrap_or([0u8; 32])));
     let spender = (spender_text.to_string(), [0u8; 32]);
-    let allowed = *s.allowances.get(&(from.clone(), spender.clone())).unwrap_or(&0);
+    let (allowed, exp) = effective_allowance(s, &(from.clone(), spender.clone()));
     if allowed < amount {
         return Err(format!("insufficient allowance: {allowed} < {amount}"));
     }
@@ -694,7 +1007,7 @@ fn burn_approved(
     if bal < amount {
         return Err(format!("insufficient funds: {bal} < {amount}"));
     }
-    s.allowances.insert((from.clone(), spender), allowed - amount);
+    s.allowances.insert((from.clone(), spender), (allowed - amount, exp));
     *s.balances.entry(from.clone()).or_insert(0) -= amount;
     s.txns.push(FakeTxn {
         kind: "burn",

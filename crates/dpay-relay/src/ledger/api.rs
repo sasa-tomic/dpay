@@ -91,4 +91,27 @@ pub trait Ledger: Send + Sync {
             "facade module hash unavailable: this ledger cannot read the IC state tree".to_string(),
         ))
     }
+
+    /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2):
+    /// query `pool`'s OWN ICPSwap `quote` and return its `ok(amountOut)` VERBATIM — the relay
+    /// NEVER computes or blends a rate, it is a read proxy exactly like `balance_on_ledger`.
+    /// `pool` is the pool principal as canonical TEXT (the route validated it against
+    /// [`crate::catalog::SWAP_POOL_PRINCIPAL`]); `zero_for_one` names the direction
+    /// (true = token0 in, token1 out — derived from the pool's pair, read never assumed); the
+    /// returned amount is GROSS of the output ledger's transfer fee (the app computes net). A
+    /// pool `#err` comes back as `Rejected(text)` with the variant name verbatim; transport
+    /// failures as `Transient`. The default impl is "not supported" — the test-helpers route
+    /// serves the fake-IC gateway's pool instead; [`AgentLedger`](crate::agent_ledger::AgentLedger)
+    /// overrides it with the real query.
+    async fn swap_pool_quote(
+        &self,
+        pool: &str,
+        zero_for_one: bool,
+        amount_in_e8s: u128,
+    ) -> Result<u128, LedgerError> {
+        let _ = (pool, zero_for_one, amount_in_e8s);
+        Err(LedgerError::Transient(
+            "swap quote unavailable: this ledger cannot query swap pools".to_string(),
+        ))
+    }
 }

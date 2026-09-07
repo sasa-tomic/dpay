@@ -249,6 +249,45 @@ struct CkEthMinterInfoMirror {
     deposit_with_subaccount_helper_contract_address: Option<String>,
 }
 
+/// Minimal candid mirror of the ICPSwap pool's `SwapArgs` — the `quote` QUERY / `swap` UPDATE arg
+/// (third_party/oisy-wallet/src/declarations/icp_swap_pool/icp_swap_pool.did): amounts are TEXT
+/// decimal strings on the wire, and `zeroForOne` names the direction (true = token0 in,
+/// token1 out). Used by [`Ledger::swap_pool_quote`] (the delegated-conversion quote proxy — spec
+/// docs/specs/2026-09-07-delegated-conversion-spec.md §2); the APP, not the relay, builds the
+/// `depositFromAndSwap` arg the user signs.
+#[derive(CandidType, Deserialize, Debug)]
+pub struct IcpSwapArgs {
+    #[serde(rename = "amountIn")]
+    pub amount_in: String,
+    #[serde(rename = "amountOutMinimum")]
+    pub amount_out_minimum: String,
+    #[serde(rename = "zeroForOne")]
+    pub zero_for_one: bool,
+}
+
+/// Minimal candid mirror of the ICPSwap pool's `Error` variant (the .did's `type Error`).
+/// The `quote` reply is `Result = variant { err : Error; ok : nat }`.
+#[derive(CandidType, Deserialize, Debug)]
+pub enum IcpSwapError {
+    CommonError,
+    InsufficientFunds,
+    InternalError(String),
+    UnsupportedToken(String),
+}
+
+/// The ICPSwap pool's `quote`/`swap`/`depositFromAndSwap` reply shape: `ok(amountOut)` gross of
+/// the output ledger's transfer fee, or the pool's own refusal. The pool is a MOTOKO canister:
+/// its Result arms are LOWERCASE on the wire (`variant { err : Error; ok : nat }`, the .did) —
+/// NOT the capitalized `Ok`/`Err` the Rust ICRC ledgers serve, so std `Result` (which candid
+/// labels `Ok`/`Err`) cannot decode it. Deliberate lowercase arms, in the venue's own spelling.
+#[derive(CandidType, Deserialize, Debug)]
+pub enum IcpSwapResult {
+    #[allow(non_camel_case_types)]
+    ok(Nat),
+    #[allow(non_camel_case_types)]
+    err(IcpSwapError),
+}
+
 /// One [`AgentLedger::deposit_info`] cache entry: the reply plus the instant it was fetched.
 /// `std::time::Instant` is a monotonic clock, so TTL checks are immune to wall-clock jumps.
 struct DepositInfoCacheEntry {
@@ -620,6 +659,55 @@ impl Ledger for AgentLedger {
         Ok(params)
     }
 
+    /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2): the
+    /// pool's OWN `quote` query, returned VERBATIM — the relay never computes or blends a rate.
+    /// `pool` is the known-pool principal text (the route already validated it against
+    /// [`crate::catalog::SWAP_POOL_PRINCIPAL`]); the reply's `ok(nat)` is the pool's own
+    /// amountOut estimate, GROSS of the output ledger's transfer fee (the app computes net). A
+    /// pool `#err` comes back as `Rejected` with the variant name (+ its text payload) so the
+    /// route surfaces the pool's own refusal verbatim; transport/decode failures as `Transient`
+    /// (503 at the route).
+    async fn swap_pool_quote(
+        &self,
+        pool: &str,
+        zero_for_one: bool,
+        amount_in_e8s: u128,
+    ) -> Result<u128, LedgerError> {
+        let pool_id = Principal::from_text(pool)
+            .map_err(|e| LedgerError::Transient(format!("parse pool principal '{pool}': {e}")))?;
+        // amountOutMinimum carries no slippage floor for a QUOTE (0) — the app applies its own
+        // min-out when it signs the swap (spec §5); the pool ignores the field for quoting.
+        let arg = encode_one(&IcpSwapArgs {
+            amount_in: amount_in_e8s.to_string(),
+            amount_out_minimum: "0".to_string(),
+            zero_for_one,
+        })
+        .map_err(|e| LedgerError::Transient(format!("encode quote arg: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent.query(&pool_id, "quote").with_arg(arg).call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!("quote timed out after {CANISTER_CALL_TIMEOUT_SECS}s"))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("quote query: {e}")))?;
+        match decode_one::<IcpSwapResult>(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode quote reply: {e}")))?
+        {
+            IcpSwapResult::ok(nat) => nat.0.to_u128().ok_or_else(|| {
+                LedgerError::Transient("quote amountOut exceeds u128".to_string())
+            }),
+            // The pool's own refusal, named verbatim (variant name + its text payload when the
+            // variant carries one) — the route's `pool_error` body forwards this string as-is.
+            IcpSwapResult::err(e) => Err(LedgerError::Rejected(match e {
+                IcpSwapError::CommonError => "CommonError".to_string(),
+                IcpSwapError::InsufficientFunds => "InsufficientFunds".to_string(),
+                IcpSwapError::InternalError(t) => format!("InternalError: {t}"),
+                IcpSwapError::UnsupportedToken(t) => format!("UnsupportedToken: {t}"),
+            })),
+        }
+    }
 }
 
 impl AgentLedger {

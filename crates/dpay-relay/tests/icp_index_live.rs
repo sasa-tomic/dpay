@@ -53,10 +53,10 @@ use pocket_ic::{PocketIc, PocketIcBuilder};
 
 use dpay_core::generate_keypair;
 use dpay_relay::agent_ledger::{
-    icp_legacy_account_identifier, ICP_INDEX,
-    IcpIndexAccountTransactionsOk, IcpIndexAccountTransactionsResult,
-    IcpIndexApprove, IcpIndexBurn, IcpIndexGetAccountTransactionsArgs, IcpIndexMint,
-    IcpIndexTokens, IcpIndexTransaction, IcpIndexTransactionWithId, IcpIndexTransfer,
+    icp_legacy_account_identifier, IcpIndexAccountTransactionsOk,
+    IcpIndexAccountTransactionsResult, IcpIndexApprove, IcpIndexBurn,
+    IcpIndexGetAccountTransactionsArgs, IcpIndexMint, IcpIndexTokens, IcpIndexTransaction,
+    IcpIndexTransactionWithId, IcpIndexTransfer, ICP_INDEX,
 };
 use dpay_relay::{app, AgentLedger, AppState};
 use icrc_ledger_types::icrc1::account::Account;
@@ -78,7 +78,11 @@ const TS0_NS: u64 = 1_750_000_000_000_000_000;
 const SETTLEMENT_MEMO: [u8; 16] = [3u8; 16];
 
 fn get(uri: &str) -> Request<Body> {
-    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
+    Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap()
 }
 
 async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
@@ -159,10 +163,14 @@ fn build_index_responder_wasm(routes: &[(Vec<(u32, u8)>, &[u8])]) -> Vec<u8> {
 
     // import section: the four ic0 system functions this query needs (func indices 0..=3).
     let mut imports = vec![0x04];
-    for (typeidx, name) in
-        ["msg_arg_data_size", "msg_arg_data_copy", "msg_reply_data_append", "msg_reply"]
-            .iter()
-            .enumerate()
+    for (typeidx, name) in [
+        "msg_arg_data_size",
+        "msg_arg_data_copy",
+        "msg_reply_data_append",
+        "msg_reply",
+    ]
+    .iter()
+    .enumerate()
     {
         wasm_name("ic0", &mut imports);
         wasm_name(name, &mut imports);
@@ -186,17 +194,17 @@ fn build_index_responder_wasm(routes: &[(Vec<(u32, u8)>, &[u8])]) -> Vec<u8> {
     // code section body.
     let mut body: Vec<u8> = Vec::new();
     body.extend_from_slice(&[0x01, 0x01, 0x7F]); // locals: one i32
-    // size = msg_arg_data_size()
+                                                 // size = msg_arg_data_size()
     body.extend_from_slice(&[0x10, 0x00]); // call 0
     body.extend_from_slice(&[0x21, 0x00]); // local.set 0
-    // msg_arg_data_copy(ARG_BUF, 0, size)
+                                           // msg_arg_data_copy(ARG_BUF, 0, size)
     body.push(0x41);
     sleb32(RESPONDER_ARG_BUF, &mut body);
     body.push(0x41);
     sleb32(0, &mut body);
     body.extend_from_slice(&[0x20, 0x00]); // local.get 0
     body.extend_from_slice(&[0x10, 0x01]); // call 1
-    // routes: if (load8_u(ARG_BUF+o1)==b1 && ...) { reply(...); msg_reply(); return }
+                                           // routes: if (load8_u(ARG_BUF+o1)==b1 && ...) { reply(...); msg_reply(); return }
     let mut data: Vec<u8> = Vec::new();
     let mut ptr = RESPONDER_DATA_BASE;
     for (probes, reply) in routes {
@@ -281,7 +289,14 @@ fn probes_for(mine: &[u8], others: &[&[u8]]) -> Vec<(u32, u8)> {
 
 // --- golden index fixtures -----------------------------------------------------------------------
 
-fn tx_transfer(id: u64, from: &str, to: &str, e8s: u64, memo: Vec<u8>, ts_ns: u64) -> IcpIndexTransactionWithId {
+fn tx_transfer(
+    id: u64,
+    from: &str,
+    to: &str,
+    e8s: u64,
+    memo: Vec<u8>,
+    ts_ns: u64,
+) -> IcpIndexTransactionWithId {
     IcpIndexTransactionWithId {
         id: Nat::from(id),
         transaction: IcpIndexTransaction {
@@ -326,7 +341,9 @@ fn tx_unused_approve_and_burn_shaped_correctly() {
     // Approve/burn shapes exist for decode parity; the fixtures below never send them, and the
     // unit tests in agent_ledger.rs cover their omission from the REST contract.
     let _ = (
-        IcpIndexApprove { from: String::new() },
+        IcpIndexApprove {
+            from: String::new(),
+        },
         IcpIndexBurn {
             from: String::new(),
             memo: None,
@@ -348,14 +365,13 @@ fn index_arg(account: &Account, start: Option<u64>) -> Vec<u8> {
     .expect("encode index arg")
 }
 
-fn ok_reply(
-    rows: Vec<IcpIndexTransactionWithId>,
-    oldest_tx_id: Option<u64>,
-) -> Vec<u8> {
-    encode_one(&IcpIndexAccountTransactionsResult::Ok(IcpIndexAccountTransactionsOk {
-        transactions: rows,
-        oldest_tx_id: oldest_tx_id.map(Nat::from),
-    }))
+fn ok_reply(rows: Vec<IcpIndexTransactionWithId>, oldest_tx_id: Option<u64>) -> Vec<u8> {
+    encode_one(&IcpIndexAccountTransactionsResult::Ok(
+        IcpIndexAccountTransactionsOk {
+            transactions: rows,
+            oldest_tx_id: oldest_tx_id.map(Nat::from),
+        },
+    ))
     .expect("encode index reply")
 }
 
@@ -397,9 +413,23 @@ fn live_icp_index_history_dispatch_direction_memo_pagination_real_agent_path() {
     let reply_p1 = ok_reply(
         vec![
             // id 1002 — transfer IN, u64::MAX amount, plain memo
-            tx_transfer(1002, COUNTER_ACCT, &my_acct, u64::MAX, b"change".to_vec(), TS2_NS),
+            tx_transfer(
+                1002,
+                COUNTER_ACCT,
+                &my_acct,
+                u64::MAX,
+                b"change".to_vec(),
+                TS2_NS,
+            ),
             // id 1001 — transfer OUT with the 16-byte settlement memo (dpay reconciliation shape)
-            tx_transfer(1001, &my_acct, COUNTER_ACCT, 250, SETTLEMENT_MEMO.to_vec(), TS1_NS),
+            tx_transfer(
+                1001,
+                &my_acct,
+                COUNTER_ACCT,
+                250,
+                SETTLEMENT_MEMO.to_vec(),
+                TS1_NS,
+            ),
         ],
         Some(1000),
     );
@@ -453,7 +483,9 @@ fn live_icp_index_history_dispatch_direction_memo_pagination_real_agent_path() {
         .build()
         .unwrap();
     rt.block_on(async move {
-        let agent = AgentLedger::connect(&gateway_url, dpay).await.expect("agent connect");
+        let agent = AgentLedger::connect(&gateway_url, dpay)
+            .await
+            .expect("agent connect");
         let state = AppState::new(Arc::new(agent));
         let base = format!("/api/v1/transactions/{}", hex::encode(user_pk));
 
@@ -500,10 +532,13 @@ fn live_icp_index_history_dispatch_direction_memo_pagination_real_agent_path() {
         //    the non-matching newest row, yet limit=1 must return the MATCHING row, not the
         //    newest one — the responder always returns both, so this proves the adapter (not
         //    the fixture) filters, and that the filter precedes the limit.
-        let (code, b) = call(&state, get(&format!(
-            "{base}?currency={CURRENCY}&limit=1&memo={}",
-            hex::encode(SETTLEMENT_MEMO)
-        )))
+        let (code, b) = call(
+            &state,
+            get(&format!(
+                "{base}?currency={CURRENCY}&limit=1&memo={}",
+                hex::encode(SETTLEMENT_MEMO)
+            )),
+        )
         .await;
         assert_eq!(code, StatusCode::OK, "body: {b}");
         let rows = b["transactions"].as_array().expect("transactions array");

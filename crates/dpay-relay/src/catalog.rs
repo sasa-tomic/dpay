@@ -103,6 +103,42 @@ pub(crate) const ICP_LEDGER_PRINCIPAL: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 /// `catalog_truth_tests` module below.
 pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 
+/// The ICPSwap V3 pool the delegated-conversion PoC quotes (spec
+/// docs/specs/2026-09-07-delegated-conversion-spec.md §1): `65mrh-fqaaa-aaaar-qapoa-cai`, the
+/// ICP/VCHF 0.3% pool (factory `4mmnk-kiaaa-aaaag-qbllq-cai`, fee tier 3000). NOT a catalog
+/// row — the venue table is a relay-side read-validation pin for `/api/v1/swap_quote` (the
+/// catalog migration is a spec follow-up, and the APP carries its own venue consts in
+/// `app/config/` for the PoC). Compiled only where the quote surfaces exist (agent = the live
+/// read, test-helpers = the fake-IC pool stub).
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) const SWAP_POOL_PRINCIPAL: &str = "65mrh-fqaaa-aaaar-qapoa-cai";
+
+/// The relay's KNOWN venue table for `/api/v1/swap_quote` — one PoC venue: the ICP/VCHF pool
+/// (`venue_for_pool` keys by the pool principal itself). `token0_ledger`/`token1_ledger` pin
+/// the pool's own metadata pair (token0 = ICP); the route derives `zero_for_one` from THIS
+/// table (token_in == token0), never from pair order alone.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) struct SwapVenue {
+    pub token0_ledger: &'static str,
+    pub token1_ledger: &'static str,
+}
+
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) const ICP_VCHF_VENUE: SwapVenue = SwapVenue {
+    token0_ledger: ICP_LEDGER_PRINCIPAL,
+    token1_ledger: VCHF_LEDGER_PRINCIPAL,
+};
+
+/// The venue a `/api/v1/swap_quote` pool principal resolves to — `None` means unknown pool.
+/// (One PoC venue; adding one = adding a const here, exactly like the catalog rows.)
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) fn venue_for_pool(pool: &str) -> Option<&'static SwapVenue> {
+    match pool {
+        SWAP_POOL_PRINCIPAL => Some(&ICP_VCHF_VENUE),
+        _ => None,
+    }
+}
+
 /// The IC section rows of the catalog — the wallet's runtime source of truth for which assets
 /// exist and how to display/fund them. REAL prod rows, fetched live from the prod relay's
 /// `/api/v1/currencies` on 2026-08-28 and transplanted VERBATIM (every field, null vs value):
