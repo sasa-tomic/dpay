@@ -29,7 +29,7 @@ const TESTS_DIR = join(__dirname, '..', 'tests');
 
 /** Canonical journey order for stable summaries + the FLOWS.md table. */
 export const JOURNEYS = [
-  'wire', 'onboard', 'pay', 'offline', 'deposit', 'withdraw', 'nfc', 'system', 'tour',
+  'wire', 'onboard', 'pay', 'offline', 'deposit', 'withdraw', 'convert', 'nfc', 'system', 'tour',
 ];
 
 /** Human-readable one-line description per journey (used by the matrix + FLOWS.md headings). */
@@ -40,6 +40,7 @@ export const JOURNEY_TITLE = {
   offline: 'Offline hand-off (the signature feature)',
   deposit: 'Deposits & onramp (ckBTC + ckUSDC + ckERC20)',
   withdraw: 'Withdrawal (ckBTC cash-out)',
+  convert: 'Delegated conversion (ICPSwap pool, ICP ↔ VCHF)',
   nfc: 'NFC (tap-to-pay)',
   system: 'Settings & system',
   tour: 'Visual capture (UX tour)',

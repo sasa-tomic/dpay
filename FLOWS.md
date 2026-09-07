@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **131 flows**
-> (130 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **135 flows**
+> (134 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (18) · pay (38) · offline (11) · deposit (11) · withdraw (11) · nfc (11) · system (24) · tour (6)
+wire (1) · onboard (18) · pay (38) · offline (11) · deposit (11) · withdraw (11) · convert (4) · nfc (11) · system (24) · tour (6)
 
 ---
 
@@ -146,6 +146,15 @@ wire (1) · onboard (18) · pay (38) · offline (11) · deposit (11) · withdraw
 | 52 | sol-withdraw | SOL withdraw: select SOL → Pay tab "Send to address" → a wrong-chain paste is refused by name and a valid one has its route disclosed → enter amount → sign+broadcast (stub) → Sent ✓. | sol-withdraw, sol-send, sol-tab-ia, sign, route-disclosure, error-handling |
 | 56 | withdraw-saved-addr | A successful chain-key send (approve + retrieve settled on /api/v2) writes the destination to the per-asset address book; after the send surface is closed and REMOUNTED the book is re-read from storage and the destination renders as a saved chip that pre-fills the shared field on tap. | saved-address, address-book, send-saved, withdraw-persist |
 | 77 | sol-usdc-withdraw | USDC send to address: happy path (USDC units + rent disclosure note → Sent ✓) and the below-rent pre-check failure (friendly error, no Sent). | sol-usdc-withdraw, spl-transfer, ata-note, rent-precheck, sol-send |
+
+### Delegated conversion (ICPSwap pool, ICP ↔ VCHF)
+
+| # | Flow | Verifies | Covers |
+|---|------|----------|--------|
+| 140 | convert-happy-path | The delegated-conversion happy path: a payment review carries no Convert anywhere (§0.6); Home ▸ ICP ▸ Convert opens the one pre-signing surface where every §5 line renders (counterparty/pool principal, attributed+timestamped quote, itemised fees, dpay-paid-nothing, impact, minimum+refusal, net end state — all matching the relay's own quote); confirm re-quotes then signs approve+swap on-device; settle is exact (ICP −amount−2 fees, VCHF +gross) with done derived from the SEEN ledger row and the Ledger showing the incoming VCHF row from the pool. | convert, icp, vchf, uniform-ia, transparency-checklist, counterparty, quote-attribution, fees-itemised, price-impact, min-out, slippage, icrc2-approve, deposit-from-and-swap, state-machine, ledger-watch, settle, balance-refresh, ledger-row, no-mid-payment-conversion |
+| 141 | convert-pending-withdrawal | When the pool replies #ok but holds the output (fail_withdrawal knob), the app parks on an honest pending_withdrawal screen — never done from #ok — naming the asset owed, where it sits, the pool principal, that dpay cannot reverse it, and the approval-expiry bound; settle_pending drains the venue queue and the same screen flips to done with the SEEN amount, with nothing re-signed and VCHF credited exactly. | convert, icp, vchf, fail-withdrawal, pending-withdrawal, honest-unknown, pool-ok-not-settled, expiry-countdown, settle-pending, resolution, ledger-watch, no-resubmit |
+| 142 | convert-venue-less-fail-closed | Every asset gets the same Convert button; assets without a venue fail closed INSIDE the surface: ckUSDC shows the honest what-exists-today copy plus the saturated-direct-pool refusal line (spec §1), DEMO shows the generic copy without it, and neither offers an amount field or a quote. | convert, uniform-ia, venue-less, fail-closed, ckusdc, saturated-pool, honest-copy, demo |
+| 143 | convert-stale-quote-refresh | A fresh Convert quote shows the attributed+timestamped line with no staleness notice; forcing staleness via the app's test seam makes the surface flag + refresh it (fetched-at moves, stale notice clears), an unchanged re-quote does not raise the quote-changed interrupt, and confirm stays armed. | convert, icp, vchf, quote-staleness, auto-refresh, quote-attribution, no-quote-drift, test-seam |
 
 ### NFC (tap-to-pay)
 
