@@ -526,6 +526,83 @@ async function icpBalanceOfArg(ownerText: string, subaccountHex: string): Promis
   return binOutHex(ex, len, out, 'icp_balance_of_arg');
 }
 
+// --- delegated-conversion (ICPSwap pool) builders — PURE-JS twins of the Rust encoders ---
+//
+// dpay-wasm does NOT re-export these two (A1 landed them in dpay-ffi/Kotlin only), so the web/jest
+// build gets exact twins here. Both are byte-pinned to the SAME goldens as the Rust core
+// (crates/dpay-icp/tests/goldens.rs G_SWAP_*) by app/__tests__/convert-core-twin.test.ts, which
+// parses the committed Rust golden file — if this twin and the core ever diverge, that jest suite
+// is the alarm, not a user's phone.
+
+/** The 39-byte `depositFromAndSwap` DIDL type-table prefix (magic + one record of five fields in
+ *  candid label-hash order) — generated once by @dfinity/candid from the cached pool interface and
+ *  pinned in goldens.rs. Values follow with NO per-field tags. */
+const DEPOSIT_AND_SWAP_PREFIX_HEX =
+  '4449444c016c05a8bb95a7037dddefb5ca0671a5d0b4f8087ed8ddd1d70971b1b4bc800a7d0100';
+
+const U128_MAX = 2n ** 128n - 1n;
+
+/** Parse a strict non-negative decimal-u128 string (mirrors the core's u128_str: rejects empty,
+ *  signs, decimals, and > u128). */
+function parseU128Str(s: string, label: string): bigint {
+  if (!/^[0-9]+$/.test(s) || (s.length > 1 && s.startsWith('0'))) {
+    throw new Error(`DpayCore twin: ${label} is not a canonical decimal u128: ${JSON.stringify(s)}`);
+  }
+  const v = BigInt(s);
+  if (v > U128_MAX) throw new Error(`DpayCore twin: ${label} overflows u128: ${s}`);
+  return v;
+}
+
+function uleb128Bytes(v: bigint): number[] {
+  const out: number[] = [];
+  let b = v;
+  do {
+    let byte = Number(b & 0x7fn);
+    b >>= 7n;
+    if (b !== 0n) byte |= 0x80;
+    out.push(byte);
+  } while (b !== 0n);
+  return out;
+}
+
+function candidTextBytes(s: string): number[] {
+  const bytes = Array.from(new TextEncoder().encode(s));
+  return [...uleb128Bytes(BigInt(bytes.length)), ...bytes];
+}
+
+async function icpDepositAndSwapArg(
+  amountIn: string, amountOutMinimum: string, tokenInFee: string, tokenOutFee: string, zeroForOne: boolean,
+): Promise<string> {
+  const fee0 = parseU128Str(tokenInFee, 'tokenInFee');
+  const fee1 = parseU128Str(tokenOutFee, 'tokenOutFee');
+  // The decimal STRINGS are validated for canonical form, then carried verbatim into the text
+  // fields — exactly what the Rust encoder does (amountIn.to_string()).
+  parseU128Str(amountIn, 'amountIn');
+  parseU128Str(amountOutMinimum, 'amountOutMinimum');
+  const bytes = [
+    ...Array.from(hexToBytes(DEPOSIT_AND_SWAP_PREFIX_HEX)),
+    ...uleb128Bytes(fee0),
+    ...candidTextBytes(amountIn),
+    zeroForOne ? 1 : 0,
+    ...candidTextBytes(amountOutMinimum),
+    ...uleb128Bytes(fee1),
+  ];
+  return bytesToHex(Uint8Array.from(bytes));
+}
+
+async function icpSwapMinOut(quotedOut: string, slippageBps: number): Promise<string> {
+  const q = parseU128Str(quotedOut, 'quotedOut');
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 65535) {
+    throw new Error(`DpayCore twin: slippageBps out of u16 range: ${slippageBps}`);
+  }
+  // Split quotient/remainder so no intermediate multiplies two full u128s — the exact Rust shape
+  // (units*k + rem*k/10000, floored, saturating at 0 for bps >= 10000).
+  const k = 10_000n - BigInt(Math.min(slippageBps, 10_000));
+  const units = q / 10_000n;
+  const rem = q % 10_000n;
+  return (units * k + (rem * k) / 10_000n).toString();
+}
+
 // --- minter calls (user-principal offramp + deposits) — golden-pinned builders ---
 
 async function icpMinterAccountArg(ownerText: string, subaccountHex: string): Promise<string> {
@@ -772,6 +849,8 @@ export const DpayCore = {
   icpIngressExpiry,
   icpTransferArg,
   icpApproveArg,
+  icpDepositAndSwapArg,
+  icpSwapMinOut,
   icpBalanceOfArg,
   icpMinterAccountArg,
   icpRetrieveBtcArg,

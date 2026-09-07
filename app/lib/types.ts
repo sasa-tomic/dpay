@@ -150,6 +150,13 @@ export type DpayCoreApi = {
   icpIngressExpiry(nowNs: string, aheadS: number): Promise<string>;
   icpTransferArg(toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string, amount: string, fee: string, memoHex: string): Promise<string>;
   icpApproveArg(spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string, amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string): Promise<string>;
+  /** ICPSwap pool `depositFromAndSwap` arg (delegated conversion): amounts + both token fees as
+   *  decimal e8s strings, `zeroForOne` from the venue's own pair. Kotlin arity MUST match the
+   *  @ReactMethod (bridge-parity guard). */
+  icpDepositAndSwapArg(amountIn: string, amountOutMinimum: string, tokenInFee: string, tokenOutFee: string, zeroForOne: boolean): Promise<string>;
+  /** Exact-floor min-out from a venue quote + slippage bps (saturates at 0 for bps >= 10000).
+   *  The core owns this math — the app never computes it in TS. */
+  icpSwapMinOut(quotedOut: string, slippageBps: number): Promise<string>;
   icpBalanceOfArg(ownerText: string, subaccountHex: string): Promise<string>;
   icpMinterAccountArg(ownerText: string, subaccountHex: string): Promise<string>;
   icpRetrieveBtcArg(address: string, amountSats: string, fromSubaccountHex: string): Promise<string>;

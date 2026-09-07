@@ -61,6 +61,7 @@ describe('HomeTab accounts — bundled VCHF/ICP rows (zero-balance visible, no r
           onReceive={jest.fn()}
           onDeposit={jest.fn()}
           onTopUp={jest.fn()}
+          onConvert={jest.fn()}
           onSelect={jest.fn()}
           onSeeAll={jest.fn()}
         />,
@@ -143,6 +144,7 @@ describe('HomeTab accounts — home-currency rail badges (mark every rail, never
           onReceive={jest.fn()}
           onDeposit={jest.fn()}
           onTopUp={jest.fn()}
+          onConvert={jest.fn()}
           onSelect={jest.fn()}
           onSeeAll={jest.fn()}
         />,

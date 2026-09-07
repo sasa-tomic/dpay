@@ -8,7 +8,7 @@ import {currencyName, currencyOfAsset, preferredRail, railLineLabel, type HomeCu
 import {CurrencyRow} from './CurrencyRow';
 import {HistoryRow} from './HistoryRow';
 import {HotkeyHint} from './HotkeyHint';
-import {IconArrowDownLeft, IconPlus, IconQr} from './icons';
+import {IconArrowDownLeft, IconPlus, IconQr, IconSwap} from './icons';
 import {RailLiquidityNote} from './RailLiquidityNote';
 import type {AssetId, Txn} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
@@ -22,10 +22,13 @@ import type {BalanceView} from '../lib/assetBalances';
 // reading over a figure it cannot know. The amount is always the SELECTED asset's OWN balance in
 // its own token unit (the header's displayText) — never an FX conversion, never a portfolio sum.
 //
-// The action row is three uniform buttons, capability-dispatched: Pay/Receive switch modes (the
+// The action row is four uniform buttons, capability-dispatched: Pay/Receive switch modes (the
 // same surfaces every asset pays through); Add money fires the DEMO faucet when the demo asset is
 // selected (the Balances row's topUp machinery + fail-closed copy) and otherwise lands the existing
-// deposit surface for the selected asset. No per-asset special cases beyond that capability split.
+// deposit surface for the selected asset; Convert opens the delegated-conversion surface for EVERY
+// asset alike (uniform-IA hard rule) — the venue check happens INSIDE that surface, so a venue-less
+// asset gets the same entry point and fails closed with honest copy there, never a hidden button.
+// No per-asset special cases beyond that capability split.
 //
 // The accounts list (O4 S3) is the retired Balances sheet's body moved WHOLESALE — every row
 // testID, the MAIN/sibling-rail badges, the DEMO faucet button, and the testnet toggle — rendered
@@ -36,7 +39,7 @@ import type {BalanceView} from '../lib/assetBalances';
 // The activity feed shows the newest ledger rows through the SAME HistoryRow the Transactions tab
 // renders (own token units per row), capped at 3 with a See-all link into the full tab — its own
 // home-hist-* testIDs, never the Ledger's hist-* anchors.
-export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, homeCurrency, homeAsset, online, history, topUpBusy, topUpErr, hasTestnet, showTestnet, onToggleTestnet, onPay, onReceive, onDeposit, onTopUp, onSelect, onSeeAll}: {
+export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, homeCurrency, homeAsset, online, history, topUpBusy, topUpErr, hasTestnet, showTestnet, onToggleTestnet, onPay, onReceive, onDeposit, onTopUp, onConvert, onSelect, onSeeAll}: {
   assets: SelectableAsset[];
   selectedAsset: SelectableAsset | null;
   selectedId: AssetId | null;
@@ -55,6 +58,7 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
   onReceive: () => void;
   onDeposit: (id: AssetId) => void;
   onTopUp: () => void;
+  onConvert: () => void;
   onSelect: (id: AssetId) => void;
   onSeeAll: () => void;
 }) {
@@ -104,6 +108,13 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
         <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, topUpBusy && S.dim]} onPress={() => (isDemo ? onTopUp() : selectedAsset !== null && onDeposit(selectedAsset.id))} disabled={topUpBusy || selectedAsset === null} accessibilityRole="button" accessibilityLabel={addMoneyLabel} accessibilityHint={addMoneyHint}>
           <IconPlus size={22} color={C.brand} />
           <Text style={S.homeActionLabel}>{addMoneyLabel}</Text>
+        </Pressable>
+        {/* Convert — the uniform fourth action. Enabled for EVERY selected asset (venue-less assets
+            fail closed inside the Convert surface with honest copy); only the no-selection state
+            disables it, exactly like its siblings. */}
+        <Pressable testID="btn-home-convert" style={S.homeActionBtn} onPress={onConvert} disabled={selectedAsset === null} accessibilityRole="button" accessibilityLabel={M.convert.actionConvert} accessibilityHint={M.convert.actionConvert}>
+          <IconSwap size={22} color={C.brand} />
+          <Text style={S.homeActionLabel}>{M.convert.actionConvert}</Text>
         </Pressable>
       </View>
       {isDemo && topUpErr ? <Text testID="home-faucet-err" style={S.homeFaucetErr}>{topUpErr}</Text> : null}

@@ -394,6 +394,46 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** DIDL arg for the ICPSwap pool's depositFromAndSwap (delegated-conversion leg 2 — the user
+     *  signs it AFTER icrc2_approve named this pool the spender). Amounts + both token fees are
+     *  raw-u128 decimal STRINGS; zeroForOne is the pool's own token0→token1 direction, taken from
+     *  the venue quote, never assumed from pair order. */
+    @ReactMethod
+    fun icpDepositAndSwapArg(
+        amountIn: String,
+        amountOutMinimum: String,
+        tokenInFee: String,
+        tokenOutFee: String,
+        zeroForOne: Boolean,
+        promise: Promise,
+    ) {
+        try {
+            val arg = uniffi.dpay_ffi.icpDepositAndSwapArg(
+                amountIn,
+                amountOutMinimum,
+                tokenInFee,
+                tokenOutFee,
+                zeroForOne,
+            )
+            promise.resolve(hex(arg))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Exact-floor minimum-out from a venue quote + slippage in basis points (saturates at 0 for
+     *  bps >= 10000). The compiled core owns this arithmetic — the JS side never recomputes it. */
+    @ReactMethod
+    fun icpSwapMinOut(quotedOut: String, slippageBps: Double, promise: Promise) {
+        try {
+            val bps = slippageBps.toInt()
+            if (bps < 0 || bps > 65535) throw IllegalArgumentException("slippageBps out of u16 range")
+            promise.resolve(uniffi.dpay_ffi.icpSwapMinOut(quotedOut, bps.toUShort()))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** DIDL arg for icrc1_balance_of (signed-query balance rail). */
     @ReactMethod
     fun icpBalanceOfArg(ownerText: String, subaccountHex: String, promise: Promise) {

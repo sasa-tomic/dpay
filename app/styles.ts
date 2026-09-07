@@ -207,6 +207,31 @@ function buildStyles(p: Palette) {
   homeAccounts: {alignSelf: 'stretch', marginTop: 24},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
   homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'center'},
+  // Convert — the delegated-conversion surface (spec 2026-09-07 §5). The checklist card carries
+  // every transparency line on ONE surface before signing; the state panel renders the §4 machine.
+  // Left-aligned instruction copy (not centered): these are lines to read closely before money
+  // moves, matching the deposit/rail disclosure grammar rather than the celebration grammar.
+  convertWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 20},
+  convertHeaderRow: {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, minHeight: 40},
+  convertHeaderTitle: {flex: 1, fontSize: 22, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3},
+  convertHeaderSpacer: {width: 26},
+  convertAmountLabel: {fontSize: 13, color: p.sub, marginBottom: 6, fontFamily: FONT.sansMedium},
+  convertMetaLine: {fontSize: 13, color: p.sub, marginTop: 8, fontFamily: FONT.sans},
+  convertChecklistCard: {backgroundColor: p.card, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch', marginTop: 14, ...LIFT_SM},
+  convertChecklistLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 10, fontFamily: FONT.sans},
+  convertChecklistWarn: {fontSize: 14, color: p.bad, lineHeight: 20, marginBottom: 10, fontFamily: FONT.sansMedium},
+  convertSlippageRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap'},
+  convertSlippageChip: {paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field},
+  convertSlippageChipOn: {borderColor: p.brand, backgroundColor: p.brand},
+  convertSlippageChipText: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
+  convertSlippageChipTextOn: {color: p.brandInk},
+  convertBtnBusyRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  convertUnavailableTitle: {fontSize: 18, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8},
+  convertUnavailableBody: {fontSize: 14, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
+  convertStateTitle: {fontSize: 20, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8, marginTop: 10},
+  convertStateBody: {fontSize: 14, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},
+  convertStateMeta: {fontSize: 13, color: p.sub, lineHeight: 18, marginBottom: 6, fontFamily: FONT.sans},
+  convertFooting: {alignItems: 'center', marginTop: 18},
   // Mode toggle — a joined two-segment pill control at the top of the Pay/Receive tab bodies:
   // `[ Scan to pay | Send to address ]` (Pay) and `[ Request payment | My address ]` (Receive).
   // Inset well (panel2) + white active segment + ink text: the editorial segmented control,

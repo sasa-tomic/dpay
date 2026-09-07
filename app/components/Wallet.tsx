@@ -35,6 +35,7 @@ import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
 import {Ledger} from './Ledger';
 import {HomeTab} from './HomeTab';
+import {ConvertMode} from './ConvertMode';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
 import {SettingsSheet} from './SettingsSheet';
@@ -49,7 +50,7 @@ import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
-  const [mode, setMode] = useState<'pay' | 'receive' | 'ledger' | 'home'>('pay');
+  const [mode, setMode] = useState<'pay' | 'receive' | 'ledger' | 'home' | 'convert'>('pay');
   // A shared payment link that has been PARSED but not yet resolved against the catalog (which
   // loads async). Held here until the resolve effect below turns it into a concrete asset + amount,
   // or into an honest on-screen refusal.
@@ -989,6 +990,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               onReceive={() => setMode('receive')}
               onDeposit={goToDeposit}
               onTopUp={topUp}
+              onConvert={() => setMode('convert')}
               onSelect={handleSelect}
               onSeeAll={() => setMode('ledger')}
             />
@@ -1084,6 +1086,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   />
                 )
           )
+          : mode === 'convert'
+          ? <ConvertMode
+              identity={identity}
+              relayUrl={relayUrl}
+              catalog={catalog}
+              selectedAsset={selectedAsset}
+              assetBalances={displayAssetBalances}
+              onBack={() => setMode('home')}
+              onActivity={onActivity}
+            />
           : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} />}
       </ScrollView>
 

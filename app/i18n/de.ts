@@ -49,6 +49,7 @@
  */
 import type {Messages} from './keys';
 import {depositDe, withdrawDe} from './domains/de/deposit.ts';
+import {convertDe} from './domains/de/convert.ts';
 import {errorsDe} from './domains/de/errors.ts';
 import {payDe, receiveDe} from './domains/de/pay.ts';
 import {onboardingDe, settingsDe} from './domains/de/settings.ts';
@@ -76,6 +77,7 @@ export const de: Messages = {
 
   deposit: depositDe,
   withdraw: withdrawDe,
+  convert: convertDe,
 
   nfc: {
     reason: {

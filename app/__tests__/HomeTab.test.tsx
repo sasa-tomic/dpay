@@ -108,6 +108,7 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
         onReceive={jest.fn()}
         onDeposit={jest.fn()}
         onTopUp={jest.fn()}
+        onConvert={jest.fn()}
         onSelect={jest.fn()}
         onSeeAll={jest.fn()}
         {...props}
@@ -207,6 +208,24 @@ describe('HomeTab — the capability-dispatched action row', () => {
     act(() => { pressable(tree, 'btn-home-receive').props.onPress(); });
     expect(onPay).toHaveBeenCalledTimes(1);
     expect(onReceive).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('Convert renders for EVERY asset — uniform IA; the venue check lives inside, never here', () => {
+    // The uniform-IA hard rule: the button is not capability-gated. ICP/VCHF get the venue; every
+    // other asset gets the SAME button and fails closed inside the Convert surface with honest copy.
+    for (const asset of ASSETS) {
+      const onConvert = jest.fn();
+      const tree = mountHome({selectedAsset: asset, selectedId: asset.id, onConvert});
+      const btn = pressable(tree, 'btn-home-convert');
+      expect(btn.props.disabled).toBeFalsy();
+      act(() => { btn.props.onPress(); });
+      expect(onConvert).toHaveBeenCalledTimes(1);
+      act(() => { tree.unmount(); });
+    }
+    // Null selection is the only disabled state — same rule as Pay/Receive/Add money.
+    const tree = mountHome({selectedAsset: null, selectedId: null});
+    expect(pressable(tree, 'btn-home-convert').props.disabled).toBe(true);
     act(() => { tree.unmount(); });
   });
 });

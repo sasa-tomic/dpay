@@ -91,6 +91,12 @@ export const IconArrowDownLeft = make(({color}) => {
   const {p} = withStroke(color);
   return [p('M17 7 7 17'), p('M17 17H7V7')];
 });
+// ⇄ — the delegated-conversion action (Convert). Two opposing horizontal arrows: the shape reads
+// as an exchange between two assets without implying direction (either side can be the input).
+export const IconSwap = make(({color}) => {
+  const {p} = withStroke(color);
+  return [p('M4 9h13'), p('M14 6l3 3-3 3'), p('M20 15H7'), p('M10 12l-3 3 3 3')];
+});
 
 export const IconQr = make(({color}) => {
   const {p, r} = withStroke(color);

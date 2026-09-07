@@ -49,6 +49,7 @@
  */
 import type {Messages} from './keys';
 import {depositFr, withdrawFr} from './domains/fr/deposit.ts';
+import {convertFr} from './domains/fr/convert.ts';
 import {errorsFr} from './domains/fr/errors.ts';
 import {payFr, receiveFr} from './domains/fr/pay.ts';
 import {onboardingFr, settingsFr} from './domains/fr/settings.ts';
@@ -75,6 +76,7 @@ export const fr: Messages = {
   receive: receiveFr,
 
   deposit: depositFr,
+  convert: convertFr,
   withdraw: withdrawFr,
 
   nfc: {
