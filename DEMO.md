@@ -23,6 +23,11 @@ echo 'fs.inotify.max_user_instances=512' | sudo tee /etc/sysctl.d/60-inotify.con
 
 ## Demo A — phone (payer) + laptop (merchant)   ★ recommended
 
+> ⚠ **Measured broken at HEAD (2026-09-07):** the phone→local-replica leg cannot settle — the
+> demo relay’s catalog resolves the DEMO currency to a mainnet ledger the clean replica does not
+> carry, and the app has no operator override for its IC gateway (it always targets `icp-api.io`).
+> Details + the workaround used to rehearse: `OPEN_ISSUES.md` (“`just demo` cannot settle”).
+
 **What the audience sees:** a phone in airplane mode signs a payment; the laptop scans it and it
 settles on the ledger in seconds; scanning again is refused.
 
@@ -64,7 +69,8 @@ dot next to the balance means the wallet can see the ledger.
      **“Received …”** within ~1s (it polls the chain), and the phone's balance drops. No second scan.
    - **Offline / flaky link:** after 5s the phone shows a **signed QR**; the laptop's **Scan payer's
      signed QR**
-     camera scans it (or use the **Share auth code** button → paste box).
+      camera scans it (the terminal ingests by camera only — there is no paste box;
+      **Share auth code** on the phone copies the same code for support use).
 3. Both **Recent** lists (phone + laptop) show the payment.
 4. **Submit the payer's signed QR a second time** → the balances do not move and **Recent** gains
    no second row: the payer signed one envelope, and the IC admits a given envelope's request id
@@ -72,8 +78,11 @@ dot next to the balance means the wallet can see the ledger.
    > Say it as "the same slip, handed over twice, settles once" — NOT as a ledger nonce. On this
    > rail the request id rides as the ICRC memo and the ledger does not key on it
    > (`dpay_core::PaymentRequest`). Do not promise an "Already paid" screen: that copy renders only
-   > on a ledger `Duplicate`, which this rail cannot produce. **Drive this step once before showing
-   > it** — it is an open gate in `OPEN_ISSUES.md`, not a formality.
+   > on a ledger `Duplicate`, which this rail cannot produce. **Driven 2026-09-07** (the phone's
+   > signed code submitted twice through the real terminal): the gateway takes the identical bytes
+   > as a free dedup, balances and both Recent lists stay unchanged, and the terminal settles on
+   > the honest dim line *"Couldn't confirm this payment yet — if the payer paid, it lands with the
+   > next balance refresh."*
 
 Amount + payee are chosen by the **merchant** (the request) and **bound by the payer's signature**,
 so neither side can alter them and the payer approves the exact amount before signing.
@@ -84,7 +93,8 @@ so neither side can alter them and the payer approves the exact amount before si
 - It settles on a **real** local replica, not a mock — balances actually move on-chain, and the
   phone shows its **live** balance.
 - Online is a one-tap direct pay; the QR "dance" is the automatic offline fallback. A fussy camera
-  never derails it (paste / share on both sides).
+  on the phone side never derails it (**Share auth code**); the terminal's ingest is camera-only
+  today.
 
 ---
 
@@ -124,7 +134,9 @@ just verify    # the whole offline inner loop (core + canister + relay + UI), in
 ## Troubleshooting
 
 - **Build fails with `EMFILE` / `inotify`** → raise `fs.inotify.max_user_instances` (see setup).
-- **Webcam won’t scan** → use the **paste** box on the terminal; it takes the same code.
+- **Webcam won’t scan** → the terminal has no paste fallback today (camera-only ingest); use
+  Chrome on `localhost` and show it the phone’s signed QR. Also note the `just demo` settle path
+  is broken at HEAD — see the warning under Demo A and `OPEN_ISSUES.md`.
 - **“Refused”** on the terminal → the payment was rejected by the canister (expired, over-cap,
   insufficient funds, or a reused nonce) — the reason is shown.
 - **Reset balances** → re-run `just demo` (it deploys a fresh `--clean` replica each time).

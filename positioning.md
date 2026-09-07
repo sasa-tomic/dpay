@@ -31,9 +31,18 @@ UI rule (extends the existing one): show the **currency** the user thinks in —
 
 ### Roadmap, not built: conversion the user authorizes, delegated and itemised
 
-**DRAFT — founder direction taken 2026-09-04, recorded for approval. Nothing in this subsection exists. It is written in roadmap verbs on purpose and must never be quoted in the present tense.**
+**Direction LANDED 2026-09-07 (founder): dpay will NOT be an exchange; it WILL integrate existing
+DeFi and CeFi venues so the user can convert quickly — delegated (the user's own device signs
+with the venue, dpay never a party), itemised, and recipient/merchant-side first (converting
+proceeds already settled to the merchant's own account, where being online and choosing accepted
+currencies already live). Aligned with the precedents that won (no custody, user sole
+decision-maker, venue's own attributed quote, no routing discretion, no dpay cut). A
+compliant-by-construction PoC — ICPSwap ICP↔VCHF, user-device-signed — is specced:
+`docs/specs/2026-09-07-delegated-conversion-spec.md`; once it exists, the founder asks the
+officials to confirm the shape. Until the PoC is verified and the answers land, this subsection
+stays in roadmap verbs and must never be quoted in the present tense.**
 
-dpay will want to offer conversion between assets, with the exchange itself performed by a licensed third party. That is the same shape this section already describes for a payer who lacks the merchant's asset — the difference is that it would become a deliberate feature with its own screen instead of an edge case. The frame does not move and is not re-opened here: dpay will not exchange one asset for another on a user's behalf, will not hold the funds while it happens, and will not take price risk (`CLAUDE.md`). What is on the table is the **screen**: dpay showing a licensed provider's offer, and the user authorizing that provider directly.
+dpay will offer conversion between assets, with the exchange itself performed by a third party or an on-chain protocol — a licensed provider the user authorizes directly, or a pool contract the user's own device signs into. That is the same shape this section already describes for a payer who lacks the merchant's asset — the difference is that it becomes a deliberate feature with its own screen instead of an edge case. The frame does not move and is not re-opened here: dpay will not exchange one asset for another on a user's behalf, will not hold the funds while it happens, and will not take price risk (`CLAUDE.md`). What is on the table is the **screen**: dpay showing the venue's offer (provider or pool), and the user authorizing that venue directly.
 
 **"Transparent for the user" is the whole feature, so it has to be checkable.** Before the user authorizes anything, the screen would have to name — in their own language, on one surface, without a tap to reveal it:
 
@@ -45,14 +54,16 @@ dpay will want to offer conversion between assets, with the exchange itself perf
 
 A screen that shows one blended "you get X" and hides the split is not transparent, however accurate X is.
 
-**Founder decisions this needs, none of them taken** (regulatory evidence: `docs/REGULATORY.md`):
+**Decision status after the 2026-09-07 direction** (regulatory evidence: `docs/REGULATORY.md`; the
+answers below are PoC-scoped and conservative — product-final stays open until the officials/counsel
+step answers them):
 
-1. **Quote, or only relay the provider's quote.** Displaying a rate at all is near the line that turns a wallet into a broker. Showing the provider's own rate, attributed and timestamped, is the conservative shape; dpay computing or blending one is not.
-2. **Pick the provider, or let the user pick.** Picking is routing, and routing is the clause with legal weight (`monetization.md`).
-3. **Take a cut, or not** — already open in `monetization.md`. It cannot be decided separately from 1 and 2, or from the itemisation rule above.
-4. **Where the funds sit mid-swap.** The only acceptable answer is "never with dpay". A provider integration that requires depositing to an address dpay controls is refused, not negotiated — that is custody by another name.
+1. **Quote, or only relay the provider's quote.** Displaying a rate at all is near the line that turns a wallet into a broker. **PoC: relay the venue's own quote verbatim, attributed + timestamped; dpay computing or blending one stays refused.**
+2. **Pick the provider, or let the user pick.** Picking is routing, and routing is the clause with legal weight (`monetization.md`). **PoC: exactly one venue per pair, so no routing surface exists at all; when a second venue arrives, the user picks — never dpay.**
+3. **Take a cut, or not** — already open in `monetization.md`. **PoC: none, and the screen says so explicitly.**
+4. **Where the funds sit mid-swap.** The only acceptable answer is "never with dpay" — **taken, and it was never open.** A provider integration that requires depositing to an address dpay controls is refused, not negotiated — that is custody by another name. For a DeFi venue, the pool transiently pulls via the user's own ICRC-2 approval — disclosed on screen as temporary pool custody with recovery risk.
 
-**Prep needed now: none, deliberately.** The wallet is already asset-first — the merchant names the settlement asset, the payer pays that exact asset, nothing converts implicitly — so a conversion surface would be additive rather than a rework, and building for an undecided design would be YAGNI. The property to keep true in the meantime is the one that makes any of this possible: dpay stays a screen, never a counterparty.
+**Prep needed now: the PoC (2026-09-07).** The wallet is already asset-first — the merchant names the settlement asset, the payer pays that exact asset, nothing converts implicitly — so the conversion surface is additive rather than a rework, and the direction is decided enough to build the conservative shape without YAGNI risk. The property that makes any of this possible stays absolute: dpay remains a screen, never a counterparty. "Hands-off" means one tap for the user — never unattended automation, which stays out until the officials/counsel step answers for it.
 
 **The risk to name honestly:** an embedded flow smooth enough to feel like "dpay converted my money" may be judged on that substance rather than on the contract behind it — the same activity test already flagged for the relay under MiCA. Disclosure is the mitigation, which is why it is the requirement and not the polish.
 
@@ -90,7 +101,7 @@ put a user on, and the measured liquidity and ramp evidence behind that choice, 
 
 - The promise is "**you** don't need signal," not "nobody needs signal." If the *merchant* is also offline (remote market, mountain hut), settlement defers until they reach the network (store-and-forward the signed authorization); the offline receipt round-trip tells the payer the outcome once it settles.
 - Volatile crypto (BTC/ETH/SOL) acceptance is a **merchant opt-in** who then holds price risk; "spend crypto, merchant receives stable dollars" is a **licensed-partner edge feature**, never a dpay-native swap.
-- Any cross-asset conversion, on-ramp, or off-ramp is a licensed third party the user deals with directly — keep dpay demonstrably a technical/UI layer (`docs/REGULATORY.md`).
+- Any cross-asset conversion, on-ramp, or off-ramp is a third party or on-chain protocol the user authorizes directly — never dpay. Keep dpay demonstrably a technical/UI layer (`docs/REGULATORY.md`); the conversion screen's whole job is to make that demonstrable.
 
 ## Scope
 

@@ -76,7 +76,8 @@ cat <<EOF
          • ONLINE  → the phone pays directly; the laptop shows Paid ✓ within ~1s.
          • OFFLINE / flaky → after 5s the phone shows a QR; the laptop scans it.
     3. Balance drops on the phone; the payment appears in both "Recent" lists.
-    4. Settle the same request twice → "Already paid — not charged twice".
+    4. Settle the same request twice → nothing settles twice: balances stay put,
+       neither "Recent" list gains a row (one envelope settles once).
 
   Canister $CID on a local replica.  Ctrl-C to shut it all down.
 

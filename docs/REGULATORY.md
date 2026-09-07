@@ -404,6 +404,8 @@ Ask these in these words.
 
 ---
 
+**Direction update (2026-09-07, founder).** dpay will not be an exchange; it will integrate existing DeFi and CeFi venues for delegated, user-signed conversion — recipient/merchant-side first (converting funds already settled to the merchant's own account, at the merchant's own initiative: the strongest Coinbase-Wallet-shape fact pattern in the record — own funds, sole decision-maker, no mid-payment dependency). The PoC is built to the §4 checklist deliberately so it can become the artifact for the questions below: the ask to officials/counsel shifts from a hypothetical to "confirm this shape", with Q1 carrying a real screen. Two facts the licensed-provider draft did not have: (a) the DeFi leg has no counterparty relationship at all — the user's device signs into a pool contract — at the cost of smart-contract and transient-pool-custody risk that must be disclosed rather than licensed away; (b) no venue picking, no computed rates, and no compensation exist in the shape at all, which removes the §2/§3 aggravators rather than arguing them. The §8 limits below still apply to all of it.
+
 ## 8. The limits of this research — read before relying on any of it
 
 Recorded honestly, because the gaps are load-bearing:

@@ -7,7 +7,14 @@
 > + residuals in CODEBASE_ANALYSIS risk 4), item 3 SOL settle-verify 6(b) (`68c6c3f`; recorded in
 > CODEBASE_ANALYSIS SOL v2 model ¶; 6(a) was already `9c7572f`), and the trust-wallet fund-button
 > closed record (`43b1f09`; never O3 progress). Work order is now O3-only (hard-blocked) + the
-> physical gates below. Nothing was closed by the prune itself.
+> physical gates below. Later the same session: the DEMO.md step-4 gate was DRIVEN for real and
+> removed (record in the demo bullet under “Other open issues”), PROD STATE re-measured (relay
+> shipped at `cf119bb`), and the OCP tripwires re-run green (its bullet).
+> **Also 2026-09-07 (latest): the conversion/swap direction LANDED** (founder): dpay will NOT be
+> an exchange; full DELEGATED integration with existing DeFi/CeFi venues — the user's own device
+> signs, recipient/merchant-side first, aligned with the winning precedents, PoC then an
+> officials-confirmation ask. The DO-NOT-NAG draft entry is REMOVED below; the PoC is work-order
+> item 2. Spec: `docs/specs/2026-09-07-delegated-conversion-spec.md`.
 > **Pruned 2026-09-06** (455 lines → this): closed records removed — governance P1/P2 (`8805027`),
 > SOL 6(a) (`9c7572f`), the e2e balance-route residual (`450bdc7`), item 4 and `refresh_deposit`
 > (retired, struck below with their evidence), the completed OCP founder-ops, and the settled
@@ -34,8 +41,25 @@ until the blockers land. THE thing that unblocks it:**
 - **(e) Structural, measured 2026-09-04** — no compliant fiat rail into ANY chain-key asset exists;
   only Solana USDC and native ICP are card-reachable at all.
 
-Nothing else is agent-pickable: the work order above is the only non-physical blocked item; the
-remaining list is the physical/outer-loop gates (below, founder-run) and the DO-NOT-NAG set.
+**2. Delegated conversion PoC — UNBLOCKED 2026-09-07 (founder direction landed; the ACTIVE
+build).** ICPSwap ICP↔VCHF, user-device-signed `icrc2_approve` + `depositFromAndSwap`,
+recipient-side framing, precedent-aligned itemised screen, execution/recovery state machine.
+Authoritative spec (read it first): `docs/specs/2026-09-07-delegated-conversion-spec.md`.
+BUILT END-TO-END (2026-09-07): core+FFI encoders, relay quote route + fake-IC pool stub, the
+app surface + e2e flows 140–143 — all gates green at build time. **Post-build correction
+(same day, review pass): the pool `Result` wire arms are the venue's LOWERCASE `ok`/`err`
+(Motoko canister — its own `.did`), NOT the capitalized `Ok`/`Err` of the Rust ICRC ledgers
+the earlier tables/goldens wrongly reused; tables + goldens + the relay decode were re-cased
+(byte-verified against the `.did` hashes). Consequences: (a) the offline suites' goldens
+changed after the green run — re-run `just verify` before relying on them; (b) the offline
+fake encodes the same lowercase shape, so a ONE-LIVE-PROBE of the real pool's `quote` (dfx or
+the shipped relay route) is owed before any live-ship claim — it is the only ground truth the
+offline loop cannot see.** Remaining before any LIVE ship are founder-run (relay deploy
+decision + catalog migration; officials/counsel, `docs/REGULATORY.md` §7) — do not nag before
+the PoC exists.
+
+Nothing else is agent-pickable beyond item 2: the remaining list is the physical/outer-loop
+gates (below, founder-run) and the DO-NOT-NAG set.
 
 **Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
 - **O1 home currency** — BUILT, gated green, shipped; spec
@@ -50,14 +74,16 @@ remaining list is the physical/outer-loop gates (below, founder-run) and the DO-
   what remains of it is the two-handset tap (below) and the bearer-token revisit (below). The
   cashier page (`8805027`) and the OCP tx-id fix are done and recorded below/inline.
 
-## PROD STATE (checked, never asserted — floor `face8fba`)
+## PROD STATE (checked, never asserted — floor `cf119bb`)
 
-Floor `face8fba` = HEAD verified live 2026-09-06 (`just verify-relay` PASS at HEAD-equality, both
-EUR rows in the live catalog). Unshipped since: `450bdc7` / `9c7572f` / `8805027` / `65eeef6` /
-`3c16053` / `68c6c3f` / `90f5930` (+ docs). **The facade WASM changed at `90f5930`** (lazy-sweep +
-paged-reconcile surface: `inflight_intents`, `debug_dangle_intent`) — the next ship is the FULL
-sequence `just deploy-ic && just apk && just up` (the deploy-ic upgrade is no longer skippable);
-`just integrity-check` goes MATCH after that deploy re-bakes the module-hash pin.
+Re-measured 2026-09-07: the relay is LIVE at `cf119bb` = HEAD (`just verify-relay` PASS at
+HEAD-equality; live catalog healthy — testnet rows segregated to their section, VEUR on IC
+mainnet, EURC deep on Solana). `just integrity-check` MATCHes the 2026-09-06 pin (`0978386f…`) —
+the canister is untouched since the recorded upgrade. **The only unshipped surface is the facade
+WASM changed at `90f5930`** (lazy-sweep + paged-reconcile: `inflight_intents`,
+`debug_dangle_intent`) — the next ship is `just deploy-ic` (no longer skippable); prepend
+`just apk && just up` only if further app/relay commits land first. `just integrity-check`
+re-MATCHes after that deploy re-bakes the module-hash pin.
 
 ## Retired this prune (decision-shaped — do not re-file)
 
@@ -84,9 +110,6 @@ sequence `just deploy-ic && just apk && just up` (the deploy-ic upgrade is no lo
   (founder-run retest; commit `8940b1d`).
 - **Till tap on two physical handsets** — the merchant counter arming the reader from a live
   charge. Rides the IC rail's proven HCE hop unchanged; a confirmation, not a design risk.
-- **DEMO.md step 4 has never been driven.** `118e122` replaced a step that promised an
-  "Already paid" screen the shipped rail cannot produce; the invariant behind the replacement
-  copy is test-proven, the operator-facing screen is not. Drive it once before the next live demo.
 - **ckBTC live mainnet deposit→mint + withdrawal with real BTC** (low — final pre-pilot confidence
   checks after the testnet proofs).
 - **ckUSDC live Sepolia withdraw proof** (needs funded ckUSDC + ckETH gas; PocketIC already proves
@@ -107,12 +130,6 @@ sequence `just deploy-ic && just apk && just up` (the deploy-ic upgrade is no lo
 
 ## FOUNDER-OWNED (DO NOT NAG)
 
-- **CF edge still serves the stale APK on the BARE url** `https://dpay.kalaj.org/download/dpay.apk`
-  (value 7 / effort S): the cached object predates the max-age=300 fix and carries
-  `immutable, max-age=31536000` — the edge won't refetch for ~1 yr. Relay-side fix is live; the
-  remaining step needs a permission the repo's CF token lacks (Tunnel+DNS only): **purge the
-  cached APK** (dashboard → Caching → Purge Everything, or a *Zone · Cache Purge* token exported
-  as `CF_PURGE_TOKEN` so `just up` purges automatically). Only the APK is purge-required.
 - **Governance stance (founder-set):** govern in place, no NNS/SNS hand-off until critical mass —
   see docs/GOVERNANCE.md. `ADMIN_CALLERS` allowlist is accepted under this plan.
 - **Gatekeeper RPC URL** (`beta.helius-rpc.com`) — NO config slot exists anywhere in the
@@ -123,17 +140,33 @@ sequence `just deploy-ic && just apk && just up` (the deploy-ic upgrade is no lo
   retention once real ckUSDC exists, wrong-network recourse messaging (2026-07-30, pre-cutover —
   several may be stale; confirm-or-drop). Same decisions gate Objective 3(a) above.
 - **Desktop-width /wallet design pass** (value 5, effort M-L — design-level, needs founder input).
-- **Conversion/swap direction — DRAFT AWAITING APPROVAL** (founder ask, 2026-09-04):
-  `positioning.md` → "Roadmap, not built: conversion the user authorizes, delegated and
-  itemised". Four decisions listed there, none taken; nothing is built and nothing should be.
-  Regulatory research DONE, counsel questions written out: `docs/REGULATORY.md`.
+- **Conversion PoC → officials confirmation** (post-PoC, founder-run): carry the built screen +
+  the spec to the counsel/officials ask (`docs/REGULATORY.md` §7); the founder also owns the
+  live-ship decision (`just up` ships the quote route) and the catalog migration of venue consts
+  before any live ship.
 
 ## Other open issues
 
+- **`just demo` cannot settle at HEAD (Demo A’s phone→replica leg; measured 2026-09-07).** Two
+  independent breaks: (F1) the demo relay’s catalog resolves the DEMO currency to mainnet DUSD
+  `td2nx…`, absent on the clean replica the script boots — while its faucet mints on
+  `dpay_canister`, so no payment can settle; (F2) the app has NO operator override for its IC
+  `/api/v2` gateway (always `icp-api.io`; the only redirect is the e2e-only
+  `__DPAY_TEST_IC_GATEWAY` seam), so the phone cannot target the local replica even with F1
+  fixed. **The step-4 double-submission gate was DRIVEN the same day** via the offline
+  test-helpers relay: identical signed code re-submitted → free 202 dedup, balances unmoved, no
+  second Recent row, terminal settles on the honest dim line “Couldn’t confirm this payment yet —
+  if the payer paid, it lands with the next balance refresh.” — the exact `118e122` copy promise
+  (stale copy fixed with it: demo.sh’s “Already paid” banner, DEMO.md’s nonexistent terminal
+  “paste box”). Fix shape, NOT built: a demo/operator gateway override + demo catalog alignment.
 - **OCP tx-id fix is prod-proven, both spellings** (`a913c6d` live, measured 2026-09-05;
   physical-device orders: `2609` native ICP block `38190401`, `2610` VCHF block `81062` submitted
   prefixed — both accepted by DFX). Tripwires: `just ocp-ledger-probe` + flow 113. DFX still owes
-  the CHF 1 — do not write it off or count it recovered until it lands.
+  the CHF 1 — do not write it off or count it recovered until it lands. Re-measured 2026-09-07:
+  `just ocp-ledger-probe` — the tx-spelling/ledger-selection rule still holds live;
+  `just live-ocp` GREEN (CHF-1 till quote → review, nothing signed); the CHF 1 has STILL not
+  landed (`just agent-history`: only the rotation transfer in; float VCHF exactly the rotation
+  remainder `0.00089881`).
 - **No third-party wallet can settle an Internet Computer asset** (re-measured 2026-09-05): Oisy's
   IC OpenCryptoPay payer is Option-A (`icrc2_approve` + sender report; no tx id, no memo), DFX's
   wallet list names none. Source-only detail:

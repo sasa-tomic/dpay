@@ -28,6 +28,12 @@ Design, every founder decision, the measured venue/ramp evidence behind them, an
 [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
 Per-currency asset availability: `positioning.md`. Work order: `OPEN_ISSUES.md`.
 
+**Active addition (founder direction 2026-09-07): delegated conversion PoC** — NOT an exchange;
+full integration with existing DeFi/CeFi venues so the user swaps quickly, delegated (the user's
+own device signs, recipient/merchant-side first, aligned with the winning precedents), then the
+founder asks the officials to confirm the shape. Spec:
+[`docs/specs/2026-09-07-delegated-conversion-spec.md`](docs/specs/2026-09-07-delegated-conversion-spec.md).
+
 When in doubt about sequencing, **pick the work that gets a user holding, and spending, the currency
 they actually think in.**
 
@@ -126,7 +132,7 @@ log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context 
 - **Who:** travelers/tourists abroad on no or poor connectivity — foreign SIM, roaming off, or dead signal inside airports, malls, hotels, stadiums, metros.
 - **What:** tap-to-pay (NFC) or scan-to-pay (QR) a local merchant; **your** phone never needs a connection.
 - **Why it fits perfectly:** dpay lets the **payer** be offline, and the tourist *is* the payer. The design's one asymmetry (someone must be online) is satisfied for free — it's the merchant, who has wifi. The generic "both offline" weakness becomes the selling point.
-- **Currencies — multi-*rail*, never a swap.** The merchant's request names the settlement asset; the payer pays that **exact** asset; the canister settles it. dpay never converts one asset to another (no-swap non-negotiable). If the payer lacks the merchant's asset, a **licensed third party** converts at the edge — user authorizes it directly, dpay stays a screen. **USDC is the tourist lingua franca** (no conversion at all). UI shows the **backing native currency symbol** when known (`$`, `€`, `CHF`, `₿`/BTC, `Ξ`/ETH, `◎`/SOL) and only falls back to the wrapper (`ck*`) symbol when the backing is unknown; raw internal ledger/token identifiers (e.g. `DEMO_USD`, `DUSD`, ledger canister ids) are never surfaced.
+- **Currencies — multi-*rail*, never a swap.** The merchant's request names the settlement asset; the payer pays that **exact** asset; the canister settles it. dpay never converts one asset to another (no-swap non-negotiable). If the payer lacks the merchant's asset, a third party or on-chain protocol converts at the edge — the user authorizes it directly, dpay stays a screen; delegated in-app conversion (user-device-signed, e.g. ICPSwap) is the landed 2026-09-07 founder direction, recipient/merchant-side first. **USDC is the tourist lingua franca** (no conversion at all). UI shows the **backing native currency symbol** when known (`$`, `€`, `CHF`, `₿`/BTC, `Ξ`/ETH, `◎`/SOL) and only falls back to the wrapper (`ck*`) symbol when the backing is unknown; raw internal ledger/token identifiers (e.g. `DEMO_USD`, `DUSD`, ledger canister ids) are never surfaced.
 - **Assets (IC rows re-measured against prod `/api/v1/currencies` 2026-09-04):** live on IC = ckUSDC (launch rail), ckBTC, ckETH, plus native ICP + VCHF (deployed 2026-08-30; see What's built. VCHF is a direct ICRC ledger asset, NOT fiat CHF and not chain-key-backed). SOL = native device-key rail, **shipped** with mainnet RPC baked in (no ckSOL on IC). Near-term = EUR via EURC (verify ckEURC). Nascent = CHF (no ckCHF; thin issuance). "Pay with BTC" = **ckBTC on the IC** (native L1 can't be tap-instant; IC finalizes in ~1–2s; SOL settles natively in ~1s).
 - **Edge vs Apple Pay/Visa abroad:** their payer must be online *and* they add cross-border FX/interchange; dpay's payer is offline and same-asset settlement has no card-network FX toll.
 - **Scope:** shipped = DEMO $ + mainnet ckBTC/ckUSDC/ckETH + VCHF + native ICP + the native SOL rail; multi-currency is the product. Nothing here weakens the non-custodial / no-swap non-negotiables.
@@ -177,7 +183,7 @@ The signature binds the **exact amount + payee + request**, so consent is unambi
 Hard requirement, **not a preference**. Reject any design that violates it — restructure instead. This is a product rule and stands as one. The legal conclusion previously attached to it here was too strong and is deleted — see `docs/REGULATORY.md`.
 
 - **No custody.** The user's key lives on their device. dpay (the company, the relay, any operator) must never hold a user seed, an omnibus account, or funds it can move.
-- **No swaps by dpay.** dpay does not exchange one asset for another on a user's behalf, and does not take price risk. Conversion by a licensed third party the user authorizes directly is already the plan, not an exception (`positioning.md`). Whether dpay may quote, route, or take a cut on that third party's conversion is **open, not decided** — see `monetization.md`.
+- **No swaps by dpay.** dpay does not exchange one asset for another as counterparty, and does not take price risk. **Delegated conversion is a founder-set product direction (2026-09-07):** integrate existing DeFi and CeFi venues so the user can convert quickly — the user's OWN device signs directly with the venue/protocol (e.g. `icrc2_approve` + ICPSwap pool swap; CeFi: the user authorizes the provider directly), recipient/merchant-side first; dpay is never a party to the trade (spec: `docs/specs/2026-09-07-delegated-conversion-spec.md`). PoC red lines: the venue's own quote shown attributed + timestamped (never computed/blended/ranked), one venue per pair (no routing surface), no dpay cut, funds never touch a dpay-controlled address. Wider quote/routing/cut questions stay open — `monetization.md`, `docs/REGULATORY.md` §7.
 - **No exchange API keys.** dpay must never hold a user's CEX/DEX credentials and must never initiate a trade or withdrawal on a user's account. Holding withdrawal-capable credentials *is* control, and control *is* custody — same liability, plus a credential honeypot. If a third party must move funds, the **user** authorizes it directly with that third party.
 - **The canister cannot move funds without a user signature.** No admin transfer, no pause-and-seize, no privileged path. And the controller must not be a company key — blackhole it or hand it to an NNS/SNS-governed controller, or the "we can't touch your funds" claim is a promise rather than a property. Treat "who controls the canister" as a money-critical design question, not ops trivia.
 
@@ -309,7 +315,7 @@ The IC rail is proven on two physical phones (2026-08-26): the **NFC radio hop**
 
 - **In:** Android app (Pay + Receive), on-device key, QR generate/scan, offline signing, relay, canister ledger, two pre-funded demo accounts, single `$` unit, the airplane-mode flow.
 - **Out (deferred):** iOS, login/KYC, **fiat** on/off-ramp, secure-element hardening (the seed lives in plain AsyncStorage under `dpay.identity.v1`), contacts/P2P discovery, multi-merchant. Software keys are fine for the demo. (Corrected 2026-09-04: "funding flow" and "real onboarding" were still listed here while "What's built" above documents both — crypto deposit/withdraw on every family, and a name→backup→walkthrough first run. The FIAT ramp is what remains deferred.)
-- **Out (permanently, by design — not "later"):** custody of user funds, swaps/conversion, holding user exchange credentials, taking price risk. See the non-custodial non-negotiable above.
+- **Out (permanently, by design — not "later"):** custody of user funds, dpay-executed exchange (dpay itself as swap counterparty or price-taker), holding user exchange credentials, taking price risk. Delegated, user-signed conversion through integrated venues is IN scope (founder 2026-09-07) — see the non-negotiable above; what stays permanently out is dpay *performing* the exchange.
 
 ## Preferences
 
