@@ -34,30 +34,36 @@ and the SOL/SPL receive sheet, jest-pinned (golden URLs, eligibility, gate matri
 2026-09-06. Never O3 progress (no onramp, no fiat). The plan's optional stretch (Trust-specific WC
 entry on the ckERC20 sheet) remains NOT done by choice — optional, out of boundary.
 
-**2. Item 5 — reconcile heartbeat + paging (OPEN-DEFERRED; pickup spec, do not re-derive).**
-Revisit trigger: the facade kernel re-enters the value path, OR DUSD ledger live-window pressure.
-Context: `pay()` has no production caller (kernel dormant; only the faucet mint is live, benign
-trap shape); the operational half ships as the `docs/OPS.md` runbook (`just reconcile`, `8805027`).
-- **Heartbeat:** `#[heartbeat]` cheap-guard scanning stale in-flight intent markers — written
-  before the ledger await in `pay()`, cleared after `settle_nonce` — never blind walks.
-- **Pagination:** replace the one-shot `ledger_get_transactions` (it ignores
-  `archived_transactions`) with the relay's walk pattern (1_000-block pages, `first_index`
-  anchoring, stop at the archived-boundary).
-- **PocketIC plan exists:** `advance_time`/tick heartbeat ticks; trap-simulation past 1_000
-  blocks; archive-threshold spike first.
+**2. Item 5 — reconcile stale-detection + paging (CLOSED 2026-09-07; founder decision replaced the
+heartbeat with a lazy sweep).** Detection: `reserve_nonce` writes an INFLIGHT marker (MemoryId 15)
+before the first ledger await, `settle_nonce`/`release_nonce` clear it; `maybe_sweep_stale_intents`
+runs at most 1/hour via an O(1) `LAST_SWEEP_SECS` guard (MemoryId 16) anchored at `reconcile`/
+`mint`/`faucet` update ingress; operator surface = free `inflight_intents()` query + once-per-episode
+WARN → docs/OPS.md. NO `#[heartbeat]` — heartbeats are terribly expensive on mainnet and the kernel
+is dormant; if `pay()` ever re-enters the value path, upgrade to the IC one-shot global timer (wakes
+only at the deadline), NOT a heartbeat. Pagination: DONE — `reconcile` probes then walks BACKWARDS
+1_000-block pages anchored on `first_index`, stopping at the archived boundary / empty page / 10k
+floor. PocketIC-proven: `lazy_sweep_flags_stale_intents_and_rate_limits_to_one_per_hour` (via the
+admin-gated `debug_dangle_intent` seam — a real dropped-mid-settle is undrivable: a settle drains
+within one PocketIC tick-round), `inflight_marker_pairs_with_nonce_reservation`, and the two paged-walk
+tests. Known residual (documented in CODEBASE_ANALYSIS risk 4): the archived-boundary STOP branch has
+no offline test — the cached ic-icrc1-ledger never archives under PocketIC (probed: 1_520 blocks past
+a 1_000 trigger, time moved + ticks → `archived_transactions` stays empty); production-only.
 
-**3. 6(b) — stronger SOL receipt verify (the one agent-pickable line; pre-pilot hardening).** The
-settle path trusts `getSignatureStatuses` alone — RPC honesty is the residual. Strengthening =
-re-read the confirmed transaction via `getTransaction` and match its instructions/amount against
-the canonical message before SETTLED (strict pre-broadcast verify of the signed BYTES already
-exists: `verifySolPayment`). App-only (`rpc.getTransaction` exists; sole consumer today
-`app/solana/history.ts`) but not small: adds a fixture surface to every e2e stub plus a
-REJECTED-vs-UNREACHABLE mismatch classification to the money-critical state machine.
-(6(a) — the absent-ATA sign gate — CLOSED `9c7572f`: per-mint token facts persisted in
-`app/services/solTokenStatePersist.ts` — only-owner-can-close, no-downgrade on degraded polls;
+**3. ~~6(b) — stronger SOL receipt verify~~ CLOSED `68c6c3f` (2026-09-07).** SETTLED is no
+longer granted on `getSignatureStatuses` alone: once confirmed/finalized, `broadcastSolPayment`
+re-reads the tx via `getTransaction` and `verifySettledTransaction` (`app/solana/settleVerify.ts`,
+pure) recompiles the fetched json message to legacy wire bytes and requires full byte-equality with
+the canonical message (plus `meta.err==null`) before SETTLED. Classification: fetched-and-matching
+→ SETTLED; `meta.err` → REJECTED; well-formed-but-different (incl. v0/ALT claim) → `RECEIPT_MISMATCH=3`
+(terminal; merchant keeps `outcome:'unknown'` + reconcile armed, payer decider maps 3→pending — an
+unverifiable RPC answer is NEVER promoted to a decline); null/throwing/malformed fetch → keep polling
+to the existing deadline → UNREACHABLE (honest pending). Kotlin NFC hop unchanged (unknown codes →
+PENDING). Jest: `solana-settle-verify.test.ts` (18) + seam matrix + payments; e2e flows 138/139 +
+fixtures on 51/74/132. Recorded in CODEBASE_ANALYSIS (v2 model ¶). (6(a) — the absent-ATA sign gate —
+CLOSED `9c7572f`: per-mint token facts persisted in `app/services/solTokenStatePersist.ts`;
 pure `solSplSignGate` fail-open on unconfirmed, refusing only live-or-persisted 'absent' and
-'unregistered' for unknown mints; QR (`SolPayMode.onScan`) + NFC card (`SolNfcTap.approve`) gated,
-founder-rule copy ×4 locales; flow 137.)
+'unregistered' for unknown mints; QR + NFC card gated, founder-rule copy ×4; flow 137.)
 
 **Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
 - **O1 home currency** — BUILT, gated green, shipped; spec
