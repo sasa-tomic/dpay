@@ -12,6 +12,12 @@ upgrade loop they all serve. Every command here is founder-run; none may run una
   seemingly charged twice). `reconcile(currency)` walks that currency's recent ledger debits
   and repairs any whose credit never landed — the airtight close for the narrow window the
   `created_at_time` dedup only mitigates (canister `lib.rs`, "icrc3 reconcile").
+- **On a stale-intent WARN.** The canister flags in-flight pay intents older than 1h (a
+  transfer that neither settled nor released — the message was dropped mid-settle: stop/
+  upgrade, or a stall) lazily on update ingress, at most one scan per hour — nothing runs in
+  the background. Check what it saw with the free pull query
+  `dfx canister query <facade-id> inflight_intents` (one row per open intent: nonce, age,
+  stale, flagged), then run the sweep below.
 - **As periodic hygiene.** Run the full sweep (`just reconcile`) monthly, and after any
   incident that paused or crashed the canister mid-transfer (upgrade included). A clean sweep
   is cheap; an orphan left for weeks is a support ticket with a stale trail.

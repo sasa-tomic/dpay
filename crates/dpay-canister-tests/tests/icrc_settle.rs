@@ -35,6 +35,7 @@ use ed25519_dalek::SigningKey;
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
 use icrc_ledger_types::icrc3::blocks::{GetBlocksRequest, GetBlocksResult};
+use icrc_ledger_types::icrc3::transactions::{GetTransactionsRequest, GetTransactionsResponse};
 use pocket_ic::{PocketIc, Time};
 use serde::Deserialize;
 use std::time::Duration;
@@ -1833,5 +1834,311 @@ fn reconcile_repairs_trap_orphan_and_blocks_double_debit() {
     // 6. Non-controller cannot run reconcile (admin-gated, like the other privileged ops).
     let refused = reconcile(&pic, dpay, DEMO_USD, Principal::anonymous());
     assert!(refused.is_err(), "non-controller reconcile must be refused: {refused:?}");
+}
+
+// =================================================================================================
+// R4: lazy stale-intent sweep + the paged reconcile walk. The heartbeat design was REPLACED
+// (founder decision 2026-09-07: heartbeats are terribly expensive on mainnet and this kernel is
+// dormant) — stale detection now runs lazily on update ingress (`reconcile` + the faucet-mint
+// path `mint`/`faucet`), rate-limited to one sweep per INFLIGHT_STALE_SECS by an O(1) timestamp
+// guard, with `inflight_intents` as the free pull-based operator query.
+// =================================================================================================
+
+/// Mirror of the canister's `InFlightView` (lib.rs `inflight_intents` query).
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+struct InFlightMirror {
+    nonce: Vec<u8>,
+    reserved_at_secs: u64,
+    age_secs: u64,
+    stale: bool,
+    flagged: bool,
+}
+
+fn inflight(pic: &PocketIc, dpay: Principal) -> Vec<InFlightMirror> {
+    let reply = pic
+        .query_call(dpay, Principal::anonymous(), "inflight_intents", encode_args(()).unwrap())
+        .expect("inflight_intents query ok");
+    decode_one(&reply).expect("inflight_intents decode")
+}
+
+/// Direct ICRC-3 facts from the ledger (`get_transactions`): the served sub-range, the total log
+/// length, and the archived sub-ranges — what the reconcile walk anchors on / stops at.
+fn ledger_txns_facts(
+    pic: &PocketIc,
+    ledger: Principal,
+    start: u64,
+    length: u64,
+) -> GetTransactionsResponse {
+    let reply = pic
+        .query_call(
+            ledger,
+            Principal::anonymous(),
+            "get_transactions",
+            encode_one(GetTransactionsRequest { start: Nat::from(start), length: Nat::from(length) })
+                .unwrap(),
+        )
+        .expect("get_transactions query ok");
+    decode_one(&reply).expect("get_transactions decode")
+}
+
+/// Manufacture the EXACT dangling-intent state the sweep exists to notice: an unflagged marker at
+/// `reserved_at_secs` (what a pay whose message was dropped mid-settle leaves behind — the
+/// reservation was written, the completion that would clear it never ran). A REAL
+/// dropped-mid-settle cannot be driven in PocketIC: a full cross-canister settle drains within
+/// ONE tick-round (verified empirically — after submit + a single tick the chain already shows the
+/// settled transfer), so there is no between-rounds moment to interrupt. Hence the canister's
+/// admin-gated `debug_dangle_intent` seam — driven here exactly like the other admin surface.
+fn dangle_intent(pic: &PocketIc, dpay: Principal, nonce: [u8; 16], reserved_at_secs: u64) {
+    let reply = pic
+        .update_call(
+            dpay,
+            pic_admin(),
+            "debug_dangle_intent",
+            encode_args((nonce.to_vec(), reserved_at_secs)).unwrap(),
+        )
+        .expect("debug_dangle_intent update rejected");
+    decode_one::<Result<(), String>>(&reply)
+        .unwrap()
+        .expect("debug_dangle_intent ok");
+}
+
+/// Install a DUSD-shaped ledger with CUSTOM ArchiveOptions (response cap / archive thresholds).
+fn install_ledger_opts(
+    pic: &PocketIc,
+    minting_account: Account,
+    archive: ArchiveOptions,
+    initial_balances: Vec<(Account, Nat)>,
+) -> Principal {
+    let ledger = pic.create_canister();
+    pic.add_cycles(ledger, 10_000_000_000_000);
+    let init = LedgerArg::Init(LedgerInitArgs {
+        minting_account,
+        fee_collector_account: None,
+        transfer_fee: Nat::from(0u8),
+        decimals: Some(2),
+        max_memo_length: None,
+        token_symbol: "DUSD".into(),
+        token_name: "Demo DUSD".into(),
+        metadata: vec![],
+        initial_balances,
+        feature_flags: Some(FeatureFlags { icrc2: true, icrc152: false }),
+        archive_options: archive,
+        index_principal: None,
+    });
+    pic.install_canister(ledger, ledger_wasm(), encode_one(&init).unwrap(), None);
+    ledger
+}
+
+/// R4a (the lazy sweep): a mid-settle upgrade dangles an intent marker; the sweep — anchored at
+/// update ingress (`mint`, the relay-faucet-shaped path) — flags it once, and the O(1) rate-limit
+/// guard keeps a second sweep from running within the hour (a marker that goes stale INSIDE the
+/// blocked window stays unflagged until the next window opens). Timings are exact because
+/// deterministic-mode PocketIC only moves time via `advance_time`.
+#[test]
+fn lazy_sweep_flags_stale_intents_and_rate_limits_to_one_per_hour() {
+    let (pic, _ledger_dusd, _ckx, dpay, _sk, payer, _merch) = setup();
+
+    // Marker A dangles at T0 — the state a pay dropped mid-settle at T0 would leave.
+    dangle_intent(&pic, dpay, [0xa1; 16], T0_SECS);
+
+    // Marker B dangles at T0 + 1.9h (6_840s).
+    pic.advance_time(Duration::from_secs(6_840));
+    dangle_intent(&pic, dpay, [0xb2; 16], T0_SECS + 6_840);
+
+    // T0+2.5h (9_000s): A is 2.5h old (stale), B is 0.6h old (fresh). A mint — a sweep-bearing
+    // update entry — runs the FIRST sweep (LAST_SWEEP_SECS was 0): A gets its one WARN, B is
+    // untouched. The mints all succeed (this is the relay-faucet-shaped ingress).
+    pic.advance_time(Duration::from_secs(2_160));
+    mint(&pic, dpay, payer, DEMO_USD, 1);
+    let fl = inflight(&pic, dpay);
+    assert_eq!(fl.len(), 2, "both dangling markers are observable: {fl:?}");
+    let a = fl.iter().find(|m| m.nonce == [0xa1; 16].to_vec()).expect("marker A present");
+    let b = fl.iter().find(|m| m.nonce == [0xb2; 16].to_vec()).expect("marker B present");
+    assert!(a.stale, "A is past INFLIGHT_STALE_SECS: {a:?}");
+    assert!(a.flagged, "the first sweep WARN-flags A: {a:?}");
+    assert!(!b.stale && !b.flagged, "B is still fresh: {b:?}");
+
+    // T0+3.2h (11_520s): B (1.3h old) is now stale too, but only 0.7h passed since the last sweep
+    // — the O(1) guard SKIPS the scan: B stays UNflagged even though the query computes `stale`
+    // live. This is the rate limit doing its job: the common call path pays nothing.
+    pic.advance_time(Duration::from_secs(2_520));
+    mint(&pic, dpay, payer, DEMO_USD, 1);
+    let b = inflight(&pic, dpay)
+        .into_iter()
+        .find(|m| m.nonce == [0xb2; 16].to_vec())
+        .expect("marker B present");
+    assert!(b.stale, "B is past INFLIGHT_STALE_SECS: {b:?}");
+    assert!(!b.flagged, "rate limit: no second sweep within the hour — B must stay unflagged: {b:?}");
+
+    // T0+3.8h (13_680s): 1.3h since the last sweep — the next window is open, B gets its one WARN.
+    pic.advance_time(Duration::from_secs(2_160));
+    mint(&pic, dpay, payer, DEMO_USD, 1);
+    let (a, b) = {
+        let fl = inflight(&pic, dpay);
+        (
+            fl.iter().find(|m| m.nonce == [0xa1; 16].to_vec()).expect("A").clone(),
+            fl.iter().find(|m| m.nonce == [0xb2; 16].to_vec()).expect("B").clone(),
+        )
+    };
+    assert!(b.flagged, "the next window's sweep flags B: {b:?}");
+    assert!(a.flagged, "A stays flagged — once per episode, never re-WARNed: {a:?}");
+}
+
+/// R4b (pairing invariant): the marker lifecycle is folded into the nonce primitives — a pay that
+/// SETTLES clears its marker, and a pay that fails TRANSIENTLY (funds provably unmoved) releases
+/// both. After either outcome `inflight_intents` is empty: the sweep's read set (markers ⟺ open
+/// reservations) is truthful on the happy paths, not just the dangling one.
+#[test]
+fn inflight_marker_pairs_with_nonce_reservation() {
+    let (pic, ledger_dusd, _ckx, dpay, sk, payer, merch) = setup();
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A);
+    assert!(inflight(&pic, dpay).is_empty(), "a fresh canister has no markers");
+
+    // A settled pay leaves no marker.
+    pay(&pic, dpay, signed(&sk, payer, merch, 2_500, [0xc3; 16], T0_SECS + 120, DEMO_USD))
+        .expect("pay ok");
+    assert!(inflight(&pic, dpay).is_empty(), "a settled intent is cleared (settle_nonce)");
+
+    // A transient failure (insufficient funds — funds provably did not move) releases the nonce
+    // AND the marker: the payer may retry the same nonce, and the sweep never sees it.
+    let broke = pay(&pic, dpay, signed(&sk, payer, merch, INIT_A, [0xc4; 16], T0_SECS + 120, DEMO_USD));
+    assert!(broke.is_err(), "a pay beyond the balance must fail: {broke:?}");
+    assert!(inflight(&pic, dpay).is_empty(), "a released intent is cleared (release_nonce)");
+}
+
+/// R4c (paged walk, >1 page): with a ledger log past one `RECONCILE_PAGE_BLOCKS` page, `reconcile`
+/// walks BACKWARDS pages anchored on each reply's `first_index` and repairs an orphan that lives
+/// in the OLDEST page — a one-shot fetch (or a walk that trusted the requested `start` instead of
+/// `first_index`) would miss it entirely. Also proves the repaired nonce shuts the trap window.
+#[test]
+fn reconcile_walks_backwards_pages_and_repairs_orphan_older_than_one_page() {
+    let (pic, ledger_dusd, _ckx, dpay, sk, payer, merch) = setup();
+    fund_custody(&pic, ledger_dusd, dpay, payer, INIT_A); // block 0
+    let expiry = T0_SECS + 6 * 3_600;
+    let nonce = [0xd5; 16];
+    pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD)).expect("pay ok"); // block 1
+    // Pad the log past ONE page: 1_048 more custody funds → 1_050 blocks total, so the walk is a
+    // probe (log_length) + page [50..1050) + page [0..50) — the orphan sits in that last page.
+    // (The padding funds debit the minting account's default subaccount with no nonce memo, so the
+    // orphan filter skips them.)
+    for _ in 0..1_048 {
+        fund_custody(&pic, ledger_dusd, dpay, payer, 1);
+    }
+    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 1_050);
+
+    // Simulate the trap (same as the R3 tests): reinstall wipes SPENT; the ledger keeps the debit.
+    let dpay_init =
+        DpayInitArg { demo_ledger: ledger_dusd, per_tx_cap: CAP, controller: Some(pic_admin()) };
+    pic.reinstall_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None)
+        .expect("reinstall (simulate trap)");
+
+    let report = reconcile(&pic, dpay, DEMO_USD, pic_admin()).expect("reconcile ok");
+    assert_eq!(
+        report.orphans_repaired, 1,
+        "the old-page orphan is found by the paged walk: {report:?}"
+    );
+    assert_eq!(report.blocks_scanned, 1_050, "the whole window — both pages — was scanned: {report:?}");
+
+    // The repair landed: history reflects the orphan, and a retry of the same authorization is
+    // rejected as a duplicate (no second debit).
+    let txns = transactions_of(&pic, dpay, payer, DEMO_USD, 10);
+    assert_eq!(txns.len(), 1, "reconcile recorded the orphaned txn");
+    assert_eq!(txns[0].nonce, nonce.to_vec());
+    let dup = pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD));
+    assert!(dup.is_err(), "post-reconcile retry must be rejected: {dup:?}");
+    assert_eq!(ledger_chain_len(&pic, ledger_dusd), 1_050, "no new ledger block");
+}
+
+/// R4d (recent orphan under a SPIKE archive config): the same paged walk, but the ledger is
+/// installed with spike `ArchiveOptions` (trigger at 1_000 live blocks, 10-block archive
+/// batches) — proving `reconcile` is indifferent to archive config and still repairs an orphan
+/// sitting past one `RECONCILE_PAGE_BLOCKS` page from the log end.
+///
+/// The archived-boundary STOP itself is UNDRIVABLE offline: the cached ic-icrc1-ledger NEVER
+/// archives under PocketIC — probed empirically (trigger 1_000, log grown to 1_520, env time
+/// advanced + 30 ticks: `archived_transactions` stays empty, `first_index` stays 0; its
+/// archiving depends on subnet machinery PocketIC does not model). So that stop branch carries
+/// NO offline test — it is exercised only against production ledgers, where the defensive
+/// stops (`served == 0`, `first_index >= end`) share its shape and ARE covered by the walk's
+/// page math here. What this test pins instead: the spike config leaves `get_transactions`
+/// fully local (boundary genuinely absent), the walk scans the whole window, and the recent
+/// orphan repairs.
+#[test]
+fn reconcile_repairs_recent_orphan_under_spike_archive_config() {
+    let pic = PocketIc::new();
+    pic.set_time(Time::from_nanos_since_unix_epoch(T0_NANOS));
+    let dpay = pic.create_canister();
+    pic.add_cycles(dpay, 2_000_000_000_000);
+    let minting = Account { owner: dpay, subaccount: None };
+    // Spike config: archive 10-block batches once the live log passes 1_000 blocks.
+    let ledger = install_ledger_opts(
+        &pic,
+        minting,
+        ArchiveOptions {
+            num_blocks_to_archive: 10,
+            max_transactions_per_response: None,
+            trigger_threshold: 1_000,
+            max_message_size_bytes: None,
+            cycles_for_archive_creation: Some(1_000_000_000_000),
+            node_max_memory_size_bytes: None,
+            controller_id: minting.owner,
+            more_controller_ids: None,
+        },
+        vec![],
+    );
+    // Facade wired to the spiky ledger, controller-seeded (reconcile/mint are gated).
+    pic.install_canister(
+        dpay,
+        dpay_wasm(),
+        encode_one(&DpayInitArg { demo_ledger: ledger, per_tx_cap: CAP, controller: Some(pic_admin()) })
+            .unwrap(),
+        None,
+    );
+    let sk = generate_keypair();
+    let payer = sk.verifying_key().to_bytes();
+    let merch = generate_keypair().verifying_key().to_bytes();
+    let expiry = T0_SECS + 6 * 3_600;
+    let nonce = [0xe6; 16];
+
+    // 1 block: the payer's custody fund. Then 1_013 padding funds (blocks 1..=1013), the pay
+    // (block 1_014), and 5 more funds (blocks 1_015..=1_019) → 1_020 blocks: the ledger archived
+    // the OLDEST blocks in 10-block batches; the orphan at 1_014 lives in the live tail.
+    fund_custody(&pic, ledger, dpay, payer, INIT_A);
+    for _ in 0..1_013 {
+        fund_custody(&pic, ledger, dpay, payer, 1);
+    }
+    pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD)).expect("pay ok");
+    for _ in 0..5 {
+        fund_custody(&pic, ledger, dpay, payer, 1);
+    }
+    let log = ledger_chain_len(&pic, ledger);
+    assert_eq!(log, 1_020);
+
+    // No heartbeat chase, no boundary wait — see the doc above: this ledger never archives in
+    // PocketIC. Assert the stop flag the walk keys on is genuinely ABSENT here, so the expected
+    // result below (full window scanned) can only come from the walk's own floor logic.
+    let facts = ledger_txns_facts(&pic, ledger, 0, 1_000);
+    assert!(
+        facts.archived_transactions.is_empty(),
+        "this env must NOT fake an archived boundary: {facts:?}"
+    );
+    assert_eq!(nat_to_u64(&facts.first_index), 0, "the whole log is served locally");
+
+    // Simulate the trap + reconcile: the backwards walk covers the full window (the orphan at
+    // 1_014 sits in the newest page — more than one page from the floor, unlike R4c's oldest-page
+    // orphan), and repairs it.
+    let dpay_init =
+        DpayInitArg { demo_ledger: ledger, per_tx_cap: CAP, controller: Some(pic_admin()) };
+    pic.reinstall_canister(dpay, dpay_wasm(), encode_one(&dpay_init).unwrap(), None)
+        .expect("reinstall (simulate trap)");
+    let report = reconcile(&pic, dpay, DEMO_USD, pic_admin()).expect("reconcile ok");
+    assert_eq!(
+        report.orphans_repaired, 1,
+        "the recent orphan is found past one page depth: {report:?}"
+    );
+    assert_eq!(
+        report.blocks_scanned, log,
+        "no archived boundary exists here — the whole window is scanned: {report:?}"
+    );
 }
 

@@ -780,6 +780,57 @@ pub(crate) struct ReconcileReport {
     pub(crate) orphans_repaired: u64,
 }
 
+// --- in-flight pay-intent markers (lazy stale sweep) --------------------------------------------
+// A marker records that a `pay` has reserved its nonce and entered the cross-canister settle
+// sequence (the ledger awaits). It exists so the CHEAP lazy stale sweep (lib.rs
+// `sweep_stale_intents` — rate-limited to 1/hour on update ingress, NO heartbeat) can
+// notice an intent that has been open far longer than any legitimate settle (`bounded_wait` caps
+// every await at 300s), without ever walking the ledger. Written by `reserve_nonce` (before the
+// first ledger await in `pay`), cleared by `settle_nonce`/`release_nonce` — the marker's lifecycle
+// IS the nonce reservation's lifecycle, by construction. Flag-only: the sweep never moves
+// funds and never auto-runs reconcile (the operator does — see docs/OPS.md).
+
+/// One in-flight pay intent: when `pay` reserved the nonce (unix seconds) and whether the
+/// sweep has already flagged it stale (the flag makes the WARN log fire once per episode, not
+/// every sweep). Fixed 9 bytes: `reserved_at_secs_le(8) | flagged(1)`. Keyed by `Nonce` (MemoryId 15).
+pub(crate) const IN_FLIGHT_LEN: usize = 8 + 1;
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct InFlightIntent {
+    pub(crate) reserved_at_secs: u64,
+    pub(crate) flagged: bool,
+}
+impl Storable for InFlightIntent {
+    fn to_bytes(&self) -> Cow<'_, [u8]> {
+        let mut b = [0u8; IN_FLIGHT_LEN];
+        b[..8].copy_from_slice(&self.reserved_at_secs.to_le_bytes());
+        b[8] = self.flagged as u8;
+        Cow::Owned(b.to_vec())
+    }
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        let b = &bytes[..];
+        // SAFETY (the 1 `.try_into().unwrap()` call below): fixed-layout (IN_FLIGHT_LEN = 9)
+        // written by this canister's own `to_bytes`; the 8-byte slice→array conversion is
+        // infallible for any canister-written entry.
+        InFlightIntent {
+            reserved_at_secs: u64::from_le_bytes(b[..8].try_into().unwrap()),
+            flagged: b.get(8).copied().unwrap_or(0) != 0,
+        }
+    }
+    const BOUND: Bound = Bound::Bounded { max_size: IN_FLIGHT_LEN as u32, is_fixed_size: true };
+}
+
+/// One row of the `inflight_intents` query — the operator-facing flag surface the sweep
+/// feeds. `stale` is computed live (age > `INFLIGHT_STALE_SECS`); `flagged` records that the
+/// sweep already WARN-logged this episode.
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct InFlightView {
+    pub(crate) nonce: Vec<u8>,
+    pub(crate) reserved_at_secs: u64,
+    pub(crate) age_secs: u64,
+    pub(crate) stale: bool,
+    pub(crate) flagged: bool,
+}
+
 // --- self-service demo faucet -----------------------------------------------------------------
 
 /// Fixed amount the faucet mints per call, in minor units (cents) = **$100.00**. The self-service

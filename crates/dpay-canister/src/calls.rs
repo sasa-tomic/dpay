@@ -255,21 +255,26 @@ pub(crate) async fn icrc2_approve(
 }
 
 /// Cross-canister `get_transactions` (the typed ICRC ledger endpoint) →
-/// `(log_length, first_index, transactions)`. Uses the typed `Transaction` reply rather than
-/// hand-decoding generic ICRC-3 blocks: more robust against block-layout drift, and the cached
-/// `ic-icrc1-ledger` exposes it. Only the in-canister recent transactions are returned (archived
-/// ranges are not paged in this bounded version).
+/// `(log_length, first_index, transactions, archived_range_present)`. Uses the typed `Transaction`
+/// reply rather than hand-decoding generic ICRC-3 blocks: more robust against block-layout drift,
+/// and the cached `ic-icrc1-ledger` exposes it. This is a ONE-PAGE fetch: it returns at most the
+/// page the ledger serves locally; `archived_transactions` entries (archived sub-ranges of the
+/// REQUESTED range, with per-archive callbacks) are NOT paged in — the trailing bool tells the
+/// caller the request crossed the archived boundary, which the paged callers (`reconcile`) use as
+/// their stop condition. (PocketIC's ledger never archives in these tests, so the bool is always
+/// false there; the drift-safe read is what production needs.)
 ///
 /// `first_index` is the ACTUAL first block index of the returned range, captured from
 /// `GetTransactionsResponse.first_index` rather than assuming it equals the requested `start`: the
-/// response range may begin elsewhere once archived-range paging is in play. Callers that need to
-/// derive a transaction's ledger block index MUST use `first_index + i`, never `start + i`. (Today
-/// PocketIC has no archiving, so `first_index == start` always; this is the drift-safe read.)
+/// response range may begin elsewhere once archived-range paging is in play (the reply's
+/// `transactions` are "an arbitrary sub-range of the originally requested range" per the ICRC-3
+/// did). Callers that need to derive a transaction's ledger block index MUST use `first_index + i`,
+/// never `start + i`.
 pub(crate) async fn ledger_get_transactions(
     ledger: Principal,
     start: u64,
     length: u64,
-) -> Result<(u64, u64, Vec<Transaction>), String> {
+) -> Result<(u64, u64, Vec<Transaction>, bool), String> {
     let req = GetBlocksRequest { start: Nat::from(start), length: Nat::from(length) };
     let response = Call::bounded_wait(ledger, "get_transactions")
         .with_arg(req)
@@ -280,7 +285,8 @@ pub(crate) async fn ledger_get_transactions(
         .map_err(|e| format!("get_transactions decode: {e:?}"))?;
     let log_length = nat_to_u64(&res.log_length)?;
     let first_index = nat_to_u64(&res.first_index)?;
-    Ok((log_length, first_index, res.transactions))
+    let archived = !res.archived_transactions.is_empty();
+    Ok((log_length, first_index, res.transactions, archived))
 }
 
 // --- pure helpers shared with lib.rs ----------------------------------------------------------

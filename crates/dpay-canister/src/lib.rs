@@ -46,13 +46,26 @@
 //! quantization of the wall clock (see `dedup_created_at_time`), so retries within the same bucket
 //! share it and the ledger returns `Duplicate` → the success branch → no second debit.
 //!
+//! Detection half (lazy stale sweep): `reserve_nonce` writes an in-flight intent marker before the
+//! first ledger await, and `settle_nonce`/`release_nonce` clear it — so the marker set is exactly
+//! the settles currently in flight. Stale detection runs lazily on update ingress (rate-limited to
+//! 1/hour — `maybe_sweep_stale_intents`, anchored at `reconcile` + the faucet-mint path): the
+//! sweep scans ONLY that set (O(markers), empty on a healthy canister — never a ledger walk) and
+//! WARN-logs once per episode on any marker older than [`INFLIGHT_STALE_SECS`], pointing the
+//! operator at `reconcile`. It moves no funds and auto-runs nothing (flag-only by design; see
+//! `sweep_stale_intents`). There is NO `#[heartbeat]` (founder decision 2026-09-07: heartbeats are
+//! terribly expensive on mainnet and this kernel is dormant); if the kernel ever re-enters the
+//! value path, upgrade to the IC one-shot global timer (wakes only at the deadline), NOT a
+//! heartbeat.
+//!
 //! ## Stable-memory layout (upgrade compatibility)
 //! State lives in stable structures so it survives upgrades automatically. The layout preserves the
 //! pre-facade shipping canister's `SPENT` (MemoryId 1), `CAP` (2), `TXN_SEQ` (3), and `ACCOUNT_TXNS`
 //! (4) at the *same* MemoryIds and types, so the upgrade of an existing deployment keeps nonces +
 //! history. The legacy internal `BALANCES` (MemoryId 0) is abandoned — its entries were orphaned
 //! play money. Facade state: `LEDGERS` (5), `CONTROLLER` (6), `BAL_CACHE` (7), `FAUCET_COOLDOWN`
-//! (9), `RECEIPT_SECRET` (10), `RECEIPTS` (11), `WITHDRAW_NONCES` (12). NB: `SPENT` keeps the legacy
+//! (9), `RECEIPT_SECRET` (10), `RECEIPTS` (11), `WITHDRAW_NONCES` (12), `INFLIGHT` (15, the
+//! pay-intent markers), `LAST_SWEEP_SECS` (16, the lazy-sweep rate-limit timestamp). NB: `SPENT` keeps the legacy
 //! value type `()` (a set) rather than the ICRC demo's 1-byte `NonceState`; the Pending/Settled
 //! distinction was informational only (`contains_key` is the sole read), and reusing the same
 //! MemoryId with a different value size would corrupt the B-tree on upgrade. The full
@@ -75,6 +88,7 @@ use ic_stable_structures::memory_manager::{MemoryId, MemoryManager};
 use ic_stable_structures::{DefaultMemoryImpl, StableBTreeMap, StableCell};
 use icrc_ledger_types::icrc1::account::Account;
 use icrc_ledger_types::icrc1::transfer::{TransferArg, TransferError};
+use icrc_ledger_types::icrc3::transactions::Transaction;
 use std::cell::RefCell;
 
 use dpay_core::{
@@ -105,11 +119,21 @@ pub(crate) fn print_log(msg: impl AsRef<str>) {
 // `release` removes (on a transient failure, so the payer may retry); `settle` is a no-op (the
 // entry is already present). See the module docs for why this is a set, not the ICRC demo's
 // Pending/Settled enum (upgrade-layout compatibility).
+//
+// The SAME three calls maintain the in-flight intent markers (`INFLIGHT`, MemoryId 15): `reserve`
+// writes the marker (before `pay`'s first ledger await), `settle`/`release` clear it (the intent
+// reached a terminal state). Folding the marker lifecycle into the nonce primitives keeps the two
+// maps exactly paired at every call site with no per-branch bookkeeping in `pay`. The markers are
+// what the cheap lazy stale sweep scans — never the ledger.
 
 /// Reserve `nonce`, atomically. Returns `false` if it is already present (replay, or a concurrent
 /// `pay` reserved it first). Synchronous — no `await` — so two concurrent calls cannot both succeed.
+/// Also writes the in-flight intent marker (see [`INFLIGHT`]) so the lazy stale sweep can observe an
+/// intent that never reached a terminal state (e.g. the message was dropped by a mid-settle
+/// stop/upgrade — the one case where a pre-await stable write survives while the completion does
+/// not run). The marker is keyed by the same nonce and carries the reservation time.
 fn reserve_nonce(nonce: &Nonce) -> bool {
-    SPENT.with(|s| {
+    let ok = SPENT.with(|s| {
         let mut s = s.borrow_mut();
         if s.contains_key(nonce) {
             false
@@ -117,22 +141,43 @@ fn reserve_nonce(nonce: &Nonce) -> bool {
             s.insert(nonce.clone(), ());
             true
         }
-    })
+    });
+    if ok {
+        // The marker is written ONLY on a successful reservation — the pairing invariant
+        // (marker present ⟺ nonce reserved-but-uncleared) keeps the sweep's read truthful.
+        INFLIGHT.with(|m| {
+            m.borrow_mut().insert(
+                nonce.clone(),
+                InFlightIntent { reserved_at_secs: time() / 1_000_000_000, flagged: false },
+            );
+        });
+    }
+    ok
 }
 
-/// Mark `nonce` as settled. With set semantics this is a no-op (the reservation already inserted
-/// it); kept as a named call site so the settle/release intent reads clearly at each `pay` branch.
+/// Mark `nonce` as settled. With set semantics the SPENT insert is a no-op (the reservation
+/// already inserted it); kept as a named call site so the settle/release intent reads clearly at
+/// each `pay` branch. Clears the in-flight marker — the intent reached its terminal state
+/// ("settled" or "dead, never retry"). Also called by `reconcile`'s orphan repair, where clearing
+/// is equally correct: the repair IS the intent's resolution.
 fn settle_nonce(nonce: &Nonce) {
     SPENT.with(|s| {
         s.borrow_mut().insert(nonce.clone(), ());
     });
+    INFLIGHT.with(|m| {
+        m.borrow_mut().remove(nonce);
+    });
 }
 
 /// Release a reservation so the payer may retry the SAME nonce. Used only when funds provably did
-/// not move (transient/pre-transfer failures).
+/// not move (transient/pre-transfer failures). Clears the in-flight marker — the intent reached
+/// its terminal state ("retryable, nothing moved").
 fn release_nonce(nonce: &Nonce) {
     SPENT.with(|s| {
         s.borrow_mut().remove(nonce);
+    });
+    INFLIGHT.with(|m| {
+        m.borrow_mut().remove(nonce);
     });
 }
 
@@ -345,6 +390,26 @@ thread_local! {
     static WITHDRAW_NONCES: RefCell<StableBTreeMap<Nonce, (), Memory>> =
         RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(12)))));
 
+    /// In-flight pay-intent markers: nonce -> [`InFlightIntent`]. MemoryId 15 (next free after
+    /// the abandoned registry-era ids 8/13/14). Written by `reserve_nonce` (before `pay`'s first
+    /// ledger await), cleared by `settle_nonce`/`release_nonce` — so the map holds EXACTLY the
+    /// nonces currently inside the cross-canister settle sequence. Survives upgrades (stable),
+    /// which is the point: a mid-settle stop/upgrade drops the in-flight MESSAGE but keeps this
+    /// marker, making the dangling intent observable. This is ALL the lazy stale sweep
+    /// (`sweep_stale_intents`) ever reads — O(markers), never a ledger walk. The value carries
+    /// the reservation time + the sweep's once-per-episode stale flag.
+    static INFLIGHT: RefCell<StableBTreeMap<Nonce, InFlightIntent, Memory>> =
+        RefCell::new(StableBTreeMap::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(15)))));
+
+    /// Unix-secs of the last stale-intent sweep. MemoryId 16. The O(1) rate-limit guard for
+    /// `maybe_sweep_stale_intents` (at most one sweep per [`INFLIGHT_STALE_SECS`]); `0` at install
+    /// means the first update-ingress call sweeps once (cheap — the marker map is empty then).
+    static LAST_SWEEP_SECS: RefCell<StableCell<u64, Memory>> = RefCell::new(
+        StableCell::init(MEMORY.with(|m| m.borrow().get(MemoryId::new(16))), 0)
+            // SAFETY: one-time stable-cell init; a trap means corrupt stable storage (canister can't boot).
+            .expect("init last-sweep cell"),
+    );
+
     // MemoryId 13: registry-era `CURRENCY_META` — ABANDONED with the governed registry (founder
     // decision 2026-08-28), unread. Family/token-contract/gas-ledger/cap now come from
     // `FIXED_ASSETS`.
@@ -525,7 +590,9 @@ async fn pay(signed: Vec<u8>) -> Result<PayReceipt, String> {
     let receipt_sk = ensure_receipt_key().await?;
 
     // Reserve the nonce synchronously (no await) — this is the concurrency barrier. A concurrent
-    // `pay` with the same nonce observes it as used and is rejected at this point.
+    // `pay` with the same nonce observes it as used and is rejected at this point. The SAME
+    // reservation writes the in-flight intent marker (see [`reserve_nonce`]) the lazy stale sweep
+    // scans — before any ledger await below.
     if !reserve_nonce(&nonce) {
         return Err("nonce already used".to_string());
     }
@@ -805,6 +872,10 @@ async fn refresh_balances(
 #[update]
 async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, String> {
     require_admin()?;
+    // Lazy stale-intent sweep (rate-limited to 1/hour, O(1) when skipped): `mint` is the relay-
+    // driven production faucet ingress — the one update call that keeps firing on this otherwise
+    // dormant kernel, so it keeps the sweep ticking without a heartbeat.
+    maybe_sweep_stale_intents();
     let pk = to_pubkey(&to)?;
     let (ledger, mintable) = ledger_for(currency)?;
     if !mintable {
@@ -854,6 +925,11 @@ async fn mint(to: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Strin
 /// facade-custody [`calls::account_of`] shape, which the post-cutover app does not read.
 #[update]
 async fn faucet(account: Vec<u8>, currency: Currency) -> Result<u64, String> {
+    // Lazy stale-intent sweep (rate-limited to 1/hour, O(1) when skipped) — the direct-canister
+    // self-service half of the faucet-mint anchor (see `maybe_sweep_stale_intents`). Deliberately
+    // BEFORE the cooldown check: a cooldown-rejected call is still a completed message (not a
+    // trap), so the sweep's stable writes persist either way.
+    maybe_sweep_stale_intents();
     let pk = to_pubkey(&account)?;
     let (ledger, mintable) = ledger_for(currency)?;
     if !mintable {
@@ -971,14 +1047,37 @@ async fn burn(from: Vec<u8>, currency: Currency, amount: u64) -> Result<u64, Str
 // a duplicate. Admin-gated (controller-only, like the other privileged ops).
 
 /// Cap on how many recent ledger transactions a single `reconcile` scans (single-currency,
-/// recent-blocks scope). A long-lived ledger may have archived older blocks; this bounded scan covers
-/// the recent window where a trap could have left an orphan. Generalizing to a full archived-block
-/// walk + a heartbeat trigger is a documented follow-up (see CODEBASE_ANALYSIS risk 4).
+/// recent-blocks scope): the newest [`RECONCILE_MAX_BLOCKS`] blocks of the ledger's log. A trap's
+/// orphan is always RECENT (it was an in-flight settle), so the recent window is where repairs
+/// live. Blocks older than this window and blocks the ledger has ARCHIVED are out of scope —
+/// serving them needs the per-archive callback fetch this walk deliberately does not do (the same
+/// recent-blocks-only contract as the relay's icrc3 history walk).
 const RECONCILE_MAX_BLOCKS: u64 = 10_000;
+
+/// Page size of the reconcile walk, in blocks — mirrors the relay's `HISTORY_PAGE_BLOCKS`
+/// (crates/dpay-relay/src/agent_ledger.rs): 1_000-block pages keep every `get_transactions` round
+/// trip comfortably inside inter-canister message limits while covering the 10_000-block window in
+/// at most 10 pages.
+const RECONCILE_PAGE_BLOCKS: u64 = 1_000;
 
 /// `(nat32 currency) -> Result<ReconcileReport, text>` — walk the currency's recent ledger
 /// transactions and repair any facade-account debit whose nonce is missing from SPENT (the post-trap
 /// orphan state). Controller-only. Idempotent: re-running on already-consistent state repairs nothing.
+///
+/// The walk itself is PAGED (mirroring the relay's icrc3 walk, `agent_ledger.rs
+/// transactions_walk`, adapted to a whole-window scan): one probe round trip captures
+/// `log_length`; for a log longer than one page the walk pages backwards from that snapshot to
+/// the window floor (`log_length - RECONCILE_MAX_BLOCKS`) in [`RECONCILE_PAGE_BLOCKS`] pages.
+/// Every page anchors on the response's `first_index` (the ACTUAL first block served — the
+/// ICRC-3 reply is an arbitrary sub-range of the request, so assuming `start` was served would
+/// skip or double-count blocks), and the next page's exclusive end is the current page's
+/// `first_index`. The walk STOPS at the archived boundary: a reply with `archived_transactions`
+/// non-empty marks that the older part of the requested range lives in archive canisters behind
+/// per-archive callbacks — this page serves what it can and the walk ends (recent-blocks-only,
+/// documented, not a silent gap). An empty page ends the walk the same way. Paged anchoring is
+/// what lets one `reconcile` actually cover the whole 10_000-block window: the one-shot fetch it
+/// replaced could silently return fewer blocks than requested (the ledger bounds each response),
+/// missing recent orphans entirely.
 ///
 /// Match rule: a `transfer` whose `from.owner == canister_self()`, `from.subaccount == Some(pk)`,
 /// and whose `memo` is a 16-byte nonce — exactly the shape `pay` produces. Mint/burn use the minting
@@ -987,30 +1086,66 @@ const RECONCILE_MAX_BLOCKS: u64 = 10_000;
 #[update]
 async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
     require_admin()?;
+    // Lazy stale-intent sweep (rate-limited to 1/hour, O(1) when skipped): the operator is about to
+    // scan anyway, so this is the natural anchor for stale-marker detection (no heartbeat — see
+    // `maybe_sweep_stale_intents`).
+    maybe_sweep_stale_intents();
     let (ledger, _mintable) = ledger_for(currency)?;
     let self_id = canister_self();
 
-    let (log_length, first_index_initial, txs_initial) =
-        ledger_get_transactions(ledger, 0, RECONCILE_MAX_BLOCKS).await?;
-    // `get_transactions` returns up to `length` from `start`; if the log is longer than the cap, the
-    // recent window is what we want (a trap's orphan is recent). Re-fetch the tail when the log
-    // exceeds the cap so we scan the NEWEST blocks, not the oldest. Capture the response's
-    // `first_index` (the ACTUAL first block index of the returned range — NOT necessarily the
-    // requested `start` once archived-range paging is in play) so the loop can derive each
-    // transaction's ledger block index: the ICRC-3 `Transaction` itself carries no `block_index`
-    // field, and the tx at loop position `i` is ledger block `first_index + i`.
-    let (first_index, txs) = if log_length > RECONCILE_MAX_BLOCKS {
-        let tail_start = log_length - RECONCILE_MAX_BLOCKS;
-        let (_, first_index, txs) =
-            ledger_get_transactions(ledger, tail_start, RECONCILE_MAX_BLOCKS).await?;
-        (first_index, txs)
+    // Probe: (start=0, length=PAGE). For a log of at most one page this IS the whole live log —
+    // one round trip, done. For a longer log only the probe's `log_length` is used (its rows are
+    // the OLDEST blocks, outside the recent window).
+    let (log_length, probe_first, probe_txs, _) =
+        ledger_get_transactions(ledger, 0, RECONCILE_PAGE_BLOCKS).await?;
+
+    // The window, oldest→newest, as `(block_index, Transaction)` pairs — block indices derived
+    // from each page's OWN `first_index` (never the requested `start`; see the method doc).
+    let mut window: Vec<(u64, Transaction)> = Vec::new();
+    if log_length <= RECONCILE_PAGE_BLOCKS {
+        for (i, tx) in probe_txs.into_iter().enumerate() {
+            window.push((probe_first + i as u64, tx));
+        }
     } else {
-        (first_index_initial, txs_initial)
-    };
+        // Long log: walk BACKWARDS from the probe's `log_length` snapshot to the window floor in
+        // PAGE-sized pages (backwards, like the relay walk, so the archived boundary is hit LAST —
+        // recent pages are always served locally; a forward walk from the floor would hit the
+        // boundary first and never reach the recent blocks where orphans live).
+        let floor = log_length.saturating_sub(RECONCILE_MAX_BLOCKS);
+        let mut end = log_length; // exclusive upper block index of the next page request
+        while end > floor {
+            let start = end.saturating_sub(RECONCILE_PAGE_BLOCKS).max(floor);
+            let (_, first_index, txs, archived) =
+                ledger_get_transactions(ledger, start, end - start).await?;
+            let served = txs.len() as u64;
+            for (i, tx) in txs.into_iter().enumerate() {
+                window.push((first_index + i as u64, tx));
+            }
+            // Archived boundary: the OLDER part of this request lives behind archive callbacks —
+            // this page served what it can and the walk ends (recent-blocks-only contract).
+            if archived {
+                break;
+            }
+            // Empty page: the ledger served nothing locally for this range — nothing older to ask.
+            if served == 0 {
+                break;
+            }
+            // Drift-safe anchor + termination: continue from where the ledger ACTUALLY served.
+            // `first_index` is a served sub-range's front, so `first_index < end` whenever
+            // `served >= 1` — the loop strictly descends and cannot double-count blocks.
+            if first_index >= end {
+                break; // defensive: response violated the sub-range contract; stop rather than spin
+            }
+            end = first_index;
+        }
+        // Pages arrived newest→oldest; restore oldest→newest so the scan (and any logging) reads
+        // in ledger order.
+        window.reverse();
+    }
 
     let mut scanned: u64 = 0;
     let mut repaired: u64 = 0;
-    for (i, tx) in txs.into_iter().enumerate() {
+    for (block_index, tx) in window.into_iter() {
         scanned += 1;
         let Some(t) = tx.transfer else { continue };
         // Only debits from a user subaccount of THIS canister (a `pay`). Mints use subaccount None;
@@ -1071,7 +1206,6 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         let already_stored = RECEIPTS.with(|m| m.borrow().contains_key(&nonce_key));
         if !already_stored {
             let receipt_sk = ensure_receipt_key().await?;
-            let block_index = first_index + i as u64;
             let claim = ReceiptClaim {
                 nonce,
                 from: from_pk,
@@ -1092,6 +1226,159 @@ async fn reconcile(currency: Currency) -> Result<ReconcileReport, String> {
         repaired += 1;
     }
     Ok(ReconcileReport { currency, blocks_scanned: scanned, orphans_repaired: repaired })
+}
+
+// --- stale-intent sweep: the cheap in-flight guard (LAZY, rate-limited) --------------------------
+// The trap window `reconcile` closes has a detection half: if `pay`'s message is dropped mid-settle
+// (canister stopped/upgraded between the ledger debit and the completion message, or a stall past
+// every `bounded_wait` bound), the in-flight intent marker the reservation wrote SURVIVES in stable
+// memory while nothing is running. The sweep is the CHEAP guard over exactly that state: it scans
+// the marker map — O(markers), empty on a healthy canister, one stable-map iteration — and NEVER
+// touches the ledger (no balance reads, no `get_transactions`, no `reconcile` auto-run).
+//
+// FOUNDER DECISION (2026-09-07): there is NO `#[heartbeat]` — heartbeats are terribly expensive on
+// mainnet and this kernel is DORMANT (`pay` has no production caller). Stale detection runs lazily
+// on update ingress: `maybe_sweep_stale_intents` is anchored at the update entry points that
+// plausibly fire on an otherwise-idle canister — `reconcile` (the operator path; it is about to
+// scan anyway) and the faucet-mint path (`mint`, the relay-driven production faucet ingress, +
+// the direct self-service `faucet`) — rate-limited to at most one sweep per [`INFLIGHT_STALE_SECS`]
+// wall-clock by an O(1) timestamp read, so the common call path stays free. `pay` itself is
+// deliberately NOT an anchor (a dormant kernel must not pay for detection on the value path); if
+// the kernel ever re-enters the value path, upgrade to the IC one-shot global timer (wakes only at
+// the deadline), NOT a heartbeat.
+//
+// FLAG-ONLY by design (conservative reading of the spec): a stale marker means the settle outcome
+// is UNKNOWN — the ledger may or may not have debited. The one WARN per episode tells the operator
+// to run `reconcile` (docs/OPS.md), which is the existing admin-gated, human-reviewed repair. The
+// sweep itself moves no funds, mints nothing, and calls nothing cross-canister.
+
+/// Age after which an in-flight intent is STALE — and (same value) the minimum wall-clock interval
+/// between lazy sweeps. Every cross-canister await in `pay` is a `Call::bounded_wait` (≤ 300s by
+/// construction), so a legitimate settle completes in at most a few minutes; 1 hour is two orders
+/// of magnitude past that, only reachable by a dropped/stalled message. Chosen to be far above
+/// legitimate in-flight spans yet far below "nobody is watching". Doubles as the sweep rate-limit
+/// period (at most one sweep per hour): a marker reserved just after a sweep is flagged by the
+/// NEXT one at most ~2h after reservation — plenty for a WARN-only signal.
+pub(crate) const INFLIGHT_STALE_SECS: u64 = 60 * 60;
+
+/// The sweep body: scan the in-flight markers and WARN (once per episode) on any stale one. This is
+/// the exact former heartbeat body, relocated — O(in-flight markers), a healthy canister has zero,
+/// so a sweep is one empty-map iteration. It performs NO cross-canister calls and NO state changes
+/// beyond the markers' own once-per-episode `flagged` bits. Synchronous, so it is atomic within
+/// the calling update message.
+pub(crate) fn sweep_stale_intents(now_secs: u64) {
+    // Pass 1 (read-only): the stale-and-not-yet-flagged markers.
+    let newly_stale: Vec<(Nonce, u64)> = INFLIGHT.with(|m| {
+        let m = m.borrow();
+        m.iter()
+            .filter(|(_, intent)| {
+                !intent.flagged && now_secs.saturating_sub(intent.reserved_at_secs) > INFLIGHT_STALE_SECS
+            })
+            .map(|(nonce, intent)| (nonce, now_secs.saturating_sub(intent.reserved_at_secs)))
+            .collect()
+    });
+    // Pass 2: WARN once per episode + set the flag. `flagged` keeps the log signal loud-but-once:
+    // a dangling marker would otherwise re-WARN on every sweep for the canister's lifetime.
+    for (nonce, age_secs) in newly_stale {
+        let hex: String = nonce.0.iter().map(|b| format!("{b:02x}")).collect();
+        print_log(format!(
+            "WARN stale sweep: stale in-flight pay intent nonce={hex} age={age_secs}s — settle outcome unknown \
+             (message dropped mid-settle: stop/upgrade, or a stall); run `reconcile` on the currency's ledger \
+             to close the trap window (docs/OPS.md)"
+        ));
+        INFLIGHT.with(|m| {
+            // One borrow held across get+insert (StableBTreeMap has no get_mut; a second
+            // borrow_mut on the same cell would panic — found by the first-ever sweep run).
+            let mut map = m.borrow_mut();
+            if let Some(mut intent) = map.get(&nonce) {
+                intent.flagged = true;
+                map.insert(nonce, intent);
+            }
+        });
+    }
+}
+
+/// The lazy, rate-limited wrapper anchored at update ingress (see the section doc). The guard is
+/// O(1) — one stable-cell timestamp read — so an anchored entry point pays nothing on the common
+/// path; at most once per [`INFLIGHT_STALE_SECS`] it runs [`sweep_stale_intents`]. The timestamp
+/// is written BEFORE the scan, so an interrupted sweep is not retried more than once per window
+/// either (and the scan itself is idempotent via the `flagged` bits — a re-run is harmless).
+pub(crate) fn maybe_sweep_stale_intents() {
+    let now_secs = time() / 1_000_000_000;
+    let due = LAST_SWEEP_SECS.with(|c| {
+        let last = *c.borrow().get();
+        if now_secs.saturating_sub(last) < INFLIGHT_STALE_SECS {
+            return false;
+        }
+        match c.borrow_mut().set(now_secs) {
+            // `set` returns the cell's PREVIOUS value — discarded here.
+            Ok(_) => true,
+            // Stable-memory exhaustion: fail loud, skip this sweep (a later anchored call retries).
+            Err(e) => {
+                print_log(format!(
+                    "WARN stale sweep: cannot record sweep timestamp ({e:?}) — sweep deferred"
+                ));
+                false
+            }
+        }
+    });
+    if due {
+        sweep_stale_intents(now_secs);
+    }
+}
+
+/// `() -> vec InFlightView` — the operator-facing half of the stale-intent flag: every currently-open
+/// intent with its reservation time, live age, staleness (age > [`INFLIGHT_STALE_SECS`]), and
+/// whether the sweep has already WARN-logged it. This is what an operator (or the OPS.md
+/// incident flow) reads to see WHAT to reconcile; `transactions_of`/`receipt` then show the
+/// outcome. Query, unauthenticated: it exposes only nonces + timestamps (a nonce alone moves no
+/// funds; the signed authorization is what spends, and it is not stored here). Pull-based and
+/// free — the operator polls it; no background execution (no heartbeat) ever runs on its behalf.
+#[query]
+fn inflight_intents() -> Vec<InFlightView> {
+    let now_secs = time() / 1_000_000_000;
+    INFLIGHT.with(|m| {
+        let m = m.borrow();
+        m.iter()
+            .map(|(nonce, intent)| {
+                let age_secs = now_secs.saturating_sub(intent.reserved_at_secs);
+                InFlightView {
+                    nonce: nonce.0.to_vec(),
+                    reserved_at_secs: intent.reserved_at_secs,
+                    age_secs,
+                    stale: age_secs > INFLIGHT_STALE_SECS,
+                    flagged: intent.flagged,
+                }
+            })
+            .collect()
+    })
+}
+
+/// `(nonce: vec nat8, reserved_at_secs: nat64) -> Result<(), String>` — TEST/OPS SEAM: manufactures
+/// the marker state a pay whose message was dropped mid-settle leaves behind — an unflagged
+/// [`INFLIGHT`] entry at an arbitrary age. A REAL dropped-mid-settle cannot be driven in PocketIC
+/// (a full cross-canister settle drains within ONE tick-round, so there is no between-rounds
+/// moment to interrupt), and the lazy-sweep tests need exactly that state: backdated markers,
+/// the 1/hour guard, the flag bit. Admin-gated (`require_admin`, the same trust boundary as
+/// `mint`) and inert by construction: a marker moves no funds (spend authority is the signed
+/// envelope + `SPENT`, not the marker); the worst it can do is a row in `inflight_intents` and,
+/// once stale, one WARN line. It is the only writer of [`INFLIGHT`] besides `reserve_nonce`.
+#[update]
+fn debug_dangle_intent(nonce: Vec<u8>, reserved_at_secs: u64) -> Result<(), String> {
+    require_admin()?;
+    let nonce: [u8; NONCE_LEN] = nonce
+        .try_into()
+        .map_err(|_| format!("debug_dangle_intent: nonce must be {NONCE_LEN} bytes"))?;
+    INFLIGHT.with(|m| {
+        m.borrow_mut().insert(
+            Nonce(nonce),
+            InFlightIntent {
+                reserved_at_secs,
+                flagged: false,
+            },
+        );
+    });
+    Ok(())
 }
 
 // --- deposit / withdraw proxy surface ---------------------------------------------------------
