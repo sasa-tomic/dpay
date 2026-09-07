@@ -1,6 +1,13 @@
 # OPEN_ISSUES — the authoritative open list
 
 > Role: known blockers + documented follow-ups. Read top-down; work order first.
+> **Pruned 2026-09-07** — work-order items 2+3 closed and removed: item 2 reconcile
+> stale-detection + paging (`90f5930`; founder decision replaced the specced `#[heartbeat]` with a
+> lazy ≤1/hour sweep — heartbeats are terribly expensive on mainnet and the kernel is dormant; design
+> + residuals in CODEBASE_ANALYSIS risk 4), item 3 SOL settle-verify 6(b) (`68c6c3f`; recorded in
+> CODEBASE_ANALYSIS SOL v2 model ¶; 6(a) was already `9c7572f`), and the trust-wallet fund-button
+> closed record (`43b1f09`; never O3 progress). Work order is now O3-only (hard-blocked) + the
+> physical gates below. Nothing was closed by the prune itself.
 > **Pruned 2026-09-06** (455 lines → this): closed records removed — governance P1/P2 (`8805027`),
 > SOL 6(a) (`9c7572f`), the e2e balance-route residual (`450bdc7`), item 4 and `refresh_deposit`
 > (retired, struck below with their evidence), the completed OCP founder-ops, and the settled
@@ -27,43 +34,8 @@ until the blockers land. THE thing that unblocks it:**
 - **(e) Structural, measured 2026-09-04** — no compliant fiat rail into ANY chain-key asset exists;
   only Solana USDC and native ICP are card-reachable at all.
 
-Adjacent but NOT O3: the Trust Wallet fund-button
-(`docs/specs/2026-08-17-trust-wallet-fund-button.md`) — CLOSED `43b1f09` (2026-08-22):
-`app/trustwallet.ts` deeplink builder + android-gated ghost button on the mainnet-BTC DepositSheet
-and the SOL/SPL receive sheet, jest-pinned (golden URLs, eligibility, gate matrix); re-verified
-2026-09-06. Never O3 progress (no onramp, no fiat). The plan's optional stretch (Trust-specific WC
-entry on the ckERC20 sheet) remains NOT done by choice — optional, out of boundary.
-
-**2. Item 5 — reconcile stale-detection + paging (CLOSED 2026-09-07; founder decision replaced the
-heartbeat with a lazy sweep).** Detection: `reserve_nonce` writes an INFLIGHT marker (MemoryId 15)
-before the first ledger await, `settle_nonce`/`release_nonce` clear it; `maybe_sweep_stale_intents`
-runs at most 1/hour via an O(1) `LAST_SWEEP_SECS` guard (MemoryId 16) anchored at `reconcile`/
-`mint`/`faucet` update ingress; operator surface = free `inflight_intents()` query + once-per-episode
-WARN → docs/OPS.md. NO `#[heartbeat]` — heartbeats are terribly expensive on mainnet and the kernel
-is dormant; if `pay()` ever re-enters the value path, upgrade to the IC one-shot global timer (wakes
-only at the deadline), NOT a heartbeat. Pagination: DONE — `reconcile` probes then walks BACKWARDS
-1_000-block pages anchored on `first_index`, stopping at the archived boundary / empty page / 10k
-floor. PocketIC-proven: `lazy_sweep_flags_stale_intents_and_rate_limits_to_one_per_hour` (via the
-admin-gated `debug_dangle_intent` seam — a real dropped-mid-settle is undrivable: a settle drains
-within one PocketIC tick-round), `inflight_marker_pairs_with_nonce_reservation`, and the two paged-walk
-tests. Known residual (documented in CODEBASE_ANALYSIS risk 4): the archived-boundary STOP branch has
-no offline test — the cached ic-icrc1-ledger never archives under PocketIC (probed: 1_520 blocks past
-a 1_000 trigger, time moved + ticks → `archived_transactions` stays empty); production-only.
-
-**3. ~~6(b) — stronger SOL receipt verify~~ CLOSED `68c6c3f` (2026-09-07).** SETTLED is no
-longer granted on `getSignatureStatuses` alone: once confirmed/finalized, `broadcastSolPayment`
-re-reads the tx via `getTransaction` and `verifySettledTransaction` (`app/solana/settleVerify.ts`,
-pure) recompiles the fetched json message to legacy wire bytes and requires full byte-equality with
-the canonical message (plus `meta.err==null`) before SETTLED. Classification: fetched-and-matching
-→ SETTLED; `meta.err` → REJECTED; well-formed-but-different (incl. v0/ALT claim) → `RECEIPT_MISMATCH=3`
-(terminal; merchant keeps `outcome:'unknown'` + reconcile armed, payer decider maps 3→pending — an
-unverifiable RPC answer is NEVER promoted to a decline); null/throwing/malformed fetch → keep polling
-to the existing deadline → UNREACHABLE (honest pending). Kotlin NFC hop unchanged (unknown codes →
-PENDING). Jest: `solana-settle-verify.test.ts` (18) + seam matrix + payments; e2e flows 138/139 +
-fixtures on 51/74/132. Recorded in CODEBASE_ANALYSIS (v2 model ¶). (6(a) — the absent-ATA sign gate —
-CLOSED `9c7572f`: per-mint token facts persisted in `app/services/solTokenStatePersist.ts`;
-pure `solSplSignGate` fail-open on unconfirmed, refusing only live-or-persisted 'absent' and
-'unregistered' for unknown mints; QR + NFC card gated, founder-rule copy ×4; flow 137.)
+Nothing else is agent-pickable: the work order above is the only non-physical blocked item; the
+remaining list is the physical/outer-loop gates (below, founder-run) and the DO-NOT-NAG set.
 
 **Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
 - **O1 home currency** — BUILT, gated green, shipped; spec
@@ -81,11 +53,11 @@ pure `solSplSignGate` fail-open on unconfirmed, refusing only live-or-persisted 
 ## PROD STATE (checked, never asserted — floor `face8fba`)
 
 Floor `face8fba` = HEAD verified live 2026-09-06 (`just verify-relay` PASS at HEAD-equality, both
-EUR rows in the live catalog). Unshipped since: `450bdc7` / `9c7572f` / `8805027` / `65eeef6`
-(+ this prune). The next `just up` ships the cashier page (`GET /till/{id}`), the integrity route
-(`GET /api/v1/integrity`), and the balance-route deletion; `just integrity-check` goes MATCH after
-that deploy without any `deploy-ic` — the facade is unchanged, so the baked pin
-(`deploy/facade-module-hash.txt`, `0978…722c`) already equals the live module hash.
+EUR rows in the live catalog). Unshipped since: `450bdc7` / `9c7572f` / `8805027` / `65eeef6` /
+`3c16053` / `68c6c3f` / `90f5930` (+ docs). **The facade WASM changed at `90f5930`** (lazy-sweep +
+paged-reconcile surface: `inflight_intents`, `debug_dangle_intent`) — the next ship is the FULL
+sequence `just deploy-ic && just apk && just up` (the deploy-ic upgrade is no longer skippable);
+`just integrity-check` goes MATCH after that deploy re-bakes the module-hash pin.
 
 ## Retired this prune (decision-shaped — do not re-file)
 
