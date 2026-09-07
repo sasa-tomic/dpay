@@ -23,6 +23,7 @@
 // Selector contract: `asset-sol-select`, `tab-receive`, `tab-pay`, `sol-req-amount-input`,
 // `btn-sol-req-make`, `sol-req-qr`, `sol-req-status`, `sol-req-sig`, `sol-pay-scan`.
 import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
 export const meta = {
   id: '51',
@@ -71,8 +72,10 @@ export async function run() {
 
     // Install the SOL RPC stub with v2 methods.
     // Phase 1 (createSolPaymentRequest): getGenesisHash + getLatestBlockhash.
-    // Phase 2 (broadcastSolPayment): isBlockhashValid + getBlockHeight + sendTransaction + getSignatureStatuses.
-    // sendTransaction echoes the sig stashed in __DPAY_TEST_SOL_SIG (set after extracting from the solpay).
+    // Phase 2 (broadcastSolPayment): isBlockhashValid + getBlockHeight + sendTransaction + getSignatureStatuses
+    // + getTransaction (the settle gate, 6(b): a "confirmed" status alone no longer settles — the
+    // re-read body must BE the canonical message). sendTransaction echoes the sig stashed in
+    // __DPAY_TEST_SOL_SIG; getTransaction echoes the json detail stashed in __DPAY_TEST_SOL_TX_DETAIL.
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
         getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
@@ -81,6 +84,7 @@ export async function run() {
         getBlockHeight: () => 250000001,
         sendTransaction: () => globalThis.__DPAY_TEST_SOL_SIG || 'sig_fallback',
         getSignatureStatuses: () => ({context: {slot: 250000002}, value: [{confirmationStatus: 'confirmed'}]}),
+        getTransaction: () => globalThis.__DPAY_TEST_SOL_TX_DETAIL ?? null,
         getBalance: () => ({value: 5000000000}),
       };
     });
@@ -129,6 +133,13 @@ export async function run() {
     const sig = extractSig(solpayUri);
     await driver.eval((s) => { globalThis.__DPAY_TEST_SOL_SIG = s; }, sig);
     console.log(`[51-sol-merchant-broadcast] sig extracted + stashed: ${sig.slice(0, 12)}…`);
+
+    // 4b. Seed the settle-gate fixture: the json detail DERIVED FROM the real canonical bytes the
+    //     payer signed (that is exactly what makes it match — the re-read must recompile to the
+    //     same legacy message the merchant verified).
+    const detail = solTxDetailFromSolpay(solpayUri);
+    await driver.eval((d) => { globalThis.__DPAY_TEST_SOL_TX_DETAIL = d; }, detail);
+    console.log('[51-sol-merchant-broadcast] settle-gate getTransaction fixture seeded from the signed tx');
 
     // Dismiss the NFC overlay (Done button).
     await driver.eval(() => {

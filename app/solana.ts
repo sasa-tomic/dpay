@@ -25,9 +25,10 @@ import {solanaTokenInfo, solanaTokenOfMint} from './solana/tokens';
 import {utf8ToBytes} from './lib/base64url';
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
-import type {SolanaSignatureStatus} from './solana/rpc';
+import type {SolanaSignatureStatus, SolanaTransactionDetail} from './solana/rpc';
 import type {SolanaHistory} from './solana/history';
-import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from './solana/payments';
+import {verifySettledTransaction} from './solana/settleVerify';
+import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE, RECEIPT_MISMATCH} from './solana/payments';
 import {M} from './i18n';
 
 export {deriveSolanaAddress};
@@ -456,7 +457,10 @@ export function signSplPayment(secretHex: string, request: SolReqV2): SolPayV2 {
 
 /** ONLINE merchant broadcast + confirm. STRICT. Runs the canonical-message rebuild + Ed25519 verify
  *  BEFORE any network send, freshness-checks the blockhash + block height against the request, then
- *  broadcasts with preflight and confirms via history-aware signature status polling.
+ *  broadcasts with preflight and confirms via history-aware signature status polling — and before
+ *  answering SETTLED, re-reads the confirmed transaction and requires its body to BE the canonical
+ *  message (settle-verify, OPEN_ISSUES 6(b): a signature confirming is not the same as THIS
+ *  payment confirming).
  *
  *  Money-critical freshness state machine (invariants #4/#5/#10/#12/#13):
  *    • URI ≠ request          → throw (programming error, never silent).
@@ -471,7 +475,20 @@ export function signSplPayment(secretHex: string, request: SolReqV2): SolPayV2 {
  *    • sendTransaction other
  *      error                  → UNREACHABLE, sig=<verified> (honest unknown — tx MAY still land).
  *    • Confirm: status w/err  → REJECTED, sig=<verified> (on-chain rejection).
- *    • Confirm: confirmed     → SETTLED, sig=<verified>.
+ *    • Confirm: confirmed +
+ *      re-read body verified  → SETTLED, sig=<verified> (recompiled body == canonical, err==null).
+ *    • Confirm: confirmed +
+ *      re-read body err≠null  → REJECTED, sig=<verified> (the chain's own failure record).
+ *    • Confirm: confirmed +
+ *      re-read body ≠
+ *      canonical              → MISMATCH(3), sig=<verified> (terminal doubt — well-formed confirmed
+ *                               body that isn't this request, incl. v0/ALT claims; merchant must
+ *                               NOT treat it as received, payer gets honest pending, never a
+ *                               decline).
+ *    • Confirm: confirmed but
+ *      body unreadable
+ *      (null/malformed/trans-
+ *      ient RPC)             → keep polling to the deadline (unverifiable is NEVER a verdict).
  *    • Confirm timeout +
  *      authoritative expiry
  *      (height>lvh AND bh
@@ -600,7 +617,36 @@ export async function broadcastSolPayment(
           return {status: RECEIPT_REJECTED, rid, sig};
         }
         if (statusResult.status.confirmationStatus === 'confirmed' || statusResult.status.confirmationStatus === 'finalized') {
-          return {status: RECEIPT_SETTLED, rid, sig};
+          // Confirmed alone is NOT settled (OPEN_ISSUES 6(b)): the signature says some transaction
+          // with this id confirmed — the re-read must prove the confirmed body IS the canonical
+          // message this merchant verified before broadcasting. No new budget: this rides the same
+          // confirm deadline; every failure of the re-read keeps polling (unverifiable is NEVER a
+          // verdict — three-verdict discipline, see services/rail.ts).
+          let detail: SolanaTransactionDetail | null = null;
+          let detailRead = false;
+          try {
+            detail = await rpc.getTransaction(SOLANA_RPC_URL, sig, {signal});
+            detailRead = true;
+          } catch (e) {
+            console.warn(`broadcastSolPayment: transient getTransaction failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
+          }
+          if (detailRead) {
+            const evidence = verifySettledTransaction(expectedMessage, detail);
+            if (evidence.kind === 'verified') {
+              return {status: RECEIPT_SETTLED, rid, sig};
+            }
+            if (evidence.kind === 'onchain-error') {
+              console.warn(`broadcastSolPayment: on-chain error record for rid=${rid}`);
+              return {status: RECEIPT_REJECTED, rid, sig};
+            }
+            if (evidence.kind === 'mismatch') {
+              // TERMINAL doubt — the signature confirms a DIFFERENT well-formed transaction. The
+              // merchant must not treat it as received; the payer hears honest pending (code 3).
+              console.warn(`broadcastSolPayment: settle-verify mismatch for rid=${rid}: ${evidence.reason}`);
+              return {status: RECEIPT_MISMATCH, rid, sig};
+            }
+            console.warn(`broadcastSolPayment: settle-verify unverifiable for rid=${rid}: ${evidence.reason}`);
+          }
         }
       }
     } catch (e) {

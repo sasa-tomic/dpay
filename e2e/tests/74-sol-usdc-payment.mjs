@@ -17,6 +17,7 @@
 // Selector contract: `asset-sol-usdc-select`, `tab-receive`, `sol-req-amount-input`,
 // `btn-sol-req-make`, `sol-req-qr`, `sol-req-status`, `sol-req-sig`, `sol-pay-scan`.
 import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
 export const meta = {
   id: '74',
@@ -65,6 +66,7 @@ export async function run() {
         getBlockHeight: () => 250000001,
         sendTransaction: () => globalThis.__DPAY_TEST_SOL_SIG || 'sig_fallback',
         getSignatureStatuses: () => ({context: {slot: 250000002}, value: [{confirmationStatus: 'confirmed'}]}),
+        getTransaction: () => globalThis.__DPAY_TEST_SOL_TX_DETAIL ?? null,
         getBalance: () => ({value: 5000000000}),
       };
     });
@@ -117,6 +119,12 @@ export async function run() {
     const sig = extractSig(solpayUri);
     await driver.eval((s) => { globalThis.__DPAY_TEST_SOL_SIG = s; }, sig);
     console.log(`[74-sol-usdc-payment] sig extracted + stashed: ${sig.slice(0, 12)}…`);
+
+    // 4b. Seed the settle-gate fixture from the REAL TransferChecked canonical bytes (the re-read
+    //     must recompile to the same legacy message — this is what makes it matching).
+    const detail = solTxDetailFromSolpay(solpayUri);
+    await driver.eval((d) => { globalThis.__DPAY_TEST_SOL_TX_DETAIL = d; }, detail);
+    console.log('[74-sol-usdc-payment] settle-gate getTransaction fixture seeded from the signed USDC tx');
 
     // Dismiss the NFC overlay.
     await driver.eval(() => {

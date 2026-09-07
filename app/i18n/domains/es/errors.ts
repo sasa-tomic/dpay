@@ -57,6 +57,7 @@ export const errorsEs: ErrorMessages = {
     paymentRejected: 'Pago rechazado',
     couldntConfirm: 'No se pudo confirmar',
     couldntConfirmCheckBalance: 'No se pudo confirmar el pago: revisa tu saldo',
+    settlementNotVerified: 'Confirmado, pero no es esta solicitud: comprueba la firma antes de entregar',
     paymentRequestExpired: 'Esta solicitud de pago ha caducado',
   },
 };

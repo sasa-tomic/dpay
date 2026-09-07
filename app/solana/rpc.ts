@@ -344,12 +344,36 @@ export interface SolanaTransactionMeta {
 }
 
 /** A confirmed transaction as returned by `getTransaction` with `encoding:'json'` (accountKeys are
- *  base58 STRINGS — `jsonParsed` would make them objects and is not requested). */
+ *  base58 STRINGS — `jsonParsed` would make them objects and is not requested).
+ *
+ * The message carries MORE than `accountKeys` on the wire (recentBlockhash, header, instructions,
+ * version, addressTableLookups). Those fields are ALL-OPTIONAL here because the sole historical
+ * consumer (`history.ts`) reads only `accountKeys`; the settle verifier (`settleVerify.ts`) reads
+ * the full set and treats any absent field as unverifiable — never as a verdict. */
 export interface SolanaTransactionDetail {
   readonly slot: number;
   readonly blockTime: number | null;
   readonly meta: SolanaTransactionMeta | null;
-  readonly transaction: {readonly message: {readonly accountKeys: readonly string[]}};
+  readonly transaction: {
+    readonly message: {
+      readonly accountKeys: readonly string[];
+      readonly recentBlockhash?: string;
+      readonly header?: {
+        readonly numRequiredSignatures: number;
+        readonly numReadonlySignedAccounts: number;
+        readonly numReadonlyUnsignedAccounts: number;
+      };
+      readonly instructions?: readonly {
+        readonly programIdIndex: number;
+        readonly accounts: readonly number[];
+        readonly data: string;
+      }[];
+      /** 'legacy' for pre-v0 messages; 0 for versioned ones (a settle-verify MISMATCH claim). */
+      readonly version?: 'legacy' | number;
+      /** Present only on versioned messages that resolve accounts through lookup tables. */
+      readonly addressTableLookups?: readonly unknown[];
+    };
+  };
 }
 
 /** The most recent `limit` transaction signatures that touched `address`, newest-first. Bounded by

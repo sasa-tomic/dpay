@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **129 flows**
-> (128 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **131 flows**
+> (130 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (18) · pay (38) · offline (10) · deposit (11) · withdraw (11) · nfc (10) · system (24) · tour (6)
+wire (1) · onboard (18) · pay (38) · offline (11) · deposit (11) · withdraw (11) · nfc (11) · system (24) · tour (6)
 
 ---
 
@@ -105,6 +105,7 @@ wire (1) · onboard (18) · pay (38) · offline (10) · deposit (11) · withdraw
 |---|------|----------|--------|
 | 100 | offline-bundled-assets | A dead-relay cold start (no cached catalog) still renders both bundled native rows in the shared selector — "VCHF · Internet Computer" and "ICP · Internet Computer" — with no ramp actions. | offline, cold-start, bundled-catalog, vchf, icp, icp-mainnet, asset-selector, no-ramp |
 | 110 | offline-send-gate | Offline, Pay ▸ Send to address replaces the form with an instruction naming the constraint and routing to Scan to pay (the rail that works offline); the form returns when the connection does. | offline, send-to-address, error-handling, graceful |
+| 138 | sol-settle-mismatch | SOL settle-verify: confirmed-but-mismatched body → honest doubt copy + reconcile; unreadable body → keeps polling, settles only when verified; on-chain error → rejected copy. | sol-merchant, sol-settle-verify, three-verdict |
 | 20 | offline-handoff | offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows | offline-pay, hand-off, reconcile |
 | 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger | receive-scan, offline-settle |
 | 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → AUTO-SIGN (no setup, no nonce) → solpay:v2 QR (U-F5 short destination rides the qr header) → honest pending. | sol-offline-sign, qr-handoff, honest-pending, sign-status-short-payee |
@@ -152,6 +153,7 @@ wire (1) · onboard (18) · pay (38) · offline (10) · deposit (11) · withdraw
 |---|------|----------|--------|
 | 11 | nfc | NFC transport phases render via the RNW event bus; a request AUTO-SIGNS on arrival (one-press rule) — the wire exists with no Approve click. | nfc-phases, event-bus, auto-sign |
 | 117 | till-tap | A shop rings up CHF 4.50 on its own dpay wallet and the counter ALSO arms the NFC reader from that charge: the 132-byte request it serves names the shop’s own account, the exact raw VCHF, and the CHARGE’s reference as its nonce. A payer’s offline-signed bundle delivered over that reader settles a real icrc1_transfer whose ICRC-1 memo is therefore the charge’s reference, so `GET /api/v1/till/{id}` — which reads the merchant’s own ledger history and knows nothing about taps — flips to paid, names the block, and the shop is credited the exact VCHF. The paid light is the relay’s answer: the tap is given no onSettled, and the merchant’s tap screen is dismissed before the till’s own verdict is read off the counter. | till, merchant-till, nfc, charge-reference, observed-settlement, vchf, settle |
+| 139 | sol-nfc-mismatch-receipt | SOL NFC receipt code 3 (settle-verify mismatch) → payer honest pending ("Sent · awaiting"), never a decline. | sol-nfc, sol-v2-receipt, sol-settle-verify, three-verdict |
 | 32 | nfc-disclosure | NFC auto-sign exchanging status discloses honest asset + amount ("Paying 0.00050000 BTC on Bitcoin") + hold-to-send; the wire exists on arrival (one-press rule). | nfc-disclosure, consent, asset-name, auto-sign |
 | 47 | sol-nfc | SOL v2 NFC tap: arm card → request AUTO-SIGNS (one-press rule → offline sign) → receipt (rid+sig match) → Paid ✓ | sol-nfc, sol-v2-receipt, event-bus, auto-sign |
 | 60 | nfc-error | NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); an unsupported-asset request auto-declines "Declined" + honest reason (fail-closed, no sign); a late error after settling is ignored (no false failure over a decided outcome). | nfc-error, nfc-declined, nfc-phases, error-handling, no-fake-paid, terminal-escape, fail-closed |

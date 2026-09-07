@@ -98,6 +98,9 @@ export type ErrorMessages = {
     couldntConfirm: string;
     /** SOL merchant: unknown outcome — the broadcast may still land, so never "try again". */
     couldntConfirmCheckBalance: string;
+    /** SOL tap: settle-verify mismatch — the confirmed tx isn't this request (receipt code 3,
+     *  honest pending for the payer; shortened NFC form of receive.settlementNotVerified). */
+    settlementNotVerified: string;
     /** SOL payer: the request's recent blockhash window closed before the sign fired. */
     paymentRequestExpired: string;
   };
@@ -155,6 +158,7 @@ export const errorsEn: ErrorMessages = {
     paymentRejected: 'Payment rejected',
     couldntConfirm: 'Couldn’t confirm',
     couldntConfirmCheckBalance: 'Couldn’t confirm the payment — check your balance',
+    settlementNotVerified: 'Confirmed — but it isn’t this request. Check the signature before handover',
     paymentRequestExpired: 'This payment request has expired',
   },
 };

@@ -14,8 +14,9 @@ import {buildCanonicalSplMessage, deriveAta, ASSOCIATED_TOKEN_PROGRAM_ADDRESS} f
 import {USDC_DECIMALS} from '../solana/tokens';
 import {deriveSolanaKeypair} from '../solana/identity';
 import {utf8ToBytes} from '../lib/base64url';
-import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../solana/payments';
-import type {SolanaRpcStub} from '../solana/rpc';
+import {bytesToBase64} from '../lib/base64';
+import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE, RECEIPT_MISMATCH} from '../solana/payments';
+import type {SolanaRpcStub, SolanaTransactionDetail} from '../solana/rpc';
 import type {SolanaPayTransfer} from '../solana';
 
 const realFetch = globalThis.fetch;
@@ -713,15 +714,57 @@ describe('solana seam — broadcastSolPayment (money-critical freshness state ma
     return {payment, sig: verify.signature};
   }
 
-  test('happy path: freshness OK + sendTransaction returns verified sig + confirmed → SETTLED', async () => {
+  /** The canonical message broadcastSolPayment will rebuild for this request (same builder, same
+   *  payer key extracted from the signed tx). */
+  function canonicalFor(request: SolReqV2): Uint8Array {
+    const {publicKey} = deriveSolanaKeypair(SEED_HEX);
+    return request.cur === 'SOL'
+      ? buildCanonicalSolMessage(publicKey, request)
+      : buildCanonicalSplMessage(publicKey, request, USDC_DECIMALS);
+  }
+
+  /** Serialize a legacy message into the json-detail shape getTransaction returns — the settle
+   *  gate recompiles this back to wire bytes and compares against the canonical message. */
+  function txDetailFromMessage(
+    msg: Uint8Array,
+    over: {message?: Record<string, unknown>; meta?: Record<string, unknown>; metaNull?: boolean} = {},
+  ): SolanaTransactionDetail {
+    let off = 0;
+    const header = {numRequiredSignatures: msg[off++], numReadonlySignedAccounts: msg[off++], numReadonlyUnsignedAccounts: msg[off++]};
+    const nk = readCompactU16(msg, off); off = nk.next;
+    const accountKeys: string[] = [];
+    for (let i = 0; i < nk.value; i++) { accountKeys.push(bs58.encode(msg.slice(off, off + 32))); off += 32; }
+    const recentBlockhash = bs58.encode(msg.slice(off, off + 32)); off += 32;
+    const ni = readCompactU16(msg, off); off = ni.next;
+    const instructions: {programIdIndex: number; accounts: number[]; data: string}[] = [];
+    for (let i = 0; i < ni.value; i++) {
+      const programIdIndex = msg[off++];
+      const na = readCompactU16(msg, off); off = na.next;
+      const accounts: number[] = [];
+      for (let j = 0; j < na.value; j++) accounts.push(msg[off++]);
+      const nd = readCompactU16(msg, off); off = nd.next;
+      instructions.push({programIdIndex, accounts, data: bytesToBase64(msg.slice(off, off + nd.value))});
+      off += nd.value;
+    }
+    return {
+      slot: 1,
+      blockTime: null,
+      meta: over.metaNull ? null : {err: null, fee: 5000, preBalances: [], postBalances: [], ...over.meta},
+      transaction: {message: {accountKeys, recentBlockhash, header, instructions, version: 'legacy', ...over.message} as SolanaTransactionDetail['transaction']['message']},
+    };
+  }
+
+  test('happy path: freshness OK + sendTransaction returns verified sig + confirmed + settle-verified body → SETTLED', async () => {
     const request = solReqV2();
     const {payment, sig} = signAndExtractSig(request);
     let sendCalls = 0;
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
+    let txReads = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
       isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
       getBlockHeight: () => request.lvh - 10,
       sendTransaction: () => { sendCalls++; return sig; },
       getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]}),
+      getTransaction: () => { txReads++; return txDetailFromMessage(canonicalFor(request)); },
     };
     const receipt = await withStubUrl(async () => {
       const {broadcastSolPayment} = require('../solana');
@@ -731,6 +774,100 @@ describe('solana seam — broadcastSolPayment (money-critical freshness state ma
     expect(receipt.rid).toBe(request.rid);
     expect(receipt.sig).toBe(sig);
     expect(sendCalls).toBe(1);
+    expect(txReads).toBe(1); // confirmed → exactly one settle re-read before SETTLED
+  });
+
+  test('settle gate: confirmed but getTransaction THROWS each poll → transient, keeps polling to deadline → UNREACHABLE (never a decline)', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10, // never past lvh → honest unknown at timeout
+      sendTransaction: () => sig,
+      getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]}),
+      getTransaction: () => { throw new Error('solana rpc http 503'); },
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPayment} = require('../solana');
+      return broadcastSolPayment(request, buildUri(request), payment, new AbortController().signal, {confirmTimeoutMs: 60, pollMs: 5}) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_UNREACHABLE);
+    expect(receipt.sig).toBe(sig);
+  });
+
+  test('settle gate: confirmed but getTransaction returns null (pruned/unknown) → keeps polling to deadline → UNREACHABLE', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => sig,
+      getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]}),
+      getTransaction: () => null,
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPayment} = require('../solana');
+      return broadcastSolPayment(request, buildUri(request), payment, new AbortController().signal, {confirmTimeoutMs: 60, pollMs: 5}) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_UNREACHABLE);
+    expect(receipt.sig).toBe(sig);
+  });
+
+  test('settle gate: confirmed body with the WRONG AMOUNT → MISMATCH (3) — never SETTLED, never a decline', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    // A different well-formed canonical (amount 9999999) — a tx that pays LESS than the request.
+    const wrongAmount = canonicalFor(solReqV2({amt: '9999999', rid: 'd'.repeat(32)}));
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => sig,
+      getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]}),
+      getTransaction: () => txDetailFromMessage(wrongAmount),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPayment} = require('../solana');
+      return broadcastSolPayment(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_MISMATCH);
+    expect(receipt.rid).toBe(request.rid);
+    expect(receipt.sig).toBe(sig);
+  });
+
+  test('settle gate: confirmed body claims version 0 + addressTableLookups → MISMATCH (3)', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => sig,
+      getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]}),
+      getTransaction: () => txDetailFromMessage(canonicalFor(request), {message: {version: 0, addressTableLookups: [{accountKey: USDC_MINT, writableIndexes: [0], readonlyIndexes: []}]}}),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPayment} = require('../solana');
+      return broadcastSolPayment(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_MISMATCH);
+    expect(receipt.sig).toBe(sig);
+  });
+
+  test('settle gate: confirmed body carries meta.err → REJECTED (the chain failure record)', async () => {
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      isBlockhashValid: () => ({context: {slot: request.slot + 1}, value: true}),
+      getBlockHeight: () => request.lvh - 10,
+      sendTransaction: () => sig,
+      getSignatureStatuses: () => ({context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]}),
+      getTransaction: () => txDetailFromMessage(canonicalFor(request), {meta: {err: {InstructionError: [1, 'CustomProgramError(3)']}}}),
+    };
+    const receipt = await withStubUrl(async () => {
+      const {broadcastSolPayment} = require('../solana');
+      return broadcastSolPayment(request, buildUri(request), payment, new AbortController().signal) as Promise<{status: number; rid: string; sig: string}>;
+    });
+    expect(receipt.status).toBe(RECEIPT_REJECTED);
+    expect(receipt.sig).toBe(sig);
   });
 
   test('semantic reject: payment signed for a DIFFERENT request → REJECTED sig="", no sendTransaction', async () => {

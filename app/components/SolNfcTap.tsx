@@ -13,7 +13,7 @@ import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {extractSignedTxParts} from '../solana/tx';
 import {signSolPayment, signSplPayment, broadcastSolPayment} from '../solana';
 import {friendlySolTapError} from '../solana/errors';
-import {decideSolPayerReceiptV2, isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE} from '../solana/payments';
+import {decideSolPayerReceiptV2, isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE, RECEIPT_MISMATCH} from '../solana/payments';
 import {DpaySolNfc} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
@@ -128,6 +128,12 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       } else if (receipt.status === RECEIPT_REJECTED) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_REJECTED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (rejected)', e); }
         ctx.finalize('declined', M.errors.tap.paymentRejected);
+      } else if (receipt.status === RECEIPT_MISMATCH) {
+        // Settle-verify mismatch: the confirmed body isn't this request. Honest pending for the
+        // payer (Kotlin maps the unknown code 3 to the PENDING card phase and re-emits it
+        // verbatim — the payer's own decideSolPayerReceiptV2 maps 3→pending); never a decline.
+        try { await DpaySolNfc.confirmSolReceipt(RECEIPT_MISMATCH, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (mismatch)', e); }
+        ctx.finalize('pending', M.errors.tap.settlementNotVerified);
       } else {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_UNREACHABLE, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (unreachable)', e); }
         ctx.finalize('pending', M.errors.tap.couldntConfirm);

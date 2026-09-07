@@ -573,6 +573,9 @@ export type ReceiveMessages = {
   paymentRejectedDetail: string;
   couldNotConfirmMaySettle: string;
   stillCannotConfirm: string;
+  /** Settle-verify MISMATCH (receipt code 3): the tx confirmed with a body that isn't this
+   *  request. Terminal doubt — check-before-handover copy; the reconcile card stays armed. */
+  settlementNotVerified: string;
   savedDataCorrupt: string;
   paymentBeingConfirmed: string;
   broadcastInterrupted: string;
@@ -723,6 +726,7 @@ export const receiveEn: ReceiveMessages = {
   paymentRejectedDetail: 'Payment rejected — the payer may have insufficient balance or the blockhash expired.',
   couldNotConfirmMaySettle: "Couldn't confirm — the payment may still settle. Check your balance shortly or retry.",
   stillCannotConfirm: "Still can't confirm — the payment may still settle. Try again later.",
+  settlementNotVerified: "Confirmed, but the on-chain transaction doesn't match this request. Don't hand over the goods yet — check the signature in a Solana explorer and watch your balance; the payment may still arrive correctly.",
   savedDataCorrupt: 'Saved payment data is corrupt.',
   paymentBeingConfirmed: 'A payment is being confirmed',
   broadcastInterrupted: 'A broadcast was interrupted. The payment may have settled — retry to check.',

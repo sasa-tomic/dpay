@@ -56,6 +56,10 @@ export async function run() {
         getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         sendTransaction: () => 'sig_' + Math.random().toString(36).slice(2, 12),
         getSignatureStatuses: () => ({context: {slot: 250000001}, value: [{confirmationStatus: 'confirmed'}]}),
+        // This flow pays via the SENDER path (sendSolanaPay → confirmTransaction v1) which never
+        // re-reads the tx. The stub entry exists so the settle gate FAILS LOUD if that ever
+        // changes — no detail is seeded here (there is no captured solpay to derive one from).
+        getTransaction: () => globalThis.__DPAY_TEST_SOL_TX_DETAIL ?? null,
         getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
         getBalance: () => ({value: 5000000000}),
         getTokenAccountBalance: () => ({value: {amount: '2000000', decimals: 6, uiAmount: 2, uiAmountString: '2'}}),

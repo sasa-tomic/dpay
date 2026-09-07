@@ -272,6 +272,7 @@ export const receiveEs: ReceiveMessages = {
   paymentRejectedDetail: 'Pago rechazado: puede que quien paga no tenga saldo suficiente o que el blockhash haya caducado.',
   couldNotConfirmMaySettle: 'No se pudo confirmar: puede que el pago aún se confirme. Revisa tu saldo en breve o reinténtalo.',
   stillCannotConfirm: 'Sigue sin poder confirmarse: puede que el pago aún se confirme. Inténtalo más tarde.',
+  settlementNotVerified: 'Confirmado, pero la transacción en cadena no coincide con esta solicitud. No entregues aún la mercancía: comprueba la firma en un explorador de Solana y vigila tu saldo; el pago aún puede llegar correctamente.',
   savedDataCorrupt: 'Los datos guardados del pago están dañados.',
   paymentBeingConfirmed: 'Se está confirmando un pago',
   broadcastInterrupted: 'Se interrumpió un envío a la red. Puede que el pago se haya confirmado: reintenta para saberlo.',

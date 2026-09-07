@@ -8,8 +8,8 @@
  *   The merchant's broadcast result is the source of truth. A receipt is believed ONLY if both
  *   `rid` and `sig` match the payer's open request — otherwise it is IGNORED (a stale or cross-tap
  *   receipt must never be believed for the wrong payment). On match: settled→success, rejected→
- *   declined, unreachable→pending. An unknown status code is honest-unknown→pending (never a false
- *   failure).
+ *   declined, unreachable→pending, mismatch→pending. An unknown status code is honest-unknown→
+ *   pending (never a false failure).
  *
  * Dependency-free (no react-native, no fetch, no globals) so it runs under jest on the fast inner
  * loop. These receipt codes belong only to the SOL transport; IC settlement is polled directly.
@@ -17,6 +17,18 @@
 export const RECEIPT_SETTLED = 0;
 export const RECEIPT_REJECTED = 1;
 export const RECEIPT_UNREACHABLE = 2;
+
+/**
+ * 3 — the confirmed tx's body does NOT match the canonical message the merchant verified
+ * (`settleVerify.ts` 'mismatch', incl. a v0/ALT claim). MERCHANT semantics: terminal doubt — do
+ * NOT treat the payment as received (the signature confirms a DIFFERENT transaction), but the tx
+ * may still move money, so the merchant keeps the durable unknown-state (reconcile/rebroadcast)
+ * and gets the check-before-handover copy. PAYER semantics: honest pending — the payer did sign
+ * and hand over a valid tx, so this is NEVER a decline; it maps to 'pending' exactly like
+ * UNREACHABLE (the existing "Sent · awaiting…" copy). This keeps the three-verdict discipline: an
+ * answer the payer's phone cannot verify is never promoted to a decline.
+ */
+export const RECEIPT_MISMATCH = 3;
 
 /**
  * The payer's terminal state, derived from a SolReceiptV2 received over QR/NFC from the merchant:
@@ -39,7 +51,7 @@ export type SolPayerOutcomeV2 =
 
 /**
  * The v2 receipt shape the merchant hands back. `status` is a ReceiptCode (0=settled, 1=rejected,
- * 2=unreachable). `rid` echoes the solreq:v2 request id;
+ * 2=unreachable, 3=mismatch — see RECEIPT_MISMATCH). `rid` echoes the solreq:v2 request id;
  * `sig` is the on-chain transaction signature (base58). Neither is a trusted claim — both must
  * match what the payer signed.
  */
@@ -72,6 +84,10 @@ export function decideSolPayerReceiptV2(
     case RECEIPT_REJECTED:
       return {outcome: 'declined'};
     case RECEIPT_UNREACHABLE:
+      return {outcome: 'pending'};
+    case RECEIPT_MISMATCH:
+      // The merchant saw the tx confirm with a body that isn't this request — terminal doubt for
+      // the MERCHANT, honest pending for the payer (see RECEIPT_MISMATCH). NEVER a decline.
       return {outcome: 'pending'};
     default:
       // An unknown receipt code (future/undocumented) — honest unknown, NEVER a false failure.

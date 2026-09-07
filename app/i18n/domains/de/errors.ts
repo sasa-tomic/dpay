@@ -57,6 +57,7 @@ export const errorsDe: ErrorMessages = {
     paymentRejected: 'Zahlung abgelehnt',
     couldntConfirm: 'Nicht bestätigt',
     couldntConfirmCheckBalance: 'Die Zahlung konnte nicht bestätigt werden — prüfe dein Guthaben',
+    settlementNotVerified: 'Bestätigt — aber es ist nicht diese Anfrage. Prüfe die Signatur vor der Übergabe',
     paymentRequestExpired: 'Diese Zahlungsanfrage ist abgelaufen',
   },
 };

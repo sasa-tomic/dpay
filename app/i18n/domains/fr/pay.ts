@@ -273,6 +273,7 @@ export const receiveFr: ReceiveMessages = {
   paymentRejectedDetail: 'Paiement refusé — le solde du payeur est peut-être insuffisant, ou le blockhash a expiré.',
   couldNotConfirmMaySettle: 'Impossible de confirmer — le paiement peut encore être réglé. Vérifiez votre solde dans un instant ou réessayez.',
   stillCannotConfirm: 'Toujours impossible de confirmer — le paiement peut encore être réglé. Réessayez plus tard.',
+  settlementNotVerified: 'Confirmé, mais la transaction on-chain ne correspond pas à cette demande. Ne remettez pas encore la marchandise — vérifiez la signature dans un explorateur Solana et surveillez votre solde ; le paiement peut encore arriver correctement.',
   savedDataCorrupt: 'Les données de paiement enregistrées sont corrompues.',
   paymentBeingConfirmed: 'Un paiement est en cours de confirmation',
   broadcastInterrupted: 'Un envoi a été interrompu. Le paiement a peut-être été réglé — réessayez pour vérifier.',

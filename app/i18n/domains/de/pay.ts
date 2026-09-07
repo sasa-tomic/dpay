@@ -277,6 +277,8 @@ export const receiveDe: ReceiveMessages = {
     'Nicht bestätigt — die Zahlung kann trotzdem noch abgewickelt werden. Prüfe gleich dein Guthaben oder versuche es erneut.',
   stillCannotConfirm:
     'Weiterhin nicht bestätigt — die Zahlung kann trotzdem noch abgewickelt werden. Versuche es später erneut.',
+  settlementNotVerified:
+    'Bestätigt, aber die On-Chain-Transaktion stimmt nicht mit dieser Anfrage überein. Übergib die Ware noch nicht — prüfe die Signatur in einem Solana-Explorer und beobachte dein Guthaben; die Zahlung kann trotzdem noch korrekt ankommen.',
   savedDataCorrupt: 'Die gespeicherten Zahlungsdaten sind beschädigt.',
   paymentBeingConfirmed: 'Eine Zahlung wird gerade bestätigt',
   broadcastInterrupted:

@@ -17,7 +17,7 @@ import {deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {solanaTokenInfo} from '../solana/tokens';
 import {decodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
-import {isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED} from '../solana/payments';
+import {isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_MISMATCH} from '../solana/payments';
 import {extractSignedTxParts} from '../solana/tx';
 import {createSolPaymentRequest, broadcastSolPayment, isSolanaRpcAvailable} from '../solana';
 import {friendlySolError} from '../solana/errors';
@@ -287,6 +287,13 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
         setErr(M.receive.paymentRejectedDetail);
+      } else if (receipt.status === RECEIPT_MISMATCH) {
+        // Settle-verify MISMATCH — the confirmed tx's body is NOT this request (terminal doubt).
+        // The tx may still move money, so keep the SAME durable unknown-state as UNREACHABLE
+        // (reconcile/rebroadcast stays available); the copy names the check-before-handover duty.
+        await saveSolMerchantState(identity.publicHex, {req: reqSnapshot, uri: reqUri, acceptedSignature: acceptedSig, acceptedTx: acceptedTxStr, outcome: 'unknown'});
+        setReconcile({acceptedSig, acceptedTx: acceptedTxStr});
+        setErr(M.receive.settlementNotVerified);
       } else {
         // UNREACHABLE — the tx MAY still land. Keep the accepted tx for reconciliation (invariant #12).
         await saveSolMerchantState(identity.publicHex, {req: reqSnapshot, uri: reqUri, acceptedSignature: acceptedSig, acceptedTx: acceptedTxStr, outcome: 'unknown'});
@@ -331,6 +338,10 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
         setErr(M.receive.paymentRejected);
+      } else if (receipt.status === RECEIPT_MISMATCH) {
+        // Same durable unknown-state as the first-scan mismatch (reconcile stays armed).
+        await saveSolMerchantState(identity.publicHex, {req: reqSnapshot, uri: reqUri, acceptedSignature: reconcile.acceptedSig, acceptedTx: reconcile.acceptedTx, outcome: 'unknown'});
+        setErr(M.receive.settlementNotVerified);
       } else {
         setErr(M.receive.stillCannotConfirm);
       }

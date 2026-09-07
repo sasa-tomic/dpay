@@ -58,6 +58,7 @@ export const errorsFr: ErrorMessages = {
     paymentRejected: 'Paiement refusé',
     couldntConfirm: 'Impossible de confirmer',
     couldntConfirmCheckBalance: 'Impossible de confirmer le paiement — vérifiez votre solde',
+    settlementNotVerified: 'Confirmé, mais ce n’est pas cette demande — vérifiez la signature avant la remise',
     paymentRequestExpired: 'Cette demande de paiement a expiré',
   },
 };

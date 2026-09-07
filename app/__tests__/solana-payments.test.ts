@@ -93,6 +93,13 @@ describe('decideSolPayerReceiptV2 — SOL receipt outcome (rid + sig matcher)', 
       expect(['success', 'declined', 'pending']).toContain(o.outcome);
     }
   });
+
+  it('RECEIPT_MISMATCH (3) → honest pending, NEVER a decline (the payer did sign and hand over the tx)', () => {
+    // Settle-verify mismatch is terminal doubt for the MERCHANT, but for the payer it is exactly
+    // the UNREACHABLE class: an outcome this phone cannot verify is never promoted to a decline.
+    const o = decideSolPayerReceiptV2({status: 3, rid: MY_RID, sig: MY_SIG}, MY_RID, MY_SIG);
+    expect(o.outcome).toBe('pending');
+  });
 });
 
 // Type-level guard: the success/declined/pending variants carry no extra data; only 'ignore' is
