@@ -490,6 +490,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_deposit_and_swap_arg() != 44898:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg() != 924:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_envelope_request_id() != 56521:
@@ -511,6 +513,8 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_icp_sign_read_state() != 25642:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_sign_update() != 3984:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_swap_min_out() != 1480:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -883,6 +887,15 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_deposit_and_swap_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.c_int8,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_deposit_and_swap_arg.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -958,6 +971,12 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_update.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_sign_update.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_swap_min_out.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.c_uint16,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_swap_min_out.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.argtypes = (
     _UniffiRustBuffer,
     _UniffiRustBuffer,
@@ -1371,6 +1390,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_text.restype = ctypes.c_uint
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_deposit_and_swap_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_deposit_and_swap_arg.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg.restype = ctypes.c_uint16
@@ -1404,6 +1426,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_read_state.restype = ctypes.c_
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_update.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_sign_update.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_swap_min_out.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_swap_min_out.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.restype = ctypes.c_uint16
@@ -1522,6 +1547,19 @@ class _UniffiConverterUInt8(_UniffiConverterPrimitiveInt):
     @staticmethod
     def write(value, buf):
         buf.write_u8(value)
+
+class _UniffiConverterUInt16(_UniffiConverterPrimitiveInt):
+    CLASS_NAME = "u16"
+    VALUE_MIN = 0
+    VALUE_MAX = 2**16
+
+    @staticmethod
+    def read(buf):
+        return buf.read_u16()
+
+    @staticmethod
+    def write(value, buf):
+        buf.write_u16(value)
 
 class _UniffiConverterUInt32(_UniffiConverterPrimitiveInt):
     CLASS_NAME = "u32"
@@ -3551,6 +3589,33 @@ def icp_decode_transfer_result(arg: "bytes") -> "IcpTransferOutcome":
         _UniffiConverterBytes.lower(arg)))
 
 
+def icp_deposit_and_swap_arg(amount_in: "str",amount_out_minimum: "str",token_in_fee: "str",token_out_fee: "str",zero_for_one: "bool") -> "bytes":
+    """
+    ICPSwap V3 pool `depositFromAndSwap(DepositAndSwapArgs)` argument bytes — the
+    one-call conversion leg the user signs AFTER `icrc2_approve` named this pool the
+    spender. Amounts and both token fees are decimal strings; `zero_for_one` is the
+    pool's own token0-to-token1 direction from its metadata, never assumed from pair
+    order.
+    """
+
+    _UniffiConverterString.check_lower(amount_in)
+    
+    _UniffiConverterString.check_lower(amount_out_minimum)
+    
+    _UniffiConverterString.check_lower(token_in_fee)
+    
+    _UniffiConverterString.check_lower(token_out_fee)
+    
+    _UniffiConverterBool.check_lower(zero_for_one)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_deposit_and_swap_arg,
+        _UniffiConverterString.lower(amount_in),
+        _UniffiConverterString.lower(amount_out_minimum),
+        _UniffiConverterString.lower(token_in_fee),
+        _UniffiConverterString.lower(token_out_fee),
+        _UniffiConverterBool.lower(zero_for_one)))
+
+
 def icp_eip1559_price_arg(ckerc20_ledger_text: "str") -> "bytes":
     """
     ckETH minter `eip_1559_transaction_price` QUERY arg (opt record{ckerc20_ledger_id}) — the
@@ -3750,6 +3815,22 @@ def icp_sign_update(secret: "bytes",canister_text: "str",method_name: "str",arg:
         _UniffiConverterString.lower(method_name),
         _UniffiConverterBytes.lower(arg),
         _UniffiConverterString.lower(ingress_expiry_ns)))
+
+
+def icp_swap_min_out(quoted_out: "str",slippage_bps: "int") -> "str":
+    """
+    The swap minimum-out from a venue quote and a slippage in basis points (exact
+    floor, saturating at 0 for bps at or above 10_000) — the tested core owns this
+    math, the app never computes it in TS.
+    """
+
+    _UniffiConverterString.check_lower(quoted_out)
+    
+    _UniffiConverterUInt16.check_lower(slippage_bps)
+    
+    return _UniffiConverterString.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_swap_min_out,
+        _UniffiConverterString.lower(quoted_out),
+        _UniffiConverterUInt16.lower(slippage_bps)))
 
 
 def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[str]",from_subaccount_hex: "typing.Optional[str]",amount: "str",fee: "typing.Optional[str]",memo_hex: "typing.Optional[str]") -> "bytes":
@@ -4060,6 +4141,7 @@ __all__ = [
     "icp_decode_read_state",
     "icp_decode_text",
     "icp_decode_transfer_result",
+    "icp_deposit_and_swap_arg",
     "icp_eip1559_price_arg",
     "icp_envelope_request_id",
     "icp_ingress_expiry",
@@ -4071,6 +4153,7 @@ __all__ = [
     "icp_sign_query",
     "icp_sign_read_state",
     "icp_sign_update",
+    "icp_swap_min_out",
     "icp_transfer_arg",
     "icp_validate_account_id",
     "icp_validate_icrc_account",

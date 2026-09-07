@@ -413,5 +413,43 @@ except d.DpayError.BadNonceLength:
     check(True, "till_open_signature(short nonce) -> DpayError.BadNonceLength")
 
 
+# 10) ICPSwap conversion surface (delegated-conversion PoC, spec 2026-09-07) -------------------
+# The two-call flow the app drives: icrc2_approve naming the pool as spender, then the
+# one-call depositFromAndSwap. Both args cross through the SAME compiled core the phone
+# signs with; the golden pins the DIDL bytes against the production @dfinity/candid encoder.
+POOL = "65mrh-fqaaa-aaaar-qapoa-cai"  # the ICPSwap ICP/VCHF pool (spec 2026-09-07)
+G_SWAP = bytes.fromhex(
+    "4449444c016c05a8bb95a7037dddefb5ca0671a5d0b4f8087ed8ddd1d70971b1b4bc800a7d0100"
+    "904e09313032303030303030010731383030303030904e"
+)
+swap_arg = d.icp_deposit_and_swap_arg("102000000", "1800000", "10000", "10000", True)
+check(swap_arg == G_SWAP, "icp_deposit_and_swap_arg -> byte-exact golden (float-op shape)")
+# The approval the app signs first: exact swap amount + approve fee, expected_allowance
+# present, finite expiry (spec §3 shape) — then the swap call signs against the pool.
+approve_arg = d.icp_approve_arg(POOL, "", "", "102010000", "102010000",
+                                "1810000000000000000", "", "10000")
+signed_approve = d.icp_sign_update(kp.secret, "ryjl3-tyaaa-aaaaa-aaaba-cai",
+                                   "icrc2_approve", approve_arg, "1800000000000000000")
+signed_swap = d.icp_sign_update(kp.secret, POOL, "depositFromAndSwap", swap_arg,
+                                "1800000000000000000")
+check(len(signed_approve.envelope) > 350 and len(signed_swap.envelope) > 350,
+      "approve + depositFromAndSwap both produce signable envelopes")
+# The min-out math lives in the core, never TS: exact floor, saturating at full slippage.
+check(d.icp_swap_min_out("2000000", 300) == "1940000", "icp_swap_min_out(2e6, 300bps) == 1940000")
+check(d.icp_swap_min_out("2000000", 10000) == "0", "icp_swap_min_out(100% bps) == 0")
+check(d.icp_swap_min_out(str(2**128 - 1), 100) == "336879543251729078828740861357450529340",
+      "icp_swap_min_out(u128::MAX, 100bps) == exact floor (no overflow-to-0)")
+try:
+    d.icp_deposit_and_swap_arg("1.5", "0", "0", "0", False)
+    raise AssertionError("FAILED: non-integer amountIn should have raised")
+except d.DpayError.BadInput:
+    check(True, "non-integer amount -> DpayError.BadInput")
+try:
+    d.icp_swap_min_out("nope", 100)
+    raise AssertionError("FAILED: bad quote should have raised")
+except d.DpayError.BadInput:
+    check(True, "non-numeric quote -> DpayError.BadInput")
+
+
 print(f"\nALL {passed} FFI CHECKS PASSED — Python called the real dpay-core across UniFFI.")
 sys.exit(0)

@@ -779,3 +779,172 @@ fn gateway_codecs_round_trip() {
     let ours = encode_transfer_ok(1234);
     assert_eq!(&ok_golden[..], &ours[..]);
 }
+
+// --- ICPSwap pool depositFromAndSwap args (delegated-conversion PoC, 2026-09-07) — generated
+// --- from the cached pool interface (icp_swap_pool.did DepositAndSwapArgs) through the
+// --- production @dfinity/candid encoder; same rule as every golden: fix the crate, never these ---
+const G_SWAP_FLOAT_OP: &str = "4449444c016c05a8bb95a7037dddefb5ca0671a5d0b4f8087ed8ddd1d70971b1b4bc800a7d0100904e09313032303030303030010731383030303030904e";
+const G_SWAP_ZEROES_129BIT_FEE: &str = "4449444c016c05a8bb95a7037dddefb5ca0671a5d0b4f8087ed8ddd1d70971b1b4bc800a7d0100000130000130d295fcf1e49df8b9c3edbfc8ee31";
+const G_SWAP_U128_MAX: &str = "4449444c016c05a8bb95a7037dddefb5ca0671a5d0b4f8087ed8ddd1d70971b1b4bc800a7d0100012733343032383233363639323039333834363334363333373436303734333137363832313134353501013102";
+
+#[test]
+fn golden_deposit_and_swap_args() {
+    // The 2026-09-05 float-op shape: amountIn 1.02 ICP e8s, minOut 1.8 VCHF e8s, both
+    // fees 10_000, token0 -> token1.
+    let b = icrc::deposit_and_swap_arg(102_000_000, 1_800_000, 10_000, 10_000, true);
+    assert_eq_hex(&b, G_SWAP_FLOAT_OP, "depositFromAndSwap arg (float-op shape)");
+    // Zeroes everywhere plus a >u64 fee (uleb stress beyond 64 bits), token1 -> token0.
+    let b = icrc::deposit_and_swap_arg(0, 0, 0, 123_456_789_012_345_678_901_234_567_890, false);
+    assert_eq_hex(&b, G_SWAP_ZEROES_129BIT_FEE, "depositFromAndSwap arg (zeroes + 129-bit fee)");
+    // u128::MAX amounts — the 39-char decimal text ceiling.
+    let b = icrc::deposit_and_swap_arg(u128::MAX, 1, 1, 2, true);
+    assert_eq_hex(&b, G_SWAP_U128_MAX, "depositFromAndSwap arg (u128::MAX amountIn)");
+}
+
+#[test]
+fn golden_decode_deposit_and_swap_arg() {
+    use dpay_icp::icrc::{DepositAndSwapArg, decode_deposit_and_swap_arg as dec};
+
+    let d = dec(&unhex(G_SWAP_FLOAT_OP)).unwrap();
+    assert_eq!(
+        d,
+        DepositAndSwapArg {
+            amount_in: 102_000_000,
+            amount_out_minimum: 1_800_000,
+            token_in_fee: 10_000,
+            token_out_fee: 10_000,
+            zero_for_one: true,
+        }
+    );
+    let d = dec(&unhex(G_SWAP_ZEROES_129BIT_FEE)).unwrap();
+    assert_eq!((d.amount_in, d.amount_out_minimum, d.zero_for_one), (0, 0, false));
+    assert_eq!(d.token_in_fee, 0);
+    assert_eq!(d.token_out_fee, 123_456_789_012_345_678_901_234_567_890);
+    let d = dec(&unhex(G_SWAP_U128_MAX)).unwrap();
+    assert_eq!(
+        (d.amount_in, d.amount_out_minimum, d.token_in_fee, d.token_out_fee, d.zero_for_one),
+        (u128::MAX, 1, 1, 2, true)
+    );
+
+    // truncated / trailing / garbage input all fail loudly
+    assert!(dec(&unhex(G_SWAP_FLOAT_OP)[..30]).is_err());
+    let mut trailing = unhex(G_SWAP_FLOAT_OP);
+    trailing.push(0x00);
+    assert!(dec(&trailing).is_err());
+    assert!(dec(b"not DIDL").is_err());
+
+    // a mutated bool byte (0x02) is refused, not silently coerced
+    let mut bad_bool = unhex(G_SWAP_FLOAT_OP);
+    bad_bool[51] = 0x02; // prefix(39) + tokenInFee uleb(2) + amountIn text len(1) + 9 chars
+    assert!(dec(&bad_bool).is_err());
+
+    // encoder -> decoder at the u128 edges the goldens don't reach
+    let arg = icrc::deposit_and_swap_arg(u128::MAX, u128::MAX, u128::MAX, u128::MAX, false);
+    assert_eq!(
+        dec(&arg).unwrap(),
+        DepositAndSwapArg {
+            amount_in: u128::MAX,
+            amount_out_minimum: u128::MAX,
+            token_in_fee: u128::MAX,
+            token_out_fee: u128::MAX,
+            zero_for_one: false,
+        }
+    );
+}
+
+// --- ICPSwap pool surface (delegated-conversion PoC): quote/swap args + pool Result,
+// icrc2_allowance reply record, pool metadata fixture — production candid 0.10.22 bytes.
+// The pool Result arms are the venue's LOWERCASE `ok`/`err` (Motoko wire, the .did) — NOT the
+// capitalized Ok/Err of the Rust ICRC ledgers (see G_TR_*/G_AR_* above for that casing). ---
+
+const G_SWAP_ARGS: &str = "4449444c016c03ddefb5ca0671a5d0b4f8087ed8ddd1d70971010009313030303030303030010130";
+const G_SWAP_RESULT_OK: &str = "4449444c026b029cc2017de58eb402016b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f010000808dbf2f";
+const G_SWAP_RESULT_ERR_COMMON: &str = "4449444c026b029cc2017de58eb402016b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f01000100";
+const G_SWAP_RESULT_ERR_INSUFFICIENT: &str = "4449444c026b029cc2017de58eb402016b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f01000103";
+const G_SWAP_RESULT_ERR_INTERNAL: &str = "4449444c026b029cc2017de58eb402016b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f0100010118616d6f756e744f75744d696e696d756d206e6f74206d6574";
+const G_SWAP_RESULT_ERR_UNSUPPORTED: &str = "4449444c026b029cc2017de58eb402016b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f01000102077a7a7a2d636169";
+const G_ALLOWANCE_WITH_EXPIRY: &str = "4449444c026c02d8bbb2840c7ddea7f7da0d016e780100b9600100c0e92759596417";
+const G_ALLOWANCE_NO_EXPIRY: &str = "4449444c026c02d8bbb2840c7ddea7f7da0d016e780100b96000";
+const G_POOL_METADATA: &str = "4449444c046b029cc20101e58eb402036c09c6fcb6027d9f93c60271ccdad3a9047ddd86f3e70474f29d80ee047d97ae9c8f090298ae9c8f0902ccc19aa9097db7e78d800d7d6c02b4e3ade80971bdeee0d30e716b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f010000b8170e746f6b302d746f6b312d3330303080808080808080808080808080200000000000000000011b72796a6c332d74796161612d61616161612d61616162612d63616906494352432d311b6c793336782d77696161612d61616161692d61716a37712d63616906494352432d310101";
+
+#[test]
+fn golden_swap_arg() {
+    use dpay_icp::icrc::{decode_swap_arg, swap_arg, PoolSwapArgs};
+    let b = swap_arg(100_000_000, 0, true);
+    assert_eq_hex(&b, G_SWAP_ARGS, "quote/swap arg");
+    assert_eq!(
+        decode_swap_arg(&b).unwrap(),
+        PoolSwapArgs { amount_in_e8s: 100_000_000, amount_out_minimum_e8s: 0, zero_for_one: true }
+    );
+    // truncated and trailing-garbage args must fail, not mis-read
+    assert!(decode_swap_arg(&unhex(G_SWAP_ARGS)[..20]).is_err());
+    let mut trailing = unhex(G_SWAP_ARGS);
+    trailing.push(0x00);
+    assert!(decode_swap_arg(&trailing).is_err());
+    // u128 edges round-trip through the wire's text amounts
+    let big = swap_arg(u128::MAX, u128::MAX, false);
+    assert_eq!(
+        decode_swap_arg(&big).unwrap(),
+        PoolSwapArgs { amount_in_e8s: u128::MAX, amount_out_minimum_e8s: u128::MAX, zero_for_one: false }
+    );
+}
+
+#[test]
+fn golden_swap_result_replies() {
+    use dpay_icp::icrc::{
+        decode_swap_result, encode_swap_result_err, encode_swap_result_ok, PoolSwapError,
+    };
+    assert_eq_hex(&encode_swap_result_ok(99_600_000), G_SWAP_RESULT_OK, "pool Result ok");
+    assert_eq_hex(&encode_swap_result_err(&PoolSwapError::CommonError), G_SWAP_RESULT_ERR_COMMON, "pool Result err CommonError");
+    assert_eq_hex(&encode_swap_result_err(&PoolSwapError::InsufficientFunds), G_SWAP_RESULT_ERR_INSUFFICIENT, "pool Result err InsufficientFunds");
+    assert_eq_hex(
+        &encode_swap_result_err(&PoolSwapError::InternalError("amountOutMinimum not met".into())),
+        G_SWAP_RESULT_ERR_INTERNAL,
+        "pool Result err InternalError",
+    );
+    assert_eq_hex(
+        &encode_swap_result_err(&PoolSwapError::UnsupportedToken("zzz-cai".into())),
+        G_SWAP_RESULT_ERR_UNSUPPORTED,
+        "pool Result err UnsupportedToken",
+    );
+    // decode round-trips every arm
+    assert_eq!(decode_swap_result(&unhex(G_SWAP_RESULT_OK)).unwrap(), Ok(99_600_000u128));
+    assert_eq!(decode_swap_result(&unhex(G_SWAP_RESULT_ERR_COMMON)).unwrap(), Err(PoolSwapError::CommonError));
+    assert_eq!(decode_swap_result(&unhex(G_SWAP_RESULT_ERR_INSUFFICIENT)).unwrap(), Err(PoolSwapError::InsufficientFunds));
+    assert_eq!(
+        decode_swap_result(&unhex(G_SWAP_RESULT_ERR_INTERNAL)).unwrap(),
+        Err(PoolSwapError::InternalError("amountOutMinimum not met".into()))
+    );
+    assert_eq!(
+        decode_swap_result(&unhex(G_SWAP_RESULT_ERR_UNSUPPORTED)).unwrap(),
+        Err(PoolSwapError::UnsupportedToken("zzz-cai".into()))
+    );
+}
+
+#[test]
+fn golden_allowance_record_and_args() {
+    use dpay_icp::icrc::{decode_allowance_args, decode_allowance_record, encode_allowance_record, PoolAllowance};
+    let with_expiry = PoolAllowance { allowance_e8s: 12_345, expires_at_ns: Some(EXPIRY) };
+    let no_expiry = PoolAllowance { allowance_e8s: 12_345, expires_at_ns: None };
+    assert_eq_hex(&encode_allowance_record(&with_expiry), G_ALLOWANCE_WITH_EXPIRY, "allowance record (expiry set)");
+    assert_eq_hex(&encode_allowance_record(&no_expiry), G_ALLOWANCE_NO_EXPIRY, "allowance record (no expiry)");
+    assert_eq!(decode_allowance_record(&unhex(G_ALLOWANCE_WITH_EXPIRY)).unwrap(), with_expiry);
+    assert_eq!(decode_allowance_record(&unhex(G_ALLOWANCE_NO_EXPIRY)).unwrap(), no_expiry);
+    // the pre-existing allowance ARG golden decodes to its (account, spender) pair
+    let (account, spender) = decode_allowance_args(&unhex(G_ALLOWANCE_ARG)).unwrap();
+    assert_eq!(account, acct7());
+    assert_eq!(spender.owner, to_principal());
+    assert_eq!(spender.subaccount, [0u8; 32]);
+}
+
+#[test]
+fn golden_pool_metadata_fixture() {
+    use dpay_icp::icrc::encode_pool_metadata;
+    let b = encode_pool_metadata(
+        3000,
+        "tok0-tok1-3000",
+        "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "ly36x-wiaaa-aaaai-aqj7q-cai",
+    );
+    assert_eq_hex(&b, G_POOL_METADATA, "pool metadata fixture");
+}

@@ -832,6 +832,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -877,6 +881,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_decode_text(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_icp_deposit_and_swap_arg(
+): Short
 fun uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_envelope_request_id(
@@ -898,6 +904,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_sign_query(
 fun uniffi_dpay_ffi_checksum_func_icp_sign_read_state(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_sign_update(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_swap_min_out(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_transfer_arg(
 ): Short
@@ -1084,6 +1092,8 @@ fun uniffi_dpay_ffi_fn_func_icp_decode_text(`arg`: RustBuffer.ByValue,uniffi_out
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_deposit_and_swap_arg(`amountIn`: RustBuffer.ByValue,`amountOutMinimum`: RustBuffer.ByValue,`tokenInFee`: RustBuffer.ByValue,`tokenOutFee`: RustBuffer.ByValue,`zeroForOne`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_eip1559_price_arg(`ckerc20LedgerText`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_envelope_request_id(`envelope`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1105,6 +1115,8 @@ fun uniffi_dpay_ffi_fn_func_icp_sign_query(`secret`: RustBuffer.ByValue,`caniste
 fun uniffi_dpay_ffi_fn_func_icp_sign_read_state(`secret`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,`wantTime`: Byte,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_sign_update(`secret`: RustBuffer.ByValue,`canisterText`: RustBuffer.ByValue,`methodName`: RustBuffer.ByValue,`arg`: RustBuffer.ByValue,`ingressExpiryNs`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_swap_min_out(`quotedOut`: RustBuffer.ByValue,`slippageBps`: Short,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_transfer_arg(`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1307,6 +1319,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_deposit_and_swap_arg() != 44898.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_eip1559_price_arg() != 924.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1338,6 +1353,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_sign_update() != 3984.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_swap_min_out() != 1480.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696.toShort()) {
@@ -1599,6 +1617,29 @@ public object FfiConverterUByte: FfiConverter<UByte, Byte> {
 
     override fun write(value: UByte, buf: ByteBuffer) {
         buf.put(value.toByte())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterUShort: FfiConverter<UShort, Short> {
+    override fun lift(value: Short): UShort {
+        return value.toUShort()
+    }
+
+    override fun read(buf: ByteBuffer): UShort {
+        return lift(buf.getShort())
+    }
+
+    override fun lower(value: UShort): Short {
+        return value.toShort()
+    }
+
+    override fun allocationSize(value: UShort) = 2UL
+
+    override fun write(value: UShort, buf: ByteBuffer) {
+        buf.putShort(value.toShort())
     }
 }
 
@@ -3790,6 +3831,23 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     
 
         /**
+         * ICPSwap V3 pool `depositFromAndSwap(DepositAndSwapArgs)` argument bytes — the
+         * one-call conversion leg the user signs AFTER `icrc2_approve` named this pool the
+         * spender. Amounts and both token fees are decimal strings; `zero_for_one` is the
+         * pool's own token0-to-token1 direction from its metadata, never assumed from pair
+         * order.
+         */
+    @Throws(DpayException::class) fun `icpDepositAndSwapArg`(`amountIn`: kotlin.String, `amountOutMinimum`: kotlin.String, `tokenInFee`: kotlin.String, `tokenOutFee`: kotlin.String, `zeroForOne`: kotlin.Boolean): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_deposit_and_swap_arg(
+        FfiConverterString.lower(`amountIn`),FfiConverterString.lower(`amountOutMinimum`),FfiConverterString.lower(`tokenInFee`),FfiConverterString.lower(`tokenOutFee`),FfiConverterBoolean.lower(`zeroForOne`),_status)
+}
+    )
+    }
+    
+
+        /**
          * ckETH minter `eip_1559_transaction_price` QUERY arg (opt record{ckerc20_ledger_id}) — the
          * live gas estimate the app needs BEFORE approving ckETH for the gas leg.
          */
@@ -3948,6 +4006,21 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_sign_update(
         FfiConverterByteArray.lower(`secret`),FfiConverterString.lower(`canisterText`),FfiConverterString.lower(`methodName`),FfiConverterByteArray.lower(`arg`),FfiConverterString.lower(`ingressExpiryNs`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The swap minimum-out from a venue quote and a slippage in basis points (exact
+         * floor, saturating at 0 for bps at or above 10_000) — the tested core owns this
+         * math, the app never computes it in TS.
+         */
+    @Throws(DpayException::class) fun `icpSwapMinOut`(`quotedOut`: kotlin.String, `slippageBps`: kotlin.UShort): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_swap_min_out(
+        FfiConverterString.lower(`quotedOut`),FfiConverterUShort.lower(`slippageBps`),_status)
 }
     )
     }

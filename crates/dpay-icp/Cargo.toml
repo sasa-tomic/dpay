@@ -8,3 +8,6 @@ description = "Pure IC user-principal rail: principal derivation, request-id has
 [dependencies]
 ed25519-dalek = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }

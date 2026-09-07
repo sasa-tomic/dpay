@@ -387,6 +387,41 @@ pub fn icp_eip1559_price_arg(ckerc20_ledger_text: String) -> Result<Vec<u8>, Dpa
     Ok(dpay_icp::icrc::eip1559_price_arg(&ledger))
 }
 
+/// ICPSwap V3 pool `depositFromAndSwap(DepositAndSwapArgs)` argument bytes — the
+/// one-call conversion leg the user signs AFTER `icrc2_approve` named this pool the
+/// spender. Amounts and both token fees are decimal strings; `zero_for_one` is the
+/// pool's own token0-to-token1 direction from its metadata, never assumed from pair
+/// order.
+#[uniffi::export]
+pub fn icp_deposit_and_swap_arg(
+    amount_in: String,
+    amount_out_minimum: String,
+    token_in_fee: String,
+    token_out_fee: String,
+    zero_for_one: bool,
+) -> Result<Vec<u8>, DpayError> {
+    let amount_in = u128_str(&amount_in, "amount_in")?;
+    let amount_out_minimum = u128_str(&amount_out_minimum, "amount_out_minimum")?;
+    let token_in_fee = u128_str(&token_in_fee, "token_in_fee")?;
+    let token_out_fee = u128_str(&token_out_fee, "token_out_fee")?;
+    Ok(dpay_icp::icrc::deposit_and_swap_arg(
+        amount_in,
+        amount_out_minimum,
+        token_in_fee,
+        token_out_fee,
+        zero_for_one,
+    ))
+}
+
+/// The swap minimum-out from a venue quote and a slippage in basis points (exact
+/// floor, saturating at 0 for bps at or above 10_000) — the tested core owns this
+/// math, the app never computes it in TS.
+#[uniffi::export]
+pub fn icp_swap_min_out(quoted_out: String, slippage_bps: u16) -> Result<String, DpayError> {
+    let quoted = u128_str(&quoted_out, "quoted_out")?;
+    Ok(dpay_icp::icrc::swap_amount_out_minimum(quoted, slippage_bps).to_string())
+}
+
 /// Decode a bare `text` reply (get_btc_address / any single-text query).
 #[uniffi::export]
 pub fn icp_decode_text(arg: Vec<u8>) -> Result<String, DpayError> {
@@ -890,5 +925,33 @@ mod tests {
         let arg = icp_balance_of_arg(owner, Some("00".repeat(32))).unwrap();
         assert!(!arg.is_empty());
         let _ = hex(&arg);
+    }
+
+    #[test]
+    fn swap_arg_and_min_out_round_trip() {
+        // The 2026-09-05 float-op shape: amountIn 1.02 ICP e8s, minOut 1.8 VCHF e8s,
+        // both fees 10_000, token0 -> token1. Decodes back through the shared dpay-icp pair.
+        let arg = icp_deposit_and_swap_arg(
+            "102000000".into(),
+            "1800000".into(),
+            "10000".into(),
+            "10000".into(),
+            true,
+        )
+        .unwrap();
+        let d = dpay_icp::icrc::decode_deposit_and_swap_arg(&arg).unwrap();
+        assert_eq!(d.amount_in, 102_000_000);
+        assert_eq!(d.amount_out_minimum, 1_800_000);
+        assert_eq!(d.token_in_fee, 10_000);
+        assert_eq!(d.token_out_fee, 10_000);
+        assert!(d.zero_for_one);
+        // Non-decimal strings are typed errors, never silently-wrong bytes.
+        assert!(icp_deposit_and_swap_arg("1.5".into(), "0".into(), "0".into(), "0".into(), false).is_err());
+        assert!(icp_deposit_and_swap_arg("-1".into(), "0".into(), "0".into(), "0".into(), false).is_err());
+        // min-out: 3% of a 2_000_000 quote floors to 1_940_000; full slippage floors at 0.
+        assert_eq!(icp_swap_min_out("2000000".into(), 300).unwrap(), "1940000");
+        assert_eq!(icp_swap_min_out("2000000".into(), 10_000).unwrap(), "0");
+        assert_eq!(icp_swap_min_out("0".into(), 0).unwrap(), "0");
+        assert!(icp_swap_min_out("not-a-number".into(), 300).is_err());
     }
 }
