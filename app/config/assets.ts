@@ -38,6 +38,14 @@ import {type AssetId} from '../lib/types';
 import {solanaTokenOfMint} from '../solana/tokens';
 import {M} from '../i18n';
 
+/**
+ * The PRACTICE rail's stable asset id — currency 0, the faucet-minted demo dollar. Named once so
+ * every "is this play money?" decision reads the same constant instead of re-spelling `'ic:0'`:
+ * the reconcile/deeplink fallbacks below, and the trip-readiness gate that must NOT count it
+ * (`decideFundsReady` — X13: a wallet holding only practice money is not ready for a trip).
+ */
+export const DEMO_ASSET_ID: AssetId = 'ic:0';
+
 // A resolved, display-ready view of one selectable asset. Built fresh from the current catalog +
 // Solana config on every call; React state stores only the STABLE `id`, never a `SelectableAsset`
 // (so a catalog object refresh cannot invalidate the selection — the id is derived from the
@@ -284,7 +292,7 @@ export function reconcileSelectedAsset(
 ): AssetId | null {
   if (selectedId !== null && assets.some(a => a.id === selectedId)) return selectedId;
   if (preferredId !== null && assets.some(a => a.id === preferredId)) return preferredId;
-  const demo = assets.find(a => a.id === 'ic:0');
+  const demo = assets.find(a => a.id === DEMO_ASSET_ID);
   if (demo) return demo.id;
   return assets.length > 0 ? assets[0].id : null;
 }
@@ -301,7 +309,7 @@ export function routeDeeplinkToIc(selectedId: AssetId | null, assets: Selectable
   // Already on an IC asset — the IC engine mounts; nothing to change.
   if (selectedId !== null && selectedId.startsWith('ic:')) return selectedId;
   // Prefer DEMO (always present, the default home asset), else the first IC asset in catalog order.
-  const demo = assets.find(a => a.id === 'ic:0');
+  const demo = assets.find(a => a.id === DEMO_ASSET_ID);
   if (demo) return demo.id;
   const firstIc = assets.find(a => a.protocol === 'ic');
   return firstIc ? firstIc.id : null;

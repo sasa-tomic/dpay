@@ -160,6 +160,10 @@ export const payEs: PayMessages = {
   fundSibling: {
     holds: (amount, rail) => `Tienes ${amount} en ${rail}`,
     switchTo: network => `Cambiar a ${network}`,
+    switchToAsset: asset => `Cambiar a ${asset}`,
+    practice: amount =>
+      `Tienes ${amount} en dinero de práctica. Puedes practicar un pago con él: no tiene valor y no puede pagar a un comercio real.`,
+    switchToPractice: 'Cambiar al dinero de práctica',
   },
 
   offlineSendTitle: 'Enviar a una dirección necesita conexión',

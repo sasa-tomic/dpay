@@ -1124,8 +1124,8 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
   });
 });
 
-describe('SolPayMode — the funded-sibling pointer on the fund gates (Objective 2, S5)', () => {
-  test('a USDC-zero gate with a funded ckUSDC sibling names it and offers the one-tap switch', () => {
+describe('SolPayMode — the fund-first surfaces: the camera, and the funded account (X1/X3)', () => {
+  test('a USDC-zero surface with a funded ckUSDC sibling names it and offers the one-tap switch', () => {
     const onSwitchRail = jest.fn();
     const tree = mountTill({
       homeCurrency: 'USD',
@@ -1141,7 +1141,9 @@ describe('SolPayMode — the funded-sibling pointer on the fund gates (Objective
     act(() => { tree.unmount(); });
   });
 
-  test('a SOL gate points nowhere — SOL is no home currency\'s rail', () => {
+  test('X1: a SOL gate now points too — the funded account is a fact whatever the rail group', () => {
+    // Was "points nowhere": SOL belongs to no home currency, so the same-currency pointer had
+    // nothing to say and the gate stayed a dead end while the wallet held dollars one tap away.
     const tree = mountTill({
       homeCurrency: 'USD',
       balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
@@ -1149,7 +1151,46 @@ describe('SolPayMode — the funded-sibling pointer on the fund gates (Objective
       selectedToken: 'SOL',
     });
     expect(hasTestID(tree, 'sol-pay-fund')).toBe(true);
-    expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
+    expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
+    act(() => { tree.unmount(); });
+  });
+
+  test('X3: a zero SELECTED balance no longer hides the camera — the solreq names its own mint', () => {
+    // IC twin: PayMode's X3 test, same reason. A `solreq:v2` carries its own currency and mint, so
+    // the selection cannot decide whether it is payable — and hiding the lens stopped the payer
+    // reading a code they could have settled. The sign gate stays per-request (`solSplSignGate`).
+    const tree = mountTill({payGate: 'sol-zero', selectedToken: 'SOL', balances: {}});
+    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
+    expect(hasTestID(tree, 'sol-pay-fund')).toBe(true);
+    pressByTestID(tree, 'btn-sol-start-scan');
+    expect(scannerNodes(tree)).not.toHaveLength(0);
+    expect(hasTestID(tree, 'sol-pay-fund')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('X3: an ABSENT token account keeps its setup card AND the camera', () => {
+    // The same class: the account this wallet lacks is the SELECTED one, and a request naming SOL
+    // or any other mint is perfectly payable from here.
+    const tree = mountTill({payGate: 'token-absent', selectedToken: 'USDC', balances: {}});
+    expect(hasTestID(tree, 'sol-pay-ata-instructions')).toBe(true);
+    expect(hasTestID(tree, 'btn-sol-start-scan')).toBe(true);
+    pressByTestID(tree, 'btn-sol-start-scan');
+    expect(scannerNodes(tree)).not.toHaveLength(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('X1: the practice balance is named on this rail too — one pointer, both engines', () => {
+    const onSwitchRail = jest.fn();
+    const tree = mountTill({
+      homeCurrency: 'CHF',
+      payGate: 'sol-zero',
+      selectedToken: 'SOL',
+      balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}},
+      onSwitchRail,
+    });
+    expect(textByTestID(tree, 'fund-sibling-holds')).toBe(M.pay.fundSibling.practice('∂100.00'));
+    pressByTestID(tree, 'btn-fund-sibling-switch');
+    expect(onSwitchRail).toHaveBeenCalledWith('ic:0');
     act(() => { tree.unmount(); });
   });
 });

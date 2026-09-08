@@ -220,29 +220,30 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   const selectedMint = isNativeSelected ? null : solanaTokenInfo(selectedToken)?.mint ?? null;
   const selectedSymbol = isNativeSelected ? SOL_UNIT : selectedToken;
 
-  // The funded-sibling pointer (Objective 2, S5): every fund-first gate below renders it. Null on
-  // its own unless a sibling rail of the home currency is funded (a funded sibling token rail is
-  // the live case; SOL is no currency's rail, so a SOL gate never points anywhere). The switch is
-  // a USER gesture — `onSwitchRail` is Wallet's `payRailSelect` under `shouldAllowUserSelect`;
-  // Wallet passes no switch while the selection is locked, and the pointer then names the rail
-  // without the button.
-  // The fund-gate rail notes: FIRST the gated rail's OWN liquidity statement (warn tone ⇒ renders
-  // exactly for a thin gated rail — untiered SOL/USDC show nothing), THEN the funded-sibling
-  // pointer. Together they answer, at the gate itself: "what does this rail cost to use, and what
-  // could I switch to instead?"
+  // The two lines every fund-blocked surface below pairs, in this order, because together they
+  // answer "what does this rail cost to use, and what could I use instead?":
+  //   • `railNote` — the BLOCKED rail's own catalogued liquidity statement (warn tone ⇒ renders
+  //     exactly for a thin rail; untiered SOL/USDC show nothing).
+  //   • `fundedElsewhere` — the funded-account pointer (X1). Null on its own unless some OTHER
+  //     account of the user's holds money; widened on 2026-09-08 past the home-currency group, so
+  //     a SOL gate that used to point nowhere can now name a funded ckUSDC — or the ∂100 practice
+  //     balance a brand-new wallet holds and no screen ever mentioned. `purpose` is what keeps
+  //     practice money off the SEND surface, where it has no route out of the wallet.
+  // The switch is a USER gesture — `onSwitchRail` is Wallet's `payRailSelect` under
+  // `shouldAllowUserSelect`; Wallet passes no switch while the selection is locked, and the
+  // pointer then names the account without the button.
   const siblingAssetId: AssetId = isNativeSelected ? 'solana:SOL' : `solana:${selectedToken}`;
   const gatedAsset = assets.find(a => a.id === siblingAssetId) ?? null;
-  const siblingPointer = (
-    <>
-      {gatedAsset != null ? <RailLiquidityNote asset={gatedAsset} tone="warn" /> : null}
-      <FundedSiblingRail
-        homeCurrency={homeCurrency}
-        assets={assets}
-        balances={balances}
-        selectedAssetId={siblingAssetId}
-        onSwitch={onSwitchRail}
-      />
-    </>
+  const railNote = gatedAsset != null ? <RailLiquidityNote asset={gatedAsset} tone="warn" /> : null;
+  const fundedElsewhere = (purpose: 'pay' | 'send') => (
+    <FundedSiblingRail
+      homeCurrency={homeCurrency}
+      assets={assets}
+      balances={balances}
+      selectedAssetId={siblingAssetId}
+      purpose={purpose}
+      onSwitch={onSwitchRail}
+    />
   );
 
   // "Send to address" sub-mode: render the on-chain send flow INLINE (the SolanaWithdrawSheet body).
@@ -295,7 +296,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
             onRecheck={onRecheckBalances}
             recheckBusy={recheckBusy}
           />
-          {siblingPointer}
+          {railNote}
+          {fundedElsewhere('send')}
           {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         </View>
       );
@@ -689,59 +691,59 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   const claimedMemo = req ? sanitiseDisplayText(req.memo) : '';
 
   if (phase === 'scan') {
-    // Zero-funds gate (2026-08-16 UX): when the active asset is KNOWN unfunded the scanner is
-    // replaced by the fund-first panel. NFC does NOT arm while gated — a tap is auto-sign consent,
-    // and a zero balance would sign a payment the merchant can never settle (doomed signature).
-    // loading/error/unavailable NEVER reach here (the Wallet's gate fails OPEN to the scanner —
-    // offline-first rule; the honest backstop is the same review/RPC failure as before).
-    if (payGate === 'sol-zero' || payGate === 'token-zero') {
-      const isSol = payGate === 'sol-zero';
-      return (
-        <View style={S.center}>
-          {toggle}
-          <InstructionPanel
-            testID="sol-pay-fund"
-            title={M.pay.fundTitle(isSol ? 'SOL' : selectedSymbol)}
-            body={isSol
-              ? M.pay.fundBody('SOL', 'pay')
-              : M.pay.fundBodyToken(selectedSymbol)}
-            primaryLabel={M.pay.showMyAddress(isSol ? 'SOL' : selectedSymbol)}
-            onPrimary={isSol ? onShowSolAddress : onShowTokenAddress}
-            secondaryLabel={!isSol && solZero ? M.pay.showMyAddress('SOL') : undefined}
-            onSecondary={!isSol && solZero ? onShowSolAddress : undefined}
-            onRecheck={onRecheckBalances}
-            recheckBusy={recheckBusy}
-          />
-          {siblingPointer}
-          {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
-        </View>
-      );
-    }
-    if (payGate === 'token-absent') {
-      // Token-selected + its account KNOWN absent: the one-tap setup card (with the fund-SOL
-      // secondary when SOL is also zero) replaces the scanner. Setup first, then pay — never a
-      // doomed SPL sign.
-      const hasSol = BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
-      return (
-        <View style={S.center}>
-          {toggle}
-          <SolanaAtaSetupCard
-            asset={selectedSymbol}
-            instrTestID="sol-pay-ata-instructions"
-            btnTestID="btn-sol-pay-ata-create"
-            buttonLabel={M.pay.createTokenAccount(selectedSymbol)}
-            hasSol={hasSol}
-            checkingSol={solChecking}
-            busy={ataSetupBusy}
-            err={ataSetupErr}
-            onCreateAta={onCreateAta}
-            onShowSolAddress={onShowSolAddress}
-          />
-          {siblingPointer}
-          {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
-        </View>
-      );
-    }
+    // ── WHAT GATES THE CAMERA, AND WHAT GATES THE SIGNATURE (X3, 2026-09-08) ──────────────────
+    //
+    // IC twin: the identical rule, stated in full in PayMode. THE CAMERA IS NEVER GATED ON FUNDS.
+    // A merchant's `solreq:v2` names its OWN currency and mint — which need not be the selected
+    // asset's — so the selection says nothing about whether the request is payable, and gating the
+    // lens on it stopped a payer from even READING a code they could have settled. The camera and
+    // the HCE card are gated by ONE thing: the payer's explicit "Pay Now" press (`scanArmed`).
+    //
+    // THE SIGNATURE IS GATED PER REQUEST, in `onScan`/`SolNfcTap`, on the REQUEST's own mint:
+    // `solSplSignGate` refuses before signing when that mint's token account is KNOWN absent (a
+    // pure offline sign against a non-existent ATA is a dead QR the payer cannot see), and every
+    // UNCONFIRMED state fails open per the offline-first rule.
+    //
+    // THE FUND AND SETUP INSTRUCTIONS ARE NOT DELETED, THEY ARE DEMOTED: they ride BELOW the "Pay
+    // Now" press while the camera is idle, so the 2026-08-16 funding funnel and the one-tap ATA
+    // create both keep their entry point at the moment of intent without standing in front of the
+    // lens. The send sub-mode above keeps its full-replacement gate, because there is no request
+    // to read there.
+    //
+    // loading/error/unavailable never produce a gate at all (the Wallet's `solPayGate` fails OPEN
+    // — offline-first rule).
+    const isSolGate = payGate === 'sol-zero';
+    const fundIdle = payGate === 'sol-zero' || payGate === 'token-zero' ? (
+      <InstructionPanel
+        testID="sol-pay-fund"
+        title={M.pay.fundTitle(isSolGate ? 'SOL' : selectedSymbol)}
+        body={isSolGate
+          ? M.pay.fundBody('SOL', 'pay')
+          : M.pay.fundBodyToken(selectedSymbol)}
+        primaryLabel={M.pay.showMyAddress(isSolGate ? 'SOL' : selectedSymbol)}
+        onPrimary={isSolGate ? onShowSolAddress : onShowTokenAddress}
+        secondaryLabel={!isSolGate && solZero ? M.pay.showMyAddress('SOL') : undefined}
+        onSecondary={!isSolGate && solZero ? onShowSolAddress : undefined}
+        onRecheck={onRecheckBalances}
+        recheckBusy={recheckBusy}
+      />
+    ) : payGate === 'token-absent' ? (
+      // Token selected + its account KNOWN absent: the one-tap setup card, with the fund-SOL
+      // secondary when SOL is also zero. Setup first, then pay — but the lens stays open, because
+      // a request naming SOL or any other mint is perfectly payable from here.
+      <SolanaAtaSetupCard
+        asset={selectedSymbol}
+        instrTestID="sol-pay-ata-instructions"
+        btnTestID="btn-sol-pay-ata-create"
+        buttonLabel={M.pay.createTokenAccount(selectedSymbol)}
+        hasSol={BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS}
+        checkingSol={solChecking}
+        busy={ataSetupBusy}
+        err={ataSetupErr}
+        onCreateAta={onCreateAta}
+        onShowSolAddress={onShowSolAddress}
+      />
+    ) : null;
     return (
       <View style={S.center}>
         {toggle}
@@ -786,6 +788,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
                   >
                     <Text style={S.primaryText}>{M.pay.payNow}</Text>
                   </Pressable>
+                  {fundIdle}
+                  {fundIdle != null ? railNote : null}
+                  {fundIdle != null ? fundedElsewhere('pay') : null}
                 </>
               )}
             </View>

@@ -96,6 +96,10 @@ export type WalletMessages = {
     settingsHint: string;
     /** Chooser confirm. */
     confirm: string;
+    /** Continue pressed with nothing picked. The button LOOKS pressable, so it IS pressable and
+     *  answers with the step that is missing — a control that swallows the tap in silence is the
+     *  dead end the founder's 2026-08-29 rule forbids (`OPEN_ISSUES.md`, UX swarm X5). */
+    pickFirst: string;
     /** The catalog carries no rail for ANY currency — a broken asset list, named as such. */
     noneAvailable: string;
     a11y: (currency: string) => string;
@@ -120,17 +124,19 @@ export type WalletMessages = {
   tab: {pay: string; receive: string; transactions: string; home: string};
 
   /**
-   * The HOME TAB (O4) — the balance-first home surface. Its headline mirrors the header's eyebrow
-   * rules EXACTLY (see `balance` + `homeCurrency.mainLabel`): the home rail names the CURRENCY,
-   * any other selection names the ASSET, and the offline approximation marker outranks both —
+   * The HOME TAB — the landing surface since 2026-09-08. Its headline is the HOME CURRENCY's, not
+   * the selection's: it names the CURRENCY (`homeCurrency.mainLabel`) over the home rail's own
+   * token unit, and the offline approximation marker (`balance.approx`) outranks that label —
    * naming the currency changes the NAME, never the online/offline distinction. The amount is
-   * always ONE asset's own balance in its own token unit, never a portfolio sum.
+   * always ONE rail's own balance in its own token unit, never a portfolio sum.
    */
   home: {
-    /** The action row's three uniform buttons (capability-dispatched, one chrome for every asset). */
+    /** The action row. `scan` is the PRIMARY one — Home is the landing screen since 2026-09-08, so
+     *  the till gesture has to stay one tap from a cold start (the mitigation the UX swarm's
+     *  dissenter named). The rest are capability-dispatched, one chrome for every asset. */
     actions: {
-      pay: string;
-      payHint: string;
+      scan: string;
+      scanHint: string;
       receive: string;
       receiveHint: string;
       addMoney: string;
@@ -143,12 +149,27 @@ export type WalletMessages = {
       seeAllHint: string;
       empty: string;
     };
-    /** The inline accounts list — the full per-asset balance list (the retired Balances sheet's
-     *  body), one row per rail, never summed. */
+    /** The affordance that opens the ACCOUNTS route (the list itself lives in `accounts` below).
+     *  Carries the count so the user knows how much is behind it before tapping. */
     accounts: {
-      title: string;
-      intro: string;
+      open: (count: number) => string;
+      openHint: string;
     };
+  };
+
+  /** The ACCOUNTS route — the full per-asset balance list (the retired Balances sheet's body,
+   *  moved off Home 2026-09-08), one row per rail, never summed, never sorted by an FX-comparable
+   *  magnitude. */
+  accounts: {
+    title: string;
+    intro: string;
+    back: string;
+    backHint: string;
+    /** The divider that separates the practice rail from the accounts holding real value. Whole
+     *  sentence, never a glyph (anti-scam rule R3: play money is labelled wherever it appears). */
+    practice: string;
+    /** The per-asset Convert action, shown on the SELECTED row only. */
+    convertHint: string;
   };
 
   /** The fund-funnel resume link on Receive → My address. */
@@ -274,6 +295,7 @@ export const walletEn: WalletMessages = {
     settingsTitle: 'Main currency',
     settingsHint: 'The currency dpay shows first and pays in by default',
     confirm: 'Continue',
+    pickFirst: 'Tap the currency you want first, then Continue.',
     noneAvailable: 'No currencies could be loaded. Check the server address in Settings, then reopen dpay.',
     a11y: currency => `Choose ${currency}`,
   },
@@ -294,8 +316,8 @@ export const walletEn: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Pay',
-      payHint: 'Scan a code or send to an address',
+      scan: 'Scan to pay',
+      scanHint: 'Open the camera and scan a shop’s code',
       receive: 'Receive',
       receiveHint: 'Request a payment or show your address',
       addMoney: 'Add money',
@@ -308,9 +330,18 @@ export const walletEn: WalletMessages = {
       empty: 'No payments yet.',
     },
     accounts: {
-      title: 'Accounts',
-      intro: 'Tap a currency to show it on your home screen. Receive or send it from the Receive and Pay tabs.',
+      open: count => `Accounts · ${count}`,
+      openHint: 'See every account this wallet can hold',
     },
+  },
+
+  accounts: {
+    title: 'Accounts',
+    intro: 'Tap an account to use it in the Pay and Receive tabs. Your home screen keeps showing your main currency.',
+    back: 'Back',
+    backHint: 'Return to where you were',
+    practice: 'Practice money — it only works inside dpay, and no shop will take it.',
+    convertHint: 'Convert this account’s balance at an outside venue you sign with yourself',
   },
 
   backToPaying: asset => `Back to paying ${asset}`,
@@ -531,7 +562,7 @@ export const educationEn: EducationMessages = {
     stamps: {
       recoverySaved: {label: 'BACKED\nUP', hint: 'Copy your backup words in Settings', short: 'back up to go'},
       flowUnderstood: {label: 'SAW THE\nFLOW', hint: 'Watch the rehearsal when creating a wallet — or make any payment', short: 'see how it works to go'},
-      fundsReady: {label: 'FUNDS\nLOADED', hint: 'Add any funds — demo funds count', short: 'add funds to go'},
+      fundsReady: {label: 'FUNDS\nLOADED', hint: 'Add money you can spend — practice funds do not count', short: 'add funds to go'},
       paymentTested: {label: 'FIRST\nPAYMENT', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
     },
     close: title => `Close ${title}`,

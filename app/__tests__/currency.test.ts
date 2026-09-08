@@ -19,6 +19,7 @@ import {
   chooseRail,
   currencyOfAsset,
   currencyRails,
+  fundedAlternative,
   offerableCurrencies,
   parseHomeCurrency,
   preferredRail,
@@ -335,5 +336,68 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
     // Direct mixed with a non-Direct direction has no derivable statement — no speculative key.
     expect(railRampLine({...veur, onramp: 'Direct'})).toBeNull();
     expect(railRampLine({...ckusdc, offramp: 'Unavailable'})).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// fundedAlternative — "this account is empty; which account of yours is not?" (X1, 2026-09-08).
+//
+// The measured defect it exists to kill: a brand-new wallet holds ∂100 of spendable practice
+// money and every fund-blocked surface pointed at a 63-character deposit address instead, never
+// naming the money the user already had. The answer is ranked, and the ranking is the whole
+// design — a same-currency rail substitutes EXACTLY, another real asset is spendable but is a
+// different currency, and practice money is neither, so it is named last and only where the
+// action is paying.
+// ---------------------------------------------------------------------------------------------
+describe('fundedAlternative — the funded account a fund-blocked surface can name', () => {
+  const withSol = build([DEMO, CKBTC, CKUSDC, VCHF, ICP], true);
+  const ok = (displayText: string): BalanceView => ({displayText, status: 'ok'});
+
+  const ask = (over: Partial<Parameters<typeof fundedAlternative>[0]>) => fundedAlternative({
+    homeCurrency: 'USD',
+    assets: withSol,
+    balances: {},
+    selectedAssetId: 'ic:2',
+    purpose: 'pay',
+    ...over,
+  });
+
+  it('prefers a funded rail of the SAME currency — the only substitute that is the same money', () => {
+    const out = ask({balances: {'solana:USDC': ok('2.50 USDC'), 'ic:0': ok('∂100.00'), 'ic:1': ok('0.0005 BTC')}});
+    expect(out).not.toBeNull();
+    expect(out!.asset.id).toBe('solana:USDC');
+    expect(out!.kind).toBe('sibling');
+    expect(out!.held.displayText).toBe('2.50 USDC');
+  });
+
+  it('falls to another funded REAL account when the currency group has nothing', () => {
+    // ckBTC selected: no home-currency group applies at all, and the wallet holds BTC nowhere —
+    // but it does hold dollars, and holding dollars is a fact worth naming on a dead screen.
+    const out = ask({selectedAssetId: 'ic:1', balances: {'ic:2': ok('5.00 ckUSDC'), 'ic:0': ok('∂100.00')}});
+    expect(out!.asset.id).toBe('ic:2');
+    expect(out!.kind).toBe('other');
+  });
+
+  it('names PRACTICE money last, and only when the action is paying', () => {
+    // Nothing real is funded — the ∂100 the founder watched the app hide is the answer.
+    expect(ask({balances: {'ic:0': ok('∂100.00')}})).toEqual(
+      expect.objectContaining({kind: 'practice'}),
+    );
+    expect(ask({balances: {'ic:0': ok('∂100.00')}})!.asset.id).toBe('ic:0');
+    // Sending needs a rail off the wallet, which practice money does not have — so it is not an
+    // answer there and the surface must not pretend otherwise.
+    expect(ask({purpose: 'send', balances: {'ic:0': ok('∂100.00')}})).toBeNull();
+  });
+
+  it('never names the selected account, and never an unfunded one', () => {
+    expect(ask({balances: {'ic:2': ok('5.00 ckUSDC')}})).toBeNull();
+    for (const status of ['zero', 'absent', 'unavailable', 'error', 'loading'] as const) {
+      expect(ask({balances: {'solana:USDC': {displayText: '0.00 USDC', status}}})).toBeNull();
+    }
+  });
+
+  it('is null with nothing funded anywhere, and null before an asset is selected', () => {
+    expect(ask({})).toBeNull();
+    expect(ask({selectedAssetId: null, balances: {'ic:0': ok('∂100.00')}})).toBeNull();
   });
 });

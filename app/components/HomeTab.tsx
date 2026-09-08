@@ -1,97 +1,86 @@
-import {ActivityIndicator, Pressable, Text, View} from 'react-native';
+import {Pressable, Text, View} from 'react-native';
 import {S} from '../styles';
 import {C} from '../config/palette';
 import {M} from '../i18n';
 import {type CurrencyDescriptor} from '../config/catalog';
-import {chipLabel, type SelectableAsset} from '../config/assets';
-import {currencyName, currencyOfAsset, preferredRail, railLineLabel, type HomeCurrency} from '../config/currency';
-import {CurrencyRow} from './CurrencyRow';
+import {type SelectableAsset} from '../config/assets';
+import {currencyName, type HomeCurrency} from '../config/currency';
 import {HistoryRow} from './HistoryRow';
-import {HotkeyHint} from './HotkeyHint';
-import {IconAlert, IconArrowDownLeft, IconPlus, IconQr, IconSwap} from './icons';
-import {RailLiquidityNote} from './RailLiquidityNote';
+import {IconArrowDownLeft, IconChevronDown, IconPlus, IconScan} from './icons';
 import type {AssetId, Txn} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
 
-// The balance-first HOME tab (O4) — the fourth bottom tab, one tap left of Pay. The scanner stays
-// the landing screen; this surface is where the wallet's money story is told at a glance.
+// The HOME tab — the LANDING screen since 2026-09-08 (founder decision, recorded in
+// docs/specs/2026-09-08-first-run-redesign.md §1 F2, repealing the standing "the scanner stays the
+// landing screen" rule). It has to be worth landing on, so it is an overview: a headline, one
+// affordance into the accounts, an action row, and the activity feed as the BODY of the screen.
 //
-// The headline mirrors the header's eyebrow rules EXACTLY, from the same inputs: the home rail
-// names the CURRENCY ("Swiss francs · Main"), any other selection names the ASSET ("DEMO balance"),
-// and the offline approximation marker OUTRANKS both — a wallet must never assert a main-currency
-// reading over a figure it cannot know. The amount is always the SELECTED asset's OWN balance in
-// its own token unit (the header's displayText) — never an FX conversion, never a portfolio sum.
+// ── The two pieces of state this screen distinguishes, and why (X4) ─────────────────────────────
+// HOME CURRENCY is the persisted setting the whole onboarding exists to establish (Settings can
+// change it, nothing else can). It owns THIS HEADLINE — the number, its unit and its eyebrow — and
+// it owns the wallet's DEFAULT account. That is the founder's own wording: the home currency "sets
+// the default asset, the home screen's headline number, and the unit a price is read in".
+// SELECTED ASSET is a transient working choice. It starts as the home currency's rail and only a
+// deliberate account tap moves it; it drives Pay, Receive, Send, the deposit surfaces and the
+// header chip — never this headline.
+// Before the split, tapping any account row (or flipping a rail inside an unrelated Receive sheet)
+// rewrote the Home headline, so a wallet set up in francs greeted its owner with "USDC·Sol
+// balance / —". A setting that any stray tap overwrites is not a setting.
+// The one action here that acts on an ACCOUNT is Add money, and it acts on the home rail — the
+// account this screen is showing — so no button on Home can move money in or out of an account
+// the screen is not naming. Pay and Receive are navigation: they open tabs, which work on the
+// selected asset, and the header chip states which one that is on every screen.
 //
-// The action row is four uniform buttons, capability-dispatched: Pay/Receive switch modes (the
-// same surfaces every asset pays through); Add money fires the DEMO faucet when the demo asset is
-// selected (the Balances row's topUp machinery + fail-closed copy) and otherwise lands the existing
-// deposit surface for the selected asset; Convert opens the delegated-conversion surface for EVERY
-// asset alike (uniform-IA hard rule) — the venue check happens INSIDE that surface, so a venue-less
-// asset gets the same entry point and fails closed with honest copy there, never a hidden button.
-// No per-asset special cases beyond that capability split.
+// ── Scan is primary ─────────────────────────────────────────────────────────────────────────────
+// Landing on Home costs the returning traveller one tap on the app's most frequent action; the UX
+// swarm's dissenter named the mitigation that made him withdraw the objection, and this is it. The
+// button lands the Pay tab in SCAN sub-mode specifically, so the camera is live in exactly one tap
+// from a cold start whatever sub-mode the Pay tab was last left in.
 //
-// The accounts list (O4 S3) is the retired Balances sheet's body moved WHOLESALE — every row
-// testID, the MAIN/sibling-rail badges, the DEMO faucet button, and the testnet toggle — rendered
-// inline instead of behind a modal. Same contract: one row per rail (never summed, never
-// reordered), `onSelect` is the ONE selection callback, and selection is Wallet's to gate (the
-// lock check happens in the handler Wallet passes — a suppressed row-select is a no-op).
+// The accounts list is NOT here — it is the `accounts` route (AccountsTab), reachable from this
+// screen's `btn-home-accounts`, from the header chip on every screen, from the `a` hotkey and from
+// the passport. Reasons and the ordering policy live in that file; do not restate them here.
 //
 // The activity feed shows the newest ledger rows through the SAME HistoryRow the Transactions tab
-// renders (own token units per row), capped at 3 with a See-all link into the full tab — its own
-// home-hist-* testIDs, never the Ledger's hist-* anchors.
-export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, homeCurrency, homeAsset, online, history, demoFaucetAvailable, topUpBusy, topUpErr, hasTestnet, showTestnet, onToggleTestnet, onPay, onReceive, onDeposit, onTopUp, onConvert, onSelect, onSeeAll}: {
+// renders (own token units per row), capped at ACTIVITY_ROWS with a See-all link into the full
+// tab — its own home-hist-* testIDs, never the Ledger's hist-* anchors.
+
+/** How many ledger rows the Home feed shows. Five since 2026-09-08: with the accounts list gone,
+ *  Activity is the body of the screen rather than a footer under it. */
+export const ACTIVITY_ROWS = 5;
+
+export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, topUpErr, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll}: {
   assets: SelectableAsset[];
-  selectedAsset: SelectableAsset | null;
-  selectedId: AssetId | null;
+  homeCurrency: HomeCurrency;
+  /** The home currency's preferred rail — the account this screen IS. Null only when the catalog
+   *  carries no rail for the chosen currency, which is the one case the headline cannot state. */
+  homeAsset: SelectableAsset | null;
   balances: Readonly<Partial<Record<AssetId, BalanceView>>>;
   catalog: CurrencyDescriptor[];
-  homeCurrency: HomeCurrency;
-  homeAsset: SelectableAsset | null;
   online: boolean;
   history: Txn[];
-  demoFaucetAvailable: boolean;
-  topUpBusy: boolean;
+  /** The demo faucet's last failure, if any. The faucet BUTTON lives on the practice row in the
+   *  accounts route, but the `T` hotkey fires it from anywhere — so its failure has to be visible
+   *  on the screen the user is actually looking at, or the hotkey fails silently. */
   topUpErr: string | null;
-  hasTestnet: boolean;
-  showTestnet: boolean;
-  onToggleTestnet: () => void;
-  onPay: () => void;
+  onScan: () => void;
   onReceive: () => void;
   onDeposit: (id: AssetId) => void;
-  onTopUp: () => void;
-  onConvert: () => void;
-  onSelect: (id: AssetId) => void;
+  onOpenAccounts: () => void;
   onSeeAll: () => void;
 }) {
-  // The SAME name the header puts in its eyebrow: the home-currency name only when the selection
-  // IS the home rail, otherwise the collision-qualified chip label. 'DEMO' is the header's
-  // pre-catalog fallback name, kept identical here.
-  const activeAssetName = selectedAsset ? chipLabel(selectedAsset, assets) : 'DEMO';
-  const selectedIsHome = selectedAsset !== null && currencyOfAsset(selectedAsset) === homeCurrency && selectedAsset.id === homeAsset?.id;
-  const eyebrowName = selectedIsHome ? currencyName(homeCurrency) : activeAssetName;
-  const eyebrow = !online
-    ? M.wallet.balance.approx(eyebrowName)
-    : selectedIsHome
-      ? M.wallet.homeCurrency.mainLabel(eyebrowName)
-      : M.wallet.balance.of(eyebrowName);
-  const amount = selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—';
-  // The SAME DEMO capability test the Balances row uses (ic + currency 0), not a name match.
-  const isDemo = selectedAsset !== null && selectedAsset.protocol === 'ic' && selectedAsset.currency === 0;
-  const canAddMoney = !isDemo || demoFaucetAvailable;
-  const addMoneyLabel = isDemo && demoFaucetAvailable ? M.wallet.balances.demoFundsLabel : M.wallet.home.actions.addMoney;
-  const addMoneyHint = isDemo && demoFaucetAvailable ? M.wallet.balances.demoFundsHint : M.wallet.home.actions.addMoneyHint;
-  const rows = history.slice(0, 3);
-  // The home currency's rail group, marked — never summed and never reordered: each rail keeps its
-  // own row and balance (the founder's honesty rule: same-currency rails on different chains must
-  // never read as one balance). The preferred rail (mainId) carries the MAIN badge; every OTHER
-  // rail of the group carries a badge NAMING that rail (railLineLabel — "USDC · Solana") so a
-  // sibling row says which rail it is instead of wearing a second MAIN or vanishing into a group
-  // total.
-  const mainId = preferredRail(homeCurrency, assets)?.id ?? null;
-  // The testnet toggle renders only when there's at least one testnet currency to reveal OR
-  // testnet rows are currently shown. `hasTestnet` is computed upstream from the FULL catalog
-  // (the assets list is already filtered, so it cannot answer this on its own).
-  const showToggle = hasTestnet || showTestnet;
+  // The headline names the CURRENCY and carries the home rail's own token unit — "Swiss francs ·
+  // Main" over "12.40 VCHF". The currency is the LABEL, the token is the UNIT: VCHF is a third
+  // party's franc-denominated token whose peg dpay does not verify, so "CHF 12.40" would be a
+  // claim while this is a fact (config/currency.ts owns that rule).
+  // Offline OUTRANKS the main label: a wallet that reads "Swiss francs · Main" over a stale figure
+  // would be asserting a balance it cannot know. Flow 100 exists for exactly this.
+  const eyebrowName = currencyName(homeCurrency);
+  const eyebrow = online
+    ? M.wallet.homeCurrency.mainLabel(eyebrowName)
+    : M.wallet.balance.approx(eyebrowName);
+  const amount = homeAsset ? (balances[homeAsset.id]?.displayText ?? '—') : '—';
+  const rows = history.slice(0, ACTIVITY_ROWS);
   return (
     <View>
       {/* No hand-built accessible name here: the block is not interactive, so a screen reader
@@ -103,134 +92,42 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
         <Text testID="home-headline-label" style={S.homeEyebrow}>{eyebrow}</Text>
         <Text testID="home-headline-amount" style={S.homeAmount}>{amount}</Text>
       </View>
+      <Pressable
+        testID="btn-home-accounts"
+        style={S.homeAccountsBtn}
+        onPress={onOpenAccounts}
+        accessibilityRole="button"
+        accessibilityLabel={M.wallet.home.accounts.open(assets.length)}
+        accessibilityHint={M.wallet.home.accounts.openHint}
+        accessibilityState={{disabled: false}}>
+        <Text style={S.homeAccountsBtnText}>{M.wallet.home.accounts.open(assets.length)}</Text>
+        <IconChevronDown size={14} color={C.sub2} />
+      </Pressable>
+      <Pressable
+        testID="btn-home-scan"
+        style={S.homeScanBtn}
+        onPress={onScan}
+        accessibilityRole="button"
+        accessibilityLabel={M.wallet.home.actions.scan}
+        accessibilityHint={M.wallet.home.actions.scanHint}
+        accessibilityState={{disabled: false}}>
+        <IconScan size={22} color={C.brandInk} />
+        <Text style={S.homeScanLabel}>{M.wallet.home.actions.scan}</Text>
+      </Pressable>
       <View style={S.homeActionRow}>
-        <Pressable testID="btn-home-pay" style={S.homeActionBtn} onPress={onPay} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.pay} accessibilityHint={M.wallet.home.actions.payHint}>
-          <IconQr size={22} color={C.brand} />
-          <Text style={S.homeActionLabel}>{M.wallet.home.actions.pay}</Text>
-        </Pressable>
         <Pressable testID="btn-home-receive" style={S.homeActionBtn} onPress={onReceive} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.receive} accessibilityHint={M.wallet.home.actions.receiveHint}>
           <IconArrowDownLeft size={22} color={C.brand} />
           <Text style={S.homeActionLabel}>{M.wallet.home.actions.receive}</Text>
         </Pressable>
-        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, (!canAddMoney || topUpBusy) && S.dim]} onPress={() => (isDemo ? onTopUp() : selectedAsset !== null && onDeposit(selectedAsset.id))} disabled={!canAddMoney || topUpBusy || selectedAsset === null} accessibilityRole="button" accessibilityLabel={addMoneyLabel} accessibilityHint={addMoneyHint} accessibilityState={{disabled: !canAddMoney || topUpBusy || selectedAsset === null}}>
+        {/* Add money funds the account the headline is showing — the home currency's rail. It is
+            disabled only when the catalog carries no rail for that currency, which is the same
+            "there is nothing to act on" rule its sibling follows. */}
+        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, homeAsset === null && S.dim]} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={homeAsset === null} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addMoney} accessibilityHint={M.wallet.home.actions.addMoneyHint} accessibilityState={{disabled: homeAsset === null}}>
           <IconPlus size={22} color={C.brand} />
-          <Text style={S.homeActionLabel}>{addMoneyLabel}</Text>
-        </Pressable>
-        {/* Convert — the uniform fourth action. Enabled for EVERY selected asset (venue-less assets
-            fail closed inside the Convert surface with honest copy); only the no-selection state
-            disables it, exactly like its siblings. */}
-        <Pressable testID="btn-home-convert" style={S.homeActionBtn} onPress={onConvert} disabled={selectedAsset === null} accessibilityRole="button" accessibilityLabel={M.convert.actionConvert} accessibilityHint={M.convert.actionConvert}>
-          <IconSwap size={22} color={C.brand} />
-          <Text style={S.homeActionLabel}>{M.convert.actionConvert}</Text>
+          <Text style={S.homeActionLabel}>{M.wallet.home.actions.addMoney}</Text>
         </Pressable>
       </View>
-      {isDemo && topUpErr ? <Text testID="home-faucet-err" style={S.homeFaucetErr}>{topUpErr}</Text> : null}
-      <View style={S.homeAccounts} testID="home-accounts">
-        <Text style={S.histTitle}>{M.wallet.home.accounts.title}</Text>
-        <Text style={S.dim2}>{M.wallet.home.accounts.intro}</Text>
-        {assets.map(asset => {
-          // The pre-resolved balance view for this row. The displayText is the fully-formatted
-          // amount; `status !== 'ok'` is the unified dim rule (zero/absent/unavailable/error/
-          // loading all dim — only a confirmed non-zero balance reads at full color).
-          const view = balances[asset.id];
-          const rowIsDemo = asset.protocol === 'ic' && asset.currency === 0;
-          // The DEMO faucet button — the ONLY per-row action left (every on-chain send/receive
-          // lives in the Pay/Receive tabs). Passed via `actions` so tapping it doesn't fire select.
-          // D5b: carries the T HotkeyHint (the web keyboard top-up) so the shortcut is
-          // discoverable — same badge pattern as the tab bar / header A badge.
-          const faucet = rowIsDemo && demoFaucetAvailable ? (
-            <Pressable
-              testID="btn-topup"
-              style={[S.assetActionBtn, topUpBusy && S.dim]}
-              disabled={topUpBusy}
-              onPress={onTopUp}
-              accessibilityRole="button"
-              accessibilityLabel={M.wallet.balances.demoFundsLabel}
-              accessibilityHint={M.wallet.balances.demoFundsHint}
-              accessibilityState={{disabled: topUpBusy}}
-            >
-              {topUpBusy
-                ? <ActivityIndicator size="small" color={C.brand} />
-                : <><IconPlus size={16} color={C.brand} /><Text style={S.assetActionText}>{M.wallet.balances.demoFunds}</Text><HotkeyHint k="T" /></>}
-            </Pressable>
-          ) : null;
-          // The DEMO row's topUpErr line — rendered below the subtitle via `children`.
-          const errLine = rowIsDemo && topUpErr
-            ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text>
-            : null;
-          // 'Needs setup' badge — Solana USDC with a KNOWN-absent token account ('absent' is a
-          // USDC-only status: no ATA on chain). One tap on the row selects it, and every USDC
-          // surface then offers the one-tap account create. Known-absent only: loading/error/
-          // unavailable never claim setup is needed (offline-first honesty rule).
-          const setupBadge = view?.status === 'absent'
-            ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>{M.wallet.balances.needsSetup}</Text>
-            : null;
-          // A balance the wallet could not READ ('error': the chain's endpoint refused or failed —
-          // the baked Helius key is out of quota today, HTTP 429, so every Solana row lands here on
-          // the shipped build). It rendered the same bare "—" as a first poll still in flight, which
-          // told the user nothing about which of the two it was. Says what happened, whose side it
-          // is on, that nothing moved, and that the retry is automatic (the balance poll re-reads on
-          // its own interval behind the endpoint's cooldown — so no button is promised). Status-
-          // driven, never rail-specific: any rail that reports 'error' gets the same line.
-          const unreadable = view?.status === 'error' ? (
-            <View testID={`asset-${asset.testKey}-unreadable`} style={S.railHealthRow}>
-              <IconAlert size={14} color={C.warn} />
-              <Text style={S.railHealthText}>{M.wallet.balances.railUnreadable(asset.network ?? asset.symbol)}</Text>
-            </View>
-          ) : null;
-          // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
-          const mainBadge = asset.id === mainId
-            ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>
-            : null;
-          // The sibling-rail badge — a rail of the home currency's group that is NOT the preferred
-          // one. Its text NAMES the rail (railLineLabel: ledger token · settlement chain), never
-          // "MAIN", so the two USD rows read as two named rails of one currency, each with its own
-          // balance — the opposite of a merged group total.
-          const railBadge = asset.id !== mainId && currencyOfAsset(asset) === homeCurrency
-            ? <Text testID={`asset-${asset.testKey}-rail`} style={S.assetBadge}>{railLineLabel(asset)}</Text>
-            : null;
-          return (
-            <CurrencyRow
-              key={asset.testKey}
-              testId={`asset-${asset.testKey}`}
-              asset={asset}
-              amount={view?.displayText}
-              active={asset.id === selectedId}
-              zero={view ? view.status !== 'ok' : true}
-              onPress={() => onSelect(asset.id)}
-              accessibilityLabel={M.wallet.balances.select(asset.symbol)}
-              accessibilityHint={asset.protocol === 'solana'
-                ? M.wallet.balances.selectSolanaHint(asset.symbol)
-                : M.wallet.balances.selectHint}
-              variant="card"
-              actions={faucet}
-            >
-              {errLine}
-              {mainBadge}
-              {railBadge}
-              {setupBadge}
-              {unreadable}
-              {/* The rail-health footer — ONE shared slot under the badge stack, rendered by the
-                  same component everywhere so the thin-liability statement (VEUR) reads with one
-                  voice. Warn tone: only THIN rails carry it; deep/untiered rows render nothing
-                  (no badge colours change — the note is text, not chrome). */}
-              <RailLiquidityNote asset={asset} tone="warn" />
-            </CurrencyRow>
-          );
-        })}
-        {showToggle ? (
-          <Pressable
-            testID="btn-toggle-testnet"
-            style={S.testnetToggle}
-            onPress={onToggleTestnet}
-            accessibilityRole="button"
-            accessibilityLabel={showTestnet ? M.wallet.balances.hideTestnet : M.wallet.balances.showTestnet}
-            accessibilityHint={showTestnet ? M.wallet.balances.hideTestnetHint : M.wallet.balances.showTestnetHint}
-            accessibilityState={{disabled: false}}>
-            <Text style={S.testnetToggleText}>{showTestnet ? M.wallet.balances.hideTestnet : M.wallet.balances.showTestnet}</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      {topUpErr ? <Text testID="home-faucet-err" style={S.homeFaucetErr}>{topUpErr}</Text> : null}
       <View style={S.homeActivity} testID="home-activity">
         <Text style={S.histTitle}>{M.wallet.home.activity.title}</Text>
         {rows.length === 0

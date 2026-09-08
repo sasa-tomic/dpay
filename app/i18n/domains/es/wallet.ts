@@ -38,6 +38,7 @@ export const walletEs: WalletMessages = {
     settingsTitle: 'Moneda principal',
     settingsHint: 'La moneda que dpay muestra primero y usa por defecto',
     confirm: 'Continuar',
+    pickFirst: 'Toca primero la moneda que quieras y luego Continuar.',
     noneAvailable: 'No se pudo cargar ninguna moneda. Revisa la dirección del servidor en Ajustes y vuelve a abrir dpay.',
     a11y: currency => `Elegir ${currency}`,
   },
@@ -58,8 +59,8 @@ export const walletEs: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Pagar',
-      payHint: 'Escanea un código o envía a una dirección',
+      scan: 'Escanear y pagar',
+      scanHint: 'Abre la cámara y escanea el código de la tienda',
       receive: 'Recibir',
       receiveHint: 'Pide un pago o muestra tu dirección',
       addMoney: 'Añadir dinero',
@@ -72,9 +73,18 @@ export const walletEs: WalletMessages = {
       empty: 'Aún no hay pagos.',
     },
     accounts: {
-      title: 'Cuentas',
-      intro: 'Toca una moneda para mostrarla en tu pantalla de inicio. Recíbela o envíala desde las pestañas Recibir y Pagar.',
+      open: count => `Cuentas · ${count}`,
+      openHint: 'Ver todas las cuentas que esta cartera puede guardar',
     },
+  },
+
+  accounts: {
+    title: 'Cuentas',
+    intro: 'Toca una cuenta para usarla en las pestañas Pagar y Recibir. Tu pantalla de inicio sigue mostrando tu moneda principal.',
+    back: 'Atrás',
+    backHint: 'Volver a donde estabas',
+    practice: 'Dinero de práctica: solo funciona dentro de dpay y ninguna tienda lo acepta.',
+    convertHint: 'Convertir el saldo de esta cuenta en un servicio externo que firmas tú mismo',
   },
 
   backToPaying: asset => `Volver a pagar con ${asset}`,
@@ -220,7 +230,7 @@ export const educationEs: EducationMessages = {
     stamps: {
       recoverySaved: {label: 'COPIA\nHECHA', hint: 'Copia tus palabras de recuperación en Ajustes', short: 'falta la copia de seguridad'},
       flowUnderstood: {label: 'FLUJO\nVISTO', hint: 'Mira el ensayo al crear una billetera, o haz cualquier pago', short: 'falta ver cómo funciona'},
-      fundsReady: {label: 'FONDOS\nCARGADOS', hint: 'Añade fondos: los de prueba también valen', short: 'falta añadir fondos'},
+      fundsReady: {label: 'FONDOS\nCARGADOS', hint: 'Añade dinero que puedas gastar; los fondos de práctica no cuentan', short: 'falta añadir fondos'},
       paymentTested: {label: 'PRIMER\nPAGO', hint: 'Completa un pago: paga o recibe', short: 'falta un pago'},
     },
     close: title => `Cerrar ${title}`,

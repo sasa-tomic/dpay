@@ -73,12 +73,22 @@ const isPresent = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
   tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
 
 describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
-  test('requires an explicit currency choice before Continue', () => {
-    const tree = mountChooser();
-    const button = tree.root.findAll(node => node.props?.testID === 'btn-home-currency-continue')[0]!;
-    expect(button.props.disabled).toBe(true);
+  test('requires an explicit currency choice, and SAYS SO when Continue is pressed early (X5)', () => {
+    // The measured dead end: Continue rendered at 40% opacity in the primary colour, looked
+    // pressable, and swallowed the tap in total silence — no shake, no hint, nothing. The
+    // no-preselect decision stays (docs/specs/2026-09-07-ux-decisions.md §2); what changes is that
+    // a control which LOOKS pressable IS pressable and answers with the missing step.
+    const onChoose = jest.fn();
+    const tree = mountChooser(onChoose);
+    expect(isPresent(tree, 'home-currency-pick-first')).toBe(false);
+    press(tree, 'btn-home-currency-continue');
+    expect(onChoose).not.toHaveBeenCalled();
+    expect(rowText(tree, 'home-currency-pick-first')).toBe('Tap the currency you want first, then Continue.');
+    // Picking clears the prompt and Continue commits — the instruction never outlives its cause.
     press(tree, 'home-currency-CHF');
-    expect(tree.root.findAll(node => node.props?.testID === 'btn-home-currency-continue')[0]!.props.disabled).toBe(false);
+    expect(isPresent(tree, 'home-currency-pick-first')).toBe(false);
+    press(tree, 'btn-home-currency-continue');
+    expect(onChoose).toHaveBeenCalledWith('CHF');
     act(() => { tree.unmount(); });
   });
 

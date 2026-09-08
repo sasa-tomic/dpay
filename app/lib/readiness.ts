@@ -8,9 +8,11 @@
 // Copy-source decision: the stamp ORDER lives HERE, colocated with the logic (it is also the
 // "next step" order); the WORDS live in the message catalog (`M.education.passport.stamps`).
 import {M} from '../i18n';
+import {DEMO_ASSET_ID} from '../config/assets';
 import {JOURNEY_STAMPS, awardStamp, hasStamp} from './journey';
 import type {Journey} from './journey';
 import type {BalanceView} from './assetBalances';
+import type {AssetId} from './types';
 
 /** The four readiness capability keys (a subset of journey.ts's closed StampKey set). */
 export type ReadinessKey =
@@ -72,13 +74,21 @@ export function computeReadiness(journey: Journey): Readiness {
   return {filled, missing, complete: false, next: {key: nextKey, hint, short}};
 }
 
-/** True iff ANY asset shows a spendable balance: status 'ok' AND a real display value.
-  * DEMO counts (faucet-funded by design), offline `~approx` values count (they are known
-  * balances), `—` nulls do NOT (unknown is not funds — offline-first honesty rule). */
-export function decideFundsReady(balances: Record<string, BalanceView>): boolean {
-  // Accepts any balance-map shape (the Wallet memo is keyed by AssetId; tests/tools pass
-  // partial maps) — the decision only reads the VALUES, never the keys.
-  return Object.values(balances).some(v => v.status === 'ok' && v.displayText !== '—');
+/** True iff any asset the user could actually SPEND ON A TRIP shows a balance: status 'ok' AND a
+  * real display value. Offline `~approx` values count (they are known balances); `—` nulls do NOT
+  * (unknown is not funds — offline-first honesty rule).
+  *
+  * The PRACTICE rail is excluded (X13, UX swarm 2026-09-08). It used to count "by design", and the
+  * result was a wallet stamping FUNDS LOADED on a trip-readiness card while every real currency
+  * read 0.00 — the card claiming a state it had not verified (anti-scam rule R4). Faucet-minted
+  * demo dollars are valueless by construction, so they cannot make anyone ready for anything; the
+  * honest reading of that stamp is "you hold money a merchant would take". */
+export function decideFundsReady(balances: Partial<Record<AssetId, BalanceView>>): boolean {
+  // Keyed by AssetId so the practice rail can be named and skipped — the decision reads keys AND
+  // values now, which is why callers must pass the real map rather than an arbitrary-keyed one.
+  return Object.entries(balances).some(
+    ([id, v]) => id !== DEMO_ASSET_ID && v != null && v.status === 'ok' && v.displayText !== '—',
+  );
 }
 
 /** Award `paymentTested` — call at every CONFIRMED payment success (either direction, either

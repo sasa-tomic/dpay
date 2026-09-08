@@ -37,6 +37,7 @@ export const walletDe: WalletMessages = {
     settingsTitle: 'Hauptwährung',
     settingsHint: 'Die Währung, die dpay zuerst anzeigt und standardmässig verwendet',
     confirm: 'Weiter',
+    pickFirst: 'Tippe zuerst auf die gewünschte Währung, dann auf Weiter.',
     noneAvailable: 'Es konnten keine Währungen geladen werden. Prüfe die Serveradresse in den Einstellungen und öffne dpay erneut.',
     a11y: currency => `${currency} wählen`,
   },
@@ -57,8 +58,8 @@ export const walletDe: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Bezahlen',
-      payHint: 'Code scannen oder an eine Adresse senden',
+      scan: 'Scannen und zahlen',
+      scanHint: 'Kamera öffnen und den Code des Geschäfts scannen',
       receive: 'Empfangen',
       receiveHint: 'Zahlung anfordern oder eigene Adresse anzeigen',
       addMoney: 'Geld hinzufügen',
@@ -71,9 +72,18 @@ export const walletDe: WalletMessages = {
       empty: 'Noch keine Zahlungen.',
     },
     accounts: {
-      title: 'Konten',
-      intro: 'Tippe auf eine Währung, um sie auf deinem Startbildschirm zu zeigen. Empfangen und senden kannst du sie in den Tabs Empfangen und Bezahlen.',
+      open: count => `Konten · ${count}`,
+      openHint: 'Alle Konten anzeigen, die dieses Wallet halten kann',
     },
+  },
+
+  accounts: {
+    title: 'Konten',
+    intro: 'Tippe auf ein Konto, um es in den Tabs Bezahlen und Empfangen zu verwenden. Dein Startbildschirm zeigt weiterhin deine Hauptwährung.',
+    back: 'Zurück',
+    backHint: 'Zurück zur vorherigen Ansicht',
+    practice: 'Übungsgeld — es funktioniert nur in dpay, kein Geschäft nimmt es an.',
+    convertHint: 'Das Guthaben dieses Kontos bei einem externen Handelsplatz tauschen, den du selbst signierst',
   },
 
   backToPaying: asset => `Zurück zum Bezahlen mit ${asset}`,
@@ -219,7 +229,7 @@ export const educationDe: EducationMessages = {
     stamps: {
       recoverySaved: {label: 'BACKUP\nGESICHERT', hint: 'Kopiere deine Backup-Wörter in den Einstellungen', short: 'noch das Backup'},
       flowUnderstood: {label: 'ABLAUF\nGESEHEN', hint: 'Sieh dir den Probelauf beim Erstellen einer Wallet an — oder mach eine Zahlung', short: 'noch den Ablauf ansehen'},
-      fundsReady: {label: 'GUTHABEN\nGELADEN', hint: 'Lade Guthaben auf — Demo-Guthaben zählt', short: 'noch Guthaben aufladen'},
+      fundsReady: {label: 'GUTHABEN\nGELADEN', hint: 'Lade echtes Guthaben auf — Übungsguthaben zählt nicht', short: 'noch Guthaben aufladen'},
       paymentTested: {label: 'ERSTE\nZAHLUNG', hint: 'Schließe eine Zahlung ab — bezahlen oder empfangen', short: 'noch eine Zahlung'},
     },
     close: title => `${title} schließen`,

@@ -61,8 +61,16 @@ export function HomeCurrencyChooser({assets, balances, catalog, onChoose}: {
 }) {
   const offerable = offerableCurrencies(assets);
   // No implicit default: choosing the currency that appears first is a consequential preference,
-  // so the user must tap a row before Continue becomes available.
+  // so the user must tap a row before Continue can commit anything.
   const [picked, setPicked] = useState<HomeCurrency | null>(null);
+  // X5 — Continue was `disabled`, which made it swallow the tap in complete silence: 40% opacity
+  // in the primary colour, unmistakably a button, and no response of any kind. That is a dead end
+  // with no instruction, against the founder's 2026-08-29 hard rule, and it is independent of the
+  // no-preselect decision (which stands — `docs/specs/2026-09-07-ux-decisions.md` §2). So the
+  // button is NOT disabled: it looks pressable because it IS pressable, and an early press answers
+  // with the step that is missing. Latched on the press and cleared by the pick, so the sentence
+  // never outlives its cause and never appears unprompted.
+  const [pickFirst, setPickFirst] = useState(false);
   // Whether the picked card shows its per-rail detail panel. Tapping a row sets it from the
   // currency's own rail count, so single-rail currencies NEVER open it and Continue behaves
   // exactly as it did before the detail existed.
@@ -96,6 +104,7 @@ export function HomeCurrencyChooser({assets, balances, catalog, onChoose}: {
               style={[S.assetCard, active && S.assetCardActive]}
               onPress={() => {
                 setPicked(currency);
+                setPickFirst(false);
                 setDetail(currencyRails(currency, assets).length > 1);
               }}
               accessibilityRole="radio"
@@ -125,14 +134,21 @@ export function HomeCurrencyChooser({assets, balances, catalog, onChoose}: {
           );
         })}
 
+        {/* The prompt sits ABOVE the button, where the eye already is after a press that did
+            nothing — not below it, where the fold can hide it on a three-currency list. */}
+        {pickFirst && picked === null ? (
+          <Text testID="home-currency-pick-first" style={S.warnNote}>{M.wallet.homeCurrency.pickFirst}</Text>
+        ) : null}
         <Pressable
           testID="btn-home-currency-continue"
+          // Dimmed while nothing is picked — it is not ready — but never `disabled`: the whole
+          // defect was a control that looked pressable and answered nothing.
           style={[S.primary, picked === null && S.disabledFlat]}
-          disabled={picked === null}
-          onPress={() => { if (picked !== null) onChoose(picked); }}
+          onPress={() => { if (picked === null) { setPickFirst(true); return; } onChoose(picked); }}
           accessibilityRole="button"
           accessibilityLabel={M.wallet.homeCurrency.confirm}
-          accessibilityState={{disabled: picked === null}}
+          accessibilityHint={picked === null ? M.wallet.homeCurrency.pickFirst : undefined}
+          accessibilityState={{disabled: false}}
         >
           <Text style={S.primaryText}>{M.wallet.homeCurrency.confirm}</Text>
         </Pressable>

@@ -915,32 +915,60 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     );
   }
 
-  // IC fund-first gate (2026-08-16 zero-funds UX — same surface as the SOL rail, per the
-  // same-surfaces hard rule). Computed BEFORE both the send + scan branches so the WHOLE Pay tab
-  // gates uniformly. Balance is keyed to the SELECTED asset: currency 0 (DEMO) reads the primary
-  // poll; every other asset reads its own assetBalances entry (a missing entry → null → fail
-  // open). DEMO itself never gates (mintable — the faucet tops it up).
-  //   - ONLINE + KNOWN zero (non-DEMO) → the fund-first panel replaces the scanner + send form.
-  //   - Offline / loading / null FAIL OPEN to the live surfaces (offline-first rule — the
-  //     review-level lowbal backstop still catches a doomed payment at Approve).
-  //   - A family-depositable asset OR a complete no-minter direct-ICRC row (VCHF/ICP — receivable
-  //     by a plain ICRC-1 transfer to the user's own principal) shows the REAL top-up instruction
-  //     + the "Show my … address" primary (founder hard rule 2026-08-29: useful practical
-  //     instructions on every step — a "check back soon" dead end is a bug). Only a genuinely
-  //     undepositable malformed row keeps the honest no-primary copy.
+  // ── WHAT GATES THE CAMERA, AND WHAT GATES THE SIGNATURE (X3, 2026-09-08) ───────────────────
+  //
+  // THE CAMERA IS NEVER GATED ON FUNDS. A merchant's request NAMES its settlement asset, and this
+  // rail pays THAT asset from THAT ledger — `prepareTransfer` reads `intent.currency`, never the
+  // selection — so the locally-selected row has no bearing whatsoever on a scanned request. The
+  // fund gate used to REPLACE the scanner whenever the SELECTED balance was zero, which meant a
+  // traveller holding exactly what the merchant was asking for could not so much as READ the
+  // request because a different row happened to be highlighted. It was checking an irrelevant
+  // balance, and it was checking it before the only thing that could name the relevant one had
+  // been read. The camera is gated by ONE thing now: the payer's explicit "Pay Now" press
+  // (`scanArmed`, founder rule 2026-08-23).
+  //
+  // The HCE card arms on that same press, and the reason is the same fact rather than a weaker
+  // version of it: an NFC request carries its OWN currency, so the gate was refusing taps that
+  // would have SETTLED (a DEMO till tapped by a wallet that happens to have VCHF selected). It was
+  // never the protection it read as, either — a tap for an asset the wallet genuinely lacks was
+  // always reachable whenever the SELECTED asset was funded and the REQUESTED one was not, so this
+  // widens no failure mode. That outcome is unchanged and costs nothing: no money moves, and both
+  // phones land on the honest "not confirmed" state, because this transport cannot prove a refusal
+  // and therefore never shows one (`NfcTap.finishReader`).
+  //
+  // THE SIGNATURE IS GATED ON THE REQUESTED ASSET'S BALANCE, and only when ONLINE:
+  //   • the camera path auto-signs only `if (payable && !(online && insufficient))`, where
+  //     `insufficient` is computed from `intent.currency`'s OWN balance (`onRequestString`);
+  //   • both review surfaces re-derive the same check and render `review-lowbal` with no sign
+  //     control at all (`blockApprove`);
+  //   • OFFLINE the local balance is stale, so the payer STILL signs and the merchant's online
+  //     verify is the real gate.
+  // Those three are flow 19's contract and are untouched by this change. The NFC card has no
+  // equivalent per-request balance check — it never did — and adding one needs the balance map
+  // threaded into `NfcTap`; it is filed rather than half-built here.
+  //
+  // THE FUND INSTRUCTION IS NOT DELETED, IT IS DEMOTED. On the send sub-mode it still replaces the
+  // form, because there is no request to read there — the user spends the SELECTED asset, so a
+  // known-zero balance really is a dead end. On the scan sub-mode it rides BELOW "Pay Now" while
+  // the camera is idle, so the 2026-08-16 funding funnel keeps its entry point at the moment of
+  // intent without standing in front of the lens.
+  //
+  // Balance is keyed to the SELECTED asset: currency 0 (DEMO) reads the primary poll; every other
+  // asset reads its own assetBalances entry (a missing entry → null → fail open). DEMO itself
+  // never gates (mintable — the faucet tops it up). Offline / loading / null FAIL OPEN
+  // (offline-first rule). A family-depositable asset OR a complete no-minter direct-ICRC row
+  // (VCHF/ICP — receivable by a plain ICRC-1 transfer to the user's own principal) shows the REAL
+  // top-up instruction + the "Show my … address" primary (founder hard rule 2026-08-29: useful
+  // practical instructions on every step). Only a genuinely undepositable malformed row keeps the
+  // honest no-primary copy.
   const gateDepositable = !!gateDesc && !gateDesc.mintable && gateDesc.onramp !== 'Unavailable' && gateDesc.minter != null;
   const gateCanFund = gateDepositable || isDirectIcrcAsset(gateDesc);
   const gateBalance = withdrawCurrency === 0 ? shownBalance : (assetBalances[withdrawCurrency] ?? null);
-  const fundGate = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
-  // The gated rail itself — its catalog row's liquidity statement rides INSIDE the fund panel
+  const selectedUnfunded = online && gateBalance != null && cmpRaw(gateBalance, '0') === 0 && gateDesc != null && !gateDesc.mintable;
+  // The unfunded rail itself — its catalog row's liquidity statement rides INSIDE the fund panel
   // (warn tone ⇒ renders exactly for a thin rail like VEUR; untiered/deep rails show nothing).
   const gatedAsset = assets.find(a => a.id === selectedAssetId) ?? null;
-  // The funded-sibling pointer (S5): the fund gate exists because THIS rail is unfunded — when a
-  // sibling rail of the same home currency holds money, the gate names it and offers the switch
-  // as one tap. `onSwitchRail` is Wallet's `payRailSelect` (a user gesture under
-  // `shouldAllowUserSelect`); Wallet passes NO switch while the selection is locked, and the
-  // pointer then renders without the button.
-  const fundPanel = fundGate ? (
+  const fundInstruction = selectedUnfunded ? (
     <>
       <InstructionPanel
         testID="pay-fund"
@@ -954,15 +982,23 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         recheckBusy={refreshBusy}
       />
       {gatedAsset != null ? <RailLiquidityNote asset={gatedAsset} tone="warn" /> : null}
-      <FundedSiblingRail
-        homeCurrency={homeCurrency}
-        assets={assets}
-        balances={balances}
-        selectedAssetId={selectedAssetId}
-        onSwitch={onSwitchRail}
-      />
     </>
   ) : null;
+  // The funded-account pointer (X1): this rail is empty, and another account of the user's is not
+  // — name it, and offer the one tap. `onSwitchRail` is Wallet's `payRailSelect` (a user gesture
+  // under `shouldAllowUserSelect`); Wallet passes NO switch while the selection is locked, and the
+  // pointer then renders without the button. `purpose` is what keeps practice money off the send
+  // surface, where it has no route out of the wallet.
+  const fundedElsewhere = (purpose: 'pay' | 'send') => (selectedUnfunded ? (
+    <FundedSiblingRail
+      homeCurrency={homeCurrency}
+      assets={assets}
+      balances={balances}
+      selectedAssetId={selectedAssetId}
+      purpose={purpose}
+      onSwitch={onSwitchRail}
+    />
+  ) : null);
 
   // Offline gate for the send surface. The Pay tab's two halves have OPPOSITE connectivity truths
   // and only one of them was ever stated: scan-to-pay is the offline rail — the payer signs in
@@ -1003,7 +1039,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           left={{label: M.pay.scanToPay, value: 'scan', testID: 'btn-pay-scan'}}
           right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
         />
-        {offlinePanel ?? fundPanel ?? (
+        {offlinePanel ?? (selectedUnfunded ? <>{fundInstruction}{fundedElsewhere('send')}</> : (
           <SendSheet
             identity={identity}
             catalog={catalog}
@@ -1018,7 +1054,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             onSent={onSettled}
             onClose={() => onSubModeChange('scan')}
           />
-        )}
+        ))}
       </View>
     );
   }
@@ -1026,7 +1062,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // Scan screen. IDLE (scanArmed false): the NFC status row stays (it explains what's available)
   // and a single primary CTA arms BOTH rails — until that tap, no camera stream and no HCE card.
   // ARMED: the card arms in the background (if NFC is ready) AND the QR scanner goes live at the
-  // same time — the payer taps the merchant's phone OR scans its QR, exactly as before the gate.
+  // same time — the payer taps the merchant's phone OR scans its QR.
+  //
+  // An unfunded SELECTED asset no longer removes any of that (see the camera-vs-signature rule
+  // above): while the payer is still idle the fund instruction and the funded-account pointer sit
+  // BELOW the "Pay Now" press, so the funding funnel keeps its entry and the money the wallet
+  // already holds is finally named. Once the payer arms the camera the screen belongs to the lens.
   return (
     <View style={S.center}>
       {sendCapable ? (
@@ -1038,8 +1079,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           right={{label: M.pay.sendToAddress, value: 'send', testID: 'btn-pay-send'}}
         />
       ) : null}
-      {fundPanel ?? (
-        <>
       {scanArmed && nfcReady && DpayNfc ? (
         <NfcTap
           key={nfcKey} role="card" identity={identity}
@@ -1068,6 +1107,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
               >
                 <Text style={S.primaryText}>{M.pay.payNow}</Text>
               </Pressable>
+              {fundInstruction}
+              {fundedElsewhere('pay')}
             </>
           )}
           {/* The till lookup is two network reads and can take tens of seconds — on a screen the
@@ -1076,8 +1117,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           {err ? <Text style={S.err}>{err}</Text> : null}
         </>
       ) : null}
-        </>
-      )}
     </View>
   );
 }

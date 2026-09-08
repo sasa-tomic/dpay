@@ -6,6 +6,7 @@
  */
 import {describe, expect, test, beforeEach, jest} from '@jest/globals';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {DEMO_ASSET_ID} from '../config/assets';
 import {awardStamp, hasStamp, EMPTY_JOURNEY, type Journey} from '../lib/journey';
 import {
   passportStamps, READINESS_STAMPS, PASSPORT_COLLAPSED_KEY,
@@ -87,29 +88,44 @@ describe('decideFundsReady', () => {
     expect(decideFundsReady({})).toBe(false);
   });
 
-  test('DEMO funded (status ok, real text): ready', () => {
-    expect(decideFundsReady({demo: view('∂100.00', 'ok')})).toBe(true);
+  // X13 (UX swarm 2026-09-08) — the stamp is on a TRIP-readiness card, and a wallet holding only
+  // faucet-minted practice money cannot pay for anything on a trip. The old rule counted it and
+  // stamped "FUNDS LOADED" over a wallet whose every real currency read 0.00.
+  test('a DEMO-only wallet is NOT funds-ready — practice money buys nothing on a trip', () => {
+    expect(decideFundsReady({[DEMO_ASSET_ID]: view('∂100.00', 'ok')})).toBe(false);
+    expect(decideFundsReady({[DEMO_ASSET_ID]: view('~∂91.00', 'ok')})).toBe(false);
   });
 
-  test('DEMO null balance ("—" but status ok): NOT ready — no displayable money', () => {
-    expect(decideFundsReady({demo: view('—', 'ok')})).toBe(false);
+  test('a real asset funded alongside DEMO IS funds-ready', () => {
+    expect(decideFundsReady({
+      [DEMO_ASSET_ID]: view('∂100.00', 'ok'),
+      'ic:7': view('12.40 VCHF', 'ok'),
+    })).toBe(true);
   });
 
-  test('offline approx value (~∂91.00): ready — approximations come from funded reality', () => {
-    expect(decideFundsReady({demo: view('~∂91.00', 'ok')})).toBe(true);
+  test('real funds (status ok, real text): ready', () => {
+    expect(decideFundsReady({'ic:7': view('12.40 VCHF', 'ok')})).toBe(true);
+  });
+
+  test('null balance ("—" but status ok): NOT ready — no displayable money', () => {
+    expect(decideFundsReady({'ic:7': view('—', 'ok')})).toBe(false);
+  });
+
+  test('offline approx value (~2.50 USDC): ready — approximations come from funded reality', () => {
+    expect(decideFundsReady({'ic:3': view('~2.50 USDC', 'ok')})).toBe(true);
   });
 
   test('zero / unavailable / error / loading / absent never count', () => {
-    expect(decideFundsReady({a: view('∂0.00', 'zero')})).toBe(false);
-    expect(decideFundsReady({a: view('—', 'unavailable')})).toBe(false);
-    expect(decideFundsReady({a: view('—', 'error')})).toBe(false);
-    expect(decideFundsReady({a: view('…', 'loading')})).toBe(false);
-    expect(decideFundsReady({a: view('—', 'absent')})).toBe(false);
+    expect(decideFundsReady({'ic:7': view('0.00 VCHF', 'zero')})).toBe(false);
+    expect(decideFundsReady({'ic:7': view('—', 'unavailable')})).toBe(false);
+    expect(decideFundsReady({'ic:7': view('—', 'error')})).toBe(false);
+    expect(decideFundsReady({'ic:7': view('…', 'loading')})).toBe(false);
+    expect(decideFundsReady({'solana:USDC': view('—', 'absent')})).toBe(false);
   });
 
-  test('ANY one funded asset in a mixed map flips it true', () => {
+  test('ANY one funded REAL asset in a mixed map flips it true', () => {
     const balances = {
-      'ic:0': view('—', 'ok'),
+      [DEMO_ASSET_ID]: view('—', 'ok'),
       'ic:1': view('—', 'unavailable'),
       'ic:3': view('~2.50 USDC', 'ok'),
       'solana:SOL': view('—', 'absent'),
@@ -118,7 +134,7 @@ describe('decideFundsReady', () => {
   });
 
   test('all-null map (fresh wallet before first poll): false', () => {
-    expect(decideFundsReady({'ic:0': view('—', 'ok'), 'ic:1': view('—', 'unavailable')})).toBe(false);
+    expect(decideFundsReady({[DEMO_ASSET_ID]: view('—', 'ok'), 'ic:1': view('—', 'unavailable')})).toBe(false);
   });
 });
 

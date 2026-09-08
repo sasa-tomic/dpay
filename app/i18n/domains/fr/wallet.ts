@@ -39,6 +39,7 @@ export const walletFr: WalletMessages = {
     settingsTitle: 'Monnaie principale',
     settingsHint: 'La monnaie que dpay affiche en premier et utilise par défaut',
     confirm: 'Continuer',
+    pickFirst: 'Touchez d’abord la monnaie voulue, puis Continuer.',
     noneAvailable: 'Aucune monnaie n’a pu être chargée. Vérifie l’adresse du serveur dans les Réglages, puis rouvre dpay.',
     a11y: currency => `Choisir ${currency}`,
   },
@@ -59,8 +60,8 @@ export const walletFr: WalletMessages = {
 
   home: {
     actions: {
-      pay: 'Payer',
-      payHint: 'Scanner un code ou envoyer à une adresse',
+      scan: 'Scanner et payer',
+      scanHint: 'Ouvrir l’appareil photo et scanner le code du commerce',
       receive: 'Recevoir',
       receiveHint: 'Demander un paiement ou afficher votre adresse',
       addMoney: 'Ajouter de l’argent',
@@ -73,9 +74,18 @@ export const walletFr: WalletMessages = {
       empty: 'Aucun paiement pour l’instant.',
     },
     accounts: {
-      title: 'Comptes',
-      intro: 'Appuyez sur une monnaie pour l’afficher sur votre écran d’accueil. Recevez-la ou envoyez-la depuis les onglets Recevoir et Payer.',
+      open: count => `Comptes · ${count}`,
+      openHint: 'Voir tous les comptes que ce portefeuille peut détenir',
     },
+  },
+
+  accounts: {
+    title: 'Comptes',
+    intro: 'Appuyez sur un compte pour l’utiliser dans les onglets Payer et Recevoir. Votre écran d’accueil continue d’afficher votre monnaie principale.',
+    back: 'Retour',
+    backHint: 'Revenir là où vous étiez',
+    practice: 'Argent d’entraînement — il ne fonctionne que dans dpay et aucun commerce ne l’accepte.',
+    convertHint: 'Convertir le solde de ce compte auprès d’une plateforme externe que vous signez vous-même',
   },
 
   backToPaying: asset => `Retour au paiement en ${asset}`,
@@ -221,7 +231,7 @@ export const educationFr: EducationMessages = {
     stamps: {
       recoverySaved: {label: 'MOTS\nNOTÉS', hint: 'Copiez vos mots de récupération dans les Paramètres', short: 'encore la sauvegarde'},
       flowUnderstood: {label: 'PARCOURS\nVU', hint: 'Regardez la répétition à la création du portefeuille — ou faites un paiement', short: 'encore le parcours'},
-      fundsReady: {label: 'FONDS\nCHARGÉS', hint: 'Ajoutez des fonds — les fonds de démo comptent', short: 'encore des fonds'},
+      fundsReady: {label: 'FONDS\nCHARGÉS', hint: 'Ajoutez de l’argent utilisable — les fonds d’entraînement ne comptent pas', short: 'encore des fonds'},
       paymentTested: {label: 'PREMIER\nPAIEMENT', hint: 'Faites un paiement — envoyé ou reçu', short: 'encore un paiement'},
     },
     close: title => `Fermer ${title}`,

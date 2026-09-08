@@ -1,5 +1,7 @@
 /**
- * HomeTab — what the surface CLAIMS about a balance it cannot read, and what it announces.
+ * The home SURFACES — what they CLAIM about a balance they cannot read, and what they announce.
+ * A2 is the Home headline (HomeTab); A4 is the account row (AccountsTab, where the rows moved
+ * 2026-09-08). One file because it is one honesty rule wearing two hats.
  *
  * Two defects found on the 2026-09-08 pass, both invisible to every existing gate:
  *
@@ -24,6 +26,7 @@ import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 import {HomeTab} from '../components/HomeTab';
+import {AccountsTab} from '../components/AccountsTab';
 import {buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
@@ -38,8 +41,6 @@ const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {
   showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS,
 });
-const SOL = ASSETS.find(a => a.id === 'solana:SOL')!;
-const VCHF = ASSETS.find(a => a.id === 'ic:7')!;
 const HOME = 'CHF' as const;
 const HOME_RAIL = preferredRail(HOME, ASSETS);
 
@@ -98,27 +99,45 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
     tree = renderer.create(
       <HomeTab
         assets={ASSETS}
-        selectedAsset={SOL}
-        selectedId={SOL.id}
         balances={balancesFor({balance: '1500000000', status: 'ok'})}
         catalog={CATALOG}
         homeCurrency={HOME}
         homeAsset={HOME_RAIL}
         online={true}
         history={[]}
+        topUpErr={null}
+        onScan={jest.fn()}
+        onReceive={jest.fn()}
+        onDeposit={jest.fn()}
+        onOpenAccounts={jest.fn()}
+        onSeeAll={jest.fn()}
+        {...props}
+      />,
+    );
+  });
+  return tree;
+}
+
+/** The accounts route, where the per-rail rows live since 2026-09-08. */
+function mountAccounts(props: Partial<Parameters<typeof AccountsTab>[0]> = {}): renderer.ReactTestRenderer {
+  let tree!: renderer.ReactTestRenderer;
+  act(() => {
+    tree = renderer.create(
+      <AccountsTab
+        assets={ASSETS}
+        selectedId="ic:0"
+        balances={balancesFor({balance: '1500000000', status: 'ok'})}
+        homeCurrency={HOME}
+        demoFaucetAvailable={true}
         topUpBusy={false}
         topUpErr={null}
-        demoFaucetAvailable={true}
         hasTestnet={false}
         showTestnet={false}
         onToggleTestnet={jest.fn()}
-        onPay={jest.fn()}
-        onReceive={jest.fn()}
-        onDeposit={jest.fn()}
+        onBack={jest.fn()}
+        onSelect={jest.fn()}
         onTopUp={jest.fn()}
         onConvert={jest.fn()}
-        onSelect={jest.fn()}
-        onSeeAll={jest.fn()}
         {...props}
       />,
     );
@@ -129,17 +148,15 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
 describe('A2 — the headline announces exactly what it renders, unit stated once', () => {
   test('no announcement of the headline block states the unit twice', () => {
     const tree = mountHome();
-    expect(textOf(tree, 'home-headline-amount')).toContain('SOL');
+    expect(textOf(tree, 'home-headline-amount')).toContain('VCHF');
     for (const s of announcedStrings(tree, 'home-headline')) {
-      expect(`${s} :: SOL×${occurrences(s, 'SOL')}`).toBe(`${s} :: SOL×${Math.min(occurrences(s, 'SOL'), 1)}`);
+      expect(`${s} :: VCHF×${occurrences(s, 'VCHF')}`).toBe(`${s} :: VCHF×${Math.min(occurrences(s, 'VCHF'), 1)}`);
     }
     act(() => { tree.unmount(); });
   });
 
   test('the offline approximation marker reaches a screen reader (it outranks every other name)', () => {
     const tree = mountHome({
-      selectedAsset: VCHF,
-      selectedId: VCHF.id,
       online: false,
       balances: balancesFor({balance: null, status: 'unavailable'}, false),
     });
@@ -148,7 +165,7 @@ describe('A2 — the headline announces exactly what it renders, unit stated onc
   });
 
   test('the home rail announces its Main marker, not a re-derived "balance" sentence', () => {
-    const tree = mountHome({selectedAsset: VCHF, selectedId: VCHF.id});
+    const tree = mountHome();
     expect(announced(tree, 'home-headline'))
       .toContain(M.wallet.homeCurrency.mainLabel(M.wallet.homeCurrency.name[HOME]));
     act(() => { tree.unmount(); });
@@ -157,7 +174,7 @@ describe('A2 — the headline announces exactly what it renders, unit stated onc
 
 describe('A4 — a rail the wallet cannot read says so, and says what still holds', () => {
   test("an unreadable rail's row explains the failure, blames the network, and stays honest", () => {
-    const tree = mountHome({balances: balancesFor({balance: null, status: 'error'})});
+    const tree = mountAccounts({balances: balancesFor({balance: null, status: 'error'})});
     expect(present(tree, 'asset-sol-unreadable')).toBe(true);
     const line = textOf(tree, 'asset-sol-unreadable');
     expect(line).toContain('Solana'); // WHICH network is not answering
@@ -173,13 +190,13 @@ describe('A4 — a rail the wallet cannot read says so, and says what still hold
   });
 
   test('a first poll that has not answered is NOT an unreadable rail (loading stays silent)', () => {
-    const tree = mountHome({balances: balancesFor({balance: null, status: 'loading'})});
+    const tree = mountAccounts({balances: balancesFor({balance: null, status: 'loading'})});
     expect(present(tree, 'asset-sol-unreadable')).toBe(false);
     act(() => { tree.unmount(); });
   });
 
   test('a readable rail says nothing at all', () => {
-    const tree = mountHome();
+    const tree = mountAccounts();
     expect(present(tree, 'asset-sol-unreadable')).toBe(false);
     act(() => { tree.unmount(); });
   });

@@ -1174,73 +1174,100 @@ describe('PayMode — the till outcome screen does not contradict itself', () =>
   });
 });
 
-describe('PayMode — the funded-sibling pointer on the fund-first gate (Objective 2, S5)', () => {
+describe('PayMode — the fund-first surfaces: the camera, and the funded account (X1/X3)', () => {
   const USD_CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
   const USD_ASSETS = buildSelectableAssets(USD_CATALOG, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
+  /** An ONLINE wallet whose SELECTED asset is a known zero — the state that used to hide the
+   *  scanner. `over` names the rest of the situation. */
+  const unfunded = (over: Partial<PayModeProps> = {}) => mountPay({
+    online: true,
+    catalog: USD_CATALOG,
+    assets: USD_ASSETS,
+    assetBalances: {2: '0'},
+    withdrawCurrency: 2,
+    withdrawBalance: '0',
+    homeCurrency: 'USD',
+    balances: {},
+    ...over,
+  });
 
-  test('an unfunded ckUSDC gate with a funded USDC sibling names it and offers the one-tap switch', () => {
+  test('X3: a zero SELECTED balance no longer hides the camera — the request names the asset', () => {
+    // The measured defect: ∂100 DEMO held, VCHF selected, and the Pay tab answered "No VCHF
+    // available" with no camera at all — so a payer holding exactly what the merchant asked for
+    // could not even READ the request. The scan surface must stay reachable, and the funding
+    // instruction must survive as a companion rather than a replacement.
+    const tree = unfunded();
+    expect(hasTestID(tree, 'btn-start-scan')).toBe(true);
+    expect(hasTestID(tree, 'pay-fund')).toBe(true);
+    // ...and one press really opens the lens (the scanner stub carries onScan).
+    pressByTestID(tree, 'btn-start-scan');
+    expect(scannerNodes(tree)).not.toHaveLength(0);
+    // Once the payer has asked for the camera, the screen is the camera's.
+    expect(hasTestID(tree, 'pay-fund')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('X3: the SEND sub-mode keeps its full gate — there is no request to read there', () => {
+    const tree = unfunded({subMode: 'send', withdrawFamily: 'CkEthErc20'});
+    expect(hasTestID(tree, 'pay-fund')).toBe(true);
+    expect(texts(tree)).toContain('This wallet has no USDC. To send USDC, first receive USDC at your address.');
+    act(() => { tree.unmount(); });
+  });
+
+  test('X1: the practice balance a new wallet holds is NAMED, and is one tap away', () => {
     const onSwitchRail = jest.fn();
-    const tree = mountPay({
-      online: true,
-      catalog: USD_CATALOG,
-      assets: USD_ASSETS,
-      assetBalances: {2: '0'},
-      withdrawCurrency: 2,
-      withdrawBalance: '0',
-      homeCurrency: 'USD',
-      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
-      onSwitchRail,
+    const tree = unfunded({balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}}, onSwitchRail});
+    expect(textByTestID(tree, 'fund-sibling-holds')).toBe(M.pay.fundSibling.practice('∂100.00'));
+    pressByTestID(tree, 'btn-fund-sibling-switch');
+    expect(onSwitchRail).toHaveBeenCalledWith('ic:0');
+    act(() => { tree.unmount(); });
+  });
+
+  test('X1: practice money is not offered on the SEND surface — it cannot leave the wallet', () => {
+    const tree = unfunded({
+      subMode: 'send',
+      withdrawFamily: 'CkEthErc20',
+      balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}},
     });
     expect(hasTestID(tree, 'pay-fund')).toBe(true);
+    expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('an unfunded ckUSDC surface with a funded USDC sibling names it and offers the one-tap switch', () => {
+    const onSwitchRail = jest.fn();
+    const tree = unfunded({balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}}, onSwitchRail});
     expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
     pressByTestID(tree, 'btn-fund-sibling-switch');
     expect(onSwitchRail).toHaveBeenCalledWith('solana:USDC');
     act(() => { tree.unmount(); });
   });
 
-  test('no funded sibling: the gate renders alone — no pointer, no switch', () => {
-    const tree = mountPay({
-      online: true,
-      catalog: USD_CATALOG,
-      assets: USD_ASSETS,
-      assetBalances: {2: '0'},
-      withdrawCurrency: 2,
-      withdrawBalance: '0',
-      homeCurrency: 'USD',
-      balances: {'solana:USDC': {displayText: '0.00 USDC', status: 'zero'}},
-    });
+  test('nothing funded anywhere: the instruction renders alone — no pointer, no switch', () => {
+    const tree = unfunded({balances: {'solana:USDC': {displayText: '0.00 USDC', status: 'zero'}}});
     expect(hasTestID(tree, 'pay-fund')).toBe(true);
     expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
     act(() => { tree.unmount(); });
   });
 
-  test('a foreign-currency selection never points: the pointer is a home-currency-group surface', () => {
-    const tree = mountPay({
-      online: true,
-      catalog: USD_CATALOG,
-      assets: USD_ASSETS,
+  test('a foreign-currency selection now points too — the funded account is a fact either way', () => {
+    // Widened 2026-09-08 (X1): a ckBTC surface has no same-currency sibling, but the wallet holds
+    // dollars, and refusing to say so was the dead end. The button names the ASSET, not the chain.
+    const onSwitchRail = jest.fn();
+    const tree = unfunded({
       assetBalances: {1: '0'},
       withdrawCurrency: 1,
-      withdrawBalance: '0',
-      homeCurrency: 'USD',
       balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+      onSwitchRail,
     });
-    expect(hasTestID(tree, 'pay-fund')).toBe(true);
-    expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
+    expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
+    pressByTestID(tree, 'btn-fund-sibling-switch');
+    expect(onSwitchRail).toHaveBeenCalledWith('solana:USDC');
     act(() => { tree.unmount(); });
   });
 
   test('no switch passed while locked (Wallet withholds it): the rail is named, the button is gone', () => {
-    const tree = mountPay({
-      online: true,
-      catalog: USD_CATALOG,
-      assets: USD_ASSETS,
-      assetBalances: {2: '0'},
-      withdrawCurrency: 2,
-      withdrawBalance: '0',
-      homeCurrency: 'USD',
-      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
-    });
+    const tree = unfunded({balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}}});
     expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
     expect(hasTestID(tree, 'btn-fund-sibling-switch')).toBe(false);
     act(() => { tree.unmount(); });

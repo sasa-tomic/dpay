@@ -1,23 +1,25 @@
 /**
- * HomeTab — the balance-first home surface (O4). Two contracts are pinned here:
+ * HomeTab — the LANDING surface since 2026-09-08. Three contracts are pinned here:
  *
- *   • The HEADLINE mirrors the header's eyebrow rules EXACTLY: the home rail names the
- *     CURRENCY ("Swiss francs · Main"), any other selection names the ASSET ("DEMO balance"),
- *     and the offline approximation marker OUTRANKS both — naming the currency changes the
- *     NAME, never the online/offline distinction. The amount is the selected asset's OWN
- *     balance in its own token unit (the header's displayText), never a portfolio sum.
- *   • The action row is capability-dispatched: the DEMO selection's Add money fires the
- *     faucet (busy/err machinery, honest fail-closed copy); any real asset's Add money lands
- *     the deposit surface for THAT asset. One chrome, no per-asset special cases.
+ *   • The HEADLINE is the HOME CURRENCY's, always. It names the currency ("Swiss francs · Main")
+ *     over the home rail's own token unit, and the offline approximation marker OUTRANKS the main
+ *     label — naming the currency changes the NAME, never the online/offline distinction. What it
+ *     does NOT do is follow the transient selection: that was X4, where any account tap or rail
+ *     toggle silently rewrote the setting onboarding exists to establish.
+ *   • SCAN is the primary action and lands the camera; Receive navigates; Add money acts on the
+ *     HOME RAIL — the account the screen is showing — so nothing on Home moves money in or out of
+ *     an account the screen is not naming.
+ *   • The accounts LIST is not here (it is the accounts route — HomeAccounts.test.tsx); Home
+ *     carries only the affordance that opens it, labelled with the count.
  *
- * The activity feed is capped at 3 rows of the merged ledger, rendered through the same
- * HistoryRow as the Transactions tab but under its OWN home-hist-* testIDs.
+ * The activity feed is capped at ACTIVITY_ROWS rows of the merged ledger, rendered through the
+ * same HistoryRow as the Transactions tab but under its OWN home-hist-* testIDs.
  */
 import {describe, test, expect, jest} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
-import {HomeTab} from '../components/HomeTab';
+import {ACTIVITY_ROWS, HomeTab} from '../components/HomeTab';
 import {buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
@@ -29,8 +31,6 @@ const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {
   showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: BUNDLED_NETWORKS,
 });
-const DEMO = ASSETS.find(a => a.id === 'ic:0')!;
-const VCHF = ASSETS.find(a => a.id === 'ic:7')!;
 const HOME = 'CHF' as const;
 const HOME_RAIL = preferredRail(HOME, ASSETS);
 
@@ -91,26 +91,17 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
     tree = renderer.create(
       <HomeTab
         assets={ASSETS}
-        selectedAsset={DEMO}
-        selectedId={DEMO.id}
         balances={balancesFor()}
         catalog={CATALOG}
         homeCurrency={HOME}
         homeAsset={HOME_RAIL}
         online={true}
         history={[]}
-        topUpBusy={false}
         topUpErr={null}
-        demoFaucetAvailable={true}
-        hasTestnet={false}
-        showTestnet={false}
-        onToggleTestnet={jest.fn()}
-        onPay={jest.fn()}
+        onScan={jest.fn()}
         onReceive={jest.fn()}
         onDeposit={jest.fn()}
-        onTopUp={jest.fn()}
-        onConvert={jest.fn()}
-        onSelect={jest.fn()}
+        onOpenAccounts={jest.fn()}
         onSeeAll={jest.fn()}
         {...props}
       />,
@@ -119,151 +110,129 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
   return tree;
 }
 
-describe('HomeTab — the headline', () => {
-  test('a non-home selection names the ASSET and shows its OWN token-unit balance', () => {
+describe('HomeTab — the headline is the home currency (X4)', () => {
+  test('names the CURRENCY with the Main label over the home rail\'s own token unit', () => {
     const tree = mountHome();
-    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.balance.of('DEMO'));
-    expect(textOf(tree, 'home-headline-amount')).toBe('∂123.45');
-    act(() => { tree.unmount(); });
-  });
-
-  test('the home rail names the CURRENCY with the Main label, amount still in the token unit', () => {
-    const tree = mountHome({selectedAsset: VCHF});
     expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.homeCurrency.mainLabel(M.wallet.homeCurrency.name[HOME]));
     expect(textOf(tree, 'home-headline-amount')).toBe('1.20 VCHF');
     act(() => { tree.unmount(); });
   });
 
+  test('the DEMO balance never reaches the headline, however big it is', () => {
+    // X4's exact shape: the wallet holds ∂123.45 of practice money and 1.20 VCHF of the currency
+    // it was set up in. The headline is the francs — the practice pile is not the user's money
+    // and, more to the point, is not the currency they chose.
+    const tree = mountHome();
+    expect(textOf(tree, 'home-headline-amount')).not.toContain('∂');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the home currency changes the headline; nothing else can', () => {
+    const tree = mountHome({homeCurrency: 'USD', homeAsset: preferredRail('USD', ASSETS)});
+    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.homeCurrency.mainLabel(M.wallet.homeCurrency.name.USD));
+    act(() => { tree.unmount(); });
+  });
+
   test('offline OUTRANKS the main label — never a main-currency reading over a stale figure', () => {
-    const tree = mountHome({selectedAsset: VCHF, online: false, balances: balancesFor({online: false})});
+    const tree = mountHome({online: false, balances: balancesFor({online: false})});
     expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.balance.approx(M.wallet.homeCurrency.name[HOME]));
     expect(textOf(tree, 'home-headline-label')).not.toContain('Main');
     act(() => { tree.unmount(); });
   });
 
-  test('offline approx also applies to a non-home selection', () => {
-    const tree = mountHome({online: false, balances: balancesFor({online: false})});
-    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.balance.approx('DEMO'));
-    act(() => { tree.unmount(); });
-  });
-
-  test('a selection that is the home CURRENCY but not the home RAIL keeps the plain asset label', () => {
-    // USD is the bundled two-rail case: ckUSDC@IC is the preferred rail, USDC@Solana shares the
-    // currency. Selecting the Solana half must NOT earn the Main label — "US dollars · Main" over
-    // a Solana balance would misname which rail holds the money.
-    const usdcSol = ASSETS.find(a => a.id === 'solana:USDC')!;
-    const tree = mountHome({
-      homeCurrency: 'USD',
-      homeAsset: preferredRail('USD', ASSETS),
-      selectedAsset: usdcSol,
-      balances: balancesFor(),
-    });
-    expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.balance.of('USDC·Sol'));
-    expect(textOf(tree, 'home-headline-label')).not.toContain('Main');
+  test('a currency the catalog cannot realise shows "—", never a borrowed number', () => {
+    const tree = mountHome({homeAsset: null});
+    expect(textOf(tree, 'home-headline-amount')).toBe('—');
     act(() => { tree.unmount(); });
   });
 });
 
-describe('HomeTab — the capability-dispatched action row', () => {
-  test('DEMO add-money fires the faucet, not the deposit surface', () => {
-    const onTopUp = jest.fn();
-    const onDeposit = jest.fn();
-    const tree = mountHome({onTopUp, onDeposit});
-    act(() => { pressable(tree, 'btn-home-add-money').props.onPress(); });
-    expect(onTopUp).toHaveBeenCalledTimes(1);
-    expect(onDeposit).not.toHaveBeenCalled();
+describe('HomeTab — the accounts affordance', () => {
+  test('names the account COUNT and opens the accounts route', () => {
+    const onOpenAccounts = jest.fn();
+    const tree = mountHome({onOpenAccounts});
+    // Both the rendered label and the accessible name carry the count — one string, one source.
+    const btn = tree.root.findAll(n => n.props?.testID === 'btn-home-accounts')[0]!;
+    expect(btn.findAllByType(Text).map(n => String(n.props.children)).join(' ')).toContain(String(ASSETS.length));
+    expect(String(btn.props.accessibilityLabel)).toContain(String(ASSETS.length));
+    act(() => { pressable(tree, 'btn-home-accounts').props.onPress(); });
+    expect(onOpenAccounts).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 
-  test('a real asset\'s add-money lands the deposit surface for THAT asset', () => {
-    const onTopUp = jest.fn();
-    const onDeposit = jest.fn();
-    const tree = mountHome({selectedAsset: VCHF, onTopUp, onDeposit});
-    act(() => { pressable(tree, 'btn-home-add-money').props.onPress(); });
-    expect(onDeposit).toHaveBeenCalledWith(VCHF.id);
-    expect(onTopUp).not.toHaveBeenCalled();
+  test('the accounts LIST itself is not on Home — no row, no faucet, no testnet toggle', () => {
+    const ids = testIDs(mountHome());
+    for (const gone of ['accounts-list', 'home-accounts', 'asset-vchf', 'asset-demo', 'btn-topup', 'btn-toggle-testnet', 'btn-home-convert']) {
+      expect(ids).not.toContain(gone);
+    }
+  });
+});
+
+describe('HomeTab — the action row', () => {
+  test('Scan is present and hands off to the scanner (the one-tap till gesture)', () => {
+    const onScan = jest.fn();
+    const tree = mountHome({onScan});
+    act(() => { pressable(tree, 'btn-home-scan').props.onPress(); });
+    expect(onScan).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 
-  test('add-money is disabled while the faucet is busy (the Balances row\'s rule)', () => {
-    const tree = mountHome({topUpBusy: true});
-    expect(pressable(tree, 'btn-home-add-money').props.disabled).toBe(true);
-    act(() => { tree.unmount(); });
-  });
-
-  test('a faucet failure renders the honest error line — DEMO-scoped, like the Balances row', () => {
-    const err = M.wallet.faucet.unavailableOnRelay;
-    const tree = mountHome({topUpErr: err});
-    expect(textOf(tree, 'home-faucet-err')).toBe(err);
-    act(() => { tree.unmount(); });
-    const real = mountHome({selectedAsset: VCHF, topUpErr: err});
-    expect(testIDs(real)).not.toContain('home-faucet-err');
-    act(() => { real.unmount(); });
-  });
-
-  test('Pay and Receive navigate by mode switch, not by asset capability', () => {
-    const onPay = jest.fn();
+  test('Receive navigates by mode switch, not by asset capability', () => {
     const onReceive = jest.fn();
-    const tree = mountHome({selectedAsset: VCHF, onPay, onReceive});
-    act(() => { pressable(tree, 'btn-home-pay').props.onPress(); });
+    const tree = mountHome({onReceive});
     act(() => { pressable(tree, 'btn-home-receive').props.onPress(); });
-    expect(onPay).toHaveBeenCalledTimes(1);
     expect(onReceive).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 
-  test('Convert renders for EVERY asset — uniform IA; the venue check lives inside, never here', () => {
-    // The uniform-IA hard rule: the button is not capability-gated. ICP/VCHF get the venue; every
-    // other asset gets the SAME button and fails closed inside the Convert surface with honest copy.
-    for (const asset of ASSETS) {
-      const onConvert = jest.fn();
-      const tree = mountHome({selectedAsset: asset, selectedId: asset.id, onConvert});
-      const btn = pressable(tree, 'btn-home-convert');
-      expect(btn.props.disabled).toBeFalsy();
-      act(() => { btn.props.onPress(); });
-      expect(onConvert).toHaveBeenCalledTimes(1);
-      act(() => { tree.unmount(); });
-    }
-    // Null selection is the only disabled state — same rule as Pay/Receive/Add money.
-    const tree = mountHome({selectedAsset: null, selectedId: null});
-    expect(pressable(tree, 'btn-home-convert').props.disabled).toBe(true);
+  test('Add money funds the HOME RAIL — the account the headline is showing', () => {
+    const onDeposit = jest.fn();
+    const tree = mountHome({onDeposit});
+    act(() => { pressable(tree, 'btn-home-add-money').props.onPress(); });
+    expect(onDeposit).toHaveBeenCalledWith(HOME_RAIL!.id);
     act(() => { tree.unmount(); });
   });
-});
 
-describe('HomeTab — the inline accounts list (O4 S3, the retired Balances sheet)', () => {
-  test('every row renders under home-accounts; tapping a row hands the id to onSelect', () => {
-    const onSelect = jest.fn();
-    const tree = mountHome({onSelect});
-    expect(testIDs(tree)).toContain('home-accounts');
-    // The DEMO row keeps its faucet button; a row select fires the ONE selection callback with
-    // that row's id (Wallet owns the lock gate — the Home tab never re-implements it).
-    expect(testIDs(tree)).toContain('btn-topup');
-    const row = pressable(tree, 'asset-vchf-select');
-    act(() => { row.props.onPress(); });
-    expect(onSelect).toHaveBeenCalledWith('ic:7');
+  test('Add money is disabled — and fires nothing — when the currency has no rail', () => {
+    const onDeposit = jest.fn();
+    const tree = mountHome({homeAsset: null, onDeposit});
+    const btn = pressable(tree, 'btn-home-add-money');
+    expect(btn.props.disabled).toBe(true);
+    act(() => { btn.props.onPress(); });
+    expect(onDeposit).not.toHaveBeenCalled();
     act(() => { tree.unmount(); });
+  });
+
+  test('a faucet failure is surfaced on Home — the T hotkey fires from here and must not fail silently', () => {
+    const err = M.wallet.faucet.unavailableOnRelay;
+    const tree = mountHome({topUpErr: err});
+    expect(textOf(tree, 'home-faucet-err')).toBe(err);
+    act(() => { tree.unmount(); });
+    const quiet = mountHome();
+    expect(testIDs(quiet)).not.toContain('home-faucet-err');
+    act(() => { quiet.unmount(); });
   });
 });
 
 describe('HomeTab — the inline activity feed', () => {
-  test('renders the first 3 ledger rows in their own token units, capped', () => {
-    const history = [
-      txn('ic:0', '2500', TS, {memo: 'newest'}),
-      txn('solana:SOL', '1000000000', TS - 100, {dir: 'in'}),
-      txn('ic:7', '120000000', TS - 200),
-      txn('ic:0', '100', TS - 300),
-      txn('ic:0', '200', TS - 400),
-    ];
-    const tree = mountHome({history});
+  test(`renders the first ${ACTIVITY_ROWS} ledger rows in their own token units, capped`, () => {
+    const history = Array.from({length: ACTIVITY_ROWS + 2}, (_, i) => txn('ic:0', `${(i + 1) * 100}`, TS - i * 100));
+    const tree = mountHome({
+      history: [
+        txn('ic:0', '2500', TS, {memo: 'newest'}),
+        txn('solana:SOL', '1000000000', TS - 100, {dir: 'in'}),
+        txn('ic:7', '120000000', TS - 200),
+        ...history.slice(3),
+      ],
+    });
     const all = texts(tree);
     expect(all).toContain('−∂25.00');
     expect(all).toContain('+1 SOL');
     expect(all).toContain('−1.20 VCHF');
     const ids = testIDs(tree);
     expect(ids).toContain('home-hist-time-0');
-    expect(ids).toContain('home-hist-time-2');
-    expect(ids).not.toContain('home-hist-time-3');
+    expect(ids).toContain(`home-hist-time-${ACTIVITY_ROWS - 1}`);
+    expect(ids).not.toContain(`home-hist-time-${ACTIVITY_ROWS}`);
     // The Ledger's own anchors are never reused on this surface.
     expect(ids.some(id => id.startsWith('hist-'))).toBe(false);
     act(() => { tree.unmount(); });

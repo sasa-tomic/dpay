@@ -77,6 +77,14 @@ export const IconChevronDown = make(({color}) => {
   return [p('m6 9 6 6 6-6')];
 });
 
+// Back, on a non-tab route. Points LEFT because that is what it does — the same rule that made
+// the header's downward chevron a false affordance (X22/X7, UX swarm 2026-09-08) applies to every
+// chevron in the app: it names the direction the tap moves you.
+export const IconChevronLeft = make(({color}) => {
+  const {p} = withStroke(color);
+  return [p('m15 18-6-6 6-6')];
+});
+
 export const IconPlus = make(({color}) => {
   const {l} = withStroke(color);
   return [l(5, 12, 19, 12), l(12, 5, 12, 19)];
@@ -246,6 +254,7 @@ export const ICONS = {
   close: IconClose,
   check: IconCheck,
   chevronDown: IconChevronDown,
+  chevronLeft: IconChevronLeft,
   plus: IconPlus,
   arrowUpRight: IconArrowUpRight,
   arrowDownLeft: IconArrowDownLeft,

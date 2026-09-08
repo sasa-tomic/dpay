@@ -52,6 +52,13 @@ const MODE_SURFACE = {
 function buildStyles(p: Palette) {
   const LIFT = lift(p);
   const LIFT_SM = liftSm(p);
+  // A non-tab ROUTE's header — back chevron · title · symmetric spacer. ONE geometry defined here
+  // and exported under two names: `routeHeader*` (Accounts, and every route added after it) and
+  // the older `convertHeader*` (ConvertMode, which predates the generic name). Same object, so the
+  // two surfaces cannot drift; the convert aliases retire when ConvertMode switches names.
+  const ROUTE_HEADER_ROW = {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, minHeight: 40} as const;
+  const ROUTE_HEADER_TITLE = {flex: 1, fontSize: 22, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3} as const;
+  const ROUTE_HEADER_SPACER = {width: 26} as const;
   return StyleSheet.create({
   // The app column. `width:'100%'` keeps it full-bleed on phones (and the e2e 390px viewport);
   // `maxWidth:480` caps it on desktop so a 1280px laptop shows an intentional centered phone-width
@@ -218,21 +225,38 @@ function buildStyles(p: Palette) {
   homeHeadline: {alignSelf: 'stretch', alignItems: 'center', marginTop: 10, marginBottom: 2},
   homeEyebrow: {fontSize: 13, color: p.sub, marginBottom: 8, fontFamily: FONT.sansMedium},
   homeAmount: {fontSize: 40, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -1},
-  homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 18},
+  // The accounts affordance under the headline: a quiet pill naming the count, the ONE thing on
+  // Home that opens the accounts route. Quiet on purpose — it must not compete with Scan.
+  homeAccountsBtn: {alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 44},
+  homeAccountsBtnText: {fontSize: 13, color: p.sub, fontFamily: FONT.sansMedium},
+  // Scan is the PRIMARY action on the landing screen (2026-09-08): a full-width brand button, so
+  // the till gesture stays one unmistakable tap from a cold start. The two secondary actions keep
+  // the old card-button grammar underneath it.
+  homeScanBtn: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 18, paddingVertical: 16, borderRadius: 16, backgroundColor: p.brand, minHeight: 56, ...LIFT},
+  homeScanLabel: {fontSize: 16, color: p.brandInk, fontFamily: FONT.sansBold},
+  homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 10},
   homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, borderRadius: 16, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 72},
   homeActionLabel: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   homeFaucetErr: {fontSize: 13, color: p.bad, marginTop: 10, textAlign: 'center', fontFamily: FONT.sans},
-  homeAccounts: {alignSelf: 'stretch', marginTop: 24},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
   homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'center'},
+  // ── The Accounts route (2026-09-08) — the accounts list lifted off Home ────────────────────
+  // Same rows, same testIDs; a route header (back + title) instead of an inline section heading,
+  // and a divider that names the practice rail in a whole sentence before its row.
+  accountsWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 20},
+  accountsList: {alignSelf: 'stretch', marginTop: 12},
+  accountsPractice: {fontSize: 13, color: p.sub, marginTop: 22, marginBottom: 8, fontFamily: FONT.sans},
   // Convert — the delegated-conversion surface (spec 2026-09-07 §5). The checklist card carries
   // every transparency line on ONE surface before signing; the state panel renders the §4 machine.
   // Left-aligned instruction copy (not centered): these are lines to read closely before money
   // moves, matching the deposit/rail disclosure grammar rather than the celebration grammar.
   convertWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 20},
-  convertHeaderRow: {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, minHeight: 40},
-  convertHeaderTitle: {flex: 1, fontSize: 22, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3},
-  convertHeaderSpacer: {width: 26},
+  convertHeaderRow: ROUTE_HEADER_ROW,
+  convertHeaderTitle: ROUTE_HEADER_TITLE,
+  convertHeaderSpacer: ROUTE_HEADER_SPACER,
+  routeHeaderRow: ROUTE_HEADER_ROW,
+  routeHeaderTitle: ROUTE_HEADER_TITLE,
+  routeHeaderSpacer: ROUTE_HEADER_SPACER,
   convertAmountLabel: {fontSize: 13, color: p.sub, marginBottom: 6, fontFamily: FONT.sansMedium},
   convertMetaLine: {fontSize: 13, color: p.sub, marginTop: 8, fontFamily: FONT.sans},
   // Convert reads as ONE decision then its terms (2026-09-08): a lifted white headline card
@@ -439,7 +463,10 @@ function buildStyles(p: Palette) {
   // flex-start so the alert icon anchors the FIRST line of wrapped text, warn colour throughout.
   railHealthRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 4},
   railHealthText: {flex: 1, fontSize: 12, color: p.warn, lineHeight: 17, fontFamily: FONT.sans},
-  assetActions: {flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 10},
+  // The row's action slot. A COLUMN, not a row: since 2026-09-08 the selected row can carry two
+  // pills (Convert plus DEMO's faucet), and a row of two pills beside the flex:1 select block
+  // squeezes both off a 390px phone. Stacking is deterministic at any pill count.
+  assetActions: {flexDirection: 'column', alignItems: 'flex-end', gap: 8, marginLeft: 10},
   assetActionBtn: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: p.line2, minHeight: 44, backgroundColor: p.card},
   assetActionText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
   assetCardZero: {color: p.sub2},

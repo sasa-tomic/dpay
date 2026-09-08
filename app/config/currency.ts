@@ -225,6 +225,74 @@ export function railRampLine(rail: SelectableAsset): string | null {
  */
 export type RailBalances = Readonly<Partial<Record<AssetId, BalanceView>>>;
 
+/**
+ * PRACTICE MONEY — the DEMO rail (`ic:0`). It spends through exactly the same surfaces as a real
+ * asset inside dpay and is worth nothing outside it, which is why every screen that OFFERS it has
+ * to say both halves. Kept here rather than inferred at each call site because the answer decides
+ * what a user is told about money.
+ */
+export function isPracticeAsset(asset: SelectableAsset): boolean {
+  return asset.protocol === 'ic' && asset.currency === 0;
+}
+
+/**
+ * What kind of account the user was pointed at, which decides what the pointer is allowed to
+ * promise:
+ *   'sibling'  — a rail of the SAME home currency. The same unit and the same money, so the
+ *                payment the user was about to make still works after the switch.
+ *   'other'    — a funded account outside that group. Real, spendable money in a DIFFERENT
+ *                currency: the switch changes what the tab acts on, and nothing is converted.
+ *   'practice' — the DEMO balance. Never presented as a way to pay a real merchant.
+ */
+export type FundedAlternativeKind = 'sibling' | 'other' | 'practice';
+export type FundedAlternative = {asset: SelectableAsset; held: BalanceView; kind: FundedAlternativeKind};
+
+/**
+ * "This account is empty — which account of yours is not?"
+ *
+ * The measured defect this answers (X1, `OPEN_ISSUES.md` "UX swarm 2026-09-08"): on a new wallet
+ * every fund-blocked surface asked for a deposit to a 63-character principal while ∂100 of
+ * spendable practice money sat one tap away and was never named. Naming it is not a copy tweak —
+ * it is the difference between a screen that only asks and a screen that offers.
+ *
+ * Ranked, first match wins, and the ranking IS the honesty:
+ *   1. a funded rail of the home currency's group (only when the SELECTED asset is itself in that
+ *      group — otherwise "same currency" means nothing here), in stated preference order;
+ *   2. any other funded REAL account, in asset-list order;
+ *   3. the practice balance, and only when `purpose` is 'pay' — practice money has no route off
+ *      the wallet, so offering it on a send surface would be a dead end wearing an offer's clothes.
+ *
+ * "Funded" is `status: 'ok'` — the ONE definition the whole app renders by. Unknown is not funded:
+ * a loading, errored, absent or zero account is skipped, so the wallet never points at money it
+ * cannot see. Never returns the selected account itself.
+ */
+export function fundedAlternative(args: {
+  homeCurrency: HomeCurrency | null;
+  assets: SelectableAsset[];
+  balances: RailBalances;
+  selectedAssetId: AssetId | null;
+  purpose: 'pay' | 'send';
+}): FundedAlternative | null {
+  const {homeCurrency, assets, balances, selectedAssetId, purpose} = args;
+  if (selectedAssetId == null) return null;
+  const funded = (a: SelectableAsset): boolean => a.id !== selectedAssetId && balances[a.id]?.status === 'ok';
+  const answer = (asset: SelectableAsset, kind: FundedAlternativeKind): FundedAlternative =>
+    ({asset, held: balances[asset.id]!, kind});
+
+  const selected = assets.find(a => a.id === selectedAssetId) ?? null;
+  if (homeCurrency != null && selected != null && currencyOfAsset(selected) === homeCurrency) {
+    const sibling = currencyRails(homeCurrency, assets).find(funded);
+    if (sibling != null) return answer(sibling, 'sibling');
+  }
+  const other = assets.find(a => funded(a) && !isPracticeAsset(a));
+  if (other != null) return answer(other, 'other');
+  if (purpose === 'pay') {
+    const practice = assets.find(a => funded(a) && isPracticeAsset(a));
+    if (practice != null) return answer(practice, 'practice');
+  }
+  return null;
+}
+
 /** Why chooseRail returned the rail it did — the reason is part of the answer, not a log line. */
 export type RailReason = 'destination' | 'funded' | 'preference';
 export type RailChoice = {rail: SelectableAsset; reason: RailReason};

@@ -227,13 +227,25 @@ export type PayMessages = {
   showMyAddress: (symbol: string) => string;
   /** Also used by SolReceiveMode's inline ATA setup card. */
   createTokenAccount: (symbol: string) => string;
-  /** The funded-sibling pointer on a fund-first gate (Objective 2, S5): another rail of the SAME
-   *  home currency already holds money. `holds` names the rail (`railLineLabel`, e.g. "USDC ·
-   *  Solana") with the amount line exactly as the balances map renders it (unit included); the
-   *  switch button names the network only — the currency is already on screen twice by then. */
+  /** The funded-account pointer on a fund-blocked surface (`config/currency.ts` →
+   *  `fundedAlternative`): the wallet is empty HERE and holds money THERE, so the screen names it
+   *  instead of asking for a deposit and nothing else.
+   *
+   *  `holds` serves the two REAL kinds — a rail of the same home currency, and an account in
+   *  another currency — with the amount exactly as the balances map renders it (unit included,
+   *  never merged, never converted). Their buttons differ because their ambiguity does: two rails
+   *  of one currency are told apart by their CHAIN, while two accounts on the same chain are told
+   *  apart only by their ASSET.
+   *
+   *  `practice` is its own sentence because practice money is its own thing: it must state both
+   *  that a payment can be rehearsed with it AND that it buys nothing from a real merchant. Never
+   *  reuse `holds` for it — "You hold ∂100.00" beside a merchant's price is a lie by omission. */
   fundSibling: {
     holds: (amount: string, rail: string) => string;
     switchTo: (network: string) => string;
+    switchToAsset: (asset: string) => string;
+    practice: (amount: string) => string;
+    switchToPractice: string;
   };
 
   // --- send-to-address needs a connection; scan-to-pay does not ------------------------------
@@ -453,6 +465,10 @@ export const payEn: PayMessages = {
   fundSibling: {
     holds: (amount, rail) => `You hold ${amount} on ${rail}`,
     switchTo: network => `Switch to ${network}`,
+    switchToAsset: asset => `Switch to ${asset}`,
+    practice: amount =>
+      `You have ${amount} in practice money. You can practise a payment with it — it has no cash value and cannot pay a real merchant.`,
+    switchToPractice: 'Switch to practice money',
   },
 
   offlineSendTitle: 'Sending to an address needs a connection',

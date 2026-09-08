@@ -31,9 +31,15 @@ const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled
 
 /** The wallet's real map for a given DEMO balance + connectivity; every other source is empty. */
 function mapFor(primaryBalance: string | null, online = true): Record<string, BalanceView> {
+  return mapWith({}, primaryBalance, online);
+}
+
+/** The same map with one or more NON-practice IC rails polled — the only kind of balance that can
+ *  make a wallet trip-ready (X13). */
+function mapWith(icBalances: Record<number, string>, primaryBalance: string | null, online = true): Record<string, BalanceView> {
   return buildAssetBalances({
     catalog: CATALOG, assets: ASSETS,
-    icBalances: {}, primaryBalance, online,
+    icBalances, primaryBalance, online,
     solState: {balance: null, status: 'unavailable'},
     tokenStates: {},
   });
@@ -72,8 +78,17 @@ describe('decideFundsReady over the REAL map (the D4 regression pin)', () => {
     expect(decideFundsReady(mapFor(null))).toBe(false);
   });
 
-  it('one faucet top-up of the DEMO rail flips it — and offline it stays flipped', () => {
-    expect(decideFundsReady(mapFor('10000'))).toBe(true);
-    expect(decideFundsReady(mapFor('9100', false))).toBe(true);
+  it('X13: a faucet top-up of the DEMO rail does NOT flip it — practice money is not trip funds', () => {
+    // The stamp lives on a TRIP-readiness card. ∂100 of faucet-minted demo dollars buys nothing
+    // from any merchant, so a wallet holding only that is not ready for anything (UX swarm X13).
+    expect(decideFundsReady(mapFor('10000'))).toBe(false);
+    expect(decideFundsReady(mapFor('9100', false))).toBe(false);
+  });
+
+  it('a REAL asset flips it — and offline it stays flipped', () => {
+    // ckUSDC polled at 2.50; DEMO empty. The approximation marker says "best-known", not
+    // "unknown", so an offline reading of a funded rail still counts.
+    expect(decideFundsReady(mapWith({2: '2500000'}, '0'))).toBe(true);
+    expect(decideFundsReady(mapWith({2: '2500000'}, '0', false))).toBe(true);
   });
 });

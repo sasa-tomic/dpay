@@ -35,6 +35,7 @@ import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
 import {Ledger} from './Ledger';
 import {HomeTab} from './HomeTab';
+import {AccountsTab} from './AccountsTab';
 import {ConvertMode} from './ConvertMode';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
@@ -50,7 +51,28 @@ import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 
 export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
-  const [mode, setMode] = useState<'pay' | 'receive' | 'ledger' | 'home' | 'convert'>('pay');
+  // The wallet's surfaces. Four are TABS (home/pay/receive/ledger — the bottom bar switches
+  // between them and each is a destination); two are ROUTES (accounts/convert — entered from a
+  // control, left by Back, never a bottom-bar destination).
+  //
+  // The app OPENS on 'home' (founder decision 2026-09-08, docs/specs/2026-09-08-first-run-redesign
+  // §1 F2). This repealed the standing "the scanner stays the landing screen" rule: greeting a new
+  // user with a payment-request surface is what read as a scam. The cost — one extra tap on the
+  // returning traveller's most frequent action — is paid back by Home's primary Scan button, which
+  // lands the camera in exactly one tap.
+  type Mode = 'pay' | 'receive' | 'ledger' | 'home' | 'accounts' | 'convert';
+  const [mode, setMode] = useState<Mode>('home');
+  // Where the accounts ROUTE was entered from, so Back returns there instead of guessing 'home'.
+  // A ref, not state: nothing renders from it, and it must be written during the same tick as the
+  // mode change that reads it.
+  const accountsFrom = useRef<Mode>('home');
+  const openAccounts = useCallback(() => {
+    setMode(prev => {
+      if (prev !== 'accounts') accountsFrom.current = prev;
+      return 'accounts';
+    });
+  }, []);
+  const closeAccounts = useCallback(() => setMode(accountsFrom.current), []);
   // A shared payment link that has been PARSED but not yet resolved against the catalog (which
   // loads async). Held here until the resolve effect below turns it into a concrete asset + amount,
   // or into an honest on-screen refusal.
@@ -755,7 +777,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     p: () => setMode('pay'),
     r: () => setMode('receive'),
     t: topUp,
-    a: () => { if (!balancesDisabled) setMode('home'); },
+    // `a` recovers its original Balances meaning: it opens the ACCOUNTS route, the surface the
+    // list actually lives on since 2026-09-08 (it had been pointing at Home, where the list was
+    // inlined). Same lock rule as the header chip it mirrors.
+    a: () => { if (!balancesDisabled) openAccounts(); },
     l: () => setMode('ledger'),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
@@ -773,6 +798,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (settingsOpen) { setSettingsOpen(false); return true; }
+      // A ROUTE is left by Back before the app is: accounts returns to whatever it was opened
+      // from, convert returns to the accounts list that launched it. This is the difference
+      // between a route and a tab, and it is why the accounts list is not a modal.
+      if (mode === 'accounts') { closeAccounts(); return true; }
+      if (mode === 'convert') { openAccounts(); return true; }
       if (Date.now() - lastBackRef.current < 2000) { BackHandler.exitApp(); return true; }
       lastBackRef.current = Date.now();
       setBackHint(true);
@@ -784,7 +814,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       sub.remove();
       if (backHintTimerRef.current) { clearTimeout(backHintTimerRef.current); backHintTimerRef.current = null; }
     };
-  }, [settingsOpen]);
+  }, [settingsOpen, mode, closeAccounts, openAccounts]);
 
   // The ONE selection setter. Setting the selection is a deliberate user action, so it dismisses the
   // Balances sheet AND resets the within-tab sub-modes + clears any idle draft (the scan/send +
@@ -875,13 +905,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         setHowItWorksOpen(true);
         break;
       case 'fundsReady':
-        setMode('home');
+        openAccounts();
         break;
       case 'paymentTested':
         setMode('pay');
         break;
     }
-  }, []);
+  }, [openAccounts]);
 
   // The home-currency gate. Until the user has said which currency they think in, that question IS
   // the wallet — every surface below reads the selection this choice seeds. It sits here, after all
@@ -933,11 +963,16 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             <Text style={S.who} testID="header-who">{identity.username}</Text>
           </View>
         </View>
+        {/* The header account chip. X7 (UX swarm 2026-09-08): a `⌄` beside a balance means "switch
+            account" in every wallet, and this one navigated to Home — and on Home it did nothing
+            at all. It now opens the ACCOUNTS route, which is what the chevron looked like it did,
+            and it does so from EVERY screen including the Pay scanner — the most literal reading
+            of the founder's "the list of currencies should still be easily accessible". */}
         <Pressable
           testID="balance"
           style={[S.balBox, balancesDisabled && S.dim]}
           disabled={balancesDisabled}
-          onPress={() => setMode('home')}
+          onPress={openAccounts}
           accessibilityRole="button"
           accessibilityLabel={M.wallet.balance.label}
           accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : M.wallet.balance.hint}
@@ -955,9 +990,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               <View style={S.balAmtRow}>
                 {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
                     map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
-                    polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
-                <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
-                {/* P1 — chevron signals the balance pressable lands the Home tab (the asset hub). */}
+                    polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e).
+                    X8: NOT on Home. There the Home headline prints a balance ~90 px below this one,
+                    and printing the same number twice in one viewport is noise — so on Home the chip
+                    keeps only the account name and the chevron, and becomes purely the switcher its
+                    chevron always claimed to be. */}
+                {mode === 'home' ? null : <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>}
                 <IconChevronDown size={16} color={C.sub2} />
               </View>
             </View>
@@ -972,38 +1010,52 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         </Pressable>
       </View>
 
-      {/* Trip Ready J5b (UX hardening 2026-08-23) — the home-surface readiness line. The passport
-          lived only inside Balances/Settings ("hard to find"); this slim strip shows live progress
-          on the home screen and taps straight into the passport ARCHIVE (the permanent record —
-          Balances keeps only the asset list; one fact, two surfaces: strip = live entry,
-          archive = record). Retires itself when done. */}
-      <TripStrip onOpen={() => setPassportOpen(true)} />
+      {/* Trip Ready J5b (UX hardening 2026-08-23) — the home-surface readiness line. Live progress
+          that taps straight into the passport ARCHIVE (the permanent record; one fact, two
+          surfaces: strip = live entry, archive = record). Retires itself when done.
+          X14 (UX swarm 2026-09-08): HOME ONLY. It was rendered outside the mode switch, so a
+          first-run progress meter sat on all four tabs with no dismiss — every screen telling the
+          user they owed the app something. Home is what its own name says it is, and since Home is
+          now the landing screen the strip is seen at launch anyway. */}
+      {mode === 'home' ? <TripStrip onOpen={() => setPassportOpen(true)} /> : null}
 
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'home'
           ? <HomeTab
               assets={assets}
-              selectedAsset={selectedAsset}
-              selectedId={effectiveSelectedId}
               balances={balances}
               catalog={catalog}
               homeCurrency={homeCurrency}
               homeAsset={homeAsset}
               online={online}
               history={ledgerHistory}
+              topUpErr={topUpErr}
+              // Scan pins the sub-mode, so the camera is live in ONE tap from a cold start whatever
+              // the Pay tab was last left showing (a `send` sub-mode left over from a previous
+              // session would otherwise make the till gesture two taps — the exact regression the
+              // primary Scan button exists to prevent).
+              onScan={() => { setPaySubMode('scan'); setMode('pay'); }}
+              onReceive={() => setMode('receive')}
+              onDeposit={goToDeposit}
+              onOpenAccounts={openAccounts}
+              onSeeAll={() => setMode('ledger')}
+            />
+          : mode === 'accounts'
+          ? <AccountsTab
+              assets={assets}
+              selectedId={effectiveSelectedId}
+              balances={balances}
+              homeCurrency={homeCurrency}
               demoFaucetAvailable={capabilities.demoFaucet}
               topUpBusy={topUpBusy}
               topUpErr={topUpErr}
               hasTestnet={hasTestnet}
               showTestnet={showTestnet}
               onToggleTestnet={toggleTestnet}
-              onPay={() => setMode('pay')}
-              onReceive={() => setMode('receive')}
-              onDeposit={goToDeposit}
+              onBack={closeAccounts}
+              onSelect={handleSelect}
               onTopUp={topUp}
               onConvert={() => setMode('convert')}
-              onSelect={handleSelect}
-              onSeeAll={() => setMode('ledger')}
             />
           : mode === 'pay'
           ? (activeSol && solAddress
@@ -1106,7 +1158,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               catalog={catalog}
               selectedAsset={selectedAsset}
               assetBalances={displayAssetBalances}
-              onBack={() => setMode('home')}
+              // Back goes where Convert is launched FROM — the accounts route (X15 moved the
+              // action onto the selected account's row). Returning to Home would drop the user
+              // somewhere they never were.
+              onBack={openAccounts}
               onActivity={onActivity}
               // The zero-balance gate's action — the SAME deposit trip the Pay tab's gate fires.
               // No `returnTo`: that argument offers a "back to PAYING <asset>" resume once the
@@ -1121,8 +1176,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row
           to a bar OUTSIDE the ScrollView (primary nav stays reachable without scrolling). Same
           `mode` union, byte-stable testIDs, and P/R/L hotkeys (useHotkeys); the enclosing
-          SafeAreaView owns the bottom safe-area inset. O4: Home (the balance-first surface) sits
-          LEFTMOST — the scanner stays the landing mode, Home is one tap away, not in front of it. */}
+          SafeAreaView owns the bottom safe-area inset. Home sits LEFTMOST and is now the LANDING
+          mode (2026-09-08); the two ROUTES (accounts, convert) light no tab — they are entered
+          from a control and left by Back, which is what makes them routes rather than tabs. */}
       <View style={S.bottomNav}>
         <Tab variant="bottom" testId="tab-home" label={M.wallet.tab.home} active={mode === 'home'} onPress={() => setMode('home')} icon={c => <IconHome size={22} color={c} />} />
         <Tab variant="bottom" testId="tab-pay" label={M.wallet.tab.pay} active={mode === 'pay'} onPress={() => setMode('pay')} icon={c => <IconQr size={22} color={c} />} />
