@@ -190,6 +190,15 @@ fn load_apk() -> Option<Vec<u8>> {
                 }
             }
         }
+        // Set but not UTF-8 is not "not set", and saying so sent an operator hunting for a
+        // variable they had already exported. Named, like every other env read in this file.
+        Err(std::env::VarError::NotUnicode(raw)) => {
+            eprintln!(
+                "dpay-relay: warn: DPAY_APK_PATH is set to a value that is not valid UTF-8 ({raw:?}); \
+                 APK downloads disabled"
+            );
+            None
+        }
         _ => {
             println!("no DPAY_APK_PATH set — APK downloads disabled (/download/dpay.apk → 404)");
             None
@@ -473,7 +482,13 @@ async fn shutdown_signal() {
         use tokio::signal::unix::{signal, SignalKind};
         let mut term = match signal(SignalKind::terminate()) {
             Ok(s) => s,
-            Err(_) => {
+            Err(e) => {
+                // This relay will now ignore SIGTERM, so `docker stop` waits out its grace period
+                // and then SIGKILLs — a hard kill nobody could explain from the logs.
+                eprintln!(
+                    "dpay-relay: warn: could not install a SIGTERM handler ({e}) — this process \
+                     will only shut down cleanly on Ctrl-C; `docker stop` will end in a SIGKILL"
+                );
                 let _ = tokio::signal::ctrl_c().await;
                 return;
             }

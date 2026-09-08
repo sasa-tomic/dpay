@@ -12,6 +12,12 @@
 //! - `GET /.well-known/assetlinks.json` — Android App Links, so a shared payment link opens the
 //!   installed app instead of a browser.
 //! - `GET /assets/{path}` — the wallet build's content-hashed assets (immutable caching).
+//! - `GET /sw.js`, `GET /manifest.webmanifest`, `GET /icon-192.png` — the wallet's offline shell
+//!   (OPEN_ISSUES X10). The worker's caching policy is documented in `e2e/web/sw.js`, which is
+//!   the only place it lives; the relay just serves it, `no-cache`, from the root scope.
+//!
+//! Every compressible response above is served as the brotli the web build precompressed, when
+//! the client asks for it (`serve_dist_asset`). Nothing is compressed per request.
 //! - `GET /privacy` — the public privacy policy for the app and website.
 //! - `GET /dpay-core.wasm` — the shared wire core (canonical same-origin URL for any web surface;
 //!   the wallet build carries its own hashed copy under /assets/).
@@ -103,9 +109,16 @@ pub struct AppState {
     /// anonymous relay cannot credit anything. Defaults to `false`: a state that never said it
     /// can serve a faucet does not advertise one.
     faucet_available: bool,
-    /// The agent-build faucet's per-account cooldown map (see [`crate::faucet`]). Guarded by
-    /// the repo's poison-tolerant lock convention and never held across an await.
-    #[cfg(feature = "agent")]
+    /// The faucet's per-account cooldown map (see [`crate::faucet`]). Guarded by the repo's
+    /// poison-tolerant lock convention and never held across an await.
+    ///
+    /// SHARED BY BOTH BUILDS, and not a fixture nicety: it used to be `#[cfg(feature = "agent")]`,
+    /// so the offline image served an unlimited faucet while production served one top-up an hour.
+    /// The e2e suite calibrated itself to the fixture — flow 02 asserted the top-up button was
+    /// REPEATABLE — and therefore proved a behaviour the shipped app has never had. One map, one
+    /// predicate ([`crate::faucet::is_self_service_top_up`]), both handlers. Compiled only where a
+    /// faucet route is — a build that serves none carries no cooldown map and no dead code.
+    #[cfg(any(feature = "agent", feature = "test-helpers"))]
     faucet_cooldown: Arc<Mutex<crate::faucet::FaucetCooldown>>,
     /// The Android build served at `GET /download/dpay.apk`, when one is configured. `None` renders
     /// a "coming soon" CTA on the landing page and answers the download route with `404`.
@@ -134,7 +147,7 @@ impl AppState {
             tills: Arc::new(Mutex::new(crate::till::TillStore::default())),
             till_enabled: false,
             faucet_available: false,
-            #[cfg(feature = "agent")]
+            #[cfg(any(feature = "agent", feature = "test-helpers"))]
             faucet_cooldown: Arc::new(Mutex::new(crate::faucet::FaucetCooldown::with_window(
                 crate::faucet::FAUCET_COOLDOWN_SECS,
             ))),
@@ -190,9 +203,9 @@ impl AppState {
         self
     }
 
-    /// Replace the faucet cooldown's window (agent build). Test seam ONLY: the live tests shrink
-    /// the 1h production window to seconds so the rollover is observable; prod never calls this.
-    #[cfg(feature = "agent")]
+    /// Replace the faucet cooldown's window. Test seam ONLY: the live tests shrink the 1h
+    /// production window to seconds so the rollover is observable; prod never calls this.
+    #[cfg(any(feature = "agent", feature = "test-helpers"))]
     pub fn set_faucet_cooldown_window(&self, window_secs: u64) {
         *self.faucet_cooldown.lock().unwrap_or_else(|p| p.into_inner()) =
             crate::faucet::FaucetCooldown::with_window(window_secs);
@@ -320,6 +333,11 @@ pub fn app(state: AppState) -> Router {
         .route("/wallet/pay/{recipient}", get(wallet_pay_page))
         // Android App Links: lets a shared https payment link open the installed app.
         .route("/.well-known/assetlinks.json", get(assetlinks))
+        // The offline-boot surface (OPEN_ISSUES X10). `/sw.js` sits at the root because a service
+        // worker's default scope is its own directory, and the wallet spans /wallet AND /assets/.
+        .route("/sw.js", get(service_worker))
+        .route("/manifest.webmanifest", get(web_manifest))
+        .route("/icon-192.png", get(web_icon))
         .route("/assets/{*path}", get(web_asset))
         .route("/privacy", get(privacy_page))
         .route("/dpay-core.wasm", get(dpay_core_wasm))
@@ -395,12 +413,49 @@ async fn test_cors_middleware(req: axum::extract::Request, next: axum::middlewar
     resp
 }
 
+/// The rate limit BOTH faucet handlers run before crediting anything, so the offline fixture and
+/// production cannot answer the same request differently. `None` = proceed; `Some` = the refusal to
+/// return, carrying the cooldown's own verbatim wait text (the app renders it as-is, N5).
+///
+/// A request that is not the canonical self-service top-up is not rate-limited HERE, because it is
+/// not a top-up: production refuses it outright at its own call site, and the fixture serves it as
+/// the e2e harness's opening-balance credit. See [`crate::faucet::is_self_service_top_up`].
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+fn faucet_cooldown_refusal(
+    state: &AppState,
+    pk: &[u8; 32],
+    currency: u32,
+    amount: u64,
+) -> Option<Response> {
+    if !crate::faucet::is_self_service_top_up(amount) {
+        return None;
+    }
+    // The lock is NEVER held across an await (check-and-mark completes synchronously) and is
+    // poison-tolerant like every lock in this crate. The clock is the crate's one reading, which
+    // STOPS on a pre-epoch host rather than substituting `0` — see [`crate::now_secs`] for what
+    // the `0` this replaces did to this exact cooldown.
+    let now_secs = crate::now_secs();
+    match state
+        .faucet_cooldown
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .check_and_mark(pk, currency, now_secs)
+    {
+        Ok(()) => None,
+        Err(reason) => Some(err(StatusCode::UNPROCESSABLE_ENTITY, reason)),
+    }
+}
+
 /// `POST /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}`. Demo on-ramp
 /// (test-helpers WITHOUT agent — the e2e/test-relay build; the agent build serves the production
 /// branch below). Credits the user PRINCIPAL on the fake-IC gateway's ledger for `currency`,
 /// exactly where a signed icrc1_transfer would move funds; the pk → principal mapping is
 /// self_authenticating(pk) — the account the app derives from its device key. Defaults:
-/// `currency = DEMO_USD` (0), `amount = 10_000`.
+/// `currency = DEMO_USD` (0), `amount =` the canonical top-up.
+///
+/// It serves a SUPERSET of production: an arbitrary `amount` is accepted so the e2e harness can set
+/// a flow's opening balance in raw units (sats, wei, 8-decimal VCHF), which production answers 422
+/// to. Everything production DOES accept is answered identically here, cooldown included.
 #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
     // ONE gate, the same predicate `GET /api/v1/capabilities` reports — and it subsumes the
@@ -413,7 +468,10 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     // Currency defaults to DEMO_USD — the faucet's whole point is play money for the demo. A missing
     // amount is the demo's $100.00 top-up.
     let currency = req.currency.unwrap_or(DEMO_USD);
-    let amount = req.amount.map(|x| x.0).unwrap_or(10_000);
+    let amount = req.amount.map(|x| x.0).unwrap_or(crate::faucet::FAUCET_AMOUNT);
+    if let Some(refusal) = faucet_cooldown_refusal(&state, &pk, currency as u32, amount) {
+        return refusal;
+    }
     use dpay_icp::principal::Principal as IcpPrincipal;
     let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
     let bal = fake.faucet_credit(currency, &owner, u128::from(amount));
@@ -448,24 +506,15 @@ async fn faucet_agent(State(state): State<AppState>, Json(req): Json<FaucetReque
     let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
     let currency = req.currency.unwrap_or(DEMO_USD);
     let amount = req.amount.map(|x| x.0).unwrap_or(crate::faucet::FAUCET_AMOUNT);
-    if amount != crate::faucet::FAUCET_AMOUNT {
+    if !crate::faucet::is_self_service_top_up(amount) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             format!("faucet amount is fixed at {} (minor units)", crate::faucet::FAUCET_AMOUNT),
         );
     }
-    // Relay-side rate limit. The lock is NEVER held across the mint await below (check-and-mark
-    // completes synchronously) and is poison-tolerant like every lock in this crate. The clock is
-    // the crate's one reading, which STOPS on a pre-epoch host rather than substituting `0` — see
-    // [`crate::now_secs`] for what the `0` this replaces did to this exact cooldown.
-    let now_secs = crate::now_secs();
-    if let Err(reason) = state
-        .faucet_cooldown
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .check_and_mark(&pk, currency as u32, now_secs)
-    {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, reason);
+    // Relay-side rate limit, the same one the offline fixture runs — see [`faucet_cooldown_refusal`].
+    if let Some(refusal) = faucet_cooldown_refusal(&state, &pk, currency as u32, amount) {
+        return refusal;
     }
     match state.ledger.faucet_mint(&pk, currency, amount).await {
         Ok(balance) => {
@@ -862,10 +911,18 @@ async fn apk_download(State(state): State<AppState>, headers: HeaderMap) -> Resp
     let etag = format!("\"{}\"", state.apk_version);
     // A matching If-None-Match — an exact strong-etag match anywhere in the (possibly list-valued)
     // header, or `*` — short-circuits to a bodyless 304.
-    let not_modified = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.split(',').any(|t| { let t = t.trim(); t == etag || t == "*" }));
+    // A non-text header value is treated as ABSENT (the client gets the full body, which is always
+    // correct) and SAID so — the same shape `till.rs` uses for `Host`/`X-Forwarded-Proto`. Silently
+    // dropping it would turn "this CDN sends a malformed validator" into a 56 MB re-download nobody
+    // can explain.
+    let not_modified = match headers.get(header::IF_NONE_MATCH).map(|v| v.to_str()) {
+        Some(Ok(v)) => v.split(',').any(|t| { let t = t.trim(); t == etag || t == "*" }),
+        Some(Err(e)) => {
+            eprintln!("dpay-relay: apk: If-None-Match is not text ({e}); serving the full build");
+            false
+        }
+        None => false,
+    };
     if not_modified {
         return (
             StatusCode::NOT_MODIFIED,
@@ -927,8 +984,8 @@ async fn privacy_page() -> Response {
 /// lever needed — an over-cached HTML is exactly the APK-cache incident's class). The page's CSP
 /// `<meta>` cannot carry `frame-ancestors` (browsers ignore it there — console error), so the
 /// no-framing guarantee ships as a REAL response header on this route.
-async fn wallet_page() -> Response {
-    let mut resp = serve_dist_asset("/wallet");
+async fn wallet_page(headers: HeaderMap) -> Response {
+    let mut resp = serve_dist_asset("/wallet", &headers);
     resp.headers_mut().insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static("frame-ancestors 'none'"),
@@ -943,8 +1000,8 @@ async fn wallet_page() -> Response {
 /// never sees a payment, and a link is not a request for one; only the payer's own wallet resolves
 /// and signs it. The path segment is captured (not a wildcard) so a nested path 404s rather than
 /// silently rendering the wallet with a recipient the app would then have to reject.
-async fn wallet_pay_page(Path(_recipient): Path<String>) -> Response {
-    wallet_page().await
+async fn wallet_pay_page(Path(_recipient): Path<String>, headers: HeaderMap) -> Response {
+    wallet_page(headers).await
 }
 
 /// `GET /.well-known/assetlinks.json` — Android App Links (Digital Asset Links). This is what lets
@@ -973,31 +1030,98 @@ async fn assetlinks() -> Response {
 
 /// `GET /assets/{path}` — the wallet build's content-hashed assets (immutable, cache-forever:
 /// the hash IS the version). Unknown names are a clean 404; there is no catch-all.
-async fn web_asset(Path(path): Path<String>) -> Response {
-    serve_dist_asset(&format!("/assets/{path}"))
+async fn web_asset(Path(path): Path<String>, headers: HeaderMap) -> Response {
+    serve_dist_asset(&format!("/assets/{path}"), &headers)
 }
 
-/// Serve one embedded dist file by route, or 404. Hashed `assets/` files are immutable; the
-/// entry HTML is no-cache (see wallet_page).
-fn serve_dist_asset(route: &str) -> Response {
-    match web_dist::WEB_ASSETS.iter().find(|a| a.route == route) {
-        Some(asset) => {
-            let cache = if asset.immutable {
-                "public, max-age=31536000, immutable"
-            } else {
-                "no-cache"
-            };
-            (
-                [
-                    (header::CONTENT_TYPE, HeaderValue::from_static(asset.content_type)),
-                    (header::CACHE_CONTROL, HeaderValue::from_static(cache)),
-                ],
-                asset.bytes,
-            )
-                .into_response()
+/// `GET /sw.js` — the wallet's service worker (`e2e/web/sw.js`, built with its precache manifest
+/// baked in). Served from the ROOT so its scope covers both path prefixes the wallet spans,
+/// `/wallet` and `/assets/`; `serve_dist_asset` gives it `no-cache`, which is what makes a deploy
+/// reach an installed worker on the next navigation instead of whenever a cache decides.
+async fn service_worker(headers: HeaderMap) -> Response {
+    serve_dist_asset("/sw.js", &headers)
+}
+
+/// `GET /manifest.webmanifest` + `GET /icon-192.png` — the web app manifest the wallet page links
+/// and the icon it names (the APK's own launcher icon, read from the Android res tree at build
+/// time so the project has one icon rather than two).
+async fn web_manifest(headers: HeaderMap) -> Response {
+    serve_dist_asset("/manifest.webmanifest", &headers)
+}
+async fn web_icon(headers: HeaderMap) -> Response {
+    serve_dist_asset("/icon-192.png", &headers)
+}
+
+/// Does this `Accept-Encoding` accept brotli? Token-exact and q-aware: `br;q=0` is a REFUSAL, and
+/// `brotli` / `xbr` are not `br`. A client that does not ask gets the identity bytes — that is
+/// content negotiation, not a degraded path.
+fn accepts_brotli(headers: &HeaderMap) -> bool {
+    // Unreadable is treated as "did not ask" (identity bytes — always correct) and SAID so, like
+    // every other header this crate reads. A client that never gets a compressed asset because its
+    // proxy sends a non-text Accept-Encoding is otherwise a silent 4x bandwidth bill.
+    let raw = match headers.get(header::ACCEPT_ENCODING).map(|v| v.to_str()) {
+        Some(Ok(raw)) => raw,
+        Some(Err(e)) => {
+            eprintln!("dpay-relay: Accept-Encoding is not text ({e}); serving identity bytes");
+            return false;
         }
-        None => err(StatusCode::NOT_FOUND, "not found"),
+        None => return false,
+    };
+    raw.split(',').any(|part| {
+        let mut it = part.split(';');
+        let token = it.next().unwrap_or("").trim();
+        if !token.eq_ignore_ascii_case("br") {
+            return false;
+        }
+        // Any `q=0` (or `q=0.000`) in the parameters is an explicit refusal of this coding.
+        !it.any(|p| {
+            let p = p.trim();
+            p.strip_prefix("q=")
+                .is_some_and(|q| q.parse::<f32>().is_ok_and(|q| q == 0.0))
+        })
+    })
+}
+
+/// Serve one embedded dist file by route, or 404. Hashed `assets/` files are immutable; the entry
+/// HTML, the service worker and the manifest are no-cache (see `wallet_page`, `service_worker`).
+///
+/// The body is the brotli the vite build precompressed (`build.rs`) whenever the client asked for
+/// it — compression happens once at build time at max quality, never per request. `Vary` is sent
+/// on every response that HAS a compressed twin, including the identity one, so a shared cache
+/// cannot hand a `br` body to a client that never asked for one.
+fn serve_dist_asset(route: &str, headers: &HeaderMap) -> Response {
+    let Some(asset) = web_dist::WEB_ASSETS.iter().find(|a| a.route == route) else {
+        return err(StatusCode::NOT_FOUND, "not found");
+    };
+    let cache = if asset.immutable {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    };
+    let mut resp = match asset.brotli.filter(|_| accepts_brotli(headers)) {
+        Some(br) => (
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static(asset.content_type)),
+                (header::CACHE_CONTROL, HeaderValue::from_static(cache)),
+                (header::CONTENT_ENCODING, HeaderValue::from_static("br")),
+            ],
+            br,
+        )
+            .into_response(),
+        None => (
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static(asset.content_type)),
+                (header::CACHE_CONTROL, HeaderValue::from_static(cache)),
+            ],
+            asset.bytes,
+        )
+            .into_response(),
+    };
+    if asset.brotli.is_some() {
+        resp.headers_mut()
+            .insert(header::VARY, HeaderValue::from_static("accept-encoding"));
     }
+    resp
 }
 
 /// `GET /dpay-core.wasm` — the frozen wire core compiled to wasm32 (crates/dpay-wasm, staged by
@@ -1342,10 +1466,23 @@ pub fn classify_integrity(live: Option<&str>, pinned: Option<&str>) -> &'static 
 /// different jobs, different failure domains. Every failure degrades to a 200 with an honest
 /// status rather than a 5xx: this is a report, not a promise.
 async fn integrity(State(state): State<AppState>) -> Response {
-    let live: Option<String> = if state.facade_canister.is_some() {
-        state.ledger.facade_module_hash().await.ok()
-    } else {
-        None
+    let live: Option<String> = match state.facade_canister.as_deref() {
+        // The reason the live half is missing is NOT on the wire — the body reports a status, and
+        // `UNREACHABLE` is the honest one for every way the read can fail — but it must exist
+        // somewhere, because this route is the upgrade-detection primitive of GOVERNANCE row 7 and
+        // "we could not read the canister's module hash" is exactly the sentence an operator needs
+        // when the answer stops being MATCH. `.ok()` used to destroy it outright.
+        Some(canister) => match state.ledger.facade_module_hash().await {
+            Ok(hash) => Some(hash),
+            Err(e) => {
+                eprintln!(
+                    "dpay-relay: integrity: could not read facade {canister}'s live module hash \
+                     (reporting UNREACHABLE): {e}"
+                );
+                None
+            }
+        },
+        None => None,
     };
     let pinned = pinned_facade_hash();
     let status = classify_integrity(live.as_deref(), pinned);

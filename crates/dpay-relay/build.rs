@@ -14,7 +14,10 @@
 //!
 //! 2. The prod web build of the REAL app (`e2e/dist-prod`, produced by `just web` /
 //!    `vite build --mode web-prod`) → a generated `$OUT_DIR/web_assets.rs` static table the
-//!    `/wallet` + `/assets/*` routes serve from. Everything the relay serves is compiled in —
+//!    `/wallet` + `/assets/*` routes serve from, each compressible file paired with the `.br`
+//!    body the vite build precompressed for it (see `must_be_precompressed` — the pairing is
+//!    enforced in both directions, so nothing ships uncompressed by accident and no unused
+//!    compressed copy is carried). Everything the relay serves is compiled in —
 //!    the Docker image ships the binary and nothing else. The dist is gitignored and built at
 //!    `just web` / image-build time, NEVER committed; if it is missing here the build FAILS
 //!    LOUD (no silent stub wallet — a stub could ship a broken /wallet while `just check` is
@@ -180,10 +183,22 @@ fn content_type(path: &str) -> &'static str {
         "svg" => "image/svg+xml",
         "ico" => "image/x-icon",
         "json" | "map" => "application/json; charset=utf-8",
+        "webmanifest" => "application/manifest+json",
         "txt" => "text/plain; charset=utf-8",
         "woff2" => "font/woff2",
         _ => "application/octet-stream",
     }
+}
+
+/// Is this dist file one the vite build is required to have precompressed? Mirrors `COMPRESSIBLE`
+/// in `e2e/vite.config.js`; the two are checked against each other by [`embed_web_dist`], which
+/// FAILS THE BUILD when a compressible file arrives without its `.br` sibling. Fonts (woff2) and
+/// PNGs are absent on purpose: both are already compressed containers.
+fn must_be_precompressed(path: &str) -> bool {
+    matches!(
+        path.rsplit('.').next().unwrap_or(""),
+        "js" | "mjs" | "html" | "css" | "wasm" | "json" | "webmanifest" | "svg" | "txt"
+    )
 }
 
 /// Walk `dir` recursively → sorted map of (route path → absolute file path). BTreeMap keeps the
@@ -234,10 +249,18 @@ fn embed_web_dist() {
          \x20   /// Content-hashed filename under assets/ → served `immutable` (see wallet_page).\n\
          \x20   pub immutable: bool,\n\
          \x20   pub bytes: &'static [u8],\n\
+         \x20   /// The vite build's brotli of `bytes`, for a client that sent `Accept-Encoding: br`.\n\
+         \x20   /// `None` only for containers that are already compressed (woff2, png).\n\
+         \x20   pub brotli: Option<&'static [u8]>,\n\
          }\n\n\
          pub static WEB_ASSETS: &[WebAsset] = &[\n",
     );
     for (route, path) in &files {
+        // `.br` files are not resources of their own — they are the compressed body of the file
+        // next to them, attached below.
+        if route.ends_with(".br") {
+            continue;
+        }
         // wallet.html is the /wallet entry page; everything else serves at its dist-relative path
         // (assets/<hashed> under /assets/<hashed>). Only hashed assets/ files get `immutable`.
         let served = if route == "/wallet.html" {
@@ -250,8 +273,32 @@ fn embed_web_dist() {
             .canonicalize()
             .unwrap_or_else(|e| panic!("canonicalize {}: {e}", path.display()));
         assert!(abs.is_absolute(), "{} must be absolute", abs.display());
+
+        // The precompression contract, enforced at build time in BOTH directions: a compressible
+        // file without a `.br` would silently ship uncompressed (the 2 MB defect X12 records), and
+        // a `.br` for a file the relay never negotiates would be dead weight in the binary.
+        let br = files.get(&format!("{route}.br"));
+        let brotli = match (must_be_precompressed(route), br) {
+            (true, Some(br_path)) => {
+                let br_abs = br_path
+                    .canonicalize()
+                    .unwrap_or_else(|e| panic!("canonicalize {}: {e}", br_path.display()));
+                format!("Some(include_bytes!(r\"{}\"))", br_abs.display())
+            }
+            (true, None) => panic!(
+                "e2e/dist-prod{route} has no e2e/dist-prod{route}.br — the web-prod vite build must brotli every \
+                 compressible output (plugin `dpayWebProdAssets` in e2e/vite.config.js). Rebuild \
+                 with `just web`; do NOT ship this uncompressed."
+            ),
+            (false, Some(_)) => panic!(
+                "e2e/dist-prod{route}.br exists but {route} is not a type the relay serves \
+                 compressed (woff2/png are already compressed containers). Keep `COMPRESSIBLE` in \
+                 e2e/vite.config.js and `must_be_precompressed` in this file in step."
+            ),
+            (false, None) => "None".to_string(),
+        };
         rs.push_str(&format!(
-            "    WebAsset {{ route: {served:?}, content_type: {:?}, immutable: {immutable}, bytes: include_bytes!(r\"{}\") }},\n",
+            "    WebAsset {{ route: {served:?}, content_type: {:?}, immutable: {immutable}, bytes: include_bytes!(r\"{}\"), brotli: {brotli} }},\n",
             content_type(route),
             abs.display()
         ));

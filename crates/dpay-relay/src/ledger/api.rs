@@ -49,7 +49,7 @@ pub trait Ledger: Send + Sync {
     /// durable history (the in-memory UI list is gone on restart; the ledger is the source of
     /// truth). History is read off the ICRC ledger named by `ledger` (the catalog's Principal
     /// text) — its OWN transaction log walked backwards, not a facade-maintained index.
-    /// [`AgentLedger`](crate::agent_ledger::AgentLedger) implements the real icrc3 walk;
+    /// `AgentLedger` implements the real icrc3 walk;
     /// [`FakeLedger`](super::FakeLedger) serves its in-memory log and ignores `ledger`.
     async fn transactions_on_ledger(
         &self,
@@ -78,7 +78,7 @@ pub trait Ledger: Send + Sync {
     /// `mint` through the agent build's authenticated identity (crediting the USER principal).
     /// The default impl is "not supported" — [`FakeLedger`](super::FakeLedger) and test fakes
     /// inherit it (the test-helpers faucet route serves the fake-IC gateway instead);
-    /// [`AgentLedger`](crate::agent_ledger::AgentLedger) overrides it with the real call. A
+    /// `AgentLedger` overrides it with the real call. A
     /// canister refusal comes back as `Rejected(text)` with the reason VERBATIM (the app surfaces
     /// it as-is); transport failures as `Transient`.
     async fn faucet_mint(
@@ -99,7 +99,7 @@ pub trait Ledger: Send + Sync {
     /// unrecorded upgrade with one curl (GOVERNANCE row 7). The default impl is "not supported" —
     /// [`FakeLedger`](super::FakeLedger) and test fakes inherit it (and FakeLedger overrides it
     /// with a deterministic hash the test-helpers build bakes as the pin, so the MATCH state is
-    /// exercisable offline); [`AgentLedger`](crate::agent_ledger::AgentLedger) overrides it with
+    /// exercisable offline); `AgentLedger` overrides it with
     /// the real `read_state` call. Failures are `Transient` — the caller degrades to
     /// `status:"UNREACHABLE"`, never a 5xx.
     async fn facade_module_hash(&self) -> Result<String, LedgerError> {
@@ -112,7 +112,7 @@ pub trait Ledger: Send + Sync {
     /// `zeroForToken0` come from the pool's own metadata — read them, never assume"*): query
     /// `pool`'s `metadata` and return the decoded [`SwapPoolMetadata`]. This is what makes
     /// `zero_for_one` derivable rather than assumable, so it is a READ on every quote — cached
-    /// with a TTL by [`AgentLedger`](crate::agent_ledger::AgentLedger) exactly like
+    /// with a TTL by `AgentLedger` exactly like
     /// `deposit_info`, never a compiled constant. A pool `#err` comes back as `Rejected(text)`;
     /// transport failures as `Transient`. The default impl is "not supported" — the test-helpers
     /// route serves the fake-IC gateway's stub pool instead.
@@ -132,7 +132,7 @@ pub trait Ledger: Send + Sync {
     /// the returned amount is GROSS of the output ledger's transfer fee (the app computes net).
     /// A pool `#err` comes back as `Rejected(text)` with the variant name verbatim; transport
     /// failures as `Transient`. The default impl is "not supported" — the test-helpers route
-    /// serves the fake-IC gateway's pool instead; [`AgentLedger`](crate::agent_ledger::AgentLedger)
+    /// serves the fake-IC gateway's pool instead; `AgentLedger`
     /// overrides it with the real query.
     async fn swap_pool_quote(
         &self,

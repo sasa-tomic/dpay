@@ -114,8 +114,17 @@ impl Ledger for FakeLedger {
     }
 
     async fn healthy(&self) -> bool {
-        // In-memory ledger is healthy iff its mutex isn't poisoned.
-        self.state.lock().is_ok()
+        // In-memory ledger is healthy iff its mutex isn't poisoned. `/health` answers a two-word
+        // verdict, so — exactly as in `AgentLedger::healthy` — the log is the only place the cause
+        // can live, and a poisoned lock (some earlier handler panicked while holding it) is the one
+        // thing that could ever put this build's health red.
+        match self.state.lock() {
+            Ok(_) => true,
+            Err(e) => {
+                eprintln!("dpay-relay: health: the fixture ledger's state lock is poisoned ({e}) — an earlier handler panicked while holding it");
+                false
+            }
+        }
     }
 
     async fn deposit_info(&self, _currency: Currency) -> Result<DepositInfo, LedgerError> {

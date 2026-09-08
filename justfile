@@ -347,15 +347,27 @@ wasm-core:
 # e2e suite exercises; the ONE divergent shim is the camera (real getUserMedia+jsQR vs inject).
 # The seam guard FAILS the build if any __DPAY_TEST_* seam leaks into the prod bundle (they are
 # mode-gated in e2e/web/shims.ts; `test-relay` depends on this, so `just check` enforces it too).
+# This build ALSO emits the offline shell (sw.js + manifest + icon) and brotli-precompresses every
+# compressible output — see `dpayWebProdAssets` in e2e/vite.config.js; build.rs refuses a dist
+# where a compressible file arrived without its `.br`.
 web:
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && node node_modules/vite/bin/vite.js build --mode web-prod
     node scripts/check-web-prod-seams.mjs
 
+# Regenerate e2e/web/fonts/*.woff2 from the APK's own res/font TTFs (the one font source in the
+# repo) and PROVE the subset lost no codepoint the app can paint. Off the inner loop — the .woff2
+# files are committed, exactly as the .ttf files they replaced were; run this only when the fonts
+# or the set of characters the UI can render changes. Needs python3 + fontTools.
+fonts:
+    python3 scripts/subset-web-fonts.py
+
 # Acceptance gate for the prod web wallet: builds the dist (`web`), serves the EXACT bytes a
 # real relay would, and drives them in headless chrome — DPAY_SELFCHECK PASS (wasm core boots),
 # onboarding against a real relay, identity persists across reload, wallet chrome renders,
-# screenshot proves pixels, zero console errors. Run after any web-shim / wallet.html change.
+# screenshot proves pixels, zero console errors, and NO off-box origin contacted. Wired into
+# `verify` (see that recipe for why there and not `check`).
+# acceptance gate for the SHIPPED /wallet bytes — boots, onboards, persists, renders
 web-smoke: web
     cd e2e && node web-wallet-smoke.mjs
 
@@ -365,8 +377,10 @@ web-smoke: web
 # bytes through the FULL pipeline: getUserMedia → <video> → rAF canvas → vendored jsQR →
 # onCodeScanned → PayMode review. Catches every layer of the 2026-08-16 scan regression class
 # (missing decoder bytes, UMD interop, codeScanner-shape mismatch) that web e2e (inject shim)
-# and web-smoke (no camera) are structurally blind to. Run after any camera-real.tsx / vendor
-# jsQR change.
+# and web-smoke (no camera) are structurally blind to. Wired into `verify` (see that recipe for why
+# there and not `check`). Needs `ffmpeg` on PATH — the only tool in the inner loop that is not
+# in-project; gen-scan-video.mjs says so by name if it is missing.
+# decode gate for the SHIPPED /wallet camera: a real getUserMedia stream, decoded by the real jsQR
 web-scan: web
     node scripts/gen-scan-video.mjs
     cd e2e && node web-scan-smoke.mjs
@@ -382,10 +396,18 @@ wasm:
     node scripts/check-wasm-core.mjs
     @echo "staged crates/dpay-relay/assets/dpay-core.wasm ($(stat -c%s crates/dpay-relay/assets/dpay-core.wasm) bytes)"
 
-# everything: rust loop + radical e2e (real app + real relay + real browser). The e2e harness
-# superseded the old ui/ parallel-component golden-shot harness (drives the REAL App.tsx +
-# screenshots every flow state), so `ui` is gone and `verify` runs `check e2e`.
-verify: check e2e
+# web-smoke + web-scan are HERE and not in `check` (2026-09-08). They were on no gate at all, and
+# both had been RED for days without anyone noticing — each carried its own private copy of the
+# first-run sequence, which the app changed three times in five weeks. Being on a gate is what
+# stops that; `verify` rather than `check` is where the cost fits, because they are the only two
+# recipes besides `e2e` that drive a headless browser (~30s each) and `check` is the hot Rust loop
+# people re-run on every edit. They add no build: `check` → `test-relay` already builds the dist
+# they serve, and `just` runs a dependency once per invocation. They come BEFORE `e2e` so a broken
+# SHIPPED bundle fails in half a minute rather than after the full flow suite.
+# (The e2e harness superseded the old ui/ parallel-component golden-shot harness — it drives the
+# REAL App.tsx and screenshots every flow state — so `ui` is gone.)
+# everything: rust loop + the two shipped-bytes web smokes + radical e2e (real app, relay, browser)
+verify: check web-smoke web-scan e2e
     @echo "full inner loop green"
 
 # cross-compile dpay-ffi to Android .so for arm64-v8a + x86_64 (NDK)

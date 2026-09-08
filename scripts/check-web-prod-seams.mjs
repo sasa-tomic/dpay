@@ -53,7 +53,10 @@ const walk = (dir) => {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) walk(p);
-    else files.push(p);
+    // `<file>.br` is the brotli of `<file>`, which is scanned right here — grepping the compressed
+    // copy adds no coverage and can only produce a false hit on a byte run that happens to spell a
+    // seam name. The BODY is what ships either way, and the body is checked.
+    else if (!name.endsWith('.br')) files.push(p);
   }
 };
 walk(DIST);

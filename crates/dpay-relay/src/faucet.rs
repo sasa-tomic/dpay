@@ -3,7 +3,7 @@
 //! the app's verbatim-reason surface (Wallet N5: "faucet cooldown: try again in ~58 min") shows
 //! exactly what it showed before the 2026-08-20 faucet moved to the relay.
 //!
-//! Pure and lock-free by itself: [`FaucetCooldown::check_and_mark`] is synchronous
+//! Pure and lock-free by itself: `FaucetCooldown::check_and_mark` is synchronous
 //! (check-then-insert with NO await in between — the canister's RefCell discipline translated to
 //! host code), so a `Mutex<FaucetCooldown>` can never be held across an await. Callers wrap it in
 //! the repo's poison-tolerant lock convention (`unwrap_or_else(|p| p.into_inner())`).
@@ -18,6 +18,22 @@ pub(crate) const FAUCET_AMOUNT: u64 = 10_000;
 /// canister `FAUCET_COOLDOWN_SECS`). Generous for a demo; tune here — redeploying the relay is a
 /// one-line image swap, no canister upgrade cycle (the reason the cooldown lives relay-side).
 pub(crate) const FAUCET_COOLDOWN_SECS: u64 = 60 * 60;
+
+/// Is this request the canonical SELF-SERVICE TOP-UP — the one and only shape the production
+/// faucet serves? Both faucet handlers ask this question through this function, and it is what
+/// makes the offline fixture behave like production on every request production would accept.
+///
+/// WHY IT EXISTS AT ALL. The two builds serve the same route with deliberately different reach:
+/// the agent build accepts EXACTLY this shape and refuses everything else (an arbitrary amount is
+/// a self-service surface printing arbitrary money), while the offline fixture build additionally
+/// serves the e2e harness, which credits arbitrary raw amounts of arbitrary currencies to set a
+/// flow's opening balance — a request production answers `422` to and therefore never rate-limits.
+/// So the rule is one rule, not two: *a request production would accept is subject to production's
+/// cooldown*. Before this existed the fixture had no cooldown at all, and flow 02 asserted the
+/// top-up button was repeatable — a behaviour the shipped faucet has never had.
+pub(crate) fn is_self_service_top_up(amount: u64) -> bool {
+    amount == FAUCET_AMOUNT
+}
 
 /// Per-key (account pubkey × currency) last-top-up timestamps. The key is the same shape the old
 /// canister `CacheKey` carried.
@@ -114,6 +130,18 @@ mod tests {
         assert!(cd.check_and_mark(&PK_A, 1, 1_000).is_ok());
         // Only the original key is cooling down.
         assert!(cd.check_and_mark(&PK_A, 0, 1_001).is_err());
+    }
+
+    /// The shape gate BOTH builds share. Production refuses everything it rejects; the offline
+    /// fixture serves those as harness credits and rate-limits exactly what production accepts.
+    #[test]
+    fn only_the_canonical_amount_is_a_self_service_top_up() {
+        assert!(is_self_service_top_up(FAUCET_AMOUNT), "$100.00 is the self-service top-up");
+        assert!(!is_self_service_top_up(FAUCET_AMOUNT - 1));
+        assert!(!is_self_service_top_up(FAUCET_AMOUNT + 1));
+        assert!(!is_self_service_top_up(0), "a zero credit is not a top-up");
+        // The raw-unit seeds the e2e harness sends (sats, wei, 8-decimal VCHF) are not top-ups.
+        assert!(!is_self_service_top_up(500_000_000));
     }
 
     #[test]

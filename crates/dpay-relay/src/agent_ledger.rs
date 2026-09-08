@@ -1,5 +1,5 @@
 //! The real read path: an [`AgentLedger`] that talks to the ICRC ledgers (and, for the
-//! faucet/deposit metadata, the dpay facade canister) on a live IC network via [`ic-agent`].
+//! faucet/deposit metadata, the dpay facade canister) on a live IC network via the `ic-agent` crate.
 //! Same [`Ledger`] trait the relay serves, so the axum app is unchanged — only the seam is
 //! swapped.
 //!
@@ -598,13 +598,27 @@ impl Ledger for AgentLedger {
         // by STATUS_TIMEOUT_SECS so a hung replica flips the merchant terminal's green dot red within
         // one poll cycle (the terminal hits /health every 3s) instead of wedging for ic-agent's full
         // ~5min expiry.
-        tokio::time::timeout(
-            Duration::from_secs(STATUS_TIMEOUT_SECS),
-            self.agent.status(),
-        )
-        .await
-        .map(|status_result| status_result.is_ok())
-        .unwrap_or(false)
+        //
+        // BOTH failure paths say WHY. `/health`'s body is a liveness verdict and stays two words
+        // (`{"status":"unhealthy"}` — a probe an operator polls every 3 s is not a diagnostics
+        // surface), so the log is the only place the cause can live. Without it, an unreachable
+        // gateway and a replica that answered with a rejection were the same reasonless 503, and
+        // this is the first thing anyone reads when prod goes red.
+        match tokio::time::timeout(Duration::from_secs(STATUS_TIMEOUT_SECS), self.agent.status())
+            .await
+        {
+            Ok(Ok(_)) => true,
+            Ok(Err(e)) => {
+                eprintln!("dpay-relay: health: the IC answered `status` with an error: {e}");
+                false
+            }
+            Err(_) => {
+                eprintln!(
+                    "dpay-relay: health: the IC did not answer `status` within {STATUS_TIMEOUT_SECS}s"
+                );
+                false
+            }
+        }
     }
 
     async fn faucet_mint(

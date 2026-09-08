@@ -842,28 +842,65 @@ pub(crate) struct TransferBody {
     pub hint: String,
 }
 
-/// What the merchant's own app polls. `state` is the answer `paid` alone cannot give: a charge
-/// that was superseded by the next ring-up and one that is still waiting look identical through a
-/// null `paid`, and the cashier's screen has to tell a customer which of those it is.
+/// What the merchant's own app and the cashier page poll. `state` is the answer `paid` alone cannot
+/// give: a charge that was superseded by the next ring-up and one that is still waiting look
+/// identical through a null `paid`, and the cashier's screen has to tell a customer which of those
+/// it is.
 ///
-/// NO [`Charge::reference`] HERE, deliberately, and the reason is least authority rather than
-/// secrecy. `GET /api/v1/till/{id}` is UNAUTHENTICATED — the charge id is a bearer read token, so
-/// anybody who photographed the code holds it — while the ring-up that does carry the reference is
-/// signed by the merchant. Working the disclosure through the matching rule, an id-holder who
-/// learned the reference could do exactly one thing with it: send the merchant a transfer of the
-/// exact price naming this charge, i.e. PAY the shop. It authorises nothing, moves nothing of the
-/// merchant's, and cannot re-aim a sale — `consumed` is derived from this store's own settlements,
-/// not from anything a stranger writes. (An id-holder can in fact already read it: step 2 then step
-/// 3 hand the same value to any caller, because that is the payer's path.) So the field would
-/// neither leak nor help — and the merchant does not need it here, having been told it on the
-/// ring-up and holding it for as long as the code is up. This body is also the CANCELLATION's
-/// reply, so a field only one of two callers could use would be minted onto both.
+/// # THE CHARGE ID IS A BEARER READ TOKEN — the threat model this body survives
+///
+/// `GET /api/v1/till/{id}` is UNAUTHENTICATED, and has to be: the cashier page
+/// (`../assets/till.html`) is a plain browser page on a screen that holds no key, so the route
+/// cannot tell the merchant from a bystander by anything it sees. Anybody who photographs the code
+/// at the counter can therefore read this body. The question is not whether that is comfortable, it
+/// is what such a reader LEARNS THAT THEY COULD NOT OTHERWISE and what they can DO with it — worked
+/// field by field against the routes the standard ALREADY obliges this till to serve to any caller
+/// holding the same id:
+///
+/// * `id` — the caller's own token.
+/// * `cents` / `amount` — the price, in francs and in VCHF. Step 2 (`GET /v1/lnurlp/{id}`) serves
+///   both to any caller: `requestedAmount` and `transferAmounts[].assets[].amount`.
+/// * `merchant_name` — step 2 serves the same string as `displayName`. Claimed on both, verified on
+///   neither; every renderer must mark it so.
+/// * `state` — steps 2 and 3 refuse a charge that is not payable, BY CAUSE ([`Charge::payable`]),
+///   so superseded / cancelled / expired is already disclosed to a payer who asks.
+/// * `created_secs` / `expires_at` — step 2 serves the quote's `expiration` and step 3 the
+///   instruction's `expiryDate`. The ring-up second is the one value here no other route states,
+///   and all it says is when a cashier typed a price.
+/// * `paid` — the settlement, INCLUDING the payer's account ([`Settled::from`]). The only field
+///   worth arguing over, and what closes it is DERIVATION, not obscurity: an id-holder is handed
+///   this charge's `reference` and the merchant's account by step 3 (they must be — that is the
+///   payer's own instruction), and ICRC-1 ledgers are public, so the transfer carrying that memo to
+///   that account is readable straight off the chain by anyone — sender, amount, timestamp and
+///   block included. Step 4 ([`lnurlp_submit`]) hands the whole `Settled` back to any caller too.
+///   This field restates public state; it creates no link the QR had not already created.
+///
+/// WHAT AN ID-HOLDER STILL CANNOT DO, which is what makes the above tolerable rather than merely
+/// equal: they cannot ENUMERATE (an id is 16 bytes of OS randomness — [`fresh_id`]); cannot ring up,
+/// void or re-aim anything (both merchant routes demand the signature of the key the destination
+/// account derives from — rule 0); cannot make this relay pay anything; and cannot even make it
+/// walk a ledger on demand ([`OBSERVE_TTL_SECS`] bounds a charge to one history read every 2 s
+/// however hard it is polled). Settlement is derived from this store's own observations, never from
+/// anything a stranger writes.
+///
+/// WHAT IS DELIBERATELY OFF THIS BODY. [`Charge::reference`] — not because it would leak (step 3
+/// hands it to any id-holder) but because the merchant was told it on the ring-up they signed, so
+/// restating it here would widen an unauthenticated body for no reader. The same rule retired
+/// `merchant`, the destination principal, on 2026-09-08: its only reader was the cashier page,
+/// which was printing a 63-character principal in the place it meant the shop's NAME.
+///
+/// THE PROPERTY ALL OF THIS RESTS ON IS PINNED, not asserted:
+/// `the_unauthenticated_status_body_is_exactly_these_fields` fails the moment a field is added, so
+/// widening this body forces a deliberate re-derivation of the paragraphs above rather than a diff
+/// nobody re-read.
 #[derive(Debug, Serialize)]
 pub(crate) struct ChargeStatus {
     pub id: String,
     pub cents: u64,
     pub amount: String,
-    pub merchant: String,
+    /// The shop's own CLAIMED name, as signed into the ring-up and clamped to
+    /// [`MERCHANT_NAME_BYTES`]. Every renderer treats it as display text and never as markup.
+    pub merchant_name: String,
     pub state: ChargeState,
     /// Unix seconds this charge was rung up, and the second it stops being payable
     /// ([`Charge::expires_at`]). Both are on the wire so the cashier's screen can render an honest
@@ -884,7 +921,7 @@ impl ChargeStatus {
             id: charge.id.clone(),
             cents: charge.cents,
             amount: charge.amount_text(),
-            merchant: charge.merchant.clone(),
+            merchant_name: charge.merchant_name.clone(),
             state: charge.state(now_secs),
             created_secs: charge.created_secs,
             expires_at: charge.expires_at(),
@@ -1332,6 +1369,49 @@ mod tests {
             assert_eq!(tail.len(), 16);
             assert!(tail.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')), "{id}");
         }
+    }
+
+    /// The tripwire under [`ChargeStatus`]'s threat model. `GET /api/v1/till/{id}` is a bearer read
+    /// token, and the argument that this is acceptable is field-by-field: every key below is either
+    /// already served to the same caller by the standard's own payer routes, or derivable from the
+    /// public ICRC-1 ledger the QR itself names. That argument is only true of THIS key set, so the
+    /// key set is pinned — a new field fails here and has to be argued into the doc above rather
+    /// than merged as a diff nobody re-read.
+    #[test]
+    fn the_unauthenticated_status_body_is_exactly_these_fields() {
+        let mut s = TillStore::default();
+        let charge = ring_up(&mut s, "pl_0123456789abcdef", MERCHANT, [7u8; 32], 450, 1_000);
+        let json = serde_json::to_value(ChargeStatus::of(&charge, 1_000))
+            .expect("a status body serialises");
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .expect("the status body is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "amount",
+                "cents",
+                "created_secs",
+                "expires_at",
+                "id",
+                "merchant_name",
+                "paid",
+                "state",
+            ],
+            "a field was added to (or removed from) the unauthenticated charge status — \
+             re-derive ChargeStatus's threat model before changing this list"
+        );
+        // The two the argument names explicitly, so their absence is asserted rather than implied:
+        // the reference (the merchant holds it from the ring-up they signed) and the destination
+        // principal (retired 2026-09-08 — its only reader was printing it as the shop's name).
+        assert!(json.get("reference").is_none(), "the reference stays off the bearer body");
+        assert!(json.get("merchant").is_none(), "the destination principal has no reader here");
+        // …and what IS there is the claimed name, which step 2 already serves as `displayName`.
+        assert_eq!(json["merchant_name"], serde_json::json!("Shop"));
     }
 
     #[test]

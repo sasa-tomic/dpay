@@ -14,6 +14,17 @@
 //!   signed icrc1_transfer executed by the gateway (verify → dedup → execute → history);
 //! - the public root: landing page, privacy, /wallet (the real app), APK download, screenshots,
 //!   /dpay-core.wasm.
+//!
+//! `test-helpers` IS ALWAYS ON IN THIS FILE — do not re-derive it, and do not write a `cfg` that
+//! tests for it. `Cargo.toml`'s `[dev-dependencies]` names this very package back at itself,
+//! `dpay-relay = { path = ".", features = ["test-helpers"] }`, so cargo compiles the integration
+//! test target with `--cfg feature="test-helpers"` in every build, `agent` or not (verified
+//! 2026-09-08 by reading the rustc invocation out of `cargo test -p dpay-relay --test relay
+//! --no-run -v`). A `cfg(all(feature = "test-helpers", not(feature = "agent")))` therefore says
+//! only `not(agent)` while LOOKING like a two-feature condition, and this suite has already been
+//! bitten once by an expectation copied from the implementation's own `cfg`. The ONE axis that
+//! actually varies here is `agent`: off ⇒ the fake-IC gateway serves the value path, on ⇒ a live
+//! replica does. Gate on that and nothing else.
 
 use std::sync::Arc;
 
@@ -2564,6 +2575,154 @@ async fn wallet_assets_404_cleanly_and_legacy_routes_are_gone() {
     }
 }
 
+// --- Offline shell + precompression (OPEN_ISSUES X10 / X12) -------------------------------------
+//
+// X12 measured every asset leaving this relay with `encodedBodySize == decodedBodySize`: 2.0 MB of
+// wallet with no compression on the wire at all. The web build now brotli-compresses every
+// compressible output at max quality and build.rs refuses a dist where one is missing, so these
+// tests pin the SERVING half: the negotiation, and the two containers that must never be encoded
+// twice.
+
+/// A hashed asset is served as the build's brotli when the client asks for it, as the identity
+/// bytes when it does not, and `Vary` is on BOTH so a shared cache cannot cross the two.
+#[tokio::test]
+async fn hashed_assets_are_served_brotli_only_when_the_client_asks() {
+    let (state, _led) = state_from(ledger());
+
+    // Find the entry bundle's hashed name off the page that references it (no hardcoded hash).
+    let (_s, _h, html) = call_raw(&state, get_req("/wallet")).await;
+    let html = String::from_utf8(html).unwrap();
+    let start = html.find("/assets/wallet-").expect("entry bundle referenced");
+    let end = start + html[start..].find(".js").expect("entry bundle is .js") + 3;
+    let bundle = &html[start..end];
+
+    let (status, headers, identity) = call_raw(&state, get_req(bundle)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        headers.get(header::CONTENT_ENCODING).is_none(),
+        "no Accept-Encoding must yield the identity body, not a brotli one the client cannot read"
+    );
+    assert_eq!(
+        headers.get(header::VARY).map(|v| v.to_str().unwrap()),
+        Some("accept-encoding"),
+        "Vary must be present on the identity response too, or a cache will serve it to a br client"
+    );
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(bundle)
+        .header(header::ACCEPT_ENCODING, "gzip, deflate, br, zstd")
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, compressed) = call_raw(&state, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_ENCODING).map(|v| v.to_str().unwrap()),
+        Some("br")
+    );
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        Some("public, max-age=31536000, immutable"),
+        "the encoding must not change the caching contract — the filename is still the version"
+    );
+    assert!(
+        compressed.len() * 2 < identity.len(),
+        "the app bundle must compress by more than 2× (measured 4.2×), got {} from {}",
+        compressed.len(),
+        identity.len()
+    );
+
+    // `br;q=0` is an explicit REFUSAL of brotli, not a request for it.
+    let req = Request::builder()
+        .method("GET")
+        .uri(bundle)
+        .header(header::ACCEPT_ENCODING, "br;q=0, gzip")
+        .body(Body::empty())
+        .unwrap();
+    let (_status, headers, body) = call_raw(&state, req).await;
+    assert!(
+        headers.get(header::CONTENT_ENCODING).is_none(),
+        "br;q=0 refuses brotli"
+    );
+    assert_eq!(body.len(), identity.len(), "a refusal gets the identity body");
+}
+
+/// WOFF2 is brotli inside the container: re-encoding it would grow the response and force a
+/// pointless decode. It must go out unencoded and WITHOUT `Vary` — its body never varies.
+#[tokio::test]
+async fn fonts_are_never_encoded_twice() {
+    let (state, _led) = state_from(ledger());
+
+    let (_s, _h, html) = call_raw(&state, get_req("/wallet")).await;
+    let html = String::from_utf8(html).unwrap();
+    let start = html.find("/assets/plex_mono_500-").expect("mono font referenced");
+    let end = start + html[start..].find(".woff2").expect("font is .woff2") + 6;
+    let font = &html[start..end];
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(font)
+        .header(header::ACCEPT_ENCODING, "br")
+        .body(Body::empty())
+        .unwrap();
+    let (status, headers, bytes) = call_raw(&state, req).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        Some("font/woff2")
+    );
+    assert!(headers.get(header::CONTENT_ENCODING).is_none());
+    assert!(headers.get(header::VARY).is_none());
+    assert_eq!(&bytes[..4], b"wOF2", "the wOF2 signature must reach the browser intact");
+}
+
+/// The offline shell (X10): the worker at the ROOT scope, `no-cache` so a deploy reaches it on the
+/// next navigation; the manifest and the icon it names. The worker must arrive fully built — a
+/// template placeholder shipping would mean a syntax error and no offline wallet at all.
+#[tokio::test]
+async fn service_worker_manifest_and_icon_are_served_from_the_root() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/sw.js")).await;
+    assert_eq!(status, StatusCode::OK, "/sw.js must serve from the root (its scope is /)");
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        Some("text/javascript; charset=utf-8")
+    );
+    assert_eq!(
+        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        Some("no-cache"),
+        "a cached service worker pins an old bundle past a deploy — it must revalidate every time"
+    );
+    let sw = String::from_utf8(bytes).unwrap();
+    assert!(
+        !sw.contains("__DPAY_SW_"),
+        "the build must substitute every sw.js placeholder; one shipping is a syntax error"
+    );
+    assert!(
+        sw.contains("dpay-shell-") && sw.contains("\"/wallet\""),
+        "the worker must carry its versioned cache name and precache the shell document"
+    );
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/manifest.webmanifest")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        Some("application/manifest+json")
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(manifest["start_url"], "/wallet");
+    assert_eq!(manifest["icons"][0]["src"], "/icon-192.png");
+
+    let (status, headers, bytes) = call_raw(&state, get_req("/icon-192.png")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        Some("image/png")
+    );
+    assert_eq!(&bytes[1..4], b"PNG", "the manifest's icon must be a real PNG");
+}
+
 // --- Shared wasm core (GET /dpay-core.wasm) -----------------------------------------------------
 //
 // crates/dpay-wasm compiles the frozen Rust wire core to wasm32 so every web surface signs the
@@ -4146,10 +4305,12 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
 const SWAP_POOL: &str = "65mrh-fqaaa-aaaar-qapoa-cai";
 const VCHF_LEDGER: &str = "ly36x-wiaaa-aaaai-aqj7q-cai";
 const VCHF: Currency = 7;
-/// A principal that is NOT a known venue (the ICPSwap factory — must be refused by name). Only
-/// the offline build has a route test for it: under `agent` the quote route queries the LIVE
-/// pool, so its refusal tests are compiled out (see `swap_quote_refuses_unknown_pools_and_pairs`).
-#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+/// A principal that is NOT a known venue (the ICPSwap factory — must be refused by name). BOTH
+/// builds refuse it and both are tested: the offline route's own refusals in
+/// [`swap_quote_refuses_unknown_pools_and_pairs`], and the shipped route's in
+/// [`swap_quote_agent_refuses_an_unknown_pool_before_reaching_the_venue`]. It was briefly gated to
+/// the offline build alone, which left the agent build's copy of the allowlist check — the one that
+/// ships — covered by nothing at all.
 const NOT_A_VENUE: &str = "4mmnk-kiaaa-aaaag-qbllq-cai";
 /// `zeroForOne` for an ICP-in / VCHF-out trade at this venue. FALSE, because the pool's own
 /// `metadata` (MEASURED 2026-09-08, `dfx/catalog_truth.json` `swap_venue`) reports
@@ -4225,7 +4386,6 @@ async fn set_swap_pool_knobs(state: &AppState, body: &str) {
     assert_eq!(json["ok"], true);
 }
 
-#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 fn swap_quote_uri(pool: &str, token_in: &str, token_out: &str, amount_in: u64) -> String {
     format!("/api/v1/swap_quote?pool={pool}&token_in={token_in}&token_out={token_out}&amount_in={amount_in}")
 }
@@ -4236,7 +4396,7 @@ fn swap_quote_uri(pool: &str, token_in: &str, token_out: &str, amount_in: u64) -
 /// `fetched_at`. Deterministic: identical inputs ⇒ identical outputs.
 /// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
 /// faucet tests.)
-#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+#[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     let (state, _led, fake) = state_with_fake(ledger()).await;
@@ -4309,7 +4469,7 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
 /// doesn't cover.
 /// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
 /// faucet tests.)
-#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+#[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn swap_quote_refuses_unknown_pools_and_pairs() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;
@@ -4329,6 +4489,39 @@ async fn swap_quote_refuses_unknown_pools_and_pairs() {
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"], "unsupported_pair");
+}
+
+/// The SAME name refusal, in the build that SHIPS. `swap_quote_agent` is a different function with
+/// its own copy of the `is_known_swap_pool` check, and until now only the offline twin's copy was
+/// ever exercised — the agent build compiled the test above out and put nothing in its place.
+///
+/// The property is not cosmetic: `pool` is a caller-supplied canister id that the route turns into
+/// a query, so a relay that skipped the allowlist would be an open query proxy for any canister on
+/// the IC. It is checked BEFORE the venue is touched, and this state's `FakeLedger` inherits
+/// `Ledger::swap_pool_metadata`'s "cannot query swap pools" default — so the 400 below is itself
+/// the proof that nothing was asked of any venue, and the 503 after it is the control that says
+/// the 400 came from the allowlist rather than from a parse failure refusing every pool alike.
+///
+/// The pair refusals stay offline-only: those are read off the pool's OWN metadata, which the fake
+/// ledger has none of, and inventing one here would test this test rather than the route.
+#[cfg(feature = "agent")]
+#[tokio::test]
+async fn swap_quote_agent_refuses_an_unknown_pool_before_reaching_the_venue() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+
+    let req = get_req(&swap_quote_uri(NOT_A_VENUE, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "the venue must never be asked: {body}");
+    assert_eq!(body["error"], "unknown_pool", "the named refusal");
+
+    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let (status, body) = call(&state, req).await;
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "the ALLOWED venue gets past the name check and dies at the ledger this state cannot \
+         query — which is what makes the 400 above an allowlist refusal: {body}"
+    );
 }
 
 /// The full happy path through the SAME signed /api/v2 rail the app uses: icrc2_approve of the
@@ -4490,7 +4683,7 @@ async fn expired_allowance_blocks_the_swap() {
 /// default 3000 tier for the same input; impact_bps 10_000 floors the payout at 0.
 /// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
 /// faucet tests.)
-#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+#[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn swap_pool_knobs_shape_the_quote_curve() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;

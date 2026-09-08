@@ -112,7 +112,7 @@ pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 /// A pool PRINCIPAL is the only venue fact the relay may hold as a constant: it is dpay's own
 /// choice of which contract to talk to. The pool's token PAIR and its fee tier are claims about
 /// a remote system — they are read off the pool at request time
-/// ([`crate::agent_ledger::AgentLedger::swap_pool_metadata`]), never assumed. The 2026-09-07
+/// (`AgentLedger::swap_pool_metadata`), never assumed. The 2026-09-07
 /// build pinned the pair as a constant AND seeded the offline fake from the same pin: the two
 /// agreed with each other and neither agreed with the venue, so live production served each
 /// direction's rate under the other direction's label (docs/specs/2026-09-08-conversion-hardening-plan.md).

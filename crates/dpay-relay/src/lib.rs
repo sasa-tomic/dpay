@@ -42,12 +42,14 @@ pub(crate) fn now_secs() -> u64 {
     }
 }
 
-/// The agent-build faucet's relay-side cooldown — the resurrection of the old canister faucet's
-/// rate limit (window, granularity and verbatim error text). Compiled whenever the PRODUCTION
-/// faucet route exists (agent — including with test-helpers co-enabled, the live-test config;
-/// the test-helpers-only e2e build's faucet serves the fake-IC gateway instead). Pure logic +
-/// its own unit tests.
-#[cfg(feature = "agent")]
+/// The faucet's relay-side cooldown — the resurrection of the old canister faucet's rate limit
+/// (window, granularity and verbatim error text). Compiled whenever ANY faucet route exists, which
+/// since 2026-09-08 means both builds: the offline fixture used to serve an unlimited faucet while
+/// production served one top-up an hour, and the e2e suite had calibrated itself to the fixture.
+/// Pure logic + its own unit tests. Compiled with the cooldown map on `AppState` and with nothing
+/// else — a build that serves no faucet route needs neither, and gating them apart is what made
+/// `cargo check` with default features fail on 2026-09-08.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
 pub mod faucet;
 
 /// The real ic-agent read path (talks to a live IC — the ICRC ledgers directly; the currency
