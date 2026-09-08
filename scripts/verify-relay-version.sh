@@ -11,7 +11,7 @@
 #                    neither current nor behind — it is unidentifiable. Checked FIRST, because a
 #                    dirty build whose base SHA equals HEAD would otherwise read as MATCH. Exit 1.
 #   BEHIND by N    — the live commit is an ANCESTOR of HEAD (HEAD is ahead; the image predates the
-#                    source — redeploy: `just image && just up`). Exit 1.
+#                    source — redeploy per docs/OPS.md section 3). Exit 1.
 #   MISMATCH       — the live commit is NOT an ancestor of HEAD (divergent / force-pushed / different
 #                    branch). Exit 1.
 #   (unreachable)  — the live endpoint didn't answer or returned no commit. Exit 2.
@@ -62,7 +62,8 @@ if [ "$LIVE_DIRTY" = yes ]; then
   echo "FAIL: the live relay was built from a DIRTY working tree (/version reports $LIVE_RAW)."
   echo "      uncommitted changes were compiled into the image, so commit $LIVE does NOT describe"
   echo "      what prod is running and nothing here can tell you what does."
-  echo "      commit (or stash) the tree, then redeploy:  just image && just up"
+  echo "      commit the tree, then redeploy — docs/OPS.md section 3 (the image build now"
+  echo "      refuses a dirty tree, so this state can only be an image built before that gate)."
   exit 1
 fi
 
@@ -75,9 +76,9 @@ fi
 if git merge-base --is-ancestor "$LIVE" "$HEAD" 2>/dev/null; then
   BEHIND="$(git rev-list --count "$LIVE..$HEAD")"
   echo "FAIL: the live relay is BEHIND by $BEHIND commit(s) (live=$LIVE, HEAD=$HEAD)."
-  echo "      the running image predates the current source — redeploy:  just image && just up"
+  echo "      the running image predates the current source — redeploy: docs/OPS.md section 3."
   exit 1
 fi
 echo "FAIL: the live relay commit ($LIVE) is NOT an ancestor of HEAD ($HEAD) — MISMATCH (divergent / different branch / force-push)."
-echo "      redeploy from the intended branch:  just image && just up"
+echo "      redeploy from the intended branch — docs/OPS.md section 3."
 exit 1

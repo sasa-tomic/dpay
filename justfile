@@ -164,6 +164,9 @@ deploy:
 # non-DEMO assets are compile-time FIXED_ASSETS consts, and the catalog the app renders is compiled
 # into the relay (adding a currency = relay code change + `just up`). The ONE mainnet deploy path
 # (state-preserving upgrade by default). See deploy/README.md + docs/CANISTERS.md.
+# Requires a clean tree, and LEAVES one dirty (it re-bakes the tracked pin
+# deploy/facade-module-hash.txt), so it prints the record-then-ship steps it hands you to.
+# This is step 1 of the prod sequence — the whole of it is docs/OPS.md section 3.
 deploy-ic:
     bash scripts/dfx-deploy-ic.sh
 
@@ -248,8 +251,9 @@ verify-deploy:
     bash scripts/verify-deploy.sh
 
 # OBJECTIVE deploy-fidelity gate for the RELAY: curls the live `/api/v1/version` and compares its
-# baked git commit to `git rev-parse HEAD`. MATCH = current; BEHIND-N / MISMATCH = stale image →
-# `just image && just up`. No dfx needed (a plain curl). Override the target via DPAY_RELAY_URL.
+# baked git commit to `git rev-parse HEAD`. MATCH = current; DIRTY / BEHIND-N / MISMATCH = the image
+# does not correspond to HEAD → redeploy per docs/OPS.md section 3. No dfx needed (a plain curl).
+# Override the target via DPAY_RELAY_URL.
 verify-relay:
     bash scripts/verify-relay-version.sh
 
@@ -415,6 +419,8 @@ demo:
 # build the relay container image (host-built binary --features agent -> slim runtime; verified).
 # build.sh FIRST runs the prod web build of the real app (vite --mode web-prod → e2e/dist-prod),
 # which the relay's build.rs embeds — /wallet ships inside the binary, nothing else to stage.
+# REFUSES a dirty tree (deploy/git-lib.sh): the image bakes HEAD into /api/v1/version but compiles
+# the working tree, so an uncommitted one produces an image no commit describes. No override.
 image:
     bash deploy/build.sh
 
@@ -440,6 +446,10 @@ up: image
     docker compose up -d && docker compose ps
     sleep 1
     curl -sS https://dpay.kalaj.org/api/v1/health
+    echo
+    echo "next — prove what is now live (docs/OPS.md section 3):"
+    echo "    just verify-relay      # live /version == HEAD, and NOT '-dirty'"
+    echo "    just integrity-check   # live facade module hash == the pin this image baked"
 
 # tear the compose stack down
 compose-down:

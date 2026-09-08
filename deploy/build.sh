@@ -13,12 +13,20 @@
 # then *prove* the pairing by running the binary inside the finished image — a broken pairing fails
 # here, loudly, instead of as a crash-looping container on a VPS.
 #
+# The tree this compiles must correspond to a commit — see the gate in deploy/git-lib.sh.
+#
 # Env:
 #   DPAY_RUNTIME_BASE   override the runtime base image (default: chosen from the host's glibc)
 #   DPAY_IMAGE          image name:tag (default dpay-relay:latest)
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 ROOT="$PWD"
+
+# shellcheck source=deploy/git-lib.sh
+source deploy/git-lib.sh
+# First, before the minutes of web + cargo build below: a dirty tree can only produce an image
+# nothing can identify, so there is nothing to spend that time on.
+require_clean_tree "this relay image"
 
 export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
 export PATH="$ROOT/.dev/cargo/bin:$PATH"

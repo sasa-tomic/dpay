@@ -154,26 +154,22 @@ docker compose up -d relay && curl -sS http://127.0.0.1:8787/api/v1/health   # {
 
 `host.docker.internal` resolves via the `extra_hosts` mapping in the compose file.
 
-For mainnet, deploy the canister first, then bring up the relay:
+For mainnet, do the one-time setup here and then follow the deploy sequence in `docs/OPS.md` §3:
 
 ```sh
 icp-cli new-identity dpay                        # once — this identity BECOMES the canister controller
 echo 'DPAY_DFX_IDENTITY=dpay' >> deploy/.env      # (a cycles-funded identity; see below)
-just deploy-ic                                    # builds + deploys as `dpay`, writes DPAY_CANISTER_ID to .env
 just tunnel-provision                             # publishes the tunnel (or set CF_TUNNEL_TOKEN by hand)
-just up
 ```
 
 `just deploy-ic` requires `DPAY_DFX_IDENTITY` — the identity that deploys **becomes the canister
 controller** (upgrade authority), so it is explicit, not "whatever identity is active." It writes the
-resulting `DPAY_CANISTER_ID` back into `deploy/.env` for you. Re-running it is a **redeploy**: because
-this demo canister has **no stable memory**, it makes you choose `DPAY_DEPLOY_MODE=reinstall` (wipe +
-re-fund) or `=upgrade` (push code, lose all balances) rather than silently wiping state. Two hard gates
-before a pilot: give the controller to NNS/SNS governance (or blackhole it), and add stable storage so
-upgrades preserve balances. The relay holds **one** identity — the controller seed
-(`DPAY_CONTROLLER_SEED`) — used only for the faucet's `mint`; every read route works anonymously, and
-settlement authority is the payer's Ed25519 signature in the app's own /api/v2 envelopes (the caller
-principal is irrelevant to `pay`).
+resulting `DPAY_CANISTER_ID` back into `deploy/.env` for you. Re-running it is a **redeploy**, and
+`DPAY_DEPLOY_MODE` chooses what that means (see the header of `scripts/dfx-deploy-ic.sh`). The
+controller is a founder key; the posture that makes that safe is `docs/GOVERNANCE.md`. The relay holds
+**one** identity — the controller seed (`DPAY_CONTROLLER_SEED`) — used only
+for the faucet's `mint`; every read route works anonymously, and settlement authority is the payer's
+Ed25519 signature in the app's own /api/v2 envelopes (the caller principal is irrelevant to `pay`).
 
 ## Why the binary is built on the host
 

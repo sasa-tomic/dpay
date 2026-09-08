@@ -16,6 +16,11 @@
 # the settlement kernel is covered going forward by PocketIC canister tests + e2e + `just
 # verify-deploy` (wasm-hash fidelity).
 #
+# On a real network this REQUIRES A CLEAN WORKING TREE (deploy/git-lib.sh): the wasm is built from
+# the tree and then recorded against a commit in docs/UPGRADES.md. It also LEAVES the tree dirty —
+# the pin it rewrites is tracked — so the steps it prints at the end are part of the deploy, not a
+# suggestion. Whole sequence: docs/OPS.md section 3.
+#
 # Identity (DPAY_DFX_IDENTITY) is REQUIRED and load-bearing: `dfx deploy --network ic` spends the
 # identity's cycles AND makes it the CANISTER CONTROLLER (upgrade authority). Create one with
 # `icp-cli new-identity dpay` (or `dfx identity new dpay`) — both land in the dfx identity store —
@@ -50,6 +55,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source deploy/env-lib.sh
 # shellcheck source=deploy/dfx-lib.sh
 source deploy/dfx-lib.sh
+# shellcheck source=deploy/git-lib.sh
+source deploy/git-lib.sh
 setup_dfx_env
 CANISTER=dpay_canister        # dfx canister name + wasm artifact basename (cargo maps - to _)
 CRATE=dpay-canister           # cargo package name
@@ -59,6 +66,18 @@ require_cmd dfx "dfx not found on PATH"
 # Guard before the `> dfx/dpay_canister.did` redirect in refresh_candid, which would otherwise
 # truncate the committed candid file to empty (→ dfx "no main service") when the tool is absent.
 require_cmd candid-extractor "candid-extractor not found — cargo install candid-extractor"
+
+# This builds the wasm from the WORKING TREE and the docs/UPGRADES.md row it prints at the end names
+# a commit; from a dirty tree that row would be a lie about what the IC is running. Refused BEFORE
+# the build, the identity load and the cycles, and before the pin rewrite at the end makes the tree
+# dirty by construction — so a second unrecorded upgrade cannot stack on an unrecorded first one.
+# A local rehearsal is exempt for the same reason it never writes deploy/.env or the pin: it records
+# nothing and claims no commit, and it is rehearsed precisely while the change is still uncommitted.
+if [ "$NETWORK" != "local" ]; then
+  require_cmd git "git not found — this upgrade must be attributable to a commit (docs/UPGRADES.md)"
+  require_clean_tree "the facade wasm this installs"
+  DEPLOY_COMMIT="$(git rev-parse HEAD)"
+fi
 
 # --- identity: required, must exist, becomes the controller ------------------------------------
 # Keyring troubleshooting hint, surfaced on dfx's PRINCIPAL-load failure (headless envs). load_identity
@@ -255,11 +274,19 @@ if [ "$NETWORK" != "local" ]; then
   _hash="$(sed -n 's/^Module hash: 0x//p' <<<"$_info" | tr -d '\n')"
   if [[ "$_hash" =~ ^[0-9a-f]{64}$ ]]; then
     printf '%s\n' "$_hash" > deploy/facade-module-hash.txt
-    _commit="$(git rev-parse HEAD 2>/dev/null || echo '<no-git>')"
     echo "   pinned facade module hash $_hash (deploy/facade-module-hash.txt)"
-    echo "   REMINDER: add a docs/UPGRADES.md row for this upgrade —"
-    echo "      date, git commit ($_commit), the hash above, and what changed."
-    echo "      That row is the changelog 'just integrity-check' polices."
+    echo
+    echo "   THE TREE IS NOW DIRTY BY CONSTRUCTION — that pin is a TRACKED file, and the relay"
+    echo "   image build refuses a dirty tree. Record this upgrade, then ship:"
+    echo
+    echo "     1. add a docs/UPGRADES.md row:"
+    echo "        | $(date +%F) | \`$DEPLOY_COMMIT\` | \`$_hash\` | <what changed> |"
+    echo "     2. git add deploy/facade-module-hash.txt docs/UPGRADES.md && git commit"
+    echo "     3. just apk && just up"
+    echo "     4. just verify-relay && just integrity-check"
+    echo
+    echo "   That row is the changelog 'just integrity-check' polices; the whole sequence, and why"
+    echo "   step 2 is not optional, is docs/OPS.md section 3."
   else
     echo "WARN: could not read the fresh module hash (got '$_hash') — deploy/facade-module-hash.txt" >&2
     echo "      was NOT updated. Record it by hand before the next relay image build:" >&2
@@ -270,7 +297,8 @@ fi
 echo
 echo "done. The catalog the app renders is NOT set here — it is compiled into the relay"
 echo "      (crates/dpay-relay/src/catalog.rs); adding a currency = relay code change + 'just up'."
-echo "next: deploy/.env now carries the canister id (and, on ic, the controller seed). Confirm"
-echo "      DPAY_LEDGER=ic, DPAY_IC_URL=https://icp-api.io, and DPAY_IC_FETCH_ROOT_KEY=false"
-echo "      there, optionally run 'just faucet-verify' (asserts seed↔controller wiring — needs"
-echo "      the relay up: 'just up'), then set up the tunnel (just tunnel-provision) and: just up"
+echo "      deploy/.env now carries the canister id (and, on ic, the controller seed). Confirm"
+echo "      DPAY_LEDGER=ic, DPAY_IC_URL=https://icp-api.io, and DPAY_IC_FETCH_ROOT_KEY=false there."
+echo "      First deploy on this host? Publish the tunnel too: just tunnel-provision."
+echo "      Recording this upgrade and shipping it is docs/OPS.md section 3; once the relay is up,"
+echo "      'just faucet-verify' asserts the seed<->controller wiring."

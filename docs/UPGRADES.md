@@ -9,9 +9,8 @@ canister against it at `GET /api/v1/integrity`, so an upgrade that skipped this 
 
 How the pieces fit:
 
-- `just deploy-ic` upgrades the canister, then **auto-writes** the fresh hash into
-  `deploy/facade-module-hash.txt` and prints the reminder to add the row here. Commit both
-  together (the pin is only a pin if the changelog and the file move as one).
+- The sequence that produces a row — and the gate that makes skipping it stop the deploy — is
+  `docs/OPS.md` §3.
 - `just integrity-check` curls the live relay and asserts `status == MATCH`.
   `UNPINNED`/`MISMATCH`/`UNREACHABLE` each say what to do next.
 - To measure the live hash by hand (no relay in the loop):
@@ -21,4 +20,5 @@ How the pieces fit:
 
 | Date | Git commit | Module hash (sha256) | Notes |
 |------|------------|----------------------|-------|
+| 2026-09-08 | `20133499671579758f331ba22afd9f33f12cfc6f` | `e537056e9bf44b17777563d0f3e08f4ceef9c29fd4d4d924f1f9cd16928fe1cc` | Ships `90f5930`, the only canister-source change since the row below: no heartbeat — the stale-intent sweep runs lazily and rate-limited on update ingress, `reconcile` walks the ledger in pages, and `inflight_intents` is added (`dfx/dpay_canister.did` regenerated). Recorded a deploy late: the founder ran `just deploy-ic` on 2026-09-08 and shipped the relay image before this row and the pin were committed, so prod reported `20133499…-dirty`. `just verify-deploy` PASSes at this commit (source-built sha == live module hash), so the row describes the installed wasm exactly. |
 | 2026-09-06 | `41b8bf4fcee7a326064e10bbeead5541bb45ea31` | `0978386f70a4313e8548937d3e7abb5210deea06682620a54da0e1b69588722c` | The pin starts here — the live hash, measured off mainnet and recorded as the initial pin. `just verify-deploy` PASSed at this commit (live == source at HEAD), so the row describes the canister exactly. Upgrades before this date were not recorded; this row is the baseline, not the history. |

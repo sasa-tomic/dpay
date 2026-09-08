@@ -1,7 +1,7 @@
 # Ops runbook — reconcile + key rotation + upgrades
 
-The operator-side procedures, in the order they bite: the trap-closer, the keys, and the
-upgrade loop they all serve. Every command here is founder-run; none may run unattended.
+The operator-side procedures, in the order they bite: the trap-closer, the keys, and the deploy
+sequence they all serve. Every command here is founder-run; none may run unattended.
 
 ## 1. `reconcile` — when and how to run the trap-closer
 
@@ -101,15 +101,39 @@ Retired by the 2026-08-19/20 user-principal cutover: `/receipt/{nonce}` and
 `read_state` poll of the envelope it submitted. There is no receipt key to rotate; this
 section exists so nobody goes looking for one.
 
-## 3. Upgrades — the loop the above serves
+## 3. Ship to prod — the one sequence
+
+This is the only prod deploy procedure; nothing else may restate it. Founder-run, in order,
+from a clean tree:
 
 ```bash
-just deploy-ic          # upgrade the facade; auto-writes the fresh hash to the pin file + reminds
-just integrity-check    # curl the live relay: status must be MATCH
+# 1. upgrade the facade canister. Re-bakes deploy/facade-module-hash.txt (TRACKED) with the
+#    hash the IC now runs, and prints the docs/UPGRADES.md row for step 2.
+just deploy-ic
+
+# 2. record it: paste that row into docs/UPGRADES.md, filling in what changed, then commit
+#    the row WITH the pin — neither means anything without the other.
+git add deploy/facade-module-hash.txt docs/UPGRADES.md && git commit
+
+# 3. signed APK/AAB, then the prod relay image — both built from that commit.
+just apk && just up
+
+# 4. prove what is live: /version == HEAD and NOT `-dirty`; facade hash == the baked pin.
+just verify-relay
+just integrity-check
 ```
 
-Then add the `docs/UPGRADES.md` row (date, git commit, module hash, what changed) and commit
-it with the pin file — that row IS the changelog `integrity-check` polices. The relay image
-itself rides its own loop (`just verify-relay` → `just image && just up`); the facade loop is
-this one. If `integrity-check` reports `MISMATCH`, someone upgraded outside this procedure —
-find out who and why before re-recording.
+**Nothing changed on the canister?** Skip 1–2 — `just apk && just up`, then 4. `up` swaps only
+the relay image, so relay- or app-side changes need no canister step.
+
+**Step 2 is enforced, not advised.** `deploy/build.sh` refuses to build an image from a dirty
+tree (`deploy/git-lib.sh`) and `just up` builds the image, so skipping the commit stops the
+deploy with the offending files named. There is no override: on 2026-09-08 the sequence was run
+without step 2 — which did not exist — and prod reported `20133499…-dirty` at
+`/api/v1/version`, meaning nothing could say what was running. `just deploy-ic` dirties the
+tree *by construction* (the pin it writes is tracked), so without step 2 every image is
+unattributable.
+
+If `integrity-check` reports `MISMATCH`, someone upgraded outside this procedure — find out who
+and why before re-recording. If `verify-relay` reports `BEHIND`/`MISMATCH`, the running image
+predates the source: re-run from step 3.
