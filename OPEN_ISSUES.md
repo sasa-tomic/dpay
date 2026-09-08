@@ -94,12 +94,13 @@ home currency; (b) Home must be an overview (balances, movements) or Pay — **n
 currency list, which stays one gesture away; (c) drop the "— dpays Standard-Weg" rail-reason suffix
 from the chooser.
 
-**(b) and (c) are DONE and (a) is half done.** The app now opens on Home, Home is an overview with a
+**(a), (b) and (c) are DONE.** The app now opens on Home, Home is an overview with a
 persistent Scan, the account list lives on its own route one gesture from every screen, and no
 surface dead-ends on a deposit request any more — a gate that cannot be funded from the selected
 asset names a funded account and offers the switch. Both founder forks are RESOLVED (§1 of the
 spec): the landing was reversed by the founder; the seed backup stays where it is, decided here.
-**What is left of (a) is the practice payment itself — 4b below.**
+And first run now MAKES a payment: a real ∂1.00 practice transfer, alone, on the one device, before
+the app asks the user to decide anything (`app/components/Practice.tsx`, flows 152–156).
 
 Design, diagnosis and build order — the authority, do not restate it:
 [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md).
@@ -108,11 +109,7 @@ decisions are in
 [`docs/specs/2026-09-07-ux-decisions.md`](docs/specs/2026-09-07-ux-decisions.md) and their defect
 inventory is the "UX swarm" section below.
 
-| # | Item | value | effort |
-|---|------|------:|:------:|
-| 4b | Practice screen: one real ∂1 DEMO payment on ONE device, replacing the unperformable two-phone leaflet. Unanimous CUT verdict on the current screen; the design is spec §3. This is the last piece of "give before you ask". | 9 | M |
-
-Beyond items 2–4 the remaining list is the physical/outer-loop gates (below, founder-run) and the
+Beyond items 2–3 the remaining list is the physical/outer-loop gates (below, founder-run) and the
 DO-NOT-NAG set.
 
 **Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
@@ -285,6 +282,8 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
 
 | # | Item | value | effort |
 |---|------|------:|:------:|
+| U5 | **`just web-smoke` is RED for two pre-existing reasons.** (a) `e2e/web-wallet-smoke.mjs` never answers the home-currency chooser added 2026-09-04, so it stalls there — `grep home-currency` on that file returns nothing; (b) ten `429`s from the live Helius RPC. It is a gate that has been failing without anyone noticing, which is worse than not having it. | 7 | S |
+| U6 | **The shipped web bundle is not byte-reproducible.** Two consecutive `--mode web-prod` builds of identical source produce different `wallet-*.js` content (md5 differs) while the unminified e2e build is deterministic — so it is the `oxc` minifier. Pre-dates the service worker. Consequences: the SW version churns on every rebuild even with no source change, and `deploy/build.sh`'s reproducibility story is weaker than it reads — a reviewer cannot rebuild a shipped image and compare. | 6 | M |
 | U4 | **`CODEBASE_ANALYSIS.md` carries a hand-maintained ~40-flow enumeration that duplicates the generated `FLOWS.md` wholesale.** It is labelled "illustrative, not exhaustive", but since `just check` now regenerates and diffs `FLOWS.md` (recipe `flows-md`) its remaining value is close to zero and it is a standing DRY violation in the file every session opens with. It cannot be deleted blind: it carries a few non-flow facts (the testID contract, the seed/backup surface, the restore surface, the asset-segregation note) that need re-homing first. | 6 | S |
 
 ## Other open issues

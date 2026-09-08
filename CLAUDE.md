@@ -102,6 +102,24 @@ These are hard requirements, **not preferences**. Do not accept a design that vi
 
 Full plan and rationale: `dev-loop-plan.md`.
 
+## Non-negotiable: "pre-existing" is not a reason to leave something broken (set 2026-09-08)
+
+Founder rule, verbatim: **"'pre-existing' excuses don't work here, please fix all problems, not only
+the ones you know you introduced! Make it a hard rule to do so."**
+
+- A defect you find is a defect you fix, whoever wrote it and whenever it landed. "Not mine",
+  "pre-dates this change", "out of scope", "another agent owns that file" and "the test was already
+  red" are **not** dispositions. They are, at most, an explanation of why the fix is a separate
+  commit.
+- A gate that was already failing is worse than no gate, because it has been silently teaching
+  everyone to ignore it. Fix the gate AND whatever it was failing on.
+- The only legitimate reasons not to fix something on the spot: it needs a founder decision (say
+  which), it needs an external step this repo cannot take (say which), or it is genuinely
+  higher-effort than the session can hold — in which case it goes in `OPEN_ISSUES.md` with a value
+  and an effort **and gets picked up next session**, not parked forever.
+- When a subagent reports something as "not mine to fix", that is a hand-off to be routed, not a
+  conclusion to be recorded. Route it.
+
 ## Non-negotiable: useful practical instructions on every step (set 2026-08-29)
 
 Founder hard rule, verbatim: **"user MUST be given useful practical instructions on every step, especially error path. If you cannot figure out what the instructions should be, ask."**
