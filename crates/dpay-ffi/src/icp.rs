@@ -422,6 +422,47 @@ pub fn icp_swap_min_out(quoted_out: String, slippage_bps: u16) -> Result<String,
     Ok(dpay_icp::icrc::swap_amount_out_minimum(quoted, slippage_bps).to_string())
 }
 
+/// A decoded ICPSwap pool reply (`variant { ok : nat; err : Error }`, the venue's Motoko
+/// lowercase arms): `ok` carries the pool's GROSS amount out — never the amount the wallet
+/// receives, which is that figure minus the output ledger's own fee. Errors flatten to the
+/// venue's own arm tag plus its own words, so a refusal is reported as the venue phrased it.
+#[derive(uniffi::Record, Clone)]
+pub struct IcpSwapReply {
+    pub ok: bool,
+    pub amount_out_gross: Option<String>,
+    /// `CommonError` | `InsufficientFunds` | `InternalError` | `UnsupportedToken`; empty when ok.
+    pub err_variant: String,
+    /// The pool's own text for the two text-carrying arms; empty otherwise.
+    pub err_detail: String,
+}
+
+#[uniffi::export]
+pub fn icp_decode_swap_result(arg: Vec<u8>) -> Result<IcpSwapReply, DpayError> {
+    use dpay_icp::icrc::PoolSwapError as E;
+    match dpay_icp::icrc::decode_swap_result(&arg).map_err(bad)? {
+        Ok(amount_out) => Ok(IcpSwapReply {
+            ok: true,
+            amount_out_gross: Some(amount_out.to_string()),
+            err_variant: String::new(),
+            err_detail: String::new(),
+        }),
+        Err(e) => {
+            let (variant, detail) = match e {
+                E::CommonError => ("CommonError", String::new()),
+                E::InsufficientFunds => ("InsufficientFunds", String::new()),
+                E::InternalError(t) => ("InternalError", t),
+                E::UnsupportedToken(t) => ("UnsupportedToken", t),
+            };
+            Ok(IcpSwapReply {
+                ok: false,
+                amount_out_gross: None,
+                err_variant: variant.into(),
+                err_detail: detail,
+            })
+        }
+    }
+}
+
 /// Decode a bare `text` reply (get_btc_address / any single-text query).
 #[uniffi::export]
 pub fn icp_decode_text(arg: Vec<u8>) -> Result<String, DpayError> {
@@ -953,5 +994,34 @@ mod tests {
         assert_eq!(icp_swap_min_out("2000000".into(), 10_000).unwrap(), "0");
         assert_eq!(icp_swap_min_out("0".into(), 0).unwrap(), "0");
         assert!(icp_swap_min_out("not-a-number".into(), 300).is_err());
+    }
+
+    #[test]
+    fn swap_result_decodes_every_arm() {
+        use dpay_icp::icrc::{encode_swap_result_err, encode_swap_result_ok, PoolSwapError};
+        // #ok: the pool's GROSS amount out — the number the settling screen compares against.
+        let out = icp_decode_swap_result(encode_swap_result_ok(99_600_000)).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.amount_out_gross.as_deref(), Some("99600000"));
+        assert_eq!(out.err_variant, "");
+        assert_eq!(out.err_detail, "");
+        // #err: each arm keeps its own tag; the two text arms carry the venue's own words.
+        for (e, variant, detail) in [
+            (PoolSwapError::CommonError, "CommonError", ""),
+            (PoolSwapError::InsufficientFunds, "InsufficientFunds", ""),
+            (PoolSwapError::InternalError("amountOutMinimum not met".into()), "InternalError", "amountOutMinimum not met"),
+            (PoolSwapError::UnsupportedToken("zzz-cai".into()), "UnsupportedToken", "zzz-cai"),
+        ] {
+            let out = icp_decode_swap_result(encode_swap_result_err(&e)).unwrap();
+            assert!(!out.ok, "{variant} must not decode as ok");
+            assert_eq!(out.amount_out_gross, None);
+            assert_eq!(out.err_variant, variant);
+            assert_eq!(out.err_detail, detail);
+        }
+        // A reply that is not the pool's Result is a typed error, never a fabricated outcome.
+        assert!(icp_decode_swap_result(b"not DIDL".to_vec()).is_err());
+        let mut truncated = encode_swap_result_ok(99_600_000);
+        truncated.pop();
+        assert!(icp_decode_swap_result(truncated).is_err());
     }
 }

@@ -7,7 +7,7 @@
 //! prod; this relay's fake-IC gateway under `test-helpers` in tests). What the relay still
 //! serves, covered here:
 //! - read surfaces: /balances (batch), /transactions (history), /currencies, /deposit/info,
-//!   /onramp/ckerc20, /health, /version;
+//!   /onramp/ckerc20, /health, /capabilities, /version;
 //! - test-only value fixtures against the fake-IC gateway: POST /faucet + GET /balance
 //!   (principal-keyed, exactly where a signed icrc1_transfer moves funds);
 //! - the fake-IC /api/v2 boundary itself: mounting, garbage-envelope rejection, and a REAL
@@ -84,17 +84,21 @@ fn state_from(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>) {
 
 /// A state with the fake-IC gateway attached (test-helpers): `/api/v2/canister/*` is served and
 /// the faucet fixture + the balances/transactions routes read the gateway's principal-keyed
-/// ledgers.
+/// ledgers. The faucet is declared available because in THIS build the attached gateway is
+/// exactly what its route credits — the shape `main` builds for the e2e image, and the shape the
+/// funding used across this file needs. (Under `agent` the route is the production one instead,
+/// which a `FakeLedger` cannot serve; the tests that fund through it are compiled out there.)
 async fn state_with_fake(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>, Arc<FakeIc>) {
     let arc = Arc::new(ledger);
     let fake = FakeIc::from_catalog();
-    let state = AppState::new(arc.clone()).with_fake_ic(fake.clone());
+    let state = AppState::new(arc.clone()).with_fake_ic(fake.clone()).with_faucet(true);
     (state, arc, fake)
 }
 
-/// POST /api/v1/faucet — the demo on-ramp (test-helpers). `amount_json` is a pre-rendered JSON
-/// value for the amount (quoted decimal string OR raw number — the deserializer takes both);
-/// `None` omits the field (the faucet's default top-up).
+/// POST /api/v1/faucet — the demo on-ramp. `amount_json` is a pre-rendered JSON value for the
+/// amount (quoted decimal string OR raw number — the deserializer takes both); `None` omits the
+/// field (the faucet's default top-up). Offline fixture build only — under `agent` the route is
+/// the production faucet, which a `FakeLedger` cannot serve, so every caller here is compiled out.
 #[cfg(not(feature = "agent"))]
 fn faucet_json(account_hex: &str, amount_json: Option<&str>) -> Request<Body> {
     let body = match amount_json {
@@ -173,6 +177,99 @@ async fn health_ok() {
     assert_eq!(body["status"], "ok");
 }
 
+/// A bare relay — no till, and no backend its faucet could credit (no fake-IC gateway attached,
+/// and a `FakeLedger` that cannot mint) — advertises neither surface.
+#[tokio::test]
+async fn capabilities_report_default_state() {
+    let (state, _led) = state_from(ledger());
+
+    let (status, body) = call(&state, get_req("/api/v1/capabilities")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, serde_json::json!({"till": false, "demo_faucet": false}));
+}
+
+/// The reported till capability reads the same immutable state flag that registers its routes.
+#[tokio::test]
+async fn capabilities_report_enabled_till() {
+    let (state, _led) = state_from(ledger());
+    let state = state.with_till(true);
+
+    let (status, body) = call(&state, get_req("/api/v1/capabilities")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body, serde_json::json!({"till": true, "demo_faucet": false}));
+}
+
+/// Drive `POST /api/v1/faucet` on the SAME router the capability is read from, and report whether
+/// the account actually gained funds. Deliberately amount-pinned to the canonical top-up
+/// (`crate::faucet::FAUCET_AMOUNT` = 10_000, what the app's TOP_UP_CENTS sends) so BOTH builds'
+/// handlers judge AVAILABILITY here and never the denomination — the production branch refuses
+/// any other amount before it looks at anything else.
+#[cfg(not(feature = "agent"))]
+async fn faucet_route_credits(state: &AppState, pk: &[u8; 32]) -> (bool, StatusCode, Value) {
+    let (status, body) = call(state, faucet_json(&hex::encode(pk), Some("10000"))).await;
+    (status.is_success(), status, body)
+}
+
+/// The advertised `demo_faucet` capability is MEASURED against the router, never re-derived from
+/// the same `cfg!` expression the implementation uses — a tautological expectation stays green
+/// while the implementation lies, which is exactly how production came to advertise no faucet
+/// while minting through one. Two states whose faucet BACKING genuinely differs, one assertion:
+/// what the route does is what the capability says.
+///
+/// Scoped to the offline fixture build, because that is where a faucet backed by the attached
+/// gateway can actually credit. The production build's half of this pairing — an agent that holds
+/// the controller identity versus an anonymous one, against a REAL canister — is
+/// `live_capability_demo_faucet_equals_what_the_faucet_route_does` in `tests/live.rs`.
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn capability_demo_faucet_equals_what_the_faucet_route_does() {
+    // (1) The gateway-backed relay — the shape the e2e image runs.
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let pk = pubkey(&keypair());
+    let owner = user_principal(&pk);
+    let before = fake.balance_for(DEMO_USD, &owner);
+
+    let (credited, fs, fb) = faucet_route_credits(&state, &pk).await;
+    assert_eq!(
+        credited,
+        fake.balance_for(DEMO_USD, &owner) > before,
+        "a faucet answer that succeeded must have moved funds, and one that refused must not \
+         (faucet answered {fs}: {fb})",
+    );
+    let (cs, cb) = call(&state, get_req("/api/v1/capabilities")).await;
+    assert_eq!(cs, StatusCode::OK, "{cb}");
+    assert_eq!(
+        cb["demo_faucet"], credited,
+        "advertised demo_faucet must equal what POST /api/v1/faucet did — gateway attached, \
+         faucet answered {fs}: {fb}",
+    );
+
+    // (2) The SAME build with nothing behind the faucet: no gateway for the fixture branch to
+    // credit, and a ledger that cannot mint for the production branch to call.
+    let (bare, _led2) = state_from(ledger());
+    let (bare_credited, bfs, bfb) = faucet_route_credits(&bare, &pubkey(&keypair())).await;
+    assert!(
+        !bare_credited,
+        "nothing backs this relay's faucet, so it cannot credit (answered {bfs}: {bfb})",
+    );
+    let (bs, bb) = call(&bare, get_req("/api/v1/capabilities")).await;
+    assert_eq!(bs, StatusCode::OK, "{bb}");
+    assert_eq!(
+        bb["demo_faucet"], false,
+        "a relay whose faucet cannot credit must not advertise one",
+    );
+}
+
+/// The three shapes `build.rs` can bake into the commit field, in ONE place because two routes
+/// mirror the same value: a 40-char SHA (clean checkout), that SHA plus `-dirty` (a build from an
+/// uncommitted tree — `deploy/build.sh` compiles the working tree, so uncommitted code really does
+/// ship and the image corresponds to no commit), or `unknown` (no git at all, e.g. a release
+/// tarball). Asserting the bare SHA alone is what let a dirty image report a clean identity.
+fn is_baked_commit(commit: &str) -> bool {
+    let sha = commit.strip_suffix("-dirty").unwrap_or(commit);
+    commit == "unknown" || (sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
 /// `GET /api/v1/version` reports the relay's name + pkg version + the git commit and its
 /// committer date baked by `build.rs`. The commit is the deploy-fidelity primitive
 /// (verify-relay-version.sh compares it to HEAD); this test pins the route's shape + that both
@@ -192,11 +289,12 @@ async fn version_route_reports_baked_commit() {
         "version present: {body}"
     );
     let commit = body["commit"].as_str().expect("commit present");
-    // The baked commit is either a 40-char SHA (a git checkout) or the "unknown" fallback (no git).
-    // In the test build (run from the repo) it MUST be a real SHA — proves build.rs wired through.
+    // In the test build (run from the repo) the commit MUST be a real baked identity — proves
+    // build.rs wired through. A dirty checkout is the normal state while working, so the shape
+    // includes the `-dirty` marker; `unknown` is refused here because we ARE in a git checkout.
     assert!(
-        commit.len() == 40 && commit.chars().all(|c| c.is_ascii_hexdigit()),
-        "commit must be a 40-char SHA when built in a git checkout, got {commit:?}"
+        is_baked_commit(commit) && commit != "unknown",
+        "commit must be a baked git identity when built in a checkout, got {commit:?}"
     );
     // The date is the commit's ISO-8601 committer date (`git show -s --format=%cI`), e.g.
     // "2026-08-27T09:41:00+02:00" — starts with the 4-digit year. "unknown" only outside git.
@@ -252,10 +350,7 @@ async fn integrity_route_reports_match_by_default() {
     assert_eq!(body["live_module_hash"], FAKE_FACADE_MODULE_HASH);
     assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
     let commit = body["relay_commit"].as_str().expect("relay_commit present");
-    assert!(
-        commit.len() == 40 || commit == "unknown",
-        "relay_commit mirrors /version: {body}"
-    );
+    assert!(is_baked_commit(commit), "relay_commit mirrors /version: {body}");
 }
 
 /// A live hash that differs from the pin (an unrecorded upgrade, or any drift between the two
@@ -317,14 +412,15 @@ async fn integrity_route_without_a_facade_reports_no_live_hash() {
 // covered by live.rs `live_faucet_mints_at_user_principal_with_relay_side_cooldown`), so these
 // fake-gateway assertions don't apply there and are compiled out.
 
-/// The faucet still MINTS, so on any real ledger the relay disables it. Disabled means the route
-/// is *gone* (404) and, crucially, no money is created at the user's principal on the gateway.
+/// The operator's `DPAY_ENABLE_FAUCET` switch, off: the route refuses with a reason that NAMES the
+/// missing knob (not a bare "disabled"), no money is created at the user's principal on the
+/// gateway, and — the pairing that matters — the relay stops advertising the capability.
 #[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn faucet_disabled_mints_nothing() {
     let merchant = keypair();
     let (state, _led, fake) = state_with_fake(ledger()).await;
-    state.set_faucet_enabled(false);
+    let state = state.with_faucet(false);
     let merch_owner = user_principal(&pubkey(&merchant));
 
     let (status, body) = call(
@@ -333,12 +429,21 @@ async fn faucet_disabled_mints_nothing() {
     )
     .await;
 
-    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    let reason = body["error"].as_str().unwrap_or_default();
+    assert!(
+        reason.contains("DPAY_ENABLE_FAUCET"),
+        "the refusal must name what is missing, got {reason:?}"
+    );
     assert_eq!(
         fake.balance_for(DEMO_USD, &merch_owner),
         0,
         "a disabled faucet must not create funds"
     );
+
+    let (cs, cb) = call(&state, get_req("/api/v1/capabilities")).await;
+    assert_eq!(cs, StatusCode::OK, "{cb}");
+    assert_eq!(cb["demo_faucet"], false, "a refused faucet is not advertised: {cb}");
 }
 
 /// …and enabled (the demo default) it credits the USER PRINCIPAL on the fake-IC gateway — exactly
@@ -4041,8 +4146,18 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
 const SWAP_POOL: &str = "65mrh-fqaaa-aaaar-qapoa-cai";
 const VCHF_LEDGER: &str = "ly36x-wiaaa-aaaai-aqj7q-cai";
 const VCHF: Currency = 7;
-/// A principal that is NOT a known venue (the ICPSwap factory — must be refused by name).
+/// A principal that is NOT a known venue (the ICPSwap factory — must be refused by name). Only
+/// the offline build has a route test for it: under `agent` the quote route queries the LIVE
+/// pool, so its refusal tests are compiled out (see `swap_quote_refuses_unknown_pools_and_pairs`).
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 const NOT_A_VENUE: &str = "4mmnk-kiaaa-aaaag-qbllq-cai";
+/// `zeroForOne` for an ICP-in / VCHF-out trade at this venue. FALSE, because the pool's own
+/// `metadata` (MEASURED 2026-09-08, `dfx/catalog_truth.json` `swap_venue`) reports
+/// `token0 = VCHF`, `token1 = ICP` — the REVERSE of what the 2026-09-07 build pinned. Every
+/// signed-arg test below reads this rather than a bare `true`, and
+/// [`approve_then_deposit_from_and_swap_pays_the_quoted_output`] asserts it against the stub's
+/// own metadata so a reseed can never leave these literals behind.
+const ICP_IN_ZERO_FOR_ONE: bool = false;
 
 /// Sign + POST an arbitrary canister call, then read the outcome back the app's way
 /// (read_state → certificate → request_status). The generic twin of
@@ -4116,15 +4231,16 @@ fn swap_quote_uri(pool: &str, token_in: &str, token_out: &str, amount_in: u64) -
 }
 
 /// The route serves the pool's OWN quote verbatim: `amount_out` equals the stub pool's curve
-/// (read directly through the same `FakeIc` the gateway serves), `zero_for_one` follows the
-/// pool's OWN token pair (ICP is token0), and the response carries the echo fields + a
-/// wall-clock `fetched_at`. Deterministic: identical inputs ⇒ identical outputs.
+/// (read directly through the same `FakeIc` the gateway serves), `fee_millionths` is the
+/// venue's own tier echoed, and the response carries the echo fields + a wall-clock
+/// `fetched_at`. Deterministic: identical inputs ⇒ identical outputs.
 /// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
 /// faucet tests.)
 #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 #[tokio::test]
 async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     let (state, _led, fake) = state_with_fake(ledger()).await;
+    let meta = fake.swap_pool_metadata();
 
     let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
     let (status, body) = call(&state, req).await;
@@ -4133,18 +4249,36 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     assert_eq!(body["token_in"], ICP_LEDGER);
     assert_eq!(body["token_out"], VCHF_LEDGER);
     assert_eq!(body["amount_in"], "100000000", "e8s as decimal string");
-    assert_eq!(body["zero_for_one"], true, "ICP is the pool's token0");
+    assert_eq!(
+        body["fee_millionths"].as_u64().map(u128::from),
+        Some(meta.fee_millionths),
+        "the venue's OWN fee tier, echoed — dpay claims no number here"
+    );
     assert!(
         body["fetched_at"].as_u64().is_some_and(|t| t > 0),
         "fetched_at is wall-clock seconds"
     );
+    // THE regression this whole change exists for: the direction is DERIVED from what the pool
+    // says about itself, never from a pin. Asserting it against the metadata (rather than a
+    // literal `true`) is what makes a reversed pair impossible to reintroduce silently — the
+    // 2026-09-07 build's literal agreed with a backwards pin and shipped a ~5.9x-wrong rate.
+    assert_eq!(
+        body["zero_for_one"].as_bool(),
+        Some(ICP_LEDGER == meta.token0_ledger),
+        "zero_for_one == (token_in is the pool's own token0)"
+    );
+    // …and on the MEASURED live pair (token0 = VCHF, token1 = ICP) that means ICP in is
+    // token1 in, i.e. FALSE — the exact bit production was serving inverted.
+    assert_eq!(body["zero_for_one"], false, "ICP is the venue's token1, not its token0");
+
     let amount_out = body["amount_out"].as_str().expect("amount_out is a string");
-    let (pool_quote, zero_for_one) = fake
-        .swap_pool_quote(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000)
-        .expect("the stub pool serves this pair");
+    let pool_quote = fake.swap_pool_quote(false, 100_000_000);
     assert_eq!(amount_out, pool_quote.to_string(), "the route's number IS the pool's number");
-    assert!(pool_quote > 0);
-    assert!(zero_for_one);
+    // The exact figure, pinned: the 2026-09-08 reseed moved token0/token1 into the venue's
+    // measured order AND moved each reserve with its own token, so every quoted AMOUNT is
+    // byte-identical to the pre-reseed suite and only the direction flag flipped. A future
+    // reseed that changes what a user is quoted has to change this literal to land.
+    assert_eq!(amount_out, "192420808", "1 ICP → VCHF on the stub curve");
 
     // Determinism: an identical quote is an identical number (no clock blending).
     let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
@@ -4152,16 +4286,27 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(again["amount_out"], body["amount_out"]);
 
-    // The REVERSE direction quotes the other curve side (VCHF → ICP: zero_for_one false).
-    let req = get_req(&swap_quote_uri(SWAP_POOL, VCHF_LEDGER, ICP_LEDGER, 193_000_000));
+    // The REVERSE direction quotes the other curve side (VCHF → ICP: VCHF IS token0 ⇒ true),
+    // and the two directions are genuinely different numbers — a route that ignored direction
+    // would return the same one twice.
+    let req = get_req(&swap_quote_uri(SWAP_POOL, VCHF_LEDGER, ICP_LEDGER, 100_000_000));
     let (status, rev) = call(&state, req).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(rev["zero_for_one"], false);
-    assert!(rev["amount_out"].as_str().is_some_and(|v| v != "0"));
+    assert_eq!(
+        rev["zero_for_one"].as_bool(),
+        Some(VCHF_LEDGER == meta.token0_ledger),
+    );
+    assert_eq!(rev["zero_for_one"], true);
+    assert_eq!(rev["amount_out"], "51658004", "1 VCHF → ICP on the stub curve");
+    assert_ne!(
+        rev["amount_out"], body["amount_out"],
+        "the same amount_in through opposite directions cannot quote the same amount_out"
+    );
 }
 
 /// The route refuses unknown pools and non-pool pairs BY NAME, and refuses a venue whose pair
-/// isn't the pool's own — fail-closed on anything the venue table doesn't know.
+/// isn't the pool's own — fail-closed on anything the allowlist / the pool's own metadata
+/// doesn't cover.
 /// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
 /// faucet tests.)
 #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
@@ -4201,13 +4346,21 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
     // The expected payout, straight from the fake pool's own quote — the number the swap must
     // pay out verbatim. (The HTTP route's verbatim passthrough is pinned by the gated test
     // above; this oracle keeps the approve→swap path runnable under the `agent` build too,
-    // where the route serves the live pool query by design.)
-    let (quoted, zero_for_one) = fake
-        .swap_pool_quote(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000)
-        .expect("the stub pool serves this pair");
-    let quoted: u128 = quoted.into();
+    // where the route serves the live pool query by design.) The direction is read off the
+    // stub's OWN metadata, exactly as the app reads it off the quote's `zero_for_one` echo.
+    let meta = fake.swap_pool_metadata();
+    assert_eq!(
+        (meta.token0_ledger.as_str(), meta.token1_ledger.as_str()),
+        (VCHF_LEDGER, ICP_LEDGER),
+        "the stub serves the MEASURED live pair order (token0 = VCHF, token1 = ICP)"
+    );
+    assert_eq!(
+        ICP_IN_ZERO_FOR_ONE,
+        ICP_LEDGER == meta.token0_ledger,
+        "the signed-arg literal below must track the stub pool's OWN pair order"
+    );
+    let quoted = fake.swap_pool_quote(ICP_IN_ZERO_FOR_ONE, 100_000_000);
     assert!(quoted > 0);
-    assert!(zero_for_one);
 
     // icrc2_approve: exact swap amount, approve fee, 5-min expiry — spec §3's bounds.
     let spender = Account { owner: Principal::from_text(SWAP_POOL).unwrap(), subaccount: [0; 32] };
@@ -4228,7 +4381,7 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
     ));
 
     // depositFromAndSwap on the pool canister: 1 ICP in, no minimum, fees declared.
-    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
     assert_eq!(swap_result(outcome), Ok(quoted), "the swap pays the quoted output, verbatim");
 
@@ -4238,7 +4391,7 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
 
     // The approval was EXACT-amount: a second identical swap is refused by the pool (#err,
     // not a reject — the pool's own shape), and no balances move.
-    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
     assert_eq!(swap_result(outcome), Err(PoolSwapError::InsufficientFunds));
     assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 100_000_000 - 20_000);
@@ -4286,7 +4439,7 @@ async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
     let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
     assert!(matches!(swap_result_or_approve(&outcome), ApproveCheck::Approved));
 
-    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
     let Ok(queued_out) = swap_result(outcome) else {
         panic!("the swap itself succeeds; only the withdrawal 'fails'")
@@ -4324,7 +4477,7 @@ async fn expired_allowance_blocks_the_swap() {
     let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
     assert!(matches!(swap_result_or_approve(&outcome), ApproveCheck::Approved));
 
-    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
     assert_eq!(swap_result(outcome), Err(PoolSwapError::InsufficientFunds));
     // Only the two approve fees ever left (approve itself, then nothing): balance untouched by

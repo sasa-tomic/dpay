@@ -13,6 +13,22 @@ use dpay_core::{Currency, PUBKEY_LEN};
 use super::ckerc20::CkErc20OnrampParams;
 use super::types::{DepositInfo, LedgerError, TxnRecord};
 
+/// What a swap venue says about ITSELF — the subset of the ICPSwap pool's own `PoolMetadata`
+/// (`third_party/oisy-wallet/src/declarations/icp_swap_pool/icp_swap_pool.did`) that decides how
+/// `/api/v1/swap_quote` may be answered. Read from the pool, never pinned: `token0_ledger` /
+/// `token1_ledger` are the pool's OWN pair order (the meaning of `zeroForOne` in every arg the
+/// relay and the user's device build), and `fee_millionths` is the venue's own fee tier, echoed
+/// to the app so no copy of it exists anywhere else.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SwapPoolMetadata {
+    /// `metadata().token0.address` — the ICRC ledger principal, canonical text.
+    pub token0_ledger: String,
+    /// `metadata().token1.address` — the ICRC ledger principal, canonical text.
+    pub token1_ledger: String,
+    /// `metadata().fee` — the pool's fee tier in millionths of the input (3000 = 0.30%).
+    pub fee_millionths: u128,
+}
+
 /// The ledger read seam. `async_trait` keeps it dyn-compatible so `Arc<dyn Ledger>` works.
 #[async_trait]
 pub trait Ledger: Send + Sync {
@@ -92,14 +108,29 @@ pub trait Ledger: Send + Sync {
         ))
     }
 
+    /// The venue's OWN pair order and fee tier (spec 2026-09-07 §1: *"Token0/token1 order and
+    /// `zeroForToken0` come from the pool's own metadata — read them, never assume"*): query
+    /// `pool`'s `metadata` and return the decoded [`SwapPoolMetadata`]. This is what makes
+    /// `zero_for_one` derivable rather than assumable, so it is a READ on every quote — cached
+    /// with a TTL by [`AgentLedger`](crate::agent_ledger::AgentLedger) exactly like
+    /// `deposit_info`, never a compiled constant. A pool `#err` comes back as `Rejected(text)`;
+    /// transport failures as `Transient`. The default impl is "not supported" — the test-helpers
+    /// route serves the fake-IC gateway's stub pool instead.
+    async fn swap_pool_metadata(&self, pool: &str) -> Result<SwapPoolMetadata, LedgerError> {
+        let _ = pool;
+        Err(LedgerError::Transient(
+            "swap pool metadata unavailable: this ledger cannot query swap pools".to_string(),
+        ))
+    }
+
     /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2):
     /// query `pool`'s OWN ICPSwap `quote` and return its `ok(amountOut)` VERBATIM — the relay
     /// NEVER computes or blends a rate, it is a read proxy exactly like `balance_on_ledger`.
     /// `pool` is the pool principal as canonical TEXT (the route validated it against
-    /// [`crate::catalog::SWAP_POOL_PRINCIPAL`]); `zero_for_one` names the direction
-    /// (true = token0 in, token1 out — derived from the pool's pair, read never assumed); the
-    /// returned amount is GROSS of the output ledger's transfer fee (the app computes net). A
-    /// pool `#err` comes back as `Rejected(text)` with the variant name verbatim; transport
+    /// [`crate::catalog::is_known_swap_pool`]); `zero_for_one` names the direction (true =
+    /// token0 in, token1 out) and is DERIVED from [`Ledger::swap_pool_metadata`], never assumed;
+    /// the returned amount is GROSS of the output ledger's transfer fee (the app computes net).
+    /// A pool `#err` comes back as `Rejected(text)` with the variant name verbatim; transport
     /// failures as `Transient`. The default impl is "not supported" — the test-helpers route
     /// serves the fake-IC gateway's pool instead; [`AgentLedger`](crate::agent_ledger::AgentLedger)
     /// overrides it with the real query.

@@ -27,8 +27,13 @@
 //!                           (each has its own key); MUST be false on mainnet, where it would mean
 //!                           trusting whatever key the endpoint returns. Default: true only when
 //!                           DPAY_IC_URL is a loopback/local address. See `AgentLedger::connect_with`.
-//!   DPAY_ENABLE_FAUCET      (test-helpers build only) serve `POST /api/v1/faucet`, which mints
-//!                           demo funds on the fake-IC gateway (default: true on `memory`)
+//!   DPAY_ENABLE_FAUCET      (offline fixture build only — `test-helpers` without `agent`) serve
+//!                           `POST /api/v1/faucet`, which credits demo funds on the fake-IC
+//!                           gateway (default: true on `memory`). The AGENT build compiles a
+//!                           different faucet, which mints through the facade canister: its gate
+//!                           is DPAY_CONTROLLER_SEED below, and this flag is not consulted there.
+//!                           Whichever build, the resolved answer is what
+//!                           `GET /api/v1/capabilities` reports as `demo_faucet`.
 //!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's eight routes (`POST /api/v1/till`,
 //!                           `POST /api/v1/till/void`, `GET /api/v1/till/{id}`,
 //!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`, `GET /pl/`, `GET /till/{id}`
@@ -41,9 +46,10 @@
 //!                           relay enforces the cooldown locally and drives the canister's
 //!                           admin-gated `mint`, crediting the USER principal (the 2026-08-20
 //!                           founder-approved faucet design). When unset the agent stays
-//!                           ANONYMOUS — read-only routes are unaffected, but the faucet's mint
-//!                           is refused by the canister's `require_admin` (the route answers
-//!                           422 "unauthorized: admin ops require the controller principal").
+//!                           ANONYMOUS — read-only routes are unaffected, but the faucet is
+//!                           UNAVAILABLE: `/api/v1/capabilities` reports `demo_faucet:false` and
+//!                           the route answers 503 naming this variable (an anonymous mint is
+//!                           refused by the canister's `require_admin` anyway).
 //!                           The seed must be the SAME key material that deployed the canister
 //!                           (`DPAY_DFX_IDENTITY`'s identity.pem): export it with
 //!                           `openssl ec -in identity.pem -text -noout` (the `priv:` half) or
@@ -69,11 +75,16 @@ async fn main() {
         process::exit(EXIT_CONFIG);
     });
 
-    let ledger = build_ledger(&cfg).await;
+    let (ledger, faucet_available) = build_ledger(&cfg).await;
     let apk = load_apk();
     let state = AppState::new(ledger.clone())
         .with_apk(apk)
-        .with_till(cfg.till);
+        .with_till(cfg.till)
+        // The ONE faucet predicate: `GET /api/v1/capabilities` reports it and `POST
+        // /api/v1/faucet` refuses on it. Derived from the backend that was actually built, right
+        // above — never from the build's feature flags, which is how the relay came to advertise
+        // no faucet while serving one.
+        .with_faucet(faucet_available);
     // Name the facade for GET /api/v1/integrity: the route reads the canister's live module hash
     // off the public state tree and compares it against the build-time pin. Only an IC-backed
     // ledger has one; a memory demo relay honestly reports it has no live hash instead.
@@ -95,16 +106,29 @@ async fn main() {
         println!("fake-IC /api/v2 gateway ENABLED (test-helpers) — envelopes settle in-memory at user principals");
         state.with_fake_ic(fake)
     };
-    state.set_faucet_enabled(cfg.faucet);
-    if cfg.faucet {
-        // The faucet only exists in the test-helpers build (it credits the fake-IC gateway).
-        #[cfg(feature = "test-helpers")]
-        println!(
-            "! POST /api/v1/faucet is ENABLED — it credits the fake-IC gateway (test-helpers only)."
-        );
-        #[cfg(not(feature = "test-helpers"))]
-        eprintln!("dpay-relay: warn: DPAY_ENABLE_FAUCET is set, but the faucet route only exists in the test-helpers build.");
-    }
+    // What DPAY_ENABLE_FAUCET means depends on which faucet this binary compiled, so say which one
+    // the operator is looking at. `faucet_available` (above) is what the route and
+    // `/api/v1/capabilities` both obey; these lines only explain how it was reached.
+    #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+    println!(
+        "POST /api/v1/faucet: {} — the offline fixture faucet (DPAY_ENABLE_FAUCET={}), which \
+         credits the fake-IC gateway.",
+        if faucet_available { "ENABLED" } else { "unavailable" },
+        cfg.faucet
+    );
+    #[cfg(feature = "agent")]
+    println!(
+        "POST /api/v1/faucet: {} — the production faucet, gated by the relay agent's identity \
+         (DPAY_CONTROLLER_SEED), not by DPAY_ENABLE_FAUCET (={}, not consulted on this build).",
+        if faucet_available { "ENABLED" } else { "unavailable" },
+        cfg.faucet
+    );
+    #[cfg(not(any(feature = "test-helpers", feature = "agent")))]
+    println!(
+        "POST /api/v1/faucet: not registered — this build has no faucet route at all \
+         (DPAY_ENABLE_FAUCET={} is not consulted).",
+        cfg.faucet
+    );
     // The till's state belongs in the log the founder reads (`docker logs`), because which
     // surfaces an image serves is an operator's decision and one that came up wrong should be
     // visible without a probe.
@@ -253,7 +277,9 @@ impl Config {
             LedgerCfg::Memory
         };
 
-        // The faucet mints. Safe on the in-memory ledger, a money printer on a real one.
+        // The operator's switch for the OFFLINE FIXTURE faucet (the only one it gates — see
+        // `memory_faucet_available`). Default: on for the in-memory ledger, where it credits a
+        // fake gateway, and off otherwise, because a faucet mints.
         let faucet = match non_empty("DPAY_ENABLE_FAUCET") {
             Some(s) => parse_bool("DPAY_ENABLE_FAUCET", &s)?,
             None => matches!(ledger, LedgerCfg::Memory),
@@ -320,10 +346,11 @@ fn is_mainnet_url(url: &str) -> bool {
 
 // ---- read backend ----
 
-/// Build the read backend. On the `ic` path a failure to connect is **fatal**: coming up on
-/// the in-memory catalog instead would silently serve a demo catalog and zero balances as if
-/// they were real.
-async fn build_ledger(cfg: &Config) -> Arc<dyn Ledger> {
+/// Build the read backend, and with it the ONE fact `/api/v1/faucet` and `/api/v1/capabilities`
+/// both obey: whether this deployment's faucet can actually credit (`AppState::with_faucet`). On
+/// the `ic` path a failure to connect is **fatal**: coming up on the in-memory catalog instead
+/// would silently serve a demo catalog and zero balances as if they were real.
+async fn build_ledger(cfg: &Config) -> (Arc<dyn Ledger>, bool) {
     match &cfg.ledger {
         LedgerCfg::Ic {
             url,
@@ -332,13 +359,33 @@ async fn build_ledger(cfg: &Config) -> Arc<dyn Ledger> {
         } => connect_ic(url, canister_id, *fetch_root_key).await,
         LedgerCfg::Memory => {
             println!("read surface on the in-memory demo catalog (balances are always 0 — value lives on the IC rail)");
-            Arc::new(FakeLedger::new())
+            (Arc::new(FakeLedger::new()), memory_faucet_available(cfg.faucet))
         }
     }
 }
 
+/// Whether `POST /api/v1/faucet` can credit anything on the IN-MEMORY ledger. Only the offline
+/// fixture build has a faucet that can: it credits the fake-IC gateway attached above, gated by
+/// the operator's `DPAY_ENABLE_FAUCET`.
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+fn memory_faucet_available(enabled: bool) -> bool {
+    enabled
+}
+
+/// The other builds: the agent faucet mints THROUGH the facade canister, which an in-memory
+/// ledger has no way to reach, and a build with neither feature registers no faucet route at all.
+/// Either way the answer is no, whatever `DPAY_ENABLE_FAUCET` says.
+#[cfg(not(all(feature = "test-helpers", not(feature = "agent"))))]
+fn memory_faucet_available(_enabled: bool) -> bool {
+    false
+}
+
+/// Connect the agent read backend, and report whether its faucet can credit: the mint is an
+/// AUTHENTICATED call, so it needs the identity built from `DPAY_CONTROLLER_SEED`. This is the
+/// relay-side half of the gate — whether that identity is the canister's actual controller stays
+/// the canister's own `require_admin` call, surfaced verbatim to the caller.
 #[cfg(feature = "agent")]
-async fn connect_ic(url: &str, canister_id: &str, fetch_root_key: bool) -> Arc<dyn Ledger> {
+async fn connect_ic(url: &str, canister_id: &str, fetch_root_key: bool) -> (Arc<dyn Ledger>, bool) {
     let principal = candid::Principal::from_text(canister_id).unwrap_or_else(|e| {
         eprintln!("dpay-relay: DPAY_CANISTER_ID={canister_id:?} is not a principal: {e}");
         process::exit(EXIT_CONFIG);
@@ -366,10 +413,10 @@ async fn connect_ic(url: &str, canister_id: &str, fetch_root_key: bool) -> Arc<d
                 if seed.is_some() {
                     "controller — faucet ENABLED (authenticated mint)"
                 } else {
-                    "anonymous — read-only (faucet mint will be refused by the canister)"
+                    "anonymous — read-only (faucet unavailable: the canister's mint is admin-gated)"
                 }
             );
-            Arc::new(l)
+            (Arc::new(l), seed.is_some())
         }
         // Exit rather than degrade. A relay that can't reach the catalog/ledgers must fail loudly;
         // the orchestrator restarts it, and no stale demo data is ever served as real.
@@ -411,7 +458,7 @@ fn parse_controller_seed() -> Option<[u8; 32]> {
 }
 
 #[cfg(not(feature = "agent"))]
-async fn connect_ic(_url: &str, _canister_id: &str, _fetch_root_key: bool) -> Arc<dyn Ledger> {
+async fn connect_ic(_url: &str, _canister_id: &str, _fetch_root_key: bool) -> (Arc<dyn Ledger>, bool) {
     eprintln!(
         "dpay-relay: DPAY_LEDGER=ic, but this binary was built WITHOUT the `agent` feature, so it \
          has no way to reach a real canister. Rebuild with `--features agent` (see deploy/build.sh)."

@@ -36,5 +36,12 @@
   "wire_consts": {
     "retrieve_btc_min_amount": 50000,
     "mint_account": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "swap_venue": {
+    "_doc": "MEASURED 2026-09-08 off the LIVE pool's own `metadata` query (anonymous, read-only, https://icp-api.io). NOT a production input: production reads token0/token1/fee off the pool at request time (crates/dpay-relay/src/agent_ledger.rs swap_pool_metadata), because a remote system's pair order is a fact to read, never a constant to assume. This block exists for exactly two jobs: (1) it is the order the OFFLINE fake-IC stub pool is seeded in (crates/dpay-relay/src/ic_gateway.rs FakeIc::from_catalog), pinned by the Rust drift alarm in catalog.rs so the fake can never again agree with a stale pin instead of with the venue; (2) `just swap-venue-probe` asserts the LIVE pool still reports exactly these values. The 2026-09-07 build pinned the REVERSE order as a constant and seeded the fake from the same pin, so the closed loop proved only its own consistency while live production quoted each direction under the other direction's label — see docs/specs/2026-09-08-conversion-hardening-plan.md.",
+    "pool": "65mrh-fqaaa-aaaar-qapoa-cai",
+    "token0_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
+    "token1_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+    "fee_millionths": 3000
   }
 }

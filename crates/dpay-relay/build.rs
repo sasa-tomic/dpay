@@ -6,6 +6,11 @@
 //!    comparing the live commit to `git rev-parse HEAD` catches a stale image shipping while
 //!    `just check` is green (the bug class `verify-deploy.sh` closes for the canister); the date
 //!    is its human-readable half ("when was prod last updated").
+//!    A build from a DIRTY working tree bakes `<sha>-dirty`, because the image then corresponds
+//!    to no commit at all: `deploy/build.sh` compiles the working tree, not `git archive`, so
+//!    uncommitted code really does ship. Reporting the bare SHA there was a lie that made
+//!    `/api/v1/version` — and every rule resting on it — unable to say what prod runs
+//!    (`scripts/verify-relay-version.sh` treats the marker as its own outcome).
 //!
 //! 2. The prod web build of the REAL app (`e2e/dist-prod`, produced by `just web` /
 //!    `vite build --mode web-prod`) → a generated `$OUT_DIR/web_assets.rs` static table the
@@ -40,6 +45,18 @@ fn main() {
 /// Bake the git commit + its committer date (fallback `"unknown"` for release tarballs — the
 /// build never fails on git). The date is the commit's, not the build's: it stays deterministic
 /// across rebuilds of the same source, so it pairs 1:1 with the SHA above.
+///
+/// A dirty tree bakes `<sha>-dirty` — one string, so EVERY consumer of the commit (the
+/// `/api/v1/version` + `/api/v1/integrity` bodies, the `/shots/*` ETag, `verify-relay-version.sh`)
+/// stops matching a clean SHA the moment the build stops corresponding to one. A separate boolean
+/// was the alternative and is worse: a consumer reading only the commit would keep silently
+/// reporting MATCH, which is the exact failure being fixed.
+///
+/// Freshness of the marker: cargo re-runs this script only when a declared `rerun-if-changed`
+/// input moves. `deploy/build.sh` — the only path whose `/version` answer is load-bearing —
+/// regenerates `e2e/dist-prod` (a declared input, see `embed_web_dist`) on every image build, so
+/// the marker is always recomputed there. In a dev tree it can lag until any declared input moves;
+/// that is a stale DEV number, never a stale SHIPPED one.
 fn bake_commit() {
     // Rerun when the ref moves (a commit advances HEAD). A missing .git/HEAD (release tarball) is
     // harmless — cargo simply never triggers the rerun on it, and the fallback below applies.
@@ -56,9 +73,12 @@ fn bake_commit() {
     let commit_raw = lines.next().unwrap_or("").trim();
     let date_raw = lines.next().unwrap_or("").trim();
     let commit = if commit_raw.is_empty() {
-        "unknown"
+        // No git at all (release tarball): there is no commit to be dirty against either.
+        "unknown".to_string()
+    } else if working_tree_dirty() {
+        format!("{commit_raw}-dirty")
     } else {
-        commit_raw
+        commit_raw.to_string()
     };
     let date = if date_raw.is_empty() {
         "unknown"
@@ -68,6 +88,35 @@ fn bake_commit() {
 
     println!("cargo:rustc-env=DPAY_BUILD_COMMIT={commit}");
     println!("cargo:rustc-env=DPAY_BUILD_DATE={date}");
+}
+
+/// Does the working tree differ from HEAD? `git status --porcelain` is the whole test: it reports
+/// staged + unstaged changes to tracked files AND untracked files that are not gitignored — every
+/// way the compiled source can differ from the commit being reported. (Gitignored paths, which
+/// includes `e2e/dist-prod`, `target/` and `.dev/`, are excluded by git itself.)
+///
+/// Only reached when `git show HEAD` already succeeded, so git exists and this IS a checkout. A
+/// failure here is therefore a real failure and PANICS: silently assuming "clean" would re-create
+/// the defect this function exists to close, on the one build where it matters most.
+fn working_tree_dirty() -> bool {
+    let out = Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "`git status --porcelain` could not run ({e}) — it decides whether this build is \
+                 reported as `<sha>` or `<sha>-dirty` on GET /api/v1/version. Without it the image \
+                 could claim a commit it was not built from."
+            )
+        });
+    if !out.status.success() {
+        panic!(
+            "`git status --porcelain` failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    !out.stdout.is_empty()
 }
 
 /// The hash `test-helpers` builds bake as the integrity pin — MUST equal

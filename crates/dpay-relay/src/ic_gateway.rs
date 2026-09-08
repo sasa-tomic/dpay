@@ -34,19 +34,20 @@ use axum::response::{IntoResponse, Response};
 use dpay_icp::envelope::verify_envelope;
 use dpay_icp::icrc::{
     ApproveArg,
-    decode_account_arg, decode_allowance_args, decode_approve_arg, decode_deposit_and_swap_arg,
+    decode_account_arg, decode_approve_arg, decode_deposit_and_swap_arg,
     decode_legacy_transfer_arg, decode_minter_account_arg, decode_retrieve_btc_arg,
-    decode_swap_arg, decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg,
-    encode_allowance_record, encode_approve_ok, encode_eip1559_price,
+    decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg,
+    encode_approve_ok, encode_eip1559_price,
     encode_legacy_transfer_bad_fee, encode_legacy_transfer_insufficient_funds,
     encode_legacy_transfer_ok, encode_minter_ok, encode_nat8_reply, encode_nat_reply,
-    encode_pool_metadata, encode_swap_result_err, encode_swap_result_ok, encode_text_reply,
+    encode_swap_result_err, encode_swap_result_ok, encode_text_reply,
     encode_transfer_bad_fee, encode_transfer_insufficient_funds, encode_transfer_ok,
     uleb_bytes, Eip1559Price, PoolSwapError, RetrieveBtcArg, WithdrawEthArg,
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
 
+use crate::ledger::api::SwapPoolMetadata;
 use crate::AppState;
 use dpay_core::Currency;
 
@@ -111,11 +112,16 @@ struct FakeIcState {
 /// (`fee_millionths`, `impact_bps`, `fail_withdrawal`) are the test surface
 /// (`POST /api/v1/test/swap_pool`).
 struct FakePoolState {
-    /// The pool's OWN metadata pair (what `metadata` replies and pair validation reads).
+    /// The pool's OWN metadata pair — what [`FakeIc::swap_pool_metadata`] reports and the route
+    /// derives `zero_for_one` from. Seeded in the order MEASURED off the live venue
+    /// (`dfx/catalog_truth.json` `swap_venue`), pinned by the drift alarm in `catalog.rs`.
     token0_ledger: String,
     token1_ledger: String,
-    /// Genesis reserves: 1M ICP / 1.93M VCHF e8s — deep enough that PoC-size swaps barely move
-    /// the price (stable, deterministic quotes; matching the historical band is NOT a goal).
+    /// Genesis reserves, EACH FOLLOWING ITS OWN TOKEN: reserve0 = 1.93M VCHF, reserve1 = 1M ICP
+    /// e8s — deep enough that PoC-size swaps barely move the price (stable, deterministic
+    /// quotes; matching the live band is NOT a goal). They travelled with the pair when the
+    /// 2026-09-08 reseed put token0/token1 in the measured order, so every quoted AMOUNT is
+    /// unchanged and only the direction flag moved.
     reserve0_e8s: u128,
     reserve1_e8s: u128,
     /// Swap fee in millionths (default 3000 = the PoC pool's 0.30% tier), applied to amount_in.
@@ -145,8 +151,8 @@ impl FakePoolState {
         FakePoolState {
             token0_ledger: token0_ledger.to_string(),
             token1_ledger: token1_ledger.to_string(),
-            reserve0_e8s: 100_000_000_000_000,          // 1M ICP
-            reserve1_e8s: 193_000_000_000_000,          // 1.93M VCHF
+            reserve0_e8s: 193_000_000_000_000,          // 1.93M VCHF (token0)
+            reserve1_e8s: 100_000_000_000_000,          // 1M ICP (token1)
             fee_millionths: 3000,                       // the PoC pool's 0.30% tier
             impact_bps: 0,
             fail_withdrawal: false,
@@ -259,11 +265,14 @@ impl FakeIc {
                 st.minters.insert(m, d.ledger.clone());
             }
         }
-        // The stub ICPSwap pool at the PoC venue principal — token0 = ICP, token1 = VCHF
-        // (the relay-side venue pin, `crate::catalog::ICP_VCHF_VENUE`).
+        // The stub ICPSwap pool at the PoC venue principal, in the pair order MEASURED off the
+        // LIVE pool on 2026-09-08 — token0 = VCHF, token1 = ICP (`dfx/catalog_truth.json`
+        // `swap_venue`, held to it by the drift alarm in `catalog.rs`). Seeding this from a
+        // guess is precisely what hid a ~5.9x-wrong production rate behind a green suite: the
+        // fake and the code agreed with each other and neither agreed with the venue.
         st.pool = FakePoolState::new(
-            crate::catalog::ICP_LEDGER_PRINCIPAL,
             crate::catalog::VCHF_LEDGER_PRINCIPAL,
+            crate::catalog::ICP_LEDGER_PRINCIPAL,
         );
         Arc::new(FakeIc {
             state: Mutex::new(st),
@@ -337,30 +346,34 @@ impl FakeIc {
         0
     }
 
-    /// The stub pool's quote for the relay's `/api/v1/swap_quote` (test-helpers): validates the
-    /// venue the SAME way the agent build does (known pool; token_in/token_out must be the
-    /// pool's OWN pair — `zero_for_one` derived from that, never assumed), then serves the
-    /// deterministic curve. The amount_out is the POOL's quote verbatim — the relay blends
-    /// nothing. Errors are the route's named refusal codes (`unknown_pool`/`unsupported_pair`).
-    pub fn swap_pool_quote(
-        &self,
-        pool: &str,
-        token_in: &str,
-        token_out: &str,
-        amount_in_e8s: u128,
-    ) -> Result<(u128, bool), &'static str> {
+    /// What the gateway's one stub pool says about ITSELF — the offline twin of
+    /// [`Ledger::swap_pool_metadata`](crate::Ledger::swap_pool_metadata). The relay's
+    /// test-helpers `/api/v1/swap_quote` branch derives `zero_for_one` from THIS, through the
+    /// exact same pure rule the agent branch applies to the live pool's reply, so the offline
+    /// loop exercises the direction logic rather than agreeing with a pin.
+    ///
+    /// No `pool` argument: the allowlist is the ROUTE's gate
+    /// ([`crate::catalog::is_known_swap_pool`], the same gate the agent build applies), and this
+    /// gateway holds exactly one stub pool. Re-checking here would only add a branch no caller
+    /// can reach. The signed-envelope path is different and DOES check its canister
+    /// ([`FakeIc::pool_deposit_from_and_swap`]) — there the principal is untrusted input.
+    pub fn swap_pool_metadata(&self) -> SwapPoolMetadata {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        if pool != crate::catalog::SWAP_POOL_PRINCIPAL {
-            return Err("unknown_pool");
+        SwapPoolMetadata {
+            token0_ledger: s.pool.token0_ledger.clone(),
+            token1_ledger: s.pool.token1_ledger.clone(),
+            fee_millionths: s.pool.fee_millionths,
         }
-        let p = &s.pool;
-        if token_in == p.token0_ledger && token_out == p.token1_ledger {
-            Ok((p.quote(amount_in_e8s, true), true))
-        } else if token_in == p.token1_ledger && token_out == p.token0_ledger {
-            Ok((p.quote(amount_in_e8s, false), false))
-        } else {
-            Err("unsupported_pair")
-        }
+    }
+
+    /// The stub pool's quote for the relay's `/api/v1/swap_quote` (test-helpers) — the offline
+    /// twin of [`Ledger::swap_pool_quote`](crate::Ledger::swap_pool_quote): the CALLER derived
+    /// `zero_for_one` from [`FakeIc::swap_pool_metadata`], so this serves the deterministic
+    /// curve and nothing else. The amount_out is the POOL's quote verbatim — the relay blends
+    /// nothing.
+    pub fn swap_pool_quote(&self, zero_for_one: bool, amount_in_e8s: u128) -> u128 {
+        let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        s.pool.quote(amount_in_e8s, zero_for_one)
     }
 
     /// The test knobs for the stub pool (`POST /api/v1/test/swap_pool`): fee tier / impact
@@ -863,51 +876,6 @@ impl FakeIc {
             "icrc1_fee" => {
                 let f = s.ledgers.get(&canister).and_then(|l| l.fee).unwrap_or(0);
                 Ok(encode_nat_reply(f))
-            }
-            "icrc2_allowance" => {
-                // Any ledger canister: unknown keys read (0, None) — same silence as
-                // icrc1_balance_of on an unknown account.
-                let Ok((account, spender)) = decode_allowance_args(arg) else {
-                    return Err((5, "malformed icrc2_allowance arg".into()));
-                };
-                let key: AllowanceKey = (
-                    (canister.clone(), account_owner(&account)),
-                    account_owner(&spender),
-                );
-                let (allowance, expires_at) = effective_allowance(&s, &key);
-                Ok(encode_allowance_record(&dpay_icp::icrc::PoolAllowance {
-                    allowance_e8s: allowance,
-                    expires_at_ns: expires_at,
-                }))
-            }
-            "quote" => {
-                // The stub pool's own quote — pool canister only, exactly like the real
-                // ICPSwap canister shape (ok(nat) / err(Error)).
-                if canister != crate::catalog::SWAP_POOL_PRINCIPAL {
-                    return Err((3, format!("Canister {canister} has no query method 'quote'")));
-                }
-                let Ok(a) = decode_swap_arg(arg) else {
-                    return Err((5, "malformed quote arg".into()));
-                };
-                let out = s.pool.quote(a.amount_in_e8s, a.zero_for_one);
-                if out < a.amount_out_minimum_e8s {
-                    return Ok(encode_swap_result_err(&PoolSwapError::InternalError(
-                        "amountOutMinimum not met".into(),
-                    )));
-                }
-                Ok(encode_swap_result_ok(out))
-            }
-            "metadata" => {
-                if canister != crate::catalog::SWAP_POOL_PRINCIPAL {
-                    return Err((3, format!("Canister {canister} has no query method 'metadata'")));
-                }
-                let p = &s.pool;
-                Ok(encode_pool_metadata(
-                    p.fee_millionths,
-                    &format!("{}-{}-{}", p.token0_ledger, p.token1_ledger, p.fee_millionths),
-                    &p.token0_ledger,
-                    &p.token1_ledger,
-                ))
             }
             "get_btc_address" => {
                 // Mainnet-true: the real ckBTC minter exposes get_btc_address as an UPDATE

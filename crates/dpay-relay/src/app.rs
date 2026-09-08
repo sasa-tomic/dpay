@@ -17,14 +17,18 @@
 //!   the wallet build carries its own hashed copy under /assets/).
 //! - `GET /shots/{name}` — the real app screenshots embedded in the landing page.
 //! - `GET /api/v1/health` — liveness pre-flight; consults `ledger.healthy()`.
+//! - `GET /api/v1/capabilities` — runtime surface flags: whether this relay serves the till and
+//!   whether the offline play-money DEMO faucet is available.
 //! - `GET /api/v1/integrity` — the facade canister's live module hash vs the PIN baked at build
 //!   time (`deploy/facade-module-hash.txt`; GOVERNANCE row 7), so one curl detects an unrecorded
 //!   upgrade. Degrades, never 5xxes: an unreachable IC reports `status:"UNREACHABLE"`.
 //! - `GET /api/v1/transactions/{hex}?currency=N&limit=30` — the wallet's durable transaction list,
 //!   newest-first, read off the ICRC ledger's own transaction log at the user's principal.
 //! - `GET /api/v1/swap_quote?pool=&token_in=&token_out=&amount_in=` — the delegated-conversion
-//!   PoC's venue quote (spec 2026-09-07 §2): the pool's OWN quote VERBATIM + `fetched_at`; the
-//!   relay never computes a rate. Served under `agent` (real ICPSwap pool) or `test-helpers`
+//!   PoC's venue quote (spec 2026-09-07 §2): the pool's OWN quote VERBATIM + its OWN
+//!   `fee_millionths` + `fetched_at`; the relay never computes a rate, and since 2026-09-08 it
+//!   never assumes the pool's pair either — the direction is read off the pool's own `metadata`
+//!   (see `swap_quote_direction`). Served under `agent` (real ICPSwap pool) or `test-helpers`
 //!   (the fake-IC stub pool); absent from the no-feature build.
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
 //!   min amount) so the "Add money" sheet can render them.
@@ -42,7 +46,9 @@
 //!   test-helpers credits the fake-IC gateway (gated by `DPAY_ENABLE_FAUCET`); the agent build
 //!   (production) enforces the relay-side cooldown ([`crate::faucet`]) and drives the facade's
 //!   controller-gated `mint` through the authenticated agent, crediting the USER principal.
-//!   With BOTH features (the live-test config) the test-helpers branch owns the route.
+//!   With BOTH features (the live-test config) the AGENT branch owns the route. Whichever is
+//!   compiled refuses on [`AppState::faucet_available`] — the same flag `/capabilities` reports —
+//!   with 503 and a reason naming the knob that is missing.
 //!
 //! Read-only by construction apart from the play-money faucet: there is no value-moving route
 //! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
@@ -84,12 +90,19 @@ pub struct AppState {
     /// while the router is built, so it cannot change under a live request. Set by
     /// [`AppState::with_till`]; `false` for a state that does not ask.
     till_enabled: bool,
-    /// Whether `POST /api/v1/faucet` (which *mints*) is served. Gates the test-helpers faucet
-    /// (`DPAY_ENABLE_FAUCET`); defaults to `true` — harmless against the offline fixtures it
-    /// ships with. The agent-build faucet is NOT gated by this flag: its rate limit is the
-    /// relay-side [`crate::faucet`] cooldown, and its mint is already canister-gated
-    /// (`require_admin` refuses the anonymous agent).
-    faucet_enabled: Arc<Mutex<bool>>,
+    /// Whether `POST /api/v1/faucet` — the route THIS build compiles — will actually credit an
+    /// account. ONE predicate: [`capabilities`] reports it and the compiled faucet handler refuses
+    /// on it, so what the relay advertises can no longer drift from what the route does. It did:
+    /// production served `{"demo_faucet":false}` while its faucet minted happily, so the app hid
+    /// the top-up button and onboarded unfunded wallets against a healthy relay.
+    ///
+    /// Set by [`AppState::with_faucet`] from `main`, which is where the backend is known — the
+    /// offline fixture build gates on the operator's `DPAY_ENABLE_FAUCET` (its faucet credits the
+    /// fake-IC gateway), the agent build on the relay agent holding an authenticated identity
+    /// (`DPAY_CONTROLLER_SEED`), because the facade's `mint` is `require_admin`-gated and an
+    /// anonymous relay cannot credit anything. Defaults to `false`: a state that never said it
+    /// can serve a faucet does not advertise one.
+    faucet_available: bool,
     /// The agent-build faucet's per-account cooldown map (see [`crate::faucet`]). Guarded by
     /// the repo's poison-tolerant lock convention and never held across an await.
     #[cfg(feature = "agent")]
@@ -120,7 +133,7 @@ impl AppState {
             ledger,
             tills: Arc::new(Mutex::new(crate::till::TillStore::default())),
             till_enabled: false,
-            faucet_enabled: Arc::new(Mutex::new(true)),
+            faucet_available: false,
             #[cfg(feature = "agent")]
             faucet_cooldown: Arc::new(Mutex::new(crate::faucet::FaucetCooldown::with_window(
                 crate::faucet::FAUCET_COOLDOWN_SECS,
@@ -168,8 +181,13 @@ impl AppState {
         self
     }
 
-    pub fn set_faucet_enabled(&self, on: bool) {
-        *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner()) = on;
+    /// Declare whether this deployment's faucet can actually credit — see
+    /// [`faucet_available`](AppState::faucet_available). `main` derives it from the backend it
+    /// built (fixture: `DPAY_ENABLE_FAUCET`; agent: an authenticated identity); tests declare it
+    /// the same way they declare the till.
+    pub fn with_faucet(mut self, available: bool) -> Self {
+        self.faucet_available = available;
+        self
     }
 
     /// Replace the faucet cooldown's window (agent build). Test seam ONLY: the live tests shrink
@@ -179,11 +197,19 @@ impl AppState {
         *self.faucet_cooldown.lock().unwrap_or_else(|p| p.into_inner()) =
             crate::faucet::FaucetCooldown::with_window(window_secs);
     }
-
-    pub fn faucet_enabled(&self) -> bool {
-        *self.faucet_enabled.lock().unwrap_or_else(|p| p.into_inner())
-    }
 }
+
+/// Why `POST /api/v1/faucet` refuses on THIS build when it is unavailable — the reason names the
+/// knob that is missing, so an operator reading a refusal knows what to set instead of reading
+/// "disabled". Exactly one of these compiles: the agent branch owns the route whenever `agent` is
+/// on (the same precedence the route registration uses).
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+const FAUCET_UNAVAILABLE: &str = "faucet unavailable: this relay serves the offline fixture \
+     faucet, which needs DPAY_ENABLE_FAUCET=true and the fake-IC gateway it credits";
+#[cfg(feature = "agent")]
+const FAUCET_UNAVAILABLE: &str = "faucet unavailable: this relay's agent signs anonymously — set \
+     DPAY_CONTROLLER_SEED, since the facade's mint is controller-gated and an anonymous relay \
+     cannot credit anything";
 
 /// Build the router. No socket is bound here — tests drive it via `tower::ServiceExt::oneshot`,
 /// `main` wraps it with a listener.
@@ -201,6 +227,7 @@ pub fn app(state: AppState) -> Router {
         .route("/currencies", get(currencies))
         .route("/onramp/ckerc20", get(ckerc20_onramp))
         .route("/health", get(health))
+        .route("/capabilities", get(capabilities))
         .route("/version", get(version))
         .route("/integrity", get(integrity));
 
@@ -259,11 +286,12 @@ pub fn app(state: AppState) -> Router {
 
     // `GET /api/v1/swap_quote` — the delegated-conversion PoC's venue quote (spec 2026-09-07
     // §2, the FIXED contract): the relay is a READ PROXY (same class as the balance fan-out) —
-    // it validates the venue (known pool + the pool's OWN token pair) and returns the pool's
-    // own `quote` amountOut VERBATIM plus the relay wall-clock `fetched_at`. It NEVER computes
-    // or blends a rate. Two builds, one route shape (mirroring the faucet split): the offline
-    // image (test-helpers, without agent) reads the fake-IC stub pool; the agent build queries
-    // the real ICPSwap pool anonymously.
+    // it checks the pool against the ALLOWLIST, asks that pool what pair it trades, derives the
+    // direction from the answer, and returns the pool's own `quote` amountOut VERBATIM plus the
+    // venue's own fee tier and the relay wall-clock `fetched_at`. It NEVER computes or blends a
+    // rate, and it holds no belief about the venue's pair. Two builds, one route shape
+    // (mirroring the faucet split): the offline image (test-helpers, without agent) reads the
+    // fake-IC stub pool; the agent build queries the real ICPSwap pool anonymously.
     #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
     let api = api.route("/swap_quote", axum::routing::get(swap_quote_fake));
     #[cfg(feature = "agent")]
@@ -375,17 +403,17 @@ async fn test_cors_middleware(req: axum::extract::Request, next: axum::middlewar
 /// `currency = DEMO_USD` (0), `amount = 10_000`.
 #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
-    if !state.faucet_enabled() {
-        return err(StatusCode::NOT_FOUND, "faucet disabled");
-    }
+    // ONE gate, the same predicate `GET /api/v1/capabilities` reports — and it subsumes the
+    // gateway check, because this branch can credit nothing else. Binding the gateway out of it
+    // keeps a single refusal path instead of a second "not attached" branch saying the same thing.
+    let Some(fake) = state.fake_ic.clone().filter(|_| state.faucet_available) else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, FAUCET_UNAVAILABLE);
+    };
     let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
     // Currency defaults to DEMO_USD — the faucet's whole point is play money for the demo. A missing
     // amount is the demo's $100.00 top-up.
     let currency = req.currency.unwrap_or(DEMO_USD);
     let amount = req.amount.map(|x| x.0).unwrap_or(10_000);
-    let Some(fake) = state.fake_ic.clone() else {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
-    };
     use dpay_icp::principal::Principal as IcpPrincipal;
     let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
     let bal = fake.faucet_credit(currency, &owner, u128::from(amount));
@@ -410,6 +438,13 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
 /// Wallet shows the reason as-is (N5); transport failures answer 503.
 #[cfg(feature = "agent")]
 async fn faucet_agent(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -> Response {
+    // The SAME predicate `GET /api/v1/capabilities` reports, so the route and the advertisement
+    // cannot disagree. Refusing here rather than at the canister costs one round trip and, more
+    // to the point, names the missing knob: an anonymous relay's mint is refused by
+    // `require_admin` anyway, and "unauthorized" does not tell an operator what to set.
+    if !state.faucet_available {
+        return err(StatusCode::SERVICE_UNAVAILABLE, FAUCET_UNAVAILABLE);
+    }
     let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
     let currency = req.currency.unwrap_or(DEMO_USD);
     let amount = req.amount.map(|x| x.0).unwrap_or(crate::faucet::FAUCET_AMOUNT);
@@ -487,24 +522,27 @@ async fn test_swap_pool(
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
-/// Venue validation for `GET /api/v1/swap_quote`, shared by both builds: the pool must be a
-/// KNOWN venue (`catalog::venue_for_pool`) and the pair must be that pool's OWN token pair —
-/// `zero_for_one` is DERIVED from the match (token_in == token0), exactly the wallet-side
-/// convention (`zeroForOne: pool.token0.address === token_in`), never assumed from pair order.
-/// The named refusals: 400 `unknown_pool` / 400 `unsupported_pair`.
+/// The direction rule for `GET /api/v1/swap_quote`, shared by both builds and PURE: given what
+/// the pool said about ITSELF, which way is this trade? `zero_for_one = token_in == token0` —
+/// exactly the wallet-side convention (`zeroForOne: pool.token0.address === token_in`) and
+/// exactly what the pool means by the flag in the arg the user's device signs.
+///
+/// The pair is NOT a relay constant. It is read off the venue on every quote
+/// ([`crate::ledger::api::Ledger::swap_pool_metadata`]) precisely because the 2026-09-07 build
+/// pinned it, pinned it BACKWARDS, and seeded the offline fake from the same pin — so the tests
+/// agreed with the pin instead of with the venue while production quoted each direction under
+/// the other direction's label. The refusal: 400 `unsupported_pair` when `{token_in, token_out}`
+/// is not this pool's pair (which also covers token_in == token_out).
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
 fn swap_quote_direction(
-    pool: &str,
+    meta: &crate::ledger::api::SwapPoolMetadata,
     token_in: &str,
     token_out: &str,
-) -> Result<(bool, &'static crate::catalog::SwapVenue), Response> {
-    let Some(venue) = crate::catalog::venue_for_pool(pool) else {
-        return Err(err(StatusCode::BAD_REQUEST, "unknown_pool"));
-    };
-    if token_in == venue.token0_ledger && token_out == venue.token1_ledger {
-        Ok((true, venue))
-    } else if token_in == venue.token1_ledger && token_out == venue.token0_ledger {
-        Ok((false, venue))
+) -> Result<bool, Response> {
+    if token_in == meta.token0_ledger && token_out == meta.token1_ledger {
+        Ok(true)
+    } else if token_in == meta.token1_ledger && token_out == meta.token0_ledger {
+        Ok(false)
     } else {
         Err(err(StatusCode::BAD_REQUEST, "unsupported_pair"))
     }
@@ -512,49 +550,60 @@ fn swap_quote_direction(
 
 /// `GET /api/v1/swap_quote?pool=<id>&token_in=<ledger>&token_out=<ledger>&amount_in=<e8s>` —
 /// see the route comment above for the fixed contract. This build reads the fake-IC stub pool
-/// (the offline e2e image); the pair validation and the response shape are byte-identical to
-/// the agent build's.
+/// (the offline e2e image): it asks the STUB for its own metadata and runs the same
+/// [`swap_quote_direction`] rule the agent build runs on the live pool's reply, so the offline
+/// loop exercises the direction logic instead of agreeing with a constant.
 #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 async fn swap_quote_fake(
     State(state): State<AppState>,
     Query(qs): Query<SwapQuoteQuery>,
 ) -> Response {
-    if let Err(resp) = swap_quote_direction(&qs.pool, &qs.token_in, &qs.token_out) {
-        return resp;
+    if !crate::catalog::is_known_swap_pool(&qs.pool) {
+        return err(StatusCode::BAD_REQUEST, "unknown_pool");
     }
     let Some(fake) = state.fake_ic.clone() else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
     };
-    // The stub validates the pair against the POOL's own metadata — same rule, and its
-    // zero_for_one is the reply's.
-    match fake.swap_pool_quote(&qs.pool, &qs.token_in, &qs.token_out, u128::from(qs.amount_in.0)) {
-        Ok((amount_out, zero_for_one)) => {
-            (StatusCode::OK, Json(SwapQuoteBody {
-                pool: qs.pool,
-                token_in: qs.token_in,
-                token_out: qs.token_out,
-                amount_in: qs.amount_in,
-                amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
-                zero_for_one,
-                fetched_at: crate::now_secs(),
-            }))
-            .into_response()
-        }
-        Err(code) => err(StatusCode::BAD_REQUEST, code),
-    }
+    let meta = fake.swap_pool_metadata();
+    let zero_for_one = match swap_quote_direction(&meta, &qs.token_in, &qs.token_out) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let amount_out = fake.swap_pool_quote(zero_for_one, u128::from(qs.amount_in.0));
+    (StatusCode::OK, Json(SwapQuoteBody {
+        pool: qs.pool,
+        token_in: qs.token_in,
+        token_out: qs.token_out,
+        amount_in: qs.amount_in,
+        amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
+        zero_for_one,
+        fee_millionths: meta.fee_millionths,
+        fetched_at: crate::now_secs(),
+    }))
+    .into_response()
 }
 /// `GET /api/v1/swap_quote` — the production branch (agent build; also the owner when
-/// test-helpers is co-enabled for the live tests): queries the REAL ICPSwap pool's own `quote`
-/// through the agent stack (`AgentLedger::swap_pool_quote`, anonymous read) and passes its
-/// amountOut through VERBATIM. The pool's own `#err` text surfaces verbatim at 422 (the
-/// house convention), transport trouble at 503.
+/// test-helpers is co-enabled for the live tests): reads the REAL pool's OWN `metadata` to
+/// learn its pair order and fee tier, derives the direction from that, then queries the pool's
+/// own `quote` (`AgentLedger`, anonymous reads) and passes its amountOut through VERBATIM. The
+/// pool's own `#err` text surfaces verbatim at 422 (the house convention), transport trouble at
+/// 503.
 #[cfg(feature = "agent")]
 async fn swap_quote_agent(
     State(state): State<AppState>,
     Query(qs): Query<SwapQuoteQuery>,
 ) -> Response {
-    let (zero_for_one, _venue) = match swap_quote_direction(&qs.pool, &qs.token_in, &qs.token_out)
-    {
+    if !crate::catalog::is_known_swap_pool(&qs.pool) {
+        return err(StatusCode::BAD_REQUEST, "unknown_pool");
+    }
+    let meta = match state.ledger.swap_pool_metadata(&qs.pool).await {
+        Ok(m) => m,
+        Err(LedgerError::Rejected(msg)) => return err(StatusCode::UNPROCESSABLE_ENTITY, msg),
+        Err(LedgerError::Transient(msg)) => {
+            return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+        }
+    };
+    let zero_for_one = match swap_quote_direction(&meta, &qs.token_in, &qs.token_out) {
         Ok(v) => v,
         Err(resp) => return resp,
     };
@@ -571,6 +620,7 @@ async fn swap_quote_agent(
                 amount_in: qs.amount_in,
                 amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
                 zero_for_one,
+                fee_millionths: meta.fee_millionths,
                 fetched_at: crate::now_secs(),
             }))
             .into_response()
@@ -1054,7 +1104,9 @@ struct SwapQuoteQuery {
 /// pool's `quote` reply, GROSS — the app computes net by subtracting the output ledger's
 /// fee; the relay adds/blends NOTHING) plus `fetched_at` (relay wall-clock seconds, for the
 /// app's staleness line). The echo fields let the app key the quote without re-deriving
-/// direction; `zero_for_one` comes from the venue's OWN token pair.
+/// direction; `zero_for_one` and `fee_millionths` are read off the venue's OWN metadata on
+/// this request — `fee_millionths` is the venue's fee tier ECHOED (3000 = 0.30%), never a
+/// number dpay claims, and it is the app's only source for that figure.
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
 #[derive(Serialize)]
 struct SwapQuoteBody {
@@ -1064,6 +1116,7 @@ struct SwapQuoteBody {
     amount_in: U64String,
     amount_out: U64String,
     zero_for_one: bool,
+    fee_millionths: u128,
     fetched_at: u64,
 }
 
@@ -1097,6 +1150,16 @@ struct ErrorBody {
 #[derive(Serialize)]
 struct HealthBody {
     status: &'static str,
+}
+
+/// `GET /api/v1/capabilities` response. `demo_faucet` means "`POST /api/v1/faucet` on THIS relay
+/// will credit an account" — whichever of the two faucet builds is compiled (see
+/// [`AppState::faucet_available`]); the wallet reads it to decide whether a top-up action can
+/// exist at all.
+#[derive(Serialize)]
+struct CapabilitiesBody {
+    till: bool,
+    demo_faucet: bool,
 }
 
 /// `GET /api/v1/version` response — the running image's source identity. `commit` is the git SHA
@@ -1212,6 +1275,21 @@ async fn health(State(state): State<AppState>) -> Response {
         )
             .into_response()
     }
+}
+
+/// `GET /api/v1/capabilities` → `200 {"till":bool,"demo_faucet":bool}`. Both values are read off
+/// the SAME state the surfaces themselves are gated on — `till_enabled` is the flag [`app`] reads
+/// to register the till routes, and `faucet_available` is the flag the compiled faucet handler
+/// refuses on — so an advertised capability is the one thing this relay will actually do.
+async fn capabilities(State(state): State<AppState>) -> Response {
+    (
+        StatusCode::OK,
+        Json(CapabilitiesBody {
+            till: state.till_enabled,
+            demo_faucet: state.faucet_available,
+        }),
+    )
+        .into_response()
 }
 
 /// `GET /api/v1/version` → `200 {"name":"dpay-relay","version":"<pkg>","commit":"<sha>"}`. The commit

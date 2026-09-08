@@ -196,6 +196,18 @@ ic-mainnet-probe:
 ic-index-probe:
     bash scripts/icp-index-probe.sh
 
+# OPT-IN mainnet read-only TRIPWIRE for the delegated-conversion venue (NEEDS NETWORK, never in
+# check/verify): one anonymous `metadata` query on the ICPSwap PoC pool, asserting its OWN
+# token0/token1/fee still equal `swap_venue` in dfx/catalog_truth.json — the block the offline
+# fake pool is seeded from. Free: a query costs nothing, moves nothing, signs nothing.
+# `just test-live` is PocketIC and has NO ICPSwap pool in it, so it is structurally unable to
+# see a venue fact; on 2026-09-07 that gap let a compiled pair pin sit BACKWARDS behind a fully
+# green suite while live production quoted every ICP→VCHF trade at the VCHF→ICP rate (~5.9x
+# against the user). Run it after any change to the conversion quote path, and whenever the
+# venue itself may have changed.
+swap-venue-probe:
+    DPAY_IC_MAINNET=1 cargo nextest run -p dpay-relay --features agent -E 'binary(swap_venue_mainnet)' --no-capture
+
 # OPT-IN live OpenCryptoPay probe (NEEDS NETWORK, never in check/verify): drives the REAL app
 # against the REAL provider's public CHF-1 test till and stops at the review, having signed
 # nothing. Reads only — a quote costs nothing and commits nothing, and the wallet it drives is a
@@ -304,8 +316,20 @@ aid-parity:
 # (merchant-wire is GONE 2026-08-16: the hand-rolled /merchant page was merged into /wallet — the
 #  real app builds requests through its own wasm core, so the hand-rolled-encoder drift class it
 #  guarded against no longer has a surface to live on.)
-check: test-core test-canister test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core
+check: test-core test-canister test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core flows-md
     @echo "rust inner loop green"
+
+# FLOWS.md is GENERATED from each flow's own `meta` (e2e/harness/meta.mjs is the single reader), so
+# the catalog cannot drift from the tests — but only if something checks. This compares the file
+# on disk against what the generator produces RIGHT NOW, not against HEAD: an uncommitted flow with
+# a correctly-regenerated manifest is fine, a stale manifest is not. Until this existed, an edited
+# `verifies`/`covers` with a stale FLOWS.md was caught by nothing.
+flows-md:
+    @cp FLOWS.md {{justfile_directory()}}/.dev/FLOWS.md.before
+    @node e2e/gen-flows-md.mjs >/dev/null
+    @diff -u {{justfile_directory()}}/.dev/FLOWS.md.before FLOWS.md \
+      || (echo "FLOWS.md was STALE — regenerated above from the flows' own meta; keep the new file." && exit 1)
+    @rm -f {{justfile_directory()}}/.dev/FLOWS.md.before
 
 # Wasm-core parity: proves the COMMITTED crates/dpay-relay/assets/dpay-core.wasm (the bytes every
 # web surface loads) signs/builds byte-identically to the JS oracle — catches a stale or corrupted

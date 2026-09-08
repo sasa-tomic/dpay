@@ -24,7 +24,7 @@ use dpay_icp::icrc::{
     decode_minter_ok as icrc_decode_minter_ok,
     decode_transfer_result as icrc_decode_transfer_result,
     legacy_transfer_arg as icrc_legacy_transfer_arg, transfer_arg as icrc_transfer_arg,
-    LegacyTransferError, LegacyTransferResult, TransferError, TransferResult,
+    LegacyTransferError, LegacyTransferResult, PoolSwapError, TransferError, TransferResult,
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{
@@ -445,6 +445,88 @@ pub extern "C" fn w_icp_withdraw_erc20_arg(
     let sub2 = match sub32_at(sub2_ptr, sub2_len) { Ok(s) => s, Err(e) => return e };
     let arg = dpay_icp::icrc::withdraw_erc20_arg(amount, &ledger, &recip, sub1, sub2);
     write_str_out(&arg, out_ptr, cap)
+}
+
+// --- delegated conversion (ICPSwap pool) — same three calls the Kotlin/UniFFI surface exports ---
+
+/// Read a REQUIRED decimal u128 (empty is not an amount here — refuse, never default to 0).
+fn u128_req_at(ptr: u32, len: u32) -> Result<u128, u32> {
+    match u128_opt_at(ptr, len)? {
+        Some(v) => Ok(v),
+        None => Err(BAD_UTF8),
+    }
+}
+
+/// `icp_deposit_and_swap_arg`: the ICPSwap V3 pool `depositFromAndSwap` argument bytes — the
+/// conversion leg the user signs after `icrc2_approve` named the pool the spender. Amounts and
+/// both token fees cross as decimal strings; `zero_for_one` is the pool's own token0→token1
+/// direction (0 = false, anything else = true).
+#[no_mangle]
+pub extern "C" fn w_icp_deposit_and_swap_arg(
+    amount_in_ptr: u32, amount_in_len: u32,
+    min_out_ptr: u32, min_out_len: u32,
+    token_in_fee_ptr: u32, token_in_fee_len: u32,
+    token_out_fee_ptr: u32, token_out_fee_len: u32,
+    zero_for_one: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let amount_in = match u128_req_at(amount_in_ptr, amount_in_len) { Ok(v) => v, Err(e) => return e };
+    let min_out = match u128_req_at(min_out_ptr, min_out_len) { Ok(v) => v, Err(e) => return e };
+    let fee_in = match u128_req_at(token_in_fee_ptr, token_in_fee_len) { Ok(v) => v, Err(e) => return e };
+    let fee_out = match u128_req_at(token_out_fee_ptr, token_out_fee_len) { Ok(v) => v, Err(e) => return e };
+    let arg = dpay_icp::icrc::deposit_and_swap_arg(amount_in, min_out, fee_in, fee_out, zero_for_one != 0);
+    write_str_out(&arg, out_ptr, cap)
+}
+
+/// `icp_swap_min_out`: the exact-floor minimum-out for a venue quote at `slippage_bps`, as
+/// `{"minOut":"<decimal>"}`. JSON rather than a bare decimal because the legitimate answer `0` is
+/// one byte long, and a 1-byte length is indistinguishable from the `BAD_LEN` status code — a
+/// zero floor and a refused call must never read the same on a money screen. A bps outside u16 is
+/// REFUSED (BAD_LEN), never clamped: silently rewriting slippage is rewriting a money setting.
+#[no_mangle]
+pub extern "C" fn w_icp_swap_min_out(
+    quoted_ptr: u32, quoted_len: u32, slippage_bps: u32, out_ptr: u32, cap: u32,
+) -> u32 {
+    let quoted = match u128_req_at(quoted_ptr, quoted_len) { Ok(v) => v, Err(e) => return e };
+    let Ok(bps) = u16::try_from(slippage_bps) else {
+        return BAD_LEN;
+    };
+    let min_out = dpay_icp::icrc::swap_amount_out_minimum(quoted, bps);
+    write_str_out(format!("{{\"minOut\":\"{min_out}\"}}").as_bytes(), out_ptr, cap)
+}
+
+/// `icp_decode_swap_result`: the pool's `depositFromAndSwap`/`quote`/`swap` reply
+/// (`variant { ok : nat; err : Error }`, Motoko lowercase arms) as the same compact JSON the
+/// transfer/minter decoders emit — `{"ok":true,"amountOutGross":"…"}` or
+/// `{"ok":false,"errVariant":"…","errDetail":"…"}`. The pool's own text rides in `errDetail`, so
+/// it is JSON-escaped like every other untrusted string on this surface.
+#[no_mangle]
+pub extern "C" fn w_icp_decode_swap_result(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 8192 {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) };
+    let result = match dpay_icp::icrc::decode_swap_result(arg) { Ok(r) => r, Err(_) => return BAD_UTF8 };
+    let mut json = String::with_capacity(128);
+    match result {
+        Ok(amount_out) => {
+            json.push_str(&format!("{{\"ok\":true,\"amountOutGross\":\"{amount_out}\"}}"));
+        }
+        Err(e) => {
+            let (variant, detail) = match e {
+                PoolSwapError::CommonError => ("CommonError", String::new()),
+                PoolSwapError::InsufficientFunds => ("InsufficientFunds", String::new()),
+                PoolSwapError::InternalError(t) => ("InternalError", t),
+                PoolSwapError::UnsupportedToken(t) => ("UnsupportedToken", t),
+            };
+            json.push_str("{\"ok\":false,\"errVariant\":");
+            push_json_str(variant, &mut json);
+            json.push_str(",\"errDetail\":");
+            push_json_str(&detail, &mut json);
+            json.push('}');
+        }
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
 }
 
 /// ckETH minter `eip_1559_transaction_price` QUERY arg (ckerc20 ledger principal text).

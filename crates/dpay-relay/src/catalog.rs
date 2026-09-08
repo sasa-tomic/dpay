@@ -105,38 +105,25 @@ pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 
 /// The ICPSwap V3 pool the delegated-conversion PoC quotes (spec
 /// docs/specs/2026-09-07-delegated-conversion-spec.md §1): `65mrh-fqaaa-aaaar-qapoa-cai`, the
-/// ICP/VCHF 0.3% pool (factory `4mmnk-kiaaa-aaaag-qbllq-cai`, fee tier 3000). NOT a catalog
-/// row — the venue table is a relay-side read-validation pin for `/api/v1/swap_quote` (the
-/// catalog migration is a spec follow-up, and the APP carries its own venue consts in
-/// `app/config/` for the PoC). Compiled only where the quote surfaces exist (agent = the live
-/// read, test-helpers = the fake-IC pool stub).
+/// VCHF/ICP 0.3% pool (factory `4mmnk-kiaaa-aaaag-qbllq-cai`). NOT a catalog row — this is the
+/// relay's ALLOWLIST for `/api/v1/swap_quote`. Compiled only where the quote surfaces exist
+/// (agent = the live read, test-helpers = the fake-IC pool stub).
+///
+/// A pool PRINCIPAL is the only venue fact the relay may hold as a constant: it is dpay's own
+/// choice of which contract to talk to. The pool's token PAIR and its fee tier are claims about
+/// a remote system — they are read off the pool at request time
+/// ([`crate::agent_ledger::AgentLedger::swap_pool_metadata`]), never assumed. The 2026-09-07
+/// build pinned the pair as a constant AND seeded the offline fake from the same pin: the two
+/// agreed with each other and neither agreed with the venue, so live production served each
+/// direction's rate under the other direction's label (docs/specs/2026-09-08-conversion-hardening-plan.md).
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
 pub(crate) const SWAP_POOL_PRINCIPAL: &str = "65mrh-fqaaa-aaaar-qapoa-cai";
 
-/// The relay's KNOWN venue table for `/api/v1/swap_quote` — one PoC venue: the ICP/VCHF pool
-/// (`venue_for_pool` keys by the pool principal itself). `token0_ledger`/`token1_ledger` pin
-/// the pool's own metadata pair (token0 = ICP); the route derives `zero_for_one` from THIS
-/// table (token_in == token0), never from pair order alone.
+/// Is `pool` a venue this relay will quote? The allowlist, keyed on the pool principal alone —
+/// the route's 400 `unknown_pool` refusal. (One PoC venue; adding one = adding an arm here.)
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
-pub(crate) struct SwapVenue {
-    pub token0_ledger: &'static str,
-    pub token1_ledger: &'static str,
-}
-
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
-pub(crate) const ICP_VCHF_VENUE: SwapVenue = SwapVenue {
-    token0_ledger: ICP_LEDGER_PRINCIPAL,
-    token1_ledger: VCHF_LEDGER_PRINCIPAL,
-};
-
-/// The venue a `/api/v1/swap_quote` pool principal resolves to — `None` means unknown pool.
-/// (One PoC venue; adding one = adding a const here, exactly like the catalog rows.)
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
-pub(crate) fn venue_for_pool(pool: &str) -> Option<&'static SwapVenue> {
-    match pool {
-        SWAP_POOL_PRINCIPAL => Some(&ICP_VCHF_VENUE),
-        _ => None,
-    }
+pub(crate) fn is_known_swap_pool(pool: &str) -> bool {
+    pool == SWAP_POOL_PRINCIPAL
 }
 
 /// The IC section rows of the catalog — the wallet's runtime source of truth for which assets
@@ -1399,4 +1386,76 @@ mod wire_byte_shape_tests {
             "{\"token\":\"EURC\",\"symbol\":\"EURC\",\"decimals\":6,\"min_fraction_digits\":2,\"mint\":\"HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr\",\"onramp\":\"Unavailable\",\"offramp\":\"Unavailable\",\"liquidity\":\"deep\"}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Swap-venue drift alarm (2026-09-08). The relay holds ONE venue constant — the pool PRINCIPAL
+// (dpay's own choice of contract). The pool's PAIR ORDER and FEE TIER are facts about a remote
+// system, so production reads them off the pool on every quote and pins nothing.
+//
+// What still needs pinning is the offline FAKE: its stub pool has to be seeded in some order,
+// and if that order is a guess then the fake and the code agree with each other while both
+// disagree with the venue — which is exactly what happened, and exactly why the offline suite
+// could not see a live rate that was wrong by ~5.9× against the user. So the seed is MEASURED
+// (`dfx/catalog_truth.json` `swap_venue`, off the live pool 2026-09-08) and this alarm holds the
+// stub to it. The live half is `just swap-venue-probe`
+// (`crates/dpay-relay/tests/swap_venue_mainnet.rs`) — the only thing that can see the venue
+// change, since `just test-live` is PocketIC and has no ICPSwap pool in it.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "test-helpers"))]
+mod swap_venue_truth_tests {
+    use super::*;
+
+    use serde_json::Value;
+
+    const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
+
+    fn swap_venue_truth() -> Value {
+        serde_json::from_str::<Value>(CATALOG_TRUTH)
+            .expect("dfx/catalog_truth.json must be valid JSON")["swap_venue"]
+            .clone()
+    }
+
+    #[test]
+    fn allowlisted_pool_is_the_measured_venue_and_nothing_else() {
+        let v = swap_venue_truth();
+        assert_eq!(
+            SWAP_POOL_PRINCIPAL,
+            v["pool"].as_str().expect("swap_venue.pool"),
+            "the allowlisted pool principal IS the measured venue"
+        );
+        assert!(is_known_swap_pool(SWAP_POOL_PRINCIPAL));
+        // The allowlist is a whitelist, not a shape check: a well-formed principal that is not
+        // the PoC venue is refused (the route's 400 `unknown_pool`).
+        assert!(!is_known_swap_pool(ICP_LEDGER_PRINCIPAL));
+        assert!(!is_known_swap_pool(""));
+    }
+
+    #[test]
+    fn stub_pool_is_seeded_in_the_measured_live_pair_order() {
+        let v = swap_venue_truth();
+        let meta = crate::ic_gateway::FakeIc::from_catalog().swap_pool_metadata();
+        assert_eq!(
+            meta.token0_ledger,
+            v["token0_ledger"].as_str().expect("swap_venue.token0_ledger"),
+            "the offline stub's token0 must be the venue's OWN token0 (measured 2026-09-08) — \
+             seeding it backwards is what let a 5.9x-wrong live rate pass a green suite"
+        );
+        assert_eq!(
+            meta.token1_ledger,
+            v["token1_ledger"].as_str().expect("swap_venue.token1_ledger"),
+            "the offline stub's token1 must be the venue's OWN token1 (measured 2026-09-08)"
+        );
+        assert_eq!(
+            meta.fee_millionths,
+            u128::from(v["fee_millionths"].as_u64().expect("swap_venue.fee_millionths")),
+            "the offline stub's fee tier must be the venue's OWN tier (measured 2026-09-08)"
+        );
+        // And the measured order is the REVERSE of the pin the 2026-09-07 build carried: token0
+        // is VCHF, token1 is ICP. Naming both catalog consts here makes the alarm say WHICH
+        // asset moved, not just that a string changed.
+        assert_eq!(meta.token0_ledger, VCHF_LEDGER_PRINCIPAL);
+        assert_eq!(meta.token1_ledger, ICP_LEDGER_PRINCIPAL);
+    }
+
 }

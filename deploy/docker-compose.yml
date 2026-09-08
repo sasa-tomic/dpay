@@ -41,8 +41,11 @@ services:
       # combination at startup. Unset → true only for a loopback URL.
       DPAY_IC_FETCH_ROOT_KEY: ${DPAY_IC_FETCH_ROOT_KEY:-}
 
-      # POST /faucet mints demo funds. It only exists in the test-helpers build; off by default —
-      # only ever turn it on against a throwaway replica.
+      # POST /faucet mints demo funds. This switch gates the OFFLINE FIXTURE faucet (the
+      # test-helpers build, which credits an in-process fake gateway) — off by default, and only
+      # ever worth turning on against a throwaway replica. It does NOT gate the faucet this
+      # production image compiles: that one mints through the facade canister and is gated by
+      # DPAY_CONTROLLER_SEED below.
       DPAY_ENABLE_FAUCET: ${DPAY_ENABLE_FAUCET:-false}
 
       # The OpenCryptoPay till (POST /api/v1/till + /api/v1/till/void + /v1/lnurlp/*). Its routes
@@ -53,8 +56,10 @@ services:
       # The faucet (agent build): hex Ed25519 seed of the canister CONTROLLER key (the same key
       # material as DPAY_DFX_IDENTITY's identity.pem). Set → the relay signs its faucet `mint`
       # calls and POST /api/v1/faucet works (relay-side cooldown + authenticated mint, crediting
-      # the user principal). Unset → the agent is anonymous and the mint is refused by the
-      # canister's require_admin (read-only relay). SECRET: treat like the PEM itself.
+      # the user principal), and GET /api/v1/capabilities reports `demo_faucet:true`. Unset → the
+      # agent is anonymous, the faucet is unavailable (503 naming this variable), and the wallet
+      # shows no top-up action. THIS is the production faucet's gate — not DPAY_ENABLE_FAUCET
+      # above. SECRET: treat like the PEM itself.
       DPAY_CONTROLLER_SEED: ${DPAY_CONTROLLER_SEED:-}
 
     # Lets DPAY_IC_URL point at a dfx replica running on the host (http://host.docker.internal:4943)

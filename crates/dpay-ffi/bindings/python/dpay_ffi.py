@@ -486,6 +486,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state() != 56142:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_swap_result() != 51438:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_text() != 30438:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046:
@@ -877,6 +879,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_read_state.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_swap_result.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_swap_result.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1384,6 +1391,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_query.restype = ctypes.c_uin
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_swap_result.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_swap_result.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_text.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_text.restype = ctypes.c_uint16
@@ -1988,6 +1998,71 @@ class _UniffiConverterTypeIcpStateRead(_UniffiConverterRustBuffer):
     def write(value, buf):
         _UniffiConverterOptionalString.write(value.time_ns, buf)
         _UniffiConverterSequenceTypeIcpRequestStatus.write(value.statuses, buf)
+
+
+class IcpSwapReply:
+    """
+    A decoded ICPSwap pool reply (`variant { ok : nat; err : Error }`, the venue's Motoko
+    lowercase arms): `ok` carries the pool's GROSS amount out — never the amount the wallet
+    receives, which is that figure minus the output ledger's own fee. Errors flatten to the
+    venue's own arm tag plus its own words, so a refusal is reported as the venue phrased it.
+    """
+
+    ok: "bool"
+    amount_out_gross: "typing.Optional[str]"
+    err_variant: "str"
+    """
+    `CommonError` | `InsufficientFunds` | `InternalError` | `UnsupportedToken`; empty when ok.
+    """
+
+    err_detail: "str"
+    """
+    The pool's own text for the two text-carrying arms; empty otherwise.
+    """
+
+    def __init__(self, *, ok: "bool", amount_out_gross: "typing.Optional[str]", err_variant: "str", err_detail: "str"):
+        self.ok = ok
+        self.amount_out_gross = amount_out_gross
+        self.err_variant = err_variant
+        self.err_detail = err_detail
+
+    def __str__(self):
+        return "IcpSwapReply(ok={}, amount_out_gross={}, err_variant={}, err_detail={})".format(self.ok, self.amount_out_gross, self.err_variant, self.err_detail)
+
+    def __eq__(self, other):
+        if self.ok != other.ok:
+            return False
+        if self.amount_out_gross != other.amount_out_gross:
+            return False
+        if self.err_variant != other.err_variant:
+            return False
+        if self.err_detail != other.err_detail:
+            return False
+        return True
+
+class _UniffiConverterTypeIcpSwapReply(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return IcpSwapReply(
+            ok=_UniffiConverterBool.read(buf),
+            amount_out_gross=_UniffiConverterOptionalString.read(buf),
+            err_variant=_UniffiConverterString.read(buf),
+            err_detail=_UniffiConverterString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiConverterBool.check_lower(value.ok)
+        _UniffiConverterOptionalString.check_lower(value.amount_out_gross)
+        _UniffiConverterString.check_lower(value.err_variant)
+        _UniffiConverterString.check_lower(value.err_detail)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiConverterBool.write(value.ok, buf)
+        _UniffiConverterOptionalString.write(value.amount_out_gross, buf)
+        _UniffiConverterString.write(value.err_variant, buf)
+        _UniffiConverterString.write(value.err_detail, buf)
 
 
 class IcpTransferOutcome:
@@ -3571,6 +3646,13 @@ def icp_decode_read_state(body: "bytes",request_ids: "typing.List[bytes]") -> "I
         _UniffiConverterSequenceBytes.lower(request_ids)))
 
 
+def icp_decode_swap_result(arg: "bytes") -> "IcpSwapReply":
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterTypeIcpSwapReply.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_swap_result,
+        _UniffiConverterBytes.lower(arg)))
+
+
 def icp_decode_text(arg: "bytes") -> "str":
     """
     Decode a bare `text` reply (get_btc_address / any single-text query).
@@ -4121,6 +4203,7 @@ __all__ = [
     "IcpRequestStatus",
     "IcpSignedUpdate",
     "IcpStateRead",
+    "IcpSwapReply",
     "IcpTransferOutcome",
     "KeyPair",
     "NfcBundleData",
@@ -4139,6 +4222,7 @@ __all__ = [
     "icp_decode_minter_ok",
     "icp_decode_query",
     "icp_decode_read_state",
+    "icp_decode_swap_result",
     "icp_decode_text",
     "icp_decode_transfer_result",
     "icp_deposit_and_swap_arg",

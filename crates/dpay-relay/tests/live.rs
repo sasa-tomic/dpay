@@ -920,7 +920,9 @@ fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
         let agent = AgentLedger::connect_with_identity(&gateway_url, canister_id, true, seed)
             .await
             .expect("AgentLedger must connect with the controller identity");
-        let state = AppState::new(Arc::new(agent));
+        // Wired the way `main` wires a relay that was given DPAY_CONTROLLER_SEED: the faucet is
+        // available, which is both what `/api/v1/capabilities` reports and what the route obeys.
+        let state = AppState::new(Arc::new(agent)).with_faucet(true);
         // Test seam: shrink the 1h production window to 2s so the rollover is observable.
         state.set_faucet_cooldown_window(2);
         state
@@ -1010,16 +1012,19 @@ fn live_faucet_mints_at_user_principal_with_relay_side_cooldown() {
     assert_eq!(user_balance(&pic.0, &ledger), 20_000u64);
 }
 
-// The REFUSAL side of the faucet's money-safety gate, pinned verbatim: an agent that is NOT the
-// canister's controller is refused by `require_admin` and the relay surfaces the canister's text
-// 1:1 as the 422 {error} the app shows. Two shapes, both the exact prod failure class reported
-// 2026-08-20 ("Faucet top up fails: unauthorized: admin ops require the controller principal"):
-//   - ANONYMOUS — DPAY_CONTROLLER_SEED unset (the relay's default without deploy-side wiring);
+// The REFUSAL side of the faucet's money-safety gate — the exact prod failure class reported
+// 2026-08-20 ("Faucet top up fails: unauthorized: admin ops require the controller principal"),
+// in the two shapes it comes in, each answered by the half of the gate that can actually know:
+//   - ANONYMOUS — DPAY_CONTROLLER_SEED unset (the relay's default without deploy-side wiring).
+//     The RELAY knows this about itself, so it refuses without a canister round trip and names
+//     the variable to set. `main` never declares such a relay's faucet available, and the route
+//     obeys the same flag `/api/v1/capabilities` reports.
 //   - WRONG SEED — a set-but-different key (an operator pasting the wrong half / wrong identity).
-// The mirror of the happy path above; if the canister's gate wording or the relay's verbatim
-// mapping ever drifts, this test is what catches it.
+//     The relay CANNOT know an installed identity is the wrong one, so this is the canister's
+//     call: `require_admin` refuses and the relay surfaces that text 1:1 as the 422 the app
+//     shows. If the canister's wording or the relay's verbatim mapping ever drifts, this catches it.
 #[test]
-fn live_faucet_refuses_non_controller_identities_verbatim() {
+fn live_faucet_refuses_non_controller_identities() {
     let (_pic, _ledger, dpay, gateway_url, _seed) = stand_up_with_controller_seed();
     let hex_pk = hex::encode(generate_keypair().verifying_key().to_bytes());
 
@@ -1028,43 +1033,178 @@ fn live_faucet_refuses_non_controller_identities_verbatim() {
         .build()
         .expect("tokio runtime");
 
-    // (a) anonymous agent — exactly `AgentLedger::connect` with no DPAY_CONTROLLER_SEED;
-    // (b) an agent holding a DIFFERENT seed — self-authenticates as a non-controller principal.
-    let anonymous = rt
-        .block_on(AgentLedger::connect(&gateway_url, dpay))
-        .expect("anonymous agent connects");
-    let wrong_seed = rt
-        .block_on(AgentLedger::connect_with_identity(
+    let faucet_req = || {
+        let body = serde_json::json!({ "account": hex_pk, "amount": "10000" });
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/faucet")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+
+    // (a) anonymous agent — exactly `AgentLedger::connect` with no DPAY_CONTROLLER_SEED, and the
+    // faucet left unavailable exactly as `main` leaves it without that seed.
+    let anonymous = AppState::new(Arc::new(
+        rt.block_on(AgentLedger::connect(&gateway_url, dpay))
+            .expect("anonymous agent connects"),
+    ));
+    rt.block_on(async {
+        let (s, b) = call(&anonymous, faucet_req()).await;
+        assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE, "anonymous: faucet body={b}");
+        let reason = b["error"]
+            .as_str()
+            .unwrap_or_else(|| panic!("error must be a string (body={b})"));
+        assert!(
+            reason.contains("DPAY_CONTROLLER_SEED"),
+            "the refusal must name the knob an operator has to set, got {reason:?}"
+        );
+    });
+
+    // (b) an agent holding a DIFFERENT seed — it self-authenticates as a non-controller principal,
+    // so `main` WOULD declare the faucet available (a seed is installed) and only the canister can
+    // say otherwise.
+    let wrong_seed = AppState::new(Arc::new(
+        rt.block_on(AgentLedger::connect_with_identity(
             &gateway_url,
             dpay,
             true,
             [9u8; 32],
         ))
-        .expect("wrong-seed agent connects");
+        .expect("wrong-seed agent connects"),
+    ))
+    .with_faucet(true);
+    rt.block_on(async {
+        let (s, b) = call(&wrong_seed, faucet_req()).await;
+        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "wrong seed: faucet body={b}");
+        assert_eq!(
+            b["error"].as_str(),
+            Some("unauthorized: admin ops require the controller principal"),
+            "the canister's verbatim refusal must surface 1:1 (body={b})"
+        );
+    });
+}
 
-    for (name, ledger) in [("anonymous", anonymous), ("wrong seed", wrong_seed)] {
-        let state = AppState::new(Arc::new(ledger));
-        let body = serde_json::json!({ "account": hex_pk, "amount": "10000" });
-        let req = Request::builder()
+/// `GET /api/v1/capabilities`'s `demo_faucet` and what `POST /api/v1/faucet` actually did, read
+/// off the SAME router: `(advertised, credited, status, body)`.
+async fn faucet_capability_and_route(
+    state: &AppState,
+    account_hex: &str,
+) -> (bool, bool, StatusCode, Value) {
+    let (cs, cb) = call(
+        state,
+        Request::builder()
+            .method("GET")
+            .uri("/api/v1/capabilities")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(cs, StatusCode::OK, "capabilities body={cb}");
+    let advertised = cb["demo_faucet"]
+        .as_bool()
+        .unwrap_or_else(|| panic!("demo_faucet must be a bool (body={cb})"));
+    // The canonical top-up (`FAUCET_AMOUNT` = 10_000, what the app's TOP_UP_CENTS sends), so the
+    // handler judges AVAILABILITY and never the denomination.
+    let body = serde_json::json!({ "account": account_hex, "amount": "10000" });
+    let (fs, fb) = call(
+        state,
+        Request::builder()
             .method("POST")
             .uri("/api/v1/faucet")
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
-            .unwrap();
-        rt.block_on(async {
-            let (s, b) = call(&state, req).await;
-            assert_eq!(
-                s,
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "{name}: faucet body={b}"
-            );
-            assert_eq!(
-                b["error"].as_str(),
-                Some("unauthorized: admin ops require the controller principal"),
-                "{name}: the canister's verbatim refusal must surface 1:1 (body={b})"
-            );
-        });
-    }
+            .unwrap(),
+    )
+    .await;
+    (advertised, fs.is_success(), fs, fb)
+}
+
+// The PRODUCTION-build mirror of `capability_demo_faucet_equals_what_the_faucet_route_does`
+// (tests/relay.rs), and the live pin on the defect it exists for: prod served
+// `{"till":false,"demo_faucet":false}` while `POST /api/v1/faucet` minted happily, so the app hid
+// the top-up button and onboarded unfunded wallets against a perfectly healthy relay. The
+// expectation is MEASURED against the router on both sides of the gate — an agent that holds the
+// facade's controller identity and an anonymous one — never re-derived from the `cfg!` the
+// implementation uses (that tautology is what let the lie ship).
+#[test]
+fn live_capability_demo_faucet_equals_what_the_faucet_route_does() {
+    let (pic, ledger, dpay, gateway_url, seed) = stand_up_with_controller_seed();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+
+    // Ground truth straight off the rail (query; safe outside the runtime).
+    let balance_at = |pic: &PocketIc, owner: Principal| -> u64 {
+        let res = pic
+            .query_call(
+                ledger,
+                Principal::anonymous(),
+                "icrc1_balance_of",
+                encode_one(Account { owner, subaccount: None }).unwrap(),
+            )
+            .expect("icrc1_balance_of query must succeed");
+        decode_one::<Nat>(&res)
+            .expect("balance decodes as Nat")
+            .0
+            .try_into()
+            .expect("test balance fits u64")
+    };
+    let owner_of = |pk: &[u8; 32]| -> Principal {
+        Principal::from_slice(
+            dpay_icp::principal::Principal::self_authenticating_ed25519(pk).as_slice(),
+        )
+    };
+
+    // (a) the shape production runs: an agent holding the controller identity (DPAY_CONTROLLER_SEED).
+    let funded_pk = generate_keypair().verifying_key().to_bytes();
+    let controller = rt.block_on(async {
+        AppState::new(Arc::new(
+            AgentLedger::connect_with_identity(&gateway_url, dpay, true, seed)
+                .await
+                .expect("controller-identity agent connects"),
+        ))
+        // What `main` declares when DPAY_CONTROLLER_SEED is set — the wiring under test is that
+        // the route and the capability then agree, whichever way the flag went.
+        .with_faucet(true)
+    });
+    let (adv, credited, s, b) =
+        rt.block_on(faucet_capability_and_route(&controller, &hex::encode(funded_pk)));
+    assert!(credited, "a controller-identity relay must actually mint (answered {s}: {b})");
+    assert_eq!(
+        adv, credited,
+        "advertised demo_faucet must equal what POST /api/v1/faucet did (answered {s}: {b})"
+    );
+    assert_eq!(
+        balance_at(&pic.0, owner_of(&funded_pk)),
+        10_000u64,
+        "the measurement is a real mint at the USER principal, not a 200 with no money"
+    );
+
+    // (b) the same canister, an ANONYMOUS relay: the canister's `require_admin` means this relay
+    // cannot credit anything, and it must not claim otherwise.
+    let unfunded_pk = generate_keypair().verifying_key().to_bytes();
+    let anonymous = rt.block_on(async {
+        AppState::new(Arc::new(
+            AgentLedger::connect(&gateway_url, dpay)
+                .await
+                .expect("anonymous agent connects"),
+        ))
+    });
+    let (adv2, credited2, s2, b2) =
+        rt.block_on(faucet_capability_and_route(&anonymous, &hex::encode(unfunded_pk)));
+    assert!(!credited2, "an anonymous relay cannot mint (answered {s2}: {b2})");
+    assert_eq!(
+        adv2, credited2,
+        "an anonymous relay must not advertise a faucet (answered {s2}: {b2})"
+    );
+    assert_eq!(
+        balance_at(&pic.0, owner_of(&unfunded_pk)),
+        0u64,
+        "a refused faucet creates nothing"
+    );
 }
 
 // --- WAVE 5: runtime ckERC20-helper read ---------------------------------------------------------

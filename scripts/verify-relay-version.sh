@@ -6,6 +6,10 @@
 #
 # Outcomes:
 #   MATCH          — the live relay's commit == HEAD (the running image is current).
+#   DIRTY          — the live commit carries the `-dirty` marker build.rs bakes for a build made
+#                    from a modified working tree. The image corresponds to NO commit, so it is
+#                    neither current nor behind — it is unidentifiable. Checked FIRST, because a
+#                    dirty build whose base SHA equals HEAD would otherwise read as MATCH. Exit 1.
 #   BEHIND by N    — the live commit is an ANCESTOR of HEAD (HEAD is ahead; the image predates the
 #                    source — redeploy: `just image && just up`). Exit 1.
 #   MISMATCH       — the live commit is NOT an ancestor of HEAD (divergent / force-pushed / different
@@ -35,14 +39,32 @@ LIVE_JSON="$(curl -m 8 -Ss --connect-timeout 5 "$URL" 2>/dev/null)" || {
   echo "verify-relay-version: could not reach $URL (curl failed). Is the relay deployed + reachable?" >&2
   exit 2
 }
-# Extract the commit field without a jq dependency (the body is a flat 3-field JSON object).
-LIVE="$(printf '%s' "$LIVE_JSON" | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([0-9a-f]*\)".*/\1/p' | head -n1)"
+# Extract the commit field without a jq dependency (the body is a flat 3-field JSON object). The
+# match is the whole quoted value, NOT `[0-9a-f]*`: that older pattern stopped at the `-` of a
+# `-dirty` marker and handed back a clean-looking 40-char SHA, which is precisely how a dirty image
+# reported MATCH.
+LIVE_RAW="$(printf '%s' "$LIVE_JSON" | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+case "$LIVE_RAW" in
+  *-dirty) LIVE="${LIVE_RAW%-dirty}"; LIVE_DIRTY=yes ;;
+  *)       LIVE="$LIVE_RAW";          LIVE_DIRTY=no  ;;
+esac
 if [ -z "$LIVE" ] || [ "${#LIVE}" -ne 40 ]; then
   echo "verify-relay-version: live /version did not return a 40-char commit. body:" >&2
   printf '%s\n' "$LIVE_JSON" | head -c 400 >&2
   exit 2
 fi
-echo "== live relay: $LIVE  ($URL)"
+echo "== live relay: $LIVE_RAW  ($URL)"
+
+# DIRTY first: the base SHA may well equal HEAD, and treating that as MATCH is the bug this state
+# exists to make impossible. Uncommitted code was compiled into the image (deploy/build.sh builds
+# the working tree), so no commit describes what is running.
+if [ "$LIVE_DIRTY" = yes ]; then
+  echo "FAIL: the live relay was built from a DIRTY working tree (/version reports $LIVE_RAW)."
+  echo "      uncommitted changes were compiled into the image, so commit $LIVE does NOT describe"
+  echo "      what prod is running and nothing here can tell you what does."
+  echo "      commit (or stash) the tree, then redeploy:  just image && just up"
+  exit 1
+fi
 
 if [ "$LIVE" = "$HEAD" ]; then
   echo "PASS: the live relay is built from the current HEAD ($HEAD)."

@@ -343,6 +343,10 @@ for (const c of CASES) {
     // way to pay a 64-hex account identifier — see AccountIdentifier in crates/dpay-icp).
     'w_icp_validate_icrc_account', 'w_icp_validate_account_id', 'w_icp_account_id_from_principal',
     'w_icp_legacy_transfer_arg', 'w_icp_decode_legacy_transfer_result',
+    // Delegated conversion (ICPSwap pool): the swap arg the user signs, the min-out arithmetic
+    // behind it, and the pool's own Result reply. Before these existed the web build hand-rolled
+    // TS twins of all three — every e2e conversion flow signed bytes the compiled core never made.
+    'w_icp_deposit_and_swap_arg', 'w_icp_swap_min_out', 'w_icp_decode_swap_result',
   ];
   for (const name of PINNED_ICP_EXPORTS) {
     check(`icp export present: ${name}`, typeof ex[name] === 'function',
@@ -493,6 +497,97 @@ for (const c of CASES) {
   check('w_icp_decode_read_state(malformed cert) == BAD_UTF8(2)',
     ex.w_icp_decode_read_state(writeBytes(new Uint8Array([0xde, 0xad, 0xbe, 0xef])), 4,
       ex.w_alloc(32 * 8), 0, ex.w_alloc(CAP), CAP) === 2);
+}
+
+// --- delegated conversion (ICPSwap pool): swap arg + min-out + pool Result -----------------------
+// The arg the user signs and the reply that decides whether their money moved. The expected bytes
+// are READ from the committed Rust goldens (crates/dpay-icp/tests/goldens.rs) — never restated
+// here — so this guard and the core cannot drift apart by editing one of them.
+{
+  const CAP = 4096;
+  const sl = s => enc.encode(s).length;
+  const GOLDENS_RS = readFileSync(`${ROOT}crates/dpay-icp/tests/goldens.rs`, 'utf8');
+  const golden = name => {
+    const m = GOLDENS_RS.match(new RegExp(`const ${name}: &str = "([0-9a-f]+)";`));
+    if (m === null) throw new Error(`golden ${name} not found in crates/dpay-icp/tests/goldens.rs`);
+    return m[1];
+  };
+  const swapArg = (amountIn, minOut, feeIn, feeOut, zeroForOne) => {
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_deposit_and_swap_arg(
+      writeStr(amountIn), sl(amountIn), writeStr(minOut), sl(minOut),
+      writeStr(feeIn), sl(feeIn), writeStr(feeOut), sl(feeOut),
+      zeroForOne ? 1 : 0, out, CAP);
+    return [n, n > 3 ? hex(readBytes(out, n)) : ''];
+  };
+  {
+    const [n, got] = swapArg('102000000', '1800000', '10000', '10000', true);
+    check('w_icp_deposit_and_swap_arg(float-op shape) == G_SWAP_FLOAT_OP',
+      got === golden('G_SWAP_FLOAT_OP'), `n=${n}\n    got:  ${got}\n    want: ${golden('G_SWAP_FLOAT_OP')}`);
+  }
+  {
+    const [n, got] = swapArg('0', '0', '0', '123456789012345678901234567890', false);
+    check('w_icp_deposit_and_swap_arg(zeroes + 129-bit fee) == G_SWAP_ZEROES_129BIT_FEE',
+      got === golden('G_SWAP_ZEROES_129BIT_FEE'), `n=${n} got=${got}`);
+  }
+  {
+    const [n, got] = swapArg('340282366920938463463374607431768211455', '1', '1', '2', true);
+    check('w_icp_deposit_and_swap_arg(u128::MAX amountIn) == G_SWAP_U128_MAX',
+      got === golden('G_SWAP_U128_MAX'), `n=${n} got=${got}`);
+  }
+  // Non-amounts are REFUSED, never coerced: a swap arg is what the user's key signs.
+  for (const bad of ['1.5', '-1', '340282366920938463463374607431768211456', '', ' 1']) {
+    check(`w_icp_deposit_and_swap_arg(amountIn=${JSON.stringify(bad)}) == BAD_UTF8(2)`,
+      swapArg(bad, '0', '0', '0', false)[0] === 2, `got ${swapArg(bad, '0', '0', '0', false)[0]}`);
+  }
+
+  // min-out: the exact floor the app signs into the arg above.
+  // `{"minOut":"…"}` — JSON, because the legitimate answer "0" is one byte and a 1-byte length
+  // would read as the BAD_LEN status code.
+  const minOut = (quoted, bps) => {
+    const out = ex.w_alloc(64);
+    const n = ex.w_icp_swap_min_out(writeStr(quoted), sl(quoted), bps, out, 64);
+    return [n, n > 3 ? JSON.parse(readStr(out, n)).minOut : ''];
+  };
+  const U128_MAX = '340282366920938463463374607431768211455';
+  check('w_icp_swap_min_out(u128::MAX, 0 bps) is the identity',
+    minOut(U128_MAX, 0)[1] === U128_MAX, `got ${minOut(U128_MAX, 0)[1]}`);
+  check('w_icp_swap_min_out(u128::MAX, 10000 bps) == "0" (no overflow-to-quote)',
+    minOut(U128_MAX, 10000)[1] === '0', `got ${minOut(U128_MAX, 10000)[1]}`);
+  check('w_icp_swap_min_out(u128::MAX, 65535 bps) == "0"',
+    minOut(U128_MAX, 65535)[1] === '0', `got ${minOut(U128_MAX, 65535)[1]}`);
+  // Remainder-heavy floor: units=1 rem=9999, k=5000 → 1*5000 + floor(9999*5000/10000) = 9999.
+  check('w_icp_swap_min_out(19999, 5000 bps) == "9999" (floored, never rounded up)',
+    minOut('19999', 5000)[1] === '9999', `got ${minOut('19999', 5000)[1]}`);
+  // A bps the u16 cannot hold is REFUSED — never truncated into a different money setting.
+  check('w_icp_swap_min_out(bps = 65536) == BAD_LEN(1)', minOut('100', 65536)[0] === 1);
+  check('w_icp_swap_min_out(quote = "abc") == BAD_UTF8(2)', minOut('abc', 0)[0] === 2);
+  check('w_icp_swap_min_out(quote = "") == BAD_UTF8(2)', minOut('', 0)[0] === 2);
+
+  // The pool's own Result reply — every arm of the venue's Motoko `variant { ok; err }`.
+  const decodeSwap = hexStr => {
+    const bytes = fromHex(hexStr);
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_decode_swap_result(writeBytes(bytes), bytes.length, out, CAP);
+    return [n, n > 3 ? readStr(out, n) : ''];
+  };
+  const swapCases = [
+    ['G_SWAP_RESULT_OK', {ok: true, amountOutGross: '99600000'}],
+    ['G_SWAP_RESULT_ERR_COMMON', {ok: false, errVariant: 'CommonError', errDetail: ''}],
+    ['G_SWAP_RESULT_ERR_INSUFFICIENT', {ok: false, errVariant: 'InsufficientFunds', errDetail: ''}],
+    ['G_SWAP_RESULT_ERR_INTERNAL', {ok: false, errVariant: 'InternalError', errDetail: 'amountOutMinimum not met'}],
+    ['G_SWAP_RESULT_ERR_UNSUPPORTED', {ok: false, errVariant: 'UnsupportedToken', errDetail: 'zzz-cai'}],
+  ];
+  for (const [name, want] of swapCases) {
+    const [n, s] = decodeSwap(golden(name));
+    check(`w_icp_decode_swap_result(${name}) == ${JSON.stringify(want)}`,
+      n > 3 && canon(JSON.parse(s)) === canon(want), `n=${n} s=${s}`);
+  }
+  check('w_icp_decode_swap_result(non-DIDL garbage) == BAD_UTF8(2)', decodeSwap('deadbeef')[0] === 2);
+  check('w_icp_decode_swap_result(truncated ok reply) == BAD_UTF8(2)',
+    decodeSwap(golden('G_SWAP_RESULT_OK').slice(0, -2))[0] === 2);
+  check('w_icp_decode_swap_result(oob arg_ptr) == BAD_LEN(1)',
+    ex.w_icp_decode_swap_result(0xffff0000, 32, ex.w_alloc(CAP), CAP) === 1);
 }
 
 // --- w_till_open_sig: the merchant's ring-up proof, against the Rust-emitted golden -------------

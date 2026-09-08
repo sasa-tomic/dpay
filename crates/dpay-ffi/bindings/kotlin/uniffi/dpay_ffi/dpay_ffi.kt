@@ -836,6 +836,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -876,6 +878,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_decode_minter_ok(
 fun uniffi_dpay_ffi_checksum_func_icp_decode_query(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_read_state(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_swap_result(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_text(
 ): Short
@@ -1087,6 +1091,8 @@ fun uniffi_dpay_ffi_fn_func_icp_decode_minter_ok(`arg`: RustBuffer.ByValue,uniff
 fun uniffi_dpay_ffi_fn_func_icp_decode_query(`body`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_read_state(`body`: RustBuffer.ByValue,`requestIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_swap_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_text(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1311,6 +1317,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_read_state() != 56142.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_swap_result() != 51438.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_text() != 30438.toShort()) {
@@ -2848,6 +2857,58 @@ public object FfiConverterTypeIcpStateRead: FfiConverterRustBuffer<IcpStateRead>
 
 
 /**
+ * A decoded ICPSwap pool reply (`variant { ok : nat; err : Error }`, the venue's Motoko
+ * lowercase arms): `ok` carries the pool's GROSS amount out — never the amount the wallet
+ * receives, which is that figure minus the output ledger's own fee. Errors flatten to the
+ * venue's own arm tag plus its own words, so a refusal is reported as the venue phrased it.
+ */
+data class IcpSwapReply (
+    var `ok`: kotlin.Boolean, 
+    var `amountOutGross`: kotlin.String?, 
+    /**
+     * `CommonError` | `InsufficientFunds` | `InternalError` | `UnsupportedToken`; empty when ok.
+     */
+    var `errVariant`: kotlin.String, 
+    /**
+     * The pool's own text for the two text-carrying arms; empty otherwise.
+     */
+    var `errDetail`: kotlin.String
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIcpSwapReply: FfiConverterRustBuffer<IcpSwapReply> {
+    override fun read(buf: ByteBuffer): IcpSwapReply {
+        return IcpSwapReply(
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IcpSwapReply) = (
+            FfiConverterBoolean.allocationSize(value.`ok`) +
+            FfiConverterOptionalString.allocationSize(value.`amountOutGross`) +
+            FfiConverterString.allocationSize(value.`errVariant`) +
+            FfiConverterString.allocationSize(value.`errDetail`)
+    )
+
+    override fun write(value: IcpSwapReply, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`ok`, buf)
+            FfiConverterOptionalString.write(value.`amountOutGross`, buf)
+            FfiConverterString.write(value.`errVariant`, buf)
+            FfiConverterString.write(value.`errDetail`, buf)
+    }
+}
+
+
+
+/**
  * A decoded `icrc1_transfer` reply (the DIDL variant inside a `replied` arg): `ok` carries the
  * ledger block index (decimal string); errors flatten to a variant tag + human detail.
  */
@@ -3802,6 +3863,16 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_read_state(
         FfiConverterByteArray.lower(`body`),FfiConverterSequenceByteArray.lower(`requestIds`),_status)
+}
+    )
+    }
+    
+
+    @Throws(DpayException::class) fun `icpDecodeSwapResult`(`arg`: kotlin.ByteArray): IcpSwapReply {
+            return FfiConverterTypeIcpSwapReply.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_swap_result(
+        FfiConverterByteArray.lower(`arg`),_status)
 }
     )
     }

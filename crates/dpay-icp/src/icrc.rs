@@ -1617,28 +1617,26 @@ pub fn decode_int(bytes: &[u8]) -> Result<i128, IcpError> {
 }
 
 // ---------------------------------------------------------------------------
-// ICPSwap pool surface — the FAKE-GATEWAY half (delegated-conversion PoC, spec 2026-09-07)
+// ICPSwap pool RESULT surface (delegated-conversion PoC, spec 2026-09-07)
 //
 // The signed-swap arg side (`deposit_and_swap_arg` above) is the app-facing encoder; THIS
-// section is what the offline fake-IC pool + the relay's passthrough decode/encode:
-// - `quote`/`swap` take SwapArgs (`swap_arg`/`decode_swap_arg`) and reply
-//   `Result = variant { err : Error; ok : nat }` (`encode_swap_result_*`/`decode_swap_result`);
-// - `icrc2_allowance` replies `{ allowance : nat; expires_at : opt nat64 }`;
-// - `metadata` replies `variant { ok : PoolMetadata; err : Error }` (fixture shape).
-// Amounts are TEXT DECIMAL STRINGS on the wire (.did:
-// third_party/oisy-wallet/src/declarations/icp_swap_pool/icp_swap_pool.did). Tables are the
-// production-candid 0.10.22 bytes, golden-pinned in tests/goldens.rs
-// (G_SWAP_ARGS/G_SWAP_RESULT_*/G_ALLOWANCE_*/G_POOL_METADATA): if one fails after an edit
-// here, fix this code, never the golden.
+// section is the reply half both sides read: `depositFromAndSwap` (and `quote`, on any caller
+// that makes one) answers `Result = variant { err : Error; ok : nat }`. The offline fake-IC
+// pool encodes it; the app decodes it through the wasm/FFI export of `decode_swap_result`.
+// The table is the production-candid 0.10.22 bytes, golden-pinned in tests/goldens.rs
+// (G_SWAP_RESULT_*): if one fails after an edit here, fix this code, never the golden.
+//
+// Deleted 2026-09-08 as dead: `swap_arg`/`decode_swap_arg`/`PoolSwapArgs`, the
+// `icrc2_allowance` reply codec, and the `metadata` reply FIXTURE encoder. Their only callers
+// were three fake-gateway query arms that nothing ever queried, and the metadata fixture had
+// already drifted off the venue's real wire shape (it emitted `tick : int64`; the live pool
+// sends `tick : int`) — which is what an unexercised codec does. The relay reads the venue's
+// real `metadata` through a candid mirror pinned to CAPTURED MAINNET BYTES instead
+// (`crates/dpay-relay/src/agent_ledger.rs`). If a device-side quote read is ever wanted
+// (docs/specs/2026-09-08-multi-venue-readiness.md V10), `swap_arg` is six lines over the same
+// `put_text` primitives `deposit_and_swap_arg` still uses — and it would need re-measuring
+// against the live venue anyway.
 // ---------------------------------------------------------------------------
-
-/// The pool's `SwapArgs` (`quote`/`swap`), with the wire's text decimal amounts parsed to e8s.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct PoolSwapArgs {
-    pub amount_in_e8s: u128,
-    pub amount_out_minimum_e8s: u128,
-    pub zero_for_one: bool,
-}
 
 /// The pool's `Error` variant (the .did's `type Error`).
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -1663,20 +1661,6 @@ impl std::fmt::Display for PoolSwapError {
 /// The pool's `quote`/`swap`/`depositFromAndSwap` reply: `ok(amountOut)` or the pool's refusal.
 pub type PoolSwapResult = Result<u128, PoolSwapError>;
 
-/// The `icrc2_allowance` reply record `{ allowance : nat; expires_at : opt nat64 }`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct PoolAllowance {
-    pub allowance_e8s: u128,
-    pub expires_at_ns: Option<u64>,
-}
-
-/// SwapArgs type table + arg header (production candid 0.10.22): record
-/// { amountIn : text; zeroForOne : bool; amountOutMinimum : text } (fields in idl_hash order).
-const SWAP_ARG_TABLE: [u8; 27] = [
-    0x44, 0x49, 0x44, 0x4c, 0x01, 0x6c, 0x03, 0xdd, 0xef, 0xb5, 0xca, 0x06, 0x71, 0xa5, 0xd0,
-    0xb4, 0xf8, 0x08, 0x7e, 0xd8, 0xdd, 0xd1, 0xd7, 0x09, 0x71, 0x01, 0x00,
-];
-
 /// The pool Result table + header: `variant { ok : nat; err : variant { CommonError;
 /// InternalError : text; UnsupportedToken : text; InsufficientFunds } }` (arms in idl_hash
 /// order — inner idx 0=CommonError, 1=InternalError, 2=UnsupportedToken, 3=InsufficientFunds).
@@ -1689,68 +1673,6 @@ const SWAP_RESULT_TABLE: [u8; 44] = [
     0x01, 0x6b, 0x04, 0xfd, 0x84, 0xaf, 0xf9, 0x04, 0x7f, 0xab, 0x8e, 0x83, 0x80, 0x0e, 0x71,
     0xa4, 0xa4, 0xa1, 0xb5, 0x0e, 0x71, 0xeb, 0x9c, 0xdb, 0xd5, 0x0f, 0x7f, 0x01, 0x00,
 ];
-
-/// The icrc2_allowance reply table + header: record { allowance : nat; expires_at : opt nat64 }.
-const ALLOWANCE_TABLE: [u8; 23] = [
-    0x44, 0x49, 0x44, 0x4c, 0x02, 0x6c, 0x02, 0xd8, 0xbb, 0xb2, 0x84, 0x0c, 0x7d, 0xde, 0xa7,
-    0xf7, 0xda, 0x0d, 0x01, 0x6e, 0x78, 0x01, 0x00,
-];
-
-/// The pool `metadata` reply table + header (nargs+ref only — the ok arm index is a value
-/// byte): `variant { ok : PoolMetadata; err : Error }` with PoolMetadata = record { fee; key;
-/// sqrtPriceX96; tick; liquidity; token0; token1; maxLiquidityPerTick; nextPositionId } (fields
-/// in idl_hash order) and Token = record { address : text; standard : text }. Same MOTOKO
-/// lowercase `ok`/`err` labels as SWAP_RESULT_TABLE (the venue's .did, not the Rust-ledger
-/// casing).
-const POOL_METADATA_TABLE: [u8; 112] = [
-    0x44, 0x49, 0x44, 0x4c, 0x04, 0x6b, 0x02, 0x9c, 0xc2, 0x01, 0x01, 0xe5, 0x8e, 0xb4, 0x02,
-    0x03, 0x6c, 0x09, 0xc6, 0xfc, 0xb6, 0x02, 0x7d, 0x9f, 0x93, 0xc6, 0x02, 0x71, 0xcc, 0xda,
-    0xd3, 0xa9, 0x04, 0x7d, 0xdd, 0x86, 0xf3, 0xe7, 0x04, 0x74, 0xf2, 0x9d, 0x80, 0xee, 0x04,
-    0x7d, 0x97, 0xae, 0x9c, 0x8f, 0x09, 0x02, 0x98, 0xae, 0x9c, 0x8f, 0x09, 0x02, 0xcc, 0xc1,
-    0x9a, 0xa9, 0x09, 0x7d, 0xb7, 0xe7, 0x8d, 0x80, 0x0d, 0x7d, 0x6c, 0x02, 0xb4, 0xe3, 0xad,
-    0xe8, 0x09, 0x71, 0xbd, 0xee, 0xe0, 0xd3, 0x0e, 0x71, 0x6b, 0x04, 0xfd, 0x84, 0xaf, 0xf9,
-    0x04, 0x7f, 0xab, 0x8e, 0x83, 0x80, 0x0e, 0x71, 0xa4, 0xa4, 0xa1, 0xb5, 0x0e, 0x71, 0xeb,
-    0x9c, 0xdb, 0xd5, 0x0f, 0x7f, 0x01, 0x00,
-];
-
-/// Encode the pool's `quote`/`swap` arg (`SwapArgs`) — the arg the relay's agent stack builds
-/// for the pool's own quote query and the fake pool decodes.
-pub fn swap_arg(amount_in_e8s: u128, amount_out_minimum_e8s: u128, zero_for_one: bool) -> Vec<u8> {
-    let mut out = SWAP_ARG_TABLE.to_vec();
-    put_text(&mut out, &amount_in_e8s.to_string());
-    out.push(u8::from(zero_for_one));
-    put_text(&mut out, &amount_out_minimum_e8s.to_string());
-    out
-}
-
-/// Decode the pool's `quote`/`swap` arg (`SwapArgs`).
-pub fn decode_swap_arg(bytes: &[u8]) -> Result<PoolSwapArgs, IcpError> {
-    let mut rd = Rd { b: bytes, i: 0 };
-    let (_, _, arg0) = rd.message()?;
-    let Ty::Rec(fs) = arg0 else {
-        return Err(IcpError::DidlType("swap args must be a record".into()));
-    };
-    let (mut amount_in, mut min_out, mut zero) = (None, None, None);
-    for (label, _ty) in &fs {
-        match *label {
-            l if l == idl_hash("amountIn") => {
-                amount_in = Some(text_nat(&mut rd, "amountIn")?)
-            }
-            l if l == idl_hash("zeroForOne") => zero = Some(rd.boolean()?),
-            l if l == idl_hash("amountOutMinimum") => {
-                min_out = Some(text_nat(&mut rd, "amountOutMinimum")?)
-            }
-            l => return Err(IcpError::DidlType(format!("unknown SwapArgs field {l:#x}"))),
-        }
-    }
-    rd.finish()?;
-    Ok(PoolSwapArgs {
-        amount_in_e8s: amount_in.ok_or_else(|| Rd::err("SwapArgs missing amountIn"))?,
-        amount_out_minimum_e8s: min_out
-            .ok_or_else(|| Rd::err("SwapArgs missing amountOutMinimum"))?,
-        zero_for_one: zero.ok_or_else(|| Rd::err("SwapArgs missing zeroForOne"))?,
-    })
-}
 
 /// Reply bytes for the pool `Result` `ok(amountOut)` — the shape `quote`/`swap`/
 /// `depositFromAndSwap` reply (a bare nat amountOut).
@@ -1812,80 +1734,4 @@ pub fn decode_swap_result(bytes: &[u8]) -> Result<PoolSwapResult, IcpError> {
     };
     rd.finish()?;
     Ok(result)
-}
-
-/// Reply bytes for the `icrc2_allowance` record `{ allowance : nat; expires_at : opt nat64 }`.
-pub fn encode_allowance_record(a: &PoolAllowance) -> Vec<u8> {
-    let mut out = ALLOWANCE_TABLE.to_vec();
-    put_uleb(&mut out, a.allowance_e8s);
-    put_opt_nat64(&mut out, a.expires_at_ns);
-    out
-}
-
-/// Decode the `icrc2_allowance` reply record.
-pub fn decode_allowance_record(bytes: &[u8]) -> Result<PoolAllowance, IcpError> {
-    let mut rd = Rd { b: bytes, i: 0 };
-    let (_, _, arg0) = rd.message()?;
-    let Ty::Rec(fs) = arg0 else {
-        return Err(IcpError::DidlType("allowance reply must be a record".into()));
-    };
-    let (mut allowance, mut expires_at) = (None, None);
-    for (label, _ty) in &fs {
-        match *label {
-            l if l == idl_hash("allowance") => allowance = Some(rd.nat()?),
-            l if l == idl_hash("expires_at") => expires_at = rd.opt_nat64()?,
-            l => return Err(IcpError::DidlType(format!("unknown Allowance field {l:#x}"))),
-        }
-    }
-    rd.finish()?;
-    Ok(PoolAllowance {
-        allowance_e8s: allowance.ok_or_else(|| Rd::err("Allowance missing allowance"))?,
-        expires_at_ns: expires_at,
-    })
-}
-
-/// Decode the `icrc2_allowance` QUERY arg — `record { account : Account; spender : Account }`.
-pub fn decode_allowance_args(bytes: &[u8]) -> Result<(Account, Account), IcpError> {
-    let mut rd = Rd { b: bytes, i: 0 };
-    let (_, _, arg0) = rd.message()?;
-    let Ty::Rec(fs) = arg0 else {
-        return Err(IcpError::DidlType("allowance args must be a record".into()));
-    };
-    let (mut account, mut spender) = (None, None);
-    for (label, _ty) in &fs {
-        match *label {
-            l if l == idl_hash("account") => account = Some(rd.account()?),
-            l if l == idl_hash("spender") => spender = Some(rd.account()?),
-            l => return Err(IcpError::DidlType(format!("unknown AllowanceArgs field {l:#x}"))),
-        }
-    }
-    rd.finish()?;
-    Ok((
-        account.ok_or_else(|| Rd::err("AllowanceArgs missing account"))?,
-        spender.ok_or_else(|| Rd::err("AllowanceArgs missing spender"))?,
-    ))
-}
-
-/// Reply bytes for the pool `metadata` query — the deterministic fixture shape the fake-IC
-/// gateway serves: fixed liquidity/maxLiquidityPerTick/nextPositionId (1), sqrtPriceX96 (2^96)
-/// and tick (0); `fee` (the pool's fee tier in millionths), `key`, and the token pair texts
-/// come from the caller. Values follow the table's idl_hash order after the ok arm: fee, key,
-/// sqrtPriceX96, tick (sleb), liquidity, token0, token1, maxLiquidityPerTick, nextPositionId.
-pub fn encode_pool_metadata(fee_millionths: u128, key: &str, token0: &str, token1: &str) -> Vec<u8> {
-    let mut out = POOL_METADATA_TABLE.to_vec();
-    out.push(0x00); // ok variant arm
-    put_uleb(&mut out, fee_millionths);
-    put_text(&mut out, key);
-    put_uleb(&mut out, 1u128 << 96); // sqrtPriceX96
-    put_nat64(&mut out, 0); // tick: int64 — fixed-width 8-byte LE, NOT sleb
-    put_uleb(&mut out, 1); // liquidity
-    // Token = record { address : text; standard : text } — the fixture pair is ICRC-1 (the
-    // PoC pool's standard, .did PoolMetadata token0/token1)
-    put_text(&mut out, token0);
-    put_text(&mut out, "ICRC-1");
-    put_text(&mut out, token1);
-    put_text(&mut out, "ICRC-1");
-    put_uleb(&mut out, 1); // maxLiquidityPerTick
-    put_uleb(&mut out, 1); // nextPositionId
-    out
 }

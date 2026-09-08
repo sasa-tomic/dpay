@@ -1,0 +1,25 @@
+# nextest configuration.
+#
+# WHY THIS FILE EXISTS: the PocketIC-backed suites are not CPU-cheap tests — each one boots a
+# PocketIC replica that is itself multi-threaded. Running them at nextest's default parallelism
+# (one thread per core) puts N replicas on N cores and they thrash: MEASURED 2026-09-08 on this
+# 16-core sandbox, `dpay-canister-tests` took **409.6s** at the default while a single test of that
+# same suite, run alone, takes **6.5s**. Capping the group restores each test to roughly its
+# isolated speed:
+#
+#   default (16) → 409.6s      -j 4 → 130.8s      -j 6 → 119.3s      -j 8 → 122.5s
+#
+# 6 is the measured floor, and the curve is flat either side of it, so the exact number is not
+# load-bearing — what matters is that it is well under the core count. This is a ~3.4x cut on the
+# single largest block of `just verify`, which is the recipe the offline-inner-loop non-negotiable
+# in CLAUDE.md is about. Re-measure if the host's core count changes materially.
+#
+# Scoped to a GROUP rather than set globally: every other package's tests are ordinary in-process
+# Rust tests and should keep full parallelism.
+
+[test-groups]
+pocket-ic = { max-threads = 6 }
+
+[[profile.default.overrides]]
+filter = 'package(dpay-canister-tests)'
+test-group = 'pocket-ic'

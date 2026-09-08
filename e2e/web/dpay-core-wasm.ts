@@ -117,6 +117,9 @@ type WasmExports = WebAssembly.Exports & {
   w_icp_decode_transfer_result(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   w_icp_decode_minter_ok(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   w_icp_decode_int(argPtr: number, argLen: number, outPtr: number, cap: number): number;
+  w_icp_deposit_and_swap_arg(amountInPtr: number, amountInLen: number, minOutPtr: number, minOutLen: number, feeInPtr: number, feeInLen: number, feeOutPtr: number, feeOutLen: number, zeroForOne: number, outPtr: number, cap: number): number;
+  w_icp_swap_min_out(quotedPtr: number, quotedLen: number, slippageBps: number, outPtr: number, cap: number): number;
+  w_icp_decode_swap_result(argPtr: number, argLen: number, outPtr: number, cap: number): number;
   memory: WebAssembly.Memory;
 };
 
@@ -341,6 +344,7 @@ export type IcpRequestStatusOut = {
 };
 export type IcpStateReadOut = { timeNs: string | null; statuses: IcpRequestStatusOut[] };
 export type IcpTransferOutcomeOut = { ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string };
+export type IcpSwapReplyOut = { ok: boolean; amountOutGross?: string; errVariant?: string; errDetail?: string };
 export type IcpEip1559PriceOut = {
   gasLimit: string;
   maxFeePerGas: string;
@@ -526,81 +530,56 @@ async function icpBalanceOfArg(ownerText: string, subaccountHex: string): Promis
   return binOutHex(ex, len, out, 'icp_balance_of_arg');
 }
 
-// --- delegated-conversion (ICPSwap pool) builders — PURE-JS twins of the Rust encoders ---
-//
-// dpay-wasm does NOT re-export these two (A1 landed them in dpay-ffi/Kotlin only), so the web/jest
-// build gets exact twins here. Both are byte-pinned to the SAME goldens as the Rust core
-// (crates/dpay-icp/tests/goldens.rs G_SWAP_*) by app/__tests__/convert-core-twin.test.ts, which
-// parses the committed Rust golden file — if this twin and the core ever diverge, that jest suite
-// is the alarm, not a user's phone.
+// --- delegated conversion (ICPSwap pool) — the compiled core, same as every other builder here ---
 
-/** The 39-byte `depositFromAndSwap` DIDL type-table prefix (magic + one record of five fields in
- *  candid label-hash order) — generated once by @dfinity/candid from the cached pool interface and
- *  pinned in goldens.rs. Values follow with NO per-field tags. */
-const DEPOSIT_AND_SWAP_PREFIX_HEX =
-  '4449444c016c05a8bb95a7037dddefb5ca0671a5d0b4f8087ed8ddd1d70971b1b4bc800a7d0100';
-
-const U128_MAX = 2n ** 128n - 1n;
-
-/** Parse a strict non-negative decimal-u128 string (mirrors the core's u128_str: rejects empty,
- *  signs, decimals, and > u128). */
-function parseU128Str(s: string, label: string): bigint {
-  if (!/^[0-9]+$/.test(s) || (s.length > 1 && s.startsWith('0'))) {
-    throw new Error(`DpayCore twin: ${label} is not a canonical decimal u128: ${JSON.stringify(s)}`);
-  }
-  const v = BigInt(s);
-  if (v > U128_MAX) throw new Error(`DpayCore twin: ${label} overflows u128: ${s}`);
-  return v;
-}
-
-function uleb128Bytes(v: bigint): number[] {
-  const out: number[] = [];
-  let b = v;
-  do {
-    let byte = Number(b & 0x7fn);
-    b >>= 7n;
-    if (b !== 0n) byte |= 0x80;
-    out.push(byte);
-  } while (b !== 0n);
-  return out;
-}
-
-function candidTextBytes(s: string): number[] {
-  const bytes = Array.from(new TextEncoder().encode(s));
-  return [...uleb128Bytes(BigInt(bytes.length)), ...bytes];
-}
-
+/** The pool's `depositFromAndSwap` arg: the leg the user's key signs after `icrc2_approve` named
+ *  the pool the spender. Amounts + both token fees are decimal e8s strings; `zeroForOne` is the
+ *  pool's own token0→token1 direction, taken from the venue quote. */
 async function icpDepositAndSwapArg(
   amountIn: string, amountOutMinimum: string, tokenInFee: string, tokenOutFee: string, zeroForOne: boolean,
 ): Promise<string> {
-  const fee0 = parseU128Str(tokenInFee, 'tokenInFee');
-  const fee1 = parseU128Str(tokenOutFee, 'tokenOutFee');
-  // The decimal STRINGS are validated for canonical form, then carried verbatim into the text
-  // fields — exactly what the Rust encoder does (amountIn.to_string()).
-  parseU128Str(amountIn, 'amountIn');
-  parseU128Str(amountOutMinimum, 'amountOutMinimum');
-  const bytes = [
-    ...Array.from(hexToBytes(DEPOSIT_AND_SWAP_PREFIX_HEX)),
-    ...uleb128Bytes(fee0),
-    ...candidTextBytes(amountIn),
-    zeroForOne ? 1 : 0,
-    ...candidTextBytes(amountOutMinimum),
-    ...uleb128Bytes(fee1),
-  ];
-  return bytesToHex(Uint8Array.from(bytes));
+  const ex = await core();
+  const amt = putStr(ex, amountIn);
+  const min = putStr(ex, amountOutMinimum);
+  const feeIn = putStr(ex, tokenInFee);
+  const feeOut = putStr(ex, tokenOutFee);
+  const out = outBuf(ex, 512, 'icp_deposit_and_swap_arg');
+  const len = ex.w_icp_deposit_and_swap_arg(
+    amt[0], amt[1], min[0], min[1], feeIn[0], feeIn[1], feeOut[0], feeOut[1],
+    zeroForOne ? 1 : 0, out, 512,
+  );
+  if (len <= 3) throw new Error(`DpayCore wasm: icp_deposit_and_swap_arg failed (wasm error code ${len})`);
+  return binOutHex(ex, len, out, 'icp_deposit_and_swap_arg');
 }
 
+/** Exact-floor min-out for a venue quote at `slippageBps`.
+ *
+ *  The bps guard lives HERE, not in the ABI: `slippageBps` crosses as a raw wasm i32, and JS
+ *  ToInt32-coerces a fractional number on the way in — 0.5 would arrive as 0, silently turning the
+ *  user's slippage tolerance off and signing a min-out equal to the full quote. Refuse it in JS,
+ *  naming the value, so the web build and the Kotlin bridge fail the same way. (The core still
+ *  refuses an out-of-u16 bps on its own side; this guard is what makes a FRACTION visible.) */
 async function icpSwapMinOut(quotedOut: string, slippageBps: number): Promise<string> {
-  const q = parseU128Str(quotedOut, 'quotedOut');
   if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 65535) {
-    throw new Error(`DpayCore twin: slippageBps out of u16 range: ${slippageBps}`);
+    throw new Error(
+      `DpayCore wasm: slippageBps must be a whole number of basis points in 0..65535, got ${slippageBps}`,
+    );
   }
-  // Split quotient/remainder so no intermediate multiplies two full u128s — the exact Rust shape
-  // (units*k + rem*k/10000, floored, saturating at 0 for bps >= 10000).
-  const k = 10_000n - BigInt(Math.min(slippageBps, 10_000));
-  const units = q / 10_000n;
-  const rem = q % 10_000n;
-  return (units * k + (rem * k) / 10_000n).toString();
+  const ex = await core();
+  const quoted = putStr(ex, quotedOut);
+  const out = outBuf(ex, 64, 'icp_swap_min_out');
+  const len = ex.w_icp_swap_min_out(quoted[0], quoted[1], slippageBps, out, 64);
+  return (jsonOut(ex, len, out, 'icp_swap_min_out') as {minOut: string}).minOut;
+}
+
+/** The pool's own reply: `{ok, amountOutGross?}` or `{ok:false, errVariant, errDetail}`. */
+async function icpDecodeSwapResult(argHex: string): Promise<IcpSwapReplyOut> {
+  const ex = await core();
+  const arg = hex(argHex);
+  const argP = put(ex, arg);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_swap_result');
+  const len = ex.w_icp_decode_swap_result(argP, arg.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_swap_result') as IcpSwapReplyOut;
 }
 
 // --- minter calls (user-principal offramp + deposits) — golden-pinned builders ---
@@ -851,6 +830,7 @@ export const DpayCore = {
   icpApproveArg,
   icpDepositAndSwapArg,
   icpSwapMinOut,
+  icpDecodeSwapResult,
   icpBalanceOfArg,
   icpMinterAccountArg,
   icpRetrieveBtcArg,

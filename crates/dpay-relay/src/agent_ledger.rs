@@ -41,6 +41,7 @@ use serde::Deserialize;
 
 use dpay_core::{Currency, PUBKEY_LEN};
 
+use crate::ledger::api::SwapPoolMetadata;
 use crate::ledger::{
     CkErc20OnrampParams, DepositInfo, Ledger, LedgerError, TxnRecord, U64String,
     ckerc20_onramp_from_descriptor,
@@ -69,6 +70,17 @@ const MINTER_CALL_TIMEOUT_SECS: u64 = 30;
 /// effectively static: min-confirmations/fee/min-amount change on minter upgrades, not per call).
 /// 60s ≪ the minter's 7–15s round-trip cadence the app polls at, and ≫ a sheet-open burst.
 const DEPOSIT_INFO_CACHE_TTL_SECS: u64 = 60;
+
+/// TTL of the [`Ledger::swap_pool_metadata`] cache, keyed by pool principal. A pool's pair order
+/// and fee tier are set when the pool is CREATED and cannot change while the pool exists (the
+/// key `token0_token1_fee` is the factory's identity for it), so this is a cache over an
+/// effectively immutable fact — but it is still a READ, not a pin, because "effectively
+/// immutable" is a belief about a remote system and the last time this relay held that belief as
+/// a constant it held it backwards. Every `/api/v1/swap_quote` needs it and the app fetches two
+/// quotes per keystroke-settled amount (trade + impact reference), so the TTL bounds that to one
+/// query per pool per minute; 60s matches [`DEPOSIT_INFO_CACHE_TTL_SECS`], the relay's other
+/// static-metadata cache.
+const SWAP_POOL_METADATA_CACHE_TTL_SECS: u64 = 60;
 
 /// Timeout for the `agent.status()` liveness probe behind [`Ledger::healthy`]. The wallet polls
 /// `/api/v1/health`, so a hung replica would otherwise wedge the connectivity dot for ic-agent's
@@ -288,11 +300,50 @@ pub enum IcpSwapResult {
     err(IcpSwapError),
 }
 
+/// Candid mirror of the ICPSwap pool's `Token` (the .did: `record { address : text; standard :
+/// text }`) — `address` is the ICRC ledger's principal as TEXT, which is what the catalog and
+/// every quote query key on.
+#[derive(CandidType, Deserialize, Debug)]
+pub struct IcpSwapToken {
+    pub address: String,
+    pub standard: String,
+}
+
+/// Candid mirror of the SUBSET of the pool's `metadata` reply that decides how a quote may be
+/// answered (the .did's `PoolMetadata` also carries key/liquidity/sqrtPriceX96/tick/
+/// maxLiquidityPerTick/nextPositionId — candid record subtyping drops the fields we do not
+/// name, so this mirror stays exactly as wide as the relay's need). MEASURED against the live
+/// reply 2026-09-08 (`crates/dpay-relay/tests/swap_venue_mainnet.rs` decodes the captured bytes
+/// offline and re-reads them from mainnet under `just swap-venue-probe`).
+#[derive(CandidType, Deserialize, Debug)]
+pub struct IcpPoolMetadata {
+    pub fee: Nat,
+    pub token0: IcpSwapToken,
+    pub token1: IcpSwapToken,
+}
+
+/// The pool's `metadata` reply: `variant { err : Error; ok : PoolMetadata }` — the same MOTOKO
+/// lowercase arms as [`IcpSwapResult`], for the same reason (std `Result` labels `Ok`/`Err`).
+#[derive(CandidType, Deserialize, Debug)]
+pub enum IcpPoolMetadataResult {
+    #[allow(non_camel_case_types)]
+    ok(IcpPoolMetadata),
+    #[allow(non_camel_case_types)]
+    err(IcpSwapError),
+}
+
 /// One [`AgentLedger::deposit_info`] cache entry: the reply plus the instant it was fetched.
 /// `std::time::Instant` is a monotonic clock, so TTL checks are immune to wall-clock jumps.
 struct DepositInfoCacheEntry {
     fetched_at: std::time::Instant,
     info: DepositInfo,
+}
+
+/// One [`Ledger::swap_pool_metadata`] cache entry — same shape and same monotonic-clock reason
+/// as [`DepositInfoCacheEntry`].
+struct SwapPoolMetadataCacheEntry {
+    fetched_at: std::time::Instant,
+    meta: SwapPoolMetadata,
 }
 
 /// A [`Ledger`] backed by a real IC replica. Owns an [`Agent`] pointed at the replica/gateway URL
@@ -309,6 +360,11 @@ pub struct AgentLedger {
     /// keyed by currency id. `std::sync::Mutex` (the relay's established interior-mutability
     /// pattern): the lock is only held for a HashMap get/insert, never across an await.
     deposit_info_cache: Mutex<HashMap<Currency, DepositInfoCacheEntry>>,
+    /// TTL cache for the swap venue's OWN `metadata` query (see
+    /// [`SWAP_POOL_METADATA_CACHE_TTL_SECS`]) — keyed by pool principal text. Same
+    /// interior-mutability discipline as `deposit_info_cache`: the lock is only held for a
+    /// HashMap get/insert, never across an await.
+    swap_pool_metadata_cache: Mutex<HashMap<String, SwapPoolMetadataCacheEntry>>,
 }
 
 impl AgentLedger {
@@ -399,6 +455,7 @@ impl AgentLedger {
             agent,
             canister_id,
             deposit_info_cache: Mutex::new(HashMap::new()),
+            swap_pool_metadata_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -659,10 +716,78 @@ impl Ledger for AgentLedger {
         Ok(params)
     }
 
+    /// The venue's OWN pair order + fee tier (spec 2026-09-07 §1): the pool's `metadata` query,
+    /// decoded into [`SwapPoolMetadata`] and cached for
+    /// [`SWAP_POOL_METADATA_CACHE_TTL_SECS`]. This is the read that makes the quote route's
+    /// `zero_for_one` DERIVED rather than assumed. Anonymous (the agent's identity is irrelevant
+    /// to a public query, and `metadata` is free). A failed fetch does NOT poison the cache —
+    /// the entry is only written on success, exactly like `deposit_info`.
+    async fn swap_pool_metadata(&self, pool: &str) -> Result<SwapPoolMetadata, LedgerError> {
+        if let Some(entry) = self
+            .swap_pool_metadata_cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(pool)
+        {
+            if entry.fetched_at.elapsed()
+                < Duration::from_secs(SWAP_POOL_METADATA_CACHE_TTL_SECS)
+            {
+                return Ok(entry.meta.clone());
+            }
+        }
+        let pool_id = Principal::from_text(pool)
+            .map_err(|e| LedgerError::Transient(format!("parse pool principal '{pool}': {e}")))?;
+        let arg = encode_args(())
+            .map_err(|e| LedgerError::Transient(format!("encode metadata arg: {e}")))?;
+        let reply = tokio::time::timeout(
+            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+            self.agent.query(&pool_id, "metadata").with_arg(arg).call(),
+        )
+        .await
+        .map_err(|_| {
+            LedgerError::Transient(format!(
+                "pool metadata timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
+        })?
+        .map_err(|e| LedgerError::Transient(format!("pool metadata query: {e}")))?;
+        let meta = match decode_one::<IcpPoolMetadataResult>(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode pool metadata reply: {e}")))?
+        {
+            IcpPoolMetadataResult::ok(m) => SwapPoolMetadata {
+                token0_ledger: m.token0.address,
+                token1_ledger: m.token1.address,
+                fee_millionths: m.fee.0.to_u128().ok_or_else(|| {
+                    LedgerError::Transient("pool fee tier exceeds u128".to_string())
+                })?,
+            },
+            // The pool's own refusal, named verbatim — same convention as `swap_pool_quote`.
+            IcpPoolMetadataResult::err(e) => {
+                return Err(LedgerError::Rejected(match e {
+                    IcpSwapError::CommonError => "CommonError".to_string(),
+                    IcpSwapError::InsufficientFunds => "InsufficientFunds".to_string(),
+                    IcpSwapError::InternalError(t) => format!("InternalError: {t}"),
+                    IcpSwapError::UnsupportedToken(t) => format!("UnsupportedToken: {t}"),
+                }))
+            }
+        };
+        self.swap_pool_metadata_cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(
+                pool.to_string(),
+                SwapPoolMetadataCacheEntry {
+                    fetched_at: std::time::Instant::now(),
+                    meta: meta.clone(),
+                },
+            );
+        Ok(meta)
+    }
+
     /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2): the
     /// pool's OWN `quote` query, returned VERBATIM — the relay never computes or blends a rate.
     /// `pool` is the known-pool principal text (the route already validated it against
-    /// [`crate::catalog::SWAP_POOL_PRINCIPAL`]); the reply's `ok(nat)` is the pool's own
+    /// [`crate::catalog::is_known_swap_pool`]) and `zero_for_one` was derived from
+    /// [`Ledger::swap_pool_metadata`]; the reply's `ok(nat)` is the pool's own
     /// amountOut estimate, GROSS of the output ledger's transfer fee (the app computes net). A
     /// pool `#err` comes back as `Rejected` with the variant name (+ its text payload) so the
     /// route surfaces the pool's own refusal verbatim; transport/decode failures as `Transient`
@@ -1740,6 +1865,76 @@ mod icp_index_tests {
                 "the error names the index endpoint: {msg}"
             ),
             other => panic!("expected Transient, got {other:?}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The swap venue's own metadata — decoder golden. OFFLINE (no network), but only compiled in
+// the `agent` build because that is where the production decoder lives, so it runs under
+// `just test-live`. The live half is `just swap-venue-probe`
+// (`tests/swap_venue_mainnet.rs`), which re-reads the same bytes from mainnet.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod swap_pool_metadata_tests {
+    use super::*;
+
+    use serde_json::Value;
+
+    /// The LIVE reply of `metadata()` on the PoC venue `65mrh-fqaaa-aaaar-qapoa-cai`, captured
+    /// VERBATIM on 2026-09-08 (`dfx canister call --query --network ic --identity anonymous
+    /// --output raw`). Measured bytes, not a hand-rolled fixture — which matters, because the
+    /// venue serves `tick : int` where the repo's old hand-rolled encoder emitted `int64`, so a
+    /// self-made fixture would have proved a shape the venue does not send.
+    const LIVE_METADATA_REPLY_HEX: &str = "4449444c046b029cc20102e58eb402016b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f6c09c6fcb6027d9f93c60271ccdad3a9047ddd86f3e7047cf29d80ee047d97ae9c8f090398ae9c8f0903ccc19aa9097db7e78d800d7d6c02b4e3ade80971bdeee0d30e71010000b8173c6c793336782d77696161612d61616161692d61716a37712d6361695f72796a6c332d74796161612d61616161612d61616162612d6361695f333030309cd8a1c8aaa6dcf78bd583f0c814f8ba7fdf839f8f87fe0f1b6c793336782d77696161612d61616161692d61716a37712d6361690549435243321b72796a6c332d74796161612d61616161612d61616162612d636169054943524332e2e0cfdca1f0abea9396b7aceadcd19b0256";
+
+    const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
+
+    fn swap_venue_truth() -> Value {
+        serde_json::from_str::<Value>(CATALOG_TRUTH)
+            .expect("dfx/catalog_truth.json must be valid JSON")["swap_venue"]
+            .clone()
+    }
+
+    /// The production candid mirror decodes the venue's REAL reply, and what it reads out is
+    /// exactly the measured `swap_venue` block. This is the offline half of the venue alarm:
+    /// it proves the decoder is wire-correct (record subtyping drops key/liquidity/
+    /// sqrtPriceX96/tick/maxLiquidityPerTick/nextPositionId without complaint) AND that the
+    /// pinned block is what the venue actually said.
+    #[test]
+    fn pool_metadata_mirror_decodes_the_measured_live_reply() {
+        let bytes = hex::decode(LIVE_METADATA_REPLY_HEX).expect("captured reply is hex");
+        let decoded = decode_one::<IcpPoolMetadataResult>(&bytes)
+            .expect("the production mirror decodes the venue's own reply");
+        let IcpPoolMetadataResult::ok(m) = decoded else {
+            panic!("the captured live reply is an #ok");
+        };
+        let v = swap_venue_truth();
+        assert_eq!(m.token0.address, v["token0_ledger"].as_str().unwrap());
+        assert_eq!(m.token1.address, v["token1_ledger"].as_str().unwrap());
+        assert_eq!(
+            m.fee.0.to_u128(),
+            v["fee_millionths"].as_u64().map(u128::from)
+        );
+        // The pair's standard is the venue's own word for it — pinned so a pool swapped for a
+        // non-icrc2 one is visible here rather than at an approve the user signs.
+        assert_eq!(m.token0.standard, "ICRC2");
+        assert_eq!(m.token1.standard, "ICRC2");
+    }
+
+    /// The err arm is a real arm, not an unreachable branch: the route must be able to surface
+    /// the venue's own refusal verbatim rather than a decode error.
+    #[test]
+    fn pool_metadata_mirror_decodes_an_err_reply() {
+        let bytes = encode_one(&IcpPoolMetadataResult::err(IcpSwapError::InternalError(
+            "pool is closed".to_string(),
+        )))
+        .expect("encode an err reply");
+        match decode_one::<IcpPoolMetadataResult>(&bytes).expect("err reply decodes") {
+            IcpPoolMetadataResult::err(IcpSwapError::InternalError(t)) => {
+                assert_eq!(t, "pool is closed")
+            }
+            other => panic!("expected InternalError, got {other:?}"),
         }
     }
 }

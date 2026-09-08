@@ -92,8 +92,8 @@ in `docker-compose.yml`.
 | `DPAY_CANISTER_ID` | — | **Required on `ic`.** The facade canister (the catalog source) |
 | `DPAY_IC_URL` | `https://icp-api.io` | Mainnet, or `http://host.docker.internal:4943` for a `dfx` replica on the host |
 | `DPAY_IC_FETCH_ROOT_KEY` | auto | `true` for a local replica, `false` on mainnet — see below |
-| `DPAY_ENABLE_FAUCET` | `false` | (test-helpers build only) Serve `POST /api/v1/faucet`, which credits demo funds |
-| `DPAY_CONTROLLER_SEED` | — | (prod faucet) Hex Ed25519 seed of the controller key — same key as `DPAY_DFX_IDENTITY`'s `identity.pem`. Set → faucet live (relay-side cooldown + authenticated `mint` at the user principal); unset → relay anonymous, faucet refused by the canister. **Secret** |
+| `DPAY_ENABLE_FAUCET` | `false` | (offline fixture build only) Serve `POST /api/v1/faucet`, which credits demo funds on an in-process fake gateway. Not consulted by this image, whose faucet is the one below |
+| `DPAY_CONTROLLER_SEED` | — | (prod faucet) Hex Ed25519 seed of the controller key — same key as `DPAY_DFX_IDENTITY`'s `identity.pem`. Set → faucet live (relay-side cooldown + authenticated `mint` at the user principal) and `GET /api/v1/capabilities` reports `demo_faucet:true`; unset → relay anonymous, faucet unavailable (503 naming this variable) and the wallet offers no top-up. **Secret** |
 | `CF_TUNNEL_TOKEN` | — | **Required.** Secret token copied from the Cloudflare tunnel install command |
 | `DPAY_CLOUDFLARED_IMAGE` | `cloudflare/cloudflared:2026.7.1` | Pinned tunnel image; override only if needed |
 
