@@ -7,6 +7,14 @@
 > carry the same two numbers, so the cost of the thing being blocked stays visible.
 
 > Role: known blockers + documented follow-ups. Read top-down; work order first.
+> **Pruned 2026-09-08** — closed and removed in the same session that finished them: work-order
+> item 2 in full (all four conversion-hardening streams; the fix is measured live on the production
+> route), item 4's (b) and (c) plus 4a and 4c (the app opens on Home, Home is an overview, the
+> account list has its own route), UX-swarm rows X1/X2/X3/X4/X5/X13/X14/X15/X22 (the dead-end graph,
+> the landing, the scanner's fund gate, the home-currency overwrite, the silent disabled button,
+> play-money readiness, global trip strip, Convert's top-level slot, account ordering) and layout
+> rows U1/U2/U3 (the cashier form's viewport overflow, its missing e2e pin, the dead bands). Each is
+> evidenced by the commit that closed it; `just verify` was EXIT=0 with 141/141 e2e at the time.
 > **Pruned 2026-09-07** — work-order items 2+3 closed and removed: item 2 reconcile
 > stale-detection + paging (`90f5930`; founder decision replaced the specced `#[heartbeat]` with a
 > lazy ≤1/hour sweep — heartbeats are terribly expensive on mainnet and the kernel is dormant; design
@@ -57,16 +65,14 @@ app surface + e2e flows 140–143.
 **The owed live probe was RUN 2026-09-08 and is DISCHARGED — and it found a money-critical
 defect the offline loop could not see. Evidence, all of it, in one place:
 [`docs/specs/2026-09-08-conversion-hardening-plan.md`](docs/specs/2026-09-08-conversion-hardening-plan.md).**
-In one line: the `ok`/`err` re-casing is confirmed correct against the live pool's own bytes,
-and the pool's token0/token1 order is the REVERSE of what the code pinned, so the live relay
-serves each direction's rate under the other direction's label. Open work, from that plan:
+In one line: the `ok`/`err` re-casing was confirmed correct against the live pool's own bytes, and
+the pool's token0/token1 order was the REVERSE of what the code pinned, so the live relay served
+each direction's rate under the other direction's label.
 
-| # | Item | value | effort |
-|---|------|------:|:------:|
-| 2a | Stream A — swap direction read from the venue's own metadata, never pinned | 10 | M |
-| 2b | Stream B — one decoder/encoder: delete the TS twins, export from core | 8 | M |
-| 2c | Stream C — the Convert screen's own defects (unit printed twice, impact stuck on "—", confirm enabled at zero balance, unlabelled slippage chips, no hierarchy) | 7 | S |
-| 2d | Stream C2 — honest quote-unavailable copy, dead keys, a11y shape | 6 | S |
+**ALL FOUR STREAMS ARE DONE AND SHIPPED (2026-09-08).** Measured on the live production route
+after the founder's deploy: 1 ICP → 2.41771929 VCHF, `zero_for_one: false`, `fee_millionths: 3000`
+echoed from the venue — direction derived from the pool's own metadata, not from any constant.
+`just swap-venue-probe` is the standing mainnet tripwire.
 
 Remaining before any LIVE ship are founder-run (the relay deploy decision; officials/counsel,
 `docs/REGULATORY.md` §7) — do not nag before the PoC exists. The "catalog migration of venue
@@ -86,22 +92,25 @@ ask me to pay in some money. Looks like scam."** Three directions landed with it
 introduction and guide the user through a real send/receive on DEMO play money BEFORE asking for a
 home currency; (b) Home must be an overview (balances, movements) or Pay — **not** the ten-row
 currency list, which stays one gesture away; (c) drop the "— dpays Standard-Weg" rail-reason suffix
-from the chooser. (c) is done in-tree; (a) and (b) need the design pass. A measured cause of the
-scam-feel is filed under the capabilities work: a fresh production wallet is created holding ∂0.00
-because the relay's capability endpoint reports the DEMO faucet unavailable while it demonstrably
-works, so every surface the new user opens is a fund-me panel.
+from the chooser.
+
+**(b) and (c) are DONE and (a) is half done.** The app now opens on Home, Home is an overview with a
+persistent Scan, the account list lives on its own route one gesture from every screen, and no
+surface dead-ends on a deposit request any more — a gate that cannot be funded from the selected
+asset names a funded account and offers the switch. Both founder forks are RESOLVED (§1 of the
+spec): the landing was reversed by the founder; the seed backup stays where it is, decided here.
+**What is left of (a) is the practice payment itself — 4b below.**
 
 Design, diagnosis and build order — the authority, do not restate it:
 [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md).
-It carries **two founder forks** (F1 move the seed backup after the practice payment? F2 did "home
-should be … or Pay" mean the LANDING screen too, superseding the scanner-lands decision?); the
-conservative reading of each is what gets built until the founder says otherwise.
+Three independent reviewers adjudicated it 2026-09-08; their verdicts on the four reconstructed
+decisions are in
+[`docs/specs/2026-09-07-ux-decisions.md`](docs/specs/2026-09-07-ux-decisions.md) and their defect
+inventory is the "UX swarm" section below.
 
 | # | Item | value | effort |
 |---|------|------:|:------:|
-| 4a | `demoView` never returns `'zero'` → `fundsReady` stamped on an empty wallet, DEMO row at full colour | 8 | S |
-| 4b | Practice screen: one real ∂1 DEMO payment on ONE device, replacing the unperformable two-phone leaflet | 9 | M |
-| 4c | Home = overview (headline + actions + 5 movements); currency list moves to an Accounts route, one gesture from every screen | 8 | M |
+| 4b | Practice screen: one real ∂1 DEMO payment on ONE device, replacing the unperformable two-phone leaflet. Unanimous CUT verdict on the current screen; the design is spec §3. This is the last piece of "give before you ask". | 9 | M |
 
 Beyond items 2–4 the remaining list is the physical/outer-loop gates (below, founder-run) and the
 DO-NOT-NAG set.
@@ -256,11 +265,6 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
 
 | # | Defect | value | effort |
 |---|--------|------:|:------:|
-| X1 | **All four Home actions dead-end on a deposit request** while the wallet holds ∂100 DEMO it can actually spend. The fund gate names the address route and never names the funded account the user already has. Fixing this is the root of the scam read. | 10 | M |
-| X2 | **Home is ~80% currency list** — measured 1308/1652 px and 1347/1691 px by two reviewers independently, nine of ten rows zero or unreadable. Covered by the Home redesign (item 4c). | 9 | M |
-| X3 | **The scanner is fund-gated on the LOCALLY SELECTED asset**, so a returning traveller holding the right asset cannot even *read* a merchant's request when a different asset is selected. The merchant's QR names the asset — read it first, check the balance at Approve, where the low-balance backstop already exists. | 9 | M |
-| X4 | **The home currency is silently overwritten** by any account-row tap or receive-rail toggle, so the setting the whole onboarding exists to establish does not hold. One reviewer watched the headline flip to `USDC·Sol balance / —` after a toggle in an unrelated sheet. | 8 | S |
-| X5 | **The disabled Continue on the currency chooser swallows taps in silence** — 40% opacity in the primary colour, looks pressable, no response, no hint. A dead end with no instruction. | 7 | S |
 | X6 | **Transaction rows are dead** — no press handler, no receipt, no memo/`ref`, no block index, no copy-proof. This is the merchant-reconciliation and dispute path and it does not exist. | 8 | M |
 | X7 | **The header balance chevron is a false affordance** — a `⌄` beside a balance means "switch account" in every wallet; here it navigates to Home and on Home it does nothing at all. | 7 | S |
 | X8 | **The balance is printed twice, ~90–250 px apart** — header eyebrow+amount and Home headline are byte-identical strings in one viewport. | 6 | S |
@@ -268,29 +272,20 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
 | X10 | **The offline-first web wallet cannot open offline** — no service worker (`getRegistrations()` → 0), no manifest; a reload with the network down gives the browser's dinosaur. The one-line pitch is "your phone never needs a connection". | 8 | M |
 | X11 | **No URL routing** — every tab and sheet is `/wallet`, browser Back ejects the user out of the wallet (measured: Settings stayed open while the URL jumped to a previously-visited pay link), no tab is deep-linkable, refresh always dumps you on the landing screen. | 7 | M |
 | X12 | **Fonts ship unsubsetted and uncompressed** — 338 KB of TTF with `encodedBodySize === decodedBodySize` on all four (one file is 130 KB), blocking text paint. WOFF2 subsets cut ~230 KB. The cheapest perceived-speed win available. | 7 | S |
-| X13 | **`fundsReady` is satisfied by play money.** The ∂0.00 case was fixed 2026-09-08, but a wallet holding only DEMO still stamps "FUNDS LOADED" on a trip-readiness check while every real currency reads 0.00. | 7 | S |
-| X14 | **The trip strip is on all four tabs** with no dismiss — a first-run progress meter used as global chrome, telling the user on every screen that they owe the app something. | 6 | S |
-| X15 | **Convert holds a top-level Home slot while being inert for 8 of 10 accounts** (an honest but action-less "not available for X yet" panel) and blocked on the other two. Relocate to the per-asset surface and to the moment a scanned request names an asset the user does not hold — which is the founder's own recipient-side framing. | 7 | S |
 | X16 | **Three unprompted denials in the first six screens** ("does not deposit, buy, or move any money" / "never asks you to deposit or buy anything" / "does not move or convert funds"), plus one on every onboarding frame and every deposit sheet. Each sentence is true; the density is a scam signature. Legitimate products state what they do. | 6 | S |
 | X17 | **Scanner body copy fails WCAG AA** — measured 3.0:1 (`rgb(103,98,87)` on `rgb(23,21,15)`), needs 4.5:1. | 6 | S |
 | X18 | **The header wordmark, gear and theme button collide**, with "ACCOUNT / name" overlapping the wordmark's descender — on every screen, light and dark. | 6 | S |
 | X19 | **8-decimal amounts on the pay-link review** ("Pay 1.25000000 VCHF") where the header and request QR both correctly show 2. | 6 | S |
 | X20 | **Self-send is not warned on the pay-link path**, while `CLAUDE.md` documents that it warns on Send-to-address. Two paths, one rule, one of them missing. | 6 | S |
 | X21 | **Keyboard shortcuts are undiscoverable on the phone-width web wallet** — five exist (`P R L A T`); the hint component returns null below 700 px and the bottom tab bar never passes one. Enter does not submit the Receive amount; Esc does not close Convert though sheets advertise it. | 6 | S |
-| X22 | **DEMO sits at the top of the account list with the largest number on screen** (∂100.00, above BTC and USDC) — play money presented as the user's biggest holding. Sort by home currency, then balance; DEMO under its own practice divider. | 6 | S |
 | X23 | **The account row's chain subtitle may contradict the deposit sheet** — the row says `USDC · Ethereum` while the sheet offers an Internet Computer principal. Both are reachable funding routes for ckUSDC, so this needs verifying before changing; if a user can read it as "send USDC on Ethereum to this IC principal", it is money-loss-shaped. | 7 | S |
 | X24 | **Large dead bands remain in the education flow** — ~350–400 px per walkthrough scene, ~330 px on the rehearsal, and the Pay landing renders 109 px of content in a 915 px viewport. (The form surfaces were fixed 2026-09-08; these are the moment screens.) | 5 | S |
 
-## Measured UI defects (driven in a real browser 2026-09-08, not code-read)
+## Tech-debt follow-ups
 
-Everything here was reproduced by driving the shipped app. Fixes in flight are struck as they land.
-
-| # | Defect | value | effort |
-|---|--------|------:|:------:|
-| U1 | **The cashier ring-up form overflows the viewport by ~61 px on each side** (root measures 533 px inside a 380 px column at 412×915): the `CHF` prefix is clipped off-screen left, the hint line is clipped at both ends, the Ring-up button's corner radii are off-screen, and ~300 px of dead vertical space sits above it. Root cause is three lines — `S.amountInput` has `flex:1` with no `minWidth:0` (its UA intrinsic width at 34 px bold measures 414 px, which becomes the row's min-content), `S.center` has `flexGrow:1` with no `alignSelf:'stretch'`, and `TillCharge` nests its own `S.center` **inside** ReceiveMode's `S.center`, so the inner view is shrink-to-fit. Refuted hypothesis: it is NOT the long German hint — English measures the same 533 px. The fix belongs on TillCharge's root container, not the input (`minWidth:0` on the input alone changes nothing; `maxWidth:380` on the root removes the overflow). `TillCharge` is the ONLY component that puts `S.amountRow` inside a second non-stretched `S.center` — every other amount surface stretches correctly. **The till ships OFF by default, so this is invisible until an operator turns it on — which is exactly what a pilot merchant deployment does.** | 8 | S |
-| U2 | **No e2e flow screenshots the till *entering* form** — flows 114–117 capture only downstream states. That is how a form overflowing the viewport by 122 px passed the full visual-regression suite. Fixing U1 without closing this gap leaves the same blind spot. | 7 | S |
+| # | Item | value | effort |
+|---|------|------:|:------:|
 | U4 | **`CODEBASE_ANALYSIS.md` carries a hand-maintained ~40-flow enumeration that duplicates the generated `FLOWS.md` wholesale.** It is labelled "illustrative, not exhaustive", but since `just check` now regenerates and diffs `FLOWS.md` (recipe `flows-md`) its remaining value is close to zero and it is a standing DRY violation in the file every session opens with. It cannot be deleted blind: it carries a few non-flow facts (the testID contract, the seed/backup surface, the restore surface, the asset-segregation note) that need re-homing first. | 6 | S |
-| U3 | **~300 px dead band at the top of the ordinary Receive form** — the same `S.center` vertical-centring idiom as U1, milder symptom. Fix with U1 so the idiom is corrected once. | 6 | S |
 
 ## Other open issues
 
