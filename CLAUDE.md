@@ -34,6 +34,20 @@ own device signs, recipient/merchant-side first, aligned with the winning preced
 founder asks the officials to confirm the shape. Spec:
 [`docs/specs/2026-09-07-delegated-conversion-spec.md`](docs/specs/2026-09-07-delegated-conversion-spec.md).
 
+**Active addition (founder direction 2026-09-08): the first run must not read as a solicitation.**
+The founder tried the shipped web wallet and reported it: *"the initial experience is VERY
+confusing… several screens that just ask me to pay in some money. Looks like scam."* Three
+directions came with it — greet with an introduction and let the user COMPLETE a real payment on
+DEMO play money before being asked for a home currency; make Home an overview (balances, movements)
+rather than the ten-row currency list, which stays one gesture away; and stop disclosing a pure rail
+preference as if it were a reason. Diagnosis, design, the two open founder forks, and the build
+order: [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md).
+
+**Delegating swaps to MORE than one venue (founder, same day): not yet possible.** There is no venue
+type at all; the persisted swap record has no venue field and its schema rejects every CeFi record
+that will ever exist. What must change first:
+[`docs/specs/2026-09-08-multi-venue-readiness.md`](docs/specs/2026-09-08-multi-venue-readiness.md).
+
 When in doubt about sequencing, **pick the work that gets a user holding, and spending, the currency
 they actually think in.**
 
@@ -275,7 +289,7 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
 - **OpenCryptoPay — dpay pays a merchant till, and now SERVES one (2026-09-01 → 2026-09-04).** A shop
   rings a price up in francs on its own dpay phone, shows a code, and is paid VCHF at its OWN
   account; the relay is the provider endpoint and never holds a key that could move that money.
-  **The till ships OFF: its seven routes register only when `DPAY_ENABLE_TILL` is set, and the
+  **The till ships OFF: its eight routes register only when `DPAY_ENABLE_TILL` is set, and the
   default is false on every build and every ledger** — an operator's choice about which surfaces an
   image serves. A ring-up, and a cancellation, must be SIGNED by the key whose account gets paid
   (`dpay_core::validate_till_open`, domain `dpay-till-open-v1`, bytes pinned by

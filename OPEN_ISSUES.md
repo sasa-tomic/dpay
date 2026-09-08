@@ -1,5 +1,11 @@
 # OPEN_ISSUES — the authoritative open list
 
+> **HARD RULE for every entry.** An item carries **value [1-10]** and **effort [S/M/L]**. Nothing
+> below value 4 is filed at all — delete it instead of parking it. An item that is DONE is REMOVED
+> from this file in the same change that finishes it, and struck wherever else it is mentioned;
+> a closed item that survives here is a bug in this file. HARD blockers and founder-owned items
+> carry the same two numbers, so the cost of the thing being blocked stays visible.
+
 > Role: known blockers + documented follow-ups. Read top-down; work order first.
 > **Pruned 2026-09-07** — work-order items 2+3 closed and removed: item 2 reconcile
 > stale-detection + paging (`90f5930`; founder decision replaced the specced `#[heartbeat]` with a
@@ -46,20 +52,59 @@ build).** ICPSwap ICP↔VCHF, user-device-signed `icrc2_approve` + `depositFromA
 recipient-side framing, precedent-aligned itemised screen, execution/recovery state machine.
 Authoritative spec (read it first): `docs/specs/2026-09-07-delegated-conversion-spec.md`.
 BUILT END-TO-END (2026-09-07): core+FFI encoders, relay quote route + fake-IC pool stub, the
-app surface + e2e flows 140–143 — all gates green at build time. **Post-build correction
-(same day, review pass): the pool `Result` wire arms are the venue's LOWERCASE `ok`/`err`
-(Motoko canister — its own `.did`), NOT the capitalized `Ok`/`Err` of the Rust ICRC ledgers
-the earlier tables/goldens wrongly reused; tables + goldens + the relay decode were re-cased
-(byte-verified against the `.did` hashes). Consequences: (a) the offline suites' goldens
-changed after the green run — re-run `just verify` before relying on them; (b) the offline
-fake encodes the same lowercase shape, so a ONE-LIVE-PROBE of the real pool's `quote` (dfx or
-the shipped relay route) is owed before any live-ship claim — it is the only ground truth the
-offline loop cannot see.** Remaining before any LIVE ship are founder-run (relay deploy
-decision + catalog migration; officials/counsel, `docs/REGULATORY.md` §7) — do not nag before
-the PoC exists.
+app surface + e2e flows 140–143.
 
-Nothing else is agent-pickable beyond item 2: the remaining list is the physical/outer-loop
-gates (below, founder-run) and the DO-NOT-NAG set.
+**The owed live probe was RUN 2026-09-08 and is DISCHARGED — and it found a money-critical
+defect the offline loop could not see. Evidence, all of it, in one place:
+[`docs/specs/2026-09-08-conversion-hardening-plan.md`](docs/specs/2026-09-08-conversion-hardening-plan.md).**
+In one line: the `ok`/`err` re-casing is confirmed correct against the live pool's own bytes,
+and the pool's token0/token1 order is the REVERSE of what the code pinned, so the live relay
+serves each direction's rate under the other direction's label. Open work, from that plan:
+
+| # | Item | value | effort |
+|---|------|------:|:------:|
+| 2a | Stream A — swap direction read from the venue's own metadata, never pinned | 10 | M |
+| 2b | Stream B — one decoder/encoder: delete the TS twins, export from core | 8 | M |
+| 2c | Stream C — the Convert screen's own defects (unit printed twice, impact stuck on "—", confirm enabled at zero balance, unlabelled slippage chips, no hierarchy) | 7 | S |
+| 2d | Stream C2 — honest quote-unavailable copy, dead keys, a11y shape | 6 | S |
+
+Remaining before any LIVE ship are founder-run (the relay deploy decision; officials/counsel,
+`docs/REGULATORY.md` §7) — do not nag before the PoC exists. The "catalog migration of venue
+consts" that used to sit here is GONE as a gate: the pair and the fee tier are no longer app-side
+constants at all (they are read off the venue), and what remains of that idea is the multi-venue
+`/api/v1/venues` shape, tracked as V4 in item 3.
+
+**3. Multi-venue readiness — the founder wants swaps delegated to SEVERAL third-party exchanges
+(2026-09-08).** The answer today is no: there is no venue type at all, the persisted record schema
+rejects every CeFi record that will ever exist, and the offline fake holds exactly one pool. The
+signing/submission half generalises unchanged, and `app/services/opencryptopay.ts` is already a
+working device-to-provider CeFi shape to copy. Gaps V1–V11 with value/effort, and the three to do
+first: [`docs/specs/2026-09-08-multi-venue-readiness.md`](docs/specs/2026-09-08-multi-venue-readiness.md).
+
+**4. First-run experience — founder verdict 2026-09-08: "VERY confusing… several screens that just
+ask me to pay in some money. Looks like scam."** Three directions landed with it: (a) greet with an
+introduction and guide the user through a real send/receive on DEMO play money BEFORE asking for a
+home currency; (b) Home must be an overview (balances, movements) or Pay — **not** the ten-row
+currency list, which stays one gesture away; (c) drop the "— dpays Standard-Weg" rail-reason suffix
+from the chooser. (c) is done in-tree; (a) and (b) need the design pass. A measured cause of the
+scam-feel is filed under the capabilities work: a fresh production wallet is created holding ∂0.00
+because the relay's capability endpoint reports the DEMO faucet unavailable while it demonstrably
+works, so every surface the new user opens is a fund-me panel.
+
+Design, diagnosis and build order — the authority, do not restate it:
+[`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md).
+It carries **two founder forks** (F1 move the seed backup after the practice payment? F2 did "home
+should be … or Pay" mean the LANDING screen too, superseding the scanner-lands decision?); the
+conservative reading of each is what gets built until the founder says otherwise.
+
+| # | Item | value | effort |
+|---|------|------:|:------:|
+| 4a | `demoView` never returns `'zero'` → `fundsReady` stamped on an empty wallet, DEMO row at full colour | 8 | S |
+| 4b | Practice screen: one real ∂1 DEMO payment on ONE device, replacing the unperformable two-phone leaflet | 9 | M |
+| 4c | Home = overview (headline + actions + 5 movements); currency list moves to an Accounts route, one gesture from every screen | 8 | M |
+
+Beyond items 2–4 the remaining list is the physical/outer-loop gates (below, founder-run) and the
+DO-NOT-NAG set.
 
 **Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
 - **O1 home currency** — BUILT, gated green, shipped; spec
@@ -142,8 +187,59 @@ re-MATCHes after that deploy re-bakes the module-hash pin.
 - **Desktop-width /wallet design pass** (value 5, effort M-L — design-level, needs founder input).
 - **Conversion PoC → officials confirmation** (post-PoC, founder-run): carry the built screen +
   the spec to the counsel/officials ask (`docs/REGULATORY.md` §7); the founder also owns the
-  live-ship decision (`just up` ships the quote route) and the catalog migration of venue consts
-  before any live ship.
+  live-ship decision (`just up` ships the quote route).
+- **Confirm-or-correct the reconstructed first-run UX decisions** —
+  `docs/specs/2026-09-07-ux-decisions.md` records four decisions that are already SHIPPED IN CODE
+  (preference-reason suppression, chooser preselect removal, first-run landing, rehearsal reframe)
+  but that no founder statement in the repo supports. The doc says so itself and asks for
+  confirmation; it is the only record, so leaving it unconfirmed means the code embodies decisions
+  nobody can check. The first-run landing one is the sharp edge: it narrows a standing `CLAUDE.md`
+  decision. Also open: the two forks in
+  [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md) §1.
+
+## DEPLOY ORDER — the app and the relay must ship TOGETHER after 2026-09-08
+
+The quote contract changed on both sides in the same session: `SwapQuoteBody` now carries
+`fee_millionths` (the venue's own tier, echoed instead of claimed) and the app hard-requires it.
+So **an APK from HEAD against the deployed relay fails every Convert quote**, and the deployed relay
+still answers `zero_for_one: true` for ICP→VCHF where the corrected tree derives `false`. Ship
+`just deploy-ic && just apk && just up` as one operation; do not ship the app alone. After the
+deploy, `just swap-venue-probe` is the check that the live route derives direction from the venue.
+
+## LIVE OUTAGE — the Solana rails are dead in every shipped build (founder-owned, 2026-09-08)
+
+The baked Helius key (`app/config/constants.ts`) answers **`HTTP 429` / `max usage reached`** — I
+curled it directly. So SOL, USDC·Solana and **EURC·Solana** return nothing on every installed build
+and every browser wallet, and the three rows render a bare `—` forever. EURC·Solana is the
+**preferred EUR rail**, so a user who picks Euros lands on a rail the app cannot read at all.
+
+No client change can fix this — the key is out of quota. **Founder action: replace or upgrade the
+key.** Value 10, effort S (an account action, not code).
+
+What WAS fixed on the client side, because the app was also part of the problem: an idle wallet was
+issuing **≈208 RPC requests/minute** with no batching, no dedup and no in-flight guard — and under a
+slow endpoint the request rate *rose* with latency (up to 3 concurrent generations of the same
+poll). Now ≈128/min, and under a 429 exactly one probe per backoff window instead of 208/min
+forever. Two remaining reductions need files that were owned elsewhere this session: batching the 5
+per-rail balance polls into 1, and collapsing `getSolanaTokenBalance`'s 2 round trips per mint into
+1 (`getTokenAccountBalance` alone answers both). Value 6, effort S.
+
+| # | Follow-up | value | effort |
+|---|-----------|------:|:------:|
+| S1 | A Solana row that cannot be read must say what is happening and what to do — `'error'` and `'loading'` currently render identically as `—`, against the founder's every-step-instruction rule. Needs i18n copy + the row component. | 7 | S |
+| S2 | Batch the balance polls (5→1/tick) and collapse the per-mint double round trip | 6 | S |
+| S3 | The offline e2e harness stubs the RPC, so it can see none of this. A request-budget assertion (a flow that fails if a cold load exceeds N requests) is the only thing that would have caught it. | 6 | M |
+
+## Measured UI defects (driven in a real browser 2026-09-08, not code-read)
+
+Everything here was reproduced by driving the shipped app. Fixes in flight are struck as they land.
+
+| # | Defect | value | effort |
+|---|--------|------:|:------:|
+| U1 | **The cashier ring-up form overflows the viewport by ~61 px on each side** (root measures 533 px inside a 380 px column at 412×915): the `CHF` prefix is clipped off-screen left, the hint line is clipped at both ends, the Ring-up button's corner radii are off-screen, and ~300 px of dead vertical space sits above it. Root cause is three lines — `S.amountInput` has `flex:1` with no `minWidth:0` (its UA intrinsic width at 34 px bold measures 414 px, which becomes the row's min-content), `S.center` has `flexGrow:1` with no `alignSelf:'stretch'`, and `TillCharge` nests its own `S.center` **inside** ReceiveMode's `S.center`, so the inner view is shrink-to-fit. Refuted hypothesis: it is NOT the long German hint — English measures the same 533 px. The fix belongs on TillCharge's root container, not the input (`minWidth:0` on the input alone changes nothing; `maxWidth:380` on the root removes the overflow). `TillCharge` is the ONLY component that puts `S.amountRow` inside a second non-stretched `S.center` — every other amount surface stretches correctly. **The till ships OFF by default, so this is invisible until an operator turns it on — which is exactly what a pilot merchant deployment does.** | 8 | S |
+| U2 | **No e2e flow screenshots the till *entering* form** — flows 114–117 capture only downstream states. That is how a form overflowing the viewport by 122 px passed the full visual-regression suite. Fixing U1 without closing this gap leaves the same blind spot. | 7 | S |
+| U4 | **`CODEBASE_ANALYSIS.md` carries a hand-maintained ~40-flow enumeration that duplicates the generated `FLOWS.md` wholesale.** It is labelled "illustrative, not exhaustive", but since `just check` now regenerates and diffs `FLOWS.md` (recipe `flows-md`) its remaining value is close to zero and it is a standing DRY violation in the file every session opens with. It cannot be deleted blind: it carries a few non-flow facts (the testID contract, the seed/backup surface, the restore surface, the asset-segregation note) that need re-homing first. | 6 | S |
+| U3 | **~300 px dead band at the top of the ordinary Receive form** — the same `S.center` vertical-centring idiom as U1, milder symptom. Fix with U1 so the idiom is corrected once. | 6 | S |
 
 ## Other open issues
 

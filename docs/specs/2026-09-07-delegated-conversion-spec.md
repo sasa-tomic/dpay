@@ -73,9 +73,17 @@ direct assets shipped. It is deliberately written to the `docs/REGULATORY.md` §
     like the legacy-transfer codec was).
   - `depositFromAndSwap` arg encoder (ICPSwap `SwapArgs` — exact shape from the `.did`).
   - Exposed through dpay-ffi + Kotlin (`just ffi` must stay green).
-- **Venue consts live app-side** in `app/config/` for the PoC (pool, factory, ledgers, fee tier);
-  migrating them into the catalog rows (`catalog.rs` + `catalog_truth.json`) is a follow-up
-  BEFORE any live ship, not part of this build.
+- ~~**Venue consts live app-side** in `app/config/` for the PoC (pool, factory, ledgers, fee tier)~~
+  **AMENDED 2026-09-08.** The app holds the pool principal and the pair as an **unordered set** —
+  never an order and never the fee tier. Both of those are facts about a remote system: the relay
+  reads them off the pool's own `metadata` at request time and echoes the tier. This spec's own §1
+  said to do that ("come from the pool's own metadata — read them, never assume"); the build
+  assumed, got the order backwards, and seeded the offline fake from the same pin, so production
+  quoted each direction under the other's label. Evidence and fix:
+  [`2026-09-08-conversion-hardening-plan.md`](2026-09-08-conversion-hardening-plan.md). The measured
+  pair now lives in `dfx/catalog_truth.json` `swap_venue` as test-fixture truth with three drift
+  alarms on it (Rust, jest, and the `just swap-venue-probe` mainnet tripwire) — **not** as a
+  production input.
 
 ## 3. Approve bounds (least-authority, matches the governance posture)
 
