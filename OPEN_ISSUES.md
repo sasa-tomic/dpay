@@ -121,14 +121,23 @@ DO-NOT-NAG set.
 
 ## PROD STATE (checked, never asserted — floor `cf119bb`)
 
-Re-measured 2026-09-07: the relay is LIVE at `cf119bb` = HEAD (`just verify-relay` PASS at
-HEAD-equality; live catalog healthy — testnet rows segregated to their section, VEUR on IC
-mainnet, EURC deep on Solana). `just integrity-check` MATCHes the 2026-09-06 pin (`0978386f…`) —
-the canister is untouched since the recorded upgrade. **The only unshipped surface is the facade
-WASM changed at `90f5930`** (lazy-sweep + paged-reconcile: `inflight_intents`,
-`debug_dangle_intent`) — the next ship is `just deploy-ic` (no longer skippable); prepend
-`just apk && just up` only if further app/relay commits land first. `just integrity-check`
-re-MATCHes after that deploy re-bakes the module-hash pin.
+Re-measured 2026-09-08 at HEAD `79a7257`: `just verify-relay` → **BEHIND by 4**, live relay reports
+`2ddb394`. `just integrity-check` → **MATCH** on the 2026-09-06 pin (`0978386f…`), so the canister
+is untouched since the recorded upgrade.
+
+**Read the live relay's reported commit with suspicion until the next deploy.** That image was
+built from a DIRTY tree — it serves `/api/v1/capabilities`, a route that does not exist at
+`2ddb394` — and `build.rs` did not mark dirty builds until `5753186`. So the live number names a
+base commit, not the running source. From the next image onward a dirty build reports `<sha>-dirty`
+and `just verify-relay` reports DIRTY as its own outcome.
+
+**Unshipped surfaces, both needed:** the facade WASM changed at `90f5930` (lazy-sweep +
+paged-reconcile) and everything from today. Ship as ONE operation —
+`just deploy-ic && just apk && just up` — because the app now requires a quote field the deployed
+relay does not send (see the deploy-order note above). Afterwards: `just integrity-check` re-MATCHes
+(the deploy re-bakes the module-hash pin), `just verify-relay` should report MATCH at HEAD, and
+`just swap-venue-probe` is the check that the live route derives swap direction from the venue
+rather than a pin.
 
 ## Retired this prune (decision-shaped — do not re-file)
 

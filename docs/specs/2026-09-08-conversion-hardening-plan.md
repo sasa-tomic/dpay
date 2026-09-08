@@ -125,5 +125,21 @@ Same live drive, same build:
 
 ## Status
 
-Streams A, B, C, C2, D: NOT STARTED at the time of writing. Each is closed by striking it here
-with its commit when it lands — no other status copy exists.
+- **A — DONE, `5753186`.** RED→GREEN both offline (the stub's seed order vs `catalog_truth.json`)
+  and live (`just swap-venue-probe` against the real pool). The live route now answers
+  1 ICP → 2.43 VCHF with `zero_for_one: false` **derived from the pool's own metadata**, and the
+  probe cross-checks each quote against the price the pool publishes in the same reply
+  (`sqrtPriceX96`), landing at exactly 1 − 0.003 — the venue's own fee tier. No e2e golden amount
+  moved: the reseed moved token0/token1 and their reserves together.
+- **B — DONE, `5753186`.** The twins are gone. Their differential run found the signed bytes were
+  always correct but the TS decoder read the venue's error text as Latin-1 and hard-failed on a
+  legal re-ordering of the same candid type — i.e. it could report a *successful* swap as
+  unreadable.
+- **C, C2 — DONE, `f85aa31`** (screen) and **`08ac419`** (flow 145).
+- **D — the trip-strip and EUR-glyph halves DONE in `f85aa31`**; the ∂0.00-first-run half belongs to
+  the capabilities work (`5753186`) and to
+  [`2026-09-08-first-run-redesign.md`](2026-09-08-first-run-redesign.md).
+
+**NOT YET TRUE IN PRODUCTION.** The relay is unshipped, so the live route still serves the inverted
+quote. See the deploy-order note in `OPEN_ISSUES.md`: the app now requires a quote field the
+deployed relay does not send, so the two must ship together.
