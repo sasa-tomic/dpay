@@ -290,6 +290,14 @@ faucet-verify *args:
 typecheck:
     cd app && npm run typecheck
 
+# regenerate crates/dpay-relay/assets/palette.css from app/config/palette.ts — the ONE source of
+# dpay's colour values. Run it after ANY palette edit; `just test-app` fails until you do
+# (app/__tests__/relay-palette.test.ts byte-compares the artifact against the emitter), which is
+# what stops the website from shipping a palette the app no longer uses. No bundler: Node imports
+# the TypeScript directly.
+palette-css:
+    node scripts/gen-relay-palette.mjs
+
 # app unit tests (jest) — 1000+ cases driving the real components, hooks, formatters and catalog.
 # Wired into `check` because it WASN'T: the suite ran only by hand, so a broken component or a
 # regressed formatter passed `just verify` green. Same shape as `typecheck` above.
@@ -350,7 +358,10 @@ wasm-core:
 # This build ALSO emits the offline shell (sw.js + manifest + icon) and brotli-precompresses every
 # compressible output — see `dpayWebProdAssets` in e2e/vite.config.js; build.rs refuses a dist
 # where a compressible file arrived without its `.br`.
+# The bundle bakes in the Solana RPC endpoint, so check-prod-sol runs first — `--no-probe` because
+# this recipe is on the fully-offline inner loop (see that script's header for the two modes).
 web:
+    node scripts/check-prod-sol.mjs --no-probe
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
     cd e2e && node node_modules/vite/bin/vite.js build --mode web-prod
     node scripts/check-web-prod-seams.mjs

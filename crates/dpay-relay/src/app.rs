@@ -876,6 +876,23 @@ async fn ckerc20_onramp(
     }
 }
 
+
+/// The palette every static page paints from, generated from `app/config/palette.ts`
+/// (`scripts/relay-palette-css.mjs`) and substituted for the `{{PALETTE}}` token below.
+///
+/// It is ONE block for FOUR pages because it used to be four hand-maintained copies of one fact,
+/// which is how palette v5 shipped in the app and left the whole website on v4 — and how
+/// till.html/till-code.html had already drifted off v4 before that. `app/__tests__/relay-palette.test.ts`
+/// fails the moment the checked-in file stops matching the palette it claims to come from.
+const PALETTE_CSS: &str = include_str!("../assets/palette.css");
+
+/// Substitute the shared palette into one static page. Every HTML asset this relay serves goes
+/// through it, so a page that forgets the token renders unstyled rather than half-styled — and the
+/// `served_pages_carry_the_shared_palette` test asserts none of them does.
+pub(crate) fn with_palette(html: &str) -> String {
+    html.replace("{{PALETTE}}", PALETTE_CSS)
+}
+
 /// `GET /` — the marketing landing page. The `{{DOWNLOAD}}` placeholder becomes a live download CTA
 /// when an APK is configured (via [`AppState::with_apk`]), or a "coming soon" chip otherwise.
 async fn landing_page(State(state): State<AppState>) -> Response {
@@ -893,7 +910,7 @@ async fn landing_page(State(state): State<AppState>) -> Response {
     };
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../assets/landing.html").replace("{{DOWNLOAD}}", &download),
+        with_palette(include_str!("../assets/landing.html")).replace("{{DOWNLOAD}}", &download),
     )
         .into_response()
 }
@@ -972,7 +989,7 @@ async fn merchant_redirect() -> Response {
 async fn privacy_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../assets/privacy.html"),
+        with_palette(include_str!("../assets/privacy.html")),
     )
         .into_response()
 }

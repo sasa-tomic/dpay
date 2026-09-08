@@ -1030,6 +1030,51 @@ async fn transactions_endpoint_returns_history_newest_first() {
 
 // --- landing page + APK download (the public root) -----------------------
 
+/// Every static page this relay serves is painted from the SAME palette, and that palette comes
+/// from `app/config/palette.ts` — not from four hand-typed copies, which is what shipped a website
+/// on palette v4 while the app ran v5 (and left till.html/till-code.html on values that matched
+/// neither). The pages carry a `{{PALETTE}}` token; `with_palette` substitutes the generated
+/// `assets/palette.css` into it at serve time.
+///
+/// This test owns the SERVING half: that the substitution actually happens on all four routes, so a
+/// page whose token was mistyped fails here rather than rendering unstyled in front of a user. The
+/// GENERATING half — that the artifact still matches the palette it claims to come from — is
+/// `app/__tests__/relay-palette.test.ts`, which is where a Node-side byte comparison belongs.
+#[tokio::test]
+async fn every_served_page_is_painted_from_the_one_palette() {
+    let (till, _fake) = till_state();
+    let (plain, _led) = state_from(ledger());
+
+    for (state, path) in [
+        (&plain, "/"),
+        (&plain, "/privacy"),
+        (&till, "/pl/?lightning=LNURL1TEST"),
+        (&till, "/till/pl_0011223344556677"),
+    ] {
+        let (status, _headers, bytes) = call_raw(state, get_req(path)).await;
+        assert_eq!(status, StatusCode::OK, "{path} must serve");
+        let html = String::from_utf8(bytes.to_vec()).expect("utf-8 page");
+        assert!(
+            !html.contains("{{PALETTE}}"),
+            "{path} served the placeholder instead of the palette"
+        );
+        // The tangerine's FILL step and its channel form: proof the whole generated block landed,
+        // not merely that a `{` survived. Values come from the palette, so this pins the mechanism
+        // rather than a colour (which would just be a fifth copy).
+        assert!(
+            html.contains("--brand: ") && html.contains("--brandRGB: "),
+            "{path} is missing the shared palette's brand tokens"
+        );
+        // Both theme hooks ride in the one block, which is what let the two mechanisms already in
+        // use (a pre-paint script on landing/privacy, plain prefers-color-scheme on the till pages)
+        // stay exactly as they were.
+        assert!(
+            html.contains("html.scheme-auto") && html.contains("html[data-theme-mode=\"dark\"]"),
+            "{path} is missing one of the two theme hooks the shared block serves"
+        );
+    }
+}
+
 /// With no APK configured (the default), `GET /` serves the landing page with the placeholder
 /// resolved to the disabled "coming soon" chip — never the literal `{{DOWNLOAD}}` token, and no
 /// download link that would 404.
@@ -1450,16 +1495,20 @@ async fn landing_page_proof_section_explains_the_signature() {
         "the verdict row must be announced and carry both stamp faces"
     );
     // The two verdicts must not read as the same colour: holds is a green outline, broken is a
-    // solid red fill (differing in fill as well as hue, so it survives colour-blindness). The
-    // dark-mode green MUST stay scoped to the holds state — unscoped, `html.dark .stamp` is
-    // (0,2,1) and outranks the (0,2,0) tamper rule, which rendered a green border around the red
-    // fill in dark mode until 2026-08-25.
+    // solid red fill (differing in fill as well as hue, so it survives colour-blindness).
+    //
+    // BOTH are now shared palette tokens, which is also what retired the rule that used to sit
+    // here: a `html.dark [data-tamper="none"] .stamp{--st:#34C48E}` override existed only because
+    // the light green was a literal, and being state-scoped was the fix for the specificity bug
+    // that override caused (unscoped, `html.dark .stamp` is (0,2,1) and outranked the (0,2,0)
+    // tamper rule, rendering a green border around the red fill — the 2026-08-25 defect). `--ok`
+    // carries its own dark value, so there is no second rule left to rank against the first.
     assert!(
-        html.contains("html.dark [data-tamper=\"none\"] .stamp{--st:#34C48E}"),
-        "the dark holds-green must stay state-scoped or it outranks the broken-red rule"
+        html.contains("--st:var(--ok);"),
+        "the holding stamp must take the shared ok token, so its dark value needs no second rule"
     );
     assert!(
-        html.contains("--st:var(--badDeep);background:var(--badDeep);color:#FCF7F2;"),
+        html.contains("--st:var(--bad);background:var(--bad);color:var(--brandInk);"),
         "the broken stamp must be a solid red fill, not just a recoloured outline"
     );
     // The claims the section exists to make.

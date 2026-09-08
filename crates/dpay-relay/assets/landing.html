@@ -29,33 +29,21 @@
 <style>
   /* ————————————————————————————————————————————————
      ∂ifferent Pay (dpay) · "Traveler Paper" (2026-08-17)
-     One palette with the app (app/config/palette.ts) — keep in lockstep.
+     The colour tokens (light + dark) are substituted here by the relay from
+     crates/dpay-relay/assets/palette.css — generated from app/config/palette.ts.
      Brand discipline: tangerine is spent ONLY on CTAs, active marks, and the
      logo. Body copy is always ink. Green is success-only, amber is caution.
      ———————————————————————————————————————————————— */
+{{PALETTE}}
+  /* Not colour, so not in the generated block: the type stacks and the page's
+     shadow ramp, tinted with the palette's own --shadowRGB. */
   :root{
-    --bg:#F4F1E8;          /* warm porcelain page */
-    --panel:#FDFCF9;       /* raised sheet */
-    --panel2:#F8F6F0;      /* inset wells */
-    --card:#FFFFFF;        /* white cards */
-    --ink:#1B1A17;
-    --sub:#676257;
-    --sub2:#A6A093;
-    --brand:#FF5A1F;       /* tangerine — CTA / active / logo ONLY */
-    --brand2:#E0480F;      /* pressed */
-    --ok:#0E9F6E;          /* success / online ONLY */
-    --warn:#B45309;        /* caution / OFFLINE — never failure; offline is a good state here */
-    --bad:#CE2F34;         /* failure TEXT tone (palette.ts `bad`, floored for 4.5:1 on paper) */
-    --badDeep:#CE2F34;     /* failure FILL tone — one value: cream text clears 4.5:1 on it in
-                              BOTH themes, so it needs no dark-mode lift (cf. palette warnDeep) */
-    --line:#E5DFD1;        /* hairline on porcelain */
-    --line2:#EDE8DC;       /* softer hairline on cards */
     --mono:'IBM Plex Mono',ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
     --sans:'Space Grotesk',system-ui,-apple-system,'Segoe UI',sans-serif;
-    --sh-xl:0 44px 90px -46px rgba(27,26,23,.42), 0 16px 34px -22px rgba(27,26,23,.26);
-    --sh-lg:0 30px 60px -34px rgba(27,26,23,.30);
-    --sh-md:0 16px 36px -22px rgba(27,26,23,.22);
-    --sh-sm:0 8px 20px -12px rgba(27,26,23,.16);
+    --sh-xl:0 44px 90px -46px rgba(var(--shadowRGB),.42), 0 16px 34px -22px rgba(var(--shadowRGB),.26);
+    --sh-lg:0 30px 60px -34px rgba(var(--shadowRGB),.30);
+    --sh-md:0 16px 36px -22px rgba(var(--shadowRGB),.22);
+    --sh-sm:0 8px 20px -12px rgba(var(--shadowRGB),.16);
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
@@ -70,7 +58,7 @@
     overflow-x:hidden;
   }
   a{color:inherit}
-  ::selection{background:rgba(255,90,31,.22)}
+  ::selection{background:rgba(var(--brandRGB),.22)}
   :focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:6px}
 
   /* paper grain — a whisper of tooth on the porcelain */
@@ -100,7 +88,7 @@
     position:sticky;top:0;z-index:50;
     display:flex;align-items:center;justify-content:space-between;
     max-width:1128px;margin:0 auto;padding:16px 28px;
-    background:rgba(244,241,232,.82);
+    background:rgba(var(--bgRGB),.82);
     -webkit-backdrop-filter:blur(14px) saturate(1.15);
             backdrop-filter:blur(14px) saturate(1.15);
     border-bottom:1px solid transparent;
@@ -117,10 +105,10 @@
     padding:9px 14px;border-radius:11px;
     transition:color .16s ease,background .16s ease;
   }
-  .navlink:hover{color:var(--ink);background:rgba(27,26,23,.055)}
+  .navlink:hover{color:var(--ink);background:rgba(var(--inkRGB),.055)}
   .navlink.ghost{
     color:var(--ink);border:1px solid var(--line);background:var(--card);
-    box-shadow:0 1px 2px rgba(27,26,23,.05);
+    box-shadow:0 1px 2px rgba(var(--inkRGB),.05);
     display:inline-flex;align-items:center;gap:7px;
   }
   .navlink.ghost:hover{border-color:var(--sub2)}
@@ -153,13 +141,13 @@
   .primary{
     display:inline-flex;align-items:center;gap:10px;
     padding:15px 26px;border-radius:15px;
-    background:var(--brand);color:#fff;
+    background:var(--brand);color:var(--brandInk);
     font-size:1.02rem;font-weight:700;letter-spacing:-.01em;text-decoration:none;
-    box-shadow:0 14px 28px -13px rgba(255,90,31,.55);
+    box-shadow:0 14px 28px -13px rgba(var(--brandRGB),.55);
     transition:transform .16s ease,background .16s ease,box-shadow .16s ease;
   }
   .primary:hover{transform:translateY(-2px);background:var(--brand2);
-    box-shadow:0 20px 36px -14px rgba(224,72,15,.55)}
+    box-shadow:0 20px 36px -14px rgba(var(--brand2RGB),.55)}
   .primary:active{transform:translateY(0)}
   .primary svg{width:17px;height:17px}
   .ghost{
@@ -191,7 +179,7 @@
   .stage{position:relative;justify-self:center;width:100%;max-width:440px;min-height:600px}
   .route{position:absolute;left:-10%;top:-2%;width:116%;height:108%;z-index:0;pointer-events:none}
   .route path{
-    fill:none;stroke:rgba(27,26,23,.22);stroke-width:1.6;stroke-linecap:round;stroke-dasharray:1 9;
+    fill:none;stroke:rgba(var(--inkRGB),.22);stroke-width:1.6;stroke-linecap:round;stroke-dasharray:1 9;
     animation:drift 42s linear infinite;
   }
   .route circle{fill:var(--brand)}
@@ -199,7 +187,7 @@
   .rings{position:absolute;top:0;right:4%;width:180px;height:180px;z-index:1;pointer-events:none}
   .rings span{
     position:absolute;inset:0;margin:auto;border-radius:50%;
-    border:1.5px solid rgba(255,90,31,.42);opacity:0;
+    border:1.5px solid rgba(var(--brandRGB),.42);opacity:0;
     animation:ping 3.8s cubic-bezier(.2,.6,.3,1) infinite;
   }
   .rings span:nth-child(2){animation-delay:1.27s}
@@ -222,7 +210,7 @@
   .phone.back{
     position:absolute;z-index:1;left:-4px;top:64px;width:240px;padding:8px;border-radius:36px;
     transform:rotate(-7deg);
-    box-shadow:0 34px 64px -40px rgba(27,26,23,.5), inset 0 1px 0 rgba(255,255,255,.08);
+    box-shadow:0 34px 64px -40px rgba(var(--inkRGB),.5), inset 0 1px 0 rgba(255,255,255,.08);
   }
   .phone.back::before{width:58px;top:13px}
   .phone.back img{border-radius:29px}
@@ -387,7 +375,7 @@
   .ph{
     position:relative;width:116px;flex:none;aspect-ratio:9/16;border-radius:20px;padding:5px;
     background:linear-gradient(172deg,#282520,#141310 72%);
-    box-shadow:0 20px 36px -22px rgba(27,26,23,.45), inset 0 1px 0 rgba(255,255,255,.08);
+    box-shadow:0 20px 36px -22px rgba(var(--inkRGB),.45), inset 0 1px 0 rgba(255,255,255,.08);
   }
   .ph::before{
     content:"";position:absolute;top:9px;left:50%;transform:translateX(-50%);
@@ -397,7 +385,7 @@
   .ph .idx{
     position:absolute;top:-8px;right:-8px;width:25px;height:25px;border-radius:50%;z-index:3;
     display:flex;align-items:center;justify-content:center;
-    font-family:var(--mono);font-size:.72rem;font-weight:600;color:#fff;background:var(--ink);
+    font-family:var(--mono);font-size:.72rem;font-weight:600;color:var(--fixedPaper);background:var(--fixedInk);
     border:2.5px solid var(--card);
   }
   .step.done .ph .idx{background:var(--ok)}
@@ -417,14 +405,14 @@
   .band .kicker{color:var(--sub2)}
   .band h2{color:var(--bg)}
   .band .sec-sub{color:var(--sub2)}
-  .band .rail-track{background:repeating-linear-gradient(90deg,rgba(244,241,232,.2) 0 7px,transparent 7px 15px)}
+  .band .rail-track{background:repeating-linear-gradient(90deg,rgba(var(--bgRGB),.2) 0 7px,transparent 7px 15px)}
   .band .rail-track i{background:var(--brand)}
-  .band .ph{background:linear-gradient(172deg,#33302a,#1d1c19 72%);box-shadow:0 24px 40px -22px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.09);border:1px solid rgba(244,241,232,.13)}
+  .band .ph{background:linear-gradient(172deg,#33302a,#1d1c19 72%);box-shadow:0 24px 40px -22px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.09);border:1px solid rgba(var(--bgRGB),.13)}
   .band .ph .idx{background:var(--brand);border-color:var(--ink)}
   .band .step.done .ph .idx{background:var(--ok)}
   .band .step .t{color:var(--bg)}
   .band .step .d{color:var(--sub2)}
-  .band .arrow{color:rgba(244,241,232,.4)}
+  .band .arrow{color:rgba(var(--bgRGB),.4)}
   /* One closing-note rule for the whole page — the proof section and the QR card's offline flow
      both end on one, and both sit on paper. (It replaced a duplicate .band-note/.proof-note pair
      that differed only in surface colour.) */
@@ -513,12 +501,12 @@
     font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--sub);
   }
   .node small::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--sub2)}
-  .node.on small{color:#0B7A55} .node.on small::before{background:var(--ok)}
-  .node.on{border-color:rgba(14,159,110,.28);background:rgba(14,159,110,.05)}
+  .node.on small{color:var(--ok)} .node.on small::before{background:var(--ok)}
+  .node.on{border-color:rgba(var(--okRGB),.28);background:rgba(var(--okRGB),.05)}
   .link{position:relative;flex:none;width:78px;height:40px;display:flex;align-items:center;justify-content:center}
   .link::before{content:"";position:absolute;left:2px;right:2px;top:50%;border-top:2px dotted var(--line)}
-  .link .tap{position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--brand);box-shadow:0 10px 20px -10px rgba(255,90,31,.6)}
-  .link .tap svg{width:19px;height:19px;color:#fff}
+  .link .tap{position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--brand);box-shadow:0 10px 20px -10px rgba(var(--brandRGB),.6)}
+  .link .tap svg{width:19px;height:19px;color:var(--brandInk)}
   .zero{font-size:4.4rem;font-weight:700;letter-spacing:-.05em;color:var(--brand);line-height:1}
 
   /* ————— get the app ————— */
@@ -545,13 +533,13 @@
   }
   .btn{
     flex-direction:column;flex:1;
-    background:var(--brand);color:#fff;
+    background:var(--brand);color:var(--brandInk);
     font-size:1.05rem;font-weight:700;letter-spacing:-.012em;line-height:1.16;
-    box-shadow:0 14px 28px -13px rgba(255,90,31,.55);
+    box-shadow:0 14px 28px -13px rgba(var(--brandRGB),.55);
     transition:transform .16s ease,background .16s ease,box-shadow .16s ease;
   }
   .btn:hover{transform:translateY(-2px);background:var(--brand2);
-    box-shadow:0 20px 36px -14px rgba(224,72,15,.55)}
+    box-shadow:0 20px 36px -14px rgba(var(--brand2RGB),.55)}
   .btn:active{transform:translateY(0)}
   .apk-meta{font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;opacity:.82;margin-top:3px}
   .btn-disabled{
@@ -604,11 +592,11 @@
   .foot-right{max-width:46ch}
   .foot p{margin:0;color:var(--sub2);font-size:.9rem;line-height:1.75}
   .foot p b{color:var(--bg);font-weight:600}
-  .foot a{color:var(--bg);text-decoration:none;border-bottom:1px solid rgba(244,241,232,.3);transition:border-color .16s ease,color .16s ease}
+  .foot a{color:var(--bg);text-decoration:none;border-bottom:1px solid rgba(var(--bgRGB),.3);transition:border-color .16s ease,color .16s ease}
   .foot a:hover{color:var(--brand);border-color:var(--brand)}
   .foot-micro{
     margin-top:22px;display:flex;gap:8px 20px;flex-wrap:wrap;
-    font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:rgba(244,241,232,.55);
+    font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:rgba(var(--bgRGB),.55);
   }
 
   /* ————— ticker: the movement strip ————— */
@@ -618,7 +606,7 @@
   .tgroup span{
     position:relative;display:inline-flex;align-items:center;white-space:nowrap;
     font-family:var(--mono);font-size:.74rem;font-weight:600;letter-spacing:.24em;text-transform:uppercase;
-    color:rgba(244,241,232,.88);padding:0 27px;
+    color:rgba(var(--bgRGB),.88);padding:0 27px;
   }
   .tgroup span::after{
     content:"·";position:absolute;right:-8px;top:50%;margin-top:-.65em;
@@ -642,7 +630,7 @@
   .band .sec-sub{margin-top:34px}
   .band .sec-sub b{color:var(--bg);font-weight:600}
   .band .cta-row{margin-top:34px}
-  .band .ghost{background:transparent;box-shadow:none;color:var(--bg);border-color:rgba(244,241,232,.4)}
+  .band .ghost{background:transparent;box-shadow:none;color:var(--bg);border-color:rgba(var(--bgRGB),.4)}
   .band .ghost:hover{border-color:var(--bg)}
 
   /* ————— the proof: one sealed slip, two couriers —————
@@ -676,8 +664,8 @@
   .rtrack:hover{border-color:var(--sub2)}
   .rtrack .knob{
     position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:50%;
-    display:flex;align-items:center;justify-content:center;color:#fff;background:var(--brand);
-    box-shadow:0 6px 14px -7px rgba(255,90,31,.8);
+    display:flex;align-items:center;justify-content:center;color:var(--brandInk);background:var(--brand);
+    box-shadow:0 6px 14px -7px rgba(var(--brandRGB),.8);
     transition:transform .3s cubic-bezier(.3,1.5,.4,1);
   }
   .rtrack .knob svg{width:14px;height:14px}
@@ -700,8 +688,8 @@
   .rnode .cap{font-family:var(--mono);font-size:.57rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--sub2)}
   .rnode b{font-size:1.02rem;font-weight:700;letter-spacing:-.015em;line-height:1.25;color:var(--ink)}
   .rnode .sm{font-size:.82rem;color:var(--sub);line-height:1.45;max-width:21ch}
-  .rnode.signer{border-color:rgba(255,90,31,.32);background:rgba(255,90,31,.05)}
-  .rnode.settles{border-color:rgba(14,159,110,.28);background:rgba(14,159,110,.05)}
+  .rnode.signer{border-color:rgba(var(--brandRGB),.32);background:rgba(var(--brandRGB),.05)}
+  .rnode.settles{border-color:rgba(var(--okRGB),.28);background:rgba(var(--okRGB),.05)}
   .rleg{position:relative;flex:none;width:92px;height:34px;align-self:center}
   .rleg::before{content:"";position:absolute;left:2px;right:2px;top:50%;border-top:2px dotted var(--line)}
   .rleg i{
@@ -750,18 +738,15 @@
   /* Holds = green outline, broken = solid red fill. The two states differ in FILL as well as hue,
      so the verdict still reads for a colour-blind visitor or on a greyscale print. */
   .stamp{
-    --st:#0B7A55;background:transparent;
+    --st:var(--ok);background:transparent;
     border:2.5px solid var(--st);color:var(--st);border-radius:11px;padding:8px 12px;
     transform:rotate(-7deg);
     font-family:var(--mono);font-size:.62rem;font-weight:600;letter-spacing:.15em;text-transform:uppercase;
     box-shadow:inset 0 0 0 2px var(--panel2), inset 0 0 0 3.5px var(--st);
   }
-  /* Scoped to the holds state on purpose: an unscoped `html.dark .stamp` is (0,2,1) and would
-     outrank the (0,2,0) tamper rule below, leaving a green border around the red fill in dark. */
-  html.dark [data-tamper="none"] .stamp{--st:#34C48E}
   .stamp .s-bad{display:none}
   [data-tamper="amount"] .stamp,[data-tamper="payee"] .stamp{
-    --st:var(--badDeep);background:var(--badDeep);color:#FCF7F2;
+    --st:var(--bad);background:var(--bad);color:var(--brandInk);
     animation:slam .32s cubic-bezier(.2,1.7,.35,1) both;
   }
   [data-tamper="amount"] .stamp .s-ok,[data-tamper="payee"] .stamp .s-ok{display:none}
@@ -889,12 +874,11 @@
   }
 
   /* ── Dark theme (Wave 4, 2026-08-20 · Wave 7 manual toggle) ─────────────────────────────
-     The warm near-black reading of the same Traveler Paper identity (mirrors
-     app/config/palette.ts DARK — keep in lockstep). Vars carry most of the page; the remaining
-     hardcoded porcelain literals (nav, grain, shadows) get scoped overrides. The .band showcase
-     sections are ALREADY dark on a porcelain page — in dark mode they sit on the page's own
-     near-black, so their inner light-alpha chrome (rail-track/arrow/phone-frame borders) stays
-     legible unchanged.
+     The warm near-black reading of the same Traveler Paper identity; its colour tokens come
+     from the generated block above. Vars carry most of the page; the remaining scoped
+     overrides below are the shadow ramp (pure black, not a palette tint) and the surfaces
+     that are ALREADY dark on a porcelain page (.band/.ticker/footer), which need a lifted
+     floor so they stay distinct once the page itself is near-black.
      Wave 7: keyed on `html.dark` (set by the pre-paint head script + the fixed toggle below)
      instead of a bare @media — with no stored choice the OS scheme seeds it via matchMedia;
      a stored 'light'/'dark' pins it. color-scheme follows the class so scrollbars/native
@@ -902,53 +886,37 @@
   html{color-scheme:light}
   html.dark{color-scheme:dark}
   html.dark{
-      --bg:#141210;
-      --panel:#1D1A16;
-      --panel2:#24211C;
-      --card:#2A2620;
-      --ink:#F2EEE6;
-      --sub:#A8A094;
-      --sub2:#8A8274;
-      --brand:#FF5A1F;
-      --brand2:#E0480F;
-      --ok:#0E9F6E;
-      --warn:#E9A23B;
-      --bad:#F16A6F;       /* lifted for text on dark (5.4:1) — palette.ts dark badRGB */
-      --line:#3B362D;
-      --line2:#34302A;
       --sh-xl:0 44px 90px -46px rgba(0,0,0,.6), 0 16px 34px -22px rgba(0,0,0,.45);
       --sh-lg:0 30px 60px -34px rgba(0,0,0,.5);
       --sh-md:0 16px 36px -22px rgba(0,0,0,.4);
       --sh-sm:0 8px 20px -12px rgba(0,0,0,.35);
     }
     html.dark .grain{opacity:.06;mix-blend-mode:screen}
-    html.dark nav{background:rgba(20,18,16,.82)}
-    html.dark .navlink:hover{background:rgba(242,238,230,.06)}
+    html.dark .navlink:hover{background:rgba(var(--inkRGB),.06)}
     /* Wave 7 contrast fixes: the .band/.ticker showcase sections key their text off var(--bg) and
        their strips off var(--ink) — both flip in dark, leaving near-black-on-near-black text and
        a cream-on-cream ticker. The floor overrides below keep the showcase rhythm readable. */
     html.dark .band h2,
     html.dark .band .step .t,
     html.dark .band .sec-sub b,
-    html.dark .mline{color:#F2EEE6}
+    html.dark .mline{color:var(--ink)}
     html.dark .ticker{background:#0E0D0B}
-    html.dark .ph .idx{background:#1B1A17;border-color:rgba(242,238,230,.25)}
-    html.dark .node.on small{color:#34C48E}
-    html.dark .route path{stroke:rgba(242,238,230,.22)}
+    html.dark .tgroup span{color:rgba(var(--inkRGB),.88)}
+    html.dark .ph .idx{border-color:rgba(var(--inkRGB),.25)}
     /* .band + .foot key off --ink/--bg which now flip (near-black band bg becomes near-black on
         near-black — indistinct): give them a slightly lifted floor + cream text so the showcase
         rhythm survives, and re-point the porcelain-tinted accents inside them. */
     html.dark .band{background:#0E0D0B}
-    html.dark .band .rail-track{background:repeating-linear-gradient(90deg,rgba(242,238,230,.14) 0 7px,transparent 7px 15px)}
-    html.dark .band .arrow{color:rgba(242,238,230,.4)}
-    html.dark .band .ph{border-color:rgba(242,238,230,.13)}
-    html.dark .band .ghost{color:#F2EEE6;border-color:rgba(242,238,230,.4)}
+    html.dark .band .rail-track{background:repeating-linear-gradient(90deg,rgba(var(--inkRGB),.14) 0 7px,transparent 7px 15px)}
+    html.dark .band .arrow{color:rgba(var(--inkRGB),.4)}
+    html.dark .band .ph{border-color:rgba(var(--inkRGB),.13)}
+    html.dark .band .ghost{color:var(--ink);border-color:rgba(var(--inkRGB),.4)}
     html.dark footer{background:#0E0D0B}
     html.dark .foot .word,
     html.dark .foot p b,
-    html.dark .foot a{color:#F2EEE6}
-    html.dark .foot a{border-bottom-color:rgba(242,238,230,.3)}
-    html.dark .foot-micro{color:rgba(242,238,230,.55)}
+    html.dark .foot a{color:var(--ink)}
+    html.dark .foot a{border-bottom-color:rgba(var(--inkRGB),.3)}
+    html.dark .foot-micro{color:rgba(var(--inkRGB),.55)}
 
   /* Wave 7 — fixed theme toggle (Light ↔ Dark flip), bottom-right. A panel chip on a
      hairline border with the site's soft shadow; the icon follows html[data-theme-mode]. */
@@ -979,11 +947,11 @@
     <svg viewBox="0 0 1024 1024" aria-hidden="true">
       <defs>
         <linearGradient id="dtile" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#FF6A2B"/><stop offset="1" stop-color="#FF5A1F"/>
+          <stop offset="0" stop-color="var(--markTop)"/><stop offset="1" stop-color="var(--markBottom)"/>
         </linearGradient>
       </defs>
       <rect width="1024" height="1024" rx="228" fill="url(#dtile)"/>
-      <path d="M422.46 366.78V288.77Q474.23 276 511.82 276Q619.27 276 667.14 368.55Q688.42 409.69 688.42 474.58Q688.42 514.65 678.49 561.11Q653.67 677.06 586.65 732.74Q534.52 776 476.72 776Q416.43 776 379.55 743.73Q335.58 704.72 335.58 639.48Q335.58 567.13 374.94 510.4Q413.24 454.72 488.42 454.72Q527.43 454.72 564.3 479.19Q578.13 488.41 597.99 517.49Q601.18 494.44 601.18 468.55Q601.18 429.19 589.84 408.62Q556.15 347.99 496.93 347.99Q467.5 347.99 422.46 366.78ZM423.17 648.34Q423.17 674.23 437.35 690.18Q451.89 706.5 477.07 706.5Q497.64 706.5 515.72 693.73Q538.06 678.13 555.44 649.4Q568.91 627.06 576.72 601.18Q547.99 539.83 499.06 539.83Q452.96 539.83 434.87 589.48Q423.17 621.04 423.17 648.34Z" fill="#F4F1E8" fill-rule="evenodd"/>
+      <path d="M422.46 366.78V288.77Q474.23 276 511.82 276Q619.27 276 667.14 368.55Q688.42 409.69 688.42 474.58Q688.42 514.65 678.49 561.11Q653.67 677.06 586.65 732.74Q534.52 776 476.72 776Q416.43 776 379.55 743.73Q335.58 704.72 335.58 639.48Q335.58 567.13 374.94 510.4Q413.24 454.72 488.42 454.72Q527.43 454.72 564.3 479.19Q578.13 488.41 597.99 517.49Q601.18 494.44 601.18 468.55Q601.18 429.19 589.84 408.62Q556.15 347.99 496.93 347.99Q467.5 347.99 422.46 366.78ZM423.17 648.34Q423.17 674.23 437.35 690.18Q451.89 706.5 477.07 706.5Q497.64 706.5 515.72 693.73Q538.06 678.13 555.44 649.4Q568.91 627.06 576.72 601.18Q547.99 539.83 499.06 539.83Q452.96 539.83 434.87 589.48Q423.17 621.04 423.17 648.34Z" fill="var(--markInk)" fill-rule="evenodd"/>
     </svg>
     <span class="word">∂<b>pay</b></span>
   </a>
@@ -1488,7 +1456,7 @@
     <a class="brandmark" href="#top" aria-label="Different Pay home">
       <svg viewBox="0 0 1024 1024" aria-hidden="true">
         <rect width="1024" height="1024" rx="228" fill="url(#dtile)"/>
-        <path d="M422.46 366.78V288.77Q474.23 276 511.82 276Q619.27 276 667.14 368.55Q688.42 409.69 688.42 474.58Q688.42 514.65 678.49 561.11Q653.67 677.06 586.65 732.74Q534.52 776 476.72 776Q416.43 776 379.55 743.73Q335.58 704.72 335.58 639.48Q335.58 567.13 374.94 510.4Q413.24 454.72 488.42 454.72Q527.43 454.72 564.3 479.19Q578.13 488.41 597.99 517.49Q601.18 494.44 601.18 468.55Q601.18 429.19 589.84 408.62Q556.15 347.99 496.93 347.99Q467.5 347.99 422.46 366.78ZM423.17 648.34Q423.17 674.23 437.35 690.18Q451.89 706.5 477.07 706.5Q497.64 706.5 515.72 693.73Q538.06 678.13 555.44 649.4Q568.91 627.06 576.72 601.18Q547.99 539.83 499.06 539.83Q452.96 539.83 434.87 589.48Q423.17 621.04 423.17 648.34Z" fill="#F4F1E8" fill-rule="evenodd"/>
+        <path d="M422.46 366.78V288.77Q474.23 276 511.82 276Q619.27 276 667.14 368.55Q688.42 409.69 688.42 474.58Q688.42 514.65 678.49 561.11Q653.67 677.06 586.65 732.74Q534.52 776 476.72 776Q416.43 776 379.55 743.73Q335.58 704.72 335.58 639.48Q335.58 567.13 374.94 510.4Q413.24 454.72 488.42 454.72Q527.43 454.72 564.3 479.19Q578.13 488.41 597.99 517.49Q601.18 494.44 601.18 468.55Q601.18 429.19 589.84 408.62Q556.15 347.99 496.93 347.99Q467.5 347.99 422.46 366.78ZM423.17 648.34Q423.17 674.23 437.35 690.18Q451.89 706.5 477.07 706.5Q497.64 706.5 515.72 693.73Q538.06 678.13 555.44 649.4Q568.91 627.06 576.72 601.18Q547.99 539.83 499.06 539.83Q452.96 539.83 434.87 589.48Q423.17 621.04 423.17 648.34Z" fill="var(--markInk)" fill-rule="evenodd"/>
       </svg>
       <span class="word">∂<b>pay</b></span>
     </a>

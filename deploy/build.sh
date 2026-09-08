@@ -28,6 +28,14 @@ source deploy/git-lib.sh
 # nothing can identify, so there is nothing to spend that time on.
 require_clean_tree "this relay image"
 
+# Same reason, same place: the web bundle built below bakes app/config/constants.ts's Solana RPC
+# endpoint into the /wallet bytes this image serves, so an unsafe or dead endpoint is a property of
+# the image. The APK path has always been gated (scripts/build-apk.sh); this half — the one that
+# publishes the endpoint in plaintext to every browser — was not. Strict mode: host rules AND a live
+# getHealth. Header of the script explains the two modes.
+echo "== verify the baked Solana RPC endpoint (host rules + live getHealth) =="
+node scripts/check-prod-sol.mjs
+
 export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
 export PATH="$ROOT/.dev/cargo/bin:$PATH"
 

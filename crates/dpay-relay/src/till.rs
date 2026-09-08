@@ -2127,7 +2127,7 @@ pub const TILL_CODE_PATH: &str = "/pl/";
 pub(crate) async fn till_code_page() -> Response {
     (
         [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        include_str!("../assets/till-code.html"),
+        crate::app::with_palette(include_str!("../assets/till-code.html")),
     )
         .into_response()
 }
@@ -2154,7 +2154,7 @@ pub(crate) async fn till_page() -> Response {
             (header::CONTENT_TYPE, "text/html; charset=utf-8"),
             (header::CACHE_CONTROL, "no-store"),
         ],
-        include_str!("../assets/till.html"),
+        crate::app::with_palette(include_str!("../assets/till.html")),
     )
         .into_response()
 }

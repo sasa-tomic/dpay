@@ -1,0 +1,110 @@
+/* GENERATED FILE — DO NOT EDIT.
+ *
+ * Source of truth: app/config/palette.ts (LIGHT + DARK). Emitter + rationale:
+ * app/config/relayPaletteCss.ts. Regenerate with `just palette-css`; the drift alarm that fails
+ * when this file and the palette disagree is app/__tests__/relay-palette.test.ts.
+ *
+ * The relay substitutes this whole block for each page's palette placeholder — `with_palette`
+ * in crates/dpay-relay/src/app.rs — in landing.html, privacy.html, till.html and
+ * till-code.html. The placeholder is deliberately NOT spelled out here: this text is injected
+ * into every page, so a copy of the token inside the injected block would survive the
+ * substitution and defeat the serving test that checks the substitution happened.
+ *
+ * A page that follows the OS scheme carries class="scheme-auto" on <html>; a page that
+ * resolves the theme itself sets data-theme-mode pre-paint.
+ */
+
+/* Theme-INVARIANT islands. The MARK: app/components/Logo.tsx paints the tile from LIGHT in both
+ * themes and the Android launcher mirrors it, so the website mark must too. The FIXED inks: the
+ * near-black and the white that a small inverted element keeps whatever theme it sits in. */
+:root {
+  --markTop: #D03F00; --markBottom: #912900; --markInk: #FDFCF9;
+  --fixedInk: #1B1A17; --fixedPaper: #FFFFFF;
+}
+
+:root {
+  --bg: #F4F1E8; --bgRGB: 244, 241, 232;
+  --panel: #FDFCF9; --panelRGB: 253, 252, 249;
+  --panel2: #F8F6F0; --panel2RGB: 248, 246, 240;
+  --card: #FFFFFF; --cardRGB: 255, 255, 255;
+  --field: #FFFFFF; --fieldRGB: 255, 255, 255;
+  --ink: #1B1A17; --inkRGB: 27, 26, 23;
+  --sub: #524D41; --subRGB: 82, 77, 65;
+  --sub2: #6D675B; --sub2RGB: 109, 103, 91;
+  --brand: #D03F00; --brandRGB: 208, 63, 0;
+  --brandText: #B93700; --brandTextRGB: 185, 55, 0;
+  --brand2: #912900; --brand2RGB: 145, 41, 0;
+  --brandInk: #FFFFFF; --brandInkRGB: 255, 255, 255;
+  --ok: #1B7351; --okRGB: 27, 115, 81;
+  --bad: #C32335; --badRGB: 195, 35, 53;
+  --warn: #9B5400; --warnRGB: 155, 84, 0;
+  --line: #E5DFD1; --lineRGB: 229, 223, 209;
+  --line2: #EDE8DC; --line2RGB: 237, 232, 220;
+  --shadow: #1B1A17; --shadowRGB: 27, 26, 23;
+  --wash: 0.06;
+}
+@media (prefers-color-scheme: dark) {
+  html.scheme-auto {
+    --bg: #141210; --bgRGB: 20, 18, 16;
+    --panel: #1D1A16; --panelRGB: 29, 26, 22;
+    --panel2: #24211C; --panel2RGB: 36, 33, 28;
+    --card: #2A2620; --cardRGB: 42, 38, 32;
+    --field: #2A2620; --fieldRGB: 42, 38, 32;
+    --ink: #F2EEE6; --inkRGB: 242, 238, 230;
+    --sub: #BEB6A9; --subRGB: 190, 182, 169;
+    --sub2: #9A9386; --sub2RGB: 154, 147, 134;
+    --brand: #FF5A1F; --brandRGB: 255, 90, 31;
+    --brandText: #FF6F41; --brandTextRGB: 255, 111, 65;
+    --brand2: #E0480F; --brand2RGB: 224, 72, 15;
+    --brandInk: #1B1A17; --brandInkRGB: 27, 26, 23;
+    --ok: #30B180; --okRGB: 48, 177, 128;
+    --bad: #F77476; --badRGB: 247, 116, 118;
+    --warn: #E9A23B; --warnRGB: 233, 162, 59;
+    --line: #3B362D; --lineRGB: 59, 54, 45;
+    --line2: #34302A; --line2RGB: 52, 48, 42;
+    --shadow: #0A0908; --shadowRGB: 10, 9, 8;
+    --wash: 0.1;
+  }
+}
+html[data-theme-mode="light"] {
+  --bg: #F4F1E8; --bgRGB: 244, 241, 232;
+  --panel: #FDFCF9; --panelRGB: 253, 252, 249;
+  --panel2: #F8F6F0; --panel2RGB: 248, 246, 240;
+  --card: #FFFFFF; --cardRGB: 255, 255, 255;
+  --field: #FFFFFF; --fieldRGB: 255, 255, 255;
+  --ink: #1B1A17; --inkRGB: 27, 26, 23;
+  --sub: #524D41; --subRGB: 82, 77, 65;
+  --sub2: #6D675B; --sub2RGB: 109, 103, 91;
+  --brand: #D03F00; --brandRGB: 208, 63, 0;
+  --brandText: #B93700; --brandTextRGB: 185, 55, 0;
+  --brand2: #912900; --brand2RGB: 145, 41, 0;
+  --brandInk: #FFFFFF; --brandInkRGB: 255, 255, 255;
+  --ok: #1B7351; --okRGB: 27, 115, 81;
+  --bad: #C32335; --badRGB: 195, 35, 53;
+  --warn: #9B5400; --warnRGB: 155, 84, 0;
+  --line: #E5DFD1; --lineRGB: 229, 223, 209;
+  --line2: #EDE8DC; --line2RGB: 237, 232, 220;
+  --shadow: #1B1A17; --shadowRGB: 27, 26, 23;
+  --wash: 0.06;
+}
+html[data-theme-mode="dark"], html.dark {
+  --bg: #141210; --bgRGB: 20, 18, 16;
+  --panel: #1D1A16; --panelRGB: 29, 26, 22;
+  --panel2: #24211C; --panel2RGB: 36, 33, 28;
+  --card: #2A2620; --cardRGB: 42, 38, 32;
+  --field: #2A2620; --fieldRGB: 42, 38, 32;
+  --ink: #F2EEE6; --inkRGB: 242, 238, 230;
+  --sub: #BEB6A9; --subRGB: 190, 182, 169;
+  --sub2: #9A9386; --sub2RGB: 154, 147, 134;
+  --brand: #FF5A1F; --brandRGB: 255, 90, 31;
+  --brandText: #FF6F41; --brandTextRGB: 255, 111, 65;
+  --brand2: #E0480F; --brand2RGB: 224, 72, 15;
+  --brandInk: #1B1A17; --brandInkRGB: 27, 26, 23;
+  --ok: #30B180; --okRGB: 48, 177, 128;
+  --bad: #F77476; --badRGB: 247, 116, 118;
+  --warn: #E9A23B; --warnRGB: 233, 162, 59;
+  --line: #3B362D; --lineRGB: 59, 54, 45;
+  --line2: #34302A; --line2RGB: 52, 48, 42;
+  --shadow: #0A0908; --shadowRGB: 10, 9, 8;
+  --wash: 0.1;
+}

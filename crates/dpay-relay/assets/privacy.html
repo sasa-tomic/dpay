@@ -24,18 +24,8 @@
 })();
 </script>
 <style>
+{{PALETTE}}
   :root{
-    --bg:#F4F1E8;
-    --panel:#FDFCF9;
-    --ink:#1B1A17;
-    --ink-2:#57534A;
-    --ink-3:#8A857A;
-    --brand:#FF5A1F;
-    --brand-deep:#D8450D;
-    --brand-soft:rgba(255,90,31,.07);
-    --brand-line:rgba(255,90,31,.26);
-    --line:#E5DFD1;
-    --line-2:#EDE8DC;
     --mono:"IBM Plex Mono",ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
     --sans:"Space Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
@@ -49,7 +39,7 @@
     content:"";position:fixed;inset:0;pointer-events:none;opacity:.05;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
   }
-  a{color:var(--brand-deep);text-underline-offset:3px}
+  a{color:var(--brandText);text-underline-offset:3px}
   a:hover{color:var(--brand)}
   nav,main,footer{position:relative;z-index:1}
   .wrap{width:min(100% - 40px,880px);margin:0 auto}
@@ -57,50 +47,50 @@
     width:min(100% - 40px,1120px);margin:0 auto;padding:22px 0;
     display:flex;align-items:center;justify-content:space-between;gap:20px;
     border-bottom:1px solid var(--line);
-    background:rgba(244,241,232,.86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    background:rgba(var(--bgRGB), .86);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
     position:sticky;top:0;z-index:5;
   }
   .word{color:var(--ink);font-size:1.3rem;font-weight:700;letter-spacing:-.03em;text-decoration:none}
   .word b{color:var(--brand)}
   .back{
-    color:var(--ink-2);font-size:.92rem;font-weight:600;text-decoration:none;
+    color:var(--sub);font-size:.92rem;font-weight:600;text-decoration:none;
     border:1px solid var(--line);border-radius:12px;padding:8px 14px;background:var(--panel);
   }
-  .back:hover{color:var(--ink);border-color:var(--brand-line)}
+  .back:hover{color:var(--ink);border-color:rgba(var(--brandTextRGB), .30)}
   header{padding:64px 0 42px}
   .kicker{
-    display:flex;align-items:center;gap:9px;color:var(--ink-3);font-family:var(--mono);
+    display:flex;align-items:center;gap:9px;color:var(--sub2);font-family:var(--mono);
     font-size:.72rem;font-weight:600;letter-spacing:.2em;text-transform:uppercase;
   }
   .kicker::before{content:"";width:22px;height:2px;background:var(--brand)}
   h1{margin:18px 0 14px;font-size:clamp(2.5rem,7vw,4.2rem);line-height:1;letter-spacing:-.045em}
-  .intro{max-width:660px;margin:0;color:var(--ink-2);font-size:1.08rem}
-  .date{margin-top:24px;color:var(--ink-3);font-family:var(--mono);font-size:.76rem;letter-spacing:.06em}
+  .intro{max-width:660px;margin:0;color:var(--sub);font-size:1.08rem}
+  .date{margin-top:24px;color:var(--sub2);font-family:var(--mono);font-size:.76rem;letter-spacing:.06em}
   .highlights{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:34px 0 8px}
   .highlight{
     padding:18px;border:1px solid var(--line);border-radius:16px;background:var(--panel);
-    box-shadow:0 1px 2px rgba(27,26,23,.04),0 4px 14px rgba(27,26,23,.05);
+    box-shadow:0 1px 2px rgba(var(--shadowRGB), .04),0 4px 14px rgba(var(--shadowRGB), .05);
   }
   .highlight b{display:block;color:var(--ink);font-size:.91rem;margin-bottom:4px}
-  .highlight span{display:block;color:var(--ink-2);font-size:.83rem;line-height:1.5}
+  .highlight span{display:block;color:var(--sub);font-size:.83rem;line-height:1.5}
   article{padding:36px 0 72px}
-  section{padding:28px 0;border-bottom:1px solid var(--line-2)}
+  section{padding:28px 0;border-bottom:1px solid var(--line2)}
   section:last-child{border-bottom:0}
   h2{margin:0 0 12px;font-size:1.38rem;letter-spacing:-.025em}
   h3{margin:22px 0 6px;font-size:1rem;color:var(--ink)}
-  p{margin:0 0 12px;color:var(--ink-2)}
-  ul{margin:10px 0 14px;padding-left:22px;color:var(--ink-2)}
+  p{margin:0 0 12px;color:var(--sub)}
+  ul{margin:10px 0 14px;padding-left:22px;color:var(--sub)}
   li{margin:8px 0;padding-left:4px}
   strong{color:var(--ink);font-weight:650}
   .notice{
     margin:18px 0 4px;padding:16px 18px;border-left:2px solid var(--brand);
-    border-radius:0 12px 12px 0;background:var(--brand-soft);color:var(--ink-2);
+    border-radius:0 12px 12px 0;background:rgba(var(--brandTextRGB), var(--wash));color:var(--sub);
   }
-  .contact{padding:22px;border:1px solid var(--brand-line);border-radius:18px;background:var(--panel);box-shadow:0 4px 18px rgba(27,26,23,.06)}
+  .contact{padding:22px;border:1px solid rgba(var(--brandTextRGB), .30);border-radius:18px;background:var(--panel);box-shadow:0 4px 18px rgba(var(--shadowRGB), .06)}
   .contact p:last-child{margin-bottom:0}
-  footer{border-top:1px solid var(--line);padding:32px 0 44px;color:var(--ink-3);font-size:.82rem;background:var(--bg)}
+  footer{border-top:1px solid var(--line);padding:32px 0 44px;color:var(--sub2);font-size:.82rem;background:var(--bg)}
   footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
-  footer a{color:var(--ink-2)}
+  footer a{color:var(--sub)}
   @media(max-width:680px){
     header{padding-top:38px}
     .highlights{grid-template-columns:1fr}
@@ -110,39 +100,26 @@
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 
   /* ── Dark theme (Wave 4, 2026-08-20 · Wave 7 manual toggle) ─────────────────────────────
-     The warm near-black reading of the same Traveler Paper identity (mirrors
-     app/config/palette.ts DARK — keep in lockstep). Vars first; the handful of hardcoded
-     porcelain literals get scoped overrides.
+     The warm near-black reading of the same Traveler Paper identity. The vars come from the
+     generated palette block at the top of this <style> (source of truth: app/config/palette.ts,
+     which emits an html.dark rule); the handful of hardcoded porcelain literals get scoped
+     overrides here.
      Wave 7: keyed on `html.dark` (set by the pre-paint head script + the fixed toggle) instead
      of a bare @media — with no stored choice the OS scheme seeds it via matchMedia, a stored
      'light'/'dark' pins it. */
   html{color-scheme:light}
   html.dark{color-scheme:dark}
-  html.dark{
-      --bg:#141210;
-      --panel:#1D1A16;
-      --ink:#F2EEE6;
-      --ink-2:#A8A094;
-      --ink-3:#8A8274;
-      --brand:#FF5A1F;
-      --brand-deep:#FF7A45;
-      --brand-soft:rgba(255,122,69,.10);
-      --brand-line:rgba(255,122,69,.32);
-      --line:#3B362D;
-      --line-2:#34302A;
-    }
     html.dark body::before{opacity:.07}
-    html.dark nav{background:rgba(20,18,16,.86)}
 
   /* Wave 7 — fixed theme toggle (Light ↔ Dark flip), bottom-right; mirrors the
      landing's chip (shared 'dpay-theme' localStorage key so both pages agree). */
   .theme-toggle{
     position:fixed;right:18px;bottom:18px;z-index:80;width:44px;height:44px;border-radius:999px;
     border:1px solid var(--line);background:var(--panel);color:var(--sub);display:flex;
-    align-items:center;justify-content:center;cursor:pointer;box-shadow:0 8px 20px -12px rgba(27,26,23,.35);
+    align-items:center;justify-content:center;cursor:pointer;box-shadow:0 8px 20px -12px rgba(var(--shadowRGB), .35);
     transition:color .15s ease,border-color .15s ease;padding:0;
   }
-  .theme-toggle:hover,.theme-toggle:focus-visible{outline:none;color:var(--ink);border-color:var(--ink-3)}
+  .theme-toggle:hover,.theme-toggle:focus-visible{outline:none;color:var(--ink);border-color:var(--sub2)}
   .theme-toggle:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
   .theme-toggle svg{display:none}
   html[data-theme-mode="light"] .theme-toggle .tt-light,

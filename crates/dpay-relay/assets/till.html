@@ -5,7 +5,11 @@
      page (the merchant name is CLAIMED, so it never touches Rust string building on this route).
      The states and their copy mirror ChargeState's own documentation in till.rs; every terminal
      state names the next action. -->
-<html lang="en">
+<!-- `scheme-auto`: this page has no theme toggle and no pre-paint script, so it follows the OS
+     scheme. That class is the hook the shared palette block
+     (crates/dpay-relay/assets/palette.css) keys its prefers-color-scheme rule on — see
+     scripts/relay-palette-css.mjs for why both theme mechanisms live in one generated block. -->
+<html lang="en" class="scheme-auto">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -16,13 +20,7 @@
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
 <meta name="robots" content="noindex" />
 <style>
-  :root{
-    --bg:#F4F1E8; --panel:#FDFCF9; --ink:#1B1A17; --ink-2:#57534A;
-    --brand:#FF5A1F; --line:#E5DFD1; --ok:#1E7F4F;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{ --bg:#141210; --panel:#1D1A17; --ink:#F4F1E8; --ink-2:#B8B1A3; --line:#2E2A25; }
-  }
+{{PALETTE}}
   *{box-sizing:border-box}
   body{
     margin:0; padding:32px 20px; background:var(--bg); color:var(--ink);
@@ -30,14 +28,14 @@
   }
   main{max-width:32rem; margin:0 auto}
   h1{font-size:1.5rem; line-height:1.25; margin:0 0 .5rem}
-  p{margin:0 0 1rem; color:var(--ink-2)}
+  p{margin:0 0 1rem; color:var(--sub)}
   .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px}
   .price{font-size:2.4rem; font-weight:700; color:var(--ink); margin:0 0 .25rem}
-  .settles{font-size:.9rem; color:var(--ink-2); margin:0 0 1rem}
+  .settles{font-size:.9rem; color:var(--sub); margin:0 0 1rem}
   .state{font-size:1.1rem; font-weight:600; margin:0 0 .5rem; color:var(--ink)}
   .state.ok{color:var(--ok)}
-  .state.idle{color:var(--ink-2)}
-  .next{margin:0; color:var(--ink-2)}
+  .state.idle{color:var(--sub)}
+  .next{margin:0; color:var(--sub)}
   .note{font-size:.9rem}
 </style>
 </head>
