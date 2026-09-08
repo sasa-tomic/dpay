@@ -250,14 +250,17 @@ key.** Value 10, effort S (an account action, not code).
 What WAS fixed on the client side, because the app was also part of the problem: an idle wallet was
 issuing **≈208 RPC requests/minute** with no batching, no dedup and no in-flight guard — and under a
 slow endpoint the request rate *rose* with latency (up to 3 concurrent generations of the same
-poll). Now ≈128/min, and under a 429 exactly one probe per backoff window instead of 208/min
-forever. Two remaining reductions need files that were owned elsewhere this session: batching the 5
-per-rail balance polls into 1, and collapsing `getSolanaTokenBalance`'s 2 round trips per mint into
-1 (`getTokenAccountBalance` alone answers both). Value 6, effort S.
+poll). The batching, the cadence work and the outage's USER-FACING half all landed on 2026-09-08 —
+what the app now does per tick is measured by e2e flow 160 and the arithmetic lives in
+`docs/specs/2026-09-08-solana-rpc-plan.md`; what it now SAYS is `RailUnreadableNote` (once per
+network, on the accounts route and on the Home headline, flow 147) and, before a signature,
+`solSignCaveat` (flow 137). **And the key is finally rotatable from the phone**: Settings ▸ Advanced
+carries the Solana endpoint beside the relay URL (`settings-sol-rpc`, flow 12), so replacing a dead
+key is an edit rather than a store release — the founder action below is still the one that fixes
+the outage, but it is no longer the only lever.
 
 | # | Follow-up | value | effort |
 |---|-----------|------:|:------:|
-| S1 | A Solana row that cannot be read must say what is happening and what to do — `'error'` and `'loading'` currently render identically as `—`, against the founder's every-step-instruction rule. Needs i18n copy + the row component. | 7 | S |
 | S2 | Batch the balance polls (5→1/tick) and collapse the per-mint double round trip | 6 | S |
 | S3 | The offline e2e harness stubs the RPC, so it can see none of this. A request-budget assertion (a flow that fails if a cold load exceeds N requests) is the only thing that would have caught it. | 6 | M |
 
@@ -281,7 +284,6 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
 | X6 | **Transaction rows are dead** — no press handler, no receipt, no memo/`ref`, no block index, no copy-proof. This is the merchant-reconciliation and dispute path and it does not exist. | 8 | M |
 | X7 | **The header balance chevron is a false affordance** — a `⌄` beside a balance means "switch account" in every wallet; here it navigates to Home and on Home it does nothing at all. | 7 | S |
 | X8 | **The balance is printed twice, ~90–250 px apart** — header eyebrow+amount and Home headline are byte-identical strings in one viewport. | 6 | S |
-| X9 | **One rail's outage is rendered N times** — the Solana banner appears verbatim on all three Solana rows, ~120 words of alarm text. One network → one line, with a retry. | 7 | S |
 | X10 | **The offline-first web wallet cannot open offline** — no service worker (`getRegistrations()` → 0), no manifest; a reload with the network down gives the browser's dinosaur. The one-line pitch is "your phone never needs a connection". | 8 | M |
 | X11 | **No URL routing** — every tab and sheet is `/wallet`, browser Back ejects the user out of the wallet (measured: Settings stayed open while the URL jumped to a previously-visited pay link), no tab is deep-linkable, refresh always dumps you on the landing screen. | 7 | M |
 | X12 | **Fonts ship unsubsetted and uncompressed** — 338 KB of TTF with `encodedBodySize === decodedBodySize` on all four (one file is 130 KB), blocking text paint. WOFF2 subsets cut ~230 KB. The cheapest perceived-speed win available. | 7 | S |
