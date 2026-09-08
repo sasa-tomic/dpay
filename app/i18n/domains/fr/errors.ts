@@ -21,6 +21,10 @@ export const errorsFr: ErrorMessages = {
     tokenUnavailable: asset => `Le ${asset} Solana n’est pas disponible (aucun point d’accès RPC configuré)`,
     senderNoTokenAccount: asset =>
       `Votre portefeuille n’a pas encore de compte ${asset}. Connectez-vous une fois à Internet et ouvrez Recevoir ▸ « Créer mon compte ${asset} » pour le créer — ou payez ce commerçant avec un actif que vous détenez déjà`,
+    senderTokenAccountUnverified: asset =>
+      `dpay n’a pas pu vérifier si votre portefeuille possède un compte ${asset}. S’il n’en a pas, ce paiement ne pourra pas être réglé. Connectez-vous une fois à Internet et ouvrez Recevoir ▸ Mon adresse pour le vérifier ou créer le compte.`,
+    senderTokenAccountUnverifiedRailDown: asset =>
+      `dpay n’a pas pu vérifier si votre portefeuille possède un compte ${asset} — Solana ne répond pas à ce portefeuille, un meilleur réseau n’y changera rien. Si le compte n’existe pas, ce paiement ne pourra pas être réglé. Ouvrez Recevoir ▸ Mon adresse pour le vérifier ou le créer dès que Solana répondra de nouveau.`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `Le destinataire n’a pas encore de compte ${asset} — le créer demande environ ${solAmount} dans ce portefeuille (loyer + frais, une seule fois, à votre charge) — envoyez d’abord un peu de SOL ici`,
     ownTokenAccountRent: (solAmount, asset) =>

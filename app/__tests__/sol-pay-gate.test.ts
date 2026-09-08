@@ -12,12 +12,13 @@
  *   • 'token-absent' is NOT gated by SOL balance: the ATA-setup card itself offers the fund-SOL
  *     escape hatch (btn-sol-ata-fund) when SOL is short.
  */
-import {describe, it, expect} from '@jest/globals';
-import {solPayGate, solSplSignGate} from '../config/assets';
+import {describe, it, expect, jest} from '@jest/globals';
+import {solPayGate, solSignCaveat, solSplSignGate} from '../config/assets';
+import {M} from '../i18n';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 
 const sol = (status: string, balance: string | null) => ({status, balance});
-const token = (status: string, amount: string | null) => ({status, amount});
+const token = (status: string, amount: string | null, failure: string | null = null) => ({status, amount, failure});
 
 // A real mainnet mint dpay does NOT carry (wrapped SOL) — registered-mint checks must refuse it.
 const UNREGISTERED_MINT = 'So11111111111111111111111111111111111111112';
@@ -87,17 +88,83 @@ describe('solSplSignGate — per-request-mint solreq sign gate (OPEN_ISSUES 6(a)
     expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('balance', '2500000')})).toBe('allow');
   });
 
-  it('loading / unavailable / error / never-polled fail OPEN (offline-first)', () => {
-    expect(solSplSignGate(EURC_MINT_ADDRESS, {})).toBe('unknown');
-    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('loading', null)})).toBe('unknown');
-    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('unavailable', null)})).toBe('unknown');
+  it('loading / unavailable / never-polled sign, and say so — UNVERIFIED, never silently fine', () => {
+    // The offline payer is the product. None of these may refuse; all of them must be nameable by
+    // the surface, which is why they are not spelled 'allow'.
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {})).toBe('unverified');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('loading', null)})).toBe('unverified');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('unavailable', null)})).toBe('unverified');
     // a degraded poll observes NOTHING — even one that preserved an amount is not an existence fact
-    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', '0')})).toBe('unknown');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', '0', 'unreachable')})).toBe('unverified');
+  });
+
+  it('an endpoint that REFUSED the wallet is its own state — the rail is down, not the phone', () => {
+    // This is the state the outage produced: the device is online, the endpoint answers 429, and
+    // the wallet has no fact for the mint. It still SIGNS (a payer who does hold the account must
+    // not be blocked by someone else's quota), but the surface has to be able to say that the
+    // account could not be checked and why — a payment that cannot settle otherwise looks fine
+    // right up until it silently never arrives.
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', null, 'refused')}))
+      .toBe('unverified-rail-down');
+    // …and 'unreadable' bytes are the same class of thing: the endpoint answered, we learnt nothing.
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', null, 'unreadable')}))
+      .toBe('unverified-rail-down');
+  });
+
+  it('a KNOWN fact beats any endpoint state — a refusing rail never re-opens a refusal', () => {
+    // The persisted-fact store is what makes this true offline: an absence observed once stays
+    // observed (only the owner can close a token account, and dpay has no close path).
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('absent', null, 'refused')})).toBe('absent');
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('balance', '1', 'refused')})).toBe('allow');
   });
 
   it('the gate reads ONLY the request\'s mint — sibling mint states are irrelevant', () => {
     const states = {[USDC_MINT_ADDRESS]: token('balance', '5'), [EURC_MINT_ADDRESS]: token('absent', null)};
     expect(solSplSignGate(USDC_MINT_ADDRESS, states)).toBe('allow');
     expect(solSplSignGate(EURC_MINT_ADDRESS, states)).toBe('absent');
+  });
+});
+
+// The DISCLOSURE half of the gate: what a payment signed on no fact tells its payer. The gate's own
+// verdicts are covered above; this covers the sentence, which is the part the user actually meets.
+describe('solSignCaveat — the sentence a fact-less signature owes its payer', () => {
+  it('a decided gate discloses nothing — allow signs on a fact, absent/unregistered never sign', () => {
+    for (const gate of ['allow', 'absent', 'unregistered'] as const) {
+      expect(solSignCaveat(gate, EURC_MINT_ADDRESS)).toBeNull();
+    }
+  });
+
+  it("'unverified' names the token, states the cost of being wrong, and sends the payer to get signal", () => {
+    const line = solSignCaveat('unverified', EURC_MINT_ADDRESS);
+    expect(line).toBe(M.errors.solana.senderTokenAccountUnverified('EURC'));
+    expect(line).toContain('EURC');
+    expect(line).toContain('cannot settle');
+    expect(line).toContain('Get online');
+    expect(line).toContain('My address');
+  });
+
+  it("'unverified-rail-down' says the RAIL is down, so it must NOT tell the payer to find signal", () => {
+    const line = solSignCaveat('unverified-rail-down', USDC_MINT_ADDRESS);
+    expect(line).toBe(M.errors.solana.senderTokenAccountUnverifiedRailDown('USDC'));
+    expect(line).toContain('USDC');
+    expect(line).toContain('Solana is not answering');
+    expect(line).toContain('cannot settle');
+    expect(line).toContain('My address');
+    // The distinction is the whole point of the second state: "get online" would be a lie to a
+    // payer who already is.
+    expect(line).not.toContain('Get online');
+  });
+
+  it('the two unverified states say DIFFERENT things (a single message would defeat the split)', () => {
+    expect(solSignCaveat('unverified', EURC_MINT_ADDRESS))
+      .not.toBe(solSignCaveat('unverified-rail-down', EURC_MINT_ADDRESS));
+  });
+
+  it('a pair the gate cannot produce warns loudly instead of naming an asset it cannot name', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(solSignCaveat('unverified', UNREGISTERED_MINT)).toBeNull();
+    expect(solSignCaveat('unverified-rail-down', null)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 });

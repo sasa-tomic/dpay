@@ -51,7 +51,7 @@ import {type HomeCurrency, currencyName, currencyOfAsset, preferredRail} from '.
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 
-export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
+export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   // The wallet's surfaces. Four are TABS (home/pay/receive/ledger — the bottom bar switches
   // between them and each is a destination); two are ROUTES (accounts/convert — entered from a
   // control, left by Back, never a bottom-bar destination).
@@ -236,7 +236,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // useSolanaBalances polls the SOL RPC directly (no relay) AND the device's token accounts for
   // every VISIBLE SPL mint (`visibleSolanaMints` mirrors the builder's availability predicate, so
   // hook membership always equals the rendered asset list) concurrently with independent per-mint
-  // statuses; when SOLANA_RPC_URL is empty (jest/e2e) it no-ops and the SOL card renders `—`.
+  // statuses; when the active endpoint is empty (jest/e2e) it no-ops and the SOL card renders `—`.
   // Both halves feed the per-asset balance map below.
   const solAddress = useMemo(() => {
     try { return deriveSolanaAddress(identity.secretHex); }
@@ -1221,6 +1221,8 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         <SettingsSheet
           relayUrl={relayUrl}
           setRelayUrl={setRelayUrl}
+          setSolanaRpc={setSolanaRpc}
+          onSolanaRpcApplied={recheckSolBalances}
           onClose={() => { setSettingsOpen(false); setSettingsOpenBackup(false); }}
           onReset={onReset}
           onRestore={onRestore}

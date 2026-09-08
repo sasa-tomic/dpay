@@ -66,7 +66,7 @@ export function AddressField({
           accessibilityRole="button"
           accessibilityLabel={M.withdraw.send.scanLabel}
           accessibilityState={{disabled: false}}>
-          <IconScan size={20} color={C.brand} />
+          <IconScan size={20} color={C.brandText} />
         </Pressable>
       </View>
 

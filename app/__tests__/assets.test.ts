@@ -62,7 +62,7 @@ describe('buildSelectableAssets — complete visible list', () => {
   });
 
   it('appends exactly solana:SOL when solanaEnabled=true and USDC is unavailable', () => {
-    // The default jest state has SOLANA_RPC_URL='' (jest.setup.js) ⇒ solanaTokenAvailable() === false.
+    // The default jest state has solanaRpcUrl() === '' (jest.setup.js) ⇒ solanaTokenAvailable() === false.
     const assets = buildSelectableAssets(BASE_CATALOG, {showTestnet: false, solanaEnabled: true});
     expect(ids(assets)).toEqual(['ic:0', 'ic:1', 'ic:2', 'solana:SOL']);
   });
@@ -358,8 +358,9 @@ describe('solanaTokenCoherent — pure coherence predicate', () => {
 });
 
 describe('solanaTokenAvailable — default jest state is fail-closed', () => {
-  // jest.setup.js sets __DPAY_TEST_SOLANA_RPC_URL='' ⇒ SOLANA_RPC_URL resolves to '' at module
-  // load ⇒ solanaTokenAvailable() MUST be false under the default jest state (no real devnet hit).
+  // jest.setup.js sets __DPAY_TEST_SOLANA_RPC_URL='' ⇒ SOLANA_RPC_BAKED is '' at module load and
+  // no override replaces it ⇒ solanaRpcUrl() answers '' ⇒ solanaTokenAvailable() MUST be false
+  // under the default jest state (no real devnet hit).
   it('returns false when the RPC URL is empty (default offline inner loop)', () => {
     expect(solanaTokenAvailable(MAINNET_MINT)).toBe(false);
   });

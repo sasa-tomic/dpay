@@ -99,7 +99,7 @@ export const settingsEs: SettingsMessages = {
     label: 'Avanzado',
     show: 'Mostrar los ajustes avanzados',
     hide: 'Ocultar los ajustes avanzados',
-    hint: 'Configuración del servidor con el que habla la billetera',
+    hint: 'Servidores y endpoints de red con los que habla esta billetera',
     serverNote: 'El servidor con el que habla tu billetera. Los cambios se aplican al tocar Aplicar.',
     serverLabel: 'Servidor',
     serverPlaceholder: 'http://<ip>:8787',
@@ -107,6 +107,12 @@ export const settingsEs: SettingsMessages = {
     apply: 'Aplicar',
     applyA11y: 'Aplicar la URL del servidor',
     applyHint: 'Cambia tu billetera a la URL de servidor introducida',
+    solanaNote: 'El endpoint de Solana con el que esta billetera lee saldos y envía pagos. Déjalo vacío para usar el integrado en esta versión.',
+    solanaLabel: 'Endpoint de Solana',
+    solanaPlaceholder: 'https://<proveedor>/?api-key=<clave>',
+    solanaHint: 'El endpoint RPC de Solana que usa esta billetera',
+    solanaApplyA11y: 'Aplicar el endpoint de Solana',
+    solanaApplyHint: 'Cambia esta billetera al endpoint de Solana introducido',
   },
 
   about: {

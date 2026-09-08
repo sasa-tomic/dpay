@@ -25,6 +25,8 @@ import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from '.
 import {THEME_STORAGE_KEY} from '../config/constants';
 
 const SET_SHEET_DEFAULTS = {
+  setSolanaRpc: () => {},
+  onSolanaRpcApplied: () => {},
   relayUrl: 'http://127.0.0.1:4391',
   setRelayUrl: () => {},
   localeChoice: null,

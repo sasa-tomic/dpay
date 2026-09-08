@@ -205,6 +205,8 @@ describe('PassportArchive deep-link (unfilled-stamp routing — founder ask 2026
 
 describe('Passport deep-link wiring (the SettingsSheet host)', () => {
   const SHEET_DEFAULTS = {
+    setSolanaRpc: () => {},
+    onSolanaRpcApplied: () => {},
     relayUrl: 'http://127.0.0.1:4391',
     setRelayUrl: () => {},
     localeChoice: null,

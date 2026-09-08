@@ -7,6 +7,7 @@ import {type SelectableAsset} from '../config/assets';
 import {currencyName, type HomeCurrency} from '../config/currency';
 import {HistoryRow} from './HistoryRow';
 import {IconArrowDownLeft, IconChevronDown, IconPlus, IconScan} from './icons';
+import {RailUnreadableNote, railUnreadable} from './RailUnreadableNote';
 import type {AssetId, Txn} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
 
@@ -81,7 +82,8 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
   const eyebrow = online
     ? M.wallet.homeCurrency.mainLabel(eyebrowName)
     : M.wallet.balance.approx(eyebrowName);
-  const amount = homeAsset ? (balances[homeAsset.id]?.displayText ?? '—') : '—';
+  const homeBalance = homeAsset ? balances[homeAsset.id] : undefined;
+  const amount = homeBalance?.displayText ?? '—';
   const rows = history.slice(0, ACTIVITY_ROWS);
   return (
     <View>
@@ -94,6 +96,10 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
         <Text testID="home-headline-label" style={S.homeEyebrow}>{eyebrow}</Text>
         <Text testID="home-headline-amount" style={S.homeAmount}>{amount}</Text>
       </View>
+      {/* An UNREADABLE headline is not a dash. The accounts route has said so since flow 147; the
+          landing screen — where the home rail's number is the largest thing on the phone — printed
+          the same bare "—" a first poll in flight prints. Same fact, same renderer, same words. */}
+      {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} /> : null}
       <Pressable
         testID="btn-home-accounts"
         style={S.homeAccountsBtn}
@@ -118,15 +124,15 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
       </Pressable>
       <View style={S.homeActionRow}>
         <Pressable testID="btn-home-receive" style={S.homeActionBtn} onPress={onReceive} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.receive} accessibilityHint={M.wallet.home.actions.receiveHint}>
-          <IconArrowDownLeft size={22} color={C.brand} />
+          <IconArrowDownLeft size={22} color={C.brandText} />
           <Text style={S.homeActionLabel}>{M.wallet.home.actions.receive}</Text>
         </Pressable>
         {/* Add money funds the account the headline is showing — the home currency's rail. It is
             disabled only when the catalog carries no rail for that currency, which is the same
             "there is nothing to act on" rule its sibling follows. */}
-        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, homeAsset === null && S.dim]} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={homeAsset === null} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addMoney} accessibilityHint={M.wallet.home.actions.addMoneyHint} accessibilityState={{disabled: homeAsset === null}}>
-          <IconPlus size={22} color={C.brand} />
-          <Text style={S.homeActionLabel}>{M.wallet.home.actions.addMoney}</Text>
+        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, homeAsset === null && S.disabledFlat]} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={homeAsset === null} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addMoney} accessibilityHint={M.wallet.home.actions.addMoneyHint} accessibilityState={{disabled: homeAsset === null}}>
+          <IconPlus size={22} color={C.brandText} />
+          <Text style={[S.homeActionLabel, homeAsset === null && S.disabledText]}>{M.wallet.home.actions.addMoney}</Text>
         </Pressable>
       </View>
       <View style={S.homeActivity} testID="home-activity">

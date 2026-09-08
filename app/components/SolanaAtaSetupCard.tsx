@@ -90,7 +90,7 @@ export function SolanaAtaSetupCard({
       </View>
       {busy ? (
         <>
-          <ActivityIndicator color={C.brand} />
+          <ActivityIndicator color={C.brandText} />
           <Text testID="sol-ata-busy" style={S.dim2}>{M.deposit.ata.creating(asset)}</Text>
         </>
       ) : (
@@ -103,7 +103,7 @@ export function SolanaAtaSetupCard({
           accessibilityLabel={buttonLabel}
           accessibilityHint={M.deposit.ata.createHint(setupCost, asset)}
           accessibilityState={{disabled: !canCreate}}>
-          <Text style={S.primaryText}>{buttonLabel}</Text>
+          <Text style={[S.primaryText, !canCreate && S.disabledText]}>{buttonLabel}</Text>
         </Pressable>
       )}
       {err ? <Text testID="sol-ata-err" style={S.err}>{err}</Text> : null}

@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, Animated, Easing, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
-import {S, isDark} from '../styles';
+import {S, isDark, inverseC} from '../styles';
 import {STORAGE_KEY, PENDING_IDENTITY_STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base, validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, validateMnemonic, wordsToString} from '../lib/bip39';
@@ -262,7 +262,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
         <View testID="recovery-saved-stamp" style={S.inkBeat}>
           <Animated.View
             style={[S.inkStamp, {opacity: stampOp, transform: [{scale: stampSc}, {rotate: '-6deg'}]}]}>
-            <IconCheck size={15} color={C.brand} />
+            <IconCheck size={15} color={inverseC().brandText} />
             <Text style={S.inkStampText}>{M.onboarding.recoverySaved.stamp}</Text>
           </Animated.View>
           <Text style={S.inkBeatLine}>{M.onboarding.recoverySaved.line}</Text>
@@ -308,7 +308,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
               {err ? <Text testID="backup-err" style={S.err}>{err}</Text> : null}
               <Pressable testID="btn-mnemonic-continue" style={[S.primary, (!backupChecked || busy) && S.disabledFlat]} disabled={!backupChecked || busy} onPress={finishCreate}
                 accessibilityRole="button" accessibilityLabel={M.onboarding.continue} accessibilityState={{disabled: !backupChecked || busy}}>
-                <Text style={S.primaryText}>{M.onboarding.continue}</Text>
+                <Text style={[S.primaryText, (!backupChecked || busy) && S.disabledText]}>{M.onboarding.continue}</Text>
               </Pressable>
             </>
           ) : pendingId && busy ? (
@@ -317,7 +317,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
                relay is exactly when it isn't — and the logo-and-tagline-only screen this replaces
                read as a hang at the one moment the user has just been told to trust the app. */
             <View testID="onboard-finishing" style={S.center}>
-              <ActivityIndicator size="large" color={C.brand} />
+              <ActivityIndicator size="large" color={C.brandText} />
               <Text style={S.dim2}>{M.onboarding.create.busy}</Text>
             </View>
           ) : mode === 'restore' ? (
@@ -344,7 +344,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
               {err ? <Text style={S.err}>{err}</Text> : null}
                   <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.disabledFlat]} disabled={busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''} onPress={restore}
                 accessibilityRole="button" accessibilityLabel={M.onboarding.restore.action} accessibilityHint={restoreMode === 'mnemonic' ? M.onboarding.restore.hintMnemonic : M.onboarding.restore.hintHex} accessibilityState={{disabled: busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''}}>
-                <Text style={S.primaryText}>{busy ? M.onboarding.restore.busy : M.onboarding.restore.action}</Text>
+                <Text style={[S.primaryText, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.disabledText]}>{busy ? M.onboarding.restore.busy : M.onboarding.restore.action}</Text>
               </Pressable>
               <Pressable testID="btn-restore-cancel" style={S.linkBtn} onPress={() => { setMode('create'); setSeed(''); setMnemonicText(''); setRestoreMode('mnemonic'); setErr(null); }}
                 accessibilityRole="button" accessibilityLabel={M.onboarding.restore.cancelA11y} accessibilityHint={M.onboarding.restore.cancelHint}>
@@ -373,7 +373,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
               {err ? <Text style={S.err}>{err}</Text> : null}
               <Pressable testID="btn-create" style={[S.primary, busy && S.disabledFlat]} disabled={busy} onPress={create}
                 accessibilityRole="button" accessibilityLabel={M.onboarding.create.action} accessibilityHint={M.onboarding.create.hint} accessibilityState={{disabled: busy}}>
-                <Text style={S.primaryText}>{busy ? M.onboarding.create.busy : M.onboarding.create.action}</Text>
+                <Text style={[S.primaryText, busy && S.disabledText]}>{busy ? M.onboarding.create.busy : M.onboarding.create.action}</Text>
               </Pressable>
               {/* Restore entry — promoted (UX fix 2026-08-10) from a muted bottom link (S.linkBtn /
                   S.linkTextMuted) to S.secondaryBtn / S.secondaryBtnText, and repositioned to sit

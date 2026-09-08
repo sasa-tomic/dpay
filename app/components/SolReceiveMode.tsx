@@ -4,7 +4,7 @@ import {QrCode} from './QrCode';
 import bs58 from 'bs58';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE_SMALL, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
+import {QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
@@ -46,7 +46,9 @@ import {M} from '../i18n';
 
 // Twin of ReceiveMode's memoInputStyle — Traveler Paper input idiom (white field, hairline border,
 // Space Grotesk), kept inline + identical so the IC and SOL Receive forms stay pixel-twins.
-const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
+// A FUNCTION, not a const: `C` is mutated in place on a theme flip, so a module-level style
+// object froze the light theme's white field + near-black ink into the dark theme's memo input.
+const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
 
 /**
  * SolReceiveMode — the merchant-side payment component for the v2 recent-blockhash SOL rail.
@@ -165,6 +167,31 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
     })();
     return () => { alive = false; };
   }, [identity.publicHex]);
+
+  // ── Watching for money to land is not an idle wallet (M3) ──────────────────────────────────────
+  // The SOL rail's poll idles at `POLL.balanceIdle` (30s) and holds the active 2.5s cadence only
+  // inside a window a money flow opens — correct for a phone in a pocket, wrong for a user standing
+  // on the receive-address screen with the sender's phone in the other hand: a deposit could take
+  // half a minute to appear on the one screen whose entire purpose is showing it arrive.
+  //
+  // Being ON this sub-mode IS the money-flow signal, so it re-opens the window the same way a
+  // confirmed send does. The refresh callback is `usePollCadence`'s `bump` — it reads NOW and holds
+  // the active cadence for `SOL_ACTIVE_POLL_WINDOW_MS`, so re-arming it exactly one window apart
+  // keeps the fast cadence alive for as long as the screen is up and stops the moment it is not.
+  // ONE callback, not both: the two are the same poll (`useSolanaBalances` answers for every rail in
+  // one request), and the pick is the same `isSpl` split `onRetryAta` below already makes.
+  const watchDeposit = subMode === 'address' ? (isSpl ? onRefreshToken : onRefreshSol) : undefined;
+  const watchRef = useRef(watchDeposit);
+  watchRef.current = watchDeposit;
+  useEffect(() => {
+    if (watchDeposit === undefined) return;
+    watchRef.current?.();
+    const id = setInterval(() => watchRef.current?.(), SOL_ACTIVE_POLL_WINDOW_MS);
+    return () => clearInterval(id);
+    // Keyed on the SUB-MODE and the SPL/native split only: the callbacks ride the ref, so a parent
+    // re-render can never restart the timer (which would re-read on every frame — the opposite of
+    // what the cadence work was for).
+  }, [subMode, isSpl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = (
     <ModeToggle
@@ -403,7 +430,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
                 <Text style={S.warnNote}>{M.receive.broadcastInterrupted}</Text>
                 {err ? <Text testID="sol-req-err" style={S.err}>{err}</Text> : null}
                 {busy ? (
-                  <ActivityIndicator color={C.brand} />
+                  <ActivityIndicator color={C.brandText} />
                 ) : (
                   <Pressable testID="btn-sol-req-retry" style={S.primaryWide} onPress={rebroadcast} accessibilityRole="button" accessibilityLabel={M.receive.retryBroadcast}>
                     <Text style={S.primaryText}>{M.receive.retryBroadcast}</Text>
@@ -474,7 +501,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
               </>
             ) : busy ? (
               <>
-                <ActivityIndicator color={C.brand} />
+                <ActivityIndicator color={C.brandText} />
                 <Text style={S.dim2}>{M.receive.broadcasting}</Text>
               </>
             ) : (
@@ -558,7 +585,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       </View>
       <TextInput
         testID="sol-req-memo-input"
-        style={memoInputStyle}
+        style={memoInputStyle()}
         value={memo}
         onChangeText={setMemo}
         placeholder={M.receive.memoPlaceholder}
@@ -588,7 +615,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       {!solRpc ? <Text style={S.warnNote}>{M.receive.solanaOffline}</Text> : null}
       {busy ? (
         <>
-          <ActivityIndicator color={C.brand} />
+          <ActivityIndicator color={C.brandText} />
           <Text style={S.dim2}>{M.receive.creatingRequest}</Text>
         </>
       ) : null}
@@ -606,7 +633,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
             accessibilityLabel={M.receive.request}
             accessibilityHint={M.receive.requestHint}
             accessibilityState={{disabled: blocked}}>
-            <Text style={S.primaryText}>{busy ? M.receive.creating : M.receive.request}</Text>
+            <Text style={[S.primaryText, blocked && S.disabledText]}>{busy ? M.receive.creating : M.receive.request}</Text>
           </Pressable>
         );
       })()}

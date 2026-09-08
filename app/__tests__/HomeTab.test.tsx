@@ -66,6 +66,12 @@ function textOf(tree: renderer.ReactTestRenderer, testID: string): string {
   return Array.isArray(c) ? c.filter(x => typeof x === 'string' || typeof x === 'number').join('') : String(c ?? '');
 }
 
+/** All rendered text INSIDE the node carrying `testID` (for wrappers that hold an icon + a line). */
+function textUnder(tree: renderer.ReactTestRenderer, testID: string): string {
+  const node = tree.root.find(n => n.props?.testID === testID);
+  return node.findAllByType(Text).map(t => String(t.props.children ?? '')).join('');
+}
+
 function testIDs(tree: renderer.ReactTestRenderer): string[] {
   return [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
 }
@@ -145,6 +151,57 @@ describe('HomeTab — the headline is the home currency (X4)', () => {
   test('a currency the catalog cannot realise shows "—", never a borrowed number', () => {
     const tree = mountHome({homeAsset: null});
     expect(textOf(tree, 'home-headline-amount')).toBe('—');
+    act(() => { tree.unmount(); });
+  });
+});
+
+// The landing screen's largest number is the one most worth being honest about. Until now Home
+// rendered `displayText ?? '—'` with no status branch at all, so an endpoint refusing this wallet
+// (the measured HTTP 429) and a first poll still in flight printed the identical dash. The
+// accounts route has told that apart since flow 147; this is the same fact, said by the same
+// renderer, on the screen the user actually lands on.
+describe('HomeTab — an UNREADABLE home rail says so (M2)', () => {
+  const EUR_RAIL = preferredRail('EUR', ASSETS);
+  // The preferred EUR rail is EURC on Solana — the only family whose balance can report 'error'
+  // at all (an IC read either answers or leaves the wallet offline). If the catalog ever moves EUR
+  // onto another rail this narrowing fails loudly rather than silently testing nothing.
+  const EUR_MINT = EUR_RAIL?.protocol === 'solana' ? EUR_RAIL.mint : null;
+
+  /** The EUR home rail with its endpoint refusing — the outage this copy exists for. */
+  const eurUnreadable = () => balancesFor({
+    tokenStates: {[EUR_MINT ?? '']: {amount: null, decimals: null, status: 'error'}},
+  });
+
+  test('a refusing endpoint grows the network line under the headline — the dash is not the whole story', () => {
+    const tree = mountHome({homeCurrency: 'EUR', homeAsset: EUR_RAIL, balances: eurUnreadable()});
+    expect(textOf(tree, 'home-headline-amount')).toBe('—');
+    expect(textUnder(tree, 'rail-unreadable-solana')).toBe(M.errors.rail.unreadable('Solana'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('the line is the ACCOUNTS route\'s, word for word — one fact, one owner', () => {
+    // If these two ever diverge, one of them was re-worded in place instead of the shared source.
+    const tree = mountHome({homeCurrency: 'EUR', homeAsset: EUR_RAIL, balances: eurUnreadable()});
+    const line = textUnder(tree, 'rail-unreadable-solana');
+    expect(line).toContain('Solana');
+    expect(line).toContain('Nothing moved');
+    expect(line).toContain('other accounts still work');
+    expect(line).toContain('keeps retrying');
+    act(() => { tree.unmount(); });
+  });
+
+  test('a readable rail says nothing, and neither does a rail still loading', () => {
+    const loading = mountHome({homeCurrency: 'EUR', homeAsset: EUR_RAIL, balances: balancesFor()});
+    expect(testIDs(loading)).not.toContain('rail-unreadable-solana');
+    act(() => { loading.unmount(); });
+    const ok = mountHome(); // CHF/VCHF, a real balance
+    expect(testIDs(ok).filter(id => id.startsWith('rail-unreadable-'))).toEqual([]);
+    act(() => { ok.unmount(); });
+  });
+
+  test('no home rail at all cannot name a network, so it says nothing', () => {
+    const tree = mountHome({homeAsset: null, balances: eurUnreadable()});
+    expect(testIDs(tree).filter(id => id.startsWith('rail-unreadable-'))).toEqual([]);
     act(() => { tree.unmount(); });
   });
 });

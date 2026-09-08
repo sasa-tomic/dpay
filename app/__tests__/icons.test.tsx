@@ -11,6 +11,7 @@
  * first letter, brand hue). If a fixture drifts from the real SelectableAsset shape, the
  * type-check in this file fails at compile time (SelectiveAsset is imported as a type).
  */
+import {C, withAlpha} from '../config/palette';
 import {describe, test, expect} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
@@ -74,7 +75,10 @@ const ASSETS: SelectableAsset[] = [
 
 describe('glyphFor', () => {
   test('DEMO maps to the brand-tangerine ∂ chip', () => {
-    expect(glyphFor(ASSETS[0])).toEqual({glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
+    // Asserted through the palette, not against a hex: the ∂ chip IS the brand (palette v5
+    // deleted its private copy of the tangerine), and a literal here would have to be re-typed on
+    // the next brand change — which is the drift the derivation exists to remove.
+    expect(glyphFor(ASSETS[0])).toEqual({glyph: '∂', color: C.brandText, bg: withAlpha(C.brandText, C.wash)});
   });
   test('ckBTC → ₿ amber, ckETH → ◊ indigo, ckUSDC → $ blue', () => {
     expect(glyphFor(ASSETS[1]).glyph).toBe('₿');
@@ -88,7 +92,7 @@ describe('glyphFor', () => {
   test('unknown IC symbol falls back to first letter on brand hue', () => {
     const g = glyphFor(ASSETS[6]);
     expect(g.glyph).toBe('C');
-    expect(g.color).toBe('#D8450D');
+    expect(g.color).toBe(C.brandText);
   });
 
   // A home-currency rail wears its CURRENCY's mark, never its rail's. The chooser and the accounts

@@ -389,7 +389,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
             neither — no radio to report on — so it keeps the per-code line. */}
         {nfcReady || Platform.OS === 'web' ? (
           <View style={S.nfcHintRow}>
-            {tapLive ? <NfcIcon color={C.brand} size={18} /> : null}
+            {tapLive ? <NfcIcon color={C.brandText} size={18} /> : null}
             <Text testID="till-tap-hint" style={S.nfcHintLabel}>
               {M.receive.till.showToCustomer(tapLive ? 'tap' : tap ? 'expired' : 'none')}
             </Text>
@@ -420,7 +420,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
             : watchingLate ? M.receive.till.expiredWatching : M.receive.till.waiting}
         </Text>
         {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
-        {cancelling ? <ActivityIndicator color={C.brand} /> : null}
+        {cancelling ? <ActivityIndicator color={C.brandText} /> : null}
         <Pressable
           testID="btn-till-cancel"
           style={[S.ghostBtn, S.ghostBtnMuted, cancelling && S.disabledFlat]}
@@ -430,7 +430,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
           accessibilityLabel={M.receive.till.cancel}
           accessibilityHint={M.receive.till.cancelHint}
           accessibilityState={{disabled: cancelling}}>
-          <Text style={S.ghostBtnText}>{cancelling ? M.receive.till.cancelling : M.receive.till.cancel}</Text>
+          <Text style={[S.ghostBtnText, cancelling && S.disabledText]}>{cancelling ? M.receive.till.cancelling : M.receive.till.cancel}</Text>
         </Pressable>
       </View>
     );
@@ -460,7 +460,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
       </View>
       <Text style={S.dim2}>{M.receive.till.chargeHint}</Text>
       {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
-      {opening ? <ActivityIndicator color={C.brand} /> : null}
+      {opening ? <ActivityIndicator color={C.brandText} /> : null}
       <Pressable
         testID="btn-till-ring-up"
         style={[S.primaryWide, (opening || amount.trim().length === 0) && S.disabledFlat]}
@@ -470,7 +470,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
         accessibilityLabel={M.receive.till.ringUp}
         accessibilityHint={M.receive.till.ringUpHint}
         accessibilityState={{disabled: opening || amount.trim().length === 0}}>
-        <Text style={S.primaryText}>{opening ? M.receive.till.ringingUp : M.receive.till.ringUp}</Text>
+        <Text style={[S.primaryText, (opening || amount.trim().length === 0) && S.disabledText]}>{opening ? M.receive.till.ringingUp : M.receive.till.ringUp}</Text>
       </Pressable>
     </View>
   );

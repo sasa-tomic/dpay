@@ -7,19 +7,25 @@
 // reached from the seam (`app/solana.ts`) by dynamic import, and the offline jest/e2e loop drives
 // it through the `__DPAY_TEST_SOLANA_RPC_STUB` seam or a mocked `fetch`.
 //
-// ── RPC shape: exactly 2 + limit calls, no pagination ───────────────────────────────────────────
-// `getSignaturesForAddress` is per-ADDRESS, and an INCOMING USDC transfer never names the owner
+// ── RPC shape: exactly 1 + mints + limit calls, no pagination ───────────────────────────────────
+// `getSignaturesForAddress` is per-ADDRESS, and an INCOMING SPL transfer never names the owner
 // wallet — its accounts are the two token accounts plus the *sender's* owner — so one query cannot
-// see both rails. We issue TWO signature queries: the owner wallet, and its canonical USDC ATA
-// (`deriveAta(owner, USDC_MINT_ADDRESS)`). They are unioned by signature, ordered by SLOT (always
-// present and monotonic — `blockTime` can be null), cut to the newest `limit`, and then ONE
-// `getTransaction` per surviving signature. Total = 2 + limit, with `limit` defaulting to 20 (the
-// IC side's page size). There is deliberately NO `before` cursor / infinite scroll (YAGNI): the
-// wallet shows a recent list, and an unbounded walk is an unbounded RPC bill.
+// see the wallet's rails. We issue ONE signature query per address the wallet's money can sit at:
+// the owner wallet, and its canonical ATA for EVERY registered mint (`solana/tokens.ts` —
+// `deriveAta(owner, mint)`). They are unioned by signature, ordered by SLOT (always present and
+// monotonic — `blockTime` can be null), cut to the newest `limit`, and then ONE `getTransaction`
+// per surviving signature. Total = 1 + mints + limit, with `limit` defaulting to 20 (the IC side's
+// page size). There is deliberately NO `before` cursor / infinite scroll (YAGNI): the wallet shows
+// a recent list, and an unbounded walk is an unbounded RPC bill.
+//
+// The per-mint page is what makes a non-USDC token visible AT ALL. While this queried the owner
+// and the USDC ATA only, an incoming EURC payment was fetched by nothing (the wallet is not in the
+// transaction) and an outgoing one arrived through the owner page as a bare lamport fee debit —
+// a payment the user made, rendered as a rounding error, on the preferred EUR rail.
 //
 // ── Direction and amount come from BALANCE DELTAS, never from instruction parsing ───────────────
 // SOL: `meta.postBalances[i] - meta.preBalances[i]` at the owner's index in the full account list.
-// USDC: `meta.postTokenBalances` − `meta.preTokenBalances`, restricted to the USDC mint and to
+// SPL: `meta.postTokenBalances` − `meta.preTokenBalances`, restricted to REGISTERED mints and to
 // entries whose `owner` is this wallet. Deltas are what the chain actually did; an instruction
 // decode is what someone *asked* the chain to do, and the two differ on failure, on partial
 // execution, and whenever an unrecognised program is in the mix.
@@ -32,8 +38,8 @@
 // paid). A UI that wants the transfer leg alone can render `amount - feeLamports` from data that is
 // on the row; nothing is hidden and nothing is invented.
 //
-// A USDC transfer costs SOL in fees, so it would otherwise produce two rows for one payment. The
-// SOL row is suppressed for a signature that already produced a USDC row IFF the SOL delta is
+// An SPL transfer costs SOL in fees, so it would otherwise produce two rows for one payment. The
+// SOL row is suppressed for a signature that already produced a token row IFF the SOL delta is
 // EXACTLY the fee we paid. Any other SOL movement — e.g. the ≈0.002 SOL rent when the transfer also
 // creates the recipient's token account — still gets its own row, because it really did leave the
 // wallet.
@@ -66,7 +72,16 @@ import {
   type SolanaTransactionDetail,
   type SolanaTransactionMeta,
 } from './rpc';
-import {deriveAta, USDC_MINT_ADDRESS, USDC_DECIMALS} from './spl';
+import {deriveAta} from './spl';
+import {SOLANA_TOKENS, SOL_TOKEN} from './tokens';
+
+/** Every registered SPL mint, with the symbol and decimals it is accounted at: the token registry
+ *  minus the native row. ONE derivation of "which tokens this wallet can hold" — a token joins the
+ *  ledger by joining `solana/tokens.ts`, never by a special case here. */
+const REGISTERED_MINTS: readonly {mint: string; token: string; decimals: number}[] =
+  Object.entries(SOLANA_TOKENS)
+    .filter(([, info]) => info.mint !== null)
+    .map(([token, info]) => ({mint: info.mint as string, token, decimals: info.decimals}));
 
 /** Page size, matching the IC rail's `limit=20`. */
 export const SOL_HISTORY_LIMIT = 20;
@@ -106,9 +121,12 @@ export function resetSolanaHistoryCache(): void {
   detailCache.clear();
 }
 
-export type SolanaHistoryToken = 'SOL' | 'USDC';
+/** The SYMBOL the row is accounted in: `'SOL'` for the native asset, else a registered SPL token's
+ *  symbol from `solana/tokens.ts` ('USDC', 'EURC', …). It is a symbol and not a mint because that
+ *  is what the ledger renders and what `solana:<symbol>` asset ids are spelled from. */
+export type SolanaHistoryToken = string;
 
-/** One movement of ONE token in ONE transaction. A transaction can produce two rows (a USDC
+/** One movement of ONE token in ONE transaction. A transaction can produce several rows (an SPL
  *  transfer that also pays token-account rent in SOL); it never produces two rows for one token. */
 export interface SolanaHistoryRow {
   /** base58 transaction signature — unique per transaction, the row's stable key with `token`. */
@@ -181,23 +199,26 @@ function lamportDeltas(keys: string[], meta: SolanaTransactionMeta): bigint[] {
     lamports(meta.postBalances[i], `postBalances[${i}]`) - lamports(meta.preBalances[i], `preBalances[${i}]`));
 }
 
-/** Net USDC delta per OWNER wallet across the transaction. Validates every USDC entry it sees:
- *  ownership must be stated (an unattributable balance would make our own delta a guess) and the
- *  mint's decimals must be the USDC decimals (a wrong scale is a 1000x wrong amount). */
-function usdcDeltasByOwner(meta: SolanaTransactionMeta): Map<string, bigint> {
+/** Net delta per OWNER wallet across the transaction, for ONE registered mint. Validates every
+ *  entry it sees for that mint: ownership must be stated (an unattributable balance would make our
+ *  own delta a guess) and the decimals must be the registry's for that mint (a wrong scale is a
+ *  1000x wrong amount). Entries for unregistered mints are not this wallet's business and are
+ *  skipped — a token dpay does not account for must not become a row, and must not fail a row it
+ *  shares a transaction with. */
+function tokenDeltasByOwner(meta: SolanaTransactionMeta, mint: string, decimals: number): Map<string, bigint> {
   const deltas = new Map<string, bigint>();
   const apply = (entries: SolanaTransactionMeta['preTokenBalances'], sign: bigint) => {
     for (const b of entries ?? []) {
-      if (b?.mint !== USDC_MINT_ADDRESS) continue;
+      if (b?.mint !== mint) continue;
       if (typeof b.owner !== 'string' || b.owner.length === 0) {
-        throw new Error(`USDC token balance at accountIndex ${String(b.accountIndex)} states no owner`);
+        throw new Error(`${mint} token balance at accountIndex ${String(b.accountIndex)} states no owner`);
       }
       const raw = b.uiTokenAmount?.amount;
       if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
-        throw new Error(`USDC token balance for ${b.owner} has a malformed amount (${String(raw)})`);
+        throw new Error(`${mint} token balance for ${b.owner} has a malformed amount (${String(raw)})`);
       }
-      if (b.uiTokenAmount?.decimals !== USDC_DECIMALS) {
-        throw new Error(`USDC token balance for ${b.owner} claims ${String(b.uiTokenAmount?.decimals)} decimals, expected ${USDC_DECIMALS}`);
+      if (b.uiTokenAmount?.decimals !== decimals) {
+        throw new Error(`${mint} token balance for ${b.owner} claims ${String(b.uiTokenAmount?.decimals)} decimals, expected ${decimals}`);
       }
       deltas.set(b.owner, (deltas.get(b.owner) ?? 0n) + sign * BigInt(raw));
     }
@@ -238,9 +259,6 @@ function toHistoryRows(
   const feeCharged = ownerIndex === 0 ? lamports(meta.fee, 'meta.fee') : 0n;
   const solDelta = ownerIndex >= 0 ? deltas[ownerIndex] : 0n;
 
-  const usdcDeltas = usdcDeltasByOwner(meta);
-  const usdcDelta = usdcDeltas.get(ownerAddress) ?? 0n;
-
   // A time we cannot read is refused, not quietly turned into "unknown time" — `null` means the
   // NODE has no time for the block, and that distinction has to stay true to be worth rendering.
   if (tx.blockTime !== null && !Number.isSafeInteger(tx.blockTime)) {
@@ -255,23 +273,28 @@ function toHistoryRows(
     ok: meta.err === null || meta.err === undefined,
   };
 
+  // One row per REGISTERED mint this wallet's balance moved on, in registry order. A transaction
+  // that moved two of them (a swap route touching both) honestly produces two rows.
   const rows: SolanaHistoryRow[] = [];
-  if (usdcDelta !== 0n) {
-    usdcDeltas.delete(ownerAddress);
+  for (const {mint, token, decimals} of REGISTERED_MINTS) {
+    const deltas = tokenDeltasByOwner(meta, mint, decimals);
+    const delta = deltas.get(ownerAddress) ?? 0n;
+    if (delta === 0n) continue;
+    deltas.delete(ownerAddress);
     rows.push({
       ...shared,
-      token: 'USDC',
-      direction: usdcDelta > 0n ? 'in' : 'out',
-      amount: abs(usdcDelta).toString(),
-      counterparty: uniqueCounterparty(usdcDeltas, usdcDelta),
+      token,
+      direction: delta > 0n ? 'in' : 'out',
+      amount: abs(delta).toString(),
+      counterparty: uniqueCounterparty(deltas, delta),
     });
   }
-  // Suppress the SOL row only when it is EXACTLY the fee for a transaction already shown as USDC.
-  const solIsOnlyTheUsdcFee = usdcDelta !== 0n && solDelta === -feeCharged;
-  if (solDelta !== 0n && !solIsOnlyTheUsdcFee) {
+  // Suppress the SOL row only when it is EXACTLY the fee for a transaction already shown as a token.
+  const solIsOnlyTheTokenFee = rows.length > 0 && solDelta === -feeCharged;
+  if (solDelta !== 0n && !solIsOnlyTheTokenFee) {
     rows.push({
       ...shared,
-      token: 'SOL',
+      token: SOL_TOKEN,
       direction: solDelta > 0n ? 'in' : 'out',
       amount: abs(solDelta).toString(),
       counterparty: uniqueCounterparty(
@@ -284,7 +307,7 @@ function toHistoryRows(
 }
 
 /**
- * Recent SOL + USDC movements for `ownerAddress`, newest-first.
+ * Recent SOL + registered-SPL-token movements for `ownerAddress`, newest-first.
  *
  * Throws when the signature queries fail (an unreadable list is an error state, never an empty
  * ledger). Individual unreadable transactions are logged and counted in `dropped`.
@@ -295,17 +318,20 @@ export async function fetchSolanaHistory(
   opts?: SolanaHistoryOpts,
 ): Promise<SolanaHistory> {
   const limit = opts?.limit ?? SOL_HISTORY_LIMIT;
-  const usdcAta = bs58.encode(deriveAta(ownerAddress, USDC_MINT_ADDRESS));
-  const [walletSigs, ataSigs] = await Promise.all([
-    getSignaturesForAddress(rpcUrl, ownerAddress, limit, opts),
-    getSignaturesForAddress(rpcUrl, usdcAta, limit, opts),
-  ]);
+  // The owner wallet, then its canonical ATA for every registered mint. One page each, concurrently.
+  const addresses = [
+    ownerAddress,
+    ...REGISTERED_MINTS.map(({mint}) => bs58.encode(deriveAta(ownerAddress, mint))),
+  ];
+  const pages = await Promise.all(
+    addresses.map((address) => getSignaturesForAddress(rpcUrl, address, limit, opts)),
+  );
 
-  // Union the two pages, newest-first by slot. Array#sort is stable, so signatures sharing a slot
-  // keep the RPC's own (newest-first) relative order. Cut to `limit` BEFORE fetching details, so a
-  // detail fetch is issued at most `limit` times regardless of how the two pages overlap.
+  // Union the pages, newest-first by slot. Array#sort is stable, so signatures sharing a slot keep
+  // the RPC's own (newest-first) relative order. Cut to `limit` BEFORE fetching details, so a
+  // detail fetch is issued at most `limit` times regardless of how the pages overlap.
   const bySignature = new Map<string, SolanaSignatureInfo>();
-  for (const info of [...walletSigs, ...ataSigs]) {
+  for (const info of pages.flat()) {
     if (!bySignature.has(info.signature)) bySignature.set(info.signature, info);
   }
   const recent = [...bySignature.values()].sort((a, b) => b.slot - a.slot).slice(0, limit);

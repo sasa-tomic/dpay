@@ -14,6 +14,60 @@
 // globals — so this stays jest-safe on the fast inner loop.
 import {M} from '../i18n';
 
+/**
+ * The endpoint ANSWERED, and the answer was not the data: an HTTP status (429/401/403/5xx) or a
+ * JSON-RPC error object. It lives HERE, in the pure module, rather than beside the fetch that
+ * throws it (`solana/rpc.ts`), because the classification is what the offline seam and the sign
+ * gates branch on and neither may statically import the network module.
+ *
+ * The distinction it carries is the one the wallet had no way to make: "this endpoint is not
+ * serving us" versus "nothing answered". A transport failure observes NOTHING about the endpoint —
+ * a payer in airplane mode produces exactly that, and that payer must keep signing. An endpoint
+ * that answers 429 for hours is a different fact about the world and gets different copy.
+ */
+export class SolanaEndpointRefused extends Error {
+  /** The HTTP status when the refusal was one; null for a JSON-RPC-level error. */
+  readonly status: number | null;
+  /** The BRAND, and the reason `isEndpointRefusal` exists rather than a bare `instanceof`: this
+   *  class is thrown inside the dynamically-imported network module and caught in the seam that
+   *  imports it statically. Two module instances mean two class objects and an `instanceof` that
+   *  silently answers false — which here would misreport a dead endpoint as an offline phone, the
+   *  exact distinction this type was added to make. A field cannot be duplicated apart. */
+  readonly dpayEndpointRefused = true;
+  constructor(message: string, status: number | null) {
+    super(message);
+    this.name = 'SolanaEndpointRefused';
+    this.status = status;
+  }
+}
+
+/** Did the ENDPOINT answer and refuse us (vs nothing answering at all)? The one supported test —
+ *  never `instanceof` (see the brand above), never message text. */
+export function isEndpointRefusal(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as {dpayEndpointRefused?: unknown}).dpayEndpointRefused === true;
+}
+
+/**
+ * The endpoint refused this request with HTTP 429, or a previous 429's cooldown has not elapsed.
+ * Carries the wait the ENDPOINT asked for (`Retry-After`) or the interval this client chose, so
+ * the caller can say what is happening and when it will retry rather than showing a bare failure.
+ *
+ * A cooldown refusal is still a refusal BY THE ENDPOINT (it is the endpoint's own 429, held for
+ * the window it asked for), which is why this extends `SolanaEndpointRefused`.
+ */
+export class SolanaRateLimited extends SolanaEndpointRefused {
+  readonly retryAfterMs: number;
+  constructor(url: string, retryAfterMs: number) {
+    super(
+      `solana rpc rate limit (HTTP 429) at ${url} — the endpoint is refusing requests from this ` +
+        `wallet; not sending again for ${Math.round(retryAfterMs / 1000)}s`,
+      429,
+    );
+    this.name = 'SolanaRateLimited';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
 /** Map a raw Solana error message (RPC body, AbortError, confirmation timeout) to human copy.
  *  Returns the original string unchanged when no known class matches — diagnosis stays possible. */
 export function friendlySolError(msg: string): string {

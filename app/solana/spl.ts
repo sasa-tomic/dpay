@@ -42,6 +42,56 @@ export const SOL_FEE_LAMPORTS = 5_000n;
 /** Minimum SOL a wallet needs to create its USDC ATA (rent + one fee). */
 export const SOL_ATA_SETUP_MIN_LAMPORTS = SOL_ATA_RENT_LAMPORTS + SOL_FEE_LAMPORTS;
 
+// ── Account LAYOUTS (read side) ────────────────────────────────────────────────────────────────
+// The balance poll reads accounts in one `getMultipleAccounts` call and decodes the bytes here,
+// instead of asking the node to parse one account per request. Every offset below is pinned
+// against real mainnet bytes in `__tests__/solana-account-decode.test.ts`: the amount this decodes
+// is checked against `getTokenAccountBalance`'s answer for the SAME account, and the decimals
+// against the same response's `decimals`. Nothing here is from memory.
+//
+// SPL Token ACCOUNT (165 bytes): mint[32] ++ owner[32] ++ amount u64LE ++ … (delegate, state,
+// is_native, delegated_amount, close_authority follow; this wallet reads none of them, and a field
+// nothing reads is a field nothing can be wrong about).
+/** Exact byte length of an SPL Token account. A shorter or longer account is not one. */
+export const SPL_TOKEN_ACCOUNT_LEN = 165;
+const TOKEN_ACCOUNT_AMOUNT_OFFSET = 64;
+// SPL Token MINT (82 bytes): mint_authority COption<Pubkey>[36] ++ supply u64LE[8] ++ decimals u8.
+/** Exact byte length of an SPL Token mint account. */
+export const SPL_MINT_ACCOUNT_LEN = 82;
+const MINT_DECIMALS_OFFSET = 44;
+
+/** Read the raw token amount out of an SPL token account, as an exact `bigint` (money-critical:
+ *  never through JS `number`, which loses precision above 2^53).
+ *
+ *  `expectedMint` is the mint the caller DERIVED this account's address from; the account states
+ *  its own mint in its first 32 bytes and the two must agree. They can only disagree if the
+ *  address, the derivation or the response mapping is wrong — none of which may be answered with
+ *  a number. Every refusal throws with a reason; a caller turns that into an honest "couldn't
+ *  read", never a zero. */
+export function decodeSplTokenAmount(data: Uint8Array, expectedMint: string): bigint {
+  if (data.length !== SPL_TOKEN_ACCOUNT_LEN) {
+    throw new Error(`spl token account is ${data.length} bytes, expected exactly ${SPL_TOKEN_ACCOUNT_LEN} bytes`);
+  }
+  const mint = bs58.encode(data.subarray(0, 32));
+  if (mint !== expectedMint) {
+    throw new Error(`spl token account holds mint ${mint}, expected ${expectedMint}`);
+  }
+  let amount = 0n;
+  for (let i = 7; i >= 0; i--) {
+    amount = (amount << 8n) | BigInt(data[TOKEN_ACCOUNT_AMOUNT_OFFSET + i]);
+  }
+  return amount;
+}
+
+/** Read a mint's `decimals`. The CHAIN's own answer for the scale a token is counted in — the same
+ *  fact `getTokenAccountBalance` used to return alongside the amount, read from the same source. */
+export function decodeSplMintDecimals(data: Uint8Array): number {
+  if (data.length !== SPL_MINT_ACCOUNT_LEN) {
+    throw new Error(`spl mint account is ${data.length} bytes, expected exactly ${SPL_MINT_ACCOUNT_LEN} bytes`);
+  }
+  return data[MINT_DECIMALS_OFFSET];
+}
+
 const TOKEN_PROGRAM_BYTES = base58Decode32(TOKEN_PROGRAM_ADDRESS);
 const ASSOCIATED_TOKEN_PROGRAM_BYTES = base58Decode32(ASSOCIATED_TOKEN_PROGRAM_ADDRESS);
 const PDA_MARKER = new TextEncoder().encode('ProgramDerivedAddress');

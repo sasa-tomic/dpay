@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
-import {PRIVACY_URL} from '../config/constants';
+import {PRIVACY_URL, solanaRpcUrl} from '../config/constants';
 import {S, isDark} from '../styles';
 import {validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, wordsToString, validateMnemonic} from '../lib/bip39';
@@ -44,9 +44,18 @@ import {M} from '../i18n';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, onOpenStep}: {
+export function SettingsSheet({relayUrl, setRelayUrl, setSolanaRpc, onSolanaRpcApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, onOpenStep}: {
   relayUrl: string;
   setRelayUrl: (s: string) => void;
+  // Apply + persist the Solana endpoint (App.tsx `persistSolanaRpc`). Unlike `setRelayUrl` this one
+  // THROWS on a refusal — plain http, a devnet host, an unparseable string — and the message is
+  // written for the user, so the row below renders it verbatim rather than swallowing it.
+  setSolanaRpc: (s: string) => void;
+  // Fired after an ACCEPTED endpoint change so the SOL rail re-reads at once instead of at its idle
+  // cadence. The relay row gets this for free (its URL is a poll dependency); the Solana endpoint
+  // is read per-request, so an operator who has just fixed a dead key would otherwise stare at the
+  // same dashes for half a minute and conclude the fix did not work.
+  onSolanaRpcApplied: () => void;
   onClose: () => void;
   onReset: () => void;
   // Replace the current identity with a restored one (built from a 64-hex seed the user pastes).
@@ -139,6 +148,35 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
   const relayClean = draftRelay.trim();
   const relayDirty = relayClean.length > 0 && relayClean !== lastApplied.trim();
   const applyRelay = () => { if (relayDirty) { setRelayUrl(draftRelay); setLastApplied(draftRelay.trim()); } };
+
+  // The Solana endpoint row — the relay row's twin, with two deliberate differences.
+  //
+  //   • EMPTY IS A VALUE. `setSolanaRpcUrl('')` restores the endpoint baked into this build, so
+  //     clearing the field is the way back and must therefore be applicable. (The relay row refuses
+  //     an empty draft because a relay URL has no such fallback — there is nothing to fall back to.)
+  //     After an apply the field is re-seeded from `solanaRpcUrl()`, so clearing it shows the user
+  //     exactly which endpoint "empty" means.
+  //   • APPLYING CAN FAIL. `setSolanaRpc` throws an actionable refusal; it is caught here and shown
+  //     next to the input, and nothing is persisted on that path.
+  const [draftSolRpc, setDraftSolRpc] = useState(solanaRpcUrl);
+  const [appliedSolRpc, setAppliedSolRpc] = useState(solanaRpcUrl);
+  const [solRpcErr, setSolRpcErr] = useState<string | null>(null);
+  const solRpcDirty = draftSolRpc.trim() !== appliedSolRpc.trim();
+  const applySolRpc = () => {
+    if (!solRpcDirty) return;
+    try {
+      setSolanaRpc(draftSolRpc);
+      setSolRpcErr(null);
+      // Re-seed from the RESOLVED endpoint, not from the draft: an empty draft resolves to the
+      // baked default, and showing that is how the user learns what clearing the field did.
+      const active = solanaRpcUrl();
+      setDraftSolRpc(active);
+      setAppliedSolRpc(active);
+      onSolanaRpcApplied();
+    } catch (e: unknown) {
+      setSolRpcErr(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   // Copy the seed via the shared clipboard-feedback hook (real clipboard on web, Share on native;
   // surfaces the "Copied ✓"/"Shared ✓" confirmation for 1500ms). BOTH copy actions award
@@ -362,7 +400,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                   accessibilityLabel={M.settings.restore.action}
                   accessibilityHint={M.settings.restore.actionHint}
                   accessibilityState={{disabled: restoreBusy || restoreSeed.trim() === ''}}>
-                  <Text style={S.primaryText}>{restoreBusy ? M.settings.restore.busy : M.settings.restore.action}</Text>
+                  <Text style={[S.primaryText, (restoreBusy || restoreSeed.trim() === '') && S.disabledText]}>{restoreBusy ? M.settings.restore.busy : M.settings.restore.action}</Text>
                 </Pressable>
                 <Pressable
                   testID="btn-settings-restore-cancel"
@@ -576,14 +614,44 @@ export function SettingsSheet({relayUrl, setRelayUrl, onClose, onReset, onRestor
                 />
                 <Pressable
                   testID="btn-relay-apply"
-                  style={[S.applyBtn, !relayDirty && S.applyBtnDisabled]}
+                  style={[S.applyBtn, !relayDirty && S.disabledFlat]}
                   disabled={!relayDirty}
                   onPress={applyRelay}
                   accessibilityRole="button"
                   accessibilityLabel={M.settings.advanced.applyA11y}
                   accessibilityHint={M.settings.advanced.applyHint}
                   accessibilityState={{disabled: !relayDirty}}>
-                  <Text style={S.applyBtnText}>{M.settings.advanced.apply}</Text>
+                  <Text style={[S.applyBtnText, !relayDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
+                </Pressable>
+                {/* The Solana endpoint — the same draft/Apply shape, one section down. It was
+                    configurable in code and read from storage at boot since 2026-09-08 but
+                    reachable from no screen, so on a phone a dead provider key was a store
+                    release. A refusal (plain http, a devnet host) renders under the field. */}
+                <Text style={S.dim2}>{M.settings.advanced.solanaNote}</Text>
+                <Text style={S.inputLabel}>{M.settings.advanced.solanaLabel}</Text>
+                <TextInput
+                  testID="settings-sol-rpc"
+                  style={S.relayInput}
+                  value={draftSolRpc}
+                  onChangeText={(t) => { setDraftSolRpc(t); setSolRpcErr(null); }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder={M.settings.advanced.solanaPlaceholder}
+                  placeholderTextColor={C.sub2}
+                  accessibilityLabel={M.settings.advanced.solanaLabel}
+                  accessibilityHint={M.settings.advanced.solanaHint}
+                />
+                {solRpcErr ? <Text testID="settings-sol-rpc-err" style={S.err}>{solRpcErr}</Text> : null}
+                <Pressable
+                  testID="btn-sol-rpc-apply"
+                  style={[S.applyBtn, !solRpcDirty && S.disabledFlat]}
+                  disabled={!solRpcDirty}
+                  onPress={applySolRpc}
+                  accessibilityRole="button"
+                  accessibilityLabel={M.settings.advanced.solanaApplyA11y}
+                  accessibilityHint={M.settings.advanced.solanaApplyHint}
+                  accessibilityState={{disabled: !solRpcDirty}}>
+                  <Text style={[S.applyBtnText, !solRpcDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
                 </Pressable>
               </View>
             ) : null}

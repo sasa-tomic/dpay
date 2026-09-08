@@ -210,74 +210,75 @@ describe('solana rpc — e2e stub seam (__DPAY_TEST_SOLANA_RPC_STUB)', () => {
   });
 });
 
-// Phase 2 — exact-string SPL token balance. `getTokenAccountBalance` reads an ATA's raw `amount`
-// (decimal-digit STRING) + `decimals` from `getTokenAccountBalance` and MUST preserve the exact
-// string — never coerce through JS `number` (money-critical; values >2^53 lose precision). The
-// hook (useSolanaBalances) trusts this to render a Solana-USDC balance row distinctly from SOL.
-describe('solana rpc — getTokenAccountBalance (exact-string SPL)', () => {
+// The balance poll's ONE request. `getMultipleAccounts` answers for the wallet, every token
+// account and every mint in a single round trip, POSITIONALLY — so the shape validation here is
+// money-critical: a length disagreement would attribute one account's balance to another address,
+// and a `null` must keep meaning "this account does not exist" (the fact the SPL sign gates refuse
+// on). The byte-level decoding of what comes back is pinned against real mainnet accounts in
+// solana-account-decode.test.ts.
+describe('solana rpc — getMultipleAccounts (the one balance request)', () => {
   afterEach(() => {
-    // The stub set by the stub-routing tests MUST be cleared so the request-shape test (which uses
-    // installRpcFetch → real-fetch routing) sees no stub. Without this the stub leaks across tests.
     delete (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB;
   });
 
-  test('returns the exact amount string + decimals from a stub response (no number coercion)', async () => {
-    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getTokenAccountBalance: () => ({value: {amount: '1234567', decimals: 6, uiAmount: 1.234567}}),
-    };
-    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
-    const {getTokenAccountBalance} = require('../solana/rpc');
-    const r = await getTokenAccountBalance('https://rpc.example', 'SomeAtaAddr');
-    expect(r).toEqual({amount: '1234567', decimals: 6});
-    expect(typeof r.amount).toBe('string'); // NEVER a number
+  const acct = (lamports: number, owner = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data = 'AAAA') =>
+    ({lamports, owner, data: [data, 'base64'], executable: false, rentEpoch: 0, space: 165});
+
+  test('request shape: one POST, base64 encoding, the addresses in the order given', async () => {
+    const {calls} = installRpcFetch([{context: {slot: 1}, value: [null, null]}]);
+    const {getMultipleAccounts} = require('../solana/rpc');
+    await getMultipleAccounts('https://rpc.example', ['AddrA', 'AddrB']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      jsonrpc: '2.0', method: 'getMultipleAccounts', params: [['AddrA', 'AddrB'], {encoding: 'base64'}],
+    }));
   });
 
-  test('preserves a large amount (>2^53) as a STRING — proves no JS number path', async () => {
-    // 10_000_000_000_000_000 raw units = 1e16 — well above 2^53 (~9e15). Number coercion would
-    // lose precision; the string must be preserved verbatim.
-    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getTokenAccountBalance: () => ({value: {amount: '10000000000000000', decimals: 6, uiAmount: null}}),
-    };
-    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
-    const {getTokenAccountBalance} = require('../solana/rpc');
-    const r = await getTokenAccountBalance('https://rpc.example', 'BigAta');
-    expect(r.amount).toBe('10000000000000000');
-    expect(typeof r.amount).toBe('string');
+  test('a null entry stays null — "does not exist" is never softened into an empty account', async () => {
+    installRpcFetch([{context: {slot: 1}, value: [acct(7), null]}]);
+    const {getMultipleAccounts} = require('../solana/rpc');
+    const r = await getMultipleAccounts('https://rpc.example', ['AddrA', 'AddrB']);
+    expect(r[0]).toEqual({lamports: 7, owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', data: ['AAAA', 'base64']});
+    expect(r[1]).toBeNull();
   });
 
-  test('preserves the raw "0" amount for a zero-balance ATA (NOT coerced to null or absent)', async () => {
-    // A zero balance is still a balance — distinguishable from a missing ATA. Must stay '0'.
-    (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getTokenAccountBalance: () => ({value: {amount: '0', decimals: 6, uiAmount: 0}}),
-    };
-    (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
-    const {getTokenAccountBalance} = require('../solana/rpc');
-    const r = await getTokenAccountBalance('https://rpc.example', 'ZeroAta');
-    expect(r).toEqual({amount: '0', decimals: 6});
+  test('a SHORT answer throws — a positional read that lost a position cannot be attributed', async () => {
+    installRpcFetch([{context: {slot: 1}, value: [acct(1)]}]);
+    const {getMultipleAccounts} = require('../solana/rpc');
+    await expect(getMultipleAccounts('https://rpc.example', ['AddrA', 'AddrB', 'AddrC']))
+      .rejects.toThrow(/1 entries for 3 addresses/);
+  });
+
+  test('a non-array value throws rather than reading as "everything is absent"', async () => {
+    installRpcFetch([{context: {slot: 1}, value: null}]);
+    const {getMultipleAccounts} = require('../solana/rpc');
+    await expect(getMultipleAccounts('https://rpc.example', ['AddrA'])).rejects.toThrow(/non-array/);
+  });
+
+  test('malformed lamports / owner / data each throw, NAMING the address they came back for', async () => {
+    const {getMultipleAccounts} = require('../solana/rpc');
+    installRpcFetch([{context: {slot: 1}, value: [{lamports: 1.5, owner: 'x', data: ['', 'base64']}]}]);
+    await expect(getMultipleAccounts('https://rpc.example', ['AddrA'])).rejects.toThrow(/malformed lamports for AddrA/);
+    installRpcFetch([{context: {slot: 1}, value: [{lamports: 1, owner: '', data: ['', 'base64']}]}]);
+    await expect(getMultipleAccounts('https://rpc.example', ['AddrB'])).rejects.toThrow(/no owning program for AddrB/);
+    installRpcFetch([{context: {slot: 1}, value: [{lamports: 1, owner: 'x', data: 'not-a-pair'}]}]);
+    await expect(getMultipleAccounts('https://rpc.example', ['AddrC'])).rejects.toThrow(/non-base64 data for AddrC/);
+    installRpcFetch([{context: {slot: 1}, value: [{lamports: 1, owner: 'x', data: ['zzz', 'jsonParsed']}]}]);
+    await expect(getMultipleAccounts('https://rpc.example', ['AddrD'])).rejects.toThrow(/non-base64 data for AddrD/);
+  });
+
+  test('an RPC error response throws (never silently returns an absent account)', async () => {
+    installRpcFetch([{error: {code: -32602, message: 'Invalid param: WrongSize'}}]);
+    const {getMultipleAccounts} = require('../solana/rpc');
+    await expect(getMultipleAccounts('https://rpc.example', ['AddrA'])).rejects.toThrow(/WrongSize/);
   });
 
   test('a method missing from the stub throws a typed error (never a falsy/zero default)', async () => {
     (globalThis as {__DPAY_TEST_SOLANA_RPC_STUB?: unknown}).__DPAY_TEST_SOLANA_RPC_STUB = {}; // no methods
     (globalThis as {fetch: unknown}).fetch = () => { throw new Error('fetch must not be called'); };
-    const {getTokenAccountBalance} = require('../solana/rpc');
-    await expect(getTokenAccountBalance('https://rpc.example', 'X'))
-      .rejects.toThrow(/stub|not implemented|getTokenAccountBalance/i);
-  });
-
-  test('an RPC error response throws (never silently returns a zero balance)', async () => {
-    installRpcFetch([{error: {code: -32000, message: 'Invalid param: account not found'}}]);
-    const {getTokenAccountBalance} = require('../solana/rpc');
-    await expect(getTokenAccountBalance('https://rpc.example', 'MissingAta'))
-      .rejects.toThrow(/account not found|solana rpc/i);
-  });
-
-  test('request shape: posts getTokenAccountBalance with the ATA pubkey as the sole param', async () => {
-    const {calls} = installRpcFetch([{value: {amount: '500000', decimals: 6, uiAmount: null}}]);
-    const {getTokenAccountBalance} = require('../solana/rpc');
-    await getTokenAccountBalance('https://rpc.example', 'AtaAddrXYZ');
-    expect(calls[0].body).toEqual(expect.objectContaining({
-      jsonrpc: '2.0', method: 'getTokenAccountBalance', params: ['AtaAddrXYZ'],
-    }));
+    const {getMultipleAccounts} = require('../solana/rpc');
+    await expect(getMultipleAccounts('https://rpc.example', ['X']))
+      .rejects.toThrow(/stub|not implemented|getMultipleAccounts/i);
   });
 });
 
@@ -435,7 +436,10 @@ describe('solana rpc — 429 rate-limit gate', () => {
 
   test('a 429 throws a rate-limit error, and the NEXT call never reaches the network', async () => {
     const {calls} = installRpcFetch([{ok: false, status: 429}, {value: 1}]);
-    const {getBalance, SolanaRateLimited} = require('../solana/rpc');
+    const {getBalance} = require('../solana/rpc');
+    // The thrown SHAPE lives in the pure module (solana/errors.ts) so the offline seam and the
+    // sign gates can branch on it without importing this network module.
+    const {SolanaRateLimited} = require('../solana/errors');
     await expect(getBalance(URL_A, 'AddrXYZ')).rejects.toBeInstanceOf(SolanaRateLimited);
     expect(calls.length).toBe(1);
     // Inside the cooldown the client refuses locally — this is what stops the 2.5s poll from

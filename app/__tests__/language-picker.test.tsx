@@ -24,6 +24,8 @@ import {LOCALES, LOCALE_ENDONYM, localePersistValue, parseLocale, type LocaleCho
 import {LOCALE_STORAGE_KEY} from '../config/constants';
 
 const SHEET_DEFAULTS = {
+  setSolanaRpc: () => {},
+  onSolanaRpcApplied: () => {},
   relayUrl: 'http://127.0.0.1:4391',
   setRelayUrl: () => {},
   onClose: () => {},

@@ -8,7 +8,7 @@
  * theme-invariance (campreview gate), and idempotent restore.
  */
 import {describe, test, expect, afterEach} from '@jest/globals';
-import {C, DARK, LIGHT} from '../config/palette';
+import {C, DARK, LIGHT, withAlpha} from '../config/palette';
 import {S, applyPalette, isDark} from '../styles';
 import {nextTheme, resolveTheme, parseTheme, themeLabel} from '../config/theme';
 
@@ -69,18 +69,23 @@ describe('dual theme: applyPalette', () => {
     expect(S.camBox.backgroundColor).toBe('#17150F');
   });
 
-  test('dark status-wash literals swap via the rgb stems (bad/warn tints)', () => {
-    const lightPill = S.qrOfflinePill.backgroundColor;
+  test('a status wash is DERIVED from the token it tints, in both themes', () => {
+    // v5 deleted the `badRGB`/`warnRGB` stems: a wash is now `withAlpha(token, p.wash)`, so it
+    // cannot survive a change to the token it is a tint of. That is the whole point of the
+    // helper, and this is what proves the derivation is live rather than a copied literal.
+    expect(S.qrOfflinePill.backgroundColor).toBe(withAlpha(LIGHT.bad, LIGHT.wash));
+    expect(S.assetBadge.backgroundColor).toBe(withAlpha(LIGHT.warn, LIGHT.wash));
     applyPalette(DARK);
-    expect(S.qrOfflinePill.backgroundColor).not.toBe(lightPill);
-    expect(S.qrOfflinePill.backgroundColor).toContain(DARK.badRGB);
-    expect(S.assetBadge.backgroundColor).not.toContain('180,83,9'); // light warn stem gone
-    expect(S.assetBadge.backgroundColor).toContain(DARK.warnRGB);
+    expect(S.qrOfflinePill.backgroundColor).toBe(withAlpha(DARK.bad, DARK.wash));
+    expect(S.assetBadge.backgroundColor).toBe(withAlpha(DARK.warn, DARK.wash));
   });
 
-  test('checkAlready uses the deep warn FILL in dark (white glyph on top)', () => {
+  test('checkAlready is the theme\'s own warn FILL — `warnDeep` is gone', () => {
+    // v4 carried a second warn token whose only job was "dark enough for a white glyph". v5's
+    // fills take `brandInk`, which flips with the theme, so one warn serves both jobs and the
+    // duplicate is deleted rather than kept in sync.
     applyPalette(DARK);
-    expect(S.checkAlready.backgroundColor).toBe('#B45309');
+    expect(S.checkAlready.backgroundColor).toBe(DARK.warn);
     applyPalette(LIGHT);
     expect(S.checkAlready.backgroundColor).toBe(LIGHT.warn);
   });
@@ -97,12 +102,12 @@ describe('dual theme: applyPalette', () => {
       linkToken: 'DEMO', network: null, minFractionDigits: 0,
       decimals: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'demo',
     } as const;
+    // The ∂ chip IS the brand, read live — v5 deleted its private copy of the tangerine, so this
+    // asserts the derivation rather than a pair of hexes that would need editing next time.
     applyPalette(LIGHT);
-    expect(glyphFor(demo)).toEqual({glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'});
+    expect(glyphFor(demo)).toEqual({glyph: '∂', color: LIGHT.brandText, bg: withAlpha(LIGHT.brandText, LIGHT.wash)});
     applyPalette(DARK);
-    const g = glyphFor(demo);
-    expect(g.color).toBe('#FF7A45');
-    expect(g.bg).toBe('rgba(255,122,69,0.14)');
+    expect(glyphFor(demo)).toEqual({glyph: '∂', color: DARK.brandText, bg: withAlpha(DARK.brandText, DARK.wash)});
   });
 });
 

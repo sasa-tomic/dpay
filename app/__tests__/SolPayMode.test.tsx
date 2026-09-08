@@ -1279,6 +1279,45 @@ describe('SolPayMode — per-request-mint solreq sign gate (OPEN_ISSUES 6(a))', 
     act(() => { tree.unmount(); });
   });
 
+  // …and failing open SILENTLY is the half that was missing: a payment that cannot settle looked
+  // exactly like one that can, right up until it never arrived. The hand-off surface is where the
+  // payer meets it (the sync auto-sign never paints the 'review' phase), and the copy differs by
+  // WHY there is no fact, because the payer's next move differs.
+  test('a fact-less signature discloses itself ON the hand-off QR — and never blocks it', async () => {
+    jest.mocked(signSplPayment).mockClear();
+    const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: {amount: null, status: 'loading'}}});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    expect(hasTestID(tree, 'sol-pay-qr')).toBe(true); // the QR is still handed over
+    expect(jest.mocked(signSplPayment)).toHaveBeenCalledTimes(1);
+    expect(textByTestID(tree, 'sol-pay-sign-caveat')).toBe(M.errors.solana.senderTokenAccountUnverified('EURC'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('an endpoint that REFUSED this wallet gets the rail-down copy, not the get-online copy', async () => {
+    const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: {amount: null, status: 'error', failure: 'refused'}}});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    expect(textByTestID(tree, 'sol-pay-sign-caveat'))
+      .toBe(M.errors.solana.senderTokenAccountUnverifiedRailDown('EURC'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('a signature made ON a fact discloses nothing — no caveat on the common path', async () => {
+    const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: {amount: '5000000', status: 'balance'}}});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    expect(hasTestID(tree, 'sol-pay-qr')).toBe(true);
+    expect(hasTestID(tree, 'sol-pay-sign-caveat')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('cancelling clears the caveat — it belongs to ONE signed request, not to the screen', async () => {
+    const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: {amount: null, status: 'loading'}}});
+    await scanToSign(tree, splReqUri(EURC_MINT_ADDRESS, 'EURC'));
+    expect(hasTestID(tree, 'sol-pay-sign-caveat')).toBe(true);
+    pressByTestID(tree, 'btn-sol-pay-discard');
+    expect(hasTestID(tree, 'sol-pay-sign-caveat')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
   test('fail-open inverse: a funded request-mint signs — even a known-zero balance (ATA exists)', async () => {
     jest.mocked(signSplPayment).mockClear();
     const tree = mountSolPay({tokenBalances: {[EURC_MINT_ADDRESS]: {amount: '0', status: 'balance'}}});

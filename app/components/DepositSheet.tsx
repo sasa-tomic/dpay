@@ -174,7 +174,7 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, on
     <>
       {loading ? (
         <View style={S.centerAll}>
-          <ActivityIndicator color={C.brand} />
+          <ActivityIndicator color={C.brandText} />
           <Text style={S.dim2}>{M.deposit.ck.fetchingAddress}</Text>
         </View>
       ) : err || !address ? (
@@ -246,7 +246,7 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, on
             disabled={checkBusy}
             onPress={() => refreshNow(true)}>
             {checkBusy
-              ? <ActivityIndicator size="small" color={C.brand} />
+              ? <ActivityIndicator size="small" color={C.brandText} />
               : <Text style={S.checkBtnText}>{M.deposit.checkNow}</Text>}
           </Pressable>
 

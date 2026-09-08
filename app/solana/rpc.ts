@@ -1,6 +1,6 @@
 // Minimal Solana JSON-RPC 2.0 client over `fetch` with bounded timeouts. NETWORK module —
 // dynamic-imported from the seam `app/solana.ts` so `@solana/*` (here: none) and real RPC never run
-// under jest/e2e (the seam no-ops when `SOLANA_RPC_URL` is empty, which jest.setup.js + the e2e
+// under jest/e2e (the seam no-ops when `solanaRpcUrl()` is empty, which jest.setup.js + the e2e
 // driver set). Exposes the online SOL MVP + offline-pay rail calls:
 //   getBalance, getLatestBlockhash, sendTransaction, confirmTransaction (poll getSignatureStatuses).
 //
@@ -17,6 +17,9 @@
 import {composeTimeout as composeTimeoutShared} from '../lib/timeout';
 import {bytesToBase64} from '../lib/base64';
 import {SOL_PAYMENT_COMMITMENT} from '../config/constants';
+// The two thrown-error SHAPES live in the pure module (`solana/errors.ts`) because the offline
+// seam and the sign gates branch on them and neither may statically import this network module.
+import {SolanaEndpointRefused, SolanaRateLimited} from './errors';
 
 /** A fetched recent blockhash + its validity window + the context slot it was observed at. The v2
  *  payment rail threads `contextSlot` as the `minContextSlot` for every downstream freshness call
@@ -65,23 +68,6 @@ export const RATE_LIMIT_BASE_MS = 5000;
  *  that never reads a balance again, which looks broken and is not more polite than probing once a
  *  minute. */
 export const RATE_LIMIT_MAX_MS = 60000;
-
-/**
- * The endpoint refused this request with HTTP 429, or a previous 429's cooldown has not elapsed.
- * Carries the wait the ENDPOINT asked for (`Retry-After`) or the interval this client chose, so
- * the caller can say what is happening and when it will retry rather than showing a bare failure.
- */
-export class SolanaRateLimited extends Error {
-  readonly retryAfterMs: number;
-  constructor(url: string, retryAfterMs: number) {
-    super(
-      `solana rpc rate limit (HTTP 429) at ${url} — the endpoint is refusing requests from this ` +
-        `wallet; not sending again for ${Math.round(retryAfterMs / 1000)}s`,
-    );
-    this.name = 'SolanaRateLimited';
-    this.retryAfterMs = retryAfterMs;
-  }
-}
 
 /** Per-endpoint cooldown: when a 429 arrives, no request goes to that URL until `until`, and the
  *  next refusal doubles the interval. Keyed by URL so one throttled endpoint never silences
@@ -151,13 +137,13 @@ async function rpcFetch(url: string, method: string, params: unknown[], opts?: S
       // and both say WHICH in the body. Named endpoint (host only — the URL carries the API key),
       // method and the first of the body.
       const body = await r.text().catch((e: unknown) => `<body unreadable: ${e instanceof Error ? e.message : String(e)}>`);
-      throw new Error(`solana rpc ${method} → ${hostOf(url)}: HTTP ${r.status}: ${body.slice(0, 200)}`);
+      throw new SolanaEndpointRefused(`solana rpc ${method} → ${hostOf(url)}: HTTP ${r.status}: ${body.slice(0, 200)}`, r.status);
     }
     const j: {error?: {message?: string}; result?: unknown} = await r.json();
     // The endpoint answered: whatever it said, it is talking to us again, so the gate is done.
     // Cleared on an RPC-level error too — a rejected METHOD is not a refused CLIENT.
     cooldowns.delete(url);
-    if (j.error) throw new Error(`solana rpc: ${j.error.message ?? 'error'}`);
+    if (j.error) throw new SolanaEndpointRefused(`solana rpc: ${j.error.message ?? 'error'}`, null);
     return j.result;
   } finally {
     cancel();
@@ -258,32 +244,58 @@ export async function accountExists(url: string, address: string, opts?: SolanaR
   return result.value !== null && result.value !== undefined;
 }
 
-/** Read a SPL token account's raw balance as an EXACT decimal-digit string + its `decimals`. Uses
- *  `getTokenAccountBalance` and returns the raw `amount` field UNCHANGED — never coerced through JS
- *  `number` (money-critical: values above 2^53 lose precision; the app-wide "amounts are strings"
- *  invariant). The caller (the USDC balance hook) trusts this to render a distinct Solana-USDC row.
+/** One account as `getMultipleAccounts` returns it. `data` is the RPC's `[base64, 'base64']` pair;
+ *  `owner` is the PROGRAM that owns the account (the System program for a plain wallet, the SPL
+ *  Token program for a mint or a token account) — the field that says what the bytes in `data`
+ *  ARE, and the reason a decoder never has to guess. */
+export interface SolanaAccountInfo {
+  readonly lamports: number;
+  readonly owner: string;
+  readonly data: readonly [string, string];
+}
+
+/**
+ * Read several accounts in ONE request. This is the whole balance poll: the wallet's own account
+ * (whose `lamports` are exactly what `getBalance` answers — measured against mainnet 2026-09-08,
+ * same account, same slot) plus, per rail, its token account and that token's mint account — one
+ * round trip in place of five.
  *
- *  Throws on any RPC error (account not found, invalid param, network failure) — the hook translates
- *  a throw into the `'error'` status so a transient RPC failure is honest, not a silent zero. */
-export async function getTokenAccountBalance(
+ * A `null` entry means the account DOES NOT EXIST — measured against mainnet, not assumed — which
+ * is what preserves the money-critical distinction the ATA gates rest on: a missing token account
+ * is KNOWN absent, never merely unread.
+ *
+ * The response is POSITIONAL, so a length disagreement is a hard failure: attributing account #2's
+ * balance to address #1 is the one bug class that must never degrade into a wrong number on a
+ * screen. Every field the caller reads is validated here for the same reason.
+ */
+export async function getMultipleAccounts(
   url: string,
-  ataAddress: string,
+  addresses: string[],
   opts?: SolanaRpcOpts,
-): Promise<{amount: string; decimals: number}> {
-  const result = (await rpcFetch(url, 'getTokenAccountBalance', [ataAddress], opts)) as {
-    value: {amount: unknown; decimals: unknown};
+): Promise<(SolanaAccountInfo | null)[]> {
+  const result = (await rpcFetch(url, 'getMultipleAccounts', [addresses, {encoding: 'base64'}], opts)) as {
+    value?: unknown;
   };
-  // Defensive validation: never trust the wire shape for money. A malformed response is an error,
-  // not a zero balance — the caller surfaces "couldn't read" honestly.
-  const amount = result?.value?.amount;
-  const decimals = result?.value?.decimals;
-  if (typeof amount !== 'string' || !/^\d+$/.test(amount)) {
-    throw new Error(`solana rpc: getTokenAccountBalance returned malformed amount for ${ataAddress}`);
+  const value = result?.value;
+  if (!Array.isArray(value) || value.length !== addresses.length) {
+    throw new Error(
+      `solana rpc: getMultipleAccounts answered ${Array.isArray(value) ? `${value.length} entries` : 'a non-array'} for ${addresses.length} addresses`,
+    );
   }
-  if (typeof decimals !== 'number' || !Number.isFinite(decimals)) {
-    throw new Error(`solana rpc: getTokenAccountBalance returned malformed decimals for ${ataAddress}`);
-  }
-  return {amount, decimals};
+  return value.map((v, i) => {
+    if (v === null || v === undefined) return null;
+    const a = v as {lamports?: unknown; owner?: unknown; data?: unknown};
+    if (typeof a.lamports !== 'number' || !Number.isSafeInteger(a.lamports) || a.lamports < 0) {
+      throw new Error(`solana rpc: getMultipleAccounts returned malformed lamports for ${addresses[i]}`);
+    }
+    if (typeof a.owner !== 'string' || a.owner.length === 0) {
+      throw new Error(`solana rpc: getMultipleAccounts named no owning program for ${addresses[i]}`);
+    }
+    if (!Array.isArray(a.data) || typeof a.data[0] !== 'string' || a.data[1] !== 'base64') {
+      throw new Error(`solana rpc: getMultipleAccounts returned non-base64 data for ${addresses[i]}`);
+    }
+    return {lamports: a.lamports, owner: a.owner, data: [a.data[0], 'base64'] as const};
+  });
 }
 
 // RFC 4648 base64 of a byte array — imported from `lib/base64.ts` (the SINGLE implementation shared

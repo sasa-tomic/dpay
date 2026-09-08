@@ -25,6 +25,7 @@
 import React from 'react';
 import {describe, it, expect, jest, afterEach} from '@jest/globals';
 import Renderer, {act} from 'react-test-renderer';
+import bs58 from 'bs58';
 import {DeviceEventEmitter} from 'react-native';
 import type {CurrencyDescriptor} from '../config/catalog';
 import {encodeSolReq} from '../solana/qr';
@@ -34,6 +35,7 @@ import {DpayNfc, DpaySolNfc} from '../services/native';
 import {prepareNfcTransfer} from '../services/rail';
 import {signSolPayment, signSplPayment} from '../solana';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
+import type {SolMintStates} from '../config/assets';
 import {M} from '../i18n';
 import {nowSecs} from '../lib/format';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -149,7 +151,7 @@ function solreqUri(over: Record<string, unknown> = {}): string {
     name: 'merchant', memo: '', ...over,
   } as never);
 }
-async function mountSol(tokenBalances?: Record<string, {amount: string | null; status: string}>) {
+async function mountSol(tokenBalances?: SolMintStates) {
   await act(async () => {
     tree = Renderer.create(
       <SolNfcTap role="card" identity={IDENTITY} tokenBalances={tokenBalances} onClose={() => {}} />,
@@ -311,6 +313,44 @@ describe('SolNfcTap (SOL) auto-sign (one-press rule)', () => {
     await mountSol(); // no tokenBalances at all (reader-style/legacy mount)
     await emitSol({type: 'request', role: 'card', solreqUri: splReq(EURC_MINT_ADDRESS, 'EURC')});
     expect(signSplPayment).toHaveBeenCalledTimes(1);
+  });
+
+  // ── The DISCLOSURE half (M1) ───────────────────────────────────────────────────────────────
+  // A tap auto-signs with no review, so there is no screen to caveat BEFORE the payment leaves the
+  // phone. The terminal message is the only sentence this flow ever shows the payer — so that is
+  // where a fact-less signature has to own up. `expectedSig` is bs58 of the mocked tx's 64 sig
+  // bytes; the receipt must match rid+sig exactly or the adapter ignores it (cross-tap defence).
+  const EXPECTED_SIG = bs58.encode(new Uint8Array(64).fill(7));
+  const receipt = (status: number) =>
+    ({type: 'receipt', role: 'card', status, rid: 'c'.repeat(32), sig: EXPECTED_SIG});
+
+  it('a DECLINE after a fact-less signature says what could not be checked and what to do', async () => {
+    await mountSol({[EURC_MINT_ADDRESS]: {amount: null, status: 'loading'}});
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(EURC_MINT_ADDRESS, 'EURC')});
+    expect(signSplPayment).toHaveBeenCalledTimes(1); // it still SIGNED — a caveat is not a block
+    await emitSol(receipt(1)); // RECEIPT_REJECTED — exactly what an absent token account produces
+    expect(hasText(`${M.errors.tap.paymentRejected}. ${M.errors.solana.senderTokenAccountUnverified('EURC')}`)).toBe(true);
+  });
+
+  it('an UNKNOWN outcome carries it too — and a refusing endpoint gets the rail-down copy', async () => {
+    await mountSol({[EURC_MINT_ADDRESS]: {amount: null, status: 'error', failure: 'refused'}});
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(EURC_MINT_ADDRESS, 'EURC')});
+    await emitSol(receipt(2)); // RECEIPT_UNREACHABLE → honest pending
+    expect(hasText(`${M.errors.tap.couldntConfirm}. ${M.errors.solana.senderTokenAccountUnverifiedRailDown('EURC')}`)).toBe(true);
+  });
+
+  it('a SETTLED tap says nothing about the account — the chain just proved it exists', async () => {
+    await mountSol({[EURC_MINT_ADDRESS]: {amount: null, status: 'loading'}});
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(EURC_MINT_ADDRESS, 'EURC')});
+    await emitSol(receipt(0)); // RECEIPT_SETTLED
+    expect(hasText(M.errors.solana.senderTokenAccountUnverified('EURC'))).toBe(false);
+  });
+
+  it('a decline after a signature made ON a fact is unchanged — no caveat is invented', async () => {
+    await mountSol({[USDC_MINT_ADDRESS]: {amount: '5000000', status: 'balance'}});
+    await emitSol({type: 'request', role: 'card', solreqUri: splReq(USDC_MINT_ADDRESS, 'USDC')});
+    await emitSol(receipt(1));
+    expect(hasText(M.errors.tap.paymentRejected)).toBe(true);
   });
 });
 

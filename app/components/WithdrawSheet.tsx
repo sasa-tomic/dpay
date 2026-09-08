@@ -218,7 +218,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
         </View>
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>
-          <ActivityIndicator color={C.brand} />
+          <ActivityIndicator color={C.brandText} />
           <Text style={S.dim2}>{M.withdraw.ic.withdrawing(fmt(raw))}</Text>
         </View>
       ) : (
@@ -273,7 +273,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
             accessibilityRole="button"
             accessibilityLabel={M.withdraw.ic.confirmLabel}
             accessibilityState={{disabled: !canReview && !retained}}>
-            <Text style={S.primaryText}>{retained ? M.withdraw.ic.retry : raw !== '0' ? M.withdraw.ic.withdrawAmount(fmt(raw)) : M.withdraw.enterAmount}</Text>
+            <Text style={[S.primaryText, !canReview && !retained && S.disabledText]}>{retained ? M.withdraw.ic.retry : raw !== '0' ? M.withdraw.ic.withdrawAmount(fmt(raw)) : M.withdraw.enterAmount}</Text>
           </Pressable>
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>{M.withdraw.pressEsc}</Text> : null}

@@ -74,16 +74,16 @@ function withStubUrl<T>(fn: () => Promise<T>): Promise<T> {
   return p!;
 }
 
-describe('solana seam — offline (SOLANA_RPC_URL empty)', () => {
-  test('getSolanaBalance returns null without any network', async () => {
+describe('solana seam — offline (solanaRpcUrl() empty)', () => {
+  test('readSolanaBalances answers "offline" for every rail without any network', async () => {
     let called = false;
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
       called = true;
       return Promise.resolve({});
     });
-    const {getSolanaBalance} = require('../solana');
-    const bal = await getSolanaBalance('AnyAddress');
-    expect(bal).toBeNull();
+    const {readSolanaBalances} = require('../solana');
+    const r = await readSolanaBalances(SEED_HEX, [USDC_MINT]);
+    expect(r).toEqual({sol: {kind: 'offline'}, tokens: {[USDC_MINT]: {kind: 'offline'}}});
     expect(called).toBe(false); // never imported rpc, never fetched
   });
 
@@ -115,22 +115,27 @@ describe('solana seam — offline (SOLANA_RPC_URL empty)', () => {
 });
 
 describe('solana seam — configured (RPC URL set) calls through to rpc', () => {
-  test('getSolanaBalance fetches via the rpc client', async () => {
-    const mock = jest.fn(() =>
-      Promise.resolve({ok: true, status: 200, json: () => Promise.resolve({result: {value: 2500000000}})} as unknown as Response),
-    );
+  test('readSolanaBalances fetches via the rpc client, in ONE POST', async () => {
+    const bodies: {method: string}[] = [];
+    const mock = jest.fn((_url: string, init?: {body?: string}) => {
+      bodies.push(JSON.parse(String(init?.body)) as {method: string});
+      return Promise.resolve({ok: true, status: 200, json: () => Promise.resolve({
+        result: {context: {slot: 1}, value: [{lamports: 2500000000, owner: '11111111111111111111111111111111', data: ['', 'base64']}]},
+      })} as unknown as Response);
+    });
     (globalThis as unknown as {fetch: typeof mock}).fetch = mock;
-    // Override the seam constant inside an isolated module registry so SOLANA_RPC_URL is non-empty.
+    // Override the seam constant inside an isolated module registry so solanaRpcUrl() is non-empty.
     const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
     let p: Promise<unknown> | undefined;
     jest.isolateModules(() => {
       g.__DPAY_TEST_SOLANA_RPC_URL = 'https://rpc.test';
-      const {getSolanaBalance} = require('../solana');
-      p = getSolanaBalance('AddrX');
+      const {readSolanaBalances} = require('../solana');
+      p = readSolanaBalances(SEED_HEX, []);
     });
-    const b = await p;
-    expect(b).toBe('2500000000');
-    expect(mock).toHaveBeenCalled();
+    const r = await p as {sol: {kind: string; lamports?: string}};
+    expect(r.sol).toEqual({kind: 'lamports', lamports: '2500000000'});
+    expect(mock).toHaveBeenCalledTimes(1);
+    expect(bodies.map(b => b.method)).toEqual(['getMultipleAccounts']);
     g.__DPAY_TEST_SOLANA_RPC_URL = '';
   });
 
@@ -175,91 +180,148 @@ describe('solana seam — configured (RPC URL set) calls through to rpc', () => 
 // `isSolanaRpcAvailable` exposes RPC availability independently from relay `online` (invariant #9).
 // ============================================================================
 
-// A "mainnet-like" stub URL — does NOT match the `/devnet|testnet/i` regex (the existing
-// `withStubUrl` uses 'https://stub.test' which DOES match → USDC would be incoherent there). Used
-// only for the USDC-balance tests so `solanaUsdcAvailable()` returns true.
-function withStubMainnetUrl<T>(fn: () => Promise<T>): Promise<T> {
-  const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
-  let p: Promise<T> | undefined;
-  jest.isolateModules(() => {
-    g.__DPAY_TEST_SOLANA_RPC_URL = 'https://sol.example';
-    p = fn();
-  });
-  g.__DPAY_TEST_SOLANA_RPC_URL = '';
-  return p!;
-}
+describe('solana seam — readSolanaBalances (one request, honest states)', () => {
+  const OWNER = deriveSolanaKeypair(SEED_HEX).address;
+  const USDC_ATA = bs58.encode(deriveAta(OWNER, USDC_MINT));
 
-describe('solana seam — getSolanaTokenBalance (Phase 2 honest balances)', () => {
-  test('returns {kind:"offline"} when SOLANA_RPC_URL is empty (no network, no dynamic import)', async () => {
-    let called = false;
-    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
-      called = true;
-      return Promise.resolve({});
-    });
-    const {getSolanaTokenBalance} = require('../solana');
-    const r = await (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string}>)(SEED_HEX, USDC_MINT);
-    expect(r).toEqual({kind: 'offline'});
-    expect(called).toBe(false);
-  });
+  /** A real 165-byte SPL token account: mint ++ owner ++ amount u64LE ++ the rest. The layout is
+   *  pinned against mainnet bytes in solana-account-decode.test.ts; here it is USED, so a decoder
+   *  that drifted from the chain would fail there and a seam that mis-wires the positions fails
+   *  here. */
+  function tokenAccount(mint: string, owner: string, amount: bigint): string {
+    const b = new Uint8Array(165);
+    b.set(base58Decode32(mint), 0);
+    b.set(base58Decode32(owner), 32);
+    for (let i = 0; i < 8; i++) b[64 + i] = Number((amount >> BigInt(8 * i)) & 0xffn);
+    return bytesToBase64(b);
+  }
+  /** A real 82-byte SPL mint account: decimals at offset 44. */
+  function mintAccount(decimals: number): string {
+    const b = new Uint8Array(82);
+    b[44] = decimals;
+    return bytesToBase64(b);
+  }
+  const account = (data: string, owner = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports = 2039280) =>
+    ({data: [data, 'base64'], owner, lamports});
 
-  test('returns {kind:"absent"} when accountExists returns false (ATA missing on-chain)', async () => {
+  /** Serve one `getMultipleAccounts` answer, positionally, and record what was asked for. */
+  function serveAccounts(answers: (unknown | null)[]): {asked: string[][]} {
+    const asked: string[][] = [];
     (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getAccountInfo: () => ({value: null}),
+      getMultipleAccounts: (params: unknown[]) => {
+        asked.push(params[0] as string[]);
+        return {context: {slot: 1}, value: answers};
+      },
     };
-    const r = await withStubMainnetUrl(async () => {
-      const {getSolanaTokenBalance} = require('../solana');
-      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX, USDC_MINT);
+    return {asked};
+  }
+
+  type Read = {sol: {kind: string; lamports?: string; failure?: string}; tokens: Record<string, {kind: string; amount?: string; decimals?: number; failure?: string}>};
+  /** Drive the seam at a mainnet-shaped endpoint. `url` is a parameter because the rpc module keeps
+   *  a PER-ENDPOINT 429 cooldown that outlives one test (by design — a refusal is held for the
+   *  window the endpoint asked for), so the refusal case must not poison the next case's read. */
+  const readBalances = (mints: string[], url = 'https://sol.example') => {
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
+    let p: Promise<Read> | undefined;
+    jest.isolateModules(() => {
+      g.__DPAY_TEST_SOLANA_RPC_URL = url;
+      const {readSolanaBalances} = require('../solana');
+      p = (readSolanaBalances as (s: string, m: string[]) => Promise<Read>)(SEED_HEX, mints);
     });
-    expect(r).toEqual({kind: 'absent'});
-    expect('amount' in r).toBe(false); // absent carries no amount
+    g.__DPAY_TEST_SOLANA_RPC_URL = '';
+    return p!;
+  };
+
+  test('one request asks for the wallet, each token account and each MINT — and answers all of them', async () => {
+    // The mint account is in the list because that is where `decimals` comes from: the chain still
+    // states the scale, exactly as `getTokenAccountBalance` used to, and it costs no extra request.
+    const {asked} = serveAccounts([
+      account(bytesToBase64(new Uint8Array(0)), '11111111111111111111111111111111', 5_000_000_000),
+      account(tokenAccount(USDC_MINT, OWNER, 1234567n)),
+      account(mintAccount(6)),
+    ]);
+    const r = await readBalances([USDC_MINT]);
+    expect(asked).toHaveLength(1);                       // ONE request for the whole wallet
+    expect(asked[0]).toEqual([OWNER, USDC_ATA, USDC_MINT]);
+    expect(r.sol).toEqual({kind: 'lamports', lamports: '5000000000'});
+    expect(r.tokens[USDC_MINT]).toEqual({kind: 'balance', amount: '1234567', decimals: 6});
   });
 
-  test('returns {kind:"balance", amount, decimals} when ATA exists + getTokenAccountBalance succeeds', async () => {
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
-      getTokenAccountBalance: () => ({value: {amount: '1234567', decimals: 6, uiAmount: 1.234567}}),
-    };
-    const r = await withStubMainnetUrl(async () => {
-      const {getSolanaTokenBalance} = require('../solana');
-      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string; amount?: string; decimals?: number}>)(SEED_HEX, USDC_MINT);
-    });
-    expect(r).toEqual({kind: 'balance', amount: '1234567', decimals: 6});
-    expect(typeof (r as {amount?: string}).amount).toBe('string');
+  test('a null token account is "absent" — the fact the sign gate is allowed to refuse on', async () => {
+    serveAccounts([
+      account(bytesToBase64(new Uint8Array(0)), '11111111111111111111111111111111', 1),
+      null,
+      account(mintAccount(6)),
+    ]);
+    const r = await readBalances([USDC_MINT]);
+    expect(r.tokens[USDC_MINT]).toEqual({kind: 'absent'});
+    expect('amount' in r.tokens[USDC_MINT]).toBe(false); // absent carries no amount
+  });
+
+  test('a null WALLET account is a zero balance, not an error (the chain answers 0 for it)', async () => {
+    serveAccounts([null]);
+    const r = await readBalances([]);
+    expect(r.sol).toEqual({kind: 'lamports', lamports: '0'});
   });
 
   test('preserves a large amount as an exact string (>2^53 — proves no number path)', async () => {
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'tok', lamports: 1}}),
-      getTokenAccountBalance: () => ({value: {amount: '10000000000000000', decimals: 6, uiAmount: null}}),
-    };
-    const r = await withStubMainnetUrl(async () => {
-      const {getSolanaTokenBalance} = require('../solana');
-      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string; amount?: string}>)(SEED_HEX, USDC_MINT);
-    });
-    expect(r).toEqual({kind: 'balance', amount: '10000000000000000', decimals: 6});
+    serveAccounts([
+      account(bytesToBase64(new Uint8Array(0)), '11111111111111111111111111111111', 1),
+      account(tokenAccount(USDC_MINT, OWNER, 10_000_000_000_000_000n)),
+      account(mintAccount(6)),
+    ]);
+    const r = await readBalances([USDC_MINT]);
+    expect(r.tokens[USDC_MINT]).toEqual({kind: 'balance', amount: '10000000000000000', decimals: 6});
+    expect(typeof r.tokens[USDC_MINT].amount).toBe('string');
   });
 
-  test('returns {kind:"error"} when the accountExists RPC fails (transient/unverifiable)', async () => {
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getAccountInfo: () => { throw new Error('RPC node degraded'); },
-    };
-    const r = await withStubMainnetUrl(async () => {
-      const {getSolanaTokenBalance} = require('../solana');
-      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string}>)(SEED_HEX, USDC_MINT);
-    });
-    expect(r).toEqual({kind: 'error'});
+  test('an endpoint that REFUSES is reported as refused — the rail is down and this device is not', async () => {
+    // HTTP 429 is the exact answer the shipped key gives with its quota spent. The wallet must be
+    // able to say that, rather than showing the same nothing an airplane-mode phone shows.
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() =>
+      Promise.resolve({ok: false, status: 429, headers: {get: () => null}, text: () => Promise.resolve('max usage reached')} as unknown as Response));
+    const r = await readBalances([USDC_MINT], 'https://refusing.example');
+    expect(r.sol).toEqual({kind: 'error', failure: 'refused'});
+    expect(r.tokens[USDC_MINT]).toEqual({kind: 'error', failure: 'refused'});
   });
 
-  test('returns {kind:"error"} when getTokenAccountBalance fails after existence confirmed', async () => {
-    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
-      getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'tok', lamports: 1}}),
-      getTokenAccountBalance: () => { throw new Error('account decoder error'); },
-    };
-    const r = await withStubMainnetUrl(async () => {
-      const {getSolanaTokenBalance} = require('../solana');
-      return (getSolanaTokenBalance as (s: string, m: string) => Promise<{kind: string}>)(SEED_HEX, USDC_MINT);
+  test('an endpoint that ANSWERS NOTHING is reported as unreachable — an offline payer, not a dead rail', async () => {
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.reject(new Error('Network request failed')));
+    const r = await readBalances([USDC_MINT], 'https://unreachable.example');
+    expect(r.sol).toEqual({kind: 'error', failure: 'unreachable'});
+    expect(r.tokens[USDC_MINT]).toEqual({kind: 'error', failure: 'unreachable'});
+  });
+
+  test('bytes that cannot be trusted are "unreadable" for THAT mint only — never a zero, never a blanked wallet', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    serveAccounts([
+      account(bytesToBase64(new Uint8Array(0)), '11111111111111111111111111111111', 42),
+      account(tokenAccount(MERCHANT_USDC_ATA, OWNER, 5n)),  // a token account for the WRONG mint
+      account(mintAccount(6)),
+    ]);
+    const r = await readBalances([USDC_MINT]);
+    expect(r.sol).toEqual({kind: 'lamports', lamports: '42'});   // SOL is unaffected
+    expect(r.tokens[USDC_MINT]).toEqual({kind: 'error', failure: 'unreadable'});
+    expect(String(warn.mock.calls[0]?.[0])).toContain(USDC_MINT);
+    warn.mockRestore();
+  });
+
+  test('a mint the cluster cannot answer for is not asked about at all', async () => {
+    // A devnet endpoint with mainnet mints: `solanaTokenAvailable` fails closed, so the token is
+    // reported offline and — the point — its accounts never enter the request.
+    const {asked} = serveAccounts([account(bytesToBase64(new Uint8Array(0)), '11111111111111111111111111111111', 7)]);
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
+    let p: Promise<Read> | undefined;
+    jest.isolateModules(() => {
+      g.__DPAY_TEST_SOLANA_RPC_URL = 'https://api.devnet.solana.com';
+      const {readSolanaBalances} = require('../solana');
+      p = (readSolanaBalances as (s: string, m: string[]) => Promise<Read>)(SEED_HEX, [USDC_MINT]);
     });
-    expect(r).toEqual({kind: 'error'});
+    g.__DPAY_TEST_SOLANA_RPC_URL = '';
+    const r = await p!;
+    expect(asked[0]).toEqual([OWNER]);                 // the incoherent mint is absent from the request
+    expect(r.tokens[USDC_MINT]).toEqual({kind: 'offline'});
+    expect(r.sol).toEqual({kind: 'lamports', lamports: '7'});
   });
 });
 
@@ -276,7 +338,7 @@ describe('solana seam — getSolanaTokenBalance (Phase 2 honest balances)', () =
 // (both proven in solana-spl.test.ts).
 // ============================================================================
 describe('solana seam — sendSpl (Phase 6 SPL direct send — mint passed by the caller)', () => {
-  test('throws offline error when SOLANA_RPC_URL is empty', async () => {
+  test('throws offline error when solanaRpcUrl() is empty', async () => {
     let called = false;
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
       called = true;
@@ -433,7 +495,7 @@ describe('solana seam — sendSpl (Phase 6 SPL direct send — mint passed by th
 // ESTIMATE; the chain enforces the real value). Mirrors the sendSpl stub shape.
 // ============================================================================
 describe('solana seam — createTokenAta (receiver-side one-tap setup)', () => {
-  test('throws offline when SOLANA_RPC_URL is empty (no network import)', async () => {
+  test('throws offline when solanaRpcUrl() is empty (no network import)', async () => {
     let called = false;
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
       called = true;
@@ -517,12 +579,12 @@ describe('solana seam — createTokenAta (receiver-side one-tap setup)', () => {
 });
 
 describe('solana seam — isSolanaRpcAvailable (independent of relay online)', () => {
-  test('returns false when SOLANA_RPC_URL is empty (offline inner loop)', () => {
+  test('returns false when solanaRpcUrl() is empty (offline inner loop)', () => {
     const {isSolanaRpcAvailable} = require('../solana');
     expect((isSolanaRpcAvailable as () => boolean)()).toBe(false);
   });
 
-  test('returns true when SOLANA_RPC_URL is non-empty', () => {
+  test('returns true when solanaRpcUrl() is non-empty', () => {
     const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
     let result: boolean | undefined;
     jest.isolateModules(() => {
@@ -1044,7 +1106,7 @@ describe('solana seam — sendSolanaPay (a scanned Solana Pay transfer)', () => 
     };
   }
 
-  test('offline (SOLANA_RPC_URL empty) throws without any network', async () => {
+  test('offline (solanaRpcUrl() empty) throws without any network', async () => {
     let called = false;
     (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => {
       called = true;

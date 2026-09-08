@@ -1,6 +1,6 @@
 import {View, Text} from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import {C} from '../config/palette';
+import {LIGHT} from '../config/palette';
 
 /**
  * QrCode — the ONE branded QR surface for every asset rail (IC + Solana, request / signed /
@@ -8,7 +8,11 @@ import {C} from '../config/palette';
  * and the web wallet render the SAME code (the web shim in e2e/web/qrcode.tsx matches the
  * upstream butt-cap path byte-for-byte):
  *
- *   - crisp square modules, near-black ink on pure white (max scanner contrast)
+ *   - crisp square modules, near-black ink on pure white (max scanner contrast). The plate is
+ *     white in BOTH themes (a scanner needs it), so every colour on it is read from `LIGHT` by
+ *     construction rather than from the live palette — the same rule `S.camBox` follows in the
+ *     other direction. The dark theme's tangerine measures 4.11:1 on this plate; the light
+ *     theme's brand ink measures 5.82:1, and it cannot drift because it is the same token.
  *   - a quiet zone built into the component (NOT just the card padding) so the code is valid
  *     wherever it is placed
  *   - a small centered brand mark (the dpay "∂" on a white rounded pad) — ~14% of the code,
@@ -27,10 +31,10 @@ export function QrCode({value, size, ecl = 'M', testID}: {value: string; size: n
   const plate = size + quiet * 2;
   const mark = Math.round(plate * 0.14);
   return (
-    <View testID={testID} style={{width: plate, height: plate, backgroundColor: '#ffffff', borderRadius: 8, alignItems: 'center', justifyContent: 'center'}}>
-      <QRCode value={value} size={size} ecl={ecl} color="#1B1A17" backgroundColor="#ffffff" />
-      <View style={{position: 'absolute', width: mark, height: mark, borderRadius: mark * 0.28, backgroundColor: '#ffffff', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line}}>
-        <Text style={{fontSize: Math.round(mark * 0.62), fontWeight: '700', color: C.brand2, lineHeight: Math.round(mark * 0.72)}}>∂</Text>
+    <View testID={testID} style={{width: plate, height: plate, backgroundColor: LIGHT.card, borderRadius: 8, alignItems: 'center', justifyContent: 'center'}}>
+      <QRCode value={value} size={size} ecl={ecl} color={LIGHT.ink} backgroundColor={LIGHT.card} />
+      <View style={{position: 'absolute', width: mark, height: mark, borderRadius: mark * 0.28, backgroundColor: LIGHT.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LIGHT.line}}>
+        <Text style={{fontSize: Math.round(mark * 0.62), fontWeight: '700', color: LIGHT.brandText, lineHeight: Math.round(mark * 0.72)}}>∂</Text>
       </View>
     </View>
   );

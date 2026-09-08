@@ -101,8 +101,26 @@ export const POLL = (() => {
     deposit:    t?.deposit    ?? 10000,
     receiptPay: t?.receiptPay ?? 2500,
     receiptRcv: t?.receiptRcv ?? 1500,
+    // The IDLE cadences — what the SOL rail polls at when nothing is happening. `balance`/`history`
+    // above are the ACTIVE cadences, kept for the seconds around a money flow (a send just
+    // confirmed, the user pressed "Check again", the wallet just opened); outside that window the
+    // rail reads at these instead, and while the app is backgrounded it reads at nothing at all.
+    //
+    // Why they exist: an idle wallet issued 128 requests a minute at the active cadence, which is
+    // how a month of provider quota went in five and a half days and took the EUR rail down with
+    // it. The arithmetic, and what one wallet costs at each cadence, is in
+    // `docs/specs/2026-09-08-solana-rpc-plan.md`. They are SEPARATE keys, deliberately: `balance`
+    // is shared with the IC rail (`hooks/useBalancePoll.ts`), so re-timing it here would silently
+    // re-time a second rail against a different provider.
+    balanceIdle: t?.balanceIdle ?? 30000,
+    historyIdle: t?.historyIdle ?? 60000,
   };
 })();
+// How long a money flow keeps the SOL rail at its ACTIVE cadence. Started by the wallet opening
+// and by every targeted refresh (a confirmed send, a "Check again" tap) — the events that mean a
+// number on screen is about to change and the user is watching for it.
+export const SOL_ACTIVE_POLL_WINDOW_MS =
+  ((globalThis as unknown as {__DPAY_TEST_SOL_ACTIVE_WINDOW_MS?: number}).__DPAY_TEST_SOL_ACTIVE_WINDOW_MS ?? 30000);
 // Bounded unknown-budget for the Receive settlement poll (F2, 2026-08-20): how many 'unknown'
 // read_state results we accept before stopping with actionable copy. NOT poll-interval-scaled —
 // a count budget keeps the wall-clock bound proportional to POLL.receiptRcv (45s at prod cadence,
@@ -121,23 +139,77 @@ export const PROOF_POLL_BUDGET = 30;
 export const WALLETCONNECT_PROJECT_ID =
   ((globalThis as unknown as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID ?? '648afbc757419fa381f77ba0c900bc85');
 
-// Solana RPC endpoint for the native device-key SOL rail (balance/send). Config-driven: the baked
-// default is the MAINNET Helius endpoint (keyed; wired 2026-08-09 — before that the rail ran on the
-// public devnet endpoint). Devnet is selected by editing this one line; IS_SOLANA_DEVNET derives
-// from the URL and badges the SOL screens accordingly. The test override
-// `__DPAY_TEST_SOLANA_RPC_URL=''` DISABLES SOL for the offline inner loop (jest.setup.js sets it
-// globally; the e2e driver injects it via evaluateOnNewDocument): an empty URL makes the SOL balance
-// hook no-op and the SOL card render with `—`, so jest/e2e never touch real devnet. Mirrors the
-// WALLETCONNECT_PROJECT_ID + POLL override seam exactly. Prod never sets the
-// global → falls through to the baked default.
-export const SOLANA_RPC_URL =
+// ── The Solana RPC endpoint for the native device-key SOL rail (balances, history, send) ────────
+//
+// ONE value, in one place, with one way to change it at runtime. The baked default below is what a
+// fresh install talks to; `setSolanaRpcUrl` replaces it for this device, and the persisted choice
+// (`SOLANA_RPC_STORAGE_KEY`, read at boot in App.tsx) is what makes that survive a restart. Mirrors
+// the relay URL slot (`RELAY_STORAGE_KEY`) deliberately: an operator running a pilot points the
+// wallet at their OWN provider key without a fork, and rotating a key stops being a store release.
+// Until 2026-09-08 this was a build-time literal and nothing else, which is why a dead key meant a
+// multi-day outage rather than a settings edit (docs/specs/2026-09-08-solana-rpc-plan.md §1.4).
+//
+// The test override `__DPAY_TEST_SOLANA_RPC_URL=''` DISABLES SOL for the offline inner loop
+// (jest.setup.js sets it globally; the e2e driver injects it via evaluateOnNewDocument): an empty
+// URL makes the balance seam no-op and the SOL rows render `—`, so jest/e2e never touch a real
+// cluster. Prod never sets the global → the baked default stands. `scripts/check-prod-sol.mjs`
+// reads THIS literal and refuses to ship a build whose default is a public/non-mainnet endpoint or
+// is not answering.
+export const SOLANA_RPC_BAKED =
   ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://mainnet.helius-rpc.com/?api-key=76929a9c-96d5-4866-9e71-f0e8a8930777');
 
-// Whether the configured SOL RPC is a devnet endpoint. Derived from the URL so it stays correct
-// when an operator flips SOLANA_RPC_URL. Used to badge SOL screens ("DEVNET") and warn on the
-// receive-address sheet while on devnet — mainnet SOL sent to a devnet key is a real fund-loss
-// risk. A prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
-export const IS_SOLANA_DEVNET = /devnet|testnet/i.test(SOLANA_RPC_URL);
+/** Where the operator's chosen endpoint persists. Same AsyncStorage pattern as identity/relay. */
+export const SOLANA_RPC_STORAGE_KEY = 'dpay.solanaRpc.v1';
+
+let activeSolanaRpc = SOLANA_RPC_BAKED;
+
+/** The endpoint every Solana read and broadcast uses RIGHT NOW. A function, not a constant,
+ *  because the operator's choice arrives after module load (from storage, or from Settings). Call
+ *  it per use — never capture it at module scope, or a rotation would need a restart. */
+export function solanaRpcUrl(): string {
+  return activeSolanaRpc;
+}
+
+/**
+ * Point this device at a different Solana endpoint. `''` restores the baked default.
+ *
+ * THROWS, with an actionable message, on anything it will not accept — the caller (Settings, or
+ * the boot loader reading the persisted value) shows or logs it. Two refusals, both fail-closed:
+ *   • not an `https:` URL. A Solana endpoint can lie about a balance or a blockhash; over plain
+ *     http anyone on the path can. The cluster-identity check (`SOL_GENESIS_HASH`) catches a wrong
+ *     CHAIN, not a wrong ANSWER.
+ *   • a devnet/testnet host. `IS_SOLANA_DEVNET` below is derived from the BAKED default so that
+ *     the "DEVNET" badge and the wrong-cluster warnings stay honest without every screen having to
+ *     re-derive them; refusing a non-mainnet override is what keeps that derivation true. Devnet
+ *     remains selectable the way it always was — by editing the baked default in a dev build.
+ */
+export function setSolanaRpcUrl(url: string): void {
+  const trimmed = url.trim();
+  if (trimmed === '') {
+    activeSolanaRpc = SOLANA_RPC_BAKED;
+    return;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`Not a valid URL: "${trimmed}". Paste the full endpoint your provider gave you, including https://`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`The Solana endpoint must start with https:// (got "${parsed.protocol}//"). An endpoint on plain http can be read and rewritten in transit.`);
+  }
+  if (/devnet|testnet/i.test(parsed.host)) {
+    throw new Error(`"${parsed.host}" is a devnet/testnet endpoint. This wallet holds mainnet funds; a test cluster would show none of them. Use your provider's mainnet endpoint.`);
+  }
+  activeSolanaRpc = trimmed;
+}
+
+// Whether the SOL rail runs on a devnet/testnet cluster. Derived from the BAKED default, and true
+// only in a dev build that edited it: `setSolanaRpcUrl` refuses a non-mainnet override precisely so
+// this stays correct without being re-derived per screen. Used to badge SOL screens ("DEVNET") and
+// warn on the receive-address sheet — mainnet SOL sent to a devnet key is a real fund-loss risk. A
+// prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
+export const IS_SOLANA_DEVNET = /devnet|testnet/i.test(SOLANA_RPC_BAKED);
 
 // SOL native send: getLatestBlockhash + sendTransaction + confirmTransaction (which polls up to
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
@@ -157,7 +229,7 @@ export const SOL_BROADCAST_TIMEOUT_MS = SOL_SEND_TIMEOUT_MS * 2;
 //   • SOL_GENESIS_HASH — the immutable mainnet-beta cluster id; mismatch fail-closes the request.
 //   • SOL_PAYMENT_MAX_WINDOW_SECONDS — the codec's frozen max request lifetime (iat..exp ≤ 90s).
 // The genesis hash accepts a `__DPAY_TEST_SOL_GENESIS_HASH` override so a unit test can mutate the
-// expected cluster identity (mirrors the SOLANA_RPC_URL + POLL override seam).
+// expected cluster identity (mirrors the SOLANA_RPC_BAKED + POLL override seam).
 export const SOL_PAYMENT_COMMITMENT = 'confirmed' as const;
 export const SOL_GENESIS_HASH =
   ((globalThis as unknown as {__DPAY_TEST_SOL_GENESIS_HASH?: string}).__DPAY_TEST_SOL_GENESIS_HASH ??

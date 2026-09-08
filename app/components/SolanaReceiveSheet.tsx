@@ -115,7 +115,7 @@ export function SolanaReceiveSheet({
           />
         ) : status === 'checking' ? (
           <>
-            <ActivityIndicator style={{marginTop: 24}} color={C.brand} />
+            <ActivityIndicator style={{marginTop: 24}} color={C.brandText} />
             <Text testID="sol-ata-checking" style={S.dim2}>{M.deposit.sol.checkingAta(assetLabel)}</Text>
           </>
         ) : (

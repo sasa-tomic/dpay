@@ -1,37 +1,49 @@
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useRef, useState} from 'react';
 import {POLL} from '../config/constants';
 import {M} from '../i18n';
 import {short, fmtTime} from '../lib/format';
 import {getSolanaHistory} from '../solana';
 import type {SolanaHistoryRow} from '../solana';
 import type {Txn} from '../lib/types';
+import {usePollCadence} from './usePollCadence';
 
 /**
  * The SOL rail's half of the Transactions list — the mirror of `useTransactionHistory` (the IC
  * half), so the Wallet merges two lists of the SAME `Txn` shape rather than two rail-specific ones.
  *
  * Reads through the seam (`solana.ts#getSolanaHistory` → `solana/history.ts`), which no-ops without
- * touching the network when the SOL rail is off (`SOLANA_RPC_URL` empty — the offline inner loop).
+ * touching the network when the SOL rail is off (`solanaRpcUrl()` empty — the offline inner loop).
  * Best-effort exactly like the IC hook: a failed poll KEEPS the prior list (an RPC outage must never
- * blank the ledger) and is logged with the address. Fetch on mount + re-poll every `POLL.history`;
- * the interval clears on unmount. A null `address` (no device key) polls nothing.
+ * blank the ledger) and is logged with the address. A null `address` (no device key) polls nothing.
+ *
+ * CADENCE (`usePollCadence`): `POLL.history` around a money flow — the wallet just opened, a send
+ * just confirmed — and `POLL.historyIdle` the rest of the time, and nothing at all while the app
+ * is backgrounded. One history tick costs one signature query per address the wallet's money can
+ * sit at (the owner and one token account per registered mint), so the cadence is what keeps the
+ * per-mint pages this reader now fetches inside a budget instead of on top of one.
  *
  * The reader also reports how many transactions it could NOT parse (`dropped`) — the hook surfaces
  * that count alongside the rows so the ledger can say the list may be short (each unreadable
  * transaction still exists on-chain; the short list is never silently short).
  */
-export function useSolanaHistory(address: string | null): {history: Txn[]; dropped: number; refreshHistory: () => Promise<void>} {
+export function useSolanaHistory(address: string | null): {history: Txn[]; dropped: number; refreshHistory: () => void} {
   const [history, setHistory] = useState<Txn[]>([]);
   const [dropped, setDropped] = useState(0);
+  // One outstanding read at a time: a tick arriving while the previous walk is still out is
+  // skipped, not queued (the same guard the balance poll carries, for the same reason).
+  const inFlight = useRef(false);
 
-  const refreshHistory = useCallback(async () => {
-    if (address === null) return;
+  const read = useCallback(async () => {
+    if (address === null || inFlight.current) return;
+    inFlight.current = true;
     let result;
     try {
       result = await getSolanaHistory(address);
     } catch (e) {
       console.warn(`useSolanaHistory fetch failed for ${address}: `, e);
       return; // keep the existing list — an unreadable poll is not an empty ledger
+    } finally {
+      inFlight.current = false;
     }
     if (result === null) return; // SOL rail off (empty RPC URL): nothing was read, nothing changes
     if (result.dropped > 0) {
@@ -44,13 +56,13 @@ export function useSolanaHistory(address: string | null): {history: Txn[]; dropp
     setHistory(result.rows.map(toTxn));
   }, [address]);
 
-  useEffect(() => {
-    let alive = true;
-    const wrapped = () => { if (alive) refreshHistory(); };
-    wrapped();
-    const id = setInterval(wrapped, POLL.history);
-    return () => { alive = false; clearInterval(id); };
-  }, [refreshHistory]);
+  const refreshHistory = usePollCadence(
+    useCallback(() => { void read(); }, [read]),
+    address !== null,
+    POLL.history,
+    POLL.historyIdle,
+    address ?? '',
+  );
 
   return {history, dropped, refreshHistory};
 }
@@ -77,7 +89,10 @@ function toTxn(row: SolanaHistoryRow): Txn {
     time: fmtTime(ts),
     ts,
     dir: row.direction,
-    assetId: row.token === 'SOL' ? 'solana:SOL' : 'solana:USDC',
+    // The row's own token symbol — `solana:SOL`, `solana:USDC`, `solana:EURC`, … — the exact id
+    // `buildSelectableAssets` spells for that rail (config/assets.ts). It used to map every
+    // non-SOL row to `solana:USDC`, which filed a EURC payment under the dollar account.
+    assetId: `solana:${row.token}`,
     // The receipt's two fields (X6). The FULL base58 counterparty, '' when it is not uniquely
     // determinable (same rule as `who` above, unabbreviated); and the transaction SIGNATURE, which
     // is this rail's proof — Solana records no dpay reference, so the receipt says that instead of

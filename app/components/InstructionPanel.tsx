@@ -77,7 +77,7 @@ export function InstructionPanel({
           <Text style={S.linkText}>{recheckBusy ? M.wallet.fund.checking : M.wallet.fund.checkAgain}</Text>
         </Pressable>
       ) : null}
-      {recheckBusy ? <ActivityIndicator color={C.brand} /> : null}
+      {recheckBusy ? <ActivityIndicator color={C.brandText} /> : null}
     </View>
   );
 }

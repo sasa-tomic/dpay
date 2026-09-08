@@ -4,11 +4,12 @@ import {C} from '../config/palette';
 import {M} from '../i18n';
 import {DEMO_ASSET_ID, type SelectableAsset} from '../config/assets';
 import {currencyOfAsset, preferredRail, railLineLabel, type HomeCurrency} from '../config/currency';
-import {linkNetworkOf, prettyNetwork} from '../config/assets';
+import {linkNetworkOf} from '../config/assets';
 import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
-import {IconAlert, IconChevronLeft, IconPlus, IconSwap} from './icons';
+import {IconChevronLeft, IconPlus, IconSwap} from './icons';
 import {RailLiquidityNote} from './RailLiquidityNote';
+import {RailUnreadableNote, railUnreadable} from './RailUnreadableNote';
 import type {AssetId} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
 
@@ -118,7 +119,7 @@ export function AccountsTab({
               accessibilityHint={M.wallet.accounts.convertHint}
               accessibilityState={{disabled: false}}
             >
-              <IconSwap size={16} color={C.brand} />
+              <IconSwap size={16} color={C.brandText} />
               <Text style={S.assetActionText}>{M.convert.actionConvert}</Text>
             </Pressable>
           ) : null;
@@ -137,8 +138,8 @@ export function AccountsTab({
               accessibilityState={{disabled: topUpBusy}}
             >
               {topUpBusy
-                ? <ActivityIndicator size="small" color={C.brand} />
-                : <><IconPlus size={16} color={C.brand} /><Text style={S.assetActionText}>{M.wallet.balances.demoFunds}</Text><HotkeyHint k="T" /></>}
+                ? <ActivityIndicator size="small" color={C.brandText} />
+                : <><IconPlus size={16} color={C.brandText} /><Text style={S.assetActionText}>{M.wallet.balances.demoFunds}</Text><HotkeyHint k="T" /></>}
             </Pressable>
           ) : null;
           // 'Needs setup' badge — Solana USDC with a KNOWN-absent token account ('absent' is a
@@ -156,14 +157,9 @@ export function AccountsTab({
           // Status-driven, never rail-specific: any rail that reports 'error' gets the same line,
           // once, for its network.
           const netSlug = linkNetworkOf(asset);
-          const outage = view?.status === 'error' && !bannered.has(netSlug);
+          const outage = railUnreadable(view) && !bannered.has(netSlug);
           if (outage) bannered.add(netSlug);
-          const banner = outage ? (
-            <View key={`outage-${netSlug}`} testID={`rail-unreadable-${netSlug}`} style={S.railOutageRow}>
-              <IconAlert size={14} color={C.warn} />
-              <Text style={S.railHealthText}>{M.errors.rail.unreadable(prettyNetwork(netSlug))}</Text>
-            </View>
-          ) : null;
+          const banner = outage ? <RailUnreadableNote key={`outage-${netSlug}`} asset={asset} /> : null;
           // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
           const mainBadge = asset.id === mainId
             ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>

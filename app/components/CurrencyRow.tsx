@@ -39,7 +39,7 @@ export type CurrencyRowProps = {
 
 export function CurrencyRow({testId, asset, amount, active, onPress, accessibilityLabel, accessibilityHint, variant, showCheck = true, zero, actions, children}: CurrencyRowProps) {
   const check = active && showCheck ? (
-    <View style={S.pickCheck}><IconCheck size={18} color={C.brand} /></View>
+    <View style={S.pickCheck}><IconCheck size={18} color={C.brandText} /></View>
   ) : null;
 
   if (variant === 'plain') {

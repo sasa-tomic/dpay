@@ -53,7 +53,7 @@ export function OcpAssetChoice({declined, options, busy, labelOf, onPick, onCanc
           onPress={() => onPick(o)}>
           {/* The EXACT amount in that asset's own units. The price differs per asset, so a menu of
               bare asset names would be a choice made blind — which is not consent. */}
-          <Text style={S.secondaryBtnText}>{M.pay.payAmount(labelOf(o))}</Text>
+          <Text style={[S.secondaryBtnText, busy && S.disabledText]}>{M.pay.payAmount(labelOf(o))}</Text>
         </Pressable>
       ))}
       {busy ? <Text testID="ocp-checking" style={S.dim2}>{M.pay.ocp.checkingTill}</Text> : null}

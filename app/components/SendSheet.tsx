@@ -352,7 +352,7 @@ export function SendSheet({
     return (
       <View style={S.sheetBody}>
         <View style={S.centerAll}>
-          <ActivityIndicator color={C.brand} />
+          <ActivityIndicator color={C.brandText} />
           <Text style={S.dim2}>{M.withdraw.send.sending(fmt(raw))}</Text>
         </View>
       </View>
@@ -433,7 +433,7 @@ export function SendSheet({
           accessibilityRole="button"
           accessibilityLabel={M.withdraw.send.maxLabel}
           accessibilityState={{disabled: maxSpendable == null}}>
-          <Text style={S.maxBtnText}>{M.withdraw.send.maxLabel}</Text>
+          <Text style={[S.maxBtnText, maxSpendable == null && S.disabledText]}>{M.withdraw.send.maxLabel}</Text>
         </Pressable>
       </View>
 
@@ -482,7 +482,7 @@ export function SendSheet({
         accessibilityRole="button"
         accessibilityLabel={M.withdraw.send.sendAmount(raw !== '0' ? fmt(raw) : assetName)}
         accessibilityState={{disabled: !canSend}}>
-        <Text style={S.primaryText}>
+        <Text style={[S.primaryText, !canSend && S.disabledText]}>
           {raw !== '0' ? M.withdraw.send.sendAmount(fmt(raw)) : M.withdraw.enterAmount}
         </Text>
       </Pressable>

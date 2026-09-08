@@ -302,10 +302,10 @@ function KeyOnDeviceVisual({reduced}: {reduced: boolean}) {
         }}>
         <Svg width={58} height={76} viewBox="0 0 58 76" fill="none">
           <G transform="rotate(-26 28 42)">
-            <Circle cx={28} cy={16} r={13} stroke={C.brand} strokeWidth={2.5} />
-            <Line x1={28} y1={29} x2={28} y2={72} stroke={C.brand} strokeWidth={2.5} strokeLinecap="round" />
-            <Line x1={28} y1={58} x2={39} y2={58} stroke={C.brand} strokeWidth={2.5} strokeLinecap="round" />
-            <Line x1={28} y1={69} x2={42} y2={69} stroke={C.brand} strokeWidth={2.5} strokeLinecap="round" />
+            <Circle cx={28} cy={16} r={13} stroke={C.brandText} strokeWidth={2.5} />
+            <Line x1={28} y1={29} x2={28} y2={72} stroke={C.brandText} strokeWidth={2.5} strokeLinecap="round" />
+            <Line x1={28} y1={58} x2={39} y2={58} stroke={C.brandText} strokeWidth={2.5} strokeLinecap="round" />
+            <Line x1={28} y1={69} x2={42} y2={69} stroke={C.brandText} strokeWidth={2.5} strokeLinecap="round" />
           </G>
         </Svg>
       </Animated.View>

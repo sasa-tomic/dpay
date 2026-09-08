@@ -20,6 +20,10 @@ export const errorsEs: ErrorMessages = {
     tokenUnavailable: asset => `El ${asset} de Solana no está disponible (no hay endpoint RPC configurado)`,
     senderNoTokenAccount: asset =>
       `Tu billetera aún no tiene una cuenta de ${asset}. Conéctate una vez a internet y abre Recibir ▸ «Crear mi cuenta de ${asset}» para crearla — o paga a este comercio con un activo que ya tengas`,
+    senderTokenAccountUnverified: asset =>
+      `dpay no pudo comprobar si tu billetera tiene una cuenta de ${asset}. Si no la tiene, este pago no puede liquidarse. Conéctate una vez a internet y abre Recibir ▸ Mi dirección para comprobarlo o crear la cuenta.`,
+    senderTokenAccountUnverifiedRailDown: asset =>
+      `dpay no pudo comprobar si tu billetera tiene una cuenta de ${asset}: Solana no responde a esta billetera, así que tener más cobertura no ayudará. Si la cuenta no existe, este pago no puede liquidarse. Abre Recibir ▸ Mi dirección para comprobarlo o crearla cuando Solana vuelva a responder.`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `Aún no tiene una cuenta de ${asset}: crearla requiere unos ${solAmount} en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
     ownTokenAccountRent: (solAmount, asset) =>

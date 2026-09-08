@@ -436,7 +436,7 @@ function Outcome({outcome, amount, left}: {outcome: Outcome; amount: string; lef
 function Blocked({blocker, onRetry}: {blocker: NonNullable<Blocker>; onRetry: () => void}) {
   const P = M.education.practice;
   if (blocker.kind === 'loading') {
-    return <View style={S.center}><ActivityIndicator size="large" color={C.brand} /></View>;
+    return <View style={S.center}><ActivityIndicator size="large" color={C.brandText} /></View>;
   }
   if (blocker.kind === 'offline') {
     return <InstructionPanel testID="practice-offline" title={P.offline.title} body={P.offline.body} onRecheck={onRetry} />;

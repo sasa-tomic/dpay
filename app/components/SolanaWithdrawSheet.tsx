@@ -218,7 +218,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
         </View>
       ) : phase === 'submitting' ? (
         <View style={S.centerAll}>
-          <ActivityIndicator color={C.brand} />
+          <ActivityIndicator color={C.brandText} />
           <Text style={S.dim2}>{M.withdraw.sol.sending(fmt(raw))}</Text>
           <Text style={S.dim2}>{M.withdraw.sol.confirmingOnSolana}</Text>
         </View>
@@ -292,7 +292,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
             accessibilityRole="button"
             accessibilityLabel={M.withdraw.sol.confirmLabel(unit)}
             accessibilityState={{disabled: !canReview}}>
-            <Text style={S.primaryText}>{raw !== '0' ? M.withdraw.sol.sendAmount(fmt(raw)) : M.withdraw.enterAmount}</Text>
+            <Text style={[S.primaryText, !canReview && S.disabledText]}>{raw !== '0' ? M.withdraw.sol.sendAmount(fmt(raw)) : M.withdraw.enterAmount}</Text>
           </Pressable>
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>{M.withdraw.pressEsc}</Text> : null}

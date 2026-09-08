@@ -40,7 +40,9 @@ import {M} from '../i18n';
 // heavy sub2 outline read as a stray box on porcelain). Full-width (alignSelf stretch so it lines
 // up with the amount row above and the Request button below — was a narrower maxWidth:320 that
 // left the field floating shorter than its neighbors), 44pt-min.
-const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
+// A FUNCTION, not a const: `C` is mutated in place on a theme flip, so a module-level style
+// object froze the light theme's white field + near-black ink into the dark theme's memo input.
+const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
 
 export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
@@ -330,7 +332,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 own screen. So the desktop wallet keeps the per-request line. */}
             {nfcReady || Platform.OS === 'web' ? (
               <View style={S.nfcHintRow}>
-                {nfcUsable ? <NfcIcon color={C.brand} size={18} /> : null}
+                {nfcUsable ? <NfcIcon color={C.brandText} size={18} /> : null}
                 <Text style={S.nfcHintLabel}>{M.receive.showToPayer(nfcUsable ? 'tap' : reqQr.nfcHex ? 'expired' : 'none')}</Text>
               </View>
             ) : (
@@ -565,7 +567,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
       </View>
       <TextInput
         testID="memo-input"
-        style={memoInputStyle}
+        style={memoInputStyle()}
         value={memo}
         onChangeText={setMemo}
         placeholder={M.receive.memoPlaceholder}

@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- dpay identity (2026-08-17 "Traveler Paper": warm porcelain field + tangerine accent.
-         Matches app/config/palette.ts and the marketing site CSS vars.) -->
+    <!-- dpay identity ("Traveler Paper": warm porcelain field + tangerine accent). Mirrors
+         app/config/palette.ts LIGHT — `accent` is that palette's `brand`, i.e. the FILL step of
+         the tangerine ramp, and `accent_ink` is its `brandInk`. Palette v5 (2026-09-08) deepened
+         the tangerine to clear WCAG AA; a splash or a system accent left on the old #FF5A1F while
+         the app renders the new one is exactly the drift this file exists to prevent. -->
     <color name="bg">#F4F1E8</color>
     <color name="panel">#FDFCF9</color>
     <color name="ink">#1B1A17</color>
-    <color name="accent">#FF5A1F</color>
+    <color name="accent">#D03F00</color>
     <color name="accent_ink">#FFFFFF</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#1B1A17</color>

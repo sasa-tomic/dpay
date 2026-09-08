@@ -1,13 +1,19 @@
 import {StyleSheet} from 'react-native';
-import {C, DARK, FONT, LIGHT} from './config/palette';
+import {C, DARK, FONT, LIGHT, withAlpha} from './config/palette';
 import type {Palette} from './config/palette';
 
-// "Traveler Paper" — the 2026-08-17 complete redesign, dual-theme since 2026-08-20 (Wave 4).
-// Warm porcelain surfaces + ink text (LIGHT, byte-identical to the single-theme era) and the
+// "Traveler Paper" — the 2026-08-17 complete redesign, dual-theme since 2026-08-20 (Wave 4),
+// re-grounded on WCAG AA in v5 (2026-09-08). Warm porcelain surfaces + ink text (LIGHT) and the
 // warm near-black night reading (DARK). Tangerine reserved for action in both. Depth comes from
 // layered surfaces + soft ink-tinted shadows, never neon glows. Space Grotesk carries UI +
 // numerals (the signature look); IBM Plex Mono carries addresses, seeds, eyebrows — the
 // "receipt" voice.
+//
+// WHICH TANGERINE GOES WHERE is decided in config/palette.ts and is not a matter of taste here:
+// `p.brand` is a FILLED area (button, active tab/chip, filled dot, the mark's tile) and only
+// `p.brandInk` may sit on it; `p.brandText` is every unfilled tangerine — text, icons, hairline
+// rings, and the `p.wash` tint of itself. Picking the wrong one is a contrast failure, not a
+// shade preference, and app/__tests__/contrast.test.ts measures it off this stylesheet.
 //
 // THE ONE-BLOCK RULE STILL HOLDS: this file stays ONE style vocabulary, now expressed as a
 // `buildStyles(palette)` builder. `S` is a mutable holder initialized from the OS-resolved
@@ -52,10 +58,21 @@ const MODE_SURFACE = {
 function buildStyles(p: Palette) {
   const LIFT = lift(p);
   const LIFT_SM = liftSm(p);
+  // The INVERSE palette — the inks for a surface that inverts against its own theme. Two surfaces
+  // do this: the RECOVERY SAVED ink beat and the TRIP READY capstone, both painted `p.ink`. In the
+  // light theme that page is near-black and wants the dark palette's inks; in the dark theme it is
+  // cream and wants the light palette's. Reading them from the opposite palette is the same rule
+  // `camText`/`camSubText` already follow (a token that knows what it sits on) — and it is not
+  // cosmetic: the light theme's tangerine measures 3.23:1 on `#1B1A17` and the dark theme's
+  // measures 2.69:1 on `#F2EEE6`, so a `p.brandText` here would fail in BOTH themes at once.
+  const inv = p === DARK ? LIGHT : DARK;
   // A non-tab ROUTE's header — back chevron · title · symmetric spacer. ONE geometry, ONE name.
   // (It briefly carried a second set of `convertHeader*` aliases so ConvertMode could keep its
   // older names while another change was in flight; ConvertMode now uses these and the aliases
   // are gone — two names for one object is exactly the drift this const exists to prevent.)
+  // The wordmark's own setting, named because `wordmarkBig` is the SAME type at another size and
+  // both are rendered standalone (see `wordmarkBig`).
+  const WORDMARK = {fontSize: 27, fontWeight: '700', letterSpacing: -0.8, color: p.ink, fontFamily: FONT.sansBold} as const;
   const ROUTE_HEADER_ROW = {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, minHeight: 40} as const;
   const ROUTE_HEADER_TITLE = {flex: 1, fontSize: 22, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3} as const;
   const ROUTE_HEADER_SPACER = {width: 26} as const;
@@ -79,9 +96,16 @@ function buildStyles(p: Palette) {
   // seed-backup gate overflowed with the Continue button unreachable. flexGrow lets short content
   // still fill + center the frame while tall content grows past it and scrolls.
   onboard: {flexGrow: 1, padding: 24, justifyContent: 'center', alignItems: 'center'},
-  wordmark: {fontSize: 27, fontWeight: '700', letterSpacing: -0.8, color: p.ink, fontFamily: FONT.sansBold},
-  wordmarkPay: {color: p.brand},
-  wordmarkBig: {fontSize: 36, marginTop: 14},
+  wordmark: WORDMARK,
+  wordmarkPay: {color: p.brandText},
+  // The 36pt setting. It is NOT only a modifier composed onto `wordmark` — two sites apply it
+  // STANDALONE as a page heading (Onboarding's "Back up your wallet", the home-currency chooser's
+  // "Which currency do you think in?"). While it carried only a size and a margin, both rendered
+  // in the platform default: black, weight 400, system face — measured at 1.12:1 on the dark
+  // theme's page, i.e. an invisible heading, and the wrong typeface in the light one. Spreading
+  // WORDMARK makes it self-sufficient at every mount point and byte-identical where it is
+  // composed, so the two settings cannot drift.
+  wordmarkBig: {...WORDMARK, fontSize: 36, marginTop: 14},
   onboardSub: {fontSize: 15, color: p.sub, textAlign: 'center', marginTop: 8, marginBottom: 28, paddingHorizontal: 12, lineHeight: 22, fontFamily: FONT.sans},
   // ∂ is the demo-dollar symbol — unfamiliar on first glance. The onboarding one-liner explains
   // it inline next to the demo funds note so a first-time user has the mapping before they see
@@ -122,7 +146,7 @@ function buildStyles(p: Palette) {
   // ── Trip Ready J5 motion system (additive) ──────────────────────────────────────────────
   // The breathing ring around the listening badge (renders BEHIND S.nfcBadge; only scale +
   // opacity animate — both non-layout props, so parent layout never re-flows mid-breath).
-  nfcBreath: {position: 'absolute', width: 108, height: 108, borderRadius: 54, borderWidth: 1.5, borderColor: p.brand},
+  nfcBreath: {position: 'absolute', width: 108, height: 108, borderRadius: 54, borderWidth: 1.5, borderColor: p.brandText},
   // The itinerary-line strip: two phone marks + the segments that light as the protocol
   // advances (linking → exchanging → awaitingApproval → settling). Sits between the badge and
   // the title; static SVG geometry, only opacities animate.
@@ -134,8 +158,8 @@ function buildStyles(p: Palette) {
   nfcEllipsisDot: {width: 6, height: 6, borderRadius: 3, backgroundColor: p.warn},
   // The paid-card stamp chip — the same stampChip language, compact + calm, additive to the
   // existing Paid view (never replaces the check/paidText marks).
-  paidStamp: {marginTop: 18, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brand, backgroundColor: 'transparent'},
-  paidStampText: {color: p.brand, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
+  paidStamp: {marginTop: 18, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brandText, backgroundColor: 'transparent'},
+  paidStampText: {color: p.brandText, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
   // ── The one-shot offline peak (J5) ───────────────────────────────────────────────────────
   // Full-width moment ABOVE the paid card: the campaign line as a strong editorial line and
   // the "no signal the whole time" microcopy. Settles INTO the card (~2s).
@@ -157,15 +181,15 @@ function buildStyles(p: Palette) {
   passportRule: {height: 1, backgroundColor: p.line, marginTop: 10},
   passportGrid: {flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 18, rowGap: 14},
   passportSlot: {width: 88, height: 88, borderRadius: 44, borderWidth: 1.5, borderColor: p.line2, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5},
-  passportSlotFilled: {width: 88, height: 88, borderRadius: 44, borderWidth: 2, borderColor: p.brand, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5},
+  passportSlotFilled: {width: 88, height: 88, borderRadius: 44, borderWidth: 2, borderColor: p.brandText, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5},
   passportSlotText: {color: p.sub, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
-  passportSlotTextFilled: {color: p.brand, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
+  passportSlotTextFilled: {color: p.brandText, fontFamily: FONT.mono, fontSize: 9, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', textAlign: 'center', lineHeight: 12},
   // The ONE contextual next-step row (incomplete only): a quiet "NEXT" tag + active-voice
   // sans hint + an up-right arrow, wrapped as a full-width ghost button (UX 2026-08-23: the
   // plain-text row read as dead text — it now takes you to the step's home instead of
   // describing where to go). Brand tag = the stamp-tag language; remains quiet chrome.
   passportHint: {flexDirection: 'row', alignItems: 'center', gap: 10, alignSelf: 'stretch', justifyContent: 'flex-start'},
-  passportHintTag: {color: p.brand, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase'},
+  passportHintTag: {color: p.brandText, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase'},
   passportHintText: {flexShrink: 1, fontSize: 13, color: p.sub, fontFamily: FONT.sans, textAlign: 'left'},
   passportHintArrow: {marginLeft: 'auto', flexShrink: 0},
   // The completed card's durable mark: the stampChip grammar ("TRIP READY") + the promise
@@ -180,10 +204,10 @@ function buildStyles(p: Palette) {
   // semantics (dark-theme-safe, never #000 — palette discipline holds).
   passportCapstoneInk: {position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: p.ink, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18},
   passportCapStamps: {alignItems: 'center', gap: 4, marginBottom: 18},
-  passportCapStampText: {color: p.bg, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase', textAlign: 'center', lineHeight: 13},
+  passportCapStampText: {color: inv.ink, fontFamily: FONT.mono, fontSize: 10, fontWeight: '600', letterSpacing: 1.6, textTransform: 'uppercase', textAlign: 'center', lineHeight: 13},
   passportSlotDate: {color: p.sub, fontFamily: FONT.mono, fontSize: 9, letterSpacing: 1, marginTop: 3, textTransform: 'uppercase', textAlign: 'center'},
-  passportCapstoneText: {color: p.brand, fontFamily: FONT.mono, fontSize: 15, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase', textAlign: 'center', lineHeight: 20},
-  passportCapstoneMicro: {fontSize: 13, color: p.bg, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans, opacity: 0.85},
+  passportCapstoneText: {color: inv.brandText, fontFamily: FONT.mono, fontSize: 15, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase', textAlign: 'center', lineHeight: 20},
+  passportCapstoneMicro: {fontSize: 13, color: inv.ink, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans, opacity: 0.85},
   // `flexShrink: 0` states the other half of the X18 contract: the account chip carries the
   // wallet's balance and the switcher, so it is the header element that keeps its width and the
   // identity block is the one that yields.
@@ -334,12 +358,31 @@ function buildStyles(p: Palette) {
   centerTop: MODE_SURFACE,
   label: {fontSize: 15, color: p.sub, marginBottom: 10, textAlign: 'center', fontFamily: FONT.sans},
   err: {color: p.bad, fontSize: 14, textAlign: 'center', marginTop: 10, fontFamily: FONT.sansMedium},
-  dim: {opacity: 0.55},
-  // Disabled state for RAISED primary buttons. `dim` layered over the shadow is indistinguishable
-  // from enabled, so a disabled money button reads as tappable. `disabledFlat` kills BOTH the
-  // Android elevation AND the iOS shadow (the lift dies on each platform where it lives) and drops
-  // opacity further. Used ONLY on primary/primaryWide sites; non-raised surfaces keep `dim`.
-  disabledFlat: {opacity: 0.4, elevation: 0, shadowOpacity: 0},
+  // TRANSIENT dimming — a busy button while its spinner runs, and the header account block while
+  // a payment holds it locked. NOT the disabled-button state (that is `disabledFlat` +
+  // `disabledText`, which swaps the fill instead of fading it; see the note there).
+  //
+  // 0.8, not the old 0.55: opacity fades the ink toward the page, so the header's own eyebrow
+  // measured 2.58:1 in light and 3.60:1 in dark while a payment was on screen — the one moment
+  // the user most wants to re-read which account is paying. At 0.8 it reads 4.51 / 6.30 and the
+  // block still visibly recedes.
+  dim: {opacity: 0.8},
+  // The DISABLED state of a BUTTON. It is a fill swap, never a fade, and that is a measurement
+  // rather than a taste: opacity fades a fill toward the page, and it fades the LABEL toward the
+  // page at the same rate — so the label is what disappears first. Measured on the real screens:
+  // white-on-tangerine at 0.4 gives 2.00:1 in light, and after v5 flipped `brandInk` to the warm
+  // near-black it gives 1.77:1 in dark (the v4 dark reading was 9.84 only because a WHITE label
+  // happened to be the opposite polarity to the night page — the light theme was already broken
+  // at 1.62:1). A disabled control is WCAG-exempt, but a button whose label cannot be read is not
+  // a design: the user has to be able to see what the thing they cannot press would do.
+  //
+  // So the disabled button becomes an inert well — `panel2` fill, hairline, no lift — and carries
+  // `disabledText`, which measures 5.19:1 (light) and 5.26:1 (dark) on it. It recedes MORE than
+  // the faded version did while staying legible. `disabledText` must be applied to the label at
+  // every site that applies this: the pair is what makes the state readable, and the contrast gate
+  // asserts the pairing. Non-button chrome (the header during a payment) keeps `dim`.
+  disabledFlat: {backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line, elevation: 0, shadowOpacity: 0},
+  disabledText: {color: p.sub2},
   dim2: {fontSize: 13, color: p.sub, marginTop: 8, textAlign: 'center', fontFamily: FONT.sans},
   // Camera viewfinder — fills the content column (`alignSelf:'stretch'` overrides the parent's
   // centering; `aspectRatio:1` keeps it square). A WARM-black frame: the viewport into the world
@@ -381,9 +424,9 @@ function buildStyles(p: Palette) {
   primary: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 16, height: 56, alignSelf: 'stretch', paddingHorizontal: 24, marginTop: 14, shadowColor: p.brand2, shadowOpacity: 0.28, shadowRadius: 14, shadowOffset: {width: 0, height: 6}, elevation: 4},
   primaryWide: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: p.brand, borderRadius: 16, height: 56, alignSelf: 'stretch', marginTop: 14, shadowColor: p.brand2, shadowOpacity: 0.28, shadowRadius: 14, shadowOffset: {width: 0, height: 6}, elevation: 4},
   primaryText: {color: p.brandInk, fontSize: 18, fontWeight: '700', fontFamily: FONT.sansBold},
-  qrCard: {backgroundColor: '#ffffff', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: p.line2, marginBottom: 14, ...LIFT},
+  qrCard: {backgroundColor: LIGHT.card, padding: 20, borderRadius: 20, borderWidth: 1, borderColor: p.line2, marginBottom: 14, ...LIFT},
   amountBig: {fontSize: 30, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.5},
-  badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: p.ok, backgroundColor: 'rgba(14,159,110,0.10)', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, overflow: 'hidden', fontFamily: FONT.sansMedium},
+  badgeOk: {marginTop: 10, fontSize: 13, fontWeight: '600', color: p.ok, backgroundColor: withAlpha(p.ok, p.wash), paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, overflow: 'hidden', fontFamily: FONT.sansMedium},
   qrHint: {marginTop: 12, fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.sans},
   // Request-QR validity countdown (the signed request expires after EXPIRY_WINDOW; a stale QR scans
   // to a confusing rejection, so the merchant is told how long it's good for).
@@ -393,15 +436,15 @@ function buildStyles(p: Palette) {
   // An inline offline-status pill on the Receive-QR screen — so a merchant staring at "Waiting
   // for payment…" knows they won't see incoming payments until reconnected. Soft bad-tinted pill
   // — informational, not a hard error (the wait state is still valid; the poll reconciles).
-  qrOfflinePill: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: `rgba(${p.badRGB},0.07)`, borderWidth: 1, borderColor: `rgba(${p.badRGB},0.28)`},
+  qrOfflinePill: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: withAlpha(p.bad, p.wash), borderWidth: 1, borderColor: withAlpha(p.bad, 0.28)},
   qrOfflinePillText: {fontSize: 12, fontWeight: '600', color: p.bad, fontFamily: FONT.sansMedium},
   confirmRow: {flexDirection: 'row', gap: 12, marginTop: 12},
   paidBtn: {backgroundColor: p.ok, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center', ...LIFT},
-  paidBtnText: {color: '#FFFFFF', fontWeight: '700', fontSize: 16, fontFamily: FONT.sansBold},
+  paidBtnText: {color: p.brandInk, fontWeight: '700', fontSize: 16, fontFamily: FONT.sansBold},
   notPaidBtn: {backgroundColor: p.card, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: p.line2},
   notPaidText: {color: p.sub, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   check: {width: 92, height: 92, borderRadius: 46, backgroundColor: p.ok, alignItems: 'center', justifyContent: 'center', marginBottom: 18, shadowColor: p.ok, shadowOpacity: 0.3, shadowRadius: 14, shadowOffset: {width: 0, height: 6}, elevation: 4},
-  checkAlready: {backgroundColor: p.warnDeep, shadowColor: p.warnDeep},
+  checkAlready: {backgroundColor: p.warn, shadowColor: p.warn},
   paidText: {fontSize: 30, fontWeight: '700', color: p.ok, fontFamily: FONT.sansBold, letterSpacing: -0.5},
   alreadyText: {color: p.warn},
   paidSub: {fontSize: 16, color: p.sub, marginTop: 6, fontFamily: FONT.sans},
@@ -418,7 +461,7 @@ function buildStyles(p: Palette) {
   // currency picker. The right border separates it from the typed amount.
   prefixBtn: {flexDirection: 'row', alignItems: 'center', paddingRight: 12, borderRightWidth: 1, borderRightColor: p.line2},
   linkBtn: {marginTop: 18, minHeight: 44, justifyContent: 'center'},
-  linkText: {color: p.brand, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
+  linkText: {color: p.brandText, fontWeight: '600', fontSize: 16, fontFamily: FONT.sansMedium},
   linkTextMuted: {color: p.sub, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   // Icon+label row inside a `linkBtn` Pressable (Settings' Privacy policy carries the
   // external-link glyph). The Pressable keeps the column linkBtn chrome (44pt target); this row
@@ -554,19 +597,21 @@ function buildStyles(p: Palette) {
   advancedCaretClosed: {transform: [{rotate: '-90deg'}]},
   applyBtn: {backgroundColor: p.brand, borderRadius: 16, height: 48, minHeight: 44, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 16, shadowColor: p.brand2, shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: {width: 0, height: 4}, elevation: 3},
   applyBtnText: {color: p.brandInk, fontSize: 16, fontWeight: '700', fontFamily: FONT.sansBold},
-  applyBtnDisabled: {opacity: 0.4, shadowOpacity: 0, elevation: 0},
-  resetConfirmBox: {alignSelf: 'stretch', backgroundColor: `rgba(${p.badRGB},0.05)`, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: `rgba(${p.badRGB},0.25)`},
+  // `applyBtnDisabled` is GONE — it was a byte-copy of `disabledFlat` under a second name, and a
+  // second name for one state is a second place for it to drift. Settings' Apply now uses the pair
+  // every other disabled button uses.
+  resetConfirmBox: {alignSelf: 'stretch', backgroundColor: withAlpha(p.bad, p.wash), borderRadius: 16, padding: 16, borderWidth: 1, borderColor: withAlpha(p.bad, 0.25)},
   // Reset entry-point — a bordered red-outline button "Reset wallet…" with the ellipsis
   // signaling "opens a dialog". Distinct from the muted "Privacy policy" link above it, but NOT
   // a loud filled-red button (the destructive gate stays in the confirmation dialog).
-  resetEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: `rgba(${p.badRGB},0.45)`, backgroundColor: `rgba(${p.badRGB},0.04)`, alignItems: 'center', justifyContent: 'center'},
+  resetEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: withAlpha(p.bad, 0.45), backgroundColor: withAlpha(p.bad, p.wash), alignItems: 'center', justifyContent: 'center'},
   resetEntryText: {color: p.bad, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   // Backup affordance (Settings → Backup). Mirrors `resetEntryBtn`'s shape but BRAND-tinted so it
   // reads as a safe, recommended action. `backupConfirmBox` is the neutral caution box;
   // `seedBox` is the revealed seed display: mono, padded, inset well so it reads as a discrete
   // selectable token block.
-  backupEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,90,31,0.45)', backgroundColor: 'rgba(255,90,31,0.06)', alignItems: 'center', justifyContent: 'center'},
-  backupEntryText: {color: p.brand, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  backupEntryBtn: {alignSelf: 'stretch', marginTop: 14, minHeight: 48, borderRadius: 14, borderWidth: 1, borderColor: withAlpha(p.brandText, 0.45), backgroundColor: withAlpha(p.brandText, p.wash), alignItems: 'center', justifyContent: 'center'},
+  backupEntryText: {color: p.brandText, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   backupConfirmBox: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: p.line2},
   seedBox: {alignSelf: 'stretch', backgroundColor: p.panel2, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: p.line2, marginTop: 4},
   seedText: {color: p.ink, fontFamily: FONT.mono, fontSize: 14, lineHeight: 20},
@@ -591,7 +636,7 @@ function buildStyles(p: Palette) {
   // that sit on the filled brand surface (active tab).
   kbdHint: {minWidth: 24, height: 24, paddingHorizontal: 6, borderRadius: 8, borderWidth: 1, borderColor: p.line, backgroundColor: p.panel2, alignItems: 'center', justifyContent: 'center'},
   kbdHintText: {fontSize: 13, fontWeight: '600', color: p.sub, fontFamily: FONT.mono},
-  kbdHintOnBrand: {borderColor: 'rgba(255,255,255,0.45)', backgroundColor: 'rgba(0,0,0,0.14)'},
+  kbdHintOnBrand: {borderColor: withAlpha(p.brandInk, 0.45), backgroundColor: withAlpha(p.ink, 0.14)},
   kbdHintTextOnBrand: {color: p.brandInk},
   // Deposit sheet — a full-screen porcelain overlay above the wallet.
   // elevation is REQUIRED alongside zIndex: on Android, sibling draw order follows elevation
@@ -673,7 +718,7 @@ function buildStyles(p: Palette) {
   // Deposit instructions — a scannable card (network/asset + est. time + fee/min + non-custody line).
   instrCard: {alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: p.line2, marginBottom: 18, ...LIFT_SM},
   instrLine: {fontSize: 15, color: p.ink, textAlign: 'center', lineHeight: 21, marginBottom: 10, fontFamily: FONT.sans},
-  instrAsset: {color: p.brand, fontWeight: '700', fontFamily: FONT.sansBold},
+  instrAsset: {color: p.brandText, fontWeight: '700', fontFamily: FONT.sansBold},
   instrMeta: {fontSize: 13, color: p.sub, textAlign: 'center', fontFamily: FONT.mono, paddingVertical: 2},
   instrCustody: {fontSize: 12, color: p.sub2, textAlign: 'center', marginTop: 10, lineHeight: 17, fontFamily: FONT.sans},
   sheetAddr: {fontSize: 13, color: p.ink, fontFamily: FONT.mono, textAlign: 'center', marginTop: 4, marginBottom: 8, letterSpacing: 0.2},
@@ -683,8 +728,8 @@ function buildStyles(p: Palette) {
   depositStatusMain: {fontSize: 16, fontWeight: '700', color: p.ink, marginBottom: 4, fontFamily: FONT.sansBold},
   depositStatusRow: {fontSize: 13, color: p.sub, fontFamily: FONT.mono},
   // Manual "Check now" — secondary (outline brand), debounced + spinner while in-flight.
-  checkBtn: {marginTop: 16, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: p.brand, alignItems: 'center', justifyContent: 'center', height: 46, backgroundColor: p.card},
-  checkBtnText: {color: p.brand, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
+  checkBtn: {marginTop: 16, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 24, borderWidth: 1, borderColor: p.brandText, alignItems: 'center', justifyContent: 'center', height: 46, backgroundColor: p.card},
+  checkBtnText: {color: p.brandText, fontWeight: '600', fontSize: 15, fontFamily: FONT.sansMedium},
   // Testnet show/hide toggle at the bottom of the Balances sheet — a subtle secondary affordance
   // (never the primary action). Muted text; full-width 44pt touch target.
   testnetToggle: {marginTop: 18, minHeight: 44, justifyContent: 'center', alignItems: 'center', paddingVertical: 8},
@@ -693,7 +738,7 @@ function buildStyles(p: Palette) {
   inputLabel: {fontSize: 13, fontWeight: '600', color: p.sub, alignSelf: 'flex-start', marginTop: 18, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1, fontFamily: FONT.sansMedium},
   withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 14, height: 56, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
   savedAddrChip: {alignSelf: 'flex-start', backgroundColor: p.panel2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
-  savedAddrText: {fontSize: 13, color: p.brand, fontFamily: FONT.mono},
+  savedAddrText: {fontSize: 13, color: p.brandText, fontFamily: FONT.mono},
   // `minWidth: 0` is load-bearing at the ONE call site that puts this field in a row — SendSheet's
   // `amtRow`, where it is given `flex: 1` beside the Max button. Without it the field's intrinsic
   // <input> width wins under CSS `min-width: auto` and pushes Max 28.7px off the right edge
@@ -716,7 +761,7 @@ function buildStyles(p: Palette) {
   // Amount row with the inline Max button.
   amtRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 8},
   maxBtn: {paddingHorizontal: 16, minHeight: 56, borderRadius: 14, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, alignItems: 'center', justifyContent: 'center'},
-  maxBtnText: {fontSize: 14, fontWeight: '700', color: p.brand, fontFamily: FONT.sansBold},
+  maxBtnText: {fontSize: 14, fontWeight: '700', color: p.brandText, fontFamily: FONT.sansBold},
   // Review card rows: label left, value right, so amount/fee/total align down the right edge.
   reviewRow: {flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 6, gap: 12},
   reviewRowLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
@@ -725,11 +770,11 @@ function buildStyles(p: Palette) {
   reviewLabel: {fontSize: 12, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 8, fontFamily: FONT.mono},
   // 'Needs setup' pill on the Balances USDC (Solana) row — a warn-tinted row annotation,
   // left-aligned under the subtitle (not a centered banner).
-  assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: `rgba(${p.warnRGB},0.08)`, borderWidth: 1, borderColor: `rgba(${p.warnRGB},0.35)`, fontSize: 11, fontWeight: '700', color: p.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
+  assetBadge: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: withAlpha(p.warn, p.wash), borderWidth: 1, borderColor: withAlpha(p.warn, 0.35), fontSize: 11, fontWeight: '700', color: p.warn, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
   // 'Main' pill on the Balances row that IS the home currency's rail. Same pill geometry as
   // `assetBadge`, brand-tinted rather than warn-tinted: this one marks the account the wallet opens
   // with, which is a statement of fact, not a warning about setup.
-  assetBadgeMain: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: 'rgba(255,90,31,0.08)', borderWidth: 1, borderColor: 'rgba(255,90,31,0.35)', fontSize: 11, fontWeight: '700', color: p.brand, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
+  assetBadgeMain: {alignSelf: 'flex-start', marginTop: 6, paddingVertical: 3, paddingHorizontal: 10, borderRadius: 999, backgroundColor: withAlpha(p.brandText, p.wash), borderWidth: 1, borderColor: withAlpha(p.brandText, 0.35), fontSize: 11, fontWeight: '700', color: p.brandText, letterSpacing: 1.1, textTransform: 'uppercase', fontFamily: FONT.mono, overflow: 'hidden'},
   // ─── Walkthrough (Trip Ready J1, 2026-08-22) ────────────────────────────────────────────────
   // The first-run 3-scene pager + its Settings replay. Editorial travel-document layout: a
   // left-aligned eyebrow/title/body block over a "paper plate" illustration stage, then a footer
@@ -752,7 +797,7 @@ function buildStyles(p: Palette) {
   // scene's illustration occupies the same stage (visual continuity across the pager).
   walkStage: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 22, borderWidth: 1, borderColor: p.line2, overflow: 'hidden', marginTop: 26, aspectRatio: 1.32, ...LIFT_SM},
   // Corner marker on the plate — the travel-document detail ("01 — SIGNAL"): mono, top-right.
-  walkStageTag: {position: 'absolute', top: 12, right: 16, fontSize: 10, fontWeight: '600', color: p.brand, letterSpacing: 1.4, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, transform: [{rotate: '3deg'}], opacity: 0.9},
+  walkStageTag: {position: 'absolute', top: 12, right: 16, fontSize: 10, fontWeight: '600', color: p.brandText, letterSpacing: 1.4, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, transform: [{rotate: '3deg'}], opacity: 0.9},
   walkFooter: {paddingHorizontal: 22, paddingBottom: 14, paddingTop: 18},
   // Dots row: relative so the Back link can sit absolutely at the left while the dots center.
   walkNavRow: {position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, minHeight: 34},
@@ -782,24 +827,24 @@ function buildStyles(p: Palette) {
   // The RECOVERY SAVED passport-stamp chip (the post-faucet beat): tangerine ring, mono
   // letterspaced caps, a kept -3° tilt (the stamp lands slightly crooked — passport-stamp
   // aesthetic; the tilt itself is animated, this is the resting angle).
-  stampChip: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brand, backgroundColor: 'transparent', transform: [{rotate: '-3deg'}]},
-  stampChipText: {color: p.brand, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
+  stampChip: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brandText, backgroundColor: 'transparent', transform: [{rotate: '-3deg'}]},
+  stampChipText: {color: p.brandText, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
   // The RECOVERY SAVED beat, re-skinned (UX hardening 2026-08-23): a full-bleed INK moment —
   // the one deliberate dark beat of onboarding (was: a tiny chip on ~96% blank porcelain, which
   // read as a crash flash). Dark-theme-safe: uses `ink`/`bg` semantics so it inverts to
   // porcelain-on-ink there (never #000 — the palette discipline holds).
   inkBeat: {flex: 1, backgroundColor: p.ink, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 36},
-  inkStamp: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 999, borderWidth: 2, borderColor: p.brand},
-  inkStampText: {color: p.bg, fontFamily: FONT.mono, fontSize: 14, fontWeight: '600', letterSpacing: 3, textTransform: 'uppercase'},
-  inkBeatLine: {color: p.bg, fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 34, lineHeight: 22, fontFamily: FONT.sansMedium},
-  inkBeatSub: {color: p.brand, fontSize: 13, textAlign: 'center', marginTop: 8, fontFamily: FONT.mono, letterSpacing: 0.4},
+  inkStamp: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 22, paddingVertical: 12, borderRadius: 999, borderWidth: 2, borderColor: inv.brandText},
+  inkStampText: {color: inv.ink, fontFamily: FONT.mono, fontSize: 14, fontWeight: '600', letterSpacing: 3, textTransform: 'uppercase'},
+  inkBeatLine: {color: inv.ink, fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 34, lineHeight: 22, fontFamily: FONT.sansMedium},
+  inkBeatSub: {color: inv.brandText, fontSize: 13, textAlign: 'center', marginTop: 8, fontFamily: FONT.mono, letterSpacing: 0.4},
   // Rehearsal, re-paged to ONE screen (UX hardening 2026-08-23): scroll container + three
   // badge/line rows in the walkthrough's postage-mark grammar (tangerine mono tag, hairline
   // border, slight tilt) — the old auto-advance rail died with the pager.
   walkScroll: {flex: 1},
   rehStep: {marginTop: 18},
   rehBadge: {alignSelf: 'flex-start', borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginBottom: 7, transform: [{rotate: '-2deg'}]},
-  rehBadgeText: {color: p.brand, fontSize: 10, fontWeight: '600', letterSpacing: 1.4, textTransform: 'uppercase', fontFamily: FONT.mono},
+  rehBadgeText: {color: p.brandText, fontSize: 10, fontWeight: '600', letterSpacing: 1.4, textTransform: 'uppercase', fontFamily: FONT.mono},
   rehStepTitle: {color: p.ink, fontSize: 17, fontWeight: '700', fontFamily: FONT.sansBold},
   rehStepBody: {color: p.sub, fontSize: 14.5, lineHeight: 21, marginTop: 4, fontFamily: FONT.sans},
   // CoachTip — the one-time contextual card. Small paper panel (panel, not card: it sits ON the
@@ -866,6 +911,14 @@ export function applyPalette(p: Palette) {
  *  live outside the S registry). */
 export function isDark(): boolean {
   return darkNow;
+}
+
+/** The palette for a surface that INVERTS against the current theme — the `p.ink`-painted beats
+ *  (RECOVERY SAVED, TRIP READY). Same rule `buildStyles` applies to their styles; components that
+ *  render an icon onto one of those surfaces read their colour from here. Call it at RENDER time:
+ *  the answer changes with the theme. */
+export function inverseC(): Palette {
+  return darkNow ? LIGHT : DARK;
 }
 
 // Resolve the OS theme BEFORE first render. This runs at styles.ts module load — before App's

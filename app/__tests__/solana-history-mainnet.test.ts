@@ -37,6 +37,7 @@ import {fetchSolanaHistory, resetSolanaHistoryCache} from '../solana/history';
 import lutTrader from './fixtures/solana/mainnet-lut-trader.json';
 import legacyTransfers from './fixtures/solana/mainnet-legacy-transfers.json';
 import lutLoadedOwner from './fixtures/solana/mainnet-lut-loaded-owner.json';
+import eurcTransfers from './fixtures/solana/mainnet-eurc-transfers.json';
 
 const RPC = 'https://rpc.example';
 
@@ -224,6 +225,69 @@ describe('solana history against real mainnet transactions', () => {
     // chain rolled everything back except the fee, which this account did not pay, so it moved
     // nothing and produces no row — not a phantom payment, and not a drop either.
     expect(rows.some(r => r.signature.startsWith('4GjbnYEm'))).toBe(false);
+  });
+
+  test('EURC is its own asset: every registered mint gets its own signature page and its own rows', async () => {
+    // The capture is a wallet that does nothing but move EURC — captured because EURC was the one
+    // catalogued Solana asset the reader could not see. Before this test the module queried the
+    // owner and the USDC ATA only, so the four INCOMING transfers (in which the wallet is not an
+    // account at all — only its EURC token account is) were fetched by nothing and rendered as
+    // nothing, and the four OUTGOING ones came back through the owner page as a bare ~0.0001 SOL
+    // fee debit. A payment the user made, shown as a rounding error.
+    const capture = eurcTransfers as unknown as Capture;
+    const {rows, dropped} = await historyOf(capture);
+
+    expect(dropped).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+    // Eight transactions, eight rows, every one of them EURC. Not seven, not four: the four
+    // incoming ones are only reachable through the EURC ATA's own page.
+    expect(rows).toHaveLength(8);
+    expect(rows.every(r => r.token === 'EURC')).toBe(true);
+    expect(rows.every(r => r.ok)).toBe(true);
+
+    // Newest-first by slot, and the amounts are the token deltas at EURC's own 6 decimals —
+    // recomputed from the fixture's pre/postTokenBalances, not read off this module's output.
+    expect(rows.map(r => `${r.direction} ${r.amount}`)).toEqual([
+      'in 15444970000',   // 2Mw2J6qG… slot 445406170 — wallet absent from accountKeys entirely
+      'out 9873360000',   // 2qvNb9EH… slot 445404463 — wallet is the fee payer (index 0)
+      'in 9873360000',    // 2q9HjXyB… slot 445404258
+      'out 15750050000',  // hzFtf9ps… slot 445402577
+      'in 15750050000',   // 5QdvGvje… slot 445402485
+      'out 23321710000',  // w7ettWZy… slot 445401052
+      'in 23321710000',   // 4PMm1bH2… slot 445400445
+      'out 24672120000',  // 4iotQLZ4… slot 445398740
+    ]);
+
+    // The incoming half is the half that did not exist. The wallet is at NO index of the
+    // transaction's account list, so its lamport delta is zero and its fee is zero — the only
+    // evidence it was paid is the token balance attributed to its owner.
+    expect(rows[0]).toEqual({
+      signature: '2Mw2J6qGf9zET5DpaLTaijxD5PcTHUQSsJJKQyLvUd9n2k5yxMt3T8CUAhDeBswK5iNAMVwLR7RJBzuF8pZcgKuw',
+      slot: 445406170,
+      blockTime: 1788891997,
+      token: 'EURC',
+      direction: 'in',
+      amount: '15444970000',
+      feeLamports: '0',
+      counterparty: 'MAfJ4HiCKTKfUcbeXZrLiz9aDerQqLcFUvthrzEHNX4',
+      ok: true,
+    });
+
+    // The outgoing half pays a 106_500-lamport priority fee, and the wallet's whole lamport delta
+    // IS that fee — so the SOL row is suppressed exactly as it is for USDC, and what remains is
+    // the EURC payment rather than a 0.0001065 SOL mystery.
+    expect(rows[1]).toEqual({
+      signature: '2qvNb9EHZ5kSUiWVTUtrD49oKiuLCZPjdRvnA7YpEFuH5Vc8H5wyoJvrMDdHywhGYQf3wH51fNuGzex38joekiGF',
+      slot: 445404463,
+      blockTime: 1788891452,
+      token: 'EURC',
+      direction: 'out',
+      amount: '9873360000',
+      feeLamports: '106500',
+      counterparty: 'D89hHJT5Aqyx1trP6EnGY9jJUB3whgnq3aUvvCqedvzf',
+      ok: true,
+    });
+    expect(rows.some(r => r.token === 'SOL')).toBe(false);
   });
 
   test('the fixtures are what a mainnet node answered, not something this repo wrote', () => {

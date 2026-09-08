@@ -594,7 +594,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         </>
       ) : phase === 'watching' ? (
         <View style={S.centerAll}>
-          <ActivityIndicator color={C.brand} />
+          <ActivityIndicator color={C.brandText} />
           {/* MC8 U5 — surface the in-flight amount so a resumed watching state shows WHAT is
               pending (the user may have forgotten the exact amount across a restart). */}
           {amount ? (
@@ -615,7 +615,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
             disabled={checkBusy}
             onPress={() => void checkOnce(true)}>
             {checkBusy
-              ? <ActivityIndicator size="small" color={C.brand} />
+              ? <ActivityIndicator size="small" color={C.brandText} />
               : <Text style={S.checkBtnText}>{M.deposit.checkNow}</Text>}
           </Pressable>
           {/* MC8 U5 — escape from a resumed watching state. A deposit that never mints would

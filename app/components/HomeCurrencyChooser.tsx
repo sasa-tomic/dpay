@@ -116,7 +116,7 @@ export function HomeCurrencyChooser({assets, balances, catalog, onChoose}: {
                 <View style={S.pickTextCol}>
                   <View style={S.assetTitleRow}>
                     <Text style={S.assetLabel}>{currencyName(currency)}</Text>
-                    {active ? <View style={S.pickCheck}><IconCheck size={18} color={C.brand} /></View> : null}
+                    {active ? <View style={S.pickCheck}><IconCheck size={18} color={C.brandText} /></View> : null}
                   </View>
                   {ordered.map((rail, i) => (
                     <Text key={rail.id} style={S.assetSub}>
@@ -150,7 +150,7 @@ export function HomeCurrencyChooser({assets, balances, catalog, onChoose}: {
           accessibilityHint={picked === null ? M.wallet.homeCurrency.pickFirst : undefined}
           accessibilityState={{disabled: false}}
         >
-          <Text style={S.primaryText}>{M.wallet.homeCurrency.confirm}</Text>
+          <Text style={[S.primaryText, picked === null && S.disabledText]}>{M.wallet.homeCurrency.confirm}</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>

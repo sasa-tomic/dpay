@@ -40,7 +40,7 @@ export function NfcStatusRow({nfcStatus, testID}: {nfcStatus: NfcStatus; testID:
     <>
       {Platform.OS !== 'web' && ready ? (
         <View style={S.nfcStatusRow} testID={testID}>
-          <NfcIcon color={C.brand} size={34} />
+          <NfcIcon color={C.brandText} size={34} />
           <Text style={S.nfcStatusLabel}>{M.pay.tapOrScanToPay}</Text>
         </View>
       ) : Platform.OS !== 'web' ? (

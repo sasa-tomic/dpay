@@ -69,7 +69,7 @@ export function PaymentReview({catalog, intent, notes, insufficient, blockApprov
         accessibilityHint={M.pay.approveHint}
         accessibilityState={{disabled: approveDisabled}}
         onPress={onApprove}>
-        <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
+        <Text style={[S.primaryText, approveDisabled && S.disabledText]}>{busy ? M.pay.signing : M.pay.approve}</Text>
       </Pressable>
       {/* Audit P2: Cancel-as-secondary-button parity — a bordered secondary button of the same
           width as Approve so the tap targets are equivalent and the user makes a deliberate choice

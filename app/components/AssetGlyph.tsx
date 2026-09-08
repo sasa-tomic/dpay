@@ -13,6 +13,7 @@ import React from 'react';
 import {Text, View} from 'react-native';
 import type {SelectableAsset} from '../config/assets';
 import {currencyOfAsset, type HomeCurrency} from '../config/currency';
+import {C, withAlpha} from '../config/palette';
 import {S, isDark} from '../styles';
 
 export type FamilyGlyph = {
@@ -20,60 +21,62 @@ export type FamilyGlyph = {
   glyph: string;
   /** Family hue for the glyph text. */
   color: string;
-  /** Soft tinted chip background (same hue, low alpha). */
+  /** Soft tinted chip background — a `C.wash` tint OF `color`, never a second hue. */
   bg: string;
 };
 
-// Family hues — recognizable per-chain colors. LIGHT variants are deepened for the porcelain UI
-// (dark-on-tint chips: hue text ~4.5:1 on the 8–10% tint over white). DARK variants are LIFTED
-// (light-on-tint over the #2A2620 card: lifted hue text 4.1–5.3:1 on the 14% tint over card —
-// glyphs render 700-weight, comfortably past the 3:1 large-text bar).
-// DEMO ties to the brand (∂ = the dpay demo unit, tangerine); BTC amber, ETH indigo, USDC blue,
-// SOL purple. Testnet variants keep the family hue (the row label already says testnet).
-const FAMILIES: Record<string, Record<'light' | 'dark', FamilyGlyph>> = {
-  demo: {
-    light: {glyph: '∂', color: '#D8450D', bg: 'rgba(255,90,31,0.10)'},
-    dark: {glyph: '∂', color: '#FF7A45', bg: 'rgba(255,122,69,0.14)'},
-  },
-  btc: {
-    light: {glyph: '₿', color: '#92580B', bg: 'rgba(161,98,7,0.10)'},
-    dark: {glyph: '₿', color: '#E8A33D', bg: 'rgba(232,163,61,0.14)'},
-  },
-  eth: {
-    // ◊ lozenge (U+25CA): the ONLY diamond-family glyph present in EVERY bundled font (Ξ U+039E
-    // is in none — MIUI fallback drew three disconnected "hamburger" bars on device, 2026-08-23).
-    light: {glyph: '◊', color: '#4338CA', bg: 'rgba(79,70,229,0.08)'},
-    dark: {glyph: '◊', color: '#8B93F8', bg: 'rgba(139,147,248,0.14)'},
-  },
-  usdc: {
-    light: {glyph: '$', color: '#1D4ED8', bg: 'rgba(29,78,216,0.08)'},
-    dark: {glyph: '$', color: '#6E9BFF', bg: 'rgba(110,155,255,0.14)'},
-  },
-  sol: {
-    light: {glyph: '◎', color: '#7E22CE', bg: 'rgba(147,51,234,0.08)'},
-    dark: {glyph: '◎', color: '#B57AEE', bg: 'rgba(181,122,238,0.14)'},
-  },
+// Family hues — recognizable per-chain colors. ONE hex per family per theme: the chip's tint is a
+// `C.wash` tint of the monogram's own colour, so a family is one decision, not two that can drift
+// out of contrast with each other. Each value is the family's OWN hue and chroma with only its
+// lightness solved, so that the monogram clears 4.5:1 against its own tint over EVERY surface a
+// chip can land on (bg / card / panel2). Light values are deepened for porcelain, dark values
+// lifted for the #2A2620 card. Measured worst case, light | dark: btc 4.75 | 5.74, eth 6.37 |
+// 4.65, usdc 5.42 | 4.75, sol 5.64 | 4.65, chf 5.27 | 5.18, eur 4.71 | 7.20.
+//
+// DEMO is NOT in this table: ∂ is the dpay unit, so its chip IS the brand and it is read from the
+// palette at render time (`C.brandText`) — a copy of the tangerine here is a copy that survives
+// the next brand change. BTC amber, ETH indigo, USDC blue, SOL purple. Testnet variants keep the
+// family hue (the row label already says testnet).
+const FAMILIES: Record<string, {glyph: string; light: string; dark: string}> = {
+  btc: {glyph: '₿', light: '#92580B', dark: '#E8A33D'},
+  // ◊ lozenge (U+25CA): the ONLY diamond-family glyph present in EVERY bundled font (Ξ U+039E
+  // is in none — MIUI fallback drew three disconnected "hamburger" bars on device, 2026-08-23).
+  eth: {glyph: '◊', light: '#4338CA', dark: '#8B93F8'},
+  usdc: {glyph: '$', light: '#1D4ED8', dark: '#6E9BFF'},
+  sol: {glyph: '◎', light: '#7E22CE', dark: '#BC81F5'},
   // The two home currencies whose mark is not already a family above (USD reuses `usdc`'s $).
   // CHF has no single-character sign every bundled font carries — the franc sign ₣ (U+20A3) is the
   // Ξ mistake again (2026-08-23: MIUI drew Ξ as three loose bars), so the mark is the three ASCII
   // letters the currency is written with everywhere, sized down by `glyphFontSize`. EUR gets a teal
   // that cannot be confused with USD's blue at a glance; the € carries the identity, the hue only
   // has to separate two stablecoin rows sitting next to each other in one list.
-  chf: {
-    light: {glyph: 'CHF', color: '#B3261E', bg: 'rgba(218,41,28,0.10)'},
-    dark: {glyph: 'CHF', color: '#F2887E', bg: 'rgba(242,136,126,0.14)'},
-  },
-  eur: {
-    light: {glyph: '€', color: '#0F766E', bg: 'rgba(15,118,110,0.10)'},
-    dark: {glyph: '€', color: '#5EDBCB', bg: 'rgba(94,219,203,0.14)'},
-  },
+  chf: {glyph: 'CHF', light: '#B3261E', dark: '#F2887E'},
+  eur: {glyph: '€', light: '#06726B', dark: '#5EDBCB'},
 };
+
+/** A chip is a monogram and a `C.wash` tint of that same monogram. One colour in, one chip out. */
+function chip(glyph: string, color: string): FamilyGlyph {
+  return {glyph, color, bg: withAlpha(color, C.wash)};
+}
+
+/** EVERY chip this module can render, in the CURRENTLY APPLIED theme — the family table plus the
+ *  two brand-derived chips (the ∂ unit and the unknown-symbol fallback). Exported so the contrast
+ *  gate measures the real set rather than a list of families copied into a test, which is the copy
+ *  that would silently stop covering a family the day one is added here. */
+export function allChips(): FamilyGlyph[] {
+  const dark = isDark();
+  return [
+    chip('∂', C.brandText),
+    chip('X', C.brandText), // the fallback's monogram is the symbol's first letter; its colour is this
+    ...Object.values(FAMILIES).map(f => chip(f.glyph, dark ? f.dark : f.light)),
+  ];
+}
 
 /** Which family carries each home currency's mark. USD deliberately reuses the `usdc` family: the
  *  dollar rails already wore $ and that was always the currency's mark, not the token's. */
 const CURRENCY_FAMILY: Record<HomeCurrency, keyof typeof FAMILIES> = {CHF: 'chf', USD: 'usdc', EUR: 'eur'};
 
-function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'fallback' {
+function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'demo' | 'fallback' {
   // FIRST: does this asset settle a home currency? Then it wears the CURRENCY's mark, on every
   // surface that renders a chip — the chooser row (a currency), the accounts row (a rail of one).
   // Without this, the mark came from the rail: EURC-on-Solana wore ◎ and read as a SOL row, and
@@ -103,11 +106,12 @@ function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'fallback' {
  *  theme cannot change between two calls in one render pass. */
 export function glyphFor(asset: SelectableAsset): FamilyGlyph {
   const key = familyKey(asset);
-  const mode = isDark() ? 'dark' : 'light';
-  if (key !== 'fallback') return FAMILIES[key][mode];
-  return mode === 'dark'
-    ? {glyph: asset.symbol.charAt(0).toUpperCase(), color: '#FF7A45', bg: 'rgba(255,122,69,0.14)'}
-    : {glyph: asset.symbol.charAt(0).toUpperCase(), color: '#D8450D', bg: 'rgba(255,90,31,0.10)'};
+  // The demo unit and an unrecognised symbol are both the BRAND's chip, read live so they follow
+  // the palette instead of pinning a tangerine of their own.
+  if (key === 'demo') return chip('∂', C.brandText);
+  if (key === 'fallback') return chip(asset.symbol.charAt(0).toUpperCase(), C.brandText);
+  const f = FAMILIES[key];
+  return chip(f.glyph, isDark() ? f.dark : f.light);
 }
 
 /** Type size for a mark inside a `size`-wide chip. A one-character sign is set at 0.44·size (the

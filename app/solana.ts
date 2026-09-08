@@ -2,7 +2,8 @@
 // `app/walletconnect.ts`). Statically imports ONLY the PURE modules (`solana/identity`,
 // `solana/tx`, `solana/spl`, `solana/qr`, `payments` — no network, no `@solana/*` SDK, safe under
 // jest/e2e). The network module `solana/rpc` is reached via a lazy `await import('./solana/rpc')`
-// INSIDE the async network functions, gated by a non-empty `SOLANA_RPC_URL`. With the URL empty
+// INSIDE the async network functions, gated by a non-empty `solanaRpcUrl()` (the operator slot in
+// config/constants.ts — a baked default that a persisted choice can replace). With the URL empty
 // (jest.setup.js + the e2e driver set `__DPAY_TEST_SOLANA_RPC_URL=''`), these functions no-op /
 // throw — so the offline inner loop never imports the network module and never touches devnet.
 //
@@ -14,18 +15,20 @@
 // (The v1 durable-nonce reclaim tool was removed 2026-08-14: no user ever held v1 nonce funds.)
 
 import bs58 from 'bs58';
-import {SOLANA_RPC_URL, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
+import {solanaRpcUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
 import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
 import {fmtAsset} from './lib/format';
 import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, buildMemoInstruction, buildSolTransferInstruction, type Instruction} from './solana/tx';
-import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalSplMessage, deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
+import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalSplMessage, deriveAta, decodeSplTokenAmount, decodeSplMintDecimals, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
+import {isEndpointRefusal} from './solana/errors';
+import {base64ToBytes} from './lib/base64';
 import {solanaTokenInfo, solanaTokenOfMint} from './solana/tokens';
 import {utf8ToBytes} from './lib/base64url';
 import {encodeSolReq, generateRid} from './solana/qr';
 import type {SolReqV2, SolPayV2, SolReceiptV2, SolReqInput, SolPayInput} from './solana/qr';
-import type {SolanaSignatureStatus, SolanaTransactionDetail} from './solana/rpc';
+import type {SolanaSignatureStatus, SolanaTransactionDetail, SolanaAccountInfo} from './solana/rpc';
 import type {SolanaHistory} from './solana/history';
 import {verifySettledTransaction} from './solana/settleVerify';
 import {RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE, RECEIPT_MISMATCH} from './solana/payments';
@@ -41,24 +44,133 @@ export type {SolanaSignatureStatus} from './solana/rpc';
 
 // --- existing exports (unchanged) ----------------------------------------------
 
-/** Read an account's lamport balance as a decimal-digit string. Returns `null` (no throw, no
- *  network) when SOL is offline (`SOLANA_RPC_URL` empty) — the hook treats null as "no balance". */
-export async function getSolanaBalance(address: string, signal?: AbortSignal): Promise<string | null> {
-  if (!SOLANA_RPC_URL) return null;
-  const {getBalance} = await import('./solana/rpc');
-  return getBalance(SOLANA_RPC_URL, address, {signal});
+// ============================================================================
+// Honest Solana balances — native SOL and every visible SPL mint, in ONE request (2026-09-08).
+//
+// The wallet must render a distinct row per Solana asset AND keep five states distinguishable
+// (plan invariant #10): loading, known-absent token account, known zero balance,
+// stale/unavailable, and read error — the last one now WITH its reason. `readSolanaBalances` is
+// the discriminated-union reader; the `useSolanaBalances` hook translates it into per-rail state.
+// ============================================================================
+
+/** The per-mint balance result — the states that must stay distinct at the seam boundary. See
+ *  `readSolanaBalances` for what each one means and how it is produced. */
+export type SolanaTokenBalanceResult =
+  | {kind: 'offline'}
+  | {kind: 'absent'}
+  | {kind: 'balance'; amount: string; decimals: number}
+  | {kind: 'error'; failure: SolanaReadFailure};
+
+/** Why a read produced no fact — the distinction a user has to be told apart, because the actions
+ *  differ. `refused`: the endpoint ANSWERED and did not serve us (HTTP status, 429, RPC error) —
+ *  this device is online and the RAIL is what is broken. `unreachable`: nothing answered at all
+ *  (transport failure, timeout, abort) — this device may simply be offline, which is the payer's
+ *  normal, designed state. `unreadable`: the endpoint answered with bytes that cannot be trusted. */
+export type SolanaReadFailure = 'refused' | 'unreachable' | 'unreadable';
+
+/** The native-SOL half of one balance read. `lamports` is an exact decimal-digit string. */
+export type SolanaSolBalanceResult =
+  | {kind: 'offline'}
+  | {kind: 'lamports'; lamports: string}
+  | {kind: 'error'; failure: SolanaReadFailure};
+
+/** One balance read: native SOL and every requested mint, from ONE request. */
+export type SolanaBalancesRead = {
+  sol: SolanaSolBalanceResult;
+  tokens: Record<string, SolanaTokenBalanceResult>;
+};
+
+/**
+ * ONE request for the whole wallet: native SOL lamports and every requested mint's token balance,
+ * read as accounts in a single `getMultipleAccounts` (`solana/rpc.ts`) instead of one
+ * `getBalance` plus two calls per mint.
+ *
+ * The account list is [wallet, (token account, mint) per mint]: the token account carries the raw
+ * amount and the MINT account carries `decimals`, so the chain still states the scale it is
+ * counted in — that fact is read from the chain every poll, exactly as `getTokenAccountBalance`
+ * used to state it, not assumed from the local registry.
+ *
+ * States are the ones the wallet must keep apart (plan invariant #10), unchanged:
+ *   - `offline`: `solanaRpcUrl()` empty, or `solanaTokenAvailable(mint)` false for that mint (a
+ *     mainnet mint pointed at a non-mainnet RPC). No network call is made for it.
+ *   - `absent`: the account does NOT exist — a `null` entry, which is what a Solana node answers
+ *     for an address nothing was ever created at (measured against mainnet 2026-09-08). A KNOWN
+ *     zero, and the fact the SPL sign gate is allowed to refuse on.
+ *   - `balance`: the exact raw amount as a decimal-digit STRING (money-critical: never through JS
+ *     `number`) plus the mint's own decimals.
+ *   - `error`: the read produced no fact, WITH the reason (`SolanaReadFailure`) — because "the
+ *     endpoint refused us" and "nothing answered" are different things to tell a user, and the
+ *     second one is the ordinary state of an offline payer.
+ *
+ * A wallet account that does not exist reads as `lamports: '0'` — measured: `getBalance` answers
+ * exactly 0 for such an address, so nothing is lost by the one call replacing both.
+ */
+export async function readSolanaBalances(
+  secretHex: string,
+  mints: string[],
+  signal?: AbortSignal,
+): Promise<SolanaBalancesRead> {
+  const mapMints = (list: string[], r: SolanaTokenBalanceResult): Record<string, SolanaTokenBalanceResult> =>
+    Object.fromEntries(list.map((m) => [m, r]));
+  if (!solanaRpcUrl()) return {sol: {kind: 'offline'}, tokens: mapMints(mints, {kind: 'offline'})};
+
+  const address = deriveSolanaAddress(secretHex);
+  // A mint the current cluster cannot coherently answer for is not asked about at all — and is
+  // reported 'offline' whatever the request does, because no request was made for it.
+  const asked = mints.filter((m) => solanaTokenAvailable(m));
+  const tokens: Record<string, SolanaTokenBalanceResult> = mapMints(
+    mints.filter((m) => !asked.includes(m)),
+    {kind: 'offline'},
+  );
+  // [wallet, ata(mint₀), mint₀, ata(mint₁), mint₁, …] — positional, and read back positionally.
+  const addresses = [address, ...asked.flatMap((m) => [bs58.encode(deriveAta(address, m)), m])];
+
+  const {getMultipleAccounts} = await import('./solana/rpc');
+  let accounts: (SolanaAccountInfo | null)[];
+  try {
+    accounts = await getMultipleAccounts(solanaRpcUrl(), addresses, {signal});
+  } catch (e) {
+    // Branching on the error SHAPE, never on message text: `solana/rpc.ts` throws a branded
+    // `SolanaEndpointRefused` exactly when the endpoint answered and did not serve us.
+    const failure: SolanaReadFailure = isEndpointRefusal(e) ? 'refused' : 'unreachable';
+    console.warn(`readSolanaBalances: ${failure} for ${address}:`, e instanceof Error ? e.message : String(e));
+    return {sol: {kind: 'error', failure}, tokens: {...tokens, ...mapMints(asked, {kind: 'error', failure})}};
+  }
+
+  const wallet = accounts[0];
+  const sol: SolanaSolBalanceResult = {kind: 'lamports', lamports: wallet === null ? '0' : String(wallet.lamports)};
+  asked.forEach((mint, i) => {
+    const ata = accounts[1 + i * 2];
+    const mintAccount = accounts[2 + i * 2];
+    if (ata === null) {
+      tokens[mint] = {kind: 'absent'};
+      return;
+    }
+    try {
+      if (mintAccount === null) throw new Error(`mint account ${mint} does not exist on this cluster`);
+      const amount = decodeSplTokenAmount(base64ToBytes(ata.data[0]), mint);
+      const decimals = decodeSplMintDecimals(base64ToBytes(mintAccount.data[0]));
+      tokens[mint] = {kind: 'balance', amount: amount.toString(), decimals};
+    } catch (e) {
+      // The endpoint answered; its bytes are the problem. Never a zero — the hook keeps the last
+      // known fact and says nothing new.
+      console.warn(`readSolanaBalances: unreadable account for mint ${mint}:`, e instanceof Error ? e.message : String(e));
+      tokens[mint] = {kind: 'error', failure: 'unreadable'};
+    }
+  });
+  return {sol, tokens};
 }
 
 /** Recent SOL + USDC movements for `address`, newest-first (the SOL rail's half of the Transactions
  *  list). Returns `null` (no throw, no network, no dynamic import) when SOL is offline
- *  (`SOLANA_RPC_URL` empty) — the SAME offline contract as `getSolanaBalance`, so the offline inner
+ *  (`solanaRpcUrl()` empty) — the SAME offline contract as `readSolanaBalances`, so the offline inner
  *  loop never reaches the network module. THROWS when the RPC is configured but the signature
  *  queries fail: an unreadable list is an error state the caller surfaces, never an empty ledger.
  *  Individually unreadable transactions are logged and counted in `SolanaHistory.dropped`. */
 export async function getSolanaHistory(address: string, signal?: AbortSignal): Promise<SolanaHistory | null> {
-  if (!SOLANA_RPC_URL) return null;
+  if (!solanaRpcUrl()) return null;
   const {fetchSolanaHistory} = await import('./solana/history');
-  return fetchSolanaHistory(SOLANA_RPC_URL, address, {signal});
+  return fetchSolanaHistory(solanaRpcUrl(), address, {signal});
 }
 
 /** Build, sign, broadcast, and confirm a System Program Transfer of `lamports` to `toAddress`.
@@ -78,14 +190,14 @@ export async function sendSol(
   signal?: AbortSignal,
   onBroadcast?: (signature: string) => void,
 ): Promise<string> {
-  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const {getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
-  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const {blockhash} = await getLatestBlockhash(solanaRpcUrl(), {signal});
   const raw = buildSignedTransfer(seed, publicKey, toAddress, lamports, base58Decode32(blockhash));
-  const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
+  const signature = await sendTransaction(solanaRpcUrl(), raw, {signal});
   onBroadcast?.(signature);
-  await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
+  await confirmTransaction(solanaRpcUrl(), signature, {signal});
   return signature;
 }
 
@@ -106,9 +218,9 @@ export async function getSolSignatureStatus(
   signature: string,
   signal?: AbortSignal,
 ): Promise<SolanaSignatureStatus | null> {
-  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
   const {getSignatureStatusesForSig} = await import('./solana/rpc');
-  const {status} = await getSignatureStatusesForSig(SOLANA_RPC_URL, signature, {signal});
+  const {status} = await getSignatureStatusesForSig(solanaRpcUrl(), signature, {signal});
   return status;
 }
 
@@ -138,7 +250,7 @@ export async function sendSpl(
   mint: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
   const token = solanaTokenOfMint(mint);
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const senderAddress = bs58.encode(publicKey);
@@ -147,16 +259,16 @@ export async function sendSpl(
   const {accountExists, getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
 
   // Sender ATA first — the device must hold the token account to debit from (fail-closed).
-  if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
+  if (!(await accountExists(solanaRpcUrl(), bs58.encode(senderAta), {signal}))) {
     throw new Error(M.errors.solana.senderNoTokenAccount(token ?? mint));
   }
   // Recipient ATA — if missing, create it in the same tx (sender pays the one-time rent, disclosed
   // upstream on the review screen; idempotent so a race with another creator is harmless).
   const ixs: Instruction[] = [];
-  if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
+  if (!(await accountExists(solanaRpcUrl(), bs58.encode(recipientAta), {signal}))) {
     // Honest cost pre-check (mirrors createTokenAta): without it the send passes review and dies at
     // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
-    const lamports = await getBalance(SOLANA_RPC_URL, senderAddress, {signal});
+    const lamports = await getBalance(solanaRpcUrl(), senderAddress, {signal});
     if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
       throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
     }
@@ -164,11 +276,11 @@ export async function sendSpl(
   }
   ixs.push(buildSplTransferInstruction(senderAta, recipientAta, publicKey, amount));
 
-  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const {blockhash} = await getLatestBlockhash(solanaRpcUrl(), {signal});
   const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
   const raw = signTransaction(message, seed);
-  const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
-  await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
+  const signature = await sendTransaction(solanaRpcUrl(), raw, {signal});
+  await confirmTransaction(solanaRpcUrl(), signature, {signal});
   return signature;
 }
 
@@ -213,7 +325,7 @@ export async function sendSolanaPay(
   signal?: AbortSignal,
   onBroadcast?: (signature: string) => void,
 ): Promise<string> {
-  if (!SOLANA_RPC_URL) throw new Error(M.errors.solana.offline);
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
   if (transfer.splToken !== null) {
     const token = solanaTokenOfMint(transfer.splToken);
     if (token === null) {
@@ -234,13 +346,13 @@ export async function sendSolanaPay(
     const token = solanaTokenOfMint(transfer.splToken) ?? transfer.splToken;
     // Sender ATA first — the device must hold the token account to debit from (fail-closed, same
     // as sendSpl).
-    if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(senderAta), {signal}))) {
+    if (!(await accountExists(solanaRpcUrl(), bs58.encode(senderAta), {signal}))) {
       throw new Error(M.errors.solana.senderNoTokenAccount(token));
     }
-    if (!(await accountExists(SOLANA_RPC_URL, bs58.encode(recipientAta), {signal}))) {
+    if (!(await accountExists(solanaRpcUrl(), bs58.encode(recipientAta), {signal}))) {
       // Same honest cost pre-check as sendSpl: without it the payment passes review and dies at
       // broadcast with a raw program error no friendlySolError pattern matches.
-      const lamports = await getBalance(SOLANA_RPC_URL, senderAddress, {signal});
+      const lamports = await getBalance(solanaRpcUrl(), senderAddress, {signal});
       if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
         throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token));
       }
@@ -253,12 +365,12 @@ export async function sendSolanaPay(
     ixs.push(buildTransferCheckedInstruction(senderAta, base58Decode32(transfer.splToken), recipientAta, publicKey, transfer.amount, decimals, referenceKeys));
   }
 
-  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const {blockhash} = await getLatestBlockhash(solanaRpcUrl(), {signal});
   const message = assembleMessage(publicKey, ixs, base58Decode32(blockhash));
   const raw = signTransaction(message, seed);
-  const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
+  const signature = await sendTransaction(solanaRpcUrl(), raw, {signal});
   onBroadcast?.(signature);
-  await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
+  await confirmTransaction(solanaRpcUrl(), signature, {signal});
   return signature;
 }
 
@@ -275,90 +387,34 @@ export async function sendSolanaPay(
  *  SOL, or on any RPC/on-chain failure. Returns the transaction signature. */
 export async function createTokenAta(secretHex: string, mint: string, signal?: AbortSignal): Promise<string> {
   const token = solanaTokenOfMint(mint);
-  if (!SOLANA_RPC_URL || !solanaTokenAvailable(mint)) throw new Error(M.errors.solana.tokenUnavailable(token ?? mint));
+  if (!solanaRpcUrl() || !solanaTokenAvailable(mint)) throw new Error(M.errors.solana.tokenUnavailable(token ?? mint));
   const {seed, publicKey} = deriveSolanaKeypair(secretHex);
   const ownerAddress = bs58.encode(publicKey);
   const ata = deriveAta(ownerAddress, mint);
   const {getBalance, getLatestBlockhash, sendTransaction, confirmTransaction} = await import('./solana/rpc');
 
-  const lamports = await getBalance(SOLANA_RPC_URL, ownerAddress, {signal});
+  const lamports = await getBalance(solanaRpcUrl(), ownerAddress, {signal});
   if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
     throw new Error(M.errors.solana.ownTokenAccountRent(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
   }
 
   const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(mint));
-  const {blockhash} = await getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const {blockhash} = await getLatestBlockhash(solanaRpcUrl(), {signal});
   const message = assembleMessage(publicKey, [ix], base58Decode32(blockhash));
   const raw = signTransaction(message, seed);
-  const signature = await sendTransaction(SOLANA_RPC_URL, raw, {signal});
-  await confirmTransaction(SOLANA_RPC_URL, signature, {signal});
+  const signature = await sendTransaction(solanaRpcUrl(), raw, {signal});
+  await confirmTransaction(solanaRpcUrl(), signature, {signal});
   return signature;
 }
 
 // --- existing exports (unchanged) ----------------------------------------------
-
-// ============================================================================
-// Phase 2 — honest Solana SOL + USDC balances (2026-08-12 unified asset selection rewrite).
-//
-// The wallet must render a distinct Solana-USDC balance row AND keep five states distinguishable
-// (plan invariant #10): loading, known-absent ATA, known zero balance, stale/unavailable, RPC error.
-// `getSolanaUsdcBalance` is the discriminated-union reader; the `useSolanaBalances` hook translates
-// it into per-status state for the Wallet.
-// ============================================================================
-
-/** The Solana token balance result — a discriminated union capturing the four states the plan
- *  requires stay distinct at the seam boundary (the hook maps them to per-status UI state):
- *    - `offline`: SOLANA_RPC_URL empty (offline inner loop) OR `solanaTokenAvailable(mint)` false
- *      (a mainnet mint pointed at a non-mainnet RPC — fail-closed rather than read a non-existent
- *      token). No network call is made.
- *    - `absent`: the device's token account for the mint does NOT exist on-chain. The user has
- *      never received this token; this is a KNOWN zero, not an unverifiable state.
- *    - `balance`: the ATA exists and `getTokenAccountBalance` returned the exact raw `amount` (a
- *      decimal-digit STRING — money-critical, never coerced through JS `number`) + `decimals`
- *      (the chain's own answer, expected to equal the registry's). A zero balance is
- *      `{kind:'balance', amount:'0', …}` — still a balance, not absent.
- *    - `error`: RPC failure (existence check or balance read threw). Transient/unverifiable; the
- *      hook preserves any prior amount (it does NOT turn a prior value into zero). */
-export type SolanaTokenBalanceResult =
-  | {kind: 'offline'}
-  | {kind: 'absent'}
-  | {kind: 'balance'; amount: string; decimals: number}
-  | {kind: 'error'};
-
-/** Read the device's token-account balance for `mint` as a discriminated result. Derives the
- *  device ATA from the seed + mint, checks on-chain existence, and if present reads the exact raw
- *  token balance.
- *
- *  ONLINE — returns `{kind:'offline'}` (no throw, no network) when `SOLANA_RPC_URL` is empty OR
- *  `solanaTokenAvailable(mint)` is false (mirroring `getSolanaBalance`'s offline no-op). On any RPC
- *  error returns `{kind:'error'}` and logs the ATA + message at `console.warn` (debuggability — a
- *  silent error here would render as a stale balance forever). */
-export async function getSolanaTokenBalance(
-  secretHex: string,
-  mint: string,
-  signal?: AbortSignal,
-): Promise<SolanaTokenBalanceResult> {
-  if (!SOLANA_RPC_URL || !solanaTokenAvailable(mint)) return {kind: 'offline'};
-  const {accountExists, getTokenAccountBalance} = await import('./solana/rpc');
-  const address = deriveSolanaAddress(secretHex);
-  const ataAddress = bs58.encode(deriveAta(address, mint));
-  try {
-    const exists = await accountExists(SOLANA_RPC_URL, ataAddress, {signal});
-    if (!exists) return {kind: 'absent'};
-    const {amount, decimals} = await getTokenAccountBalance(SOLANA_RPC_URL, ataAddress, {signal});
-    return {kind: 'balance', amount, decimals};
-  } catch (e) {
-    console.warn(`getSolanaTokenBalance: RPC failure for ATA ${ataAddress}:`, e instanceof Error ? e.message : String(e));
-    return {kind: 'error'};
-  }
-}
 
 /** Whether the Solana RPC rail is configured (RPC URL non-empty). A pure sync read of the constant —
  *  independent of relay `online` (plan invariant #9 — the relay could be reachable while SOL RPC is
  *  not, or vice versa). The token-coherence sense (a mainnet mint pointed at a non-mainnet RPC) is
  *  the separate `solanaTokenAvailable(mint)` predicate. */
 export function isSolanaRpcAvailable(): boolean {
-  return SOLANA_RPC_URL !== '';
+  return solanaRpcUrl() !== '';
 }
 
 // ============================================================================
@@ -375,7 +431,7 @@ export function isSolanaRpcAvailable(): boolean {
  *  encodes to the canonical `solreq:v2?<base64url>` URI.
  *
  *  Throws on RPC failure, genesis mismatch (wrong cluster — invariant #4 fail-closed), or when the
- *  rail is offline (`SOLANA_RPC_URL` empty). Never returns a silent empty result. */
+ *  rail is offline (`solanaRpcUrl()` empty). Never returns a silent empty result. */
 export async function createSolPaymentRequest(
   input: {
     to: string;
@@ -392,14 +448,14 @@ export async function createSolPaymentRequest(
   const rpc = await import('./solana/rpc');
 
   // Cluster identity check — fail-closed on a non-mainnet endpoint (genesis hash is immutable).
-  const genesis = await rpc.getGenesisHash(SOLANA_RPC_URL, {signal});
+  const genesis = await rpc.getGenesisHash(solanaRpcUrl(), {signal});
   if (genesis !== SOL_GENESIS_HASH) {
     throw new Error(`createSolPaymentRequest: cluster genesis mismatch (got ${genesis}, expected ${SOL_GENESIS_HASH})`);
   }
 
   // Fresh blockhash + its observation slot. The context slot threads as `minContextSlot` for every
   // downstream freshness call in broadcastSolPayment so reorg-awareness is consistent.
-  const bh = await rpc.getLatestBlockhash(SOLANA_RPC_URL, {signal});
+  const bh = await rpc.getLatestBlockhash(solanaRpcUrl(), {signal});
 
   // iat captured when the RPC result is in hand; exp = iat + the codec's frozen max lifetime.
   const iat = Math.floor(Date.now() / 1000);
@@ -559,8 +615,8 @@ export async function broadcastSolPayment(
   let currentHeight: number;
   try {
     [bhValid, currentHeight] = await Promise.all([
-      rpc.isBlockhashValid(SOLANA_RPC_URL, request.bh, {signal, minContextSlot: request.slot}),
-      rpc.getBlockHeight(SOLANA_RPC_URL, {signal, minContextSlot: request.slot}),
+      rpc.isBlockhashValid(solanaRpcUrl(), request.bh, {signal, minContextSlot: request.slot}),
+      rpc.getBlockHeight(solanaRpcUrl(), {signal, minContextSlot: request.slot}),
     ]);
   } catch (e) {
     // A freshness-check RPC failure is NOT an authoritative reject — the RPC is unavailable, not the
@@ -578,7 +634,7 @@ export async function broadcastSolPayment(
   //    DIFFERENT transaction than the one we verified (honest unknown; do NOT assume success).
   let broadcastSig: string;
   try {
-    broadcastSig = await rpc.sendTransaction(SOLANA_RPC_URL, payment.tx, {
+    broadcastSig = await rpc.sendTransaction(solanaRpcUrl(), payment.tx, {
       signal,
       minContextSlot: request.slot,
       config: {commitment: SOL_PAYMENT_COMMITMENT, minContextSlot: request.slot, skipPreflight: false},
@@ -609,7 +665,7 @@ export async function broadcastSolPayment(
     if (signal.aborted) throw new Error('aborted');
 
     try {
-      const statusResult = await rpc.getSignatureStatusesForSig(SOLANA_RPC_URL, sig, {signal});
+      const statusResult = await rpc.getSignatureStatusesForSig(solanaRpcUrl(), sig, {signal});
       latestHistoryStatus = statusResult;
       if (statusResult.status) {
         if (statusResult.status.err != null) {
@@ -625,7 +681,7 @@ export async function broadcastSolPayment(
           let detail: SolanaTransactionDetail | null = null;
           let detailRead = false;
           try {
-            detail = await rpc.getTransaction(SOLANA_RPC_URL, sig, {signal});
+            detail = await rpc.getTransaction(solanaRpcUrl(), sig, {signal});
             detailRead = true;
           } catch (e) {
             console.warn(`broadcastSolPayment: transient getTransaction failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
@@ -654,7 +710,7 @@ export async function broadcastSolPayment(
     }
 
     try {
-      latestHeight = await rpc.getBlockHeight(SOLANA_RPC_URL, {signal, minContextSlot: request.slot});
+      latestHeight = await rpc.getBlockHeight(solanaRpcUrl(), {signal, minContextSlot: request.slot});
     } catch (e) {
       console.warn(`broadcastSolPayment: transient getBlockHeight failure for rid=${rid}:`, e instanceof Error ? e.message : String(e));
     }
@@ -674,7 +730,7 @@ export async function broadcastSolPayment(
 
   let invalidityContextSlot = 0;
   try {
-    const bhv = await rpc.isBlockhashValid(SOLANA_RPC_URL, request.bh, {signal, minContextSlot: request.slot});
+    const bhv = await rpc.isBlockhashValid(solanaRpcUrl(), request.bh, {signal, minContextSlot: request.slot});
     if (!bhv.valid && bhv.contextSlot >= request.slot) {
       invalidityContextSlot = bhv.contextSlot;
     }
@@ -684,7 +740,7 @@ export async function broadcastSolPayment(
 
   let historyProvesAbsent = false;
   try {
-    const statusResult = await rpc.getSignatureStatusesForSig(SOLANA_RPC_URL, sig, {signal});
+    const statusResult = await rpc.getSignatureStatusesForSig(solanaRpcUrl(), sig, {signal});
     latestHistoryStatus = statusResult;
     if (
       invalidityContextSlot >= request.slot &&

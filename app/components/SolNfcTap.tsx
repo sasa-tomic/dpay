@@ -7,7 +7,7 @@ import {fmtAsset} from '../lib/format';
 import type {SolNfcEvent, Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {solanaTokenInfo, solanaTokenOfMint} from '../solana/tokens';
-import {solSplSignGate} from '../config/assets';
+import {solSignCaveat, solSplSignGate, type SolMintStates} from '../config/assets';
 import {decodeSolReq, decodeSolPay, encodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {extractSignedTxParts} from '../solana/tx';
@@ -49,7 +49,7 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
   /** Per-mint token states (useSolanaBalances tokens) for the per-request-mint sign gate —
    *  card role only (the reader/broadcast side signs nothing). Optional: readers and legacy
    *  mounts fail open exactly like an unpolled mint. */
-  tokenBalances?: Record<string, {amount: string | null; status: string}>;
+  tokenBalances?: SolMintStates;
   onOutcome?: (o: 'success' | 'pending' | 'declined') => void;
   onResult?: (r: {amount: string; cur: string; sig: string} | null) => void;
   onActive?: () => void;
@@ -81,6 +81,15 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
   // (defense against a cross-tap receipt for a different payment).
   const expectedRidRef = useRef<string>('');
   const expectedSigRef = useRef<string>('');
+  // The disclosure a payment signed on NO fact owes its payer (`solSignCaveat`). The QR rail can
+  // put it on the hand-off screen; this one CANNOT — a tap auto-signs with no review, and by the
+  // time anything renders the payment has already left the phone. So it is carried to the terminal
+  // message instead, which is the only sentence this flow ever shows the payer. Null whenever the
+  // gate decided on a fact.
+  const signCaveatRef = useRef<string | null>(null);
+  /** Append the fact-less-signature caveat to a terminal reason, when there is one to append. */
+  const withSignCaveat = (reason: string) =>
+    signCaveatRef.current === null ? reason : `${reason}. ${signCaveatRef.current}`;
 
   // Payer (card): decode the incoming solreq:v2 and AUTO-SIGN. The SOL transport re-emits
   // `request` on every re-tap (no requestSent latch): a duplicate with the SAME rid is ignored
@@ -175,13 +184,18 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       if (outcome.outcome === 'success') {
         onOutcome?.('success');
         awardPaymentTested(journeyRef.current); // payer: tap-settled payment counts
+        // No caveat on a settlement: the chain just proved the token account exists, so repeating
+        // "dpay couldn't check it" would be the wallet contradicting the ledger.
         ctx.finalize('success');
       } else if (outcome.outcome === 'declined') {
         onOutcome?.('declined');
-        ctx.finalize('declined', M.errors.tap.paymentRejected);
+        // A decline is EXACTLY the outcome an absent token account produces (the merchant's
+        // broadcast is rejected on chain), so the unchecked-account caveat is the most useful
+        // thing this screen can add to "Payment rejected".
+        ctx.finalize('declined', withSignCaveat(M.errors.tap.paymentRejected));
       } else {
         onOutcome?.('pending');
-        ctx.finalize('pending', M.errors.tap.couldntConfirm);
+        ctx.finalize('pending', withSignCaveat(M.errors.tap.couldntConfirm));
       }
     },
   });
@@ -215,6 +229,8 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       );
       return;
     }
+    // …and when the gate failed OPEN, carry WHY to whatever this tap ends up saying (below).
+    signCaveatRef.current = solSignCaveat(signGate, decoded.mint);
     advance('exchanging');
     try {
       const solpay: SolPayV2 = decoded.cur === 'SOL'

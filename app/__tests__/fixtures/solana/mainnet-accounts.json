@@ -1,0 +1,97 @@
+{
+ "_provenance": {
+  "endpoint": "https://api.mainnet-beta.solana.com",
+  "captured_utc": "2026-09-08T18:37:06.766Z",
+  "addresses": {
+   "wallet": "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",
+   "usdcAta": "FzbcyEZ9m8xjtergWgWDq7mfPoHEbboBF791B6cTpzbq",
+   "usdcMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+   "eurcMint": "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr",
+   "absent": "7m5AGrdr2WXbfmFN9bRK5tuoafd7rZa1Bcxv29TUng2C"
+  },
+  "note": "absent is the base58 of the 32 ascii bytes \"dpay-absent-account-probe-2026090\" (truncated to 32) — a valid pubkey with no account"
+ },
+ "getMultipleAccounts": {
+  "context": {
+   "apiVersion": "4.2.2",
+   "slot": 445408109
+  },
+  "value": [
+   {
+    "data": [
+     "",
+     "base64"
+    ],
+    "executable": false,
+    "lamports": 1742197555756406,
+    "owner": "11111111111111111111111111111111",
+    "rentEpoch": 18446744073709552000,
+    "space": 0
+   },
+   {
+    "data": [
+     "xvp6877brTo9ZfNqq8l0MbG75MLS9uDkfKYCA0UvXWFIwBtQWQBUVdncsMa87Ny0+1suq8GpqCtXOSuqpA8E5o2UQDjEAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+     "base64"
+    ],
+    "executable": false,
+    "lamports": 2040003,
+    "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "rentEpoch": 18446744073709552000,
+    "space": 165
+   },
+   {
+    "data": [
+     "AQAAAJj+huiNm+Lqi8HMpIeLKYjCQPUrhCS/tA7Rot3LXhmbz6XEq/c8HAAGAQEAAABicKqKWcWUBbRShshncubNEm6bil06OFNtN/e0FOi2Zw==",
+     "base64"
+    ],
+    "executable": false,
+    "lamports": 533414245631,
+    "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "rentEpoch": 18446744073709552000,
+    "space": 82
+   },
+   {
+    "data": [
+     "AQAAAPwckECOUSE/vNdOM2YsEjvSzXWDefk3IWT7Dz0tY2g3bV5otoNfAAAGAQEAAABN8GtMRHYCd+Q0hvg5l32TFY9n958M/kBLGF/4hQDm/Q==",
+     "base64"
+    ],
+    "executable": false,
+    "lamports": 1038032994,
+    "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "rentEpoch": 18446744073709552000,
+    "space": 82
+   },
+   null
+  ]
+ },
+ "getTokenAccountBalance": {
+  "FzbcyEZ9m8xjtergWgWDq7mfPoHEbboBF791B6cTpzbq": {
+   "context": {
+    "apiVersion": "4.2.2",
+    "slot": 445408112
+   },
+   "value": {
+    "amount": "1942268974221",
+    "decimals": 6,
+    "uiAmount": 1942268.974221,
+    "uiAmountString": "1942268.974221"
+   }
+  }
+ },
+ "getBalance": {
+  "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": {
+   "context": {
+    "apiVersion": "4.2.2",
+    "slot": 445408114
+   },
+   "value": 1742197555756406
+  },
+  "7m5AGrdr2WXbfmFN9bRK5tuoafd7rZa1Bcxv29TUng2C": {
+   "context": {
+    "apiVersion": "4.2.2",
+    "slot": 445408116
+   },
+   "value": 0
+  }
+ }
+}

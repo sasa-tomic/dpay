@@ -5,9 +5,9 @@ import {InstructionPanel} from './InstructionPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {IconCheck, IconClock, IconScan, IconShare} from './icons';
+import {IconAlert, IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {POLL, QR_SIZE} from '../config/constants';
-import {solSplSignGate, type SolPayGate} from '../config/assets';
+import {solSignCaveat, solSplSignGate, type SolMintStates, type SolPayGate} from '../config/assets';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {fmtAsset, short, toUnits} from '../lib/format';
 import {parseDecimalToUnits} from '../lib/amount';
@@ -68,7 +68,7 @@ import {M} from '../i18n';
  * `reference` pubkeys as instruction account keys and the optional `memo` as an SPL Memo
  * instruction — the matching mechanism the standard is built on (`sendSolanaPay`).
  */
-export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: Record<string, {amount: string | null; status: string}>; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
@@ -93,6 +93,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // The disclosure a payment signed on NO fact owes its payer (`solSignCaveat`). It is a CAVEAT,
+  // never a block: the sign gate refuses only a KNOWN-absent account, and a payer with no signal
+  // must keep the ability to sign a payment that would settle. Null whenever the gate decided on a
+  // fact — which is the common case, so the hand-off surface is unchanged for almost everyone.
+  const [signCaveat, setSignCaveat] = useState<string | null>(null);
   // A tap arriving on the always-armed card takes over the scan screen; nfcKey re-arms after each.
   // The radio is usable only in the 'ready' state; every other state falls through to QR-only,
   // with the row below explaining which one and what to do about it.
@@ -355,6 +360,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         );
         return;
       }
+      // …and when it failed OPEN, the payer is told so. The caveat rides the signed payment to the
+      // hand-off surface below — the one screen this rail shows while the payment is still in the
+      // payer's hands (`approve` is synchronous, so the 'review' phase never paints on this path).
+      setSignCaveat(solSignCaveat(signGate, r.mint));
       setReq(r);
       setErr(null);
       setPhase('review');
@@ -662,7 +671,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setSpay(null); setSpayAmount(''); setSpayDone(null); setErr(null); setScanArmed(false); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setSpay(null); setSpayAmount(''); setSpayDone(null); setErr(null); setSignCaveat(null); setScanArmed(false); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -859,7 +868,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           accessibilityHint={M.pay.approveHint}
           accessibilityState={{disabled: approveDisabled}}
           onPress={() => void approveOcp(ocp)}>
-          <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
+          <Text style={[S.primaryText, approveDisabled && S.disabledText]}>{busy ? M.pay.signing : M.pay.approve}</Text>
         </Pressable>
         <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
           <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
@@ -948,7 +957,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           accessibilityHint={M.pay.approveHint}
           accessibilityState={{disabled: approveDisabled}}
           onPress={() => void approveSpay(spay)}>
-          <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
+          <Text style={[S.primaryText, approveDisabled && S.disabledText]}>{busy ? M.pay.signing : M.pay.approve}</Text>
         </Pressable>
         <Pressable testID="btn-sol-pay-cancel" style={S.secondaryBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
           <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
@@ -1020,6 +1029,16 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         {claimedName ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req!.to)}</Text> : null}
         <Text style={S.badgeOk}>{M.pay.signedOffline}</Text>
         <Text style={S.qrHint}>{M.pay.solOfflineSettles}</Text>
+        {/* The fact-less-signature caveat (M1). It sits ON the hand-off surface because that is
+            where this rail's payer actually reviews a signed payment — the sync auto-sign skips
+            the 'review' phase entirely — and because it is still actionable here: the payer can
+            hand a different asset over instead. It never blocks the hand-off. */}
+        {signCaveat ? (
+          <View testID="sol-pay-sign-caveat" style={S.railOutageRow}>
+            <IconAlert size={14} color={C.warn} />
+            <Text style={S.railHealthText}>{signCaveat}</Text>
+          </View>
+        ) : null}
         {/* Trip Ready J4 — the SOL QR hand-off is ALWAYS offline-pending (no online branch), and
             the offlineQr truth ("the receiver's connection settles it") is exactly what this
             phase already says. Reading-zone mount (under the status line, above the confirm row).

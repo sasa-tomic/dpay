@@ -18,18 +18,20 @@ import {M} from '../i18n';
 // locale-invariant, copy is not. Typing this as a total Record over NfcTapPhase (it was
 // `Record<string, …>`) makes every phase provably present, so the old `?? TAP_PHASES.listening`
 // fallback is gone: an unknown phase is now a compile error rather than a silent wrong badge.
-const TAP_PHASES: Record<NfcTapPhase, {tone: string; glyph?: string; spin?: boolean; icon?: 'nfc' | 'check' | 'close' | 'key'}> = {
-  listening: {tone: C.brand, icon: 'nfc'},
-  linking: {tone: C.brand, spin: true},
-  exchanging: {tone: C.brand, spin: true},
+// `tone` is the palette KEY, never a hex: `C` is mutated in place on a theme flip, so a
+// module-level table of colours freezes the theme that happened to be resolved at import.
+const TAP_PHASES: Record<NfcTapPhase, {tone: 'brandText' | 'ok' | 'sub' | 'warn' | 'bad'; glyph?: string; spin?: boolean; icon?: 'nfc' | 'check' | 'close' | 'key'}> = {
+  listening: {tone: 'brandText', icon: 'nfc'},
+  linking: {tone: 'brandText', spin: true},
+  exchanging: {tone: 'brandText', spin: true},
   // The one-press rule removed the card-side review park (auto-sign fires on request arrival), so
   // 'awaitingApproval' is READER-ONLY now — role-aware: the merchant waits on the payer's sign.
-  awaitingApproval: {tone: C.brand, icon: 'key'},
-  settling: {tone: C.brand, spin: true},
-  success: {tone: C.ok, icon: 'check'},
-  declined: {tone: C.sub, icon: 'close'},
-  pending: {tone: C.warn, glyph: '?'},
-  error: {tone: C.bad, glyph: '!'},
+  awaitingApproval: {tone: 'brandText', icon: 'key'},
+  settling: {tone: 'brandText', spin: true},
+  success: {tone: 'ok', icon: 'check'},
+  declined: {tone: 'sub', icon: 'close'},
+  pending: {tone: 'warn', glyph: '?'},
+  error: {tone: 'bad', glyph: '!'},
 };
 
 // Trip Ready J5 — the itinerary-line progression: which segment the active phase has reached
@@ -90,22 +92,23 @@ export function NfcTapView({phase, reason, role, testID, formattedAmt, networkLa
   offlinePeak?: boolean;
 }) {
   const m = TAP_PHASES[phase];
+  const tone = C[m.tone];
   const {title, sub, terminal} = computeTapStatus(phase, reason, role, formattedAmt, networkLabel);
   const lit = LINE_LIT[phase];
 
   const badge = (
-    <View style={[S.nfcBadge, {borderColor: m.tone}]}>
-      {m.icon === 'nfc' ? <NfcIcon color={m.tone} size={64} />
-        : m.icon === 'check' ? <IconCheck size={48} color={m.tone} />
-        : m.icon === 'close' ? <IconClose size={48} color={m.tone} />
-        : m.icon === 'key' ? <TapKeyBeat size={44} tone={m.tone} />
-        : m.spin ? <ActivityIndicator size="large" color={m.tone} /> : <Text style={[S.nfcGlyph, {color: m.tone}]}>{m.glyph}</Text>}
+    <View style={[S.nfcBadge, {borderColor: tone}]}>
+      {m.icon === 'nfc' ? <NfcIcon color={tone} size={64} />
+        : m.icon === 'check' ? <IconCheck size={48} color={tone} />
+        : m.icon === 'close' ? <IconClose size={48} color={tone} />
+        : m.icon === 'key' ? <TapKeyBeat size={44} tone={tone} />
+        : m.spin ? <ActivityIndicator size="large" color={tone} /> : <Text style={[S.nfcGlyph, {color: tone}]}>{m.glyph}</Text>}
     </View>
   );
   return (
     <View style={S.center} testID={testID}>
       {phase === 'success' && offlinePeak ? <OfflinePeak /> : null}
-      {phase === 'listening' ? <TapBreathRing tone={m.tone} /> : null}
+      {phase === 'listening' ? <TapBreathRing tone={tone} /> : null}
       {phase === 'declined' || phase === 'error' ? <TapShakeSettle testID="tap-shake">{badge}</TapShakeSettle> : badge}
       {lit ? <TapProgressLine key={phase} litSegments={lit} /> : null}
       <Text style={S.nfcTitle}>{title}</Text>

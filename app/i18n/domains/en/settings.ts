@@ -148,6 +148,23 @@ export type SettingsMessages = {
     apply: string;
     applyA11y: string;
     applyHint: string;
+    /**
+     * The Solana RPC endpoint (`setSolanaRpcUrl`, config/constants.ts). It was configurable in code
+     * and applied at boot from storage, but reachable from NO screen — so on a phone a dead
+     * provider key meant waiting for a store release, which is exactly what the 2026-09-08 outage
+     * cost. Same shape as the server row above: a draft, an explicit Apply, and an empty value
+     * meaning "use the one baked into this build".
+     *
+     * `solanaError` is not written here — `setSolanaRpcUrl` throws its own actionable refusals
+     * (not https, a devnet host, unparseable) and the sheet renders those verbatim.
+     */
+    solanaNote: string;
+    /** The input's heading AND its accessibilityLabel. */
+    solanaLabel: string;
+    solanaPlaceholder: string;
+    solanaHint: string;
+    solanaApplyA11y: string;
+    solanaApplyHint: string;
   };
 
   about: {
@@ -245,7 +262,7 @@ export const settingsEn: SettingsMessages = {
     label: 'Advanced',
     show: 'Show advanced settings',
     hide: 'Hide advanced settings',
-    hint: "Server configuration for the wallet's relay",
+    hint: 'Server and network endpoints this wallet talks to',
     serverNote: 'The server your wallet talks to. Changes apply when you tap Apply.',
     serverLabel: 'Server',
     serverPlaceholder: 'http://<ip>:8787',
@@ -253,6 +270,12 @@ export const settingsEn: SettingsMessages = {
     apply: 'Apply',
     applyA11y: 'Apply server URL',
     applyHint: 'Switch your wallet to the entered server URL',
+    solanaNote: 'The Solana endpoint this wallet reads balances from and sends payments through. Leave it empty to use the one built into this build.',
+    solanaLabel: 'Solana endpoint',
+    solanaPlaceholder: 'https://<provider>/?api-key=<key>',
+    solanaHint: 'The Solana RPC endpoint this wallet uses',
+    solanaApplyA11y: 'Apply Solana endpoint',
+    solanaApplyHint: 'Switch this wallet to the entered Solana endpoint',
   },
 
   about: {

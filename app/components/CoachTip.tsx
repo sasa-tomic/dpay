@@ -24,11 +24,17 @@ import {IconArrowUpRight, IconClock, IconClose, IconQr, IconWifiOff} from './ico
 
 // The per-surface glyph — the icon restates the tip's truth at a glance (outgoing payment,
 // request code, no signal, unresolved clock). Never a celebration mark.
-const TIP_ICONS: Record<CoachTipKey, {icon: React.FC<{size?: number; color?: string}>; tint: string}> = {
-  payReview: {icon: IconArrowUpRight, tint: C.brand},
-  receiveRequest: {icon: IconQr, tint: C.brand},
-  offlineQr: {icon: IconWifiOff, tint: C.warn},
-  pendingOutcome: {icon: IconClock, tint: C.warn},
+//
+// `tint` is the palette KEY, not a colour: `C` is mutated in place when the theme flips, so a
+// module-level table that stored `C.brandText` would freeze whichever theme happened to be
+// resolved at import. That was invisible while both themes shared one tangerine and is a visible
+// wrong-colour icon now that they do not — the same reason `styles.ts` rebuilds `S` rather than
+// caching hexes.
+const TIP_ICONS: Record<CoachTipKey, {icon: React.FC<{size?: number; color?: string}>; tint: 'brandText' | 'warn'}> = {
+  payReview: {icon: IconArrowUpRight, tint: 'brandText'},
+  receiveRequest: {icon: IconQr, tint: 'brandText'},
+  offlineQr: {icon: IconWifiOff, tint: 'warn'},
+  pendingOutcome: {icon: IconClock, tint: 'warn'},
 };
 
 export function CoachTip({tipKey, reducedMotion}: {tipKey: CoachTipKey; reducedMotion?: boolean}) {
@@ -65,7 +71,7 @@ export function CoachTip({tipKey, reducedMotion}: {tipKey: CoachTipKey; reducedM
   return (
     <Animated.View testID={`coach-${tipKey}`} style={[S.coachCard, {opacity: op, transform: [{translateY: ty}]}]}>
       <View style={S.coachRow}>
-        <View style={S.coachIcon}><Glyph size={15} color={tint} /></View>
+        <View style={S.coachIcon}><Glyph size={15} color={C[tint]} /></View>
         <View style={S.coachText}>
           <Text style={S.coachTitle}>{tip.title}</Text>
           <Text style={S.coachBody}>{tip.body}</Text>

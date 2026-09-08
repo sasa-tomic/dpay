@@ -101,7 +101,7 @@ export const settingsFr: SettingsMessages = {
     label: 'Avancé',
     show: 'Afficher les paramètres avancés',
     hide: 'Masquer les paramètres avancés',
-    hint: 'Configuration du serveur utilisé par le portefeuille',
+    hint: 'Serveurs et points d’accès réseau utilisés par ce portefeuille',
     serverNote: 'Le serveur avec lequel votre portefeuille communique. Les modifications s’appliquent quand vous appuyez sur Appliquer.',
     serverLabel: 'Serveur',
     serverPlaceholder: 'http://<ip>:8787',
@@ -109,6 +109,12 @@ export const settingsFr: SettingsMessages = {
     apply: 'Appliquer',
     applyA11y: 'Appliquer l’URL du serveur',
     applyHint: 'Bascule votre portefeuille vers l’URL de serveur saisie',
+    solanaNote: 'Le point d’accès Solana par lequel ce portefeuille lit les soldes et envoie les paiements. Laissez-le vide pour utiliser celui intégré à cette version.',
+    solanaLabel: 'Point d’accès Solana',
+    solanaPlaceholder: 'https://<fournisseur>/?api-key=<clé>',
+    solanaHint: 'Le point d’accès RPC Solana utilisé par ce portefeuille',
+    solanaApplyA11y: 'Appliquer le point d’accès Solana',
+    solanaApplyHint: 'Bascule ce portefeuille vers le point d’accès Solana saisi',
   },
 
   about: {

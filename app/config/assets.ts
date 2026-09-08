@@ -31,7 +31,7 @@ import {
   solanaAssetsOf,
   testnetDisplayName,
 } from './catalog';
-import {IS_SOLANA_DEVNET, PRACTICE_CURRENCY, SOLANA_RPC_URL} from './constants';
+import {IS_SOLANA_DEVNET, PRACTICE_CURRENCY, solanaRpcUrl} from './constants';
 import {parseDecimalToUnits} from '../lib/amount';
 import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
@@ -450,7 +450,7 @@ export function shouldAllowUserSelect(selectionLocked: boolean): boolean {
 
 // Whether a Solana SPL token is selectable on the CURRENTLY configured cluster. Pure over the
 // constants; no network. The three fail-closed cases:
-//   - empty RPC URL (`SOLANA_RPC_URL=''` — the offline inner loop / jest / a build with SOL
+//   - empty RPC URL (`solanaRpcUrl() === ''` — the offline inner loop / jest / a build with SOL
 //     disabled): no cluster at all ⇒ the token is unavailable.
 //   - no mint: an SPL token row with `mint: null` (other than SOL, which never reaches this check)
 //     names no on-chain account ⇒ unavailable.
@@ -468,7 +468,7 @@ export function solanaTokenCoherent(rpcUrl: string, isDevnet: boolean, mint: str
 }
 
 export function solanaTokenAvailable(mint: string | null): boolean {
-  return solanaTokenCoherent(SOLANA_RPC_URL, IS_SOLANA_DEVNET, mint);
+  return solanaTokenCoherent(solanaRpcUrl(), IS_SOLANA_DEVNET, mint);
 }
 
 // The active-rail chip + header balance label. Returns the bare asset `symbol` UNLESS another
@@ -541,26 +541,77 @@ export function solPayGate(
 // must refuse BEFORE signing when the REQUEST's mint is KNOWN to have no account here.
 //
 // The knowledge is the useSolanaBalances per-mint state — which is exactly why an 'absent' fact
-// is trustworthy enough to refuse on, and why every UNCONFIRMED state must fail open:
+// is trustworthy enough to refuse on:
 //   ONLY THE OWNER CAN CLOSE AN ATA (close_authority defaults to the owner under Solana program
 //   rules), and dpay never builds a close instruction anywhere in app/solana/ — so once a mint
 //   has been observed 'absent', it stays absent until this wallet creates the account (Receive ▸
 //   createTokenAccount), and once observed 'balance' (ANY amount, including '0') the account
 //   existed at poll time and cannot have disappeared. The hook persists these facts across
-//   restarts (services/solTokenStatePersist), so they hold offline too. A mint never confirmed
-//   either way ('loading' / 'unavailable' / 'error' / never-polled) observes nothing — refusing
-//   there would break offline signing for wallets that DO hold the account, violating the
-//   offline-first rule (same fail-open contract as solPayGate above).
-export type SolSplSignGate = 'allow' | 'absent' | 'unknown' | 'unregistered';
-export function solSplSignGate(
-  mint: string | null,
-  states: Record<string, {amount: string | null; status: string}>,
-): SolSplSignGate {
+//   restarts (services/solTokenStatePersist), so they hold offline too.
+//
+// ── THE RULE, settled 2026-09-08 after the Solana RPC outage ──────────────────────────────────
+// An unknown is not a zero, and it is not a yes either. Three outcomes, and why each is what it is:
+//
+//   1. A KNOWN fact decides, always. 'absent' ⇒ REFUSE (this wallet has no account for that mint,
+//      so the merchant's broadcast would be rejected on-chain and the payer would be holding a
+//      dead QR — the case flow 137 pins). 'balance' ⇒ ALLOW. A fact outranks whatever the endpoint
+//      is doing right now: a refusing endpoint can neither re-open a refusal nor revoke one.
+//   2. NO fact ⇒ SIGN ANYWAY, and SAY SO. Refusing here would break the product's own
+//      non-negotiable — an offline payer must keep the ability to sign a payment that WOULD
+//      settle — and the payer who does hold the account is the common case. So the gate never
+//      blocks; it returns a state the surface is obliged to disclose, which is precisely why that
+//      state is not spelled 'allow'.
+//   3. NO fact AND the endpoint ANSWERED and did not serve us ('refused', or 'unreadable' bytes —
+//      `SolanaReadFailure` in app/solana.ts) is its OWN state: this device is online and the RAIL
+//      is what is broken. That is the 2026-09-08 outage exactly, and it is the case where "we
+//      could not check" has to say WHY, because the user can neither wait it out nor fix it by
+//      finding signal.
+//
+// What the caller owes the user (the 2026-08-29 every-step-instruction rule): on either unverified
+// state, name the token, say the account could not be checked, say what happens if it does not
+// exist (the payment cannot settle), and say what to do — 'unverified' means try again when the
+// wallet has signal; 'unverified-rail-down' means the Solana endpoint itself is refusing this
+// wallet, so the account can only be confirmed or created (Receive ▸ My address) once it answers.
+export type SolSplSignGate = 'allow' | 'absent' | 'unregistered' | 'unverified' | 'unverified-rail-down';
+/** What the gate needs to know about each mint's poll state — the read-only projection of
+ *  `SolTokenBalanceState` (hooks/useSolanaBalances.ts). It is named here because it is ALSO the
+ *  prop type of every surface that can sign a cross-mint request: those props used to widen the
+ *  hook's shape and drop `failure` on the way in, which made the rail-down state invisible to the
+ *  type checker on exactly the components that have to disclose it. */
+export type SolMintStates = Record<string, {amount: string | null; status: string; failure?: string | null}>;
+export function solSplSignGate(mint: string | null, states: SolMintStates): SolSplSignGate {
   if (mint == null) return 'allow';
   if (solanaTokenOfMint(mint) == null) return 'unregistered';
   const state = states[mint];
-  if (state == null) return 'unknown';
+  if (state == null) return 'unverified';
   if (state.status === 'absent') return 'absent';
   if (state.status === 'balance') return 'allow';
-  return 'unknown';
+  // No fact. WHY there is none decides which unverified state this is: an endpoint that answered
+  // and did not serve us, or bytes it served that cannot be trusted — both mean the rail is the
+  // problem. Anything else (loading, offline, a transport failure) is the payer's ordinary world.
+  return state.failure === 'refused' || state.failure === 'unreadable' ? 'unverified-rail-down' : 'unverified';
+}
+
+/**
+ * The sentence a payment signed on NO fact owes its payer — the disclosure half of the gate above,
+ * and the ONE owner of it: the QR hand-off (`SolPayMode`) and the auto-signing NFC tap
+ * (`SolNfcTap`) sign the identical request under the identical doubt, so they must say the
+ * identical thing.
+ *
+ * Null for every gate that is itself a decision: 'allow' signs on a fact and has nothing to
+ * disclose, and 'absent'/'unregistered' never sign at all — they are refused BY NAME at the scan.
+ */
+export function solSignCaveat(gate: SolSplSignGate, mint: string | null): string | null {
+  if (gate !== 'unverified' && gate !== 'unverified-rail-down') return null;
+  // Unreachable by construction: `solSplSignGate` answers 'allow' for a null mint and
+  // 'unregistered' for one the registry does not carry, so an unverified gate always names a
+  // registry token. Log rather than print a caveat about an asset this wallet cannot name.
+  const asset = mint == null ? null : solanaTokenOfMint(mint);
+  if (asset == null) {
+    console.warn(`solSignCaveat: gate '${gate}' for mint ${String(mint)} — solSplSignGate cannot produce that pair`);
+    return null;
+  }
+  return gate === 'unverified-rail-down'
+    ? M.errors.solana.senderTokenAccountUnverifiedRailDown(asset)
+    : M.errors.solana.senderTokenAccountUnverified(asset);
 }

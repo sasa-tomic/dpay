@@ -100,7 +100,7 @@ export const settingsDe: SettingsMessages = {
     label: 'Erweitert',
     show: 'Erweiterte Einstellungen zeigen',
     hide: 'Erweiterte Einstellungen verbergen',
-    hint: 'Server-Konfiguration für das Relay der Wallet',
+    hint: 'Server- und Netzwerk-Endpunkte, mit denen diese Wallet spricht',
     serverNote: 'Der Server, mit dem deine Wallet spricht. Änderungen gelten, wenn du auf Übernehmen tippst.',
     serverLabel: 'Server',
     serverPlaceholder: 'http://<ip>:8787',
@@ -108,6 +108,12 @@ export const settingsDe: SettingsMessages = {
     apply: 'Übernehmen',
     applyA11y: 'Server-URL übernehmen',
     applyHint: 'Schaltet deine Wallet auf die eingegebene Server-URL um',
+    solanaNote: 'Der Solana-Endpunkt, über den diese Wallet Guthaben liest und Zahlungen sendet. Leer lassen, um den in diesem Build eingebauten zu nutzen.',
+    solanaLabel: 'Solana-Endpunkt',
+    solanaPlaceholder: 'https://<anbieter>/?api-key=<schlüssel>',
+    solanaHint: 'Der Solana-RPC-Endpunkt, den diese Wallet nutzt',
+    solanaApplyA11y: 'Solana-Endpunkt übernehmen',
+    solanaApplyHint: 'Schaltet diese Wallet auf den eingegebenen Solana-Endpunkt um',
   },
 
   about: {

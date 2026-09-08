@@ -512,7 +512,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
 
       <Pressable
         testID="btn-convert-confirm"
-        style={[S.primary, !canConfirm && S.dim]}
+        style={[S.primary, !canConfirm && S.disabledFlat]}
         onPress={() => void onConfirm()}
         disabled={!canConfirm}
         accessibilityRole="button"
@@ -524,7 +524,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             <Text style={S.primaryText}>{M.convert.confirmButton}</Text>
           </View>
         ) : (
-          <Text style={S.primaryText}>{M.convert.confirmButton}</Text>
+          <Text style={[S.primaryText, !canConfirm && S.disabledText]}>{M.convert.confirmButton}</Text>
         )}
       </Pressable>
       <View style={S.convertFooting}>
@@ -589,7 +589,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
 
       {record.step === 'approving' || record.step === 'approved' ? (
         <View testID="convert-approving">
-          <ActivityIndicator size="large" color={C.brand} />
+          <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.approvingTitle}</Text>
           <Text style={S.convertStateBody}>
             {M.convert.approvingBody(fmtAsset(record.amountIn, 8, inSymbol), formatClock(new Date(record.approveExpiresAtMs)))}
@@ -598,14 +598,14 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
       ) : null}
       {record.step === 'swapping' ? (
         <View testID="convert-swapping">
-          <ActivityIndicator size="large" color={C.brand} />
+          <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.swappingTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.swappingBody}</Text>
         </View>
       ) : null}
       {record.step === 'settling' ? (
         <View testID="convert-settling">
-          <ActivityIndicator size="large" color={C.brand} />
+          <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.settlingTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.settlingBody(outSymbol)}</Text>
         </View>

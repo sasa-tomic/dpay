@@ -33,7 +33,7 @@ import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
-import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY} from './config/constants';
+import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY, SOLANA_RPC_STORAGE_KEY, setSolanaRpcUrl} from './config/constants';
 import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
 import {parseHomeCurrency, type HomeCurrency} from './config/currency';
 import {runSolSelfCheck} from './solana/selfcheck';
@@ -110,8 +110,20 @@ export default function App() {
       AsyncStorage.getItem(THEME_STORAGE_KEY),
       AsyncStorage.getItem(LOCALE_STORAGE_KEY),
       AsyncStorage.getItem(HOME_CURRENCY_STORAGE_KEY),
+      AsyncStorage.getItem(SOLANA_RPC_STORAGE_KEY),
     ])
-      .then(([idV, relayV, themeV, localeV, currencyV]) => {
+      .then(([idV, relayV, themeV, localeV, currencyV, solRpcV]) => {
+        // The operator's Solana endpoint, applied BEFORE the wallet renders (the balance hooks read
+        // it on their first poll). A stored value was validated when it was set, so a rejection here
+        // means the store was corrupted: say so loudly and stay on the built-in default rather than
+        // stranding the rail. See config/constants.ts#setSolanaRpcUrl for what is accepted.
+        if (typeof solRpcV === 'string' && solRpcV.length > 0) {
+          try {
+            setSolanaRpcUrl(solRpcV);
+          } catch (e: unknown) {
+            console.log(`[dpay] stored Solana RPC endpoint rejected, using the built-in default: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
         setIdentity(idV ? JSON.parse(idV) : null);
         if (typeof relayV === 'string' && relayV.length > 0) setRelayUrl(relayV);
         setThemeChoice(parseTheme(themeV)); // null (incl. legacy 'auto') → keep following the OS scheme
@@ -131,6 +143,22 @@ export default function App() {
     setRelayUrl(url);
     AsyncStorage.setItem(RELAY_STORAGE_KEY, url).catch((e: unknown) => {
       console.log(`[dpay] failed to persist relay URL: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }, []);
+
+  // The Solana endpoint's single mutator — the runtime twin of persistRelay, and the reason the
+  // Settings row exists at all: `setSolanaRpcUrl` has been the seam every Solana read goes through
+  // since 2026-09-08, but nothing on a phone could reach it, so a dead provider key was a store
+  // release rather than a settings edit.
+  //
+  // It THROWS on a refusal (not https, a devnet host, unparseable) and that throw is the product:
+  // the caller is the Settings row, which renders the message verbatim. Persistence happens only
+  // AFTER the value is accepted, so a refused edit can never be restored at the next boot. `''`
+  // clears the stored choice and restores the endpoint baked into this build.
+  const persistSolanaRpc = useCallback((url: string) => {
+    setSolanaRpcUrl(url); // throws → the caller shows it; nothing is stored
+    AsyncStorage.setItem(SOLANA_RPC_STORAGE_KEY, url.trim()).catch((e: unknown) => {
+      console.log(`[dpay] failed to persist Solana RPC endpoint: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
@@ -226,7 +254,7 @@ export default function App() {
   // M5: wrap every root in `screenFrame` so the capped (`maxWidth:480`) app column centers on a
   // wide desktop viewport, with the bg filling the honest side margins. At <=480px it is inert.
   if (identity === undefined || !journeyLoaded) {
-    return <View style={S.screenFrame}><SafeAreaView style={[S.root, S.centerAll]}><ActivityIndicator color={C.brand} /></SafeAreaView></View>;
+    return <View style={S.screenFrame}><SafeAreaView style={[S.root, S.centerAll]}><ActivityIndicator color={C.brandText} /></SafeAreaView></View>;
   }
   if (identity === null) {
     return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} onRestored={onRestored} /></View>;
@@ -238,5 +266,5 @@ export default function App() {
     // same marker, so first run is never blocked by it.
     return <View style={S.screenFrame}><Practice identity={identity} relayUrl={relayUrl} onDone={() => markJourneySeen(FIRST_RUN_PRACTICE)} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} setSolanaRpc={persistSolanaRpc} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
 }

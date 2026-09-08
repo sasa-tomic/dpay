@@ -13,6 +13,7 @@ import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals
 import bs58 from 'bs58';
 import {deriveSolanaKeypair} from '../solana/identity';
 import {deriveAta, USDC_MINT_ADDRESS, USDC_DECIMALS, TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
+import {EURC_MINT_ADDRESS} from '../solana/tokens';
 import {SYSTEM_PROGRAM_ADDRESS} from '../solana/constants';
 import type {SolanaRpcStub} from '../solana/rpc';
 import {fetchSolanaHistory, resetSolanaHistoryCache, SOL_HISTORY_LIMIT} from '../solana/history';
@@ -23,6 +24,7 @@ const OWNER = deriveSolanaKeypair('4f66b8c0a9b6e1f2d3a4c5b6e7f8a9b0c1d2e3f4a5b6c
 const PEER = deriveSolanaKeypair('aa'.repeat(32)).address;
 const OTHER = deriveSolanaKeypair('bb'.repeat(32)).address;
 const OWNER_ATA = bs58.encode(deriveAta(OWNER, USDC_MINT_ADDRESS));
+const OWNER_EURC_ATA = bs58.encode(deriveAta(OWNER, EURC_MINT_ADDRESS));
 const PEER_ATA = bs58.encode(deriveAta(PEER, USDC_MINT_ADDRESS));
 
 const RPC = 'https://rpc.example';
@@ -307,6 +309,100 @@ describe('solana history — USDC (SPL)', () => {
   });
 });
 
+describe('solana history — every registered mint, and only registered mints', () => {
+  /** A pre/post token-balance entry for an ARBITRARY mint (the `tokenBalance` helper above is
+   *  USDC's). Used for EURC and for a mint this wallet knows nothing about. */
+  const mintBalance = (accountIndex: number, mint: string, owner: string | undefined, amount: string, decimals: number) => ({
+    accountIndex,
+    mint,
+    ...(owner === undefined ? {} : {owner}),
+    uiTokenAmount: {amount, decimals, uiAmountString: amount},
+  });
+
+  test('one transaction that moves TWO registered tokens produces one row each, in registry order', async () => {
+    // A route that took USDC out and put EURC in. Both are the wallet's, both are accounted, and
+    // the SOL leg is exactly the fee — so the transaction reads as the two token movements it was.
+    installStub(
+      {[OWNER_EURC_ATA]: [sig('SigTwoTokens', 400)]},
+      {SigTwoTokens: tx({
+        keys: [OWNER, OWNER_ATA, OWNER_EURC_ATA, TOKEN_PROGRAM_ADDRESS],
+        pre: [1_000_000_000, ATA_RENT, ATA_RENT, 1],
+        post: [999_995_000, ATA_RENT, ATA_RENT, 1],
+        preTokenBalances: [
+          tokenBalance(1, OWNER, '5000000'),
+          mintBalance(2, EURC_MINT_ADDRESS, OWNER, '1000000', 6),
+          mintBalance(3, EURC_MINT_ADDRESS, PEER, '9000000', 6),
+        ],
+        postTokenBalances: [
+          tokenBalance(1, OWNER, '1000000'),
+          mintBalance(2, EURC_MINT_ADDRESS, OWNER, '4500000', 6),
+          mintBalance(3, EURC_MINT_ADDRESS, PEER, '5500000', 6),
+        ],
+        slot: 400,
+      })},
+    );
+    const {rows, dropped} = await fetchSolanaHistory(RPC, OWNER);
+    expect(dropped).toBe(0);
+    expect(rows.map(r => `${r.token} ${r.direction} ${r.amount}`)).toEqual([
+      'USDC out 4000000',
+      'EURC in 3500000',
+    ]);
+    // The EURC counterparty is determinable (PEER moved the opposite way); the USDC one is not
+    // (nobody else's USDC moved), and "we don't know" is a state, never a guess.
+    expect(rows[0].counterparty).toBeNull();
+    expect(rows[1].counterparty).toBe(PEER);
+    // The lamport delta was exactly the fee, and a token row exists ⇒ no phantom SOL row.
+    expect(rows.some(r => r.token === 'SOL')).toBe(false);
+  });
+
+  test('a token this wallet does not account for is IGNORED — not a row, and not a reason to drop the transaction', async () => {
+    // The foreign entry is deliberately malformed by dpay's rules — no `owner`, wrong-looking
+    // decimals — because those rules exist to protect the wallet's OWN money. Applying them to a
+    // mint the wallet neither holds nor renders would turn someone else's token into a dropped
+    // transaction and hide a real EURC payment behind it.
+    const FOREIGN = 'ENL66PWfCwtoHqmyoTfWaVK6ecCsjSJn87GA1FhVkuqR';
+    installStub(
+      {[OWNER_EURC_ATA]: [sig('SigForeign', 401)]},
+      {SigForeign: tx({
+        keys: [PEER, OWNER_EURC_ATA, TOKEN_PROGRAM_ADDRESS],
+        pre: [1_000_000_000, ATA_RENT, 1],
+        post: [999_995_000, ATA_RENT, 1],
+        preTokenBalances: [
+          mintBalance(1, EURC_MINT_ADDRESS, OWNER, '0', 6),
+          mintBalance(9, FOREIGN, undefined, '123', 9),
+        ],
+        postTokenBalances: [
+          mintBalance(1, EURC_MINT_ADDRESS, OWNER, '2000000', 6),
+          mintBalance(9, FOREIGN, undefined, '0', 9),
+        ],
+        slot: 401,
+      })},
+    );
+    const {rows, dropped} = await fetchSolanaHistory(RPC, OWNER);
+    expect(dropped).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+    expect(rows).toEqual([expect.objectContaining({token: 'EURC', direction: 'in', amount: '2000000'})]);
+  });
+
+  test('a REGISTERED mint that states no owner still fails loudly — the rule protects our own money', async () => {
+    installStub(
+      {[OWNER_EURC_ATA]: [sig('SigNoOwnerEurc', 402)]},
+      {SigNoOwnerEurc: tx({
+        keys: [PEER, OWNER_EURC_ATA, TOKEN_PROGRAM_ADDRESS],
+        pre: [1_000_000_000, ATA_RENT, 1],
+        post: [999_995_000, ATA_RENT, 1],
+        preTokenBalances: [mintBalance(1, EURC_MINT_ADDRESS, undefined, '0', 6)],
+        postTokenBalances: [mintBalance(1, EURC_MINT_ADDRESS, undefined, '2000000', 6)],
+        slot: 402,
+      })},
+    );
+    const {rows, dropped} = await fetchSolanaHistory(RPC, OWNER);
+    expect(rows).toEqual([]);
+    expect(dropped).toBe(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain('SigNoOwnerEurc');
+  });
+});
+
 describe('solana history — ordering, bounds and RPC shape', () => {
   test('both pages are unioned, deduped by signature and ordered newest-first by slot', async () => {
     const {calls} = installStub(
@@ -345,10 +441,10 @@ describe('solana history — ordering, bounds and RPC shape', () => {
     expect(rows).toEqual([]);
     expect(dropped).toBe(0);
     expect(calls.every(c => c.method === 'getSignaturesForAddress')).toBe(true);
-    expect(calls).toHaveLength(2); // the wallet and its USDC ATA — nothing else
+    expect(calls).toHaveLength(3); // the wallet and one ATA per registered mint — nothing else
   });
 
-  test('the JSON-RPC requests query the wallet AND its derived USDC ATA with the exact params', async () => {
+  test('the JSON-RPC requests query the wallet AND its derived ATA for EVERY registered mint, with the exact params', async () => {
     const bodies: {method: string; params: unknown[]}[] = [];
     (globalThis as unknown as {fetch: unknown}).fetch = (_url: string, init?: {body?: string}) => {
       const body = JSON.parse(String(init?.body)) as {method: string; params: unknown[]};
@@ -363,6 +459,7 @@ describe('solana history — ordering, bounds and RPC shape', () => {
     expect(bodies.filter(b => b.method === 'getSignaturesForAddress').map(b => b.params)).toEqual([
       [OWNER, {limit: 7, commitment: 'confirmed'}],
       [OWNER_ATA, {limit: 7, commitment: 'confirmed'}],
+      [OWNER_EURC_ATA, {limit: 7, commitment: 'confirmed'}],
     ]);
     // maxSupportedTransactionVersion is REQUIRED — without it the RPC errors on every v0 transaction.
     expect(bodies.find(b => b.method === 'getTransaction')?.params).toEqual([
@@ -508,7 +605,7 @@ describe('transaction details are read ONCE', () => {
     const second = await fetchSolanaHistory(RPC, OWNER);
     // The list is authoritative and is re-read every cycle (a dropped transaction must vanish);
     // the details behind it are not re-read.
-    expect(listCalls).toBe(4);   // owner + USDC ATA, twice
+    expect(listCalls).toBe(6);   // owner + one ATA per registered mint, twice
     expect(detailCalls).toBe(2); // …and not one detail more
     expect(second.rows).toEqual(first.rows);
   });

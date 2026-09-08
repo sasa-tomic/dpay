@@ -39,6 +39,20 @@ export type ErrorMessages = {
     tokenUnavailable: (asset: string) => string;
     /** Fail-closed sender check: you cannot send a token you hold no account for. */
     senderNoTokenAccount: (asset: string) => string;
+    /**
+     * The two CAVEATS that ride a payment signed without a fact (`solSplSignGate`'s 'unverified'
+     * and 'unverified-rail-down'). Neither may block: an offline payer must keep the ability to
+     * sign a payment that WOULD settle, and the payer who does hold the account is the common
+     * case. So the surface says what it could not check, what it costs if the guess is wrong, and
+     * what to do — and the two differ in exactly that last part, because the user's move differs:
+     *   • `senderTokenAccountUnverified` — no fact and no answer from the endpoint. Finding signal
+     *     fixes it.
+     *   • `senderTokenAccountUnverifiedRailDown` — the endpoint ANSWERED and refused this wallet
+     *     (or served bytes that cannot be trusted). The device is online and the RAIL is down, so
+     *     "get online" would be a lie; the account can only be checked once Solana answers again.
+     */
+    senderTokenAccountUnverified: (asset: string) => string;
+    senderTokenAccountUnverifiedRailDown: (asset: string) => string;
     /** The recipient has no token account; the sender pays its one-time rent and is short of SOL. */
     recipientNoTokenAccount: (solAmount: string, asset: string) => string;
     /** Same rent, own account — the receive-side onboarding pre-check. */
@@ -154,6 +168,10 @@ export const errorsEn: ErrorMessages = {
     tokenUnavailable: asset => `Solana ${asset} is not available (no RPC endpoint configured)`,
     senderNoTokenAccount: asset =>
       `Your wallet doesn't have a ${asset} account yet. Get online once and open Receive ▸ Create my ${asset} account to set it up — or pay this merchant with an asset you already hold`,
+    senderTokenAccountUnverified: asset =>
+      `dpay couldn’t check whether your wallet has a ${asset} account. If it doesn’t, this payment cannot settle. Get online once and open Receive ▸ My address to check it, or to create the account.`,
+    senderTokenAccountUnverifiedRailDown: asset =>
+      `dpay couldn’t check whether your wallet has a ${asset} account — Solana is not answering this wallet, so more signal will not help. If the account doesn’t exist, this payment cannot settle. Open Receive ▸ My address to check it, or to create the account, once Solana answers again.`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `They don't have a ${asset} account yet — creating it needs about ${solAmount} in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`,
     ownTokenAccountRent: (solAmount, asset) =>
