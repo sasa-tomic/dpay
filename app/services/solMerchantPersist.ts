@@ -74,7 +74,7 @@ export async function loadSolMerchantState(pubkeyHex: string): Promise<SolMercha
   try {
     raw = await AsyncStorage.getItem(solMerchantKey(pubkeyHex));
   } catch (e) {
-    console.warn('sol merchant persist failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`sol merchant persist: reading ${solMerchantKey(pubkeyHex)} failed:`, e instanceof Error ? e.message : String(e));
     return null;
   }
   if (raw == null) return null;
@@ -82,7 +82,7 @@ export async function loadSolMerchantState(pubkeyHex: string): Promise<SolMercha
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    console.warn('sol merchant persist failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`sol merchant persist: ${solMerchantKey(pubkeyHex)} holds ${raw.length} bytes that are not JSON:`, e instanceof Error ? e.message : String(e));
     return null; // malformed JSON — swallow, never throw
   }
   return hydrateSolMerchantState(parsed);
@@ -97,7 +97,7 @@ export async function saveSolMerchantState(pubkeyHex: string, state: SolMerchant
   try {
     await AsyncStorage.setItem(solMerchantKey(pubkeyHex), JSON.stringify(envelope));
   } catch (e) {
-    console.warn('sol merchant persist failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`sol merchant persist: writing ${solMerchantKey(pubkeyHex)} failed — a restart will not reconcile this request:`, e instanceof Error ? e.message : String(e));
     /* best-effort — a missed persist just means a restart won't reconcile (merchant re-makes request) */
   }
 }
@@ -107,7 +107,7 @@ export async function clearSolMerchantState(pubkeyHex: string): Promise<void> {
   try {
     await AsyncStorage.removeItem(solMerchantKey(pubkeyHex));
   } catch (e) {
-    console.warn('sol merchant persist failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`sol merchant persist: clearing ${solMerchantKey(pubkeyHex)} failed — a stale request may resume:`, e instanceof Error ? e.message : String(e));
     /* best-effort */
   }
 }

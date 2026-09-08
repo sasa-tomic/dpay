@@ -126,6 +126,7 @@ export const onboardingFr: OnboardingMessages = {
   errOwnSeed:
     'Ce code ne semble pas correct. Collez vos 24 mots de récupération ou votre code de 64 caractères hexadécimaux, exactement comme vous les avez notés.',
   errWords: 'Certains mots sont incorrects ou manquants. Vérifiez que vous avez bien les 24 mots correctement orthographiés.',
+  errSaveWallet: "Ce téléphone n'a pas pu enregistrer votre portefeuille, il n'a donc pas encore été créé. Vos mots sont toujours à l'écran : touchez de nouveau Continuer. Si cela échoue encore, libérez de l'espace de stockage sur le téléphone.",
 
   recoverySaved: {
     stamp: 'Sauvegarde faite',

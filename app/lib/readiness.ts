@@ -97,7 +97,7 @@ export function decideFundsReady(balances: Partial<Record<AssetId, BalanceView>>
  *
  * A confirmed real payment ALSO awards `flowUnderstood`: a payment the user just made IS the
  * flow, demonstrated live (founder rule 2026-08-23: every trip-prep check auto-detects — the
- * first-run rehearsal is unreachable for wallets created before it existed, so without this
+ * first-run practice payment is unreachable for wallets created before it existed, so without this
  * co-award SAW THE FLOW would be a permanent dead end for them). */
 export function awardPaymentTested(journey: Journey): void {
   if (hasStamp(journey, JOURNEY_STAMPS.paymentTested)) return;

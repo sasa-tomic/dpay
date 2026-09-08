@@ -17,6 +17,7 @@ import {payEn, receiveEn} from './domains/en/pay.ts';
 import {onboardingEn, settingsEn} from './domains/en/settings.ts';
 import {educationEn, walletEn} from './domains/en/wallet.ts';
 import {convertEn} from './domains/en/convert.ts';
+import {receiptEn} from './domains/en/receipt.ts';
 
 export const en: Messages = {
   common: {
@@ -42,6 +43,8 @@ export const en: Messages = {
   withdraw: withdrawEn,
 
   convert: convertEn,
+
+  receipt: receiptEn,
 
   nfc: {
     reason: {

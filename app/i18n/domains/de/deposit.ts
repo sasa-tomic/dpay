@@ -56,6 +56,10 @@ export const depositDe: DepositMessages = {
       {t: network, em: true},
       {t: '-Wallet, die es unterstützt, an dein Konto unten.'},
     ],
+    whereFrom: (symbol, network) =>
+      `Sende es aus einer beliebigen Wallet-App, die ${symbol} auf ${network} hält, oder zahle ${symbol} von einer Börse aus, die das ${network}-Netzwerk unterstützt.`,
+    onlyAccepts: (symbol, network) =>
+      `Diese Adresse empfängt ${symbol}, das über ${network} gesendet wird — sonst nichts, und keine Karten- oder Banküberweisung.`,
     noMemo: 'Kein Memo und keine Referenz nötig — eine normale Überweisung an dieses Konto genügt.',
     feeLine: fee => `Netzwerkgebühr ${fee}`,
     custody: asset => `dpay hält deine Schlüssel nie und wechselt nie — ${asset} landet direkt in deiner Wallet.`,
@@ -77,7 +81,7 @@ export const depositDe: DepositMessages = {
     pairFailed: 'Kopplung mit deiner Wallet fehlgeschlagen.',
     wrongNetwork: (networkLabel, expected, actual) =>
       `Falsches Netzwerk: Verbinde dich mit ${networkLabel} (Chain ${expected}). Deine Wallet ist auf Chain ${actual}.`,
-    connectFailed: 'Verbindung zu deiner Wallet fehlgeschlagen.',
+    connectFailed: 'Verbindung zu deiner Wallet fehlgeschlagen. Öffne deine Wallet-App, bestätige dort die Verbindungsanfrage und versuch es dann erneut.',
     noWalletApp: 'Keine Wallet-App gefunden. Scanne den QR-Code stattdessen mit einer Wallet auf einem anderen Gerät.',
     walletDisconnected: 'Wallet getrennt.',
     amountRequired: 'Gib einen Betrag größer als null ein.',
@@ -89,9 +93,9 @@ export const depositDe: DepositMessages = {
     approveUnconfirmed:
       'Die Freigabe wurde gesendet, aber nicht bestätigt, die Einzahlung wurde also nie gesendet und es hat kein Geld deine Wallet verlassen. Warte einen Moment und versuch es erneut: Deine Wallet fragt dann noch einmal nach der Freigabe — das ist normal und kostet nur Gas.',
     depositHashUnknown:
-      'Deine Wallet hat die Einzahlung angenommen, aber keine Transaktions-ID zurückgegeben — dpay kann daher nicht erkennen, ob sie gesendet wurde. Sieh in deiner Wallet-App in den letzten Aktivitäten nach, bevor du es erneut versuchst: Ist die Einzahlung dort, wird sie in etwa 20 Minuten gutgeschrieben, und eine zweite Einzahlung würde das Geld doppelt senden.',
+      'Sieh in deiner Wallet-App in den letzten Aktivitäten nach, bevor du es erneut versuchst: Ist die Einzahlung dort, wird sie in etwa 20 Minuten gutgeschrieben, und eine zweite Einzahlung würde das Geld doppelt senden.',
     approveHashUnknown:
-      'Deine Wallet hat die Freigabe angenommen, aber keine Transaktions-ID zurückgegeben — dpay kann daher nicht erkennen, ob sie gesendet wurde. Es wurde nichts eingezahlt und es hat kein Geld deine Wallet verlassen. Sieh in deiner Wallet-App in den letzten Aktivitäten nach und versuch es dann erneut — sie fragt zuerst nach der Freigabe, das ist normal und kostet nur Gas.',
+      'Es wurde nichts eingezahlt und es hat kein Geld deine Wallet verlassen. Sieh in deiner Wallet-App in den letzten Aktivitäten nach und versuch es dann erneut — sie fragt zuerst nach der Freigabe, das ist normal und kostet nur Gas.',
     txNotSigned: 'Transaktion nicht signiert.',
     txFailed: 'Transaktion fehlgeschlagen.',
     allowanceStands:
@@ -206,7 +210,6 @@ export const withdrawDe: WithdrawMessages = {
     withdrawing: amount => `${amount} werden ausgezahlt…`,
     sendToNative: (networkLabel, nativeAsset) => `Sende dein ${networkLabel} an eine native ${nativeAsset}-Adresse`,
     availableMin: (available, min) => `Verfügbar: ${available} · min. ${min}`,
-    addressLabel: asset => `${asset}-Adresse`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Unter der Mindestauszahlung von ${min}.`,
     gasNote: 'Du brauchst ckETH für Gas. Zahle zuerst ckETH ein, falls du keins hast.',

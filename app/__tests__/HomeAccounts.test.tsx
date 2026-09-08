@@ -46,7 +46,6 @@ function mount(
         homeCurrency="CHF"
         demoFaucetAvailable={true}
         topUpBusy={false}
-        topUpErr={null}
         hasTestnet={false}
         showTestnet={false}
         onToggleTestnet={jest.fn()}

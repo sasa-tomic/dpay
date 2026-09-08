@@ -57,6 +57,10 @@ export const depositEs: DepositMessages = {
       {t: network, em: true},
       {t: ' que lo soporte a tu cuenta de abajo.'},
     ],
+    whereFrom: (symbol, network) =>
+      `Envíalo desde cualquier app de billetera que tenga ${symbol} en ${network}, o retira ${symbol} de un exchange que admita la red ${network}.`,
+    onlyAccepts: (symbol, network) =>
+      `Esta dirección recibe ${symbol} enviado por ${network}: nada más, y ningún pago con tarjeta ni transferencia bancaria.`,
     noMemo: 'No hace falta memo ni referencia — una transferencia normal a esta cuenta es suficiente.',
     feeLine: fee => `Comisión de red ${fee}`,
     custody: asset => `dpay nunca guarda tus claves ni convierte — ${asset} llega directamente a tu billetera.`,
@@ -78,7 +82,7 @@ export const depositEs: DepositMessages = {
     pairFailed: 'No se pudo vincular con tu billetera.',
     wrongNetwork: (networkLabel, expected, actual) =>
       `Red incorrecta: conéctate a ${networkLabel} (cadena ${expected}). Tu billetera está en la cadena ${actual}.`,
-    connectFailed: 'No se pudo conectar con tu billetera.',
+    connectFailed: 'No se pudo conectar con tu billetera. Abre tu app de billetera, aprueba allí la solicitud de conexión y vuelve a intentarlo.',
     noWalletApp: 'No se encontró ninguna app de billetera. Escanea el QR con una billetera en otro dispositivo.',
     walletDisconnected: 'Billetera desconectada.',
     amountRequired: 'Introduce un importe mayor que cero.',
@@ -90,9 +94,9 @@ export const depositEs: DepositMessages = {
     approveUnconfirmed:
       'La aprobación se envió pero no se confirmó: el depósito nunca se envió y no salió dinero de tu billetera. Espera un momento y vuelve a intentarlo; tu billetera pedirá la aprobación otra vez, es lo normal y solo cuesta gas.',
     depositHashUnknown:
-      'Tu billetera aceptó el depósito pero no devolvió un identificador de transacción, así que dpay no puede saber si se envió. Revisa la actividad reciente en tu app de billetera antes de volver a intentarlo: si el depósito está ahí, se acreditará en unos 20 minutos, y depositar otra vez enviaría el dinero dos veces.',
+      'Revisa la actividad reciente en tu app de billetera antes de volver a intentarlo: si el depósito está ahí, se acreditará en unos 20 minutos, y depositar otra vez enviaría el dinero dos veces.',
     approveHashUnknown:
-      'Tu billetera aceptó la aprobación pero no devolvió un identificador de transacción, así que dpay no puede saber si se envió. No se hizo ningún depósito y no salió dinero de tu billetera. Revisa la actividad reciente en tu app de billetera y vuelve a intentarlo: pedirá primero la aprobación, es lo normal y solo cuesta gas.',
+      'No se hizo ningún depósito y no salió dinero de tu billetera. Revisa la actividad reciente en tu app de billetera y vuelve a intentarlo: pedirá primero la aprobación, es lo normal y solo cuesta gas.',
     txNotSigned: 'La transacción no se firmó.',
     txFailed: 'La transacción falló.',
     allowanceStands:
@@ -206,7 +210,6 @@ export const withdrawEs: WithdrawMessages = {
     withdrawing: amount => `Retirando ${amount}…`,
     sendToNative: (networkLabel, nativeAsset) => `Envía tu ${networkLabel} a una dirección nativa de ${nativeAsset}`,
     availableMin: (available, min) => `Disponible: ${available} · mín. ${min}`,
-    addressLabel: asset => `Dirección de ${asset}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Está por debajo del retiro mínimo de ${min}.`,
     gasNote: 'Necesitas ckETH para el gas. Si no tienes, añade ckETH primero.',

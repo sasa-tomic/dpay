@@ -78,5 +78,11 @@ function toTxn(row: SolanaHistoryRow): Txn {
     ts,
     dir: row.direction,
     assetId: row.token === 'SOL' ? 'solana:SOL' : 'solana:USDC',
+    // The receipt's two fields (X6). The FULL base58 counterparty, '' when it is not uniquely
+    // determinable (same rule as `who` above, unabbreviated); and the transaction SIGNATURE, which
+    // is this rail's proof — Solana records no dpay reference, so the receipt says that instead of
+    // rendering an empty Reference row.
+    counterparty: row.counterparty ?? '',
+    ledgerRef: row.signature,
   };
 }

@@ -34,7 +34,7 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
         <Camera key={epoch} style={StyleSheet.absoluteFill} device={device} isActive={appActive} codeScanner={codeScanner} />
       ) : hasPermission ? (
         <View style={S.camPlaceholder}>
-          <Text style={S.dim2}>{M.pay.noCameraFound}</Text>
+          <Text style={S.camSubText}>{M.pay.noCameraFound}</Text>
         </View>
       ) : (
         // The WHOLE camera box is the tap target while permission is absent (defer-to-intent:
@@ -46,9 +46,15 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
         // deepest touchable (the button) wins. S.camPlaceholder keeps flex:1 so the box layout
         // is unchanged.
         <Pressable style={S.camPlaceholder} onPress={requestPermission}>
-          <Text style={S.reviewTo}>{M.pay.pointCamera}</Text>
-          <Text style={S.dim2}>{M.pay.cameraPrivacy}</Text>
-          <Pressable style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={M.pay.allowCameraScan} accessibilityHint={M.pay.allowCameraScanHint} accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>{M.pay.allowCameraScan}</Text></Pressable>
+          {/* X17 — on-camera-box inks, never the porcelain page's `sub` tokens (which measured
+              3.0:1 here). See `S.camText`/`S.camSubText`. */}
+          <Text style={S.camText}>{M.pay.pointCamera}</Text>
+          <Text style={S.camSubText}>{M.pay.cameraPrivacy}</Text>
+          {/* The permission gesture is a GATE a test has to pass through, so it gets a stable
+              testID like every other gate in the app: `e2e/web-scan-smoke.mjs` had to address it
+              by its localised aria-label, which is exactly the coupling Tab.tsx refuses for the
+              same reason — the selector renames itself the moment a locale lands. */}
+          <Pressable testID="btn-allow-camera" style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={M.pay.allowCameraScan} accessibilityHint={M.pay.allowCameraScanHint} accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>{M.pay.allowCameraScan}</Text></Pressable>
         </Pressable>
       )}
     </View>

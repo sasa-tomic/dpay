@@ -96,11 +96,25 @@ export type Identity = {secretHex: string; publicHex: string; username: string};
 // sorted lists needs the raw unix SECONDS that produced it. It is `NaN` when the source has no time
 // (a Solana block whose `blockTime` the node does not have) — never `now`: `fmtTime` renders a
 // non-finite `ts` as '—' and `lib/ledger.ts#mergeHistoryByTime` sorts those rows last.
-export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; ts: number; dir: 'out' | 'in'; assetId: AssetId};
+//
+// `counterparty` and `ledgerRef` are what the RECEIPT (components/HistoryRow.tsx `TxnReceipt`) is
+// built from — a merchant who was paid has to be able to show what they were paid, and `who` is a
+// truncated display label, not a proof. Both are rail-agnostic in NAME and rail-specific in
+// MEANING, which the receipt dispatches on `assetId`:
+//   • `counterparty` — the other side's FULL account text (an IC principal, a Solana base58
+//     address). '' when the ledger recorded none on that side: an IC mint has no payer, a burn has
+//     no payee, and a Solana batch/failed transaction has no uniquely determinable counterparty.
+//     The receipt says that rather than rendering an empty labelled row.
+//   • `ledgerRef` — the row's identity ON ITS LEDGER: the BLOCK INDEX (decimal) on the IC rail,
+//     which is the only stable identity an IC row has (`nonce` is always '' there); the
+//     transaction SIGNATURE (base58) on Solana. Never empty — every settled row has one.
+export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; ts: number; dir: 'out' | 'in'; assetId: AssetId; counterparty: string; ledgerRef: string};
 // One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex). The
 // relay returns from_name/to_name/memo as JSON STRINGS (NUL-trimmed, lossy; may be ""). `amount` is
 // a decimal-digit string (MC1 units 2-4: protocol u64 amounts cross the JSON boundary as strings).
-export type TransactionsRow = {from: string; to: string; amount: string; nonce: string; currency: number; timestamp: number; from_name: string; to_name: string; memo: string};
+// `block` is the row's ledger BLOCK INDEX, a raw JSON number (bounded ≪ 2^53) — the authority for
+// its meaning is `TxnRecord::block` in crates/dpay-relay/src/ledger/types.rs.
+export type TransactionsRow = {from: string; to: string; amount: string; nonce: string; currency: number; timestamp: number; block: number; from_name: string; to_name: string; memo: string};
 export type DpayCoreApi = {
   generateKeypair(): Promise<{secretHex: string; publicHex: string}>;
   // Derive the Ed25519 keypair from a 32-byte recovery seed (64 hex chars — the value Backup

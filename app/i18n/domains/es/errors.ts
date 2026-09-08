@@ -26,10 +26,19 @@ export const errorsEs: ErrorMessages = {
       `Crear tu cuenta de ${asset} requiere unos ${solAmount} en esta billetera (renta de la cuenta y comisión, una sola vez); envía un poco de SOL aquí primero`,
   },
 
+  rail: {
+    unreadable: network =>
+      `${network} no responde, así que estos saldos están desactualizados. No se movió nada, tus otras cuentas funcionan y dpay sigue reintentando.`,
+  },
+
   ethWallet: {
     receiptReverted: hash => `la transacción ${hash} se revirtió en la cadena`,
     receiptTimeout: hash => `la transacción ${hash} no se minó dentro del tiempo de espera`,
-    hashMissing: received => `tu billetera aceptó la transacción pero no devolvió ningún identificador de transacción (${received})`,
+    hashMissing: received =>
+      `Tu billetera respondió sin identificador de transacción (${received}), así que dpay no puede saber si se envió.`,
+    sendTimedOut: 'Tu billetera no respondió, así que dpay no puede saber si la transacción se envió.',
+    requestTimedOut:
+      'Tu billetera no respondió. Abre tu app de billetera, atiende cualquier solicitud pendiente y vuelve a intentarlo.',
     pairingTimedOut: 'se agotó el tiempo de vinculación: ninguna billetera escaneó el código en 5 min',
     pairingFailed: detail => `Falló la vinculación con WalletConnect: ${detail}`,
     invalidChainId: value =>

@@ -7,9 +7,9 @@
  * `<symbol> · <network>` subtitle joiner, the fail-closed `Unsupported` sentinel, testnet naming).
  *
  * EDUCATION covers everything that teaches the dpay model: the campaign line, the 3-scene
- * walkthrough, the payment rehearsal, the contextual coaching tips, and the Trip Readiness
+ * walkthrough, the first-run practice payment, the contextual coaching tips, and the Trip Readiness
  * passport (stamps, archive page, capstone). `config/education.ts` and `lib/readiness.ts` compose
- * their export shapes (`walkthroughScenes()`, `rehearsalSteps()`, `passportStamps()`) out of the
+ * their export shapes (`walkthroughScenes()`, `passportStamps()`) out of the
  * copy below — the ids, visual keys and display ORDER stay with the logic that owns them; only the
  * words live here. Those are FUNCTIONS, not constants, precisely because a locale switch replaces
  * this object wholesale: anything captured at module load would keep rendering the old language.
@@ -19,13 +19,11 @@
  * symbols (DEMO/BTC/USDC/SOL) and network names (Bitcoin/Ethereum/Solana) are locale-invariant
  * product identity and are NOT in this catalog.
  */
-import type {CoachTipKey, RehearsalStepId, WalkthroughSceneId} from '../../../config/education';
+import type {CoachTipKey, WalkthroughSceneId} from '../../../config/education';
 import type {ReadinessKey} from '../../../lib/readiness';
 
 /** One walkthrough scene's words. The scene's id, illustration key and order live in education.ts. */
 export type WalkthroughSceneCopy = {eyebrow: string; title: string; body: string};
-/** One rehearsal beat's words. The beat's id, illustration key and order live in education.ts. */
-export type RehearsalStepCopy = {title: string; body: string};
 /** One coaching tip's words. Its surface key + glyph live in education.ts / CoachTip.tsx. */
 export type CoachTipCopy = {title: string; body: string};
 /** One passport stamp's words: the two-line inked label, the next-step hint, the strip phrase. */
@@ -190,17 +188,6 @@ export type WalletMessages = {
     demoFundsLabel: string;
     demoFundsHint: string;
     needsSetup: string;
-    /** The row's balance could not be READ (status 'error' — the chain's endpoint refused or
-     *  failed, e.g. an RPC rate limit). Distinct from a not-yet-answered first poll, which says
-     *  nothing at all. Names the network so the user knows it is not their wallet, states that
-     *  nothing moved, points at the accounts that still work, and says the retry is automatic —
-     *  the polling loop re-reads on its own, so there is no button to promise.
-     *
-     *  It speaks about the READ, never about the figure, because ONE status covers two displays:
-     *  a first poll that failed shows "—", while a later failure keeps the last value it read
-     *  (assetBalances never zeroes a balance on an RPC error). "Balance unreadable" would have
-     *  contradicted the amount still sitting on the row in the second case. */
-    railUnreadable: (network: string) => string;
     select: (symbol: string) => string;
     selectHint: string;
     selectSolanaHint: (symbol: string) => string;
@@ -358,8 +345,6 @@ export const walletEn: WalletMessages = {
     demoFundsLabel: 'Get demo funds',
     demoFundsHint: 'Add ∂100 of demo money to this wallet',
     needsSetup: 'Needs setup',
-    railUnreadable: network =>
-      `The ${network} network is not answering right now, so this balance could not be refreshed. It is that connection, not your wallet: your coins are untouched, and your other accounts still work. dpay keeps retrying on its own.`,
     select: symbol => `Select ${symbol}`,
     selectHint: "Show this asset's balance on your home screen",
     selectSolanaHint: symbol => `Show ${symbol} on your home screen and use the Solana rail for Pay/Receive`,
@@ -423,19 +408,65 @@ export type EducationMessages = {
     shopRequests: string;
   };
 
-  rehearsal: {
-    /** The page's own title line — mounting the page IS seeing the flow. */
-    title: string;
+  /**
+   * The first-run PRACTICE payment (spec docs/specs/2026-09-08-first-run-redesign.md §3): one
+   * real ∂1.00 DEMO transfer to a pinned practice payee, made alone, on this device, before the
+   * app asks the user to decide anything.
+   *
+   * Copy rule, the catalog's own: interpolation is a typed FUNCTION and never a spliced verb, and
+   * every state gets a COMPLETE sentence per branch rather than one sentence with a hole in it
+   * (`fundBody` is the model). Outcome HEADLINES are deliberately absent from this block for the
+   * two states the pay screen already names — a settled practice payment reads `M.nfc.paidAmount`
+   * and a pending one reads `M.pay.sent`, because they are the same events and one copy is the
+   * point.
+   */
+  practice: {
     /** The sheet-chrome header title. */
     sheetTitle: string;
-    /** The three beats' words, keyed by step id (order + illustration live in education.ts). */
-    steps: Record<RehearsalStepId, RehearsalStepCopy>;
-    stageTags: readonly [string, string, string];
-    /** The closing comprehension pin: approval + handoff need no signal. */
-    punchline: string;
+    /** The request card's corner tag — the walkthrough's stage-tag grammar. */
+    eyebrow: string;
+    /**
+     * The practice payee's display name. It rides the 132-byte wire request, whose name field is
+     * 32 BYTES — every locale's translation must fit that, in UTF-8.
+     */
+    payeeName: string;
+    /** The page's own title line. */
+    title: string;
+    /** The one line under the request card. */
+    cardLine: string;
+    /** The real, polled practice balance above the card. */
+    balance: (amount: string) => string;
+    review: string;
+    reviewHint: string;
     skip: string;
     skipHint: string;
-    try: string;
+    /**
+     * The one line practice adds to the real review: why practising needs a connection when the
+     * product does not. Both halves in one sentence — the exception and the rule.
+     */
+    bothSides: string;
+    /** The ledger settled it: what actually happened, then what is left. */
+    settledBody: string;
+    settledBalance: (amount: string) => string;
+    /** Signed and sent, outcome unknown. Never a success, never a failure. */
+    pendingBody: string;
+    /** The ledger refused it. `reason` is the ledger's own decoded words, shown verbatim. */
+    refusedTitle: string;
+    refusedBody: string;
+    /** The ONE exit from every outcome — practice never blocks the first run. */
+    continue: string;
+    continueHint: string;
+    /** The permanent footer: play money, and nothing is being sold. */
+    punchline: string;
+    /**
+     * The fail-closed branches. Each names what the user can do next (founder rule 2026-08-29) and
+     * NONE of them offers a deposit address or an add-money action: nothing may ask a new user for
+     * funds before the app has given them anything (anti-scam rule R1).
+     */
+    noFaucet: {title: string; body: string};
+    cooldown: {title: string; body: (reason: string) => string};
+    offline: {title: string; body: string};
+    empty: {title: string; body: string};
   };
 
   /** One-time contextual coaching, keyed by the surface its truth applies to. */
@@ -512,28 +543,42 @@ export const educationEn: EducationMessages = {
     shopRequests: 'Shop requests',
   },
 
-  rehearsal: {
-    title: 'Practice one payment safely',
-    sheetTitle: 'DEMO practice',
-    steps: {
-      request: {
-        title: 'On the other phone: request ∂1',
-        body: 'Open dpay on another phone, choose DEMO, tap Receive, enter 1, then tap Request.',
-      },
-      approve: {
-        title: 'On this phone: scan and check',
-        body: "Choose DEMO, tap Pay, and scan the other phone's dpay code. Check ∂1 and the recipient before approving.",
-      },
-      settle: {
-        title: 'Then switch roles',
-        body: 'To practice receiving, make a ∂1 DEMO request on this phone and scan it with the other phone.',
-      },
-    },
-    stageTags: ['01 — RECEIVE', '02 — PAY', '03 — SWITCH'],
-    punchline: 'DEMO is practice money with no cash value. This walkthrough never asks you to deposit or buy anything.',
+  practice: {
+    sheetTitle: 'Practice payment',
+    eyebrow: 'PRACTICE',
+    payeeName: 'Practice shop',
+    title: 'Make one payment, for real',
+    cardLine: 'This is the code a shop would show you.',
+    balance: amount => `You have ${amount} of practice money.`,
+    review: 'Review payment',
+    reviewHint: 'See the amount and the recipient before you approve',
     skip: 'Skip practice',
-    skipHint: 'Skip the practice guide and choose your main currency',
-    try: 'Choose my currency',
+    skipHint: 'Skip the practice payment and choose your main currency',
+    bothSides: 'Your phone is playing both sides here, so this practice needs a connection. On a trip, only the shop needs one.',
+    settledBody: 'That was a real payment on the practice ledger — your phone signed it and the ledger settled it.',
+    settledBalance: amount => `${amount} of practice money left.`,
+    pendingBody: 'The payment was signed and sent. dpay has not seen it settle yet, so nothing is confirmed. This is exactly what a real pending payment looks like.',
+    refusedTitle: 'The ledger refused it',
+    refusedBody: 'Nothing moved.',
+    continue: 'Continue setup',
+    continueHint: 'Go on to choosing your main currency',
+    punchline: 'Practice money has no cash value. dpay never asks you to deposit or buy anything to try it.',
+    noFaucet: {
+      title: 'No practice money here',
+      body: 'This server is not handing out practice money, so there is nothing to practise with. Nothing is missing from your wallet — carry on and pick your currency, and you can make your first real payment whenever you like.',
+    },
+    cooldown: {
+      title: 'Practice money, in a moment',
+      body: reason => `This server hands out practice money once in a while, and it has just done so. It said: ${reason} Carry on with setup — you can come back and pay any time.`,
+    },
+    offline: {
+      title: 'This practice needs a connection',
+      body: 'Your phone is playing both the shop and the payer here, so it has to reach the ledger itself. A real payment does not: the shop is the one that needs a connection. Reconnect and try again, or carry on with setup.',
+    },
+    empty: {
+      title: 'Nothing to practise with yet',
+      body: 'Your practice balance is empty, so there is nothing to pay with. Nothing is wrong with your wallet — carry on and pick your currency.',
+    },
   },
 
   coachTips: {
@@ -561,7 +606,7 @@ export const educationEn: EducationMessages = {
     title: 'Trip readiness',
     stamps: {
       recoverySaved: {label: 'BACKED\nUP', hint: 'Copy your backup words in Settings', short: 'back up to go'},
-      flowUnderstood: {label: 'SAW THE\nFLOW', hint: 'Watch the rehearsal when creating a wallet — or make any payment', short: 'see how it works to go'},
+      flowUnderstood: {label: 'SAW THE\nFLOW', hint: 'Make the practice payment on your first run — or make any payment', short: 'see how it works to go'},
       fundsReady: {label: 'FUNDS\nLOADED', hint: 'Add money you can spend — practice funds do not count', short: 'add funds to go'},
       paymentTested: {label: 'FIRST\nPAYMENT', hint: 'Complete a payment — pay or receive', short: 'one payment to go'},
     },

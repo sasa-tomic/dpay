@@ -40,6 +40,8 @@ function txn(assetId: AssetId, amount: string, ts: number, overrides: Partial<Tx
     ts,
     dir: 'out',
     assetId,
+    counterparty: 'aaaaa-aa',
+    ledgerRef: '4211',
     ...overrides,
   };
 }
@@ -59,7 +61,7 @@ function testIDs(tree: renderer.ReactTestRenderer): string[] {
 
 function mount(history: Txn[], dropped = 0): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
-  act(() => { tree = renderer.create(<Ledger history={history} catalog={CATALOG} assets={ASSETS} dropped={dropped} />); });
+  act(() => { tree = renderer.create(<Ledger history={history} catalog={CATALOG} assets={ASSETS} dropped={dropped} onOpenReceipt={() => {}} />); });
   return tree;
 }
 

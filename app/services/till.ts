@@ -316,8 +316,11 @@ export async function tillChargeStatus(relayUrl: string, id: string): Promise<Ti
   }
   const status = parseStatus(json);
   if (status === null) {
+    // The BODY is the whole diagnostic here — this branch is reached only on a 2xx whose JSON
+    // parsed and then failed the shape check, so "unreadable" without it says nothing. The two
+    // sibling parsers in this file both carry an excerpt; this one did not.
     const detail = `charge ${id} answered an unreadable status body`;
-    console.warn(`till: ${detail}`);
+    console.warn(`till: ${detail}: ${JSON.stringify(json).slice(0, 200)}`);
     return {kind: 'unchecked', detail};
   }
   return {kind: 'status', status};

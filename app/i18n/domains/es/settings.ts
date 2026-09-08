@@ -124,6 +124,7 @@ export const onboardingEs: OnboardingMessages = {
   errOwnSeed:
     'Esa semilla no parece correcta. Pega tus 24 palabras de recuperación o la semilla de 64 hex tal como las anotaste.',
   errWords: 'Hay palabras incorrectas o que faltan. Revisa que estén las 24 y bien escritas.',
+  errSaveWallet: 'Este teléfono no pudo guardar tu monedero, así que todavía no se ha creado. Tus palabras siguen en pantalla: vuelve a tocar Continuar. Si sigue fallando, libera espacio de almacenamiento en el teléfono.',
 
   recoverySaved: {
     stamp: 'Copia guardada',

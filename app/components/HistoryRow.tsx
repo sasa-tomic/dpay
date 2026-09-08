@@ -1,11 +1,14 @@
-import {View, Text} from 'react-native';
+import {Pressable, ScrollView, Text, View} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
 import {C} from '../config/palette';
-import {fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
+import {fmtCurrencyAmount, fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
-import {fmtAssetCompact} from '../lib/format';
-import {IconArrowDownLeft, IconArrowUpRight} from './icons';
+import {fmtAsset, fmtAssetCompact} from '../lib/format';
+import {useCopyFeedback} from '../hooks/useCopyFeedback';
+import {useEscapeToClose} from '../hooks/useHotkeys';
+import {AppModal} from './AppModal';
+import {IconArrowDownLeft, IconArrowUpRight, IconCopy} from './icons';
 import type {Txn} from '../lib/types';
 
 // One row's amount in the row's OWN units, dispatched on rail. History is a glanceable surface, so
@@ -28,15 +31,41 @@ export function fmtRowAmount(t: Txn, catalog: CurrencyDescriptor[], assets: Sele
     : fmtAssetCompact(t.amount, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
 }
 
+// The RECEIPT's amount — the same dispatch, through the EXACT formatters. A receipt is a
+// money-committed surface (`fmtAsset`'s own rule: "the exact formatter keeps every surface where
+// the user commits money … receipts"), so it never carries the row's compact trim or its "≈"
+// truncation marker: a merchant showing what they were paid must be able to show every digit the
+// ledger recorded. The sign is a plain prefix here — the exact formatters emit no marker for it to
+// land inside.
+function fmtReceiptAmount(t: Txn, catalog: CurrencyDescriptor[], asset: SelectableAsset | undefined): string {
+  if (!asset) return M.wallet.asset.unsupported;
+  const sign = t.dir === 'out' ? '−' : '+';
+  return asset.protocol === 'ic'
+    ? `${sign}${fmtCurrencyAmount(catalog, asset.currency, t.amount)}`
+    : `${sign}${fmtAsset(t.amount, asset.decimals, asset.symbol)}`;
+}
+
 // One transaction row — the shared renderer extracted verbatim from Ledger's list map so the Home
 // tab's inline activity feed renders the IDENTICAL row grammar (direction glyph, counterparty,
 // own-unit amount, time). The rendered output for the Ledger is byte-stable: `testPrefix` defaults
 // to the Ledger's historical 'hist' testID namespace, and a second surface (the Home activity feed)
 // passes its own ('home-hist') instead of the two sharing selectors — e2e anchors stay per-surface.
-export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist'}: {t: Txn; i: number; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; testPrefix?: string}) {
+//
+// X6 — the row is PRESSABLE and opens its receipt. `onPress` is required, not optional: a row that
+// only some surfaces can open is the defect this closes (the merchant-reconciliation and dispute
+// path did not exist). Both list surfaces get the opener from `useTxnReceipt` below.
+export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress}: {t: Txn; i: number; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; testPrefix?: string; onPress: (t: Txn) => void}) {
   const amtTxt = fmtRowAmount(t, catalog, assets);
   return (
-    <View style={S.histRow}>
+    <Pressable
+      testID={`${testPrefix}-row-${i}`}
+      style={S.histRow}
+      onPress={() => onPress(t)}
+      accessibilityRole="button"
+      accessibilityLabel={M.receipt.openRow}
+      accessibilityHint={M.receipt.openRowHint}
+      accessibilityState={{disabled: false}}
+    >
       {/* P4 — direction glyph leading each row (t.dir is Txn's reliable 'out' | 'in' field):
           incoming = arrow-down-left in ok green (matching the credited amount; tangerine stays
           reserved for CTA/active), outgoing = arrow-up-right neutral. The icon renders no
@@ -46,13 +75,144 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist'}: {t: Txn
       </View>
       <View style={S.histWhoCol}>
         <Text style={S.histWho}>{t.dir === 'out' ? M.wallet.ledger.to(t.who || '—') : M.wallet.ledger.from(t.who || '—')}</Text>
-        {t.memo ? <Text style={S.histMemo} testID={`${testPrefix}-memo-${i}`}>{t.memo}</Text> : null}
+        {/* Second line: WHEN, then the memo. The time used to sit to the right of the amount, where
+            its own width changes (the hour's 1↔2 digits) pushed the amount sideways — the rule and
+            the measurement are on `S.histAmt`. Here its width is absorbed by the flexible column.
+            The visual flows (40/84) still MASK it on the Ledger: the digits differ every run. */}
+        <View style={S.histSubRow}>
+          <Text style={S.histTime} testID={`${testPrefix}-time-${i}`}>{t.time}</Text>
+          {t.memo ? <Text style={S.histMemo} testID={`${testPrefix}-memo-${i}`}>{t.memo}</Text> : null}
+        </View>
       </View>
-      <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]}>{amtTxt}</Text>
-      {/* testID: the visual flows (40/84) MASK this element on the Ledger — the rendered time is
-          inherently time-varying (minute digits + 1↔2-digit hour width), so an unmasked
-          diff is a standing flake riding just under the 0.5% tolerance. */}
-      <Text style={S.histTime} testID={`${testPrefix}-time-${i}`}>{t.time}</Text>
+      <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]} testID={`${testPrefix}-amt-${i}`}>{amtTxt}</Text>
+    </Pressable>
+  );
+}
+
+// ─── The receipt (X6) ──────────────────────────────────────────────────────────────────────────
+// A transaction row used to be dead: no press handler, no detail, no reference, no ledger id, no
+// way to copy a proof. That is the merchant-reconciliation and dispute path, and it did not exist —
+// a merchant who was paid could not show WHAT they were paid.
+//
+// THE RULE: a field renders only when the rail really provides it. The two rails record different
+// things, and the difference is not cosmetic —
+//   • Internet Computer: the transfer's ICRC memo is the payee's reconciliation key (`nonce` in
+//     CLAUDE.md's terms table), and the row's identity is its LEDGER BLOCK INDEX (an IC row's
+//     `Txn.nonce` is always empty, so the block is the only stable id it has).
+//   • Solana: a transfer made here carries no dpay reference at all; its identity is the
+//     transaction SIGNATURE.
+// Where a rail provides nothing, the receipt prints ONE honest sentence saying so — never a label
+// over an empty value, which in a dispute reads as a value that failed to load.
+
+/** Everything the receipt shows, resolved once so the rendered sheet and the copied text cannot
+ *  disagree. Pure. `assets`/`catalog` supply the unit and the asset line, exactly as the row does. */
+function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[]) {
+  const asset = assets.find(a => a.id === t.assetId);
+  const solana = asset?.protocol === 'solana';
+  return {
+    solana,
+    amount: fmtReceiptAmount(t, catalog, asset),
+    assetLine: asset?.networkLabel ?? M.wallet.asset.unsupported,
+    partyLabel: t.dir === 'out' ? M.receipt.toLabel : M.receipt.fromLabel,
+    // The FULL account, never the row's truncated display label — a truncated principal proves
+    // nothing. '' means the ledger recorded no account on that side (an IC mint has no payer, a
+    // burn no payee, a Solana batch no unique counterparty), which is said rather than left blank.
+    account: t.counterparty || M.receipt.noAccount,
+    // The reference is the IC rail's memo. Solana has none, and says which rail fact replaces it.
+    reference: solana ? M.receipt.noReferenceSolana : (t.memo || M.receipt.noReferenceIc),
+    referenceIsValue: !solana && t.memo.length > 0,
+    proofLabel: solana ? M.receipt.signatureLabel : M.receipt.blockLabel,
+    proof: t.ledgerRef,
+    // A FAILED Solana transaction moved nothing and was charged only the fee. The row carries that
+    // status in its memo slot (`hooks/useSolanaHistory.ts#toTxn`), and a receipt for it must repeat
+    // it — "−0.000005 SOL" alone reads as a tiny successful payment.
+    status: solana ? t.memo : '',
+  };
+}
+
+/** The receipt as PLAIN TEXT — what the copy button puts on the clipboard, and what a merchant
+ *  pastes into a dispute. Every line the sheet renders, in the same order; no label is ever emitted
+ *  without a value, because the honest-absence sentences ARE the values. */
+export function receiptText(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[]): string {
+  const f = receiptFields(t, catalog, assets);
+  const lines = [
+    M.receipt.title,
+    `${M.receipt.amountLabel}: ${f.amount}`,
+    `${M.receipt.assetLabel}: ${f.assetLine}`,
+    `${f.partyLabel}: ${f.account}`,
+    `${M.receipt.whenLabel}: ${t.time}`,
+    `${M.receipt.referenceLabel}: ${f.reference}`,
+    `${f.proofLabel}: ${f.proof}`,
+  ];
+  if (f.status) lines.splice(1, 0, f.status);
+  return lines.join('\n');
+}
+
+/** One label + value block. The value is LEFT-aligned mono on its own line rather than right-
+ *  aligned beside the label: a 63-character IC principal is the thing a payee checks character by
+ *  character, and the review-card's right-aligned value row wraps it into a ragged column. */
+function Field({label, value, testID, note = false}: {label: string; value: string; testID: string; note?: boolean}) {
+  return (
+    <View style={S.receiptField}>
+      <Text style={S.receiptLabel}>{label}</Text>
+      <Text testID={testID} style={note ? S.receiptNote : S.receiptValue} selectable={!note}>{value}</Text>
     </View>
+  );
+}
+
+/**
+ * MOUNT POINT: the Wallet ROOT, beside the other overlays — never inside a list.
+ * `AppModal`'s web host is `SheetOverlay` (`position:absolute; inset:0`), whose containing block is
+ * the nearest positioned ancestor; rendered inside `Ledger` or the Home feed it therefore covered
+ * only that list's own box, and a card taller than it was clipped at the top (measured: the amount,
+ * the asset line and the payer's account were all off-surface). One owner, one instance: Wallet
+ * holds the selected `Txn` and both lists hand rows to it.
+ */
+export function TxnReceipt({t, catalog, assets, onClose}: {t: Txn; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; onClose: () => void}) {
+  const f = receiptFields(t, catalog, assets);
+  const {copied, copy} = useCopyFeedback();
+  useEscapeToClose(onClose);
+  return (
+    <AppModal onRequestClose={onClose}>
+      {/* The centered-card idiom the wallet already uses for a short explanatory surface (the
+          pay-link refusal): backdrop dismisses, the card swallows the press. */}
+      <Pressable style={S.pickBackdrop} onPress={onClose}>
+        <View testID="txn-receipt" style={S.pickCard} onStartShouldSetResponder={() => true}>
+          <Text style={S.pickTitle}>{M.receipt.title}</Text>
+          <Text testID="txn-receipt-amount" style={[S.receiptAmount, {color: t.dir === 'out' ? C.ink : C.ok}]}>{f.amount}</Text>
+          <Text testID="txn-receipt-asset" style={S.receiptAsset}>{f.assetLine}</Text>
+          {f.status ? <Text testID="txn-receipt-status" style={S.receiptNote}>{f.status}</Text> : null}
+          <ScrollView style={S.pickScroll}>
+            <Field label={f.partyLabel} value={f.account} testID="txn-receipt-account" note={!t.counterparty} />
+            <Field label={M.receipt.whenLabel} value={t.time} testID="txn-receipt-when" />
+            <Field label={M.receipt.referenceLabel} value={f.reference} testID="txn-receipt-ref" note={!f.referenceIsValue} />
+            <Field label={f.proofLabel} value={f.proof} testID="txn-receipt-proof" />
+            <Text style={S.receiptSource}>{M.receipt.source}</Text>
+          </ScrollView>
+          <Pressable
+            testID="btn-txn-receipt-copy"
+            style={[S.primaryWide, S.depositCopy]}
+            onPress={() => { void copy(receiptText(t, catalog, assets)); }}
+            accessibilityRole="button"
+            accessibilityLabel={M.receipt.copy}
+            accessibilityHint={M.receipt.copyHint}
+            accessibilityState={{disabled: false}}
+          >
+            <IconCopy size={18} color={C.brandInk} />
+            <Text style={S.primaryText}>{copied === null ? M.receipt.copy : M.receipt.copied}</Text>
+          </Pressable>
+          <Pressable
+            testID="btn-txn-receipt-close"
+            style={S.nfcInfoClose}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel={M.receipt.close}
+            accessibilityState={{disabled: false}}
+          >
+            <Text style={S.nfcInfoCloseText}>{M.receipt.close}</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </AppModal>
   );
 }

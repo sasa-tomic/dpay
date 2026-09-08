@@ -101,8 +101,6 @@ export const walletEs: WalletMessages = {
     demoFundsLabel: 'Conseguir fondos de prueba',
     demoFundsHint: 'Añade ∂100 de dinero de prueba a esta billetera',
     needsSetup: 'Sin configurar',
-    railUnreadable: network =>
-      `La red ${network} no responde ahora mismo, así que este saldo no se pudo actualizar. Es esa conexión, no tu billetera: tus fondos están intactos y tus otras cuentas siguen funcionando. dpay lo reintenta por su cuenta.`,
     select: symbol => `Seleccionar ${symbol}`,
     selectHint: 'Muestra el saldo de este activo en tu pantalla de inicio',
     selectSolanaHint: symbol => `Muestra ${symbol} en tu pantalla de inicio y usa la vía de Solana para Pagar y Recibir`,
@@ -180,28 +178,42 @@ export const educationEs: EducationMessages = {
     shopRequests: 'La tienda pide',
   },
 
-  rehearsal: {
-    title: 'Practica un pago sin riesgo',
-    sheetTitle: 'Práctica DEMO',
-    steps: {
-      request: {
-        title: 'En el otro teléfono: solicita ∂1',
-        body: 'Abre dpay en otro teléfono, elige DEMO, toca Recibir, introduce 1 y toca Solicitar.',
-      },
-      approve: {
-        title: 'En este teléfono: escanea y comprueba',
-        body: 'Elige DEMO, toca Pagar y escanea el código dpay del otro teléfono. Comprueba ∂1 y el destinatario antes de aprobar.',
-      },
-      settle: {
-        title: 'Después cambia los papeles',
-        body: 'Para practicar cómo recibir, crea una solicitud DEMO de ∂1 en este teléfono y escanéala con el otro.',
-      },
-    },
-    stageTags: ['01 — RECIBIR', '02 — PAGAR', '03 — CAMBIAR'],
-    punchline: 'DEMO es dinero de práctica sin valor. Esta introducción nunca te pide depositar ni comprar nada.',
+  practice: {
+    sheetTitle: 'Pago de práctica',
+    eyebrow: 'PRÁCTICA',
+    payeeName: 'Tienda de práctica',
+    title: 'Haz un pago de verdad',
+    cardLine: 'Este es el código que te mostraría una tienda.',
+    balance: amount => `Tienes ${amount} en dinero de práctica.`,
+    review: 'Revisar el pago',
+    reviewHint: 'Mira el importe y el destinatario antes de aprobar',
     skip: 'Saltar la práctica',
-    skipHint: 'Salta la práctica y elige tu moneda principal',
-    try: 'Elegir mi moneda',
+    skipHint: 'Salta el pago de práctica y elige tu moneda principal',
+    bothSides: 'Aquí tu teléfono hace de tienda y de quien paga, así que esta práctica necesita conexión. En un viaje, solo la tienda la necesita.',
+    settledBody: 'Ese fue un pago real en la red de práctica: tu teléfono lo firmó y la red lo confirmó.',
+    settledBalance: amount => `Te quedan ${amount} en dinero de práctica.`,
+    pendingBody: 'El pago se firmó y se envió. dpay todavía no lo ha visto confirmarse, así que no hay nada confirmado. Así se ve exactamente un pago pendiente real.',
+    refusedTitle: 'La red lo rechazó',
+    refusedBody: 'No se movió nada.',
+    continue: 'Seguir con la configuración',
+    continueHint: 'Continúa para elegir tu moneda principal',
+    punchline: 'El dinero de práctica no tiene valor. dpay nunca te pide depositar ni comprar nada para probarlo.',
+    noFaucet: {
+      title: 'Aquí no hay dinero de práctica',
+      body: 'Este servidor no reparte dinero de práctica, así que no hay con qué practicar. A tu billetera no le falta nada: sigue y elige tu moneda. Puedes hacer tu primer pago real cuando quieras.',
+    },
+    cooldown: {
+      title: 'Dinero de práctica, en un momento',
+      body: reason => `Este servidor reparte dinero de práctica de vez en cuando, y acaba de hacerlo. Dice: ${reason} Sigue con la configuración; puedes volver y pagar cuando quieras.`,
+    },
+    offline: {
+      title: 'Esta práctica necesita conexión',
+      body: 'Aquí tu teléfono hace de tienda y de quien paga, así que tiene que llegar él mismo a la red. Un pago real no lo necesita: la tienda es la que necesita conexión. Vuelve a conectarte e inténtalo otra vez, o sigue con la configuración.',
+    },
+    empty: {
+      title: 'Todavía no hay con qué practicar',
+      body: 'Tu saldo de práctica está vacío, así que no hay con qué pagar. Tu billetera no tiene ningún problema: sigue y elige tu moneda.',
+    },
   },
 
   coachTips: {
@@ -229,7 +241,7 @@ export const educationEs: EducationMessages = {
     title: 'Preparación del viaje',
     stamps: {
       recoverySaved: {label: 'COPIA\nHECHA', hint: 'Copia tus palabras de recuperación en Ajustes', short: 'falta la copia de seguridad'},
-      flowUnderstood: {label: 'FLUJO\nVISTO', hint: 'Mira el ensayo al crear una billetera, o haz cualquier pago', short: 'falta ver cómo funciona'},
+      flowUnderstood: {label: 'FLUJO\nVISTO', hint: 'Haz el pago de práctica la primera vez, o haz cualquier pago', short: 'falta ver cómo funciona'},
       fundsReady: {label: 'FONDOS\nCARGADOS', hint: 'Añade dinero que puedas gastar; los fondos de práctica no cuentan', short: 'falta añadir fondos'},
       paymentTested: {label: 'PRIMER\nPAGO', hint: 'Completa un pago: paga o recibe', short: 'falta un pago'},
     },

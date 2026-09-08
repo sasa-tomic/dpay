@@ -49,7 +49,7 @@ import type {BalanceView} from '../lib/assetBalances';
  *  Activity is the body of the screen rather than a footer under it. */
 export const ACTIVITY_ROWS = 5;
 
-export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, topUpErr, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll}: {
+export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll, onOpenReceipt}: {
   assets: SelectableAsset[];
   homeCurrency: HomeCurrency;
   /** The home currency's preferred rail — the account this screen IS. Null only when the catalog
@@ -62,12 +62,14 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
   /** The demo faucet's last failure, if any. The faucet BUTTON lives on the practice row in the
    *  accounts route, but the `T` hotkey fires it from anywhere — so its failure has to be visible
    *  on the screen the user is actually looking at, or the hotkey fails silently. */
-  topUpErr: string | null;
   onScan: () => void;
   onReceive: () => void;
   onDeposit: (id: AssetId) => void;
   onOpenAccounts: () => void;
   onSeeAll: () => void;
+  /** Open a row's receipt — the SAME surface the Transactions tab opens (X6). Wallet owns it, so
+   *  the overlay mounts at the app root instead of inside this feed's own box. */
+  onOpenReceipt: (t: Txn) => void;
 }) {
   // The headline names the CURRENCY and carries the home rail's own token unit — "Swiss francs ·
   // Main" over "12.40 VCHF". The currency is the LABEL, the token is the UNIT: VCHF is a third
@@ -127,13 +129,12 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
           <Text style={S.homeActionLabel}>{M.wallet.home.actions.addMoney}</Text>
         </Pressable>
       </View>
-      {topUpErr ? <Text testID="home-faucet-err" style={S.homeFaucetErr}>{topUpErr}</Text> : null}
       <View style={S.homeActivity} testID="home-activity">
         <Text style={S.histTitle}>{M.wallet.home.activity.title}</Text>
         {rows.length === 0
           ? <Text style={S.dim2}>{M.wallet.home.activity.empty}</Text>
           : rows.map((t, i) => (
-            <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} testPrefix="home-hist" />
+            <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} testPrefix="home-hist" onPress={onOpenReceipt} />
           ))}
         <Pressable testID="btn-home-activity-all" style={S.homeSeeAll} onPress={onSeeAll} accessibilityRole="button" accessibilityLabel={M.wallet.home.activity.seeAll} accessibilityHint={M.wallet.home.activity.seeAllHint}>
           <Text style={S.linkText}>{M.wallet.home.activity.seeAll}</Text>

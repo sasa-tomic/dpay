@@ -45,14 +45,47 @@ export type ErrorMessages = {
     ownTokenAccountRent: (solAmount: string, asset: string) => string;
   };
 
+  /**
+   * A whole RAIL's read failure, stated ONCE for the SETTLEMENT NETWORK rather than once per
+   * account (X9). When an endpoint refuses — the measured case is the baked Helius key's HTTP 429
+   * — every account on that network reports 'error' in the same poll, and the accounts list used
+   * to print the identical ~48-word paragraph on each of them (three copies, ~120 words of alarm
+   * text, for one fact). One network's outage is one fact.
+   *
+   * It promises NO button. `hooks/useSolanaBalances.ts` already re-polls every `POLL.balance`
+   * (2.5s in a shipped build) with an in-flight guard, so by the time a user could read this line
+   * and tap, several retries have already run — and against a rate limit an extra manual read is
+   * what caused the failure, not what fixes it.
+   */
+  rail: {
+    unreadable: (network: string) => string;
+  };
+
   /** The user's OWN Ethereum wallet during the ckERC20 onramp (injected provider / WalletConnect). */
   ethWallet: {
     /** Mined but reverted — a hard fail that will never credit. */
     receiptReverted: (hash: string) => string;
     /** Not mined inside the window — soft, the transaction may still land. */
     receiptTimeout: (hash: string) => string;
-    /** Accepted by the wallet, answered without a hash — possibly broadcast, unpollable either way. */
+    /**
+     * The two ways an `eth_sendTransaction` ends with no transaction id, which is one situation for
+     * the user (dpay cannot tell whether money moved, so a retry might pay twice) and two different
+     * FACTS about what dpay knows. Both are the first half of a sentence the deposit sheet finishes
+     * with the step-specific instruction; neither may claim the wallet accepted anything, because in
+     * the timeout case dpay does not know the wallet ever saw the request.
+     *
+     * `received` is the diagnostic — the value that came back — kept in the copy so a user can
+     * quote it. See `TransactionHashMissing` in app/wallet.ts.
+     */
     hashMissing: (received: string) => string;
+    /** …and the same outcome reached by silence: the wallet never answered at all. */
+    sendTimedOut: string;
+    /**
+     * A wallet request that ran out of time on OUR side with nothing at stake yet — connecting, a
+     * chain-id read, a receipt read. Nothing was signed, so unlike `sendTimedOut` this one can name
+     * a next action and mean it. The message of `WalletRequestTimeout` (app/wallet.ts).
+     */
+    requestTimedOut: string;
     pairingTimedOut: string;
     pairingFailed: (detail: string) => string;
     /** `eth_chainId` answered in neither encoding dpay decodes — see `getChainId` in wallet.ts. */
@@ -127,10 +160,19 @@ export const errorsEn: ErrorMessages = {
       `Creating your ${asset} account needs about ${solAmount} in this wallet (one-time account rent + fee) — send a little SOL here first`,
   },
 
+  rail: {
+    unreadable: network =>
+      `${network} isn't answering, so these balances are out of date. Nothing moved, your other accounts still work, and dpay keeps retrying.`,
+  },
+
   ethWallet: {
     receiptReverted: hash => `transaction ${hash} reverted on chain`,
     receiptTimeout: hash => `transaction ${hash} was not mined within the timeout`,
-    hashMissing: received => `your wallet accepted the transaction but returned no transaction id (${received})`,
+    hashMissing: received =>
+      `Your wallet answered without a transaction id (${received}), so dpay can't tell whether the transaction was sent.`,
+    sendTimedOut: "Your wallet didn't answer, so dpay can't tell whether the transaction was sent.",
+    requestTimedOut:
+      "Your wallet didn't answer. Open your wallet app, deal with any request waiting there, then try again.",
     pairingTimedOut: 'pairing timed out — no wallet scanned within 5 min',
     pairingFailed: detail => `WalletConnect pairing failed: ${detail}`,
     invalidChainId: value =>

@@ -131,6 +131,22 @@ describe('useSolanaHistory — row mapping', () => {
     act(() => { tree.unmount(); });
   });
 
+  // X6 — the receipt's two fields. `who` is a truncated LABEL and proves nothing; the receipt needs
+  // the full address and the rail's own id for the row, and an undeterminable counterparty must
+  // stay empty here too rather than be filled with the truncation.
+  test('carries the FULL counterparty and the signature for the receipt, and empties the unknown one', async () => {
+    mockedGetSolanaHistory.mockResolvedValue(history([row({counterparty: PEER})]));
+    const full = await mount();
+    expect(full.rows()[0].counterparty).toBe(PEER);
+    expect(full.rows()[0].ledgerRef).toBe(row().signature);
+    act(() => { full.tree.unmount(); });
+
+    mockedGetSolanaHistory.mockResolvedValue(history([row({counterparty: null})]));
+    const unknown = await mount();
+    expect(unknown.rows()[0].counterparty).toBe('');
+    act(() => { unknown.tree.unmount(); });
+  });
+
   test('a transaction producing two rows (USDC transfer + its SOL rent) keeps both, per token', async () => {
     mockedGetSolanaHistory.mockResolvedValue(history([
       row({token: 'USDC', direction: 'out', amount: '2500000'}),

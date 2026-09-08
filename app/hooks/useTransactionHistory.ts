@@ -83,7 +83,13 @@ export function useTransactionHistory(args: Args): {history: Txn[]; refreshHisto
       const who = (dir === 'in' && !counterparty)
         ? M.wallet.ledger.mintCounterparty
         : (dir === 'out' ? (toName || short(rec.to)) : (fromName || short(rec.from)));
-      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), ts: rec.timestamp, dir, assetId: `ic:${rec.currency}`};
+      // The receipt's two fields (X6). `counterparty` is the FULL principal text as the relay read
+      // it (not the `who` label, which is truncated for the row and replaced by a sentinel on a
+      // mint); '' when the ledger recorded no account on that side — a mint's `from` and a burn's
+      // `to` are empty by construction (`map_icrc_txn` in the relay's agent_ledger).
+      // `ledgerRef` is the BLOCK INDEX, the only stable identity an IC-rail row has: `rec.nonce` is
+      // always '' here, so without it there is nothing to quote in a dispute.
+      return {nonce: rec.nonce, amount: rec.amount, who, memo, time: fmtTime(rec.timestamp), ts: rec.timestamp, dir, assetId: `ic:${rec.currency}`, counterparty: dir === 'out' ? rec.to : rec.from, ledgerRef: String(rec.block)};
     }));
     // `catalog` is captured by closure but intentionally NOT a dep — it's a new array each render;
     // `catalogCurrencyIds` (a stable string) is the signature that retriggers the fetch only when a

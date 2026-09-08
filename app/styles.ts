@@ -52,10 +52,10 @@ const MODE_SURFACE = {
 function buildStyles(p: Palette) {
   const LIFT = lift(p);
   const LIFT_SM = liftSm(p);
-  // A non-tab ROUTE's header — back chevron · title · symmetric spacer. ONE geometry defined here
-  // and exported under two names: `routeHeader*` (Accounts, and every route added after it) and
-  // the older `convertHeader*` (ConvertMode, which predates the generic name). Same object, so the
-  // two surfaces cannot drift; the convert aliases retire when ConvertMode switches names.
+  // A non-tab ROUTE's header — back chevron · title · symmetric spacer. ONE geometry, ONE name.
+  // (It briefly carried a second set of `convertHeader*` aliases so ConvertMode could keep its
+  // older names while another change was in flight; ConvertMode now uses these and the aliases
+  // are gone — two names for one object is exactly the drift this const exists to prevent.)
   const ROUTE_HEADER_ROW = {flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, minHeight: 40} as const;
   const ROUTE_HEADER_TITLE = {flex: 1, fontSize: 22, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3} as const;
   const ROUTE_HEADER_SPACER = {width: 26} as const;
@@ -94,8 +94,19 @@ function buildStyles(p: Palette) {
   seedInput: {backgroundColor: p.field, borderRadius: 16, minHeight: 56, paddingHorizontal: 18, paddingVertical: 14, fontSize: 16, fontFamily: FONT.mono, color: p.ink, marginBottom: 8, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch'},
   // Header — borderless on porcelain (whitespace separates chrome from content; hairlines under
   // the header read as spreadsheet chrome). Balanced horizontal padding.
-  header: {paddingTop: 16, paddingLeft: 16, paddingRight: 16, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start'},
-  headerLeft: {flexDirection: 'row', alignItems: 'flex-start', gap: 4},
+  header: {paddingTop: 16, paddingLeft: 16, paddingRight: 16, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12},
+  // X18 — the header row must never grow past the column. `flexShrink` is the load-bearing pair:
+  // both RNW and Yoga default a View to flexShrink 0, so before this the identity block was sized
+  // to the username and simply PUSHED the account chip off the screen. Measured at 390 px with the
+  // 22-character name "Bartholomew Fitzgerald": the chip's right edge sat at x = 410.2, i.e. 20.2 px
+  // off-viewport, on every tab that shows an amount, in BOTH themes — and the identity block and the
+  // chip were flush (0 px apart) on all of them. The left cluster now yields its width instead
+  // (`headerIdentity` shrinks, the username ellipsizes), and the chip keeps its own.
+  headerLeft: {flexDirection: 'row', alignItems: 'flex-start', gap: 4, flexShrink: 1},
+  // The wordmark + ACCOUNT + username block. `marginLeft` on top of headerLeft's 4px gap gives the
+  // two utility buttons and the identity a real separation (12 px): they are different things, and
+  // at 4 px the ∂ read as a third button (the "collide" half of X18).
+  headerIdentity: {flexShrink: 1, marginLeft: 8},
   headerSettingsBtn: {width: 40, height: 40, borderRadius: 14, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
   brand: {fontSize: 24},
   // ACCOUNT eyebrow above the username separates the wordmark "∂pay" from the user identity so
@@ -173,13 +184,21 @@ function buildStyles(p: Palette) {
   passportSlotDate: {color: p.sub, fontFamily: FONT.mono, fontSize: 9, letterSpacing: 1, marginTop: 3, textTransform: 'uppercase', textAlign: 'center'},
   passportCapstoneText: {color: p.brand, fontFamily: FONT.mono, fontSize: 15, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase', textAlign: 'center', lineHeight: 20},
   passportCapstoneMicro: {fontSize: 13, color: p.bg, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans, opacity: 0.85},
-  balBox: {alignItems: 'flex-end'},
+  // `flexShrink: 0` states the other half of the X18 contract: the account chip carries the
+  // wallet's balance and the switcher, so it is the header element that keeps its width and the
+  // identity block is the one that yields.
+  balBox: {alignItems: 'flex-end', flexShrink: 0},
   // The header balance pressable's outer row: the label+value column, then the A hotkey badge
   // at the far right edge (DOM order label → value → badge, mirroring the tab-bar badge pattern).
   balHeaderRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
   balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
   balAmtRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
-  topUpErr: {fontSize: 13, color: p.bad, marginTop: 8, textAlign: 'center', fontFamily: FONT.sans},
+  // The practice faucet's refusal, rendered ONCE by Wallet above the mode switch. It sits outside
+  // the scroll body because the `T` hotkey fires from EVERY surface and its answer has to be on
+  // whichever one the user is looking at — printed inside a tab it was invisible from the other
+  // three, which is a control that answers nothing (founder rule 2026-08-29). Hence the horizontal
+  // padding: it has no `S.body` around it.
+  topUpErr: {fontSize: 13, color: p.bad, marginBottom: 8, paddingHorizontal: 16, textAlign: 'center', fontFamily: FONT.sans},
   dot: {width: 8, height: 8, borderRadius: 4},
   balLabel: {fontSize: 12, color: p.sub, fontFamily: FONT.sansMedium},
   balAmt: {fontSize: 28, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5},
@@ -237,7 +256,6 @@ function buildStyles(p: Palette) {
   homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 10},
   homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, borderRadius: 16, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 72},
   homeActionLabel: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
-  homeFaucetErr: {fontSize: 13, color: p.bad, marginTop: 10, textAlign: 'center', fontFamily: FONT.sans},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
   homeSeeAll: {minHeight: 44, justifyContent: 'center', alignItems: 'center'},
   // ── The Accounts route (2026-09-08) — the accounts list lifted off Home ────────────────────
@@ -251,9 +269,6 @@ function buildStyles(p: Palette) {
   // Left-aligned instruction copy (not centered): these are lines to read closely before money
   // moves, matching the deposit/rail disclosure grammar rather than the celebration grammar.
   convertWrap: {alignSelf: 'stretch', paddingTop: 6, paddingBottom: 20},
-  convertHeaderRow: ROUTE_HEADER_ROW,
-  convertHeaderTitle: ROUTE_HEADER_TITLE,
-  convertHeaderSpacer: ROUTE_HEADER_SPACER,
   routeHeaderRow: ROUTE_HEADER_ROW,
   routeHeaderTitle: ROUTE_HEADER_TITLE,
   routeHeaderSpacer: ROUTE_HEADER_SPACER,
@@ -332,6 +347,20 @@ function buildStyles(p: Palette) {
   // is DELIBERATELY theme-invariant (identical in light + dark) — the campreview pixel gate
   // (just campreview) keys on it; do NOT palette-ize.
   camBox: {alignSelf: 'stretch', aspectRatio: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: '#17150F', borderWidth: 1, borderColor: p.line, ...LIFT},
+  // Copy that sits ON the camera box — the pre-permission prompt and the no-camera fallback.
+  //
+  // X17: this text used `S.reviewTo` / `S.dim2`, whose colour is `p.sub` — a secondary ink for a
+  // PORCELAIN page. On the theme-invariant warm-black fill above it measured 3.0:1 (`#676257` on
+  // `#17150F`), against the 4.5:1 WCAG AA needs. Those tokens are correct where they were designed
+  // to live and wrong here, and nothing in a page-tinted token could ever have made them right.
+  //
+  // The fix is a token that knows what it sits on. `camBox` is deliberately theme-invariant (the
+  // `just campreview` pixel gate keys on that fill), so its ink is theme-invariant too — and the
+  // DARK palette's own inks ARE the on-warm-black inks by construction, so they are READ FROM
+  // `DARK` rather than re-entered as literals that could drift from it. Measured against
+  // `#17150F`: `DARK.ink` 15.8:1, `DARK.sub` 7.1:1 — AAA on both, in either theme.
+  camText: {fontSize: 17, color: DARK.ink, marginTop: 6, textAlign: 'center', fontFamily: FONT.sansMedium},
+  camSubText: {fontSize: 13, color: DARK.sub, marginTop: 8, textAlign: 'center', fontFamily: FONT.sans},
   // Wrapper for a scan phase's QrScanner + hint text. MUST be alignSelf:'stretch' (full width):
   // camBox sizes itself by stretch + aspectRatio, so an unstyled/content-width wrapper leaves camBox
   // with no resolvable width and it collapses to 0x0 (the 2026-08-14 SOL scan black-box bug —
@@ -411,11 +440,38 @@ function buildStyles(p: Palette) {
   secondaryBtn: {alignSelf: 'stretch', height: 56, borderRadius: 16, marginTop: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 44},
   secondaryBtnText: {color: p.sub, fontWeight: '600', fontSize: 17, fontFamily: FONT.sansMedium},
   histTitle: {fontSize: 12, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 6, fontFamily: FONT.mono},
+  // ── The transaction RECEIPT (X6, components/HistoryRow.tsx#TxnReceipt) ───────────────────────
+  // The merchant-reconciliation and dispute surface, rendered in the centered-card idiom the
+  // pay-link refusal already uses (S.pickBackdrop + S.pickCard). The headline is the EXACT amount;
+  // beneath it every field is a label over its own full-width value line, because the values here
+  // are a 63-character IC principal, a 32-byte hex reference and a base58 signature — a
+  // right-aligned value column (S.reviewRow) wraps all three into a ragged block that cannot be
+  // compared character by character, which is the one thing a payee does with them.
+  receiptAmount: {fontSize: 28, fontWeight: '700', fontFamily: FONT.sansBold, letterSpacing: -0.5, marginTop: 2},
+  receiptAsset: {fontSize: 13, color: p.sub, fontFamily: FONT.sans, marginTop: 2, marginBottom: 6},
+  receiptField: {alignSelf: 'stretch', marginTop: 12},
+  receiptLabel: {fontSize: 11, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, fontFamily: FONT.mono, marginBottom: 4},
+  receiptValue: {fontSize: 13, color: p.ink, lineHeight: 18, fontFamily: FONT.mono},
+  // An honest ABSENCE (or a failed-transaction status) reads as prose, never as a value: the
+  // receipt must not let "the ledger recorded no account" look like something copied off a chain.
+  receiptNote: {fontSize: 13, color: p.sub, lineHeight: 18, fontFamily: FONT.sans},
+  receiptSource: {fontSize: 12, color: p.sub2, lineHeight: 17, fontFamily: FONT.sans, marginTop: 16},
   histRow: {flexDirection: 'row', alignItems: 'baseline', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: p.line2},
   histWhoCol: {flex: 1},
   histWho: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium},
-  histMemo: {fontSize: 12, color: p.sub2, marginTop: 2, fontStyle: 'italic', fontFamily: FONT.sans},
-  histAmt: {fontSize: 15, fontWeight: '700', marginRight: 12, fontFamily: FONT.sansBold},
+  // The row's SECOND line — the timestamp, and the memo beside it when there is one. Both live in
+  // the flexible left column, which is what pins the amount: see `histAmt`.
+  histSubRow: {flexDirection: 'row', alignItems: 'baseline', marginTop: 2},
+  histMemo: {fontSize: 12, color: p.sub2, fontStyle: 'italic', fontFamily: FONT.sans, marginLeft: 6, flexShrink: 1},
+  // The amount is the LAST item on the row, and that is a correctness rule rather than a taste one.
+  // The timestamp is the only element here whose width changes on its own — `fmtTime`'s clock crosses
+  // 1↔2 hour digits every day at ten o'clock, one monospace character, 7.2 px. While the time sat to
+  // the RIGHT of the amount, that character pushed the amount 7.2 px sideways every time the hour
+  // rolled over (measured), which misaligns a column of money for the user and, for the pixel-diff
+  // gate (flows 40/84), was a ~0.15%-per-row drift the ledger baseline could fail on with no code
+  // change behind it. With the time in the flexible column the amount's right edge is the row's, so
+  // amounts line up down the list and nothing the clock does can move them.
+  histAmt: {fontSize: 15, fontWeight: '700', fontFamily: FONT.sansBold},
   histTime: {fontSize: 12, color: p.sub2, fontFamily: FONT.mono},
   // Leading direction glyph on each Ledger row (IconArrowDownLeft in / IconArrowUpRight out;
   // t.dir is the reliable 'out' | 'in' field on Txn). alignSelf:center overrides the row's
@@ -463,6 +519,10 @@ function buildStyles(p: Palette) {
   // flex-start so the alert icon anchors the FIRST line of wrapped text, warn colour throughout.
   railHealthRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 4},
   railHealthText: {flex: 1, fontSize: 12, color: p.warn, lineHeight: 17, fontFamily: FONT.sans},
+  // The NETWORK-level outage banner (X9) — the same warn-row idiom as railHealthRow, but it sits
+  // BETWEEN cards rather than inside one, so it carries the list's own horizontal rhythm and a
+  // little air above the row it introduces.
+  railOutageRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 16, marginBottom: 2, paddingHorizontal: 2},
   // The row's action slot. A COLUMN, not a row: since 2026-09-08 the selected row can carry two
   // pills (Convert plus DEMO's faucet), and a row of two pills beside the flex:1 select block
   // squeezes both off a 390px phone. Stacking is deterministic at any pill count.
@@ -559,7 +619,18 @@ function buildStyles(p: Palette) {
   // the viewport — the tall sheets (DepositSheet address flow, WithdrawSheet form) keep top-aligned
   // sheetBody so their long content scrolls without the RN ScrollView + justifyContent:center
   // top-cutoff gotcha.
-  sheetCenter: {flexGrow: 1, justifyContent: 'center', paddingHorizontal: 22, paddingTop: 22, paddingBottom: 22, alignItems: 'center'},
+  // `alignSelf:'stretch'` for the SAME reason `sheetBody` carries it, and that is the whole
+  // argument: these two are one surface with one difference — where the content sits vertically.
+  // Letting them differ in a SECOND property is precisely the drift that produced the measured
+  // overflows the stretch was introduced to kill (the IC send form at 424.7 px in a 358 px column,
+  // the cashier ring-up at 533 px). This one already measured x 16 / w 358 with zero overflow, and
+  // it MEASURES THE SAME WITH THE LINE ADDED — checked on both call sites in the running app: the
+  // ckERC20 deposit sheet (x 16 / w 358 / right 374 in a 390 px column, nothing off-viewport) and
+  // the Settings scroller, where this is a ScrollView contentContainer and `align-self` was already
+  // the parent's default. So the line changes nothing on screen; it states the contract the surface
+  // always had, at every mount point, instead of only where the parent happens to default to
+  // stretch.
+  sheetCenter: {flexGrow: 1, alignSelf: 'stretch', justifyContent: 'center', paddingHorizontal: 22, paddingTop: 22, paddingBottom: 22, alignItems: 'center'},
   // Compact currency picker (Receive prefix tap): a centered card over a dimmed backdrop (rendered
   // inside a <Modal>, so it covers the whole screen regardless of where ReceiveMode sits in the
   // tree). `pickCard` uses opaque `p.panel` — an alpha wash would composite with the warm-ink veil

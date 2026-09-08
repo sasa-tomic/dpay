@@ -27,6 +27,15 @@ export const DEPOSIT_ADDRESS_TIMEOUT_MS = 20000;
 // SOL payer NFC: maximum wait for the merchant's broadcast receipt.
 export const SOL_RECEIPT_WAIT_MS = 20000;
 export const STORAGE_KEY = 'dpay.identity.v1';
+// A wallet that has been GENERATED but whose 24 recovery words have not been acknowledged yet.
+// `create()` writes the keypair here and `finishCreate()` promotes it to STORAGE_KEY (and deletes
+// this) the moment the user ticks the backup box, so the identity above only ever names a wallet
+// whose owner has seen their words. Before this key existed the keypair was written to STORAGE_KEY
+// at Create and an app killed with the words on screen came back with an identity — and Onboarding
+// renders only when there is none, so the backup screen was skipped FOREVER for a wallet nobody
+// could recover. A resume reads this key and shows the SAME words (they are derived from the seed,
+// so they are the same 24 either way). Nothing but Onboarding reads it.
+export const PENDING_IDENTITY_STORAGE_KEY = 'dpay.identity.pending.v1';
 // The user-chosen relay URL persists across reloads (AsyncStorage, like identity + the currency
 // catalog) so changing networks in Settings survives an app restart. Default is `relayConfig`'s
 // value when no persisted choice exists (the harness passes ?relay=; prod codegens the real URL).
@@ -154,6 +163,25 @@ export const SOL_GENESIS_HASH =
   ((globalThis as unknown as {__DPAY_TEST_SOL_GENESIS_HASH?: string}).__DPAY_TEST_SOL_GENESIS_HASH ??
     '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
 export const SOL_PAYMENT_MAX_WINDOW_SECONDS = 90;
+// ── The first-run practice payment (docs/specs/2026-09-08-first-run-redesign.md §3) ─────────────
+// The ONE currency practice may ever pay: DEMO, the faucet-minted play dollar. `DEMO_ASSET_ID`
+// (config/assets.ts) is spelled from it, so "which rail is the practice rail" is one fact.
+export const PRACTICE_CURRENCY = 0;
+// The practice payee: a 32-byte Ed25519 PUBLIC key, generated once from a secret that was never
+// written down and no longer exists anywhere. It is KEYLESS on purpose — a distinct, real account
+// nobody can spend from — because the alternatives were worse: the facade refuses `from == to`, so
+// a literal self-payment would rest on ledger behaviour production has never demonstrated, and one
+// phone cannot scan its own screen.
+//
+// The ∂1.00 every first run sends here is therefore STRANDED, and that is acceptable for exactly
+// one reason: DEMO is valueless by construction and the faucet re-mints it on demand. It stays
+// acceptable only while `PRACTICE_CURRENCY` gates the payment — `practiceRefusal`
+// (components/Practice.tsx) refuses to run on anything else, and that guard is the whole thing
+// standing between this constant and a burn address for real money.
+export const PRACTICE_PAYEE_PUBKEY = 'e1f9e51a7fdabc25b131dbb2939ace78a0062c1d02e2c89d96a46a1d9b95ce19';
+// What practice pays: ∂1.00, in DEMO's raw minor units (2 decimals).
+export const PRACTICE_AMOUNT_RAW = '100';
+
 // Mirrors the canister's fixed FAUCET_AMOUNT ($100.00 = 10_000 cents). The demo top-up POSTs this
 // amount to /api/v1/faucet; the real canister mints the fixed amount regardless of the request. MC1
 // units 2-4: a decimal-digit STRING (raw u64) — the relay accepts string-OR-number at the JSON seam.

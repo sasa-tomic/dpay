@@ -273,8 +273,14 @@ export type OnboardingMessages = {
   errOwnSeed: string;
   /** The restore mnemonic didn't validate. */
   errWords: string;
+  /**
+   * The wallet could not be saved when the backup was acknowledged. The words stay on screen and
+   * this renders under them: the wallet does NOT exist yet, so the honest instruction is to try
+   * the same button again rather than to write anything else down.
+   */
+  errSaveWallet: string;
 
-  /** The create path's post-backup beat: a passport stamp lands, then the rehearsal. */
+  /** The create path's post-backup beat: a passport stamp lands, then the practice payment. */
   recoverySaved: {
     stamp: string;
     line: string;
@@ -348,6 +354,7 @@ export const onboardingEn: OnboardingMessages = {
   errOwnSeed:
     "That seed doesn't look right. Paste your 24 recovery words or the 64-hex seed exactly as you wrote it down.",
   errWords: 'Some words are wrong or missing. Check you have all 24 words spelled correctly.',
+  errSaveWallet: 'This phone could not save your wallet, so it has not been created yet. Your words are still on screen — tap Continue again to retry. If it keeps failing, free up some storage space on the phone.',
 
   recoverySaved: {
     stamp: 'Recovery saved',

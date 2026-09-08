@@ -100,8 +100,6 @@ export const walletDe: WalletMessages = {
     demoFundsLabel: 'Demo-Guthaben holen',
     demoFundsHint: 'Fügt dieser Wallet ∂100 Demo-Geld hinzu',
     needsSetup: 'Einrichtung nötig',
-    railUnreadable: network =>
-      `Das ${network}-Netzwerk antwortet gerade nicht, dieses Guthaben konnte deshalb nicht aktualisiert werden. Das ist diese Verbindung, nicht deine Wallet: deine Coins sind unangetastet, und deine anderen Konten funktionieren weiter. dpay versucht es von selbst weiter.`,
     select: symbol => `${symbol} auswählen`,
     selectHint: 'Zeigt das Guthaben dieses Assets auf deinem Startbildschirm',
     selectSolanaHint: symbol => `Zeigt ${symbol} auf deinem Startbildschirm und nutzt Solana zum Bezahlen und Empfangen`,
@@ -179,28 +177,42 @@ export const educationDe: EducationMessages = {
     shopRequests: 'Ladenanfrage',
   },
 
-  rehearsal: {
-    title: 'Eine Zahlung sicher üben',
-    sheetTitle: 'DEMO-Übung',
-    steps: {
-      request: {
-        title: 'Auf dem anderen Handy: ∂1 anfordern',
-        body: 'Öffne dpay auf einem anderen Handy, wähle DEMO, tippe auf Empfangen, gib 1 ein und tippe auf Anfordern.',
-      },
-      approve: {
-        title: 'Auf diesem Handy: scannen und prüfen',
-        body: 'Wähle DEMO, tippe auf Bezahlen und scanne den dpay-Code des anderen Handys. Prüfe ∂1 und den Empfänger vor der Freigabe.',
-      },
-      settle: {
-        title: 'Dann die Rollen tauschen',
-        body: 'Zum Üben des Empfangens erstellst du auf diesem Handy eine DEMO-Anfrage über ∂1 und scannst sie mit dem anderen Handy.',
-      },
-    },
-    stageTags: ['01 — EMPFANGEN', '02 — BEZAHLEN', '03 — TAUSCHEN'],
-    punchline: 'DEMO ist Spielgeld ohne Geldwert. Diese Einführung fordert dich nie zu einer Einzahlung oder einem Kauf auf.',
+  practice: {
+    sheetTitle: 'Übungszahlung',
+    eyebrow: 'ÜBUNG',
+    payeeName: 'Übungsladen',
+    title: 'Mach eine Zahlung, ganz echt',
+    cardLine: 'So sieht der Code aus, den dir ein Laden zeigt.',
+    balance: amount => `Du hast ${amount} Übungsgeld.`,
+    review: 'Zahlung prüfen',
+    reviewHint: 'Zeigt Betrag und Empfänger vor der Freigabe',
     skip: 'Übung überspringen',
-    skipHint: 'Überspringt die Übung und wählt deine Hauptwährung',
-    try: 'Meine Währung wählen',
+    skipHint: 'Überspringt die Übungszahlung und wählt deine Hauptwährung',
+    bothSides: 'Dein Handy spielt hier beide Seiten, deshalb braucht diese Übung eine Verbindung. Unterwegs braucht nur der Laden eine.',
+    settledBody: 'Das war eine echte Zahlung auf dem Übungs-Ledger — dein Handy hat sie signiert, und das Ledger hat sie abgewickelt.',
+    settledBalance: amount => `Noch ${amount} Übungsgeld übrig.`,
+    pendingBody: 'Die Zahlung wurde signiert und gesendet. dpay hat die Abwicklung noch nicht gesehen, bestätigt ist also nichts. Genau so sieht eine echte ausstehende Zahlung aus.',
+    refusedTitle: 'Das Ledger hat sie abgelehnt',
+    refusedBody: 'Es wurde nichts bewegt.',
+    continue: 'Einrichtung fortsetzen',
+    continueHint: 'Weiter zur Wahl deiner Hauptwährung',
+    punchline: 'Übungsgeld hat keinen Gegenwert. dpay fordert dich nie zu einer Einzahlung oder einem Kauf auf, um es auszuprobieren.',
+    noFaucet: {
+      title: 'Hier gibt es kein Übungsgeld',
+      body: 'Dieser Server gibt kein Übungsgeld aus, es gibt also nichts zum Üben. In deiner Wallet fehlt nichts — mach weiter und wähle deine Währung. Deine erste echte Zahlung kannst du jederzeit machen.',
+    },
+    cooldown: {
+      title: 'Übungsgeld, gleich',
+      body: reason => `Dieser Server gibt Übungsgeld nur ab und zu aus, und gerade eben hat er es getan. Er meldet: ${reason} Mach mit der Einrichtung weiter — du kannst jederzeit zurückkommen und zahlen.`,
+    },
+    offline: {
+      title: 'Diese Übung braucht eine Verbindung',
+      body: 'Dein Handy spielt hier den Laden und den Zahler, deshalb muss es das Ledger selbst erreichen. Eine echte Zahlung braucht das nicht: Da braucht nur der Laden eine Verbindung. Verbinde dich wieder und versuche es erneut, oder mach mit der Einrichtung weiter.',
+    },
+    empty: {
+      title: 'Noch nichts zum Üben da',
+      body: 'Dein Übungsguthaben ist leer, es gibt also nichts zu bezahlen. Mit deiner Wallet ist alles in Ordnung — mach weiter und wähle deine Währung.',
+    },
   },
 
   coachTips: {
@@ -228,7 +240,7 @@ export const educationDe: EducationMessages = {
     title: 'Reisebereitschaft',
     stamps: {
       recoverySaved: {label: 'BACKUP\nGESICHERT', hint: 'Kopiere deine Backup-Wörter in den Einstellungen', short: 'noch das Backup'},
-      flowUnderstood: {label: 'ABLAUF\nGESEHEN', hint: 'Sieh dir den Probelauf beim Erstellen einer Wallet an — oder mach eine Zahlung', short: 'noch den Ablauf ansehen'},
+      flowUnderstood: {label: 'ABLAUF\nGESEHEN', hint: 'Mach beim ersten Start die Übungszahlung — oder mach eine beliebige Zahlung', short: 'noch den Ablauf ansehen'},
       fundsReady: {label: 'GUTHABEN\nGELADEN', hint: 'Lade echtes Guthaben auf — Übungsguthaben zählt nicht', short: 'noch Guthaben aufladen'},
       paymentTested: {label: 'ERSTE\nZAHLUNG', hint: 'Schließe eine Zahlung ab — bezahlen oder empfangen', short: 'noch eine Zahlung'},
     },

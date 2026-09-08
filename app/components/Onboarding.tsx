@@ -3,7 +3,7 @@ import {ActivityIndicator, Animated, Easing, KeyboardAvoidingView, Platform, Pre
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
-import {STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
+import {STORAGE_KEY, PENDING_IDENTITY_STORAGE_KEY, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {base, validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, validateMnemonic, wordsToString} from '../lib/bip39';
 import {JOURNEY_STAMPS, hasStamp, loadJourney, awardStamp} from '../lib/journey';
@@ -17,9 +17,8 @@ import {Logo, WordmarkLink} from './Logo';
 import {SeedWords} from './SeedWords';
 import {IconCheck} from './icons';
 import {Walkthrough} from './Walkthrough';
-import {Rehearsal} from './Rehearsal';
 
-export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: (id: Identity) => void}) {
+export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string; onCreated: (id: Identity) => void; onRestored: (id: Identity) => void}) {
   // Trip Ready J1 — the first-run walkthrough gate. `walkthrough` is a tri-state:
   //   'checking' → the journey store hasn't loaded yet (render nothing; a flash of the create
   //                form before the walkthrough mounts would read as a glitch);
@@ -28,12 +27,13 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // Done (Get started) OR Skip awards `walkthroughDone` — persisted, so the walkthrough never
   // shows again on relaunch (restore users see it too; it is educational, not a gate — they can
   // skip instantly). The gate reads the store once on mount; the award path is idempotent.
+  //
+  // The SAME mount read resumes an interrupted create. A wallet whose 24 words have not been
+  // acknowledged lives under PENDING_IDENTITY_STORAGE_KEY, not under the app's identity key, so a
+  // phone killed with the words on screen comes back here and gets the SAME words again (they are
+  // derived from the seed) instead of skipping the backup forever. One read, both facts, so the
+  // shell never flashes one answer before the other lands.
   const [walkthrough, setWalkthrough] = useState<'checking' | boolean>('checking');
-  useEffect(() => {
-    let alive = true;
-    loadJourney().then(j => { if (alive) setWalkthrough(!hasStamp(j, JOURNEY_STAMPS.walkthroughDone)); }).catch(() => { if (alive) setWalkthrough(false); });
-    return () => { alive = false; };
-  }, []);
 
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState(false);
@@ -62,18 +62,39 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // (the 2026-08-16 founder report). The button copies the PURE space-joined words.
   const {copied, copy: doCopy} = useCopyFeedback();
 
-  // Trip Ready J2B — the create path's post-backup sequence, in-memory only (deliberately NO
-  // persisted "must show" state: an app killed mid-sequence simply lands in the wallet next
-  // launch — accepted by the spec). States:
-  //   'recoverySaved' → the RECOVERY SAVED passport-stamp beat (~750ms, auto-advances; zero
-  //                     extra mandatory taps — it plays while the faucet request is already
-  //                     done); then the rehearsal.
-  //   'rehearsal'     → the 3-beat payment rehearsal (Rehearsal.tsx); exits call onCreated.
-  //   null            → no sequence (restore path + relaunch never enter it).
-  // The flowUnderstood stamp is awarded by Rehearsal itself (on reaching beat 3); recoverySaved
-  // is awarded here the moment the beat starts (the acknowledgment IS the save — the words were
-  // written down at the gate; the beat only marks it).
-  const [beat, setBeat] = useState<'recoverySaved' | 'rehearsal' | null>(null);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([loadJourney(), AsyncStorage.getItem(PENDING_IDENTITY_STORAGE_KEY)])
+      .then(([j, pendingRaw]) => {
+        if (!alive) return;
+        setWalkthrough(!hasStamp(j, JOURNEY_STAMPS.walkthroughDone));
+        if (pendingRaw === null) return;
+        const pending = JSON.parse(pendingRaw) as Identity;
+        setPendingId(pending);
+        setUsername(pending.username);
+        setBackupMnemonic(hexToWords(pending.secretHex));
+      })
+      .catch((e: unknown) => {
+        // No silent errors: a corrupt pending record is the one case where a user could be left
+        // holding words for a wallet that will never exist, so it is named in the log and the
+        // screen falls back to a clean create rather than a half-resumed one.
+        console.warn(`onboarding: could not read the first-run state: ${e instanceof Error ? e.message : String(e)}`);
+        if (alive) setWalkthrough(false);
+      });
+    return () => { alive = false; };
+  }, []);
+
+
+  // Trip Ready J2B — the RECOVERY SAVED passport-stamp beat (~750 ms, auto-advances; zero extra
+  // mandatory taps — it plays while the faucet request is already done), then this screen is over
+  // and `onCreated` hands the wallet to the app's first-run router (App.tsx), which decides what
+  // comes next. In-memory only: the beat is a moment, not a gate, and an app killed during it
+  // simply lands wherever the router says on the next launch.
+  //
+  // `recoverySaved` is awarded when the beat starts — the acknowledgment IS the save (the words
+  // were written down at the gate; the beat only marks it). The `flowUnderstood` stamp is NOT this
+  // screen's business any more: it is awarded by the practice payment actually settling.
+  const [recoveryBeat, setRecoveryBeat] = useState(false);
   const reducedMotion = useReducedMotion();
   // The relay capability probe, held as the PROMISE and not as its answer. `finishCreate` runs the
   // instant the user taps Continue on the backup screen, which is routinely BEFORE a slow relay has
@@ -83,10 +104,14 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   const demoFaucetProbe = useRef<Promise<RelayCapabilities> | null>(null);
   useEffect(() => { demoFaucetProbe.current = relayCapabilities(relayUrl); }, [relayUrl]);
 
-  // Generate a fresh on-device Ed25519 keypair, persist it, then SHOW THE BIP-39 BACKUP before entering
-  // the wallet. The faucet fund is DEFERRED to `finishCreate` (run after the user acknowledges the
-  // backup) so the wallet is never entered without the user having seen their 24 recovery words. The
-  // mnemonic is derived ON-DEMAND from secretHex via `hexToWords` — no storage change.
+  // Generate a fresh on-device Ed25519 keypair, park it as PENDING, then SHOW THE BIP-39 BACKUP
+  // before it becomes the app's identity. The faucet fund is DEFERRED to `finishCreate` (run after
+  // the user acknowledges the backup) so the wallet is never entered without the user having seen
+  // their 24 recovery words. The mnemonic is derived ON-DEMAND from secretHex via `hexToWords`.
+  //
+  // PENDING, not the identity, is the whole point: the key is written to a key nothing else reads,
+  // so a phone killed with the words on screen has no wallet to skip the backup for. `finishCreate`
+  // is the only promotion.
   async function create() {
     const name = username.trim() || 'me';
     // Own-seed parse (auto-detected form): a bare 64-hex string is the raw seed; anything else is
@@ -110,7 +135,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
     try {
       const kp = hex ? await DpayCore.keypairFromSecret(hex) : await DpayCore.generateKeypair();
       const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username: name};
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
+      await AsyncStorage.setItem(PENDING_IDENTITY_STORAGE_KEY, JSON.stringify(id));
       const words = hexToWords(kp.secretHex);
       setPendingId(id);
       setBackupMnemonic(words);
@@ -122,11 +147,25 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // requested when the relay explicitly advertises a faucet. Wallet creation never depends on
   // funding, and a relay without a faucet must not produce a scary failure screen.
   async function finishCreate() {
-    if (!pendingId) return;
+    if (!pendingId || busy) return;
     const id = pendingId;
+    setBusy(true);
+    setErr(null);
+    // The promotion: THIS is the moment the generated key becomes the wallet's identity, because
+    // this is the moment its owner has said they can get it back. A failed write leaves the words
+    // on screen with the reason under them — never a wallet the user was told about but does not
+    // have, and never a silent swallow.
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
+      await AsyncStorage.removeItem(PENDING_IDENTITY_STORAGE_KEY);
+    } catch (e: unknown) {
+      console.warn(`onboarding: could not save the new wallet: ${e instanceof Error ? e.message : String(e)}`);
+      setErr(M.onboarding.errSaveWallet);
+      setBusy(false);
+      return;
+    }
     setBackupMnemonic(null);
     setBackupChecked(false);
-    setBusy(true);
     const probe = demoFaucetProbe.current;
     if (probe === null) {
       // Not reachable through the UI — the mount effect starts the probe before any tap can get
@@ -143,28 +182,32 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
     }
     void awardStamp(JOURNEY_STAMPS.recoverySaved);
     setBusy(false);
-    setBeat('recoverySaved');
+    setRecoveryBeat(true);
   }
 
   // The RECOVERY SAVED stamp choreography: a passport-stamp landing (tangerine ring, slight
-  // overshoot, resting -3° tilt) that holds a beat then auto-advances to the rehearsal. Reduced
-  // motion → simple fade, same timing. The alive-ref makes the unmount case safe.
+  // overshoot, resting -3° tilt) that holds a beat then hands the wallet to the app's first-run
+  // router. Reduced motion → simple fade, same timing. The alive-ref makes the unmount case safe.
   const beatAlive = useRef(true);
   useEffect(() => { beatAlive.current = true; return () => { beatAlive.current = false; }; }, []);
   const stampSc = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
   const stampOp = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
   useEffect(() => {
-    if (beat !== 'recoverySaved') return;
+    if (!recoveryBeat || pendingId === null) return;
+    const id = pendingId;
     if (!reducedMotion) {
       Animated.parallel([
         Animated.spring(stampSc, {toValue: 1, friction: 4.5, tension: 64, delay: 90, useNativeDriver: false}),
         Animated.timing(stampOp, {toValue: 1, duration: 180, delay: 90, easing: Easing.out(Easing.cubic), useNativeDriver: false}),
       ]).start();
     }
-    const t = setTimeout(() => { if (beatAlive.current) setBeat('rehearsal'); }, 750);
+    const t = setTimeout(() => { if (beatAlive.current) onCreated(id); }, 750);
     return () => { clearTimeout(t); };
+    // `reducedMotion`, `stampSc` and `stampOp` are deliberately absent: the two Animated values are
+    // refs (one identity for this mount) and the motion preference is read once, when the beat
+    // starts — re-running this effect would replay the stamp mid-landing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [beat]);
+  }, [recoveryBeat, pendingId, onCreated]);
 
   // Restore a wallet from EITHER the 24-word BIP-39 mnemonic (default) OR the 64-hex recovery seed
   // (legacy/advanced fallback). Both paths converge on `keypairFromSecret(hex)` — the mnemonic is
@@ -194,7 +237,7 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
       const kp = await DpayCore.keypairFromSecret(hex);
       const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username: name};
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(id));
-      onCreated(id);
+      onRestored(id);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   }
 
@@ -210,21 +253,12 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           onDone={() => { void awardStamp(JOURNEY_STAMPS.walkthroughDone).then(() => setWalkthrough(false)); }}
           onSkip={() => { void awardStamp(JOURNEY_STAMPS.walkthroughDone).then(() => setWalkthrough(false)); }}
         />
-      ) : beat === 'rehearsal' ? (
-        /* Trip Ready J3 — the payment rehearsal. Both exits ("Choose my currency" and "Skip
-           practice") enter the wallet at the same place: on a first run the home-currency chooser
-           renders INSTEAD of it (Wallet.tsx), which is what the next-button's label points at. The
-           label difference is about intent, not destination. */
-        <Rehearsal
-          onTry={() => { if (pendingId) onCreated(pendingId); }}
-          onSkip={() => { if (pendingId) onCreated(pendingId); }}
-        />
-      ) : beat === 'recoverySaved' ? (
+      ) : recoveryBeat ? (
         /* Trip Ready J2 — the RECOVERY SAVED beat (UX hardening 2026-08-23: was a tiny chip on
            ~96% blank porcelain — read as a crash flash; now a full-bleed INK moment, the ONE
            deliberate dark beat of onboarding). A porcelain passport stamp lands (overshoot,
-           resting -6° tilt) under the line that makes the words matter, holds a beat, then
-           auto-advances to the rehearsal. Zero extra mandatory taps. */
+           resting -6° tilt) under the line that makes the words matter, holds a beat, then hands
+           over to the first-run router. Zero extra mandatory taps. */
         <View testID="recovery-saved-stamp" style={S.inkBeat}>
           <Animated.View
             style={[S.inkStamp, {opacity: stampOp, transform: [{scale: stampSc}, {rotate: '-6deg'}]}]}>
@@ -268,8 +302,12 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                 </View>
                 <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.onboarding.backup.ack}</Text>
               </Pressable>
-              <Pressable testID="btn-mnemonic-continue" style={[S.primary, !backupChecked && S.disabledFlat]} disabled={!backupChecked} onPress={finishCreate}
-                accessibilityRole="button" accessibilityLabel={M.onboarding.continue} accessibilityState={{disabled: !backupChecked}}>
+              {/* The save can fail, and when it does the words on screen are for a wallet that
+                  does not exist yet — so the reason renders here, above the button that will try
+                  again, rather than being swallowed into a screen that simply does nothing. */}
+              {err ? <Text testID="backup-err" style={S.err}>{err}</Text> : null}
+              <Pressable testID="btn-mnemonic-continue" style={[S.primary, (!backupChecked || busy) && S.disabledFlat]} disabled={!backupChecked || busy} onPress={finishCreate}
+                accessibilityRole="button" accessibilityLabel={M.onboarding.continue} accessibilityState={{disabled: !backupChecked || busy}}>
                 <Text style={S.primaryText}>{M.onboarding.continue}</Text>
               </Pressable>
             </>

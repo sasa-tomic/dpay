@@ -43,6 +43,8 @@ export const convertEs: ConvertMessages = {
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Este monedero no tiene ${sym}. Para convertir ${sym}, recibe primero ${sym} en tu dirección: abre «${receiveTab}» abajo y elige «${myAddress}».`,
+  fundOtherHolds: (held, toSym) => `Tienes ${held}: puedes convertir eso a ${toSym} en su lugar.`,
+  fundOtherSwitch: sym => `Convertir desde ${sym} en su lugar`,
   insufficientLine: (needed, balance) =>
     `Convertir esto necesita ${needed} — el importe más dos comisiones de ledger — y este monedero tiene ${balance}. Baja el importe, o recibe más primero.`,
 
@@ -78,6 +80,5 @@ export const convertEs: ConvertMessages = {
     quoteUnreachable: () => 'No se pudo alcanzar la cotización de ICPSwap — el relay no responde. Revisa tu conexión y vuelve a intentarlo.',
     quoteRefused: () => 'ICPSwap se negó a cotizar este par ahora mismo.',
     quoteUnavailable: code => `Cotización no disponible (${code}).`,
-    swapReplyShape: () => 'No se pudo leer la respuesta del pool.',
   },
 };

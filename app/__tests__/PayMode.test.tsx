@@ -1273,3 +1273,101 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
     act(() => { tree.unmount(); });
   });
 });
+
+describe('PayMode — what the affordability gate is allowed to read, and what it does when it refuses', () => {
+  /** Re-render the SAME mounted PayMode with new props (state survives) — how a balance poll
+   *  landing mid-review reaches the component in the real app. */
+  function repoll(tree: renderer.ReactTestRenderer, props: Partial<PayModeProps>) {
+    act(() => { tree.update(payElement(props)); });
+  }
+
+  test('a transient low balance must not be a terminal refusal: once the balance covers it, the payer can sign', async () => {
+    // The measured shape (2026-09-08): the camera path decides ONCE, at decode, whether to
+    // auto-sign. A balance that was momentarily low — a faucet credit or an incoming transfer not
+    // yet in the poll's answer — suppressed that one decision, and nothing ever re-fired it. The
+    // payer was parked on a read-only card whose only control was Cancel, in front of a merchant,
+    // holding money the wallet could see in its own header a second later. The gate itself is
+    // right; being unable to act on its own change of mind is the bug.
+    const props = {online: true, shownBalance: '0'};
+    const tree = mountPay(props);
+    await scanToSign(tree, REQ); // ∂25.00 against a ∂0.00 reading
+
+    // The refusal is honest while it lasts, and it signs nothing.
+    expect(prepareTransfer).not.toHaveBeenCalled();
+    expect(textByTestID(tree, 'review-lowbal')).toBe(M.pay.notEnoughBalance);
+    // Flow 19's contract, byte-for-byte: while the payment IS unaffordable there is no sign control
+    // at all — the gate is structural, never a disabled button.
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
+
+    // The poll lands. The header now reads ∂100.00 from this very scalar.
+    repoll(tree, {...props, shownBalance: '10000'});
+    expect(hasTestID(tree, 'review-lowbal')).toBe(false);
+
+    // …and the payer has a way to pay: a DELIBERATE press, never a silent re-sign. Auto-signing a
+    // payment the user watched get refused would move money without a gesture at a moment they did
+    // not choose; a press is strictly more consent than the one-press rule already asks for.
+    expect(hasTestID(tree, 'btn-approve')).toBe(true);
+    await act(async () => { tree.root.findAll(n => n.props && n.props.testID === 'btn-approve')[0].props.onPress(); });
+    await act(async () => {});
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('an UNKNOWN balance is not a zero balance: a currency the app has never read still signs', async () => {
+    // The rule the gate must never break. `assetBalances` carries an entry only for a currency the
+    // relay actually answered for; an absent entry means "not read", and refusing a signature on it
+    // would decline a payment the wallet can make. Offline the same rule already applies (flow 19).
+    const tree = mountPay({online: true, shownBalance: null, assetBalances: {}});
+    await scanToSign(tree, REQ);
+    expect(hasTestID(tree, 'review-lowbal')).toBe(false);
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('an UNKNOWN non-primary balance is not a zero balance either', async () => {
+    // VCHF (currency 7) with an empty poll map: the ledger has not answered once. Sign.
+    const tree = mountPay({
+      online: true,
+      catalog: icpCatalogOf(BUNDLED_NETWORKS),
+      shownBalance: '0',
+      assetBalances: {},
+    });
+    await scanToSign(tree, {...REQ, currency: 7, amount: '100000000'});
+    expect(hasTestID(tree, 'review-lowbal')).toBe(false);
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the gate reads the REQUESTED currency\'s own balance — the one the header prints, and no other', async () => {
+    // The assertion that would have caught a header/review disagreement. DEMO's balance reaches
+    // this component as ONE scalar (`shownBalance`) — the identical value `buildAssetBalances`
+    // turns into the header's `ic:0` row — so a second, contradicting source in `assetBalances` is
+    // planted here deliberately: if the check ever starts reading it, these two flip.
+    const funded = mountPay({online: true, shownBalance: '10000', assetBalances: {0: '0'}});
+    await scanToSign(funded, REQ);
+    expect(hasTestID(funded, 'review-lowbal')).toBe(false);
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    act(() => { funded.unmount(); });
+
+    jest.mocked(prepareTransfer).mockClear();
+    const empty = mountPay({online: true, shownBalance: '0', assetBalances: {0: '10000'}});
+    await scanToSign(empty, REQ);
+    expect(textByTestID(empty, 'review-lowbal')).toBe(M.pay.notEnoughBalance);
+    expect(prepareTransfer).not.toHaveBeenCalled();
+    act(() => { empty.unmount(); });
+  });
+
+  test('offline, a balance that cannot cover the amount still signs — with the honest warning', async () => {
+    // Flow 19's other half, pinned here at component level: offline the local balance is stale by
+    // definition, so it warns and the merchant's online verify is the real gate. The signer is hung
+    // so the read-only surface that carries the note stays on screen to be read.
+    jest.mocked(prepareTransfer).mockImplementation(() => new Promise<RailPrepared>(() => {}));
+    const tree = mountPay({online: false, shownBalance: '0'});
+    await scanToSign(tree, REQ);
+    expect(textByTestID(tree, 'review-lowbal')).toBe(M.pay.localBalanceMayNotCover);
+    // It SIGNED (the envelope is being built) — and no sign control was needed or offered.
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    expect(hasTestID(tree, 'btn-approve')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});

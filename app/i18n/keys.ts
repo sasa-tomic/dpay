@@ -27,6 +27,7 @@ import type {PayMessages, ReceiveMessages} from './domains/en/pay';
 import type {OnboardingMessages, SettingsMessages} from './domains/en/settings';
 import type {EducationMessages, WalletMessages} from './domains/en/wallet';
 import type {ConvertMessages} from './domains/en/convert';
+import type {ReceiptMessages} from './domains/en/receipt';
 
 /**
  * The per-domain contracts, re-exported from the ONE module every locale already imports for
@@ -43,9 +44,10 @@ export type {PayMessages, ReceiveMessages} from './domains/en/pay';
 export type {OnboardingMessages, SettingsMessages, CopyWordsCopy} from './domains/en/settings';
 export type {
   EducationMessages, WalletMessages,
-  WalkthroughSceneCopy, RehearsalStepCopy, CoachTipCopy, PassportStampCopy,
+  WalkthroughSceneCopy, CoachTipCopy, PassportStampCopy,
 } from './domains/en/wallet';
 export type {ConvertMessages} from './domains/en/convert';
+export type {ReceiptMessages} from './domains/en/receipt';
 
 /** Title + sub-line for one NFC tap phase, as rendered by the shared tap status view. */
 export type NfcPhaseCopy = {title: string; sub: string};
@@ -91,6 +93,9 @@ export type Messages = {
 
   /** The delegated-conversion surface (spec 2026-09-07): venue quote, disclosure, §4 states. */
   convert: ConvertMessages;
+
+  /** The transaction receipt — the merchant-reconciliation and dispute surface (X6). */
+  receipt: ReceiptMessages;
 
   nfc: {
     /** Why tap-to-pay is unavailable. Each ends with the honest fallback that QR always works. */

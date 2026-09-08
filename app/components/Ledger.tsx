@@ -31,7 +31,7 @@ function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): s
 // non-zero, the honesty note `M.wallet.ledger.dropped` renders in BOTH branches (empty list and
 // populated) — the unreadable transactions still exist on-chain, and a short (or empty) list must
 // never read as the whole truth. Nothing renders when it is 0.
-export function Ledger({history, catalog, assets, dropped = 0}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number}) {
+export function Ledger({history, catalog, assets, dropped = 0, onOpenReceipt}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number; onOpenReceipt: (t: Txn) => void}) {
   const [filter, setFilter] = useState<AssetId | null>(null);
   if (history.length === 0) {
     return (
@@ -98,7 +98,7 @@ export function Ledger({history, catalog, assets, dropped = 0}: {history: Txn[];
         // alone is no longer unique (mint + transfer rows collide). Composite key: index pins
         // positional identity; the nonce keeps facade-era rows (which had unique nonces) stable
         // across refreshes when the list head shifts.
-        <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} />
+        <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} onPress={onOpenReceipt} />
       ))}
     </View>
   );

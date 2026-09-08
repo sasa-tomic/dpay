@@ -26,6 +26,7 @@ import {InstructionPanel} from './InstructionPanel';
 import {ModeToggle} from './ModeToggle';
 import {OcpAssetChoice} from './OcpAssetChoice';
 import {OcpQuoteLines} from './OcpQuoteLines';
+import {PaymentReview, PayeeLine} from './PaymentReview';
 import {SendSheet} from './SendSheet';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
@@ -125,6 +126,21 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     ? selectedAsset
     : null;
 
+  // THE ONE BALANCE THE AFFORDABILITY GATE MAY READ (2026-09-08): the REQUESTED currency's own,
+  // and specifically the very scalar the header prints for it — currency 0 reads `shownBalance`
+  // (what `buildAssetBalances` turns into the header's `ic:0` row), every other asset reads its own
+  // entry in the poll's map (what the header's row for that asset reads). Two call sites derived
+  // this separately (the camera's auto-sign decision and the review's render), which is two places
+  // for the check and the header to drift apart.
+  //
+  // A MISSING ENTRY IS `null`, NEVER `'0'`. The poll writes an entry only for a currency the relay
+  // actually answered for — it OMITS a currency whose ledger errored rather than reporting zero —
+  // so an absent entry means "not read", and an unread ledger is not an empty account. Refusing a
+  // signature on it would decline a payment the wallet can make; `insufficient` therefore stays
+  // false and the payment goes through, exactly as it does offline.
+  const balanceOfRequested = (currency: number): string | null =>
+    currency === 0 ? shownBalance : (assetBalances[currency] ?? null);
+
   // A wallet address the camera read instead of a payment code. Handed to the send form as a
   // prefill (mirrors the SOL rail's link prefill), so the ONE place that knows whether an address
   // is usable for this asset — and what it is when it is not — is the place that says so.
@@ -191,7 +207,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       // screen. Blocked legs (unsupported asset / online+insufficient) never sign: they render
       // their honest screens below. A payment LINK never auto-signs (see the prefill effect).
       const payable = isPayableAsset(catalog, i.currency);
-      const reqBalance = i.currency === 0 ? shownBalance : (assetBalances[i.currency] ?? null);
+      const reqBalance = balanceOfRequested(i.currency);
       const insufficient = reqBalance != null && cmpRaw(i.amount, reqBalance) > 0;
       if (payable && !(online && insufficient)) void approve(i);
     } catch (e: unknown) {
@@ -788,98 +804,58 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       );
     }
     // MC5: locked-asset review — the payer sees + pays the EXACT asset that was requested (dpay
-    // never swaps). The balance check uses ONLY that asset's balance: currency 0 → shownBalance
-    // (DEMO_USD, tracked in the header), else assetBalances[currency] (the polled per-asset
-    // balance). An unknown balance (null) is treated as "don't block" (same as the old DEMO path).
-    const reqBalance = intent.currency === 0 ? shownBalance : (assetBalances[intent.currency] ?? null);
+    // never swaps). The balance is the requested asset's own, read through the ONE lookup the
+    // camera's auto-sign decision uses (`balanceOfRequested`), so the two can never disagree and
+    // neither can drift from the number the header prints.
+    const reqBalance = balanceOfRequested(intent.currency);
     // C2: when ONLINE and the known balance can't cover the amount, gate PRE-SUBMIT (no doomed
     // submit). Offline we can't be sure (the local balance may be stale), so we only WARN there and
     // let the merchant's online verify be the real gate. MC1 units 2-4: `cmpRaw` (BigInt) — never a
     // lexicographic string compare (which would wrongly rank "9" > "10").
     const insufficient = reqBalance != null && cmpRaw(intent.amount, reqBalance) > 0;
     const blockApprove = online && insufficient;
-    // The destination, always rendered: the short pubkey of a scanned request, the FULL ICRC-1
-    // principal of a payment link. A link can name any account on the ledger, and the account IS
-    // the identity — the label beside it is only what the sender claims to be called.
-    const payeeLine = (
-      <>
-        <Text style={S.reviewTo}>{M.pay.toWho(intent.toName || intent.toAccountText)}</Text>
-        {/* U-F5 — the destination account as a subdued second line when a display name is shown,
-            so the payer can verify where the money goes beyond a claimed name (phishing surface).
-            The no-name fallback already renders the account as the primary "to" line. */}
-        {intent.toName ? <Text testID="review-payee" style={S.dim2}>{intent.toAccountText}</Text> : null}
-      </>
-    );
     if (intent.source === 'link' || intent.source === 'ocp') {
       // Link entry (zero-press): the full review card — the single Approve press IS the consent.
       // An OpenCryptoPay till lands here too, for the same reason: the amount, the destination and
       // the name all came from a party the wallet has no relationship with, so it is reviewed and
       // approved explicitly, never auto-signed. It adds three lines the other entries do not need
-      // (host, claimed name, price countdown) — see OcpQuoteLines.
-      // C1: any shown error (insufficient / verify-fail) disables the button so a doomed payment
-      // can't be re-tapped.
-      const approveDisabled = busy || !!err || blockApprove;
+      // (host, claimed name, price countdown) — see OcpQuoteLines. The card itself is shared with
+      // the first-run practice payment (PaymentReview.tsx), which is what keeps practice honest:
+      // the screen a user rehearses Approve on IS the screen a shop will put in front of them.
       return (
-        <View style={S.center}>
-          <Text style={S.label}>{M.pay.reviewPayment}</Text>
-          <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
-          {payeeLine}
-          {/* A link's payee name is UNVERIFIED — anyone can write any name into a URL. Say so, once,
-              right where the name is read: the account above it is the part that is checkable. */}
-          {intent.source === 'link' && intent.toName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.linkNameClaimed}</Text> : null}
-          {/* The till quote's own three lines. `onTooLate` writes the reason into `err`, which both
-              explains the state and disables Approve through `approveDisabled` — a price with no
-              room left for the whole sequence must never be payable, because the provider would
-              refuse the proof AFTER the money moved. */}
-          {intent.source === 'ocp' && ocp ? (
-            <OcpQuoteLines
-              host={ocp.host}
-              claimedName={intent.toName || null}
-              requested={ocp.details.requestedAmount}
-              payableUntil={ocp.payableUntil}
-              onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
-            />
-          ) : null}
-          {/* The sender-set memo (if any) — shown as a small subtitle so the payer sees the note
-              attached to this payment before approving. Empty memo renders nothing. */}
-          {intent.memo ? <Text testID="review-memo" style={S.dim2}>{intent.memo}</Text> : null}
-          {/* Trip Ready J4 — one-time first-use coaching, mounted in the reading zone (right under
-              the amount/payee block it explains) so it is seen without scrolling; inline, never
-              covers the buttons. Shows until dismissed; dismissal persists via journey seen-markers. */}
-          <CoachTip tipKey="payReview" />
-          {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
-              first; the raw request nonce is no longer surfaced (internal protocol data). */}
-          {insufficient ? (
-            <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
-              ? M.pay.notEnoughBalance
-              : M.pay.localBalanceMayNotCover}</Text>
-          ) : null}
-          {err ? <Text testID="review-err" style={S.err}>{err}</Text> : null}
-          <Pressable
-            testID="btn-approve"
-            style={[S.primary, approveDisabled && S.disabledFlat]}
-            disabled={approveDisabled}
-            accessibilityRole="button"
-            accessibilityLabel={M.pay.approveA11y}
-            accessibilityHint={M.pay.approveHint}
-            accessibilityState={{disabled: approveDisabled}}
-            onPress={() => void approve(intent)}>
-            <Text style={S.primaryText}>{busy ? M.pay.signing : M.pay.approve}</Text>
-          </Pressable>
-          {/* Audit P2: Cancel-as-secondary-button parity — a bordered secondary button of the same
-              width as Approve so the tap targets are equivalent and the user makes a deliberate choice
-              (a reflex Approve tap was the asymmetry risk). Matches the Cancel style used by the
-              offline confirm row + the unsupported-asset cancel below. */}
-          <Pressable
-            testID="btn-review-cancel"
-            style={S.secondaryBtn}
-            onPress={reset}
-            accessibilityRole="button"
-            accessibilityLabel={M.common.cancel}
-            accessibilityState={{disabled: false}}>
-            <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
-          </Pressable>
-        </View>
+        <PaymentReview
+          catalog={catalog}
+          intent={intent}
+          insufficient={insufficient}
+          blockApprove={blockApprove}
+          err={err}
+          busy={busy}
+          onApprove={() => void approve(intent)}
+          onCancel={reset}
+          notes={
+            <>
+              {/* A link's payee name is UNVERIFIED — anyone can write any name into a URL. Say so,
+                  once, right where the name is read: the account above it is the checkable part. */}
+              {intent.source === 'link' && intent.toName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.linkNameClaimed}</Text> : null}
+              {/* The till quote's own three lines. `onTooLate` writes the reason into `err`, which
+                  both explains the state and disables Approve — a price with no room left for the
+                  whole sequence must never be payable, because the provider would refuse the proof
+                  AFTER the money moved. */}
+              {intent.source === 'ocp' && ocp ? (
+                <OcpQuoteLines
+                  host={ocp.host}
+                  claimedName={intent.toName || null}
+                  requested={ocp.details.requestedAmount}
+                  payableUntil={ocp.payableUntil}
+                  onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
+                />
+              ) : null}
+              {/* The sender-set memo (if any) — shown as a small subtitle so the payer sees the
+                  note attached to this payment before approving. Empty memo renders nothing. */}
+              {intent.memo ? <Text testID="review-memo" style={S.dim2}>{intent.memo}</Text> : null}
+            </>
+          }
+        />
       );
     }
     // Camera entry: the "Pay Now" gate was the one deliberate press, so the payable sign already
@@ -891,7 +867,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       <View style={S.center}>
         <Text style={S.label}>{M.pay.paying}</Text>
         <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
-        {payeeLine}
+        <PayeeLine intent={intent} />
         {insufficient ? (
           <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
             ? M.pay.notEnoughBalance
@@ -901,15 +877,47 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         {busy ? (
           <Text style={S.dim2}>{M.pay.signing}</Text>
         ) : (
-          <Pressable
-            testID="btn-review-cancel"
-            style={S.secondaryBtn}
-            onPress={reset}
-            accessibilityRole="button"
-            accessibilityLabel={M.common.cancel}
-            accessibilityState={{disabled: false}}>
-            <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
-          </Pressable>
+          <>
+            {/* THE WAY OUT OF A REFUSAL THE WALLET HAS SINCE CHANGED ITS MIND ABOUT (2026-09-08).
+                The camera path decides ONCE, at decode, whether to auto-sign. A balance that was
+                momentarily low — a faucet credit or an incoming transfer the last poll had not
+                answered for yet — suppressed that one decision, and nothing ever re-fired it: the
+                payer sat on a read-only card whose only control was Cancel, in front of a
+                merchant, while the header a few pixels above showed money that covered the
+                payment. `insufficient` is re-derived on every render, so the note correctly
+                disappears when the balance lands — and left the screen with nothing on it.
+
+                So the deliberate press appears exactly where the auto-sign did not: not busy, no
+                error refusing it, and not blocked. Every one of those three is false in the states
+                this surface was built for (signing / expired / ledger-rejected / genuinely
+                unaffordable), which is why the button is invisible in all of them — flow 19's
+                "there is never a sign button while online + insufficient" contract is structural
+                here too, not a disabled control. And a press is strictly MORE consent than the
+                one-press rule already asks of this path: re-firing the signature on its own, at a
+                moment the payer did not choose, would move money after they watched it be
+                refused. */}
+            {!blockApprove && !err ? (
+              <Pressable
+                testID="btn-approve"
+                style={S.primary}
+                onPress={() => void approve(intent)}
+                accessibilityRole="button"
+                accessibilityLabel={M.pay.approveA11y}
+                accessibilityHint={M.pay.approveHint}
+                accessibilityState={{disabled: false}}>
+                <Text style={S.primaryText}>{M.pay.approve}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              testID="btn-review-cancel"
+              style={S.secondaryBtn}
+              onPress={reset}
+              accessibilityRole="button"
+              accessibilityLabel={M.common.cancel}
+              accessibilityState={{disabled: false}}>
+              <Text style={S.secondaryBtnText}>{M.common.cancel}</Text>
+            </Pressable>
+          </>
         )}
       </View>
     );

@@ -387,7 +387,13 @@ export function verifySolPayment(
       return { ok: false, reason: 'bad-signature' };
     }
     return { ok: true, payer: bs58.encode(parts.feePayer), signature: bs58.encode(parts.signature) };
-  } catch {
+  } catch (e) {
+    // THE MERCHANT'S DECLINE PATH. Every other `reason` above names something about the PAYMENT;
+    // this one names something about US — a decoder that threw. Reported as a refusal (correct: an
+    // unverifiable payment must never be accepted) but logged, because a bug in this file and a
+    // genuinely bad payment used to be the same opaque word on a counter.
+    const detail = e instanceof Error ? e.message : String(e);
+    console.warn(`verifySolPayment: decoding a ${payment.tx.length}-byte payment threw — refusing it: ${detail}`);
     return { ok: false, reason: 'exception' };
   }
 }

@@ -4,6 +4,7 @@ import {C} from '../config/palette';
 import {M} from '../i18n';
 import {DEMO_ASSET_ID, type SelectableAsset} from '../config/assets';
 import {currencyOfAsset, preferredRail, railLineLabel, type HomeCurrency} from '../config/currency';
+import {linkNetworkOf, prettyNetwork} from '../config/assets';
 import {CurrencyRow} from './CurrencyRow';
 import {HotkeyHint} from './HotkeyHint';
 import {IconAlert, IconChevronLeft, IconPlus, IconSwap} from './icons';
@@ -38,7 +39,7 @@ import type {BalanceView} from '../lib/assetBalances';
 // non-negotiable). "Holds something" is a boolean fact about one asset; a magnitude ordering
 // across unlike assets would be a claim.
 export function AccountsTab({
-  assets, selectedId, balances, homeCurrency, demoFaucetAvailable, topUpBusy, topUpErr,
+  assets, selectedId, balances, homeCurrency, demoFaucetAvailable, topUpBusy,
   hasTestnet, showTestnet, onToggleTestnet, onBack, onSelect, onTopUp, onConvert,
 }: {
   assets: SelectableAsset[];
@@ -47,7 +48,6 @@ export function AccountsTab({
   homeCurrency: HomeCurrency;
   demoFaucetAvailable: boolean;
   topUpBusy: boolean;
-  topUpErr: string | null;
   hasTestnet: boolean;
   showTestnet: boolean;
   onToggleTestnet: () => void;
@@ -67,6 +67,17 @@ export function AccountsTab({
   // testnet rows are currently shown. `hasTestnet` is computed upstream from the FULL catalog
   // (the assets list is already filtered, so it cannot answer this on its own).
   const showToggle = hasTestnet || showTestnet;
+  // X9 — an outage belongs to a NETWORK, not to each account on it. When an endpoint refuses (the
+  // measured case: the baked Helius key answering HTTP 429) every account on that network flips to
+  // 'error' in the same poll, and this list used to print the identical ~48-word paragraph on all
+  // three Solana rows — ~120 words of alarm text for ONE fact. The banner is now emitted once, and
+  // it is emitted immediately ABOVE the first affected row of that network so the sentence and the
+  // rows it describes cannot be separated by a scroll (the same rule the practice divider follows).
+  //
+  // The network is the SETTLEMENT chain (`linkNetworkOf`), never the asset's catalog `network` —
+  // that field names the chain a chain-key asset is BACKED by, so an IC relay outage read off it
+  // would have claimed "The Bitcoin network is not answering" on the ckBTC row.
+  const bannered = new Set<string>();
   return (
     <View style={S.accountsWrap}>
       <View style={S.routeHeaderRow}>
@@ -130,10 +141,6 @@ export function AccountsTab({
                 : <><IconPlus size={16} color={C.brand} /><Text style={S.assetActionText}>{M.wallet.balances.demoFunds}</Text><HotkeyHint k="T" /></>}
             </Pressable>
           ) : null;
-          // The DEMO row's topUpErr line — rendered below the subtitle via `children`.
-          const errLine = rowIsDemo && topUpErr
-            ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text>
-            : null;
           // 'Needs setup' badge — Solana USDC with a KNOWN-absent token account ('absent' is a
           // USDC-only status: no ATA on chain). One tap on the row selects it, and every USDC
           // surface then offers the one-tap account create. Known-absent only: loading/error/
@@ -143,14 +150,18 @@ export function AccountsTab({
             : null;
           // A balance the wallet could not READ ('error': the chain's endpoint refused or failed).
           // It rendered the same bare "—" as a first poll still in flight, which told the user
-          // nothing about which of the two it was. Says what happened, whose side it is on, that
-          // nothing moved, and that the retry is automatic (the balance poll re-reads on its own
-          // interval behind the endpoint's cooldown — so no button is promised). Status-driven,
-          // never rail-specific: any rail that reports 'error' gets the same line.
-          const unreadable = view?.status === 'error' ? (
-            <View testID={`asset-${asset.testKey}-unreadable`} style={S.railHealthRow}>
+          // nothing about which of the two it was. The network-level banner (built below, above
+          // this row) says what happened, that nothing moved, that the other accounts still work,
+          // and that the retry is automatic — no button is promised because none would help.
+          // Status-driven, never rail-specific: any rail that reports 'error' gets the same line,
+          // once, for its network.
+          const netSlug = linkNetworkOf(asset);
+          const outage = view?.status === 'error' && !bannered.has(netSlug);
+          if (outage) bannered.add(netSlug);
+          const banner = outage ? (
+            <View key={`outage-${netSlug}`} testID={`rail-unreadable-${netSlug}`} style={S.railOutageRow}>
               <IconAlert size={14} color={C.warn} />
-              <Text style={S.railHealthText}>{M.wallet.balances.railUnreadable(asset.network ?? asset.symbol)}</Text>
+              <Text style={S.railHealthText}>{M.errors.rail.unreadable(prettyNetwork(netSlug))}</Text>
             </View>
           ) : null;
           // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
@@ -180,11 +191,9 @@ export function AccountsTab({
               variant="card"
               actions={convert || faucet ? <>{convert}{faucet}</> : null}
             >
-              {errLine}
               {mainBadge}
               {railBadge}
               {setupBadge}
-              {unreadable}
               {/* The rail-health footer — ONE shared slot under the badge stack, rendered by the
                   same component everywhere so the thin-liability statement (VEUR) reads with one
                   voice. Warn tone: only THIN rails carry it; deep/untiered rows render nothing
@@ -193,11 +202,13 @@ export function AccountsTab({
             </CurrencyRow>
           );
           // The practice divider sits IMMEDIATELY above the practice row, so the sentence and the
-          // thing it describes cannot be separated by a scroll (anti-scam rule R3).
-          return rowIsDemo
+          // thing it describes cannot be separated by a scroll (anti-scam rule R3). The outage
+          // banner sits in the same position, above the first row of the network it is about.
+          return rowIsDemo || banner
             ? (
               <View key={asset.testKey}>
-                <Text testID="accounts-practice-note" style={S.accountsPractice}>{M.wallet.accounts.practice}</Text>
+                {banner}
+                {rowIsDemo ? <Text testID="accounts-practice-note" style={S.accountsPractice}>{M.wallet.accounts.practice}</Text> : null}
                 {row}
               </View>
             )

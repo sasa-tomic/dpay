@@ -237,6 +237,45 @@ describe('C3 — a confirm that can only fail is refused before it is offered', 
     expect(onShowDepositAddress).toHaveBeenCalledTimes(1);
   });
 
+  // The funded-account pointer the Pay gate has and this gate did not. It is offerable HONESTLY
+  // only here: the PoC venue trades exactly ONE unordered pair, so the only account that could
+  // ever help is the pair's other leg — already resolved as this screen's output leg. A generic
+  // "switch to BTC" would be a dead offer, which is why the pointer is not generic.
+  test('the OTHER leg of the pair is named and offered when it holds something', async () => {
+    const onSwitchAsset = jest.fn();
+    // No ICP (currency 8) and 1.2 VCHF (currency 7) — the pair's other side.
+    const tree = await mountConvert('0', null, {assetBalances: {8: '0', 7: '120000000'}, onSwitchAsset});
+    expect(present(tree, 'convert-fund-other')).toBe(true);
+    const line = textOf(tree, 'convert-fund-other-holds');
+    expect(line).toContain('1.20000000 VCHF'); // what is actually held, in its own ledger unit
+    expect(line).toContain('ICP');            // and what it would become
+    const btn = node(tree, 'btn-convert-fund-other');
+    expect(btn!.props.accessibilityRole).toBe('button');
+    await act(async () => { btn!.props.onPress(); });
+    // Switching selects the OTHER leg's asset id, which re-enters Convert with the legs swapped.
+    expect(onSwitchAsset).toHaveBeenCalledWith('ic:7');
+  });
+
+  test('a pair whose other leg is empty offers nothing — there is no account to point at', async () => {
+    const tree = await mountConvert('0', null, {assetBalances: {8: '0', 7: '0'}, onSwitchAsset: jest.fn()});
+    expect(present(tree, 'convert-fund')).toBe(true);       // the deposit route is still the answer
+    expect(present(tree, 'convert-fund-other')).toBe(false); // …and it is the WHOLE answer
+  });
+
+  test('a balance nobody has read is not a zero — nothing is offered on an unknown', async () => {
+    // The same fail-open rule the gate itself uses: `assetBalances` simply has no entry yet.
+    const tree = await mountConvert('0', null, {assetBalances: {8: '0'}, onSwitchAsset: jest.fn()});
+    expect(present(tree, 'convert-fund-other')).toBe(false);
+  });
+
+  test('while the selection is LOCKED the account is still named, only the button is withheld', async () => {
+    // The Pay pointer's rule: knowledge is not gated on the lock (Wallet passes no callback while
+    // an engine holds it, because a mid-flight switch would destroy a captured request).
+    const tree = await mountConvert('0', null, {assetBalances: {8: '0', 7: '120000000'}});
+    expect(present(tree, 'convert-fund-other')).toBe(true);
+    expect(present(tree, 'btn-convert-fund-other')).toBe(false);
+  });
+
   test('an amount above the balance fails closed and names the shortfall', async () => {
     // 2 ICP requested against a 1 ICP balance.
     const tree = await mountConvert('100000000', '2');

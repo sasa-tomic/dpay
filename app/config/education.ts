@@ -2,8 +2,8 @@
  * education.ts — the STRUCTURE of the education surfaces: scene/step ids, illustration keys, and
  * display ORDER. The words themselves live in the message catalog (`M.education`, defined in
  * i18n/domains/en/wallet.ts) — this module composes them into the shapes their surfaces render
- * (jest pins in `__tests__/education.test.ts`, e2e flow 90, and `crates/dpay-relay/assets/
- * landing.html`, which single-sources the campaign line from the catalog).
+ * (jest pins in `__tests__/education.test.ts` and `crates/dpay-relay/assets/landing.html`, which
+ * single-sources the campaign line from the catalog).
  *
  * Every export here is a FUNCTION, and deliberately so. A module-level constant would evaluate
  * `M.education.…` once, at import time; a runtime locale switch replaces `M`'s nested objects
@@ -13,9 +13,9 @@
  * component: read during render, always current.
  *
  * Single-key copy is NOT wrapped here. A named alias for one catalog key is indirection without
- * value — call sites read `M.education.campaignLine` / `.howItWorksTitle` / `.rehearsal.title` /
- * `.rehearsal.punchline` / `.coachTips[key]` directly. Only genuine COMPOSITION (structure the
- * catalog does not own, merged with copy) earns a function below.
+ * value — call sites read `M.education.campaignLine` / `.howItWorksTitle` / `.practice.*` /
+ * `.coachTips[key]` directly. Only genuine COMPOSITION (structure the catalog does not own,
+ * merged with copy) earns a function below.
  *
  * The comprehension CONTRACT is unchanged and still enforced by `__tests__/education.test.ts` —
  * the three product truths are phrased once, in the catalog, and never paraphrased elsewhere:
@@ -57,26 +57,6 @@ export function walkthroughScenes(): readonly WalkthroughScene[] {
     {id: 'offline', visual: 'offlineHandoff', ...M.education.walkthrough.scenes.offline},
     {id: 'key', visual: 'keyOnDevice', ...M.education.walkthrough.scenes.key},
     {id: 'exact', visual: 'exactlyOneAsset', ...M.education.walkthrough.scenes.exact},
-  ];
-}
-
-/**
- * Trip Ready J3 — the payment REHEARSAL, reframed 2026-09-07 as a concrete two-phone DEMO
- * practice guide (request → scan/approve → switch roles), shown once after the recovery
- * backup on first create. It is guidance, not a simulation: it never claims a transfer
- * happened or that the app funded the wallet, and DEMO is named as valueless practice
- * money. The offline-settlement truth itself lives in walkthrough scene 1.
- */
-export type RehearsalVisual = 'shopRequest' | 'payerReview' | 'shopSettles';
-/** The three beat ids — the catalog keys its step copy by these. */
-export type RehearsalStepId = 'request' | 'approve' | 'settle';
-export type RehearsalStep = {id: RehearsalStepId; title: string; body: string; visual: RehearsalVisual};
-/** The three beats in display order (same one-literal reasoning as `walkthroughScenes`). */
-export function rehearsalSteps(): readonly RehearsalStep[] {
-  return [
-    {id: 'request', visual: 'shopRequest', ...M.education.rehearsal.steps.request},
-    {id: 'approve', visual: 'payerReview', ...M.education.rehearsal.steps.approve},
-    {id: 'settle', visual: 'shopSettles', ...M.education.rehearsal.steps.settle},
   ];
 }
 

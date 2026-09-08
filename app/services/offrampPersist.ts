@@ -62,7 +62,7 @@ export async function loadOfframp(pubkeyHex: string, currency: number): Promise<
     if (raw == null) return null;
     return hydrateOfframp(JSON.parse(raw));
   } catch (e) {
-    console.warn('loadOfframp failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`loadOfframp: ${offrampKey(pubkeyHex, currency)} could not be read or parsed — a resumable withdrawal may be forgotten:`, e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -71,7 +71,7 @@ export async function saveOfframp(pubkeyHex: string, record: OfframpRecord): Pro
   try {
     await AsyncStorage.setItem(offrampKey(pubkeyHex, record.currency), JSON.stringify(record));
   } catch (e) {
-    console.warn('saveOfframp failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`saveOfframp: writing ${offrampKey(pubkeyHex, record.currency)} failed — this withdrawal will not resume after a restart:`, e instanceof Error ? e.message : String(e));
   }
 }
 
@@ -79,6 +79,6 @@ export async function clearOfframp(pubkeyHex: string, currency: number): Promise
   try {
     await AsyncStorage.removeItem(offrampKey(pubkeyHex, currency));
   } catch (e) {
-    console.warn('clearOfframp failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`clearOfframp: clearing ${offrampKey(pubkeyHex, currency)} failed — a finished withdrawal may offer to resume:`, e instanceof Error ? e.message : String(e));
   }
 }

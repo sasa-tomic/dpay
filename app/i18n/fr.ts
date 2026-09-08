@@ -45,11 +45,12 @@
  *   trip readiness ............... Prêt pour le voyage
  *   relay ("Server") ............. serveur
  *   expire / expired ............. expirer / expiré
- *   rehearsal .................... répétition
+ *   practice (the first run) ..... entraînement
  */
 import type {Messages} from './keys';
 import {depositFr, withdrawFr} from './domains/fr/deposit.ts';
 import {convertFr} from './domains/fr/convert.ts';
+import {receiptFr} from './domains/fr/receipt.ts';
 import {errorsFr} from './domains/fr/errors.ts';
 import {payFr, receiveFr} from './domains/fr/pay.ts';
 import {onboardingFr, settingsFr} from './domains/fr/settings.ts';
@@ -77,6 +78,8 @@ export const fr: Messages = {
 
   deposit: depositFr,
   convert: convertFr,
+
+  receipt: receiptFr,
   withdraw: withdrawFr,
 
   nfc: {

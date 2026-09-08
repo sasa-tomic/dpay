@@ -46,6 +46,8 @@ function txn(assetId: AssetId, amount: string, ts: number, overrides: Partial<Tx
     ts,
     dir: 'out',
     assetId,
+    counterparty: 'aaaaa-aa',
+    ledgerRef: '4211',
     ...overrides,
   };
 }
@@ -97,12 +99,12 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
         homeAsset={HOME_RAIL}
         online={true}
         history={[]}
-        topUpErr={null}
         onScan={jest.fn()}
         onReceive={jest.fn()}
         onDeposit={jest.fn()}
         onOpenAccounts={jest.fn()}
         onSeeAll={jest.fn()}
+        onOpenReceipt={jest.fn()}
         {...props}
       />,
     );
@@ -203,15 +205,6 @@ describe('HomeTab — the action row', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('a faucet failure is surfaced on Home — the T hotkey fires from here and must not fail silently', () => {
-    const err = M.wallet.faucet.unavailableOnRelay;
-    const tree = mountHome({topUpErr: err});
-    expect(textOf(tree, 'home-faucet-err')).toBe(err);
-    act(() => { tree.unmount(); });
-    const quiet = mountHome();
-    expect(testIDs(quiet)).not.toContain('home-faucet-err');
-    act(() => { quiet.unmount(); });
-  });
 });
 
 describe('HomeTab — the inline activity feed', () => {

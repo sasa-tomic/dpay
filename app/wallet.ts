@@ -30,6 +30,87 @@ export type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
 };
 
+// ── Every request() is BOUNDED ────────────────────────────────────────────────────────────────
+// EIP-1193 defines no timeout parameter, which is a fact about the STANDARD and was never a reason
+// for this app to wait forever: a WalletConnect request travels to a relay, to a phone, to a human,
+// and any of those three can simply stop. Unbounded, `await p.request(…)` leaves the deposit sheet
+// spinning with no error, no retry and no way back — and `waitForReceipt` was worse, because its
+// 120 s deadline is only consulted BETWEEN polls, so one hung read disabled the deadline itself.
+//
+// The bound is on OUR side and, like the pairing bound it mirrors (`PAIR_TIMEOUT_MS`,
+// walletconnect.ts), it cannot cancel the underlying call — a JS promise has no cancel. It ends OUR
+// wait and hands the caller a decision; a late answer is simply ignored.
+
+/** A request a HUMAN must act on in another app — connect, and sign. Five minutes: the same number
+ *  `PAIR_TIMEOUT_MS` gives someone to scan a pairing QR, because it is the same person doing the
+ *  same kind of thing (find the wallet, read a prompt, decide). Anything in seconds would time out
+ *  people, not wallets. */
+export const WALLET_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** A request NO human touches: `eth_chainId` (answered by the WalletConnect provider locally, or by
+ *  an injected wallet over the wire) and a receipt read (routed by the eip155 provider to its own
+ *  HTTP RPC). Thirty seconds is generous for a machine round trip and well inside
+ *  `waitForReceipt`'s 120 s budget, so a stalled read costs at most one poll. */
+export const WALLET_READ_TIMEOUT_MS = 30_000;
+
+/**
+ * A wallet request that ran out of time on OUR side.
+ *
+ * Its message SAYS SO, in the user's language — the wallet did not answer, so open it, deal with
+ * whatever is waiting there, and try again. It used to be deliberately empty, routing every caller's
+ * `e.message || <localized fallback>` to a generic "Could not connect to your wallet"; that fallback
+ * named no cause and no next action, and a wallet that never answered is a different thing from a
+ * wallet that refused. The diagnostic — which method, which bound — stays on `method`/`timeoutMs`
+ * and in the log line at the throw site, because it is for us, not for the user.
+ *
+ * This message is only ever right when NOTHING WAS SIGNED. `sendTransaction` catches this type and
+ * rethrows `TransactionHashMissing`, whose copy does not tell the user to try again — see there.
+ */
+export class WalletRequestTimeout extends Error {
+  override readonly name = 'WalletRequestTimeout';
+  constructor(public readonly method: string, public readonly timeoutMs: number) {
+    super(M.errors.ethWallet.requestTimedOut);
+  }
+}
+
+/** An OS call across the React Native bridge — `Linking.canOpenURL` / `Linking.openURL`. Local, so
+ *  it should answer in milliseconds; five seconds is a stall detector. It matters because
+ *  `installedWallets()` fires one probe per known wallet and the picker waits for all of them, so a
+ *  single wedged bridge call used to leave the sheet with a spinner and no way forward. */
+export const WALLET_OS_TIMEOUT_MS = 5_000;
+
+/**
+ * `work`, or `WalletRequestTimeout` after `timeoutMs`. The timer is cleared on BOTH outcomes, so a
+ * fast answer leaves no pending handle (the leak that would otherwise keep a React Native app's
+ * timer queue alive for five minutes after every single call). It cannot cancel `work` — a JS
+ * promise has no cancel — it ends OUR wait; a late answer is ignored.
+ */
+async function bounded<T>(work: Promise<T>, what: string, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          console.warn(`wallet: ${what} was not answered within ${timeoutMs} ms — giving up on this attempt`);
+          reject(new WalletRequestTimeout(what, timeoutMs));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** One EIP-1193 round trip, bounded. */
+async function boundedRequest(
+  p: Eip1193Provider,
+  args: { method: string; params?: unknown[] | object },
+  timeoutMs: number,
+): Promise<unknown> {
+  return bounded(p.request(args), args.method, timeoutMs);
+}
+
 /** True where an injected wallet could exist (react-native-web). Native uses WalletConnect later. */
 function isWeb(): boolean {
   return typeof globalThis !== 'undefined' && typeof (globalThis as { window?: unknown }).window !== 'undefined';
@@ -173,7 +254,12 @@ export async function installedWallets(): Promise<KnownWallet[]> {
   const probed = await Promise.all(
     KNOWN_WALLETS.map(async (wallet) => {
       try {
-        return (await Linking.canOpenURL(wallet.scheme)) ? wallet : null;
+        const can = await bounded(
+          Linking.canOpenURL(wallet.scheme),
+          `Linking.canOpenURL(${wallet.scheme})`,
+          WALLET_OS_TIMEOUT_MS,
+        );
+        return can ? wallet : null;
       } catch (e) {
         console.warn(
           `installedWallets: canOpenURL(${wallet.scheme}) failed:`,
@@ -205,7 +291,7 @@ export async function openWalletWithUri(wallet: KnownWallet, uri: string): Promi
   if (Platform.OS === 'web' || !WALLETCONNECT_PROJECT_ID) return false;
   const link = `${wallet.scheme}wc?uri=${encodeURIComponent(uri)}`;
   try {
-    await Linking.openURL(link);
+    await bounded(Linking.openURL(link), `Linking.openURL(${wallet.name})`, WALLET_OS_TIMEOUT_MS);
   } catch (e) {
     console.warn(
       `openWalletWithUri: ${wallet.name} did not open ${link}:`,
@@ -230,7 +316,11 @@ export async function openWalletWithUri(wallet: KnownWallet, uri: string): Promi
  * rejects or no account is returned. (On real wallets this is the prompt the user explicitly approves.)
  */
 export async function connectWallet(p: Eip1193Provider): Promise<string> {
-  const accounts = (await p.request({ method: 'eth_requestAccounts', params: [] })) as unknown[];
+  const accounts = (await boundedRequest(
+    p,
+    { method: 'eth_requestAccounts', params: [] },
+    WALLET_APPROVAL_TIMEOUT_MS,
+  )) as unknown[];
   if (!Array.isArray(accounts) || accounts.length === 0) {
     throw new Error('no account returned by the wallet');
   }
@@ -260,7 +350,7 @@ export async function connectWallet(p: Eip1193Provider): Promise<string> {
  * a throw as "cannot confirm the network" and fails closed — no calldata on an unconfirmed chain.
  */
 export async function getChainId(p: Eip1193Provider): Promise<number> {
-  const raw = await p.request({ method: 'eth_chainId', params: [] });
+  const raw = await boundedRequest(p, { method: 'eth_chainId', params: [] }, WALLET_READ_TIMEOUT_MS);
   if (typeof raw === 'string' && /^0x[0-9a-fA-F]+$/.test(raw)) return parseInt(raw, 16);
   if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0) return raw;
   // `JSON.stringify` renders a bad NUMBER unhelpfully (NaN and Infinity both become "null"), so
@@ -284,16 +374,28 @@ export class ReceiptReverted extends Error {
 }
 
 /**
- * The wallet ACCEPTED `eth_sendTransaction` and answered without a usable hash. Typed because it is
- * NOT a failed send: the wallet may well have broadcast the transaction — only the hash is lost, so
- * there is nothing to poll a receipt for and nothing to show on a block explorer. Reporting it as
- * "not sent" invites the user to pay the same money twice, which is why the caller must be able to
- * tell it apart from a decline. `received` is the value that came back instead, for the log.
+ * `eth_sendTransaction` produced no usable transaction hash — EITHER because the wallet answered
+ * without one, OR because it did not answer at all inside `WALLET_APPROVAL_TIMEOUT_MS`. Typed
+ * because neither is a failed send: the wallet may well have broadcast the transaction, and only
+ * the hash is lost, so there is nothing to poll a receipt for and nothing to show on a block
+ * explorer. Reporting it as "not sent" invites the user to pay the same money twice, which is why
+ * the caller must be able to tell it apart from a decline.
+ *
+ * `reason` is the DIFFERENCE BETWEEN THE TWO, and it is user-facing rather than diagnostic: only
+ * `'answered-without-id'` licenses saying anything at all about what the wallet did. On
+ * `'no-answer'` dpay does not know the wallet ever saw the request, so the message says exactly
+ * that and nothing more. `received` stays the diagnostic — the value that came back, or the bound
+ * that expired. Neither message ends in "try again": the caller finishes the sentence with the
+ * step-specific instruction (`M.deposit.erc20.{deposit,approve}HashUnknown`), because whether a
+ * retry is safe depends on which transaction was being signed.
  */
 export class TransactionHashMissing extends Error {
   override readonly name = 'TransactionHashMissing';
-  constructor(public readonly received: string) {
-    super(M.errors.ethWallet.hashMissing(received));
+  constructor(
+    public readonly received: string,
+    public readonly reason: 'answered-without-id' | 'no-answer',
+  ) {
+    super(reason === 'no-answer' ? M.errors.ethWallet.sendTimedOut : M.errors.ethWallet.hashMissing(received));
   }
 }
 
@@ -346,7 +448,20 @@ export async function waitForReceipt(
   const pollMs = opts.pollMs ?? 2_000;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const receipt = await p.request({ method: 'eth_getTransactionReceipt', params: [hash] });
+    // ONE POLL IS BOUNDED, AND A BOUNDED POLL IS NOT FATAL. Before this, a provider that never
+    // answered a single read left this loop suspended forever and the `deadline` below was never
+    // reached — the timeout existed but could not fire. A stalled read is now just a poll that
+    // produced nothing, exactly like a pending transaction, and `deadline` decides when to stop.
+    let receipt: unknown;
+    try {
+      receipt = await boundedRequest(p, { method: 'eth_getTransactionReceipt', params: [hash] }, WALLET_READ_TIMEOUT_MS);
+    } catch (e) {
+      // A real RPC failure still propagates (the caller treats it as "broadcast, outcome unknown"
+      // and keeps watching — see this function's doc); only OUR bound is retried, and it was
+      // already logged with the method and the bound by `boundedRequest`.
+      if (!(e instanceof WalletRequestTimeout)) throw e;
+      receipt = null;
+    }
     if (receipt != null && typeof receipt === 'object') {
       const r = receipt as { status?: string; gasUsed?: string };
       if (typeof r.status === 'string') {
@@ -381,11 +496,24 @@ export async function sendTransaction(
   tx: { to: string; data: string; value?: bigint },
 ): Promise<string> {
   const params = [{ from, to: tx.to, data: tx.data, value: toHexValue(tx.value ?? 0n) }];
-  const hash = await p.request({ method: 'eth_sendTransaction', params });
+  let hash: unknown;
+  try {
+    hash = await boundedRequest(p, { method: 'eth_sendTransaction', params }, WALLET_APPROVAL_TIMEOUT_MS);
+  } catch (e) {
+    // A SILENT WALLET AND A LOST HASH LEAVE THE USER IN THE SAME PLACE, so they are reported as the
+    // same thing: the transaction may or may not have been broadcast, and there is no id to poll or
+    // look up. Anything that reads as "it failed" here invites paying the same money twice, which is
+    // exactly why `TransactionHashMissing` exists — see that class. `received` names the real cause
+    // so a log and a support conversation can still tell the two apart.
+    if (e instanceof WalletRequestTimeout) {
+      throw new TransactionHashMissing(`no answer within ${e.timeoutMs} ms`, 'no-answer');
+    }
+    throw e;
+  }
   if (typeof hash !== 'string' || hash.length === 0) {
     // `JSON.stringify` is what names the value usefully (`""`, `null`, `{}`) but returns the VALUE
     // undefined for undefined, so that one case is spelled out rather than rendered.
-    throw new TransactionHashMissing(hash === undefined ? 'undefined' : JSON.stringify(hash));
+    throw new TransactionHashMissing(hash === undefined ? 'undefined' : JSON.stringify(hash), 'answered-without-id');
   }
   return hash;
 }

@@ -176,14 +176,20 @@ export function markSeen(key: string): Promise<Journey> {
 }
 
 /**
- * React seam: loads the journey once on mount and exposes `{journey, award, loaded}` where
+ * React seam: loads the journey once on mount and exposes `{journey, award, see, loaded}` where
  * `award(key)` updates local state AND persists (idempotent). For Wave 1A only the
  * Onboarding gate needs `hasStamp`-style reads; the hook is the seam later waves
  * (recovery moment, passport) consume so they never re-implement load/persist.
  * `loaded` (Trip Ready J5b) lets first-paint-dependent surfaces (the passport card) hold
  * their render until the real journey arrives — no empty→filled flash mid-frame.
+ *
+ * `see(key)` is `award`'s twin on the seen dimension, and it exists because the first-run router
+ * (App.tsx) ROUTES on a seen marker. `markSeen` alone would have left the router waiting on an
+ * AsyncStorage write that this store deliberately treats as best-effort — a failed write logs and
+ * does not notify, which would have stranded a user on the practice screen with no way forward.
+ * The optimistic local update is the same fail-soft contract `award` already has.
  */
-export function useJourney(): {journey: Journey; award: (key: StampKey) => void; loaded: boolean} {
+export function useJourney(): {journey: Journey; award: (key: StampKey) => void; see: (key: string) => void; loaded: boolean} {
   const [journey, setJourney] = useState<Journey>(EMPTY_JOURNEY);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
@@ -203,5 +209,9 @@ export function useJourney(): {journey: Journey; award: (key: StampKey) => void;
       : {...j, stamps: [...j.stamps, JOURNEY_STAMPS[key]], at: {...j.at, [JOURNEY_STAMPS[key]]: Date.now()}});
     void awardStamp(key);
   }, []);
-  return {journey, award, loaded};
+  const see = useCallback((key: string) => {
+    setJourney(j => (j.seen.includes(key) ? j : {...j, seen: [...j.seen, key]}));
+    void markSeen(key);
+  }, []);
+  return {journey, award, see, loaded};
 }

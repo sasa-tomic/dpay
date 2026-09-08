@@ -32,10 +32,10 @@ import {buildAssetBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {preferredRail} from '../config/currency';
 import {M} from '../i18n';
-import {walletDe} from '../i18n/domains/de/wallet';
-import {walletEs} from '../i18n/domains/es/wallet';
-import {walletFr} from '../i18n/domains/fr/wallet';
-import {walletEn} from '../i18n/domains/en/wallet';
+import {errorsDe} from '../i18n/domains/de/errors';
+import {errorsEs} from '../i18n/domains/es/errors';
+import {errorsFr} from '../i18n/domains/fr/errors';
+import {errorsEn} from '../i18n/domains/en/errors';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {
@@ -71,6 +71,12 @@ const occurrences = (haystack: string, needle: string): number => haystack.split
 const present = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
   tree.root.findAll(n => n.props?.testID === testID).length > 0;
 
+/** How many times this testID is actually RENDERED — the X9 assertion is a COUNT, not a presence.
+ *  Filtered to HOST nodes (`typeof type === 'string'`): react-test-renderer surfaces both the
+ *  composite `<View>` element and the host instance it renders, so an unfiltered count doubles. */
+const countOf = (tree: renderer.ReactTestRenderer, testID: string): number =>
+  tree.root.findAll(n => n.props?.testID === testID && typeof n.type === 'string').length;
+
 const textOf = (tree: renderer.ReactTestRenderer, testID: string): string => {
   const node = tree.root.findAll(n => n.props?.testID === testID)[0];
   if (node == null) return '';
@@ -93,6 +99,25 @@ function balancesFor(solState: SolState, online = true) {
   });
 }
 
+/** The measured X9 state: the whole Solana endpoint refusing (HTTP 429), so EVERY Solana account —
+ *  SOL and each visible SPL token — reports 'error' at once. That is the shape the banner used to
+ *  be rendered three times for. Mints come from the built asset list, never hardcoded. */
+function solanaDown() {
+  const mints = ASSETS.flatMap(a => (a.protocol === 'solana' && a.mint != null ? [a.mint] : []));
+  const tokenStates = Object.fromEntries(
+    mints.map(m => [m, {amount: null, decimals: null, status: 'error' as const}]),
+  );
+  return buildAssetBalances({
+    catalog: CATALOG,
+    assets: ASSETS,
+    icBalances: {7: '120000000'},
+    primaryBalance: '12345',
+    online: true,
+    solState: {balance: null, status: 'error'},
+    tokenStates,
+  });
+}
+
 function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
@@ -105,12 +130,12 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
         homeAsset={HOME_RAIL}
         online={true}
         history={[]}
-        topUpErr={null}
         onScan={jest.fn()}
         onReceive={jest.fn()}
         onDeposit={jest.fn()}
         onOpenAccounts={jest.fn()}
         onSeeAll={jest.fn()}
+        onOpenReceipt={jest.fn()}
         {...props}
       />,
     );
@@ -130,7 +155,6 @@ function mountAccounts(props: Partial<Parameters<typeof AccountsTab>[0]> = {}): 
         homeCurrency={HOME}
         demoFaucetAvailable={true}
         topUpBusy={false}
-        topUpErr={null}
         hasTestnet={false}
         showTestnet={false}
         onToggleTestnet={jest.fn()}
@@ -172,41 +196,59 @@ describe('A2 — the headline announces exactly what it renders, unit stated onc
   });
 });
 
-describe('A4 — a rail the wallet cannot read says so, and says what still holds', () => {
-  test("an unreadable rail's row explains the failure, blames the network, and stays honest", () => {
-    const tree = mountAccounts({balances: balancesFor({balance: null, status: 'error'})});
-    expect(present(tree, 'asset-sol-unreadable')).toBe(true);
-    const line = textOf(tree, 'asset-sol-unreadable');
+describe('A4 — a rail the wallet cannot read says so ONCE, for the network', () => {
+  test("the outage is stated once for the network, above its first affected row (X9)", () => {
+    const tree = mountAccounts({balances: solanaDown()});
+    // Three Solana accounts are unreadable; ONE banner names the network. Before X9 this rendered
+    // the same ~48-word paragraph on every one of them.
+    expect(present(tree, 'rail-unreadable-solana')).toBe(true);
+    expect(countOf(tree, 'rail-unreadable-solana')).toBe(1);
+    // …and independently of the renderer's node model: the SENTENCE appears once in everything the
+    // screen renders. Three Solana rows are on this screen (asserted below), so a per-row banner
+    // would put it there three times.
+    const solanaRows = ASSETS.filter(a => a.protocol === 'solana').length;
+    expect(solanaRows).toBeGreaterThanOrEqual(3);
+    const screen = tree.root.findAllByType(Text)
+      .map(n => (typeof n.props.children === 'string' ? n.props.children : '')).join('\n');
+    expect(occurrences(screen, M.errors.rail.unreadable('Solana'))).toBe(1);
+    const line = textOf(tree, 'rail-unreadable-solana');
     expect(line).toContain('Solana'); // WHICH network is not answering
-    expect(line.toLowerCase()).toContain('not your wallet'); // whose fault it is not
-    expect(line.toLowerCase()).toContain('untouched'); // the funds are fine
     expect(line.toLowerCase()).toContain('other accounts'); // what still works
     expect(line.toLowerCase()).toContain('retr'); // it recovers on its own — no button to press
     // It speaks about the READ, not about the figure: 'error' ALSO covers a later failure that
-    // keeps the last value it read, and a row saying "unreadable" beside a visible "2 SOL" would
+    // keeps the last value it read, and a line saying "unreadable" beside a visible "2 SOL" would
     // contradict itself (seen on the 147 e2e screenshot before this wording).
     expect(line.toLowerCase()).not.toContain('unreadable');
+    // The banner is short enough to read at a glance — that is the whole defect.
+    expect(line.length).toBeLessThan(180);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the IC rows on the same screen claim nothing about a Solana outage', () => {
+    const tree = mountAccounts({balances: solanaDown()});
+    expect(present(tree, 'rail-unreadable-internet-computer')).toBe(false);
     act(() => { tree.unmount(); });
   });
 
   test('a first poll that has not answered is NOT an unreadable rail (loading stays silent)', () => {
     const tree = mountAccounts({balances: balancesFor({balance: null, status: 'loading'})});
-    expect(present(tree, 'asset-sol-unreadable')).toBe(false);
+    expect(present(tree, 'rail-unreadable-solana')).toBe(false);
     act(() => { tree.unmount(); });
   });
 
   test('a readable rail says nothing at all', () => {
     const tree = mountAccounts();
-    expect(present(tree, 'asset-sol-unreadable')).toBe(false);
+    expect(present(tree, 'rail-unreadable-solana')).toBe(false);
     act(() => { tree.unmount(); });
   });
 
   test('all four locales carry the line, name the network, and promise no button', () => {
-    for (const [locale, w] of Object.entries({en: walletEn, de: walletDe, es: walletEs, fr: walletFr})) {
-      const line = w.balances.railUnreadable('Solana');
+    for (const [locale, e] of Object.entries({en: errorsEn, de: errorsDe, es: errorsEs, fr: errorsFr})) {
+      const line = e.rail.unreadable('Solana');
       expect(`${locale}: ${line}`).toContain('Solana');
       expect(`${locale}: ${line}`).not.toContain('undefined');
-      expect(line.length).toBeGreaterThan(60); // a sentence with instructions, not a shrug
+      expect(line.length).toBeGreaterThan(40); // a sentence with instructions, not a shrug
+      expect(line.length).toBeLessThan(180);   // …and one line, not a paragraph per account (X9)
     }
   });
 });

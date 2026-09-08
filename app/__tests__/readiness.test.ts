@@ -149,7 +149,7 @@ describe('awardPaymentTested', () => {
     expect(hasStamp(await importJourney(), 'paymentTested')).toBe(true);
   });
 
-  test('a confirmed payment ALSO awards flowUnderstood (a real payment IS the flow; the rehearsal is unreachable for pre-arc wallets)', async () => {
+  test('a confirmed payment ALSO awards flowUnderstood (a real payment IS the flow; the first-run practice is unreachable for pre-arc wallets)', async () => {
     awardPaymentTested(EMPTY_JOURNEY);
     await actAsync();
     const j = await importJourney();

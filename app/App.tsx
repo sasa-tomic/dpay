@@ -11,9 +11,22 @@
  * the username is unsigned display metadata (the account is the source of truth).
  *
  * This is the app root: it loads the persisted identity + relay URL, runs the on-device self-check,
- * and routes between Onboarding (no key yet) and Wallet (the container). Everything else — the
- * palette, format helpers, constants, hooks, services, styles, and all presentational components —
- * lives under `./{config,lib,hooks,services,styles.ts,components}`. See `2026-07-31-app-split-plan.md`.
+ * and is THE first-run router. Everything else — the palette, format helpers, constants, hooks,
+ * services, styles, and all presentational components — lives under
+ * `./{config,lib,hooks,services,styles.ts,components}`. See `2026-07-31-app-split-plan.md`.
+ *
+ * THE FIRST-RUN ROUTER (spec docs/specs/2026-09-08-first-run-redesign.md §7.1). Three lines, over
+ * PERSISTED facts only:
+ *
+ *     identity === null                       → Onboarding   (tour + create + backup)
+ *     !hasSeen(journey, FIRST_RUN_PRACTICE)   → Practice     (one real ∂1.00 practice payment)
+ *     otherwise                               → Wallet       (which still gates on homeCurrency)
+ *
+ * It replaced two half-routers — an in-memory beat machine inside Onboarding and a persisted gate
+ * inside Wallet — and that split was not cosmetic: it is why an app killed between the identity
+ * being written and the backup being acknowledged used to skip the 24 words FOREVER. A wallet is
+ * PENDING until its words are acknowledged now (`PENDING_IDENTITY_STORAGE_KEY`), so line one of
+ * this router is also the backup gate, and it cannot be got past by dying at the right moment.
  */
 import {useCallback, useEffect, useMemo, useState} from 'react';
 import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-native';
@@ -28,10 +41,12 @@ import {runIntlSelfCheck} from './i18n/selfcheck';
 import {applyLocale} from './i18n';
 import {type LocaleChoice, deviceLocaleTag, localePersistValue, parseLocale} from './i18n/locale';
 import type {Identity} from './lib/types';
+import {hasSeen, useJourney} from './lib/journey';
 import {DpayCore} from './services/native';
 import {installLogSink} from './services/log';
 import {S, applyPalette} from './styles';
 import {Onboarding} from './components/Onboarding';
+import {Practice, FIRST_RUN_PRACTICE} from './components/Practice';
 import {Wallet} from './components/Wallet';
 
 // Mirror warnings + errors into an on-device FILE before anything else can log. At module scope on
@@ -56,6 +71,13 @@ export default function App() {
   // Wallet renders the chooser instead of the wallet until they do. `undefined` would be a third
   // state with no extra meaning here: the mount read below always resolves it to a value or null.
   const [homeCurrency, setHomeCurrency] = useState<HomeCurrency | null>(null);
+
+  // The journey store, live: the router's second line reads a `seen` marker off it, and `see`
+  // is the optimistic setter that makes the route flip on the tap rather than on the AsyncStorage
+  // write (which this store treats as best-effort — a failed write must never strand a user on a
+  // one-time setup screen). `loaded` gates the first paint so the wallet never flashes in front of
+  // a first-run surface that is about to replace it.
+  const {journey, see: markJourneySeen, loaded: journeyLoaded} = useJourney();
 
   // Wave-4 dual theme + Wave-7 manual override: resolve stored choice + OS scheme → the palette.
   // styles.ts already resolved the OS theme at module load (synchronous Appearance probe → first
@@ -192,13 +214,29 @@ export default function App() {
     setIdentity(id);
   }, []);
 
+  // A RESTORED wallet skips practice: it already has funds and it already has its words, and the
+  // person holding it has just proved they can do both. Onboarding persists the identity and hands
+  // it here; the marker is set FIRST so the router never renders a practice screen for one frame
+  // on its way to the wallet.
+  const onRestored = useCallback((id: Identity) => {
+    markJourneySeen(FIRST_RUN_PRACTICE);
+    setIdentity(id);
+  }, [markJourneySeen]);
+
   // M5: wrap every root in `screenFrame` so the capped (`maxWidth:480`) app column centers on a
   // wide desktop viewport, with the bg filling the honest side margins. At <=480px it is inert.
-  if (identity === undefined) {
+  if (identity === undefined || !journeyLoaded) {
     return <View style={S.screenFrame}><SafeAreaView style={[S.root, S.centerAll]}><ActivityIndicator color={C.brand} /></SafeAreaView></View>;
   }
   if (identity === null) {
-    return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} /></View>;
+    return <View style={S.screenFrame}><Onboarding relayUrl={relayUrl} onCreated={setIdentity} onRestored={onRestored} /></View>;
+  }
+  if (!hasSeen(journey, FIRST_RUN_PRACTICE)) {
+    // The app has already given before it asks: the faucet credit landed on create, and this is
+    // the first thing the app DOES for the user rather than asks of them. It is skippable, and
+    // every one of its outcomes — including the ones that are not a success — leaves through the
+    // same marker, so first run is never blocked by it.
+    return <View style={S.screenFrame}><Practice identity={identity} relayUrl={relayUrl} onDone={() => markJourneySeen(FIRST_RUN_PRACTICE)} /></View>;
   }
   return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
 }

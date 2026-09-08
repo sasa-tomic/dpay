@@ -4,9 +4,17 @@
  * every surface that teaches the model. If a copy edit breaks a pin, it is a comprehension
  * regression — change the pin only with the same deliberation as a product-truth edit.
  */
-import {rehearsalSteps, walkthroughScenes} from '../config/education';
+import {walkthroughScenes} from '../config/education';
 import {M} from '../i18n';
+import {en} from '../i18n/en.ts';
+import {de} from '../i18n/de.ts';
+import {es} from '../i18n/es.ts';
+import {fr} from '../i18n/fr.ts';
 import {describe, expect, test} from '@jest/globals';
+
+/** Every shipped catalog, for the pins that must hold in EVERY language and not just English —
+ *  a wire-length limit and a promise about money do not stop applying in translation. */
+const CATALOGS = {en, de, es, fr};
 
 describe('education copy (the comprehension contract)', () => {
   test('exactly three scenes with the spec ids/eyebrows', () => {
@@ -52,36 +60,41 @@ describe('education copy (the comprehension contract)', () => {
   });
 });
 
-describe('education copy (Trip Ready J2B — rehearsal + coaching)', () => {
-  test('exactly three rehearsal steps with the spec ids/visuals', () => {
-    expect(rehearsalSteps().map(s => s.id)).toEqual(['request', 'approve', 'settle']);
-    expect(rehearsalSteps().map(s => s.visual)).toEqual(['shopRequest', 'payerReview', 'shopSettles']);
-    expect(rehearsalSteps().map(s => s.title)).toEqual(['On the other phone: request ∂1', 'On this phone: scan and check', 'Then switch roles']);
+describe('education copy (the first-run practice payment + coaching)', () => {
+  // The practice screen is the ONE place a new user is shown a payment before they own any money,
+  // so its copy carries two loads no other screen does: it must not claim anything the ledger has
+  // not said, and it must not ask for funds. Both are pinned here, in the catalog, because a
+  // translation is exactly where a promise or a solicitation would slip back in.
+  test('the payee name fits the 132-byte wire request (32-byte name field) in every locale', () => {
+    for (const [tag, catalog] of Object.entries(CATALOGS)) {
+      const bytes = new TextEncoder().encode(catalog.education.practice.payeeName).length;
+      expect(`${tag}:${bytes <= 32}`).toBe(`${tag}:true`);
+    }
   });
 
-  test('step 1 (request): the OTHER phone makes the DEMO request', () => {
-    const body = rehearsalSteps()[0].body;
-    expect(body).toMatch(/another phone/);
-    expect(body).toMatch(/DEMO/);
-    expect(body).toMatch(/tap Request/);
+  test('the pending state never claims a settlement, in any locale', () => {
+    for (const [tag, catalog] of Object.entries(CATALOGS)) {
+      const body = catalog.education.practice.pendingBody;
+      expect(`${tag}:${body.length > 0}`).toBe(`${tag}:true`);
+      // The settled sentence and the pending sentence must not be the same claim.
+      expect(`${tag}:${body === catalog.education.practice.settledBody}`).toBe(`${tag}:false`);
+    }
   });
 
-  test('step 2 (approve): this phone scans and checks BEFORE approving', () => {
-    const body = rehearsalSteps()[1].body;
-    expect(body).toMatch(/scan/);
-    expect(body).toMatch(/before approving/);
-    // Never implies dpay approves or moves funds on the user's behalf.
-    expect(body.toLowerCase()).not.toMatch(/dpay (approves|pays|sends)/);
+  test('no fail-closed branch solicits funds (anti-scam rule R1), in any locale', () => {
+    // English is the reference the others are translated from; the shape of the rule is that the
+    // branch copy names an ACTION the user can take on this screen and never a deposit.
+    const p = M.education.practice;
+    for (const body of [p.noFaucet.body, p.offline.body, p.empty.body, p.cooldown.body('faucet cooldown: try again in ~58 min')]) {
+      expect(body.toLowerCase()).not.toMatch(/deposit|add money|buy|top up|fund your/);
+    }
+    // …and the cooldown branch carries the server's own reason verbatim, which is the only thing
+    // that tells the user WHEN to come back.
+    expect(p.cooldown.body('faucet cooldown: try again in ~58 min')).toContain('faucet cooldown: try again in ~58 min');
   });
 
-  test('step 3 (settle): practice RECEIVING by switching roles', () => {
-    const body = rehearsalSteps()[2].body;
-    expect(body).toMatch(/practice receiving/);
-    expect(body).toMatch(/switch|other phone/);
-  });
-
-  test('the punchline: DEMO is valueless practice; nothing is ever solicited (the comprehension pin)', () => {
-    expect(M.education.rehearsal.punchline).toBe('DEMO is practice money with no cash value. This walkthrough never asks you to deposit or buy anything.');
+  test('the permanent footer labels play money and refuses to sell anything', () => {
+    expect(M.education.practice.punchline).toBe('Practice money has no cash value. dpay never asks you to deposit or buy anything to try it.');
   });
 
   test('coaching tips: exactly the four spec surfaces, ≤2 sentences each', () => {

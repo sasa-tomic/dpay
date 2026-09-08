@@ -43,6 +43,8 @@ export const convertFr: ConvertMessages = {
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Ce portefeuille n'a pas de ${sym}. Pour convertir des ${sym}, reçois d'abord des ${sym} à ton adresse : ouvre « ${receiveTab} » en bas et choisis « ${myAddress} ».`,
+  fundOtherHolds: (held, toSym) => `Vous avez ${held} — vous pouvez plutôt le convertir en ${toSym}.`,
+  fundOtherSwitch: sym => `Convertir depuis ${sym} à la place`,
   insufficientLine: (needed, balance) =>
     `Cette conversion demande ${needed} — le montant plus deux frais de ledger — et ce portefeuille détient ${balance}. Baisse le montant, ou reçois-en d'abord davantage.`,
 
@@ -78,6 +80,5 @@ export const convertFr: ConvertMessages = {
     quoteUnreachable: () => 'Impossible d’atteindre la quote ICPSwap — le relay ne répond pas. Vérifie ta connexion et réessaie.',
     quoteRefused: () => 'ICPSwap a refusé de quoter cette paire pour le moment.',
     quoteUnavailable: code => `Quote indisponible (${code}).`,
-    swapReplyShape: () => 'La réponse du pool n’a pas pu être lue.',
   },
 };

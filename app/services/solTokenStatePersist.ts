@@ -77,7 +77,7 @@ export function loadSolTokenState(): Promise<SolTokenStateStore> {
     try {
       raw = await AsyncStorage.getItem(KEY);
     } catch (e) {
-      console.warn('sol tokenState persist failed:', e instanceof Error ? e.message : String(e));
+      console.warn(`sol tokenState persist: reading ${KEY} failed — this session degrades to live polling only:`, e instanceof Error ? e.message : String(e));
       return {};
     }
     if (raw == null) return {};
@@ -85,7 +85,7 @@ export function loadSolTokenState(): Promise<SolTokenStateStore> {
     try {
       parsed = JSON.parse(raw);
     } catch (e) {
-      console.warn('sol tokenState persist failed:', e instanceof Error ? e.message : String(e));
+      console.warn(`sol tokenState persist: ${KEY} holds ${raw.length} bytes that are not JSON:`, e instanceof Error ? e.message : String(e));
       return {}; // malformed JSON — swallow, never throw
     }
     const store = hydrateStore(parsed) ?? {};
@@ -119,7 +119,7 @@ export async function recordSolTokenFact(mint: string, fact: SolTokenStateFact):
   try {
     await AsyncStorage.setItem(KEY, JSON.stringify(next));
   } catch (e) {
-    console.warn('sol tokenState persist failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`sol tokenState persist: writing the fact for mint ${mint} to ${KEY} failed — the in-memory cache still serves this session:`, e instanceof Error ? e.message : String(e));
     /* best-effort — the in-memory cache still serves this session */
   }
 }

@@ -405,11 +405,18 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         setErr(e instanceof ReceiptReverted ? M.deposit.erc20.approveReverted : M.deposit.erc20.approveUnconfirmed);
         setPhase('enter');
       } else if (e instanceof TransactionHashMissing) {
-        // The wallet ACCEPTED the request and answered without a transaction id — so it may have
-        // broadcast it, and there is no hash to poll a receipt for or to look up. This is neither
-        // 'watching' (which would promise a credit that may never come) nor "failed" (which invites
-        // paying twice): stay in 'enter' and tell the user exactly what dpay does and does not know.
-        setErr(signing === 'deposit' ? M.deposit.erc20.depositHashUnknown : M.deposit.erc20.approveHashUnknown);
+        // No transaction id came back — so the request may have been broadcast, and there is no hash
+        // to poll a receipt for or to look up. This is neither 'watching' (which would promise a
+        // credit that may never come) nor "failed" (which invites paying twice): stay in 'enter' and
+        // tell the user exactly what dpay does and does not know.
+        //
+        // TWO SENTENCES FROM TWO OWNERS, and neither can write the other's. The error knows WHICH of
+        // the two silences happened — a wallet that answered without an id, or a wallet that never
+        // answered at all — and says so in `e.message`; only the sheet knows WHICH TRANSACTION was
+        // being signed, which is what decides whether a retry is safe. Merged into one key, the
+        // opening claim was written for the first cause and stayed there when the second was added:
+        // it told the user their wallet had "accepted" a deposit dpay never heard about.
+        setErr(`${e.message} ${signing === 'deposit' ? M.deposit.erc20.depositHashUnknown : M.deposit.erc20.approveHashUnknown}`);
         setPhase('enter');
       } else {
         // Nothing reached the network: eth_sendTransaction itself failed or the user declined.

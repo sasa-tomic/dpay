@@ -20,7 +20,7 @@
 //  - The read_state certificate is DECODED, not BLS-verified (W6 follow-up) — outcomes are
 //    honestly labeled as such in the UI.
 import {DpayCore} from './native';
-import {fetchWithTimeout} from './relay';
+import {fetchWithTimeout, readBodyWithin} from './relay';
 import {hexToBytes, bytesToHex} from '../lib/format';
 import type {IcpStateRead} from '../lib/types';
 import {M} from '../i18n';
@@ -81,17 +81,35 @@ export async function icSubmit(
   signal?: AbortSignal,
 ): Promise<IcSubmitOutcome> {
   const r = await postEnvelope(canisterText, kind, envelopeHex, timeoutMs, signal);
-  if (r == null) return {kind: 'unknown'};
+  if (r == null) return {kind: 'unknown'}; // postEnvelope already named the URL and the cause
   if (r.ok) return {kind: 'accepted'};
   if (r.status >= 400 && r.status < 500) {
-    const bodyText = await r.text().catch(() => '');
+    // A definitive rejection's WHOLE VALUE is its reason — the boundary node says "invalid
+    // signature", "ingress expiry too far in the future", "canister not found". A body we could
+    // not read is therefore named, never blanked: `''` here used to make a rejection unexplainable.
+    const bodyText = await readBodyWithin(() => r.text(), `icSubmit ${kind} ${canisterText} HTTP ${r.status}`).catch((e: unknown) => {
+      const detail = e instanceof Error ? e.message : String(e);
+      console.warn(`icSubmit: ${kind} on ${canisterText} was rejected with HTTP ${r.status} and the body could not be read: ${detail}`);
+      return `<body unreadable: ${detail}>`;
+    });
     return {kind: 'rejected', status: r.status, bodyText};
   }
+  // 5xx: retryable, and the caller cannot see the status because the outcome is deliberately the
+  // same `unknown` a dropped connection produces. It still has to be findable.
+  console.warn(`icSubmit: ${kind} on ${canisterText} answered HTTP ${r.status} — treating as unknown (an identical-byte resubmit is safe)`);
   return {kind: 'unknown'};
 }
 
 // --- single-POST round-trips ----------------------------------------------------------------------
 
+/**
+ * POST one envelope to the boundary node. `null` means "no HTTP answer at all" — DNS, TLS, an
+ * abort, the timeout, a React Native network error. The caller turns that into offline / unknown,
+ * which is correct, and which is exactly why the CAUSE has to be logged here: this function carries
+ * every payment envelope the device signs, and a transfer that never left the phone used to produce
+ * no line naming the gateway, the canister or the error. A caller's own abort is deliberately still
+ * logged — one line per cancelled poll is the price of never losing a real failure.
+ */
 async function postEnvelope(
   canisterText: string,
   kind: 'call' | 'query' | 'read_state',
@@ -99,13 +117,18 @@ async function postEnvelope(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Response | null> {
+  const url = `${icGatewayBase()}/api/v2/canister/${canisterText}/${kind}`;
   try {
     return await fetchWithTimeout(
-      `${icGatewayBase()}/api/v2/canister/${canisterText}/${kind}`,
+      url,
       {method: 'POST', headers: {'Content-Type': 'application/cbor'}, body: hexToBytes(envelopeHex).buffer, signal},
       timeoutMs,
     );
-  } catch {
+  } catch (e) {
+    console.warn(
+      `postEnvelope: POST ${url} produced no answer within ${timeoutMs} ms (or failed in transport):`,
+      e instanceof Error ? e.message : String(e),
+    );
     return null;
   }
 }
@@ -124,9 +147,17 @@ export async function icQuery(
   if (expiry == null) return null;
   const envelopeHex = await DpayCore.icpSignQuery(secretHex, canisterText, methodName, argHex, expiry);
   const r = await postEnvelope(canisterText, 'query', envelopeHex, IC_QUERY_TIMEOUT_MS, signal);
-  if (r == null || !r.ok) return null;
+  if (r == null) return null; // postEnvelope named the cause
+  if (!r.ok) {
+    // A boundary node answering 502/429 is NOT the same event as an unreachable network, and this
+    // function reports both as `null` = offline. That collapse is deliberate (the caller retries
+    // either way) but it must not be silent: a balance stuck at `—` because the gateway is rate-
+    // limiting has to be findable in a log, not guessed at.
+    console.warn(`icQuery: ${methodName} on ${canisterText} answered HTTP ${r.status} — reporting it as unreachable`);
+    return null;
+  }
   const rawHex = await bodyHex(r);
-  if (rawHex == null) return null;
+  if (rawHex == null) return null; // bodyHex named the cause
   const decoded = await DpayCore.icpDecodeQuery(rawHex);
   if (decoded.replied) return decoded.argHex ?? '';
   throw new Error(decoded.rejectMessage ?? `query rejected (${decoded.rejectCode ?? '?'})`);
@@ -164,12 +195,26 @@ async function readStateWithExpiry(
 ): Promise<IcpStateRead | null> {
   const envelopeHex = await DpayCore.icpSignReadState(secretHex, requestIdsHex, wantTime, expiry);
   const r = await postEnvelope(canisterText, 'read_state', envelopeHex, IC_READ_STATE_TIMEOUT_MS, signal);
-  if (r == null || !r.ok) return null;
+  if (r == null) return null; // postEnvelope named the cause
+  if (!r.ok) {
+    // This is the SETTLEMENT-OUTCOME read. `null` reads to the caller as "not known yet", which is
+    // the honest answer either way — but a payment whose outcome is unknown because the gateway
+    // answered 502 is a different thing to debug than one the subnet has not decided, and only a
+    // log can tell them apart.
+    console.warn(`icReadState: ${canisterText} answered HTTP ${r.status} for ${requestIdsHex.length} request id(s) — outcome stays unknown`);
+    return null;
+  }
   const rawHex = await bodyHex(r);
-  if (rawHex == null) return null;
+  if (rawHex == null) return null; // bodyHex named the cause
   try {
     return await DpayCore.icpDecodeReadState(rawHex, requestIdsHex);
-  } catch {
+  } catch (e) {
+    // An undecodable certificate is NOT an unreachable node: the bytes arrived and the core refused
+    // them. Reported as unknown (never as a decline — this phone cannot prove one), but named.
+    console.warn(
+      `icReadState: ${canisterText} returned a certificate this build cannot decode (${rawHex.length / 2} bytes):`,
+      e instanceof Error ? e.message : String(e),
+    );
     return null;
   }
 }
@@ -214,7 +259,15 @@ export async function icPollSignedRequestStatus(
           const state = await DpayCore.icpDecodeReadState(rawHex, [requestIdHex]);
           const st = state.statuses?.[0];
           if (st && st.state !== 'unknown' && st.state !== 'received' && st.state !== 'processing') return st;
-        } catch {/* malformed/unavailable stays unknown and is retried */}
+        } catch (e) {
+          // Stays unknown and is retried — but a certificate the core cannot decode is a real
+          // failure, and this is the MERCHANT's poll of an offline payer's transfer. A tap that
+          // ends in "couldn't confirm" because every certificate was rejected must leave a trail.
+          console.warn(
+            `icPollSignedRequestStatus: attempt ${i + 1}/${opts.attempts} for ${requestIdHex.slice(0, 16)}… returned a certificate this build cannot decode:`,
+            e instanceof Error ? e.message : String(e),
+          );
+        }
       }
     }
     if (i < opts.attempts - 1) await sleep(opts.intervalMs, opts.signal);
@@ -283,10 +336,23 @@ export async function icStampExpiry(
 async function pollExpiry(secretHex: string, signal?: AbortSignal): Promise<string | null> {
   try {
     return await icStampExpiry(secretHex, POLL_AHEAD_S, signal);
-  } catch {
+  } catch (e) {
+    // The certified clock was unreachable, or it disagreed with this device beyond
+    // MAX_CLOCK_SKEW_NS. For a POLL that is survivable — the stamp only decides whether the
+    // boundary node accepts the poll, and a rejected poll is retried — but a device whose clock is
+    // badly wrong will also REFUSE to sign anything of value (icStampExpiry throws there), so this
+    // is the first place that fact becomes observable.
+    console.warn(
+      'pollExpiry: no certified IC time for this poll, stamping with the device clock instead:',
+      e instanceof Error ? e.message : String(e),
+    );
     try {
       return await DpayCore.icpIngressExpiry((BigInt(Date.now()) * 1_000_000n).toString(), POLL_FALLBACK_AHEAD_S);
-    } catch {
+    } catch (inner) {
+      console.warn(
+        'pollExpiry: the core could not stamp an ingress expiry from the device clock either — this poll cannot be signed:',
+        inner instanceof Error ? inner.message : String(inner),
+      );
       return null;
     }
   }
@@ -296,9 +362,15 @@ async function pollExpiry(secretHex: string, signal?: AbortSignal): Promise<stri
 
 async function bodyHex(r: Response): Promise<string | null> {
   try {
-    const buf = await r.arrayBuffer();
+    const buf = await readBodyWithin(() => r.arrayBuffer(), `bodyHex ${r.url || 'the IC gateway'} HTTP ${r.status}`);
     return bytesToHex(new Uint8Array(buf));
-  } catch {
+  } catch (e) {
+    // A 200 whose body could not be read is not "offline": the node answered and the read failed
+    // (a truncated stream, a RN bridge error). The caller reports unknown; this names why.
+    console.warn(
+      `bodyHex: HTTP ${r.status} from ${r.url || 'the IC gateway'} answered, but its body could not be read:`,
+      e instanceof Error ? e.message : String(e),
+    );
     return null;
   }
 }

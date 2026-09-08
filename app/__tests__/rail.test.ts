@@ -35,7 +35,13 @@ jest.mock('../services/icp', () => ({
   IC_SUBMIT_TIMEOUT_MS: 8000,
   INGRESS_AHEAD_S: 300,
 }));
-jest.mock('../services/relay', () => ({fetchWithTimeout: jest.fn()}));
+jest.mock('../services/relay', () => ({
+  fetchWithTimeout: jest.fn(),
+  // The body-read bound is the REAL one. A stub returning undefined here would make a matching
+  // history row read as "no confirmation", which is the shape of the bug this module exists to
+  // avoid — the mock must not be able to invent that answer.
+  readBodyWithin: jest.requireActual<typeof import('../services/relay')>('../services/relay').readBodyWithin,
+}));
 
 import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, prepareTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
 import {DpayCore} from '../services/native';
@@ -345,9 +351,45 @@ describe('railBtcDepositAddress — get_btc_address as an UPDATE call', () => {
     expect(DpayCore.icpSignUpdate).not.toHaveBeenCalled();
   });
 
-  test('a rejected request_status → null', async () => {
-    jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'rejected', rejectMessage: 'nope'} as never);
-    await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+  test('a rejected request_status → null, AND the minter\'s own reason is on the record', async () => {
+    // `null` is the right answer to the caller (the sheet shows a transient state and re-polls),
+    // but the reject message is the only thing that explains WHY no deposit address appeared — the
+    // mainnet minter's "Canister has no query method get_btc_address" is exactly this branch.
+    // Discarding it left a user with a blank sheet and a maintainer with nothing to read.
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      jest.mocked(icPollRequestStatus).mockResolvedValue({
+        state: 'rejected', rejectMessage: 'Canister has no query method get_btc_address',
+      } as never);
+      await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Canister has no query method get_btc_address'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(MINTER));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a rejection with no reason still says so, rather than saying nothing', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'rejected'} as never);
+      await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the minter gave no reason'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('an EMPTY decoded address is refused and named — never shown as an address', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      jest.mocked(icPollRequestStatus).mockResolvedValue({state: 'replied', replyArgHex: 'reply'} as never);
+      jest.mocked(DpayCore.icpDecodeText).mockResolvedValue('' as never);
+      await expect(railBtcDepositAddress(SECRET, MINTER)).resolves.toBeNull();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('EMPTY address'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test('poll budget exhausted (null status) → null — no re-sign, no second submit', async () => {

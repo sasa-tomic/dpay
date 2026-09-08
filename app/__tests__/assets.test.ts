@@ -186,9 +186,11 @@ describe('Duplicate IC currency IDs are deduped deterministically', () => {
     const dup = mk({currency: 1, minter_family: 'CkBtcUtxo', wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin Testnet', decimals: 8});
     const assets = buildSelectableAssets([first, dup], {showTestnet: true, solanaEnabled: false});
     // Only ONE ic:1 entry; and it carries the FIRST descriptor's metadata (network 'Bitcoin').
+    // Read off `network` — the backing-chain FIELD — rather than off `networkLabel`, which names
+    // the SETTLEMENT chain for every IC row (X23) and so cannot tell two backing chains apart.
     expect(ids(assets)).toEqual(['ic:1']);
-    expect(assets[0].networkLabel).toContain('Bitcoin');
-    expect(assets[0].networkLabel).not.toContain('Testnet');
+    expect(assets[0].network).toBe('Bitcoin');
+    expect(assets[0].network).not.toContain('Testnet');
   });
 });
 
@@ -305,13 +307,22 @@ describe('testKey — unique stable ASCII', () => {
 // 6. Network qualification — two USDC assets carry distinct networkLabels
 // =============================================================================================
 describe('Network qualification — IC USDC vs Solana USDC', () => {
-  it('IC USDC networkLabel references Ethereum; Solana USDC references Solana', () => {
+  // X23 — the subtitle names where the asset SETTLES, which is the chain whose address the very
+  // next screen shows. ckUSDC settles on the Internet Computer and is only BACKED by Ethereum; the
+  // subtitle used to name the backing chain, so the account row said "USDC · Ethereum" over an
+  // Internet Computer principal. The two USDC rows still have to be distinguishable — that was
+  // this test's real subject and it still holds, on the chain that actually differs.
+  it('IC USDC names the Internet Computer, Solana USDC names Solana — and never the backing chain', () => {
     const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const icUsdc = assets.find(a => a.id === 'ic:2')!;
     const solUsdc = assets.find(a => a.id === 'solana:USDC')!;
     expect(icUsdc.networkLabel).not.toBe(solUsdc.networkLabel);
-    expect(icUsdc.networkLabel).toMatch(/Ethereum/);
+    expect(icUsdc.networkLabel).toMatch(/Internet Computer/);
+    expect(icUsdc.networkLabel).not.toMatch(/Ethereum/);
     expect(solUsdc.networkLabel).toMatch(/Solana/);
+    // The BACKING chain is not lost — it moves to the field the deposit sheets read, which is
+    // where "send USDC on Ethereum" is the true instruction.
+    expect(icUsdc.network).toBe('Ethereum');
   });
 
   it('SOL networkLabel references Solana (distinct from any IC asset)', () => {

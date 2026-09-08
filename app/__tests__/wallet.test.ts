@@ -1,10 +1,13 @@
-import { describe, test, expect, jest } from '@jest/globals';
+import { describe, test, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import {
   connectWallet, sendTransaction, getChainId, waitForReceipt,
-  ReceiptReverted, TransactionHashMissing, getEthereumProvider, resolveOnrampProvider, pairOnrampWallet,
+  ReceiptReverted, TransactionHashMissing, WalletRequestTimeout,
+  WALLET_APPROVAL_TIMEOUT_MS, WALLET_READ_TIMEOUT_MS, WALLET_OS_TIMEOUT_MS,
+  getEthereumProvider, resolveOnrampProvider, pairOnrampWallet,
   openWalletApp,
   type Eip1193Provider,
 } from '../wallet';
+import {M} from '../i18n';
 
 // MC8 U6.2 — sentinel mock for the WalletConnect source. `resolveOnrampProvider()` is WEB-FIRST: it
 // returns `window.ethereum` before ever reaching the WC branch, so this rejecting sentinel PROVES
@@ -98,6 +101,11 @@ describe('sendTransaction', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(TransactionHashMissing);
       expect((e as TransactionHashMissing).received).toBe('""');
+      // The OTHER cause: the wallet DID answer, so the message may say so — and it still must not
+      // claim the transaction was accepted, which is a thing no answer-without-an-id establishes.
+      expect((e as TransactionHashMissing).reason).toBe('answered-without-id');
+      expect((e as Error).message).toBe(M.errors.ethWallet.hashMissing('""'));
+      expect((e as Error).message).not.toMatch(/accept/i);
     }
   });
 
@@ -441,6 +449,151 @@ describe('openWalletApp', () => {
       expect(wc.openWalletApp).toHaveBeenCalledWith('wc:delegate');
     } finally {
       (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+    }
+  });
+});
+
+// ── Every request() is bounded ────────────────────────────────────────────────────────────────
+// EIP-1193 has no timeout parameter, so before 2026-09-08 a wallet that simply stopped answering
+// left the deposit sheet awaiting a promise that could never settle — no error, no retry, no way
+// back. `waitForReceipt` was the sharpest case: its 120 s deadline is checked only BETWEEN polls,
+// so one hung read disabled the deadline itself and the whole loop waited forever.
+//
+// Fake timers, and a provider that answers NOTHING — the only faithful model of the failure.
+describe('a silent wallet is given up on, and says what it was asked', () => {
+  /** Answers no request, ever. `request` returns a promise nobody will settle. */
+  const silent: Eip1193Provider = { request: () => new Promise<never>(() => {}) };
+
+  /** Start `work`, run the clock forward by `ms`, and hand back whatever it did. Capturing the
+   *  rejection BEFORE advancing is what keeps an unhandled-rejection warning out of the run. */
+  async function afterAdvancing<T>(work: Promise<T>, ms: number): Promise<unknown> {
+    const settled = work.then((v) => v, (e: unknown) => e);
+    await jest.advanceTimersByTimeAsync(ms);
+    return settled;
+  }
+
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('connect gives the human five minutes — the same bound pairing gives them', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Not a second early: at one tick under the bound the request is still outstanding.
+      const early = connectWallet(silent).then(() => 'settled', () => 'settled');
+      let outcome: string | undefined;
+      void early.then((v) => { outcome = v; });
+      await jest.advanceTimersByTimeAsync(WALLET_APPROVAL_TIMEOUT_MS - 1);
+      expect(outcome).toBeUndefined();
+      await jest.advanceTimersByTimeAsync(1);
+      expect(await early).toBe('settled');
+
+      const e = await afterAdvancing(connectWallet(silent), WALLET_APPROVAL_TIMEOUT_MS);
+      expect(e).toBeInstanceOf(WalletRequestTimeout);
+      expect((e as WalletRequestTimeout).method).toBe('eth_requestAccounts');
+      expect((e as WalletRequestTimeout).timeoutMs).toBe(WALLET_APPROVAL_TIMEOUT_MS);
+      // The message is the LOCALIZED "your wallet didn't answer" line, not an empty string routed
+      // to a generic connect failure: nothing was signed here, so it may name a next action. The
+      // diagnostic stays on the fields and in the log line, which names the method and the bound.
+      expect((e as Error).message).toBe(M.errors.ethWallet.requestTimedOut);
+      expect((e as Error).message).toContain("didn't answer");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('eth_requestAccounts'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(String(WALLET_APPROVAL_TIMEOUT_MS)));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a chain-id read is a machine round trip, so it is bounded in seconds, not minutes', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const e = await afterAdvancing(getChainId(silent), WALLET_READ_TIMEOUT_MS);
+      expect(e).toBeInstanceOf(WalletRequestTimeout);
+      expect((e as WalletRequestTimeout).method).toBe('eth_chainId');
+      expect(WALLET_READ_TIMEOUT_MS).toBeLessThan(WALLET_APPROVAL_TIMEOUT_MS);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a silent SEND is reported as a lost hash, never as a failure — the user must not pay twice', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const e = await afterAdvancing(
+        sendTransaction(silent, '0xfrom', { to: '0xto', data: '0x00' }),
+        WALLET_APPROVAL_TIMEOUT_MS,
+      );
+      // The class the deposit sheet branches on to say "it may have been broadcast; there is no id
+      // to look up" — the only honest answer, and the one that does not invite a second payment.
+      expect(e).toBeInstanceOf(TransactionHashMissing);
+      expect((e as TransactionHashMissing).received).toBe(`no answer within ${WALLET_APPROVAL_TIMEOUT_MS} ms`);
+      // …and it says the true thing rather than the OTHER cause's: dpay never heard from the
+      // wallet, so it cannot report that the wallet "accepted" anything.
+      expect((e as TransactionHashMissing).reason).toBe('no-answer');
+      expect((e as Error).message).toBe(M.errors.ethWallet.sendTimedOut);
+      expect((e as Error).message).not.toMatch(/accept/i);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a hung receipt read no longer disables the receipt deadline', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Four bounded polls (4 × 30 s) overrun a 100 s budget, so the loop reaches its own deadline
+      // and throws the localized receipt timeout. Before the per-poll bound this promise could
+      // never settle at all — the assertion below is only reachable because each read gives up.
+      const e = await afterAdvancing(
+        waitForReceipt(silent, '0xhash', { timeoutMs: 100_000, pollMs: 1_000 }),
+        WALLET_READ_TIMEOUT_MS * 5,
+      );
+      expect(e).toBeInstanceOf(Error);
+      expect(e).not.toBeInstanceOf(WalletRequestTimeout);
+      expect((e as Error).message).toContain('0xhash');
+      // Each abandoned poll left a line naming the method — a stalled RPC is debuggable, not silent.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('eth_getTransactionReceipt'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('an answered request leaves no timer behind', async () => {
+    const p: Eip1193Provider = { request: async () => ['0xabc'] };
+    expect(await connectWallet(p)).toBe('0xabc');
+    // A five-minute handle per call would keep RN's timer queue alive long after the sheet closed.
+    expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
+// The OS bridge is I/O too. `installedWallets()` fires one `canOpenURL` per known wallet and the
+// picker waits for ALL of them, so a single wedged bridge call used to leave the deposit sheet on a
+// spinner with no way forward — the same class as the unbounded `request()` above, one layer down.
+describe('a wedged OS bridge drops one wallet, not the picker', () => {
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); jest.restoreAllMocks(); });
+
+  test('a canOpenURL that never answers is given up on, and the wallets that DID answer still list', async () => {
+    delete (globalThis as {ethereum?: unknown}).ethereum;
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const {Linking} = require('react-native');
+    // MetaMask answers; every other probe hangs forever.
+    jest.spyOn(Linking, 'canOpenURL').mockImplementation((...args: unknown[]) =>
+      args[0] === 'metamask://' ? Promise.resolve(true) : new Promise<never>(() => {}));
+    let listed!: Promise<unknown[]>;
+    jest.isolateModules(() => {
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'test-project-id';
+      listed = require('../wallet').installedWallets();
+    });
+    try {
+      const settled = listed.then((v) => v, (e: unknown) => e);
+      await jest.advanceTimersByTimeAsync(WALLET_OS_TIMEOUT_MS);
+      const wallets = (await settled) as {name: string}[];
+      // A probe that never answers drops ITS OWN wallet — it does not blank the picker and it does
+      // not reject the whole promise.
+      expect(wallets.map((w) => w.name)).toEqual(['MetaMask']);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Linking.canOpenURL'));
+    } finally {
+      (globalThis as {__DPAY_TEST_WALLETCONNECT_PROJECT_ID?: string}).__DPAY_TEST_WALLETCONNECT_PROJECT_ID = '';
+      warn.mockRestore();
     }
   });
 });

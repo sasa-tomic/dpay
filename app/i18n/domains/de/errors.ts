@@ -25,10 +25,19 @@ export const errorsDe: ErrorMessages = {
       `Für dein ${asset}-Konto brauchst du etwa ${solAmount} in dieser Wallet (einmalige Kontomiete + Gebühr) — sende zuerst etwas SOL hierher`,
   },
 
+  rail: {
+    unreadable: network =>
+      `${network} antwortet nicht, diese Guthaben sind daher nicht aktuell. Nichts wurde bewegt, deine anderen Konten funktionieren, und dpay versucht es weiter.`,
+  },
+
   ethWallet: {
     receiptReverted: hash => `Transaktion ${hash} wurde on-chain zurückgewiesen`,
     receiptTimeout: hash => `Transaktion ${hash} wurde nicht innerhalb der Frist in einen Block aufgenommen`,
-    hashMissing: received => `Deine Wallet hat die Transaktion angenommen, aber keine Transaktions-ID zurückgegeben (${received})`,
+    hashMissing: received =>
+      `Deine Wallet hat ohne Transaktions-ID geantwortet (${received}) — dpay kann daher nicht erkennen, ob die Transaktion gesendet wurde.`,
+    sendTimedOut: 'Deine Wallet hat nicht geantwortet — dpay kann daher nicht erkennen, ob die Transaktion gesendet wurde.',
+    requestTimedOut:
+      'Deine Wallet hat nicht geantwortet. Öffne deine Wallet-App, erledige eine dort wartende Anfrage und versuch es dann erneut.',
     pairingTimedOut: 'Zeitüberschreitung bei der Kopplung — innerhalb von 5 Min. hat keine Wallet gescannt',
     pairingFailed: detail => `WalletConnect-Kopplung fehlgeschlagen: ${detail}`,
     invalidChainId: value =>

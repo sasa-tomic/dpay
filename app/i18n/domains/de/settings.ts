@@ -125,6 +125,7 @@ export const onboardingDe: OnboardingMessages = {
   errOwnSeed:
     'Dieser Seed sieht nicht richtig aus. Füge deine 24 Wiederherstellungswörter oder den 64-Hex-Seed genau so ein, wie du sie notiert hast.',
   errWords: 'Einige Wörter sind falsch oder fehlen. Prüfe, ob alle 24 Wörter richtig geschrieben sind.',
+  errSaveWallet: 'Dieses Handy konnte deine Wallet nicht speichern, sie wurde also noch nicht erstellt. Deine Wörter stehen weiterhin auf dem Bildschirm — tippe erneut auf Weiter. Wenn es weiter fehlschlägt, gib Speicherplatz auf dem Handy frei.',
 
   recoverySaved: {
     stamp: 'Backup gesichert',

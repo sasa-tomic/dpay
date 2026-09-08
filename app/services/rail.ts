@@ -18,7 +18,7 @@ import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus,
 import {hexToBytes, bytesToHex, base, short} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 import {sanitiseDisplayText} from '../lib/deepLink';
-import {fetchWithTimeout} from './relay';
+import {fetchWithTimeout, readBodyWithin} from './relay';
 import {HISTORY_TIMEOUT_MS} from '../config/constants';
 import type {PayIntent, Req, TransactionsRow} from '../lib/types';
 import {M} from '../i18n';
@@ -282,15 +282,30 @@ export async function confirmIncomingTransfer(
         undefined,
         HISTORY_TIMEOUT_MS,
       );
-      const body = await r.json().catch(() => null) as {transactions?: TransactionsRow[]} | null;
-      if (r.ok && body?.transactions?.some(row =>
-        row.currency === expected.currency
-        && row.to.toLowerCase() === me
-        && row.amount === expected.amount
-        && row.memo.toLowerCase() === memo
-      )) return true;
+      // A relay that REFUSES and a relay that answers "no matching row yet" both leave this
+      // function returning false, which is the honest answer to "has it landed?" either way. They
+      // are not the same thing to debug, though: a merchant whose confirmation never arrives
+      // because the history route is 500ing needs that on the record, not silence.
+      if (!r.ok) {
+        console.warn(`rail: history poll ${attempt + 1}/${opts.attempts} for currency ${expected.currency} memo ${memo} answered HTTP ${r.status} — not a confirmation`);
+      } else {
+        const body = await readBodyWithin(() => r.json(), `rail history poll (HTTP ${r.status})`)
+          .catch((e: unknown) => {
+            console.warn(`rail: history poll ${attempt + 1}/${opts.attempts} answered 200 with an unreadable body:`, e instanceof Error ? e.message : String(e));
+            return null;
+          }) as {transactions?: TransactionsRow[]} | null;
+        if (body?.transactions?.some(row =>
+          row.currency === expected.currency
+          && row.to.toLowerCase() === me
+          && row.amount === expected.amount
+          && row.memo.toLowerCase() === memo
+        )) return true;
+      }
     } catch (e) {
-      console.warn('incoming transfer history poll failed:', e instanceof Error ? e.message : String(e));
+      console.warn(
+        `rail: history poll ${attempt + 1}/${opts.attempts} against ${base(expected.relayUrl)} for currency ${expected.currency} memo ${memo} failed:`,
+        e instanceof Error ? e.message : String(e),
+      );
     }
     if (attempt + 1 < opts.attempts && opts.intervalMs > 0) {
       await new Promise<void>(resolve => setTimeout(resolve, opts.intervalMs));
@@ -493,11 +508,29 @@ export async function railBtcDepositAddress(secretHex: string, minter: string, s
     const signed = await DpayCore.icpSignUpdate(secretHex, minter, 'get_btc_address', argHex, expiry);
     await icSubmit(minter, 'call', signed.envelopeHex, IC_SUBMIT_TIMEOUT_MS, signal);
     const st = await icPollRequestStatus(secretHex, minter, signed.requestIdHex, {attempts: 12, intervalMs: 500, signal});
-    if (st == null || st.state !== 'replied' || st.replyArgHex == null) return null;
+    // THE MINTER'S REFUSAL IS THE WHOLE DIAGNOSTIC, and it used to be discarded. `null` is the
+    // right answer to the caller either way (the sheet shows a transient state and re-polls), but a
+    // rejected `get_btc_address` says exactly what is wrong — the mainnet minter answers "Canister
+    // has no query method get_btc_address" when this is called the wrong way, which is the bug this
+    // function's own doc was written about. A user staring at no deposit address deserves that line
+    // to exist somewhere.
+    if (st == null) return null; // unreachable / not terminal in budget — icp.ts named the cause
+    if (st.state !== 'replied') {
+      console.warn(`get_btc_address on minter ${minter} ended '${st.state}': ${st.rejectMessage ?? 'the minter gave no reason'}`);
+      return null;
+    }
+    if (st.replyArgHex == null) {
+      console.warn(`get_btc_address on minter ${minter} replied with no argument — no address to decode`);
+      return null;
+    }
     const addr = await DpayCore.icpDecodeText(st.replyArgHex);
-    return addr === '' ? null : addr;
+    if (addr === '') {
+      console.warn(`get_btc_address on minter ${minter} decoded to an EMPTY address — refusing to show it`);
+      return null;
+    }
+    return addr;
   } catch (e) {
-    console.warn('get_btc_address update failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`get_btc_address update on minter ${minter} failed:`, e instanceof Error ? e.message : String(e));
     return null;
   }
 }
@@ -512,7 +545,7 @@ export async function railBalanceOf(secretHex: string, ledger: string, signal?: 
     if (replyArg == null) return null;
     return await DpayCore.icpDecodeInt(replyArg);
   } catch (e) {
-    console.warn('icrc1_balance_of query failed:', e instanceof Error ? e.message : String(e));
+    console.warn(`icrc1_balance_of query on ledger ${ledger} failed:`, e instanceof Error ? e.message : String(e));
     return null;
   }
 }

@@ -336,3 +336,70 @@ describe('relay client surfaces JSON error body (M11)', () => {
     await expect(depositInfo('http://relay.example', 1)).rejects.toThrow('deposit/info 502');
   });
 });
+
+// ── The body read is bounded too ──────────────────────────────────────────────────────────────
+// `fetchWithTimeout`'s abort signal is released the moment the Response object exists, so the body
+// read that follows used to run unbounded: a server that answers `200 OK` and then stops writing
+// held the caller forever — the very failure that helper exists to prevent, one step later.
+describe('readBodyWithin — a stalled body is a failure, not a wait', () => {
+  afterEach(() => { jest.useRealTimers(); });
+
+  test('a body that never finishes rejects with the bound and the context it belonged to', async () => {
+    jest.useFakeTimers();
+    const {readBodyWithin} = require('../services/relay');
+    const settled = readBodyWithin(() => new Promise(() => {}), 'GET /api/v1/thing (HTTP 200)', 1_000)
+      .then(() => 'resolved', (e: unknown) => e);
+    await jest.advanceTimersByTimeAsync(1_000);
+    const e = await settled;
+    expect(e).toBeInstanceOf(Error);
+    // The message has to name WHICH read stalled — a bare "timed out" is unactionable across the
+    // dozen call sites that share this helper.
+    expect((e as Error).message).toContain('GET /api/v1/thing (HTTP 200)');
+    expect((e as Error).message).toContain('1000 ms');
+  });
+
+  test('a body that arrives passes through untouched and leaves no timer', async () => {
+    jest.useFakeTimers();
+    const {readBodyWithin} = require('../services/relay');
+    await expect(readBodyWithin(async () => ({ok: 1}), 'GET /x', 1_000)).resolves.toEqual({ok: 1});
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('a read that throws propagates ITS error, not the timeout', async () => {
+    const {readBodyWithin} = require('../services/relay');
+    await expect(readBodyWithin(async () => { throw new Error('invalid json'); }, 'GET /x'))
+      .rejects.toThrow('invalid json');
+  });
+});
+
+describe('readJsonOrEmpty — an unusable body is empty AND named', () => {
+  test('a malformed body yields {} and a line carrying the url, the status and the cause', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const {readJsonOrEmpty} = require('../services/relay');
+      const r = {url: 'http://relay.example/api/v1/currencies', status: 502, json: async () => { throw new Error('Unexpected token <'); }} as unknown as Response;
+      await expect(readJsonOrEmpty(r)).resolves.toEqual({});
+      // `'body parse failed'` on its own could not tell a reader which of a dozen callers had
+      // failed, against which relay, with what status.
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('http://relay.example/api/v1/currencies'),
+        expect.stringContaining('Unexpected token <'),
+      );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('HTTP 502'), expect.anything());
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a well-formed body is returned and nothing is logged', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const {readJsonOrEmpty} = require('../services/relay');
+      const r = {url: 'http://relay.example/x', status: 200, json: async () => ({balance: '7'})} as unknown as Response;
+      await expect(readJsonOrEmpty(r)).resolves.toEqual({balance: '7'});
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});

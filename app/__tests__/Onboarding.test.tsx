@@ -75,7 +75,7 @@ async function createUpToContinue(): Promise<Tree> {
   );
   let tree!: Tree;
   await act(async () => {
-    tree = renderer.create(<Onboarding relayUrl="http://relay.example" onCreated={() => {}} />);
+    tree = renderer.create(<Onboarding relayUrl="http://relay.example" onCreated={() => {}} onRestored={() => {}} />);
   });
   // The journey read resolves → the create form replaces the walkthrough gate.
   await act(async () => {});

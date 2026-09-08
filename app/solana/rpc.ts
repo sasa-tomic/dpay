@@ -146,7 +146,13 @@ async function rpcFetch(url: string, method: string, params: unknown[], opts?: S
       signal,
     });
     if (r.status === 429) throw new SolanaRateLimited(url, openCooldown(url, retryAfterMs(r.headers)));
-    if (!r.ok) throw new Error(`solana rpc http ${r.status}`);
+    if (!r.ok) {
+      // The status alone was never enough to act on: a Helius 401 and a 403 mean different things
+      // and both say WHICH in the body. Named endpoint (host only — the URL carries the API key),
+      // method and the first of the body.
+      const body = await r.text().catch((e: unknown) => `<body unreadable: ${e instanceof Error ? e.message : String(e)}>`);
+      throw new Error(`solana rpc ${method} → ${hostOf(url)}: HTTP ${r.status}: ${body.slice(0, 200)}`);
+    }
     const j: {error?: {message?: string}; result?: unknown} = await r.json();
     // The endpoint answered: whatever it said, it is talking to us again, so the gate is done.
     // Cleared on an RPC-level error too — a rejected METHOD is not a refused CLIENT.
@@ -156,6 +162,15 @@ async function rpcFetch(url: string, method: string, params: unknown[], opts?: S
   } finally {
     cancel();
   }
+}
+
+/** The endpoint's HOST, never its URL: the shipped RPC URL carries an API key as a query
+ *  parameter, and a log line is exactly where a key must not appear. */
+function hostOf(url: string): string {
+  const scheme = url.indexOf('://');
+  const rest = scheme < 0 ? url : url.slice(scheme + 3);
+  const end = rest.search(/[/?#]/);
+  return end < 0 ? rest : rest.slice(0, end);
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

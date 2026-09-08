@@ -58,6 +58,10 @@ export const depositFr: DepositMessages = {
       {t: network, em: true},
       {t: ' qui les prend en charge, vers votre compte ci-dessous.'},
     ],
+    whereFrom: (symbol, network) =>
+      `Envoyez-le depuis n’importe quelle application de portefeuille qui détient ${symbol} sur ${network}, ou retirez ${symbol} d’une plateforme d’échange qui prend en charge le réseau ${network}.`,
+    onlyAccepts: (symbol, network) =>
+      `Cette adresse reçoit ${symbol} envoyé sur ${network} — rien d’autre, et aucun paiement par carte ni virement bancaire.`,
     noMemo: 'Aucun memo ni référence nécessaire — un simple transfert vers ce compte suffit.',
     feeLine: fee => `Frais de réseau ${fee}`,
     custody: asset => `dpay ne détient jamais vos clés et ne convertit rien — les ${asset} arrivent directement dans votre portefeuille.`,
@@ -79,7 +83,7 @@ export const depositFr: DepositMessages = {
     pairFailed: 'Impossible d’associer votre portefeuille.',
     wrongNetwork: (networkLabel, expected, actual) =>
       `Mauvais réseau : connectez-vous à ${networkLabel} (chaîne ${expected}). Votre portefeuille est sur la chaîne ${actual}.`,
-    connectFailed: 'Impossible de se connecter à votre portefeuille.',
+    connectFailed: 'Impossible de se connecter à votre portefeuille. Ouvrez votre application de portefeuille, approuvez-y la demande de connexion, puis réessayez.',
     noWalletApp: 'Aucune application de portefeuille trouvée. Scannez plutôt le QR avec un portefeuille sur un autre appareil.',
     walletDisconnected: 'Portefeuille déconnecté.',
     amountRequired: 'Saisissez un montant supérieur à zéro.',
@@ -91,9 +95,9 @@ export const depositFr: DepositMessages = {
     approveUnconfirmed:
       'L’approbation a été envoyée mais pas confirmée : le dépôt n’a jamais été envoyé et aucun fonds n’a quitté votre portefeuille. Patientez un instant, puis réessayez : votre portefeuille redemandera l’approbation, c’est normal et cela ne coûte que des frais de réseau.',
     depositHashUnknown:
-      'Votre portefeuille a accepté le dépôt mais n’a renvoyé aucun identifiant de transaction : dpay ne peut donc pas savoir s’il a été envoyé. Vérifiez l’activité récente dans votre application de portefeuille avant de réessayer — si le dépôt s’y trouve, il sera crédité dans une vingtaine de minutes, et déposer à nouveau enverrait l’argent deux fois.',
+      'Vérifiez l’activité récente dans votre application de portefeuille avant de réessayer — si le dépôt s’y trouve, il sera crédité dans une vingtaine de minutes, et déposer à nouveau enverrait l’argent deux fois.',
     approveHashUnknown:
-      'Votre portefeuille a accepté l’approbation mais n’a renvoyé aucun identifiant de transaction : dpay ne peut donc pas savoir si elle a été envoyée. Aucun dépôt n’a été fait et aucun fonds n’a quitté votre portefeuille. Vérifiez l’activité récente dans votre application de portefeuille, puis réessayez — elle redemandera l’approbation, c’est normal et cela ne coûte que des frais de réseau.',
+      'Aucun dépôt n’a été fait et aucun fonds n’a quitté votre portefeuille. Vérifiez l’activité récente dans votre application de portefeuille, puis réessayez — elle redemandera l’approbation, c’est normal et cela ne coûte que des frais de réseau.',
     txNotSigned: 'Transaction non signée.',
     txFailed: 'Échec de la transaction.',
     allowanceStands:
@@ -207,7 +211,6 @@ export const withdrawFr: WithdrawMessages = {
     withdrawing: amount => `Retrait de ${amount}…`,
     sendToNative: (networkLabel, nativeAsset) => `Envoyez vos ${networkLabel} vers une adresse ${nativeAsset} native`,
     availableMin: (available, min) => `Disponible : ${available} · min. ${min}`,
-    addressLabel: asset => `Adresse ${asset}`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Inférieur au retrait minimum de ${min}.`,
     gasNote: 'Il vous faut des ckETH pour les frais de réseau. Ajoutez-en d’abord si vous n’en avez pas.',

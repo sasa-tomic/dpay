@@ -109,6 +109,25 @@ describe('IcrcDepositSheet', () => {
     expect(has(tree, 'btn-deposit-check')).toBe(true);
   });
 
+  test('the instruction is ACTIONABLE for someone who owns no IC wallet yet', async () => {
+    // "Send it from any Internet Computer wallet" is a complete instruction only for someone who
+    // already has one — and the target user is a tourist who does not, is not told what one IS,
+    // and was offered no second route. The gate now names the KIND of thing to look for, the other
+    // route that exists (an exchange withdrawal on this network), and what the address is NOT.
+    // It names no product: which wallet or exchange to send a user to is a founder decision.
+    (railBalanceOf as unknown as ReturnType<typeof jest.fn>).mockResolvedValue(null);
+    const tree = await renderSheet(7);
+    const where = textOf(tree, 'deposit-where-from');
+    expect(where).toContain('VCHF');             // the asset to look for
+    expect(where).toContain('Internet Computer'); // on which network
+    expect(where.toLowerCase()).toContain('wallet app');
+    expect(where.toLowerCase()).toContain('exchange'); // the second, real route
+    const accepts = textOf(tree, 'deposit-only-accepts');
+    expect(accepts).toContain('VCHF');
+    expect(accepts).toContain('Internet Computer');
+    expect(accepts.toLowerCase()).toContain('card'); // an address is not a card payment
+  });
+
   test('ICP (currency 8) renders the same complete surface', async () => {
     (railBalanceOf as unknown as ReturnType<typeof jest.fn>).mockResolvedValue(null);
     const tree = await renderSheet(8);

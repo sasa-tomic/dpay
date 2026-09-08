@@ -37,7 +37,7 @@ import {
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
 import {fmtAsset, parseUserAmount} from '../lib/format';
-import type {Identity} from '../lib/types';
+import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconChevronDown, IconSwap} from './icons';
@@ -47,7 +47,10 @@ import {InstructionPanel} from './InstructionPanel';
 type ConvertLegs = {
   inDesc: CurrencyDescriptor;
   outDesc: CurrencyDescriptor;
-  /** Backing display symbols (CHF for VCHF) — the same symbols every other surface shows. */
+  /** The catalog's BACKING symbol for each leg (`backing_symbol`, falling back to `symbol`) — the
+   *  same string every other surface shows for that asset. For the PoC pair that is 'ICP' and
+   *  'VCHF': VCHF's own backing symbol IS "VCHF", because it is a third party's franc-denominated
+   *  token whose peg dpay does not verify, so nothing here may shorten it to "CHF". */
   inSym: string;
   outSym: string;
   inDecimals: number;
@@ -71,6 +74,12 @@ type Props = {
    *  (Receive ▸ My address) — Wallet's `goToDeposit`, the SAME callback the Pay tab's fund gate
    *  fires. The gate names that route in its copy, so it also offers it. */
   onShowDepositAddress: () => void;
+  /** Switch the wallet's selection to the venue pair's OTHER leg, so the empty account the user
+   *  is standing on becomes the conversion's DESTINATION. Wallet's `payRailSelect`: a user gesture
+   *  that respects the selection lock and does NOT reset the tabs' sub-modes — the user's goal
+   *  survives the switch, which is the whole point of a pointer. Absent while locked, in which
+   *  case the account is still NAMED and only the button is withheld (the Pay pointer's rule). */
+  onSwitchAsset?: (id: AssetId) => void;
 };
 
 const TERMINAL_STEPS = new Set<ConvertRecord['step']>(['done', 'failed_refunded', 'stuck']);
@@ -78,7 +87,7 @@ const TERMINAL_STEPS = new Set<ConvertRecord['step']>(['done', 'failed_refunded'
 const isLiveRecord = (r: ConvertRecord | null): boolean =>
   r !== null && !TERMINAL_STEPS.has(r.step) && r.step !== 'quote' && r.step !== 'confirming';
 
-export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onActivity, onShowDepositAddress}: Props) {
+export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onActivity, onShowDepositAddress, onSwitchAsset}: Props) {
   const [amountText, setAmountText] = useState('');
   const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
   const [quote, setQuote] = useState<ConvertQuote | null>(null);
@@ -300,6 +309,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // Nothing to convert at all: the Pay tab's fund-gate shape, pointed at the ONE surface that can
   // fund an IC asset (Receive ▸ My address — reachable from the bottom nav on this very screen).
   if (balanceN === 0n) {
+    // The pair's OTHER leg, formatted, iff it holds something. A balance that has not been read
+    // (undefined) is not a zero and is not offered — the same fail-open rule the gate above uses.
+    const otherRaw = assetBalances[legs.outDesc.currency];
+    const otherHeld = otherRaw != null && BigInt(otherRaw) > 0n
+      ? fmtAsset(otherRaw, outDecimals, outSym)
+      : null;
     return (
       <View testID="convert-screen" style={S.convertWrap}>
         <ConvertHeader title={M.convert.heading(inSym, outSym)} onBack={onBack} />
@@ -314,6 +329,33 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           primaryLabel={M.pay.showMyAddress(inSym)}
           onPrimary={onShowDepositAddress}
         />
+        {/* The funded-account pointer the Pay gate has had since 2026-09-08 — and the reason it can
+            be made honestly HERE, where a generic "switch to BTC" could not: the PoC venue trades
+            exactly ONE unordered pair (`CONVERT_VENUE_LEDGERS`), so the only account that could
+            ever help is the pair's other leg, which this screen has already resolved as its OUTPUT
+            leg. It is offered only when that leg actually holds something; when it does not, there
+            is provably no account to point at and the deposit route above is the whole answer.
+            Switching swaps the direction (the venue serves both), so the user converts what they
+            have into what they were standing on. */}
+        {otherHeld != null ? (
+          <View testID="convert-fund-other">
+            <Text testID="convert-fund-other-holds" style={S.convertMetaLine}>
+              {M.convert.fundOtherHolds(otherHeld, inSym)}
+            </Text>
+            {onSwitchAsset ? (
+              <Pressable
+                testID="btn-convert-fund-other"
+                style={S.linkBtn}
+                onPress={() => onSwitchAsset(`ic:${legs.outDesc.currency}`)}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.fundOtherSwitch(outSym)}
+                accessibilityState={{disabled: false}}
+              >
+                <Text style={S.linkText}>{M.convert.fundOtherSwitch(outSym)}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
         <View style={S.convertFooting}>
           <IconSwap size={20} color={C.sub} />
         </View>
@@ -495,12 +537,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
 /** Shared header: back chevron + screen title (the same shape the mode surfaces use). */
 function ConvertHeader({title, onBack}: {title: string; onBack: () => void}) {
   return (
-    <View style={S.convertHeaderRow}>
+    <View style={S.routeHeaderRow}>
       <Pressable testID="btn-convert-back" onPress={onBack} accessibilityRole="button" accessibilityLabel={M.convert.backToWallet}>
         <IconChevronDown size={26} color={C.ink} />
       </Pressable>
-      <Text style={S.convertHeaderTitle}>{title}</Text>
-      <View style={S.convertHeaderSpacer} />
+      <Text style={S.routeHeaderTitle}>{title}</Text>
+      <View style={S.routeHeaderSpacer} />
     </View>
   );
 }

@@ -314,13 +314,15 @@ describe('CkErc20DepositSheet — submit() routes on whether the DEPOSIT tx was 
   test('ERC-20: the DEPOSIT loses its hash → enter, saying dpay cannot tell whether it was sent', async () => {
     jest.mocked(sendTransaction)
       .mockResolvedValueOnce(APPROVE_HASH)
-      .mockRejectedValueOnce(new TransactionHashMissing('""'));
+      .mockRejectedValueOnce(new TransactionHashMissing('""', 'answered-without-id'));
     const tree = mountSheet();
     await driveSubmit(tree);
 
     expect(has(tree, 'btn-ckerc20-check')).toBe(false); // NOT watching — nothing may be promised
     expect(tree.root.findByProps({testID: 'btn-approve'}).props.disabled).toBe(false); // back in enter
-    expect(statusText(tree)).toContain("didn't return a transaction id");
+    // Two sentences from two owners: WHAT dpay knows (the error's own message — the wallet answered
+    // without an id) and WHAT TO DO about it for THIS transaction (the sheet's step copy).
+    expect(statusText(tree)).toContain('answered without a transaction id');
     expect(statusText(tree)).toContain('depositing again would send the money twice');
     expect(statusText(tree)).not.toContain('Transaction not signed'); // the old, fabricated verdict
     // …and the allowance line must NOT be appended here: it claims no funds left the wallet, which
@@ -331,12 +333,15 @@ describe('CkErc20DepositSheet — submit() routes on whether the DEPOSIT tx was 
   });
 
   test('ERC-20: the APPROVE loses its hash → its own copy — nothing can mint, so the retry is safe', async () => {
-    jest.mocked(sendTransaction).mockRejectedValueOnce(new TransactionHashMissing('null'));
+    jest.mocked(sendTransaction).mockRejectedValueOnce(new TransactionHashMissing('null', 'no-answer'));
     const tree = mountSheet();
     await driveSubmit(tree);
 
     expect(sendTransaction).toHaveBeenCalledTimes(1); // the deposit was never attempted
-    expect(statusText(tree)).toContain('accepted the approval');
+    // This one timed OUT, so the copy must not say the wallet accepted anything — dpay does not
+    // know it ever saw the request. That claim was the defect; the step copy is unchanged.
+    expect(statusText(tree)).toContain("Your wallet didn't answer");
+    expect(statusText(tree)).not.toMatch(/accepted/i);
     expect(statusText(tree)).toContain('No deposit was made');
     expect(statusText(tree)).not.toContain('send the money twice'); // that risk is the deposit's
     act(() => { tree.unmount(); });

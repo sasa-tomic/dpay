@@ -12,7 +12,7 @@ import {withTimeout} from '../lib/timeout';
 import {buildSelectableAssets, chipLabel, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import {mergeHistoryByTime} from '../lib/ledger';
-import type {AssetId, Identity, NfcStatus, PayIntent} from '../lib/types';
+import type {AssetId, Identity, NfcStatus, PayIntent, Txn} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
@@ -34,6 +34,7 @@ import {Tab} from './Tab';
 import {PayMode} from './PayMode';
 import {ReceiveMode} from './ReceiveMode';
 import {Ledger} from './Ledger';
+import {TxnReceipt} from './HistoryRow';
 import {HomeTab} from './HomeTab';
 import {AccountsTab} from './AccountsTab';
 import {ConvertMode} from './ConvertMode';
@@ -118,6 +119,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
     setSelectedAssetId(id);
   }, []);
   const [passportOpen, setPassportOpen] = useState(false);
+  // X6 — the transaction whose RECEIPT is open, or null. Owned HERE, not by the two lists that
+  // raise it, for the reason every other overlay is owned here: `AppModal`'s web host is absolutely
+  // positioned against its nearest positioned ancestor, so a receipt mounted inside the
+  // Transactions list or the Home feed covers only that list's own box and clips a card taller
+  // than it. One instance, at the app root, reachable from both lists.
+  const [receiptTxn, setReceiptTxn] = useState<Txn | null>(null);
   // Phase 5 — selection lock. While the mounted Pay/Receive engine is mid-flight (a pay review/qr/
   // paid, or a receive request-QR/result), it reports `true` via `onLockChange`. A USER-initiated
   // asset switch (Balances button, AssetPicker) is then suppressed so the active engine is not
@@ -951,7 +958,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           >
             {nextTheme(resolvedTheme) === 'dark' ? <IconMoon size={20} color={C.sub} /> : <IconSun size={20} color={C.sub} />}
           </Pressable>
-          <View>
+          <View style={S.headerIdentity}>
             <WordmarkLink style={S.brand} />
             {/* H4 + audit P1: the header shows ONLY the username. The hex pubkey was developer-facing
                 protocol data ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's
@@ -960,7 +967,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                 user identity so the pair no longer reads as a single currency label (a fresh-eyes
                 vision misread). The `header-who` element still holds ONLY the username (e2e contract). */}
             <Text style={S.whoLabel} accessibilityLabel={M.wallet.header.accountLabel}>{M.wallet.header.account}</Text>
-            <Text style={S.who} testID="header-who">{identity.username}</Text>
+            {/* One line, ellipsized: a long username must yield the header's width, never take it
+                from the account chip (X18). `textContent` is unchanged, so the e2e `header-who`
+                contract still reads the full name. */}
+            <Text style={S.who} testID="header-who" numberOfLines={1}>{identity.username}</Text>
           </View>
         </View>
         {/* The header account chip. X7 (UX swarm 2026-09-08): a `⌄` beside a balance means "switch
@@ -980,24 +990,31 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
         >
           <View style={S.balHeaderRow}>
             <View>
+              {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
+                  map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
+                  polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e).
+                  X8: NOT on Home. There the Home headline prints a balance ~90 px below this one,
+                  and printing the same number twice in one viewport is noise — so on Home the chip
+                  keeps only the account name and the chevron, and becomes purely the switcher its
+                  chevron always claimed to be.
+                  X18: when the amount is hidden the chevron moves UP beside the label instead of
+                  keeping a row to itself — that row was 16 px tall, held nothing but the chevron and
+                  stretched the chip's full width, so the switcher rendered orphaned at the bottom-left
+                  of its own chip (measured on Home: label y 16-32, chevron row y 32-48 at x 251.4). */}
               <View style={S.balLabelRow}>
                 <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
                 {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
                     offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
                     symbol; e2e asserts the active rail via this label (testID active-asset-label). */}
                 <Text testID="active-asset-label" style={S.balLabel}>{balanceEyebrow}</Text>
+                {mode === 'home' ? <IconChevronDown size={16} color={C.sub2} /> : null}
               </View>
-              <View style={S.balAmtRow}>
-                {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
-                    map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
-                    polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e).
-                    X8: NOT on Home. There the Home headline prints a balance ~90 px below this one,
-                    and printing the same number twice in one viewport is noise — so on Home the chip
-                    keeps only the account name and the chevron, and becomes purely the switcher its
-                    chevron always claimed to be. */}
-                {mode === 'home' ? null : <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>}
-                <IconChevronDown size={16} color={C.sub2} />
-              </View>
+              {mode === 'home' ? null : (
+                <View style={S.balAmtRow}>
+                  <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
+                  <IconChevronDown size={16} color={C.sub2} />
+                </View>
+              )}
             </View>
             {/* D5a: the A badge sits at the FAR RIGHT edge of the row (label+value column, then the
                 badge) matching the tab-bar pattern — it was inline after the label text, which read
@@ -1019,6 +1036,17 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
           now the landing screen the strip is seen at launch anyway. */}
       {mode === 'home' ? <TripStrip onOpen={() => setPassportOpen(true)} /> : null}
 
+      {/* The practice faucet's answer, rendered ONCE and rendered HERE — outside the mode switch,
+          because the action can be fired from anywhere. `T` is a global hotkey (`useHotkeys` above,
+          live on every surface) and the button itself lives on the accounts route, so a refusal
+          printed inside one tab was invisible from the other three: press T on Pay and nothing at
+          all came back. That matters in production more than it does here, because the refusal is
+          the NORMAL outcome — the faucet allows one top-up per account per hour and first run has
+          already spent it, so the cooldown reason is what most presses earn. One node, every
+          surface (founder rule 2026-08-29: every step, especially the error path, tells the user
+          what is going on). The testID is unchanged, so the flows that read it still do. */}
+      {topUpErr ? <Text testID="topup-err" style={S.topUpErr}>{topUpErr}</Text> : null}
+
       <ScrollView style={S.scroll} contentContainerStyle={S.body} keyboardShouldPersistTaps="handled">
         {mode === 'home'
           ? <HomeTab
@@ -1029,7 +1057,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               homeAsset={homeAsset}
               online={online}
               history={ledgerHistory}
-              topUpErr={topUpErr}
               // Scan pins the sub-mode, so the camera is live in ONE tap from a cold start whatever
               // the Pay tab was last left showing (a `send` sub-mode left over from a previous
               // session would otherwise make the till gesture two taps — the exact regression the
@@ -1039,6 +1066,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               onDeposit={goToDeposit}
               onOpenAccounts={openAccounts}
               onSeeAll={() => setMode('ledger')}
+              onOpenReceipt={setReceiptTxn}
             />
           : mode === 'accounts'
           ? <AccountsTab
@@ -1048,7 +1076,6 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               homeCurrency={homeCurrency}
               demoFaucetAvailable={capabilities.demoFaucet}
               topUpBusy={topUpBusy}
-              topUpErr={topUpErr}
               hasTestnet={hasTestnet}
               showTestnet={showTestnet}
               onToggleTestnet={toggleTestnet}
@@ -1169,8 +1196,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               // Convert, not from Pay. Sending them somewhere they never were is worse than
               // sending them nowhere.
               onShowDepositAddress={() => goToDeposit(`ic:${selectedCurrency}`)}
+              // The pair's other leg, switched the same way the Pay gate switches a funded rail:
+              // a user gesture that respects the selection lock and leaves the tabs' sub-modes
+              // alone. Withheld while locked, exactly as the Pay pointer's button is.
+              onSwitchAsset={payRailSwitch}
             />
-          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} />}
+          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row
@@ -1218,6 +1249,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
             onDone={() => setHowItWorksOpen(false)}
           />
         </AppModal>
+      ) : null}
+      {/* X6 — the receipt for one transaction row. Mounted at the ROOT (see `receiptTxn` above),
+          so the overlay covers the whole app column whichever list opened it. */}
+      {receiptTxn ? (
+        <TxnReceipt t={receiptTxn} catalog={catalog} assets={assets} onClose={() => setReceiptTxn(null)} />
       ) : null}
       {/* An incoming payment link that cannot be paid. It states WHICH asset/chain the link asked
           for and the one action the payer can take (founder hard rule: every dead end gives a

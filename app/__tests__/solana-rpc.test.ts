@@ -27,7 +27,14 @@ function installRpcFetch(responses: Array<unknown | {ok: false; status: number} 
     // the mock carries a Headers-shaped reader seeded from an optional `headers` field.
     const hdrs: Record<string, string> = (next && typeof next === 'object' && 'headers' in (next as any) ? (next as any).headers : {}) ?? {};
     const headers = {get: (k: string) => hdrs[k] ?? hdrs[k.toLowerCase()] ?? null};
-    return Promise.resolve({ok: httpOk, status, headers, json: () => Promise.resolve(JSON.parse(payload))} as unknown as Response);
+    // `text` is real on every Response too, and a non-2xx now reads the body so its message can
+    // carry the endpoint's own explanation (a Helius 401 says WHICH key). A double whose failure
+    // path lacked `text` would make the error under test unreachable.
+    return Promise.resolve({
+      ok: httpOk, status, headers,
+      json: () => Promise.resolve(JSON.parse(payload)),
+      text: () => Promise.resolve(payload),
+    } as unknown as Response);
   });
   (globalThis as unknown as {fetch: typeof mock}).fetch = mock;
   return {calls};
@@ -79,7 +86,9 @@ describe('solana rpc — request/response', () => {
   test('a non-2xx HTTP status throws', async () => {
     installRpcFetch([{ok: false, status: 503}]);
     const {getBalance} = require('../solana/rpc');
-    await expect(getBalance('https://rpc.example', 'X')).rejects.toThrow('solana rpc http 503');
+    // The message names the method, the HOST (never the URL — it carries the API key) and the
+    // body, because a bare status is not something anyone can act on.
+    await expect(getBalance('https://rpc.example', 'X')).rejects.toThrow(/solana rpc getBalance → rpc\.example: HTTP 503/);
   });
 });
 
@@ -150,7 +159,7 @@ describe('solana rpc — accountExists (F4 ATA gate)', () => {
   test('throws on a network error (never silently reports absent)', async () => {
     installRpcFetch([{ok: false, status: 500}]);
     const {accountExists} = require('../solana/rpc');
-    await expect(accountExists('https://rpc.example', 'X')).rejects.toThrow('solana rpc http 500');
+    await expect(accountExists('https://rpc.example', 'X')).rejects.toThrow(/solana rpc getAccountInfo → rpc\.example: HTTP 500/);
   });
 });
 
@@ -493,7 +502,7 @@ describe('solana rpc — 429 rate-limit gate', () => {
   test('a non-429 HTTP error does NOT open a cooldown (only the limiter gets to mute us)', async () => {
     const {calls} = installRpcFetch([{ok: false, status: 500}, {value: 5}]);
     const {getBalance} = require('../solana/rpc');
-    await expect(getBalance(URL_A, 'A')).rejects.toThrow(/http 500/);
+    await expect(getBalance(URL_A, 'A')).rejects.toThrow(/HTTP 500/);
     expect(await getBalance(URL_A, 'A')).toBe('5');
     expect(calls.length).toBe(2);
   });

@@ -102,8 +102,6 @@ export const walletFr: WalletMessages = {
     demoFundsLabel: 'Obtenir des fonds de démo',
     demoFundsHint: 'Ajoute ∂100 d’argent de démo à ce portefeuille',
     needsSetup: 'À configurer',
-    railUnreadable: network =>
-      `Le réseau ${network} ne répond pas pour le moment, ce solde n’a donc pas pu être actualisé. C’est cette connexion, pas votre portefeuille : vos fonds sont intacts et vos autres comptes fonctionnent toujours. dpay réessaie tout seul.`,
     select: symbol => `Sélectionner ${symbol}`,
     selectHint: 'Affiche le solde de cet actif sur votre écran d’accueil',
     selectSolanaHint: symbol => `Affiche ${symbol} sur votre écran d’accueil et utilise Solana pour Payer/Recevoir`,
@@ -181,28 +179,42 @@ export const educationFr: EducationMessages = {
     shopRequests: 'Demande',
   },
 
-  rehearsal: {
-    title: 'Entraînez-vous sans risque',
-    sheetTitle: 'Exercice DÉMO',
-    steps: {
-      request: {
-        title: 'Sur l’autre téléphone : demander ∂1',
-        body: 'Ouvrez dpay sur un autre téléphone, choisissez DÉMO, appuyez sur Recevoir, saisissez 1, puis appuyez sur Demander.',
-      },
-      approve: {
-        title: 'Sur ce téléphone : scanner et vérifier',
-        body: 'Choisissez DÉMO, appuyez sur Payer et scannez le code dpay de l’autre téléphone. Vérifiez ∂1 et le destinataire avant d’approuver.',
-      },
-      settle: {
-        title: 'Puis inversez les rôles',
-        body: 'Pour vous entraîner à recevoir, créez une demande DÉMO de ∂1 sur ce téléphone et scannez-la avec l’autre.',
-      },
+  practice: {
+    sheetTitle: 'Paiement d’entraînement',
+    eyebrow: 'ENTRAÎNEMENT',
+    payeeName: 'Commerçant d’entraînement',
+    title: 'Faites un vrai paiement',
+    cardLine: 'Voici le code qu’un commerçant vous montrerait.',
+    balance: amount => `Vous avez ${amount} en argent d’entraînement.`,
+    review: 'Vérifier le paiement',
+    reviewHint: 'Voir le montant et le destinataire avant d’approuver',
+    skip: 'Passer l’entraînement',
+    skipHint: 'Passe le paiement d’entraînement et va au choix de votre monnaie principale',
+    bothSides: 'Votre téléphone joue ici les deux rôles, cet entraînement a donc besoin d’une connexion. En voyage, seul le commerçant en a besoin.',
+    settledBody: 'C’était un vrai paiement sur le registre d’entraînement — votre téléphone l’a signé et le registre l’a réglé.',
+    settledBalance: amount => `Il reste ${amount} en argent d’entraînement.`,
+    pendingBody: 'Le paiement a été signé et envoyé. dpay ne l’a pas encore vu se régler, rien n’est donc confirmé. C’est exactement à cela que ressemble un vrai paiement en attente.',
+    refusedTitle: 'Le registre l’a refusé',
+    refusedBody: 'Rien n’a bougé.',
+    continue: 'Poursuivre la configuration',
+    continueHint: 'Continue vers le choix de votre monnaie principale',
+    punchline: 'L’argent d’entraînement n’a aucune valeur. dpay ne vous demande jamais de déposer ou d’acheter quoi que ce soit pour l’essayer.',
+    noFaucet: {
+      title: 'Pas d’argent d’entraînement ici',
+      body: 'Ce serveur ne distribue pas d’argent d’entraînement, il n’y a donc rien pour s’entraîner. Rien ne manque à votre portefeuille — continuez et choisissez votre monnaie. Vous ferez votre premier vrai paiement quand vous voudrez.',
     },
-    stageTags: ['01 — RECEVOIR', '02 — PAYER', '03 — INVERSER'],
-    punchline: 'DÉMO est de l’argent fictif sans valeur. Cette présentation ne vous demande jamais de déposer ou d’acheter quoi que ce soit.',
-    skip: 'Passer l’exercice',
-    skipHint: 'Passez l’exercice et choisissez votre monnaie principale',
-    try: 'Choisir ma monnaie',
+    cooldown: {
+      title: 'L’argent d’entraînement, dans un instant',
+      body: reason => `Ce serveur distribue de l’argent d’entraînement de temps en temps, et il vient de le faire. Il indique : ${reason} Poursuivez la configuration — vous pourrez revenir payer quand vous voudrez.`,
+    },
+    offline: {
+      title: 'Cet entraînement a besoin d’une connexion',
+      body: 'Votre téléphone joue ici le commerçant et le payeur, il doit donc atteindre le registre lui-même. Un vrai paiement n’en a pas besoin : c’est le commerçant qui a besoin d’une connexion. Reconnectez-vous et réessayez, ou poursuivez la configuration.',
+    },
+    empty: {
+      title: 'Encore rien pour s’entraîner',
+      body: 'Votre solde d’entraînement est vide, il n’y a donc rien à payer. Votre portefeuille n’a aucun problème — continuez et choisissez votre monnaie.',
+    },
   },
 
   coachTips: {
@@ -230,7 +242,7 @@ export const educationFr: EducationMessages = {
     title: 'Prêt pour le voyage',
     stamps: {
       recoverySaved: {label: 'MOTS\nNOTÉS', hint: 'Copiez vos mots de récupération dans les Paramètres', short: 'encore la sauvegarde'},
-      flowUnderstood: {label: 'PARCOURS\nVU', hint: 'Regardez la répétition à la création du portefeuille — ou faites un paiement', short: 'encore le parcours'},
+      flowUnderstood: {label: 'PARCOURS\nVU', hint: 'Faites le paiement d’entraînement au premier lancement — ou faites un paiement', short: 'encore le parcours'},
       fundsReady: {label: 'FONDS\nCHARGÉS', hint: 'Ajoutez de l’argent utilisable — les fonds d’entraînement ne comptent pas', short: 'encore des fonds'},
       paymentTested: {label: 'PREMIER\nPAIEMENT', hint: 'Faites un paiement — envoyé ou reçu', short: 'encore un paiement'},
     },

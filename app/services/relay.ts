@@ -21,9 +21,10 @@ const DEFAULT_RELAY_TIMEOUT_MS = 10000;
 // `init.signal` with the composed one (fetch rejects a double assignment; the caller's signal is
 // already forwarded into the composed controller). Default timeout is the 10s relay backstop;
 // callers pass a shorter named timeout (BALANCE_TIMEOUT_MS / FAUCET_TIMEOUT_MS etc.) to bound fast
-// polls. NOTE: the timer covers the fetch (headers) settle; the caller's subsequent body read
-// (`r.json()`) happens after the timer is cleared — bodies are tiny JSON across every call site, so
-// this is equivalent in practice to the inline pattern.
+// polls. NOTE: this timer covers the fetch (HEADERS) settle only — the abort signal is released
+// once the Response object exists. The BODY read that follows is bounded separately, by
+// [`readBodyWithin`] below, because a server that answers `200 OK` and then stops writing would
+// otherwise hold the caller forever — exactly what this helper exists to prevent.
 export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutMs = DEFAULT_RELAY_TIMEOUT_MS): Promise<Response> {
   const {signal, cancel} = composeTimeout(init?.signal, timeoutMs);
   try {
@@ -33,15 +34,44 @@ export async function fetchWithTimeout(url: string, init?: RequestInit, timeoutM
   }
 }
 
+/** How long a body may take to finish arriving once its headers have. Every body this app reads is
+ *  a few hundred bytes of JSON or CBOR, so this is a stall detector rather than a budget. */
+export const BODY_READ_TIMEOUT_MS = 10000;
+
+/**
+ * Run a body read under its own bound and REJECT if it stalls — the second half of
+ * `fetchWithTimeout`'s promise. It never substitutes a value; deciding what a missing body means is
+ * the caller's job, and the caller is the only one that knows whether "no body" is survivable.
+ * `what` is prefixed to the error so a stalled read names the URL and status it belonged to.
+ */
+export async function readBodyWithin<T>(read: () => Promise<T>, what: string, timeoutMs = BODY_READ_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what}: the body did not finish arriving within ${timeoutMs} ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 // PR26 — read a fetch Response's body as JSON, returning `{}` on any parse failure (a malformed
-// body, an empty 5xx, a non-JSON body) instead of throwing. Relay bodies are best-effort: callers
-// want `body.error` / payload fields if present and `{}` otherwise, never a throw that masks the
-// real HTTP outcome.
+// body, an empty 5xx, a non-JSON body, a stalled read) instead of throwing. Relay bodies are
+// best-effort: callers want `body.error` / payload fields if present and `{}` otherwise, never a
+// throw that masks the real HTTP outcome. The line it leaves names the URL, the status and the
+// cause — `'body parse failed'` on its own told a reader nothing about which of a dozen call sites
+// had failed or why.
 export async function readJsonOrEmpty(r: Response): Promise<any> {
-  return r.json().catch(() => {
-    console.warn('readJsonOrEmpty: body parse failed');
+  const where = `${r.url || 'the relay'} (HTTP ${r.status})`;
+  try {
+    return await readBodyWithin(() => r.json(), `readJsonOrEmpty: ${where}`);
+  } catch (e) {
+    console.warn(`readJsonOrEmpty: ${where} did not yield JSON — continuing with an empty body:`, e instanceof Error ? e.message : String(e));
     return {} as Record<string, unknown>;
-  });
+  }
 }
 
 export type RelayCapabilities = {till: boolean; demoFaucet: boolean};

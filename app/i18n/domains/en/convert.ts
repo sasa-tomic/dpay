@@ -76,6 +76,16 @@ export type ConvertMessages = {
    *  IC asset. `receiveTab`/`myAddress` are the live labels of those controls, passed in from
    *  their own keys so this sentence can never name a button that was renamed elsewhere. */
   fundBody: (sym: string, receiveTab: string, myAddress: string) => string;
+  /**
+   * The funded-account pointer on that same gate. It is offerable HONESTLY here — and only here —
+   * because the PoC venue trades exactly ONE unordered pair (`CONVERT_VENUE_LEDGERS`), so the set
+   * of accounts that could ever help is two, and the other one is already resolved as this
+   * screen's output leg. `held` is the other leg's formatted balance, `toSym` the asset it would
+   * be converted into (the empty account the user is standing on). Rendered only when that other
+   * leg actually holds something — never as a guess at a pair the venue may not serve.
+   */
+  fundOtherHolds: (held: string, toSym: string) => string;
+  fundOtherSwitch: (sym: string) => string;
   /** Entered more than the wallet can spend: both numbers, and the two ways out. */
   insufficientLine: (needed: string, balance: string) => string;
 
@@ -109,7 +119,6 @@ export type ConvertMessages = {
     quoteUnreachable: () => string;
     quoteRefused: () => string;
     quoteUnavailable: (code: string) => string;
-    swapReplyShape: () => string;
   };
 };
 
@@ -150,6 +159,8 @@ export const convertEn: ConvertMessages = {
 
   fundBody: (sym, receiveTab, myAddress) =>
     `This wallet has no ${sym}. To convert ${sym}, first receive ${sym} at your address: open ${receiveTab} below and choose “${myAddress}”.`,
+  fundOtherHolds: (held, toSym) => `You hold ${held} — you can convert that into ${toSym} instead.`,
+  fundOtherSwitch: sym => `Convert from ${sym} instead`,
   insufficientLine: (needed, balance) =>
     `Converting this needs ${needed} — the amount plus two ledger fees — and this wallet holds ${balance}. Lower the amount, or receive more first.`,
 
@@ -185,6 +196,5 @@ export const convertEn: ConvertMessages = {
     quoteUnreachable: () => 'Could not reach the ICPSwap quote — the relay is unreachable. Check your connection and try again.',
     quoteRefused: () => 'ICPSwap refused to quote this pair right now.',
     quoteUnavailable: code => `Quote unavailable (${code}).`,
-    swapReplyShape: () => 'The pool reply could not be read.',
   },
 };

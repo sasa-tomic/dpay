@@ -86,6 +86,18 @@ export type DepositMessages = {
    */
   icrc: {
     sendToAccount: (symbol: string, network: string) => InstrRun[];
+    /**
+     * WHERE the money can come from. "Send it from any Internet Computer wallet" is a complete
+     * instruction only for someone who already has one — and the target user is a tourist who
+     * does not, is not told what one IS, and is given no second route. This line names the KIND of
+     * thing to look for and the other route that actually exists (an exchange withdrawal on this
+     * network), without naming a product: which wallet or exchange dpay would send a user to is a
+     * founder decision and is deliberately not made here.
+     */
+    whereFrom: (symbol: string, network: string) => string;
+    /** What the address IS and IS NOT. A deposit address is not a card or bank payment, and a
+     *  first-time user has no way to know that from an address alone. */
+    onlyAccepts: (symbol: string, network: string) => string;
     /** Practical instruction: no memo/reference gymnastics needed for a plain transfer. */
     noMemo: string;
     feeLine: (fee: string) => string;
@@ -123,10 +135,17 @@ export type DepositMessages = {
     approveReverted: string;
     approveUnconfirmed: string;
     /**
-     * The wallet took the request and answered without a transaction id, so dpay knows neither that
-     * it was sent nor that it was not — the one outcome that is neither "sent" nor "failed". Two
-     * keys because the risk differs: an unattributed DEPOSIT may still credit (retrying can pay
-     * twice), an unattributed APPROVE can never mint anything (retrying is safe).
+     * The send produced no transaction id, so dpay knows neither that it was sent nor that it was
+     * not — the one outcome that is neither "sent" nor "failed". Two keys because the risk differs:
+     * an unattributed DEPOSIT may still credit (retrying can pay twice), an unattributed APPROVE can
+     * never mint anything (retrying is safe).
+     *
+     * Each is the INSTRUCTION HALF only. The sentence in front of it — which of the two things
+     * happened, a wallet that answered without an id or a wallet that never answered — is the
+     * `TransactionHashMissing` message (`M.errors.ethWallet.hashMissing` / `sendTimedOut`), because
+     * only the error knows that. These strings must therefore never open with a claim about the
+     * wallet; they used to say "Your wallet accepted the deposit", which is false on the silent
+     * branch and was written before that branch existed.
      */
     depositHashUnknown: string;
     approveHashUnknown: string;
@@ -277,6 +296,10 @@ export const depositEn: DepositMessages = {
       {t: network, em: true},
       {t: ' wallet that supports it to your account below.'},
     ],
+    whereFrom: (symbol, network) =>
+      `Send it from any wallet app that holds ${symbol} on ${network}, or withdraw ${symbol} from an exchange that supports the ${network} network.`,
+    onlyAccepts: (symbol, network) =>
+      `This address receives ${symbol} sent on ${network} — nothing else, and no card or bank transfer.`,
     noMemo: 'No memo or reference needed — a plain transfer to this account is enough.',
     feeLine: fee => `Network fee ${fee}`,
     custody: asset => `dpay never holds your keys and never converts — ${asset} lands directly in your wallet.`,
@@ -298,7 +321,7 @@ export const depositEn: DepositMessages = {
     pairFailed: 'Could not pair with your wallet.',
     wrongNetwork: (networkLabel, expected, actual) =>
       `Wrong network: connect to ${networkLabel} (chain ${expected}). Your wallet is on chain ${actual}.`,
-    connectFailed: 'Could not connect to your wallet.',
+    connectFailed: 'Could not connect to your wallet. Open your wallet app, approve the connection request there, then try again.',
     noWalletApp: 'No wallet app found. Scan the QR with a wallet on another device instead.',
     walletDisconnected: 'Wallet disconnected.',
     amountRequired: 'Enter an amount greater than zero.',
@@ -310,9 +333,9 @@ export const depositEn: DepositMessages = {
     approveUnconfirmed:
       'Your approval was sent but not confirmed, so the deposit was never sent and no funds left your wallet. Wait a moment, then try again: your wallet will ask you to approve once more, which is expected and only costs gas.',
     depositHashUnknown:
-      "Your wallet accepted the deposit but didn't return a transaction id, so dpay can't tell whether it was sent. Check the recent activity in your wallet app before you try again — if the deposit is there, it will still credit in about 20 minutes, and depositing again would send the money twice.",
+      'Check the recent activity in your wallet app before you try again — if the deposit is there, it will still credit in about 20 minutes, and depositing again would send the money twice.',
     approveHashUnknown:
-      "Your wallet accepted the approval but didn't return a transaction id, so dpay can't tell whether it was sent. No deposit was made and no funds left your wallet. Check the recent activity in your wallet app, then try again — it will ask you to approve first, which is expected and only costs gas.",
+      'No deposit was made and no funds left your wallet. Check the recent activity in your wallet app, then try again — it will ask you to approve first, which is expected and only costs gas.',
     txNotSigned: 'Transaction not signed.',
     txFailed: 'Transaction failed.',
     allowanceStands:
@@ -437,7 +460,6 @@ export type WithdrawMessages = {
     withdrawing: (amount: string) => string;
     sendToNative: (networkLabel: string, nativeAsset: string) => string;
     availableMin: (available: string, min: string) => string;
-    addressLabel: (asset: string) => string;
     amountPlaceholder: string;
     belowMin: (min: string) => string;
     /** ckERC20 burns ckETH for gas — dpay never swaps, so the user must hold it (Fork-C). */
@@ -564,7 +586,6 @@ export const withdrawEn: WithdrawMessages = {
     withdrawing: amount => `Withdrawing ${amount}…`,
     sendToNative: (networkLabel, nativeAsset) => `Send your ${networkLabel} to a native ${nativeAsset} address`,
     availableMin: (available, min) => `Available: ${available} · min ${min}`,
-    addressLabel: asset => `${asset} address`,
     amountPlaceholder: '0.00050000',
     belowMin: min => `Below the ${min} minimum withdrawal.`,
     gasNote: "You need ckETH for gas. Add ckETH first if you don't have any.",

@@ -31,7 +31,7 @@ import {
   solanaAssetsOf,
   testnetDisplayName,
 } from './catalog';
-import {IS_SOLANA_DEVNET, SOLANA_RPC_URL} from './constants';
+import {IS_SOLANA_DEVNET, PRACTICE_CURRENCY, SOLANA_RPC_URL} from './constants';
 import {parseDecimalToUnits} from '../lib/amount';
 import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
@@ -39,12 +39,13 @@ import {solanaTokenOfMint} from '../solana/tokens';
 import {M} from '../i18n';
 
 /**
- * The PRACTICE rail's stable asset id — currency 0, the faucet-minted demo dollar. Named once so
+ * The PRACTICE rail's stable asset id — spelled from `PRACTICE_CURRENCY`, the faucet-minted demo
+ * dollar, so the rail is one fact in one place (config/constants.ts). Named once so
  * every "is this play money?" decision reads the same constant instead of re-spelling `'ic:0'`:
  * the reconcile/deeplink fallbacks below, and the trip-readiness gate that must NOT count it
  * (`decideFundsReady` — X13: a wallet holding only practice money is not ready for a trip).
  */
-export const DEMO_ASSET_ID: AssetId = 'ic:0';
+export const DEMO_ASSET_ID: AssetId = `ic:${PRACTICE_CURRENCY}`;
 
 // A resolved, display-ready view of one selectable asset. Built fresh from the current catalog +
 // Solana config on every call; React state stores only the STABLE `id`, never a `SelectableAsset`
@@ -179,9 +180,27 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
   const network = isPrimary
     ? null
     : (desc.network ?? familyDisplay([desc], desc.currency)?.networkLabel ?? null);
+  // X23 — the row's subtitle names the SETTLEMENT chain, never `desc.network`.
+  //
+  // `desc.network` is the chain a chain-key asset is BACKED by: ckUSDC's is "Ethereum", ckBTC's is
+  // "Bitcoin". Every one of these assets SETTLES on the Internet Computer, and every one of their
+  // receive addresses is an Internet Computer principal. The subtitle was built from the backing
+  // chain, so the ckUSDC account row read "USDC · Ethereum" while the address the very next screen
+  // offers for it is an IC principal — and on a USD-home wallet that row also wears the MAIN badge
+  // and nothing else on it says "Internet Computer" at all. A user who reads a row as "this is my
+  // USDC on Ethereum" and then reads an address off the account can send Ethereum USDC to a place
+  // that cannot receive it. That is money-loss-shaped, and the rail-line helper in
+  // config/currency.ts already says so in as many words about this exact construction — it just
+  // was not the function the row used.
+  // (Named by concept, not by identifier: `rail-choice-isolation.test.ts` greps this file's SOURCE
+  // for the chooser's symbols, and that guard is worth more than the convenience of a symbol here.)
+  //
+  // The BACKING SYMBOL is kept (the founder's display rule: BTC/USDC/ETH, never the ck* wrapper),
+  // so the change is to the CHAIN half alone. `desc.network` is untouched and still feeds the
+  // deposit sheets, where "send USDC on Ethereum" is the true instruction for the minter route.
   const networkLabel = isPrimary
     ? M.wallet.asset.demoSubtitle
-    : M.wallet.asset.networkLabel(name, network ?? 'IC');
+    : M.wallet.asset.networkLabel(name, prettyNetwork('internet-computer'));
   return {
     id: `ic:${desc.currency}` as const,
     protocol: 'ic',

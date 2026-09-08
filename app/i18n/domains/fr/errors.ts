@@ -27,10 +27,19 @@ export const errorsFr: ErrorMessages = {
       `La création de votre compte ${asset} demande environ ${solAmount} dans ce portefeuille (loyer du compte + frais, une seule fois) — envoyez d’abord un peu de SOL ici`,
   },
 
+  rail: {
+    unreadable: network =>
+      `${network} ne répond pas, ces soldes ne sont donc plus à jour. Rien n’a bougé, vos autres comptes fonctionnent et dpay continue de réessayer.`,
+  },
+
   ethWallet: {
     receiptReverted: hash => `la transaction ${hash} a échoué sur la chaîne`,
     receiptTimeout: hash => `la transaction ${hash} n’a pas été minée dans le délai imparti`,
-    hashMissing: received => `votre portefeuille a accepté la transaction mais n’a renvoyé aucun identifiant de transaction (${received})`,
+    hashMissing: received =>
+      `Votre portefeuille a répondu sans identifiant de transaction (${received}) : dpay ne peut donc pas savoir si elle a été envoyée.`,
+    sendTimedOut: 'Votre portefeuille n’a pas répondu : dpay ne peut donc pas savoir si la transaction a été envoyée.',
+    requestTimedOut:
+      'Votre portefeuille n’a pas répondu. Ouvrez votre application de portefeuille, traitez la demande qui y attend, puis réessayez.',
     pairingTimedOut: 'délai d’association dépassé — aucun portefeuille scanné en 5 min',
     pairingFailed: detail => `échec de l’association WalletConnect : ${detail}`,
     invalidChainId: value =>
