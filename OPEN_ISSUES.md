@@ -7,6 +7,15 @@
 > carry the same two numbers, so the cost of the thing being blocked stays visible.
 
 > Role: known blockers + documented follow-ups. Read top-down; work order first.
+> **Pruned 2026-09-08 (parked-disposition sweep)** — five entries under "Other open issues" whose
+> dispositions ("accepted simplification", "cosmetic", "inherent", "low priority") did not meet the
+> new "pre-existing is not a disposition" bar were worked and REMOVED, not re-annotated: the till
+> bearer-token revisit (argued out at `ChargeStatus`, with a key-set tripwire), the FakeLedger
+> rate-limit (both builds now run one predicate; it caught three e2e flows asserting a repeatable
+> faucet the shipped app has never had), the receipt-poll 404 lines (route and caller both deleted
+> at the 2026-08-19 cutover — what survived was a harness filter hiding every asset 404, now
+> closed), the unbounded WalletConnect `request()` (bounded), and the unit-only Solana history
+> (asserted against real mainnet captures). Two NEW items they surfaced are filed below.
 > **Pruned 2026-09-08** — closed and removed in the same session that finished them: work-order
 > item 2 in full (all four conversion-hardening streams; the fix is measured live on the production
 > route), item 4's (b) and (c) plus 4a and 4c (the app opens on Home, Home is an overview, the
@@ -122,8 +131,8 @@ DO-NOT-NAG set.
 - **OpenCryptoPay is one interop rail among several, not the strategy** (founder, 2026-09-04). The
   till v1 build is complete (`702c359`; plan
   [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md));
-  what remains of it is the two-handset tap (below) and the bearer-token revisit (below). The
-  cashier page (`8805027`) and the OCP tx-id fix are done and recorded below/inline.
+  what remains of it is the two-handset tap (below). The cashier page (`8805027`), the OCP tx-id
+  fix and the bearer-token revisit are done and recorded below/inline.
 
 ## PROD STATE (checked, never asserted — floor `cf119bb`)
 
@@ -270,7 +279,7 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
 | X11 | **No URL routing** — every tab and sheet is `/wallet`, browser Back ejects the user out of the wallet (measured: Settings stayed open while the URL jumped to a previously-visited pay link), no tab is deep-linkable, refresh always dumps you on the landing screen. | 7 | M |
 | X12 | **Fonts ship unsubsetted and uncompressed** — 338 KB of TTF with `encodedBodySize === decodedBodySize` on all four (one file is 130 KB), blocking text paint. WOFF2 subsets cut ~230 KB. The cheapest perceived-speed win available. | 7 | S |
 | X16 | **Three unprompted denials in the first six screens** ("does not deposit, buy, or move any money" / "never asks you to deposit or buy anything" / "does not move or convert funds"), plus one on every onboarding frame and every deposit sheet. Each sentence is true; the density is a scam signature. Legitimate products state what they do. | 6 | S |
-| X17 | **Scanner body copy fails WCAG AA** — measured 3.0:1 (`rgb(103,98,87)` on `rgb(23,21,15)`), needs 4.5:1. | 6 | S |
+| X17b | **FOUNDER DECISION — ten colour pairings fail WCAG AA and two of them cannot be fixed without changing the brand.** The scanner defect X17 is fixed (3.00:1 → 15.8 light / 7.1 dark, gated by `app/__tests__/contrast.test.ts`). A full audit followed — 256 text nodes, 6 screens × 2 themes, effective background walked up the tree — and found ten more. The measured ceilings, so the trade is explicit rather than guessed: `sub2` (section labels, account subtitles, ledger times) sits at 2.30–3.96:1 and would need to go DARKER than `sub` to reach 4.5:1, collapsing the three-tier ink hierarchy to two; and the tangerine brand is 2.76–3.12:1 as text and 3.12:1 as white-on-fill — **every primary button and active tab label in both themes** — where no tangerine that still reads as tangerine passes (even the darker `brand2` is only 3.64:1). Also failing: `ok` green on credited amounts (3.00:1) and the AssetGlyph monograms on their family tints (3.92–4.45:1). Deciding this is a brand call, not an engineering one. | 7 | M |
 | X18 | **The header wordmark, gear and theme button collide**, with "ACCOUNT / name" overlapping the wordmark's descender — on every screen, light and dark. | 6 | S |
 | X19 | **8-decimal amounts on the pay-link review** ("Pay 1.25000000 VCHF") where the header and request QR both correctly show 2. | 6 | S |
 | X20 | **Self-send is not warned on the pay-link path**, while `CLAUDE.md` documents that it warns on Send-to-address. Two paths, one rule, one of them missing. | 6 | S |
@@ -282,8 +291,6 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
 
 | # | Item | value | effort |
 |---|------|------:|:------:|
-| U5 | **`just web-smoke` is RED for two pre-existing reasons.** (a) `e2e/web-wallet-smoke.mjs` never answers the home-currency chooser added 2026-09-04, so it stalls there — `grep home-currency` on that file returns nothing; (b) ten `429`s from the live Helius RPC. It is a gate that has been failing without anyone noticing, which is worse than not having it. | 7 | S |
-| U6 | **The shipped web bundle is not byte-reproducible.** Two consecutive `--mode web-prod` builds of identical source produce different `wallet-*.js` content (md5 differs) while the unminified e2e build is deterministic — so it is the `oxc` minifier. Pre-dates the service worker. Consequences: the SW version churns on every rebuild even with no source change, and `deploy/build.sh`'s reproducibility story is weaker than it reads — a reviewer cannot rebuild a shipped image and compare. | 6 | M |
 | U4 | **`CODEBASE_ANALYSIS.md` carries a hand-maintained ~40-flow enumeration that duplicates the generated `FLOWS.md` wholesale.** It is labelled "illustrative, not exhaustive", but since `just check` now regenerates and diffs `FLOWS.md` (recipe `flows-md`) its remaining value is close to zero and it is a standing DRY violation in the file every session opens with. It cannot be deleted blind: it carries a few non-flow facts (the testID contract, the seed/backup surface, the restore surface, the asset-segregation note) that need re-homing first. | 6 | S |
 
 ## Other open issues
@@ -317,22 +324,10 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
   refused by name with a practical instruction (BIP-21/321, EIP-681, BOLT-11 → `coin-request`;
   transaction-request `solana:https://…` refused as damaged — transfer requests only; non-USDC
   `spl-token` mints refused by name). Same spec.
-- **The charge id is a bearer read token** (`GET /api/v1/till/{id}` unauthenticated; worked
-  through and accepted at `ChargeStatus` — the `reference` is deliberately off that body).
-  Revisit before the till serves a merchant who is not the founder.
 - **(medium) Withdrawal approve→retrieve front-running residual** — includes the inherent
   dual-approve partial-failure class; documented mitigation in place.
-- **WC per-`request()` unbounded** (`app/wallet.ts`) — inherent to EIP-1193 (no standard timeout
-  param); pairing bounded at 5 min.
-- **(low) Solana history is unit-proven, not cluster-proven** — asserted against stubbed RPC
-  responses only; a real transaction would test direction/amount from balance-deltas, v0
-  `loadedAddresses` indexing, and the USDC/SOL row suppression.
 - **Helius API key baked as a literal** — rate-limit key, not a fund key (non-custodial, device
   key signs). Rotate if the repo ever goes public.
-- **FakeLedger has no rate-limit** (N1) — accepted simplification; the real cooldown is surfaced
-  in the UI.
-- **Receipt-poll 404 console lines** — cosmetic, by-design not-yet-settled poll; invisible to
-  users.
 - **History names stay PRINCIPAL-prefix by design** post-cutover (ledger memo is the frozen
   16-byte nonce reconciliation key — extending it was REJECTED); a signed name registry is a
   founder follow-up, NOT in-tree.

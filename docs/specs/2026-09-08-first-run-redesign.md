@@ -312,4 +312,20 @@ screenshots in front of the founder before any i18n, harness or flow work starts
 
 ## Status
 
-NOT STARTED. Build order: §5 `demoView` fix (S) → §3 Practice (M) → §6 Home/Accounts (M).
+BUILT. §5 `demoView`, §6 Home/Accounts and §3 Practice are all in the tree
+(`app/components/Practice.tsx`, `app/components/PaymentReview.tsx`, the App.tsx router). Two
+departures from the plan above, both deliberate:
+
+- **The backup gate is persisted by a PENDING identity, not by a journey key.** §7 named the hole
+  without naming the mechanism. `create()` writes `dpay.identity.pending.v1` and only the
+  acknowledgement promotes it to `dpay.identity.v1`, so line one of the router (`identity === null
+  → Onboarding`) IS the backup gate and a resume shows the SAME 24 words. The stamp set stays
+  closed and exactly one `seen` marker was added, as §7 required. Flow 155.
+- **The flow ids in §8 were already taken** (145–151 landed with other work). The six became
+  152 practice-payment, 153 practice-not-settled, 154 first-run-no-solicitation,
+  155 first-run-backup-resume, 156 restore-skips-practice; 150 accounts-route landed with §6.
+
+One measured correction to §3: **`flowUnderstood` is already awarded by the walkthrough on mount**
+(`Walkthrough.tsx`), so Practice awarding it on a settled payment is idempotent reinforcement
+rather than the only source. The stamp Practice deliberately does NOT award — `paymentTested` — is
+the one that carries the weight, and it is pinned in flow 152.
