@@ -33,8 +33,8 @@ export async function run() {
     console.log('[02-faucet] onboarding…');
     await onboardWallet(driver, 'e2e-faucet');
 
-    // 2. Open the Balances sheet where the demo faucet now lives.
-    console.log('[02-faucet] opening Balances…');
+    // 2. Open the accounts route where the demo faucet now lives.
+    console.log('[02-faucet] opening the accounts route…');
     await openBalances(driver);
     await driver.findByTestID('btn-topup', { timeoutMs: 4_000 });
 

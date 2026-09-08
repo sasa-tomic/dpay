@@ -1,7 +1,7 @@
-// Flow 130 — the EUR group in the Home accounts list: two named rows, health note on the THIN rail only
+// Flow 130 — the EUR group in the accounts route: two named rows, health note on the THIN rail only
 // (Stage 5 of the EUR dual-rail addition).
 //
-// Flow 129 pinned the chooser's detail; this flow pins the sheet where the money lives:
+// Flow 129 pinned the chooser's detail; this flow pins the route where the money lives:
 //   * home=EUR keeps EURC (MAIN) and VEUR (named rail badge) as two DISTINCT rows — never one
 //     summed balance (the founder's honesty rule, same as USD in flow 121).
 //   * The rail-health note is ONE shared row-footer, rendered in warn tone — so it appears on
@@ -19,7 +19,7 @@ export const meta = {
   name: 'eur-balances-rails',
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'eur', 'eurc', 'veur', 'vchf', 'group-model', 'rail-health'],
-  verifies: 'home=EUR in the Home accounts list: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none.',
+  verifies: 'home=EUR in the accounts route: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none.',
   timeoutMs: 30000,
 };
 
@@ -71,7 +71,7 @@ export async function run() {
       'the warn note states what thin liquidity MEANS for the user, not a bare tier label');
     const eurcRow = await driver.readText('asset-sol-eurc');
     assert(!eurcRow.includes('Very little') && !eurcRow.includes('Circulates widely'),
-      `the deep rail carries NO health line in the accounts list (warn tone renders nothing on deep). Got: ${JSON.stringify(eurcRow)}`);
+      `the deep rail carries NO health line in the accounts route (warn tone renders nothing on deep). Got: ${JSON.stringify(eurcRow)}`);
     const vchfRow = await driver.readText('asset-vchf');
     assert(!vchfRow.includes('Very little') && !vchfRow.includes('Circulates widely'),
       `an untiered row (VCHF) states nothing — no tier, no copy. Got: ${JSON.stringify(vchfRow)}`);

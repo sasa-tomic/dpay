@@ -107,8 +107,9 @@ export async function run() {
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
     await chooseHomeCurrencyIfPresent(driver);
     // The first currency choice lands on HOME (the bottom Tab styles `active` but exposes no
-    // aria-selected, so pin the SURFACE: `home-accounts` is mounted only by the Home tab).
-    await driver.findByTestID('home-accounts', { timeoutMs: 8_000 });
+    // aria-selected, so pin the SURFACE: `btn-home-accounts` is mounted only by the Home tab —
+    // the accounts LIST moved to its own route on 2026-09-08).
+    await driver.findByTestID('btn-home-accounts', { timeoutMs: 8_000 });
     assert(!(await driver.isPresent('pay-fund')), 'first currency choice must not land on the Pay funding gate');
     // This flow also proves the advertised test faucet still funded DEMO when the capability is on.
     await selectDemoAsset(driver);

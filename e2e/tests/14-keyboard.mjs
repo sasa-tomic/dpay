@@ -2,7 +2,7 @@
 //
 // The wallet is fully keyboard-driveable on web (desktop power-user feature; on mobile the NFC/tap
 // is the input, so the shortcuts + hints are web-only). The first letters map to the main actions:
-//   P → Pay tab · R → Receive tab · T → Top-up (demo money) · A → Home (the money hub)
+//   P → Pay tab · R → Receive tab · T → Top-up (demo money) · A → Accounts (the money hub)
 //   L → Ledger (transactions)
 // Esc closes whatever sheet/overlay is open (the seed affordance, built in Wave U / useEscapeToClose,
 // now shared with the wallet shortcuts via one `useHotkeys` source of truth).
@@ -11,7 +11,7 @@
 // Typing into the amount field must NOT trip a shortcut (activeElement INPUT/TEXTAREA guard).
 //
 // Selector contract: `pay-scan` (Pay scan screen), `btn-request` (Receive affordance), `balance`,
-// `home-accounts` (Home tab's inline accounts list), `asset-ckbtc-select` (BTC row whole-row select),
+// `accounts-list` (the accounts route's per-asset list), `asset-ckbtc-select` (BTC row whole-row select),
 // `btn-receive-address` (Receive → "My address"), `deposit-address` (inline deposit body),
 // `amount-input`.
 import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
@@ -24,7 +24,7 @@ export const meta = {
   name: 'keyboard',
   journey: 'system',
   covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard', 'focus-visible'],
-  verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / add-money / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4).',
+  verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / open the accounts route / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4).',
   timeoutMs: 15000,
 };
 
@@ -37,7 +37,8 @@ export async function run() {
 
     console.log('[14-keyboard] onboarding…');
     await onboardWallet(driver, 'e2e-keyboard');
-    // Onboard lands on the wallet in Pay mode (the default). Demo balance is ∂100.00.
+    // The app itself lands on Home; the `onboardWallet` helper leaves it on the Pay tab (it selects
+    // DEMO and restores Pay). Demo balance is ∂100.00.
 
     // --- P / R : single-key tab switching -------------------------------------------
     console.log('[14-keyboard] pressing R (→ Receive)…');
@@ -67,11 +68,11 @@ export async function run() {
     assert(topped, 'T should add demo money (balance ∂100.00 → ∂200.00)');
     console.log('[14-keyboard] ✓ T triggered the top-up');
 
-    // --- A : single-key Home (the money hub — the accounts list lives inline; O4 S3) -----------
-    console.log('[14-keyboard] pressing A (→ Home)…');
+    // --- A : single-key Accounts (the money hub — the per-asset list, its own route) -----------
+    console.log('[14-keyboard] pressing A (→ Accounts)…');
     await driver.pressKey('a');
-    await driver.findByTestID('home-accounts', { timeoutMs: 3_000 });
-    console.log('[14-keyboard] ✓ A landed Home (accounts list inline)');
+    await driver.findByTestID('accounts-list', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ A landed the accounts route (per-asset list)');
 
     // Back to Pay via the P shortcut (the sheet-era Esc-close is gone with the sheet).
     await driver.pressKey('p');

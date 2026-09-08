@@ -10,7 +10,7 @@
 //     surface: unconfirmed-or-fundable mints never block the offline-first rail.
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
-  armPayScan,
+  armPayScan, openBalances,
 } from '../harness/lib.mjs';
 
 export const meta = {
@@ -78,7 +78,7 @@ export async function run() {
       };
     });
     console.log('[137-sol-cross-mint-sign-gate] reading the payer USDC ATA from Receive…');
-    await driver.click('tab-home');
+    await openBalances(driver);
     await driver.click('asset-sol-usdc-select');
     await driver.click('tab-receive');
     await driver.click('btn-receive-address');
@@ -110,7 +110,7 @@ export async function run() {
     console.log('[137-sol-cross-mint-sign-gate] ✓ USDC confirmed absent (ATA card on the Pay tab)');
 
     // Back on the funded EURC rail — the scan surface is live again.
-    await driver.click('tab-home');
+    await openBalances(driver);
     await driver.click('asset-sol-eurc-select');
     await driver.click('tab-pay');
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});

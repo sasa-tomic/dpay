@@ -10,8 +10,9 @@
 // This is NOT a behavior test (the 01–34 flows cover behavior); it is a VISUAL capture harness. Its
 // GREEN contract is merely "every screen rendered without throwing" — the screenshots are the product.
 //
-// Screens captured: onboarded wallet (Pay), Receive + request QR, Balances hub, Settings, Ledger.
-import { setup, onboardWallet, assert } from '../harness/lib.mjs';
+// Screens captured: onboarded wallet (Pay), Receive + request QR, Home overview, the accounts
+// route, Settings, Ledger.
+import { setup, onboardWallet, openBalances, assert } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -21,7 +22,7 @@ export const meta = {
   name: 'ux-tour',
   journey: 'tour',
   covers: ['visual-capture', 'screen-census', 'screenshots'],
-  verifies: 'Visual capture: screenshots of every major screen (Pay, Receive+QR, Balances, Settings, Ledger) for review.',
+  verifies: 'Visual capture: screenshots of every major screen (Pay, Receive+QR, Home, Accounts, Settings, Ledger) for review.',
   timeoutMs: 20000,
 };
 
@@ -32,7 +33,8 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // 1. Onboard a funded wallet ($100 demo). Lands on the Pay tab.
+    // 1. Onboard a funded wallet ($100 demo). The app itself lands on Home; the shared
+    //    `onboardWallet` helper ends on the Pay tab (it selects DEMO and restores Pay).
     console.log('[35-ux-tour] onboarding…');
     await onboardWallet(driver, 'e2e-tour');
     await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
@@ -50,18 +52,23 @@ export async function run() {
     // exists ONLY in PayMode (after a payment), never in ReceiveMode — so that click burned its full
     // 3s timeout every run waiting for a button that cannot exist (a silent 3s tax on the critical
     // path). The header `balance` is always present (even over the request card), and tapping it
-    // opens the Balances hub directly — the next destination anyway. One click, zero wasted seconds.
+    // opens the accounts route directly — the next destination anyway. One click, zero wasted seconds.
 
-    // 3. Home tab (O4 — the balance-first surface; the accounts list lives inline, the Balances
-    //    sheet is retired). The bottom tab bar is always present, so this also dismisses the
-    //    request card.
+    // 3. Home tab (the balance-first overview: headline, actions, activity). The per-asset rows are
+    //    no longer here — `btn-home-accounts` is the affordance that opens their own route. The
+    //    bottom tab bar is always present, so this also dismisses the request card.
     await driver.click('tab-home', { timeoutMs: 5_000 });
-    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
+    await driver.findByTestID('btn-home-accounts', { timeoutMs: 5_000 });
     await driver.screenshot('35-tour-home');
-    console.log('[35-ux-tour] ✓ shot: home (accounts + activity)');
+    console.log('[35-ux-tour] ✓ shot: home (headline + actions + activity)');
+
+    // 4. The accounts route itself (the per-asset list the Home affordance opens).
+    await openBalances(driver);
+    await driver.screenshot('35-tour-accounts');
+    console.log('[35-ux-tour] ✓ shot: accounts list');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 
-    // 4. Settings (relay config + reset). Expand the Advanced disclosure so the relay input is
+    // 5. Settings (relay config + reset). Expand the Advanced disclosure so the relay input is
     //    captured (the founder-directed default is collapsed).
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 });
@@ -73,7 +80,7 @@ export async function run() {
     // to the wallet root with the funded identity still mounted.
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
-    // 5. Ledger tab (transaction history — empty initially for a fresh wallet).
+    // 6. Ledger tab (transaction history — empty initially for a fresh wallet).
     //    The tab is labeled "Transactions" → testID `tab-transactions` (Tab.tsx: `tab-${label.toLowerCase()}`).
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
     // An empty wallet renders the literal "No payments yet." (Ledger.tsx); wait for it with a
@@ -84,7 +91,7 @@ export async function run() {
     console.log('[35-ux-tour] ✓ shot: ledger');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
-    console.log(`[35-ux-tour] GREEN in ${elapsed}s (5 screens captured → e2e/shots/)`);
+    console.log(`[35-ux-tour] GREEN in ${elapsed}s (6 screens captured → e2e/shots/)`);
     assert(true, 'tour completed');
   } finally {
     await env.stop();

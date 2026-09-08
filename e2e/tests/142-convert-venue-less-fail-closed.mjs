@@ -8,7 +8,7 @@
 //   * DEMO (a plain venue-less asset): the same fail-closed panel WITHOUT the ckUSDC line — the
 //     generic copy names exactly what exists today ("ICP ↔ Swiss francs (VCHF) through ICPSwap —
 //     and nothing else"), never a teaser, never a waitlist;
-//   * the panel gives the way back to the wallet (a real action, not a dead end);
+//   * the panel gives the way back to the accounts list (a real action, not a dead end);
 //   * no quote is fetched and no amount field is offered on the fail-closed surface.
 //   * Screenshots: both fail-closed panels.
 import {setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency} from '../harness/lib.mjs';
@@ -34,11 +34,13 @@ export async function run() {
 
     // --- ckUSDC: fail closed + the saturated direct-pool refusal (spec §1) ----------------------
     console.log('[142-convert-venue-less] ckUSDC → fail-closed panel with the saturated-pool line…');
+    // selectCurrency makes ckUSDC the active asset and leaves on Pay; re-open the accounts route so
+    // Convert (which renders on the SELECTED row only) is on screen.
     await openBalances(driver);
     await selectCurrency(driver, 'ckusdc');
-    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await openBalances(driver);
     await driver.waitForText('Convert', { timeoutMs: 6_000 });
-    await driver.click('btn-home-convert', { timeoutMs: 5_000 });
+    await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
     assert(await driver.findByTestID('convert-unavailable', { timeoutMs: 8_000 }) != null, 'ckUSDC lands on the fail-closed panel (not the form)');
 
     const ckTitle = await driver.readText('convert-unavailable-title');
@@ -55,13 +57,15 @@ export async function run() {
     assert(await driver.findByTestID('convert-amount', { timeoutMs: 1_000 }).catch(() => null) == null, 'no amount field on the fail-closed surface');
     await driver.screenshot('142-convert-venueless-ckusdc');
 
-    // Back to the wallet is a real action, then DEMO: same panel, NO ckUSDC line.
+    // Back to the accounts list is a real action, then DEMO: same panel, NO ckUSDC line.
     await driver.click('btn-convert-back', { timeoutMs: 5_000 });
-    assert(await driver.findByTestID('btn-home-convert', { timeoutMs: 6_000 }) != null, 'back returns to the wallet home (no dead end)');
+    assert(await driver.findByTestID('accounts-list', { timeoutMs: 6_000 }) != null, 'back returns to the accounts list (no dead end)');
 
+    // Back landed the accounts route, so the DEMO row is right there; selectCurrency leaves on Pay,
+    // so re-open the route for the Convert button on the newly selected row.
     await selectCurrency(driver, 'demo');
-    await driver.click('tab-home', { timeoutMs: 5_000 });
-    await driver.click('btn-home-convert', { timeoutMs: 5_000 });
+    await openBalances(driver);
+    await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
     assert(await driver.findByTestID('convert-unavailable', { timeoutMs: 8_000 }) != null, 'DEMO lands on the same fail-closed panel');
     assertIncludes(await driver.readText('convert-unavailable-title'), 'DEMO', 'fail-closed title names DEMO');
     assertIncludes(await driver.readText('convert-unavailable-body'), 'ICP ↔ Swiss francs (VCHF)', 'same honest what-exists-today copy for DEMO');

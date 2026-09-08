@@ -1,4 +1,4 @@
-// Flow 54 — Testnet toggle in the Balances sheet.
+// Flow 54 — Testnet toggle in the accounts list.
 //
 // The testnet toggle (`btn-toggle-testnet`) is structurally invisible in e2e without a testnet
 // currency in the catalog: `isTestnetCurrency()` is true only for a currency whose `network` is
@@ -20,7 +20,7 @@
 //   - No existing visible asset is affected (mainnet set is 0 DEMO / 1 ckBTC / 2 ckUSDC /
 //     6 ckETH / 7 VCHF / 8 ICP → always visible).
 //
-// Selector contract: `tab-home` (bottom tab → the accounts list), `btn-toggle-testnet`,
+// Selector contract: `balance` (the header chip → the accounts route), `btn-toggle-testnet`,
 // `asset-ckbtc-testnet`, `asset-cksepoliausdc-testnet`, `asset-cksepoliaeth-testnet`.
 import {setup, assert, onboardWallet, openBalances} from '../harness/lib.mjs';
 
@@ -39,7 +39,7 @@ export const meta = {
   name: 'testnet-toggle',
   journey: 'onboard',
   covers: ['testnet', 'catalog', 'toggle', 'balances'],
-  verifies: 'Balances testnet toggle reveals + hides all three testnet rows (BTC/USDC/ETH testnet — catalog-driven testnet detection).',
+  verifies: 'The accounts route\'s testnet toggle reveals + hides all three testnet rows (BTC/USDC/ETH testnet — catalog-driven testnet detection).',
   timeoutMs: 20000,
 };
 

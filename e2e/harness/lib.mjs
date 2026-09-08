@@ -420,10 +420,11 @@ export async function chooseHomeCurrencyIfPresent(driver, currency = 'CHF', opts
 export async function selectDemoAsset(driver, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 8_000;
   await driver.click('balance', {timeoutMs});
-  // The header balance lands the Home tab (O4 S3 — the sheet is retired; the accounts list lives
-  // inline). Selecting a row no longer closes any chrome, so this helper OWNS the return trip:
-  // confirm the row's aria-selected state, then restore Pay so every caller keeps the shared
-  // "onboard ends on the Pay scanner" assumption.
+  // The header balance chip lands the ACCOUNTS route (2026-09-08). Selecting a row closes no
+  // chrome, so this helper OWNS the return trip: confirm the row's aria-selected state, then
+  // restore Pay so every caller keeps the shared "onboard ends on the Pay scanner" assumption —
+  // which is now something this helper ESTABLISHES rather than inherits, since the app itself
+  // lands on Home.
   await driver.click('asset-demo-select', {timeoutMs});
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -501,23 +502,30 @@ export async function accountOf(driver) {
 }
 
 /**
- * Open the wallet's money hub — the Home tab's inline accounts list (O4 S3; the Balances SHEET is
- * retired) — by tapping the bottom Home tab. The name/contract are kept from the sheet era: this
- * is still how most deposit/withdraw/asset flows reach the full currency list + the faucet row.
- * Waits for the DEMO row's select Pressable so callers can assume the list is mounted. Mirrors how
- * a user reaches it (a tab tap), not an internal hook.
+ * Open the wallet's money hub — the ACCOUNTS route (2026-09-08; the list left the Home tab, and
+ * the Balances SHEET was retired before that) — by tapping the header balance chip. The name and
+ * the contract are kept from the sheet era: this is still how most deposit/withdraw/asset flows
+ * reach the full currency list + the faucet row. Waits for the DEMO row's select Pressable so
+ * callers can assume the list is mounted. Mirrors how a user reaches it (the chip that carries the
+ * account name and a chevron, present on every screen), not an internal hook.
+ *
+ * The chip is DISABLED while a pay engine holds the selection lock (`selectionLocked && mode ===
+ * 'pay'`), which the old `tab-home` route was not. That is the wallet genuinely refusing, so this
+ * helper does not work around it: a flow that needs the list mid-review must leave the review
+ * first (flow 71 owns that contract).
  */
 export async function openBalances(driver, opts = {}) {
-  await driver.click('tab-home', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  await driver.click('balance', { timeoutMs: opts.timeoutMs ?? 5_000 });
   await driver.findByTestID('asset-demo-select', { timeoutMs: opts.timeoutMs ?? 5_000 });
 }
 
 /**
- * Select an IC catalog currency in the Home tab's accounts list via its whole-row select Pressable
- * (`asset-<key>-select`). Waits for the row's aria-selected (the inline list has no sheet chrome to
- * close), then restores the Pay tab — the context every caller assumes after selecting. This is the
- * SOLE way to make a currency the active asset (the row is one big select Pressable). `key` is the
- * assetTestKey (e.g. 'ckbtc', 'ckusdc', 'cketh'); 'demo' for the DEMO row.
+ * Select an IC catalog currency in the ACCOUNTS route via its whole-row select Pressable
+ * (`asset-<key>-select`). Assumes the caller is already on that route (`openBalances`). Waits for
+ * the row's aria-selected (the route has no sheet chrome to close), then restores the Pay tab —
+ * the context every caller assumes after selecting. This is the SOLE way to make a currency the
+ * active asset (the row is one big select Pressable). `key` is the assetTestKey (e.g. 'ckbtc',
+ * 'ckusdc', 'cketh'); 'demo' for the DEMO row.
  */
 export async function selectCurrency(driver, key, opts = {}) {
   await driver.click(`asset-${key}-select`, { timeoutMs: opts.timeoutMs ?? 5_000 });

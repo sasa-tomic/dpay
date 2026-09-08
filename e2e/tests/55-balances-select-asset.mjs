@@ -1,6 +1,6 @@
 // Flow 55 — Balances asset selection binds the header (DEMO → ckBTC → SOL).
 //
-// Characterizes an EXISTING, zero-covered behavior: tapping a currency row in the Balances hub
+// Characterizes an EXISTING, zero-covered behavior: tapping a currency row in the accounts route
 // SELECTS it as the wallet's one `selectedAssetId` (Phase 3 — 2026-08-12 unified asset selection
 // rewrite), and the wallet header follows — both the balance amount (read from the per-asset
 // `balances` map) AND the header asset label (`activeAssetName` = selectedAsset.symbol; the
@@ -14,9 +14,9 @@
 // asset-sol-select) — handleSelect('solana:SOL'); the SOL RPC is disabled in e2e so
 // solState.status='unavailable' and the header renders "—"; the label reads 'SOL balance'.
 //
-// Selector contract: `balance` (header → Balances), `asset-ckbtc-select` (the BTC row whole-row
-// select Pressable), `asset-sol-select` (the SOL row's select Pressable), `active-asset-label`
-// (the header asset label), `tab-home` (bottom tab → the accounts list).
+// Selector contract: `balance` (the header chip → the accounts route), `asset-ckbtc-select` (the
+// BTC row whole-row select Pressable), `asset-sol-select` (the SOL row's select Pressable),
+// `active-asset-label` (the header asset label).
 import { setup, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -46,9 +46,9 @@ export async function run() {
     let label = await driver.readText('active-asset-label');
     assertEq(label, 'DEMO balance', 'baseline active-asset-label (DEMO)');
 
-    // 3. Select ckBTC (testKey 'ckbtc') — tap its whole-row select in the Balances hub.
-    //    handleSelect('ic:1') sets selectedAssetId + closes the sheet; the header then reads the
-    //    unfunded balances['ic:1'].
+    // 3. Select ckBTC (testKey 'ckbtc') — tap its whole-row select in the accounts route.
+    //    handleSelect('ic:1') sets selectedAssetId; the header then reads the unfunded
+    //    balances['ic:1'].
     console.log('[55-balances-select-asset] selecting ckBTC…');
     await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');

@@ -62,10 +62,12 @@ export async function run() {
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: 8 });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
+    // selectCurrency makes ICP the active asset and leaves on Pay; re-open the accounts route so
+    // Convert (which renders on the SELECTED row only) is on screen.
     await openBalances(driver);
     await selectCurrency(driver, 'icp');
-    await driver.click('tab-home', { timeoutMs: 5_000 });
-    await driver.click('btn-home-convert', { timeoutMs: 6_000 });
+    await openBalances(driver);
+    await driver.click('btn-accounts-convert', { timeoutMs: 6_000 });
     await driver.type('convert-amount', '1');
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });
 

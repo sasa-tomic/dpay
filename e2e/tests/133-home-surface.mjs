@@ -1,16 +1,19 @@
-// Flow 133 — The Home surface (O4 slice 1): the balance-first home tab and its action row.
+// Flow 133 — The Home surface: the LANDING screen and what it is worth landing on.
 //
-// The scanner stays the landing screen (founder decision 4: tap-to-pay abroad — the tourist's
-// first gesture is scanning, so the balance home is one tap away rather than in front of it).
-// This flow pins that contract PLUS the new surface:
-//   (a) a freshly onboarded wallet lands on the Pay scanner — tab-home is present but the Home
-//       headline is NOT rendered;
-//   (b) tab-home lands Home: the headline shows the SELECTED asset's balance in its OWN token
-//       unit under the correct eyebrow (DEMO selection → the plain asset label, never a
-//       main-currency name over a token amount);
-//   (c) the action row navigates: Pay returns to the scanner, Receive opens the request form.
-// (The add-money capability dispatch is flow 134's contract; the activity feed is flow 135's.)
-import { setup, assert, assertEq, assertIncludes, onboardWallet } from '../harness/lib.mjs';
+// The founder reversed the standing decision on 2026-09-08 (docs/specs/2026-09-08-first-run-
+// redesign.md §1 F2): the app opens on Home, and Pay is one tap away. Greeting a new user with a
+// payment-request surface is what read as a scam. This flow is where that contract lives, and it
+// pins the mitigation that makes the change cost nothing as well:
+//   (a) a freshly onboarded wallet LANDS on Home — the headline is on screen with zero taps, and
+//       the Pay scanner is NOT;
+//   (b) the headline is the HOME CURRENCY's, in the home rail's OWN token unit under the "· Main"
+//       eyebrow — never a converted figure, and never the transient selection (X4);
+//   (c) Scan is one tap to a live camera, and it lands the SCAN sub-mode even when the Pay tab was
+//       last left on "Send to address" — the returning traveller's till gesture stays one tap;
+//   (d) Home carries the accounts AFFORDANCE and not the accounts LIST (that is flow 136's route);
+//   (e) Receive still opens the request form.
+// (The add-money dispatch is flow 134's contract; the activity feed is flow 135's.)
+import { setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, openPaySend, selectCurrency } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -19,8 +22,8 @@ export const meta = {
   id: '133',
   name: 'home-surface',
   journey: 'system',
-  covers: ['home-tab', 'action-row', 'landing'],
-  verifies: 'Landing stays the Pay scanner; tab-home lands Home: headline shows the selected asset balance in its own token unit with the correct eyebrow; the action row navigates to Pay and Receive',
+  covers: ['home-tab', 'action-row', 'landing', 'scan-affordance'],
+  verifies: 'The app LANDS on Home: the headline shows the home currency in the home rail\'s own token unit, Home carries the accounts affordance but not the list, Scan reaches a live camera in one tap even after the Pay tab was left on Send-to-address, and Receive opens the request form',
   timeoutMs: 25000,
 };
 
@@ -31,28 +34,66 @@ export async function run() {
   try {
     const { driver } = env;
 
+    // The harness preamble ends on the Pay tab by construction (selectDemoAsset restores it for
+    // the ~115 flows that assume it), so this flow onboards by reload instead: a reload is the
+    // cheapest reproduction of a cold start, and the landing mode is exactly what is under test.
     console.log('[133-home-surface] onboarding…');
     await onboardWallet(driver, 'e2e-home');
+    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`,
+      { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    await driver.waitReady({ timeoutMs: 10_000 });
 
-    // (a) The landing surface is STILL the Pay scanner — Home is one tap away, never in front.
-    await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
-    await driver.findByTestID('tab-home', { timeoutMs: 4_000 });
-    assert(!(await driver.isPresent('home-headline-amount')), 'the Home headline must not render while Pay is the active mode (the scanner is the landing screen)');
+    // (a) The landing surface IS Home — zero taps. The scanner is one tap away, not in front.
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 10_000 });
+    assert(!(await driver.isPresent('pay-scan')), 'the Pay scanner must NOT be the landing surface (the founder reversed that on 2026-09-08)');
+    await driver.findByTestID('tab-pay', { timeoutMs: 4_000 });
+    console.log('[133-home-surface] ✓ cold start lands on Home, scanner not mounted');
 
-    // (b) tab-home lands Home: DEMO selected → the plain asset eyebrow over the own-unit amount.
+    // (b) The headline is the HOME CURRENCY (the harness picks CHF), in the VCHF token unit. The
+    //     wallet holds ∂100.00 of practice money and it does NOT reach the headline — the home
+    //     currency owns that number, and nothing else can rewrite it (X4).
+    assertEq(await driver.readText('home-headline-label'), 'Swiss francs · Main', 'the headline names the home CURRENCY');
+    const headline = await driver.readText('home-headline-amount');
+    assertIncludes(headline, 'VCHF', 'the headline amount carries the home rail\'s OWN token unit');
+    assert(!headline.includes('∂'), `the practice balance must never reach the headline. Got: ${JSON.stringify(headline)}`);
+    console.log(`[133-home-surface] ✓ headline: Swiss francs · Main / ${headline}`);
+
+    // (d) The accounts AFFORDANCE is here; the LIST is not.
+    await driver.findByTestID('btn-home-accounts', { timeoutMs: 4_000 });
+    assert(!(await driver.isPresent('accounts-list')), 'the accounts list must NOT render on Home — it is its own route');
+    assert(!(await driver.isPresent('asset-demo-select')), 'no account row renders on Home');
+    console.log('[133-home-surface] ✓ Home carries the accounts affordance, not the list');
+
+    // (b′) X4's regression pin: choosing another ACCOUNT must not rewrite the home currency. Pick
+    //      ckBTC — the header chip follows it, the headline does not.
+    await openBalances(driver);
+    await selectCurrency(driver, 'ckbtc');
+    assertEq(await driver.readText('active-asset-label'), 'BTC balance', 'the header chip follows the selected account');
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
-    assertEq(await driver.readText('home-headline-label'), 'DEMO balance', 'a non-home selection names the ASSET (never the currency)');
-    assertIncludes(await driver.readText('home-headline-amount'), '∂100.00', 'the headline amount is the selected asset\'s OWN token-unit balance');
+    assertEq(await driver.readText('home-headline-label'), 'Swiss francs · Main',
+      'an account tap must NOT rewrite the home currency the headline states (X4)');
+    console.log('[133-home-surface] ✓ selecting ckBTC left the home headline in francs');
 
-    // (c) The action row navigates: Pay returns to the scanner; Receive opens the request form.
-    await driver.click('btn-home-pay', { timeoutMs: 4_000 });
+    // (c) Leave the Pay tab on "Send to address", come back to Home, and tap Scan: the camera must
+    //     be live. Without the sub-mode pin this is two taps, which is the regression the primary
+    //     Scan button exists to prevent.
+    await openPaySend(driver);
+    await driver.findByTestID('btn-pay-send', { timeoutMs: 4_000 });
+    await driver.click('tab-home', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    await driver.click('btn-home-scan', { timeoutMs: 4_000 });
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
+    console.log('[133-home-surface] ✓ Scan reached a live scanner in ONE tap from Home');
+
+    // (e) Receive still opens the request form.
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
     await driver.click('btn-home-receive', { timeoutMs: 4_000 });
     await driver.findByTestID('req-prefix', { timeoutMs: 5_000 });
 
+    await driver.click('tab-home', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
     await driver.screenshot('133-home-surface');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);

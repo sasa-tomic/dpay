@@ -16,8 +16,8 @@
 // let this test pass for the WRONG reason. We assert the failure is a connection error, not an
 // unsafe-port block, to lock in the right reason.)
 //
-// Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
-// Balances), `btn-topup` (inside the Home tab's accounts list — ABSENT offline).
+// Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header
+// chip → the accounts route), `btn-topup` (inside the accounts list — ABSENT offline).
 import { setup, assert, onboardWallet, openBalances, goOffline } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)

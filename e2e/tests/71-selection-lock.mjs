@@ -3,7 +3,7 @@
 // While a pay review/QR/paid (or receive request-QR/result) is in flight, switching the idle asset
 // would unmount the active engine and destroy the captured request snapshot the user is mid-flow on.
 // It would also arm the wrong protocol's NFC reader (invariant #11). So Wallet locks USER-initiated
-// selection changes for the duration of the in-flight op: the header Balances button goes disabled
+// selection changes for the duration of the in-flight op: the header account chip goes disabled
 // (testID `balance` carries accessibilityState.disabled + Pressable.disabled), and handleSelect bails.
 //
 // This flow enters the PayMode sign-blocked surface (an ONLINE insufficient request — the
@@ -11,22 +11,24 @@
 // seam (`__DPAY_TEST_SCAN`), then asserts the
 // lock from both angles:
 //   1. assertDisabled('balance') — the button reports a disabled state.
-//   2. tapping it anyway is a no-op — the mode STAYS Pay (no Home headline) and the
+//   2. tapping it anyway is a no-op — the mode STAYS Pay (no accounts list) and the
 //      review (pay-amount) is still showing.
-// Canceling the review (btn-review-cancel) returns to scan, releases the lock, and the Balances
-// button is re-enabled + lands the Home tab's accounts list normally.
-// (O4 S3) The ex-Balances SHEET is retired — the accounts list lives inline on the Home tab. While
-// the review holds the lock the rows are unreachable BY CONSTRUCTION (reaching Home means leaving
-// the review, and the engine's unmount releases the lock — useReportLock resets on unmount), so
-// this flow also pins that seam: navigating Home mid-review abandons the review (engine unmounted,
-// lock released) and rows then select again — the sheet-era "overlay never unmounts the engine"
-// guarantee is gone with the sheet, exactly like the pre-existing tab-receive/ledger navigation.
+// Canceling the review (btn-review-cancel) returns to scan, releases the lock, and the chip is
+// re-enabled + opens the accounts route normally.
+// The accounts list is its own ROUTE (2026-09-08; a sheet before O4 S3, inline on Home between the
+// two). While the review holds the lock the rows are unreachable BY CONSTRUCTION — the chip that
+// reaches them is the disabled one, and every other way in means leaving the review, whose
+// engine unmount releases the lock (useReportLock resets on unmount). This flow pins that seam:
+// navigating away mid-review abandons the review (engine unmounted, lock released) and rows then
+// select again — the sheet-era "overlay never unmounts the engine" guarantee is gone with the
+// sheet, exactly like the pre-existing tab-receive/ledger navigation.
 // (One-press rule 2026-08-24: a PAYABLE scan would auto-sign straight through review→qr/paid, so
 // this flow pins the lock on the blocked-insufficient leg — a stable review surface.)
 //
 // Selector contract: `pay-scan` (scan surface present before the seam fires), `pay-amount` (review),
-// `balance` (header → Home tab, disabled while locked), `home-headline-amount` (Home landed),
-// `asset-vchf-select` (row whole-row select), `btn-review-cancel` (review → scan, releases the lock).
+// `balance` (header → the accounts route, disabled while locked), `accounts-list` (route landed),
+// `btn-home-accounts` (the Home affordance into the same route), `asset-vchf-select` (row whole-row
+// select), `btn-review-cancel` (review → scan, releases the lock).
 import { setup, assert, assertIncludes, assertDisabled, waitForEnabled, openBalances, onboardWallet , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
@@ -38,7 +40,7 @@ export const meta = {
   name: 'selection-lock',
   journey: 'system',
   covers: ['selection-lock', 'in-flight-preserve', 'balances-disable', 'nfc-arming-invariant'],
-  verifies: 'An in-flight pay review locks the idle asset selection: the Balances button is disabled + a no-op, and canceling the review re-enables it.',
+  verifies: 'An in-flight pay review locks the idle asset selection: the header account chip is disabled + a no-op, and leaving the review releases the lock so the accounts route selects rows again.',
   timeoutMs: 20000,
 };
 
@@ -72,41 +74,45 @@ export async function run() {
     assertIncludes(await driver.readText('pay-amount'), '∂200.00', 'review shows the scanned amount (immutable snapshot)');
     console.log('[71-selection-lock] ✓ entered the blocked-insufficient PayMode review (∂200.00)');
 
-    // 4. LOCKED (assertion 1): the header Balances button reports a disabled state.
-    await assertDisabled(driver, 'balance', 'Balances button disabled while PayMode review is in flight');
+    // 4. LOCKED (assertion 1): the header account chip reports a disabled state.
+    await assertDisabled(driver, 'balance', 'the header account chip is disabled while the PayMode review is in flight');
 
     // 5. LOCKED (assertion 2): tapping it anyway is a no-op. The mode STAYS Pay (the disabled
-    //    Pressable never navigates — no Home headline renders) and the review is still showing —
+    //    Pressable never navigates — no accounts list renders) and the review is still showing —
     //    the active engine was not unmounted.
     await driver.click('balance', { timeoutMs: 5_000 });
-    const homeLanded = await driver.eval((id) => !!document.querySelector(`[data-testid="${id}"]`), 'home-headline-amount');
-    assert(!homeLanded, 'Home must NOT land while the selection is locked (balance button is a no-op)');
+    const routeLanded = await driver.eval((id) => !!document.querySelector(`[data-testid="${id}"]`), 'accounts-list');
+    assert(!routeLanded, 'the accounts route must NOT open while the selection is locked (the chip is a no-op)');
     const stillReview = await driver.eval((id) => !!document.querySelector(`[data-testid="${id}"]`), 'pay-amount');
     assert(stillReview, 'PayMode review must still be showing after a locked Balances tap (engine not unmounted)');
-    console.log('[71-selection-lock] ✓ Balances disabled + no-op during review');
+    console.log('[71-selection-lock] ✓ the account chip is disabled + a no-op during review');
 
-    // 5b. LOCKED → row-select suppression is BY CONSTRUCTION now (O4 S3): the inline accounts list
-    //     is only reachable by LEAVING the review, and the engine's unmount releases the lock
-    //     (useReportLock resets on unmount). Pin that seam: navigate Home mid-review — the review
-    //     unmounts (pay-amount gone) — and the rows then select freely again. If a future change
-    //     keeps the engine mounted across mode switches, this is the assert that catches it.
+    // 5b. LOCKED → row-select suppression is BY CONSTRUCTION: the accounts route is only reachable
+    //     by LEAVING the review, and the engine's unmount releases the lock (useReportLock resets
+    //     on unmount). Pin that seam: navigate away mid-review — the review unmounts (pay-amount
+    //     gone) — and the rows then select freely again. If a future change keeps the engine
+    //     mounted across mode switches, this is the assert that catches it. Home is the way in
+    //     here precisely BECAUSE the chip is refusing: `btn-home-accounts` is not lock-gated, and
+    //     it does not need to be — reaching it has already abandoned the review.
     await driver.click('tab-home', { timeoutMs: 5_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
     const reviewGone = await driver.eval((id) => !document.querySelector(`[data-testid="${id}"]`), 'pay-amount');
-    assert(reviewGone, 'navigating Home mid-review abandons the review (engine unmounted — pre-existing tab semantics)');
+    assert(reviewGone, 'navigating away mid-review abandons the review (engine unmounted — pre-existing tab semantics)');
+    await driver.click('btn-home-accounts', { timeoutMs: 5_000 });
+    await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
     await driver.click('asset-vchf-select', { timeoutMs: 5_000 });
     const vchfSelected = await driver.eval((id) => {
       const el = document.querySelector(`[data-testid="${id}"]`);
       return el ? el.getAttribute('aria-selected') : null;
     }, 'asset-vchf');
     assert(vchfSelected === 'true', 'rows select again once the engine unmount released the lock (aria-selected=true)');
-    console.log('[71-selection-lock] ✓ lock releases on engine unmount; rows selectable on Home');
+    console.log('[71-selection-lock] ✓ lock releases on engine unmount; rows selectable in the accounts route');
 
-    // 6. Back to Pay (scan) — the released lock left the button re-enabled.
+    // 6. Back to Pay (scan) — the released lock left the chip re-enabled, and it opens the route.
     await driver.click('tab-pay', { timeoutMs: 5_000 });
     await waitForEnabled(driver, 'balance', { timeoutMs: 5_000 });
     await openBalances(driver);
-    console.log('[71-selection-lock] ✓ lock released; balance lands Home (accounts list)');
+    console.log('[71-selection-lock] ✓ lock released; the chip opens the accounts route again');
 
     await driver.screenshot('71-selection-lock');
 

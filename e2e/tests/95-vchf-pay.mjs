@@ -2,9 +2,9 @@
 //
 // Covers the VCHF obligations of the spec's e2e matrix that ride the PAYER side of the shared
 // IC rail, in one journey (deeplink-entry variant — the explicit-approve surface):
-//   * (1) The VCHF mainnet row appears in the shared asset selector (BalancesSheet) with the exact
+//   * (1) The VCHF mainnet row appears in the shared asset selector (the accounts route) with the exact
 //         unit + network ("VCHF · Internet Computer") and NO ramp actions — no "Add money" /
-//         "Cash out" anywhere, and the only btn-topup in the sheet is DEMO's faucet button.
+//         "Cash out" anywhere, and the only btn-topup in the accounts list is DEMO's faucet button.
 //   * (3) The payer opens a VCHF payment link, sees the exact unit + amount
 //         ("Pay 1.00000001 VCHF"), the payee short key + merchant name — and the request does NOT
 //         auto-sign: the deeplink entry keeps the full review card with a single explicit Approve.
@@ -70,17 +70,17 @@ export async function run() {
     const account = await accountOf(driver);
 
     // (1) Shared asset selector: exact unit/network, no ramp actions.
-    console.log('[95-vchf-pay] assert BalancesSheet VCHF row (exact unit/network, no ramps)…');
+    console.log('[95-vchf-pay] assert accounts-route VCHF row (exact unit/network, no ramps)…');
     await openBalances(driver);
     const vchfRow = await driver.findByTestID('asset-vchf', { timeoutMs: 6_000 });
-    assert(vchfRow != null, 'asset-vchf row present in the shared balances sheet');
+    assert(vchfRow != null, 'asset-vchf row present in the shared accounts list');
     assertIncludes(await driver.readText('asset-vchf'), 'VCHF · Internet Computer', 'VCHF row unit · network');
     assertIncludes(await driver.readText('asset-icp'), 'ICP · Internet Computer', 'ICP sibling row unit · network');
     const sheetBody = await driver.bodyText();
     assert(!sheetBody.includes('Add money'), 'no on-ramp ("Add money") action on VCHF row');
     assert(!sheetBody.includes('Cash out'), 'no off-ramp ("Cash out") action on VCHF row');
     const topupCount = await driver.eval(() => document.querySelectorAll('[data-testid="btn-topup"]').length);
-    assertEq(String(topupCount), '1', 'exactly one btn-topup in the sheet (DEMO faucet only — VCHF has none)');
+    assertEq(String(topupCount), '1', 'exactly one btn-topup in the accounts list (DEMO faucet only — VCHF has none)');
 
     // Select VCHF; unfunded selection parks the Pay tab on the fund panel WITH real top-up
     // instructions (founder hard rule 2026-08-29: no "check back soon" dead ends — receiving a
@@ -186,11 +186,11 @@ export async function run() {
       }
     }
 
-    // In-app refresh by the exact amount: header shows the post-fee remainder, payee row in the sheet.
+    // In-app refresh by the exact amount: header shows the post-fee remainder, payee row in the accounts list.
     await driver.waitForText('1.0999 VCHF', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('asset-vchf'), '1.0999 VCHF', 'Home accounts VCHF row refreshed to post-pay amount');
+    assertIncludes(await driver.readText('asset-vchf'), '1.0999 VCHF', 'accounts-list VCHF row refreshed to post-pay amount');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the accounts list');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 

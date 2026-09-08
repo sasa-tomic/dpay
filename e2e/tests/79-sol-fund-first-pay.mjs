@@ -3,8 +3,9 @@
 // Proves the Pay-tab zero-funds gate on the SOL rail, driven through the REAL app against the
 // Solana RPC stub seam:
 //
-//   1. SOL known-zero      → the fund-first panel (sol-pay-fund) REPLACES the scanner + NFC card
-//                            (a zero-balance tap/scan is doomed — no signature surface at all).
+//   1. SOL known-zero      → the fund-first panel (sol-pay-fund) rides BELOW a still-reachable
+//                            scan surface (X3, 2026-09-08 — it used to replace it, which stopped
+//                            a payer reading a request naming an asset they actually held).
 //   2. funnel              → one tap on sol-pay-fund-go lands on the SOL deposit address QR
 //                            (Receive → My address — the ONE funding surface, no inline dupe).
 //   3. auto-release        → stub getBalance flips to positive; within one poll the panel
@@ -60,9 +61,13 @@ export async function run() {
     const panelText = await panel.evaluate((n) => n.textContent);
     assertIncludes(panelText, 'No SOL available', 'gate headline');
     assertIncludes(panelText, 'Show my SOL address', 'primary deposit action');
-    const scannerLeak = await driver.eval(() => !!document.querySelector('[data-testid="sol-pay-scan"]'));
-    assert(!scannerLeak, 'the scanner must NOT render while gated (zero balance = doomed signature)');
-    console.log('[79-sol-fund-first-pay] ✓ gate panel shown, scanner+ NFC unreachable');
+    // X3 (2026-09-08): the panel rides BELOW the scan surface instead of replacing it. A
+    // `solreq:v2` names its OWN currency and mint, so the selected balance cannot decide whether a
+    // request is readable — the funding funnel keeps its entry and the lens stays one tap away.
+    assert(await driver.isPresent('btn-sol-start-scan'), 'the scan surface stays reachable on a zero balance (X3)');
+    const camLeak = await driver.eval(() => !!document.querySelector('[data-testid="scan-cam-box"]'));
+    assert(!camLeak, 'the camera itself still waits for the Pay Now press (pay-intent gate)');
+    console.log('[79-sol-fund-first-pay] ✓ gate panel shown BESIDE a reachable scan surface');
 
     // ---- 2. FUNNEL: one tap lands on the deposit address QR ----
     console.log('[79-sol-fund-first-pay] one tap → deposit address QR…');
@@ -125,9 +130,8 @@ export async function run() {
     assertIncludes(usdcText, 'No USDC available', 'USDC gate headline');
     assertIncludes(usdcText, 'Show my USDC address', 'USDC deposit primary');
     assertIncludes(usdcText, 'Show my SOL address', 'SOL-address secondary (fees note pair)');
-    const scannerLeak2 = await driver.eval(() => !!document.querySelector('[data-testid="sol-pay-scan"]'));
-    assert(!scannerLeak2, 'USDC zero must gate the scanner too');
-    console.log('[79-sol-fund-first-pay] ✓ USDC zero panel with SOL secondary');
+    assert(await driver.isPresent('btn-sol-start-scan'), 'a USDC zero keeps the scan surface reachable too (X3)');
+    console.log('[79-sol-fund-first-pay] ✓ USDC zero panel with SOL secondary, scanner reachable');
 
     await driver.screenshot('79-sol-fund-first-pay');
 

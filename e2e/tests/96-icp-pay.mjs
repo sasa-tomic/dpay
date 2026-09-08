@@ -2,9 +2,9 @@
 //
 // The ICP twin of flow 95, entering through the CAMERA-SCAN surface (the one-press auto-sign
 // entry — the app's intended camera UX) instead of the deeplink review card:
-//   * (1) The ICP mainnet row appears in the shared asset selector (BalancesSheet) with the exact
+//   * (1) The ICP mainnet row appears in the shared asset selector (the accounts route) with the exact
 //         unit + network ("ICP · Internet Computer") and NO ramp actions — no "Add money" /
-//         "Cash out" anywhere, and the only btn-topup in the sheet is DEMO's faucet button.
+//         "Cash out" anywhere, and the only btn-topup in the accounts list is DEMO's faucet button.
 //   * (3) The payer scans the merchant's request QR, sees the exact unit + amount on the sign
 //         surface and the Paid screen ("1.00000001 ICP"), and the payment completes end-to-end.
 //   * (4) The app signs an icrc1_transfer whose ONLY canister target is ICP's exact ledger
@@ -65,17 +65,17 @@ export async function run() {
     const account = await accountOf(driver);
 
     // (1) Shared asset selector: exact unit/network, no ramp actions.
-    console.log('[96-icp-pay] assert BalancesSheet ICP row (exact unit/network, no ramps)…');
+    console.log('[96-icp-pay] assert accounts-route ICP row (exact unit/network, no ramps)…');
     await openBalances(driver);
     const icpRow = await driver.findByTestID('asset-icp', { timeoutMs: 6_000 });
-    assert(icpRow != null, 'asset-icp row present in the shared balances sheet');
+    assert(icpRow != null, 'asset-icp row present in the shared accounts list');
     assertIncludes(await driver.readText('asset-icp'), 'ICP · Internet Computer', 'ICP row unit · network');
     assertIncludes(await driver.readText('asset-vchf'), 'VCHF · Internet Computer', 'VCHF sibling row unit · network');
     const sheetBody = await driver.bodyText();
     assert(!sheetBody.includes('Add money'), 'no on-ramp ("Add money") action on ICP row');
     assert(!sheetBody.includes('Cash out'), 'no off-ramp ("Cash out") action on ICP row');
     const topupCount = await driver.eval(() => document.querySelectorAll('[data-testid="btn-topup"]').length);
-    assertEq(String(topupCount), '1', 'exactly one btn-topup in the sheet (DEMO faucet only — ICP has none)');
+    assertEq(String(topupCount), '1', 'exactly one btn-topup in the accounts list (DEMO faucet only — ICP has none)');
 
     // Select ICP; unfunded selection parks the Pay tab on the fund panel (real top-up
     // instructions — founder hard rule 2026-08-29).

@@ -35,11 +35,13 @@ const confirmDisabled = (driver) =>
   driver.eval(() => document.querySelector('[data-testid="btn-convert-confirm"]')?.getAttribute('aria-disabled') ?? null);
 
 async function openConvert(driver) {
+  // selectCurrency makes ICP the active asset and leaves on Pay; re-open the accounts route so
+  // Convert (which renders on the SELECTED row only) is on screen.
   await openBalances(driver);
   await selectCurrency(driver, 'icp');
-  await driver.click('tab-home', { timeoutMs: 5_000 });
+  await openBalances(driver);
   await driver.waitForText('Convert', { timeoutMs: 6_000 });
-  await driver.click('btn-home-convert', { timeoutMs: 5_000 });
+  await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
   assert(await driver.findByTestID('convert-screen', { timeoutMs: 8_000 }) != null, 'Convert surface opens for ICP');
 }
 

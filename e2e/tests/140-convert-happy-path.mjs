@@ -5,7 +5,7 @@
 //   * §0.6 RED LINE FIRST: a payment-review card (the ICP deeplink explicit-approve surface)
 //     carries NO conversion offer/hint anywhere — "Convert" must not appear on it. Recipient-side
 //     conversion is a §0 red line, so this is asserted before anything else.
-//   * Entry point is the UNIFORM asset action row: Home ▸ ICP row ▸ Convert (btn-home-convert) —
+//   * Entry point is the UNIFORM asset action row: Accounts ▸ ICP row ▸ Convert (btn-accounts-convert) —
 //     the same button every asset gets (uniform-IA hard rule); ICP simply has a venue behind it.
 //   * EVERY §5 transparency checklist item is a rendered line on the ONE pre-signing surface, each
 //     asserted by testID: counterparty (pool principal, autonomous contract, not licensed/not
@@ -55,7 +55,7 @@ export const meta = {
   name: 'convert-happy-path',
   journey: 'convert',
   covers: ['convert', 'icp', 'vchf', 'uniform-ia', 'transparency-checklist', 'counterparty', 'quote-attribution', 'fees-itemised', 'price-impact', 'min-out', 'slippage', 'icrc2-approve', 'deposit-from-and-swap', 'state-machine', 'ledger-watch', 'settle', 'balance-refresh', 'ledger-row', 'no-mid-payment-conversion'],
-  verifies: 'The delegated-conversion happy path: a payment review carries no Convert anywhere (§0.6); Home ▸ ICP ▸ Convert opens the one pre-signing surface where every §5 line renders (counterparty/pool principal, attributed+timestamped quote, itemised fees, dpay-paid-nothing, impact, minimum+refusal, net end state — all matching the relay\'s own quote); confirm re-quotes then signs approve+swap on-device; settle is exact (ICP −amount−2 fees, VCHF +gross) with done derived from the SEEN ledger row and the Ledger showing the incoming VCHF row from the pool.',
+  verifies: 'The delegated-conversion happy path: a payment review carries no Convert anywhere (§0.6); Accounts ▸ ICP ▸ Convert opens the one pre-signing surface where every §5 line renders (counterparty/pool principal, attributed+timestamped quote, itemised fees, dpay-paid-nothing, impact, minimum+refusal, net end state — all matching the relay\'s own quote); confirm re-quotes then signs approve+swap on-device; settle is exact (ICP −amount−2 fees, VCHF +gross) with done derived from the SEEN ledger row and the Ledger showing the incoming VCHF row from the pool.',
   timeoutMs: 180000, // onboard + review-navigation + quote + approve/swap submit+poll + settle watch (120 s inner wait) + ledger polls
 };
 
@@ -87,15 +87,17 @@ export async function run() {
     await driver.waitReady({ timeoutMs: 10_000 });
 
     // --- Fund ICP; enter through the uniform action row ----------------------------------------
-    console.log('[140-convert-happy-path] faucet 3 ICP and open Convert from the Home action row…');
+    console.log('[140-convert-happy-path] faucet 3 ICP and open Convert from the accounts action row…');
     const fund = await faucetAccount(relayBaseURL, account.publicHex, SEED, { currency: 8 });
     assert(fund.ok, `faucet credit ok (status ${fund.status})`);
 
+    // selectCurrency makes ICP the active asset and leaves on Pay; re-open the accounts route so
+    // Convert (which renders on the SELECTED row only) is on screen.
     await openBalances(driver);
     await selectCurrency(driver, 'icp');
-    await driver.click('tab-home', { timeoutMs: 5_000 });
+    await openBalances(driver);
     await driver.waitForText('Convert', { timeoutMs: 6_000 });
-    await driver.click('btn-home-convert', { timeoutMs: 5_000 });
+    await driver.click('btn-accounts-convert', { timeoutMs: 5_000 });
     assert(await driver.findByTestID('convert-screen', { timeoutMs: 8_000 }) != null, 'Convert surface opens for ICP (venue exists)');
 
     // --- The one pre-signing surface: EVERY §5 checklist line, asserted one by one --------------

@@ -1,9 +1,9 @@
-// Flow 40 — Visual regression: pixel-diff the 5 primary surfaces against committed baselines.
+// Flow 40 — Visual regression: pixel-diff the 6 primary surfaces against committed baselines.
 //
 // Flow 35 (ux-tour) CAPTURES screenshots of every major surface but never compares them — a
 // style/layout regression (the documented styles.ts single-block blind spot, a dropped import, an
 // overflow, a contrast change) sails through `just verify` and only explodes on a device. This flow
-// re-captures the SAME 5 surfaces flow 35 tours and diffs each against a committed baseline PNG via
+// re-captures the SAME surfaces flow 35 tours and diffs each against a committed baseline PNG via
 // the pure pixel comparator in harness/pixel.mjs. Fails on pixel drift beyond a tolerance
 // (default 0.5% — well above the residual font-AA variance under the FREEZE_CSS + srgb stabilization).
 //
@@ -11,8 +11,8 @@
 // (DPAY_E2E_REGEN_BASELINES=1) and the diff is reviewable in the commit. Mirrors the
 // DPAY_E2E_REGEN_LAYOUT pattern (lib.mjs) for the wire-layout golden.
 //
-// Navigation mirrors flow 35 EXACTLY (already tuned — `tab-home` for the Home surface,
-// `btn-settings-close` to dismiss the Settings sheet). Capture filenames are DISTINCT from flow 35
+// Navigation mirrors flow 35 EXACTLY (already tuned — `tab-home` for the Home surface, the header
+// `balance` chip for the Accounts route, `btn-settings-close` to dismiss the Settings sheet). Capture filenames are DISTINCT from flow 35
 // (40-vr-<surface> vs 35-tour-<surface>) so the two flows never collide on disk.
 import { setup, onboardWallet, assert } from '../harness/lib.mjs';
 import { comparePng } from '../harness/pixel.mjs';
@@ -25,7 +25,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
 const BASELINES_DIR = join(SHOTS_DIR, 'baselines');
 
-// The 5 primary surfaces, in capture order. Each entry pairs the per-run capture filename (what
+// The 6 primary surfaces, in capture order. Each entry pairs the per-run capture filename (what
 // driver.screenshot writes) with the baseline name (the contract under e2e/shots/baselines/).
 // Mirrors flow 35's tour order so the two flows exercise the identical navigation.
 //
@@ -37,6 +37,10 @@ const SURFACES = [
   { capture: '40-vr-wallet-pay', baseline: 'wallet-pay' },
   { capture: '40-vr-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
   { capture: '40-vr-home', baseline: 'home' },
+  // The accounts list became its own surface on 2026-09-08 (it was ~80% of the Home screen). It
+  // carries the per-rail rows, the MAIN badge, the practice divider and the Convert action, so it
+  // needs its own pixel contract — none of that is visible on Home any more.
+  { capture: '40-vr-accounts', baseline: 'accounts' },
   { capture: '40-vr-settings', baseline: 'settings' },
   { capture: '40-vr-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
 ];
@@ -68,23 +72,15 @@ export async function run() {
     // masks[testID] = {x,y,w,h} in DEVICE pixels (collected post-capture via getBoundingClientRect).
     const masks = {};
 
-    // 1. Onboard a funded wallet ($100 demo). Lands on the Pay tab.
+    // 1. Onboard a funded wallet ($100 demo). The harness preamble leaves the app on the Pay tab.
     console.log('[40-visual-regression] onboarding…');
     await onboardWallet(driver, 'e2e-visual');
     await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
-    // Determinism: the home TripStrip flips live when the fundsReady stamp's notify lands
-    // (the journey live seam) — wait for the settled 3-of-4 state before pixel capture.
-    await driver.findByTestID('trip-strip-dot-fundsReady-filled', { timeoutMs: 5_000 });
-    // …and let the strip's own 260ms entrance fade reach rest. The dot appearing only means the
-    // strip MOUNTED; capturing mid-fade samples a partial opacity, which is why this surface
-    // drifted between 0.2% and 0.55% run to run on identical code. Dark surfaces this first — a
-    // bright strip against black moves far more per-channel than the same strip on white.
-    // Waited in FRAMES, not milliseconds: `Animated` runs off requestAnimationFrame, so a fixed
-    // 500ms was a bet on the host's frame rate — under pool contention the fade was still moving
-    // when the shutter fired. Same idiom as the coach-card settle below.
-    await driver.waitAtRest('trip-strip', { timeoutMs: 8_000 });
+    await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
-    // 2. Capture wallet-Pay surface.
+    // 2. Capture wallet-Pay surface. The TripStrip no longer renders here (it is Home-only since
+    //    2026-09-08), so the fade this capture used to wait out has moved to the Home surface
+    //    below — where it is still waited out, for exactly the reason recorded there.
     await driver.screenshot(SURFACES[0].capture);
 
     // 3. Receive → enter an amount → request QR screen.
@@ -105,12 +101,23 @@ export async function run() {
     masks['request-qr'] = await getTestIDRectDevicePx(driver, 'request-qr');
     await driver.screenshot(SURFACES[1].capture);
 
-    // 4. Home tab — the balance-first surface (O4; the Balances SHEET is retired, the accounts
-    //    list lives inline here). The bottom tab bar is always present, so this also dismisses the
-    //    request screen.
+    // 4. Home tab — the landing overview. The bottom tab bar is always present, so this also
+    //    dismisses the request screen.
     await driver.click('tab-home', { timeoutMs: 5_000 });
-    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    // Determinism: the TripStrip's 260ms entrance fade is the last thing moving on this surface.
+    // Capturing mid-fade samples a partial opacity, which is why the old wallet-Pay capture
+    // drifted between 0.2% and 0.55% run to run on identical code. Waited in FRAMES, not
+    // milliseconds: `Animated` runs off requestAnimationFrame, so a fixed 500ms was a bet on the
+    // host's frame rate. Same idiom as the coach-card settle above.
+    await driver.waitAtRest('trip-strip', { timeoutMs: 8_000 });
     await driver.screenshot(SURFACES[2].capture);
+
+    // 4b. The accounts route — the per-rail rows, reached the way a user reaches them.
+    await driver.click('btn-home-accounts', { timeoutMs: 5_000 });
+    await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
+    await driver.screenshot(SURFACES[3].capture);
+    await driver.click('btn-accounts-back', { timeoutMs: 4_000 });
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // 5. Settings (relay config + reset). The "Advanced" disclosure defaults COLLAPSED now (the
@@ -118,7 +125,7 @@ export async function run() {
     //    captured baseline reflects the collapsed state.
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.findByTestID('btn-advanced-toggle', { timeoutMs: 5_000 });
-    await driver.screenshot(SURFACES[3].capture);
+    await driver.screenshot(SURFACES[4].capture);
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
     // 6. Ledger (transaction history — one faucet row for a fresh wallet). The row's TIMESTAMP is
@@ -130,7 +137,7 @@ export async function run() {
     if (await driver.isPresent('hist-time-0')) {
       masks['hist-time-0'] = await getTestIDRectDevicePx(driver, 'hist-time-0');
     }
-    await driver.screenshot(SURFACES[4].capture);
+    await driver.screenshot(SURFACES[5].capture);
 
     // 7. Diff each capture against its baseline (or seed if missing + REGEN).
     await mkdir(BASELINES_DIR, { recursive: true });

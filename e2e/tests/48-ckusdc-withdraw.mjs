@@ -85,9 +85,9 @@ export async function run() {
     const beforeEth = await getBalance(relayBaseURL, accountHex, CKETH_CURRENCY);
     assertEq(beforeEth, String(SEED_ETH_WEI), 'pre-withdraw ckETH gas-leg balance at the principal');
 
-    // 3. Open the Balances sheet; wait for the ckUSDC row to appear funded (the balance poll picks
+    // 3. Open the accounts route; wait for the ckUSDC row to appear funded (the balance poll picks
     //    up the faucet credit), then SELECT ckUSDC (makes it the active asset).
-    console.log('[48-ckusdc-withdraw] opening Balances; waiting for the funded ckUSDC row…');
+    console.log('[48-ckusdc-withdraw] opening the accounts route; waiting for the funded ckUSDC row…');
     await openBalances(driver);
     await driver.waitForText('1,000.00 USDC', { timeoutMs: 8_000 });
 
@@ -146,15 +146,16 @@ export async function run() {
     await driver.screenshot('48-ckusdc-withdraw');
 
     // 9. UI balance delta (locks the UI↔gateway agreement): flip the toggle back to "Scan to pay"
-    //    (hides the inline withdraw body), re-open the Balances hub, and assert the ckUSDC row now
+    //    (hides the inline withdraw body), re-open the accounts route, and assert the ckUSDC row now
     //    shows the REDUCED remaining balance (998.99 USDC = 998_990_000 raw), not the
     //    pre-withdraw 1000 USDC.
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
     const reduced = await driver.waitForText('998.99 USDC', { timeoutMs: 10_000 });
     // Scoped to the ACCOUNTS LIST: the Home activity feed legitimately keeps the +1,000.00 USDC
-    // faucet-seed row — history, not a stale balance (O4 S3: rows live on the Home tab).
-    const balBody = await driver.readText('home-accounts');
+    // faucet-seed row — history, not a stale balance. The rows live on the accounts route, reached
+    // by the header balance chip.
+    const balBody = await driver.readText('accounts-list');
     assert(reduced, `Balances ckUSDC row should show the reduced 998.99 USDC (998990000 raw remaining) after the withdraw. accounts excerpt:\n${balBody.slice(0, 500)}`);
     assert(!balBody.includes('1,000.00 USDC'), 'Balances must NOT still show the pre-withdraw 1,000.00 USDC (stale balance cache?)');
     console.log('[48-ckusdc-withdraw] ✓ UI ckUSDC balance dropped to 998.99 USDC (matches the gateway delta)');

@@ -75,14 +75,18 @@ async function run() {
     await sleep(1200);
     await shoot(driver, 'A11-phone-receive-coach');
 
-    // Home tab accounts list (O4 S3 — the ex-Balances sheet, inline now).
+    // The accounts route (2026-09-08 — the ex-Balances sheet, off Home and onto its own surface).
     await driver.click('tab-pay');
     await openBalances(driver);
     await sleep(700);
-    await shoot(driver, 'A12-phone-home-accounts');
-    await driver.click('tab-pay');
+    await shoot(driver, 'A12-phone-accounts-route');
+    await driver.click('btn-accounts-back');
 
-    // TripStrip (home) → the archive (the strip is the live entry; the archive the record).
+    // The Home overview, and the TripStrip on it — the strip renders on Home ONLY since
+    // 2026-09-08, so this shot is also the proof that it is where it belongs.
+    await driver.click('tab-home');
+    await sleep(700);
+    await shoot(driver, 'A12a-phone-home');
     await driver.findByTestID('trip-strip', { timeoutMs: 5_000 });
     await shoot(driver, 'A12b-phone-trip-strip');
     await driver.click('btn-trip-strip');
@@ -128,12 +132,12 @@ async function run() {
     await sleep(800);
     await shoot(driver, 'B04-desktop-passport-archive');
     await driver.click('btn-passport-close');
-    // Home tab accounts list at desktop for comparison.
+    // The accounts route at desktop for comparison.
     await driver.click('btn-settings-close');
-    await driver.click('tab-home');
+    await openBalances(driver);
     await sleep(700);
-    await shoot(driver, 'B05-desktop-home-accounts');
-    await driver.click('tab-pay');
+    await shoot(driver, 'B05-desktop-accounts-route');
+    await driver.click('btn-accounts-back');
 
     console.log(`[ux-capture] done — ${OUT}`);
   } finally {

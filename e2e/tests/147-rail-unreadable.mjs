@@ -14,8 +14,9 @@
 //     (the balance poll re-reads on its own — so no button is promised that nothing implements);
 //   * the IC rows on the same screen stay silent: the failure is scoped to the rail that failed.
 //
-// Selector contract: `tab-home`, `asset-sol`, `asset-sol-unreadable`, `asset-vchf`.
-import {setup, assert, assertIncludes, onboardWallet} from '../harness/lib.mjs';
+// Selector contract: `balance` (the header chip that opens the accounts route), `asset-sol`,
+// `asset-sol-unreadable`, `asset-vchf`.
+import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '147',
@@ -56,7 +57,7 @@ export async function run() {
 
     // --- the rail answers: a balance, and NO warning ------------------------------------------
     console.log('[147-rail-unreadable] a rail that answers renders its balance and nothing else…');
-    await driver.click('tab-home', {timeoutMs: 5_000});
+    await openBalances(driver);
     await driver.waitForFunction(
       () => (document.querySelector('[data-testid="asset-sol"]')?.textContent ?? '').includes('2 SOL'),
       {timeoutMs: 12_000},

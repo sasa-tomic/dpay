@@ -11,7 +11,7 @@
 //
 // `optional: true` keeps this OFF the default `just e2e` path (~37s of render-only capture that is
 // not a behavior gate); `just e2e-store` runs it on demand (DPAY_E2E_FILTER=store-screens).
-import { setup, onboardWallet, accountOf, railTransfer, assert, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
+import { setup, onboardWallet, accountOf, railTransfer, assert, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
 import { generateKeypair, decodeRequest } from '../harness/wire.mjs';
 
 export const meta = {
@@ -76,9 +76,9 @@ export async function run() {
     await driver.screenshot('39-store-request');
     console.log('[39-store-screens] ✓ request QR');
 
-    // === CAPTURE 3: Home tab — the accounts list + activity (O4; the ex-Balances sheet, inline) ===
+    // === CAPTURE 3: Home tab — the balance-first overview (headline, actions, activity) ===
     await driver.click('tab-home', { timeoutMs: 5_000 });
-    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
     await driver.screenshot('39-store-home');
     console.log('[39-store-screens] ✓ home accounts');
 

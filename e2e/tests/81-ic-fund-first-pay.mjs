@@ -8,9 +8,10 @@
  *
  * Invariants exercised here (fresh FakeLedger wallet: DEMO ∂100 from faucet, ckBTC 0):
  *   1. ckBTC selected + ONLINE + known zero → `pay-fund` panel shows 'No BTC available' with the
- *      PAY instruction, the scanner surface (`pay-scan` status row / QrScanner box) is NOT in the
- *      DOM, and the primary `pay-fund-go` ('Show my BTC address') is present (ckBTC IS depositable:
- *      mintable=false, onramp Direct, minter present).
+ *      PAY instruction and the primary `pay-fund-go` ('Show my BTC address') — ckBTC IS depositable
+ *      (mintable=false, onramp Direct, minter present) — while the scan surface stays REACHABLE
+ *      (`btn-start-scan`). Changed 2026-09-08 (X3): the panel used to replace the scanner, which
+ *      stopped a payer reading a request for an asset they actually held.
  *   2. One tap on `pay-fund-go` lands on the ckBTC deposit surface (deposit-address starts
  *      with bc1q — the one funding QR; no inline duplicate).
  *   3. Fail-open: with the relay unreachable (offline), the scanner RETURNS (no panel) —
@@ -40,15 +41,19 @@ export async function run() {
     await openBalances(driver);
     await driver.click('asset-ckbtc-select');
 
-    // (1) Online + known zero → the fund panel replaces the scanner.
+    // (1) Online + known zero → the fund panel rides BELOW the scan surface, never in front of it
+    //     (X3, 2026-09-08). The merchant's QR names its own asset and this rail pays THAT asset, so
+    //     the selected balance cannot decide whether a request is readable — the panel keeps the
+    //     funding funnel's entry, and "Pay Now" is still one tap away.
     await driver.click('tab-pay');
     const txt = await driver.readText('pay-fund');
     assertIncludes(txt, 'No BTC available', 'panel headline names the selected asset');
     assertIncludes(txt, 'To pay a BTC request, first receive BTC at your address.',
       'the scan sub-mode states the PAY instruction');
     assertIncludes(txt, 'Show my BTC address', 'depositable asset offers the deposit primary');
-    const scanLeak = await driver.eval(() => document.querySelector('[data-testid="pay-scan"], [data-testid="scan-cam-box"]') != null);
-    assert(!scanLeak, 'scanner surface must NOT be mounted while gated');
+    assert(await driver.isPresent('btn-start-scan'), 'the scan surface stays reachable on a zero balance (X3)');
+    const camLeak = await driver.eval(() => document.querySelector('[data-testid="scan-cam-box"]') != null);
+    assert(!camLeak, 'the camera itself still waits for the Pay Now press (pay-intent gate)');
 
     // (2) One tap → the ckBTC deposit address (the ONE funding QR surface).
     await driver.click('pay-fund-go');

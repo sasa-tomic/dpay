@@ -6,7 +6,7 @@
 //
 //   1. USDC absent + SOL zero → the Pay tab shows the SETUP CARD with the insufficient warning
 //      AND the fund-SOL escape hatch (btn-sol-ata-fund) — the DEAD-END copy ("then come back")
-//      is GONE.
+//      is GONE — beside a still-reachable scan surface (X3, 2026-09-08).
 //   2. btn-sol-ata-fund → one tap to the SOL deposit address (the funding funnel entry).
 //   3. Stub-fund SOL → the setup card's create ENABLES (one-tap unlock at rent+fee).
 //   4. Create ATA → stub confirms → the ATA exists → the USDC Pay surface becomes the USDC
@@ -70,9 +70,12 @@ export async function run() {
     const createBtn = await driver.findByTestID('btn-sol-pay-ata-create', {timeoutMs: 5_000});
     const createDisabled = await createBtn.evaluate((n) => n.getAttribute('aria-disabled') === 'true' || n.disabled === true);
     assert(createDisabled, 'create disabled while SOL < rent+fee');
-    const scannerLeak = await driver.eval(() => !!document.querySelector('[data-testid="sol-pay-scan"]'));
-    assert(!scannerLeak, 'no scanner while the USDC account is absent');
-    console.log('[80-sol-fund-funnel] ✓ setup card + hatch, create disabled, no scanner');
+    // X3 (2026-09-08): the setup card rides BELOW the scan surface rather than replacing it. The
+    // account this wallet lacks is the SELECTED one; a request naming SOL — or any other mint — is
+    // perfectly payable from here, and the per-request `solSplSignGate` is what refuses the ones
+    // that are not, by name, at the scan.
+    assert(await driver.isPresent('btn-sol-start-scan'), 'an absent token account keeps the scan surface reachable (X3)');
+    console.log('[80-sol-fund-funnel] ✓ setup card + hatch, create disabled, scanner reachable');
 
     // ---- 2. Escape hatch → one tap to the SOL deposit address ----
     console.log('[80-sol-fund-funnel] hatch → SOL deposit address in one tap…');

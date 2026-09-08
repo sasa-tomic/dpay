@@ -13,9 +13,9 @@
 // A bare <TextInput> with no accessibilityLabel renders as <input> with NO aria-label — the bug this
 // flow catches. A bare <Text>/<View> renders as <div> with NO role/aria (correct: not interactive).
 //
-// The census walks the same primary surfaces flow 35 (UX tour) screenshots: wallet home (Pay),
-// Receive + currency picker, Home tab (the accounts list, inline since O4 S3), Settings,
-// Transactions, and Pay → "Send to address"
+// The census walks the same primary surfaces flow 35 (UX tour) screenshots: the Pay scanner,
+// Receive + currency picker, the Home tab, the ACCOUNTS route (its own surface since 2026-09-08),
+// Settings, Transactions, and Pay → "Send to address"
 // (which needs a funded asset to reach — see `paySend`). On each surface it queries the
 // DOM for every [data-testid] matching a known-interactive prefix (btn-* / tab-* / req-* /
 // req-pick-* / settings-relay / amount-input / memo-input / privacy-policy / ledger-filter-* /
@@ -29,9 +29,9 @@
 // control means adding its testID to the right surface (single source of truth the next dev updates
 // alongside the new testID).
 //
-// Selector contract: surfaces are reached by the same taps a user makes — `tab-home`,
-// `tab-receive`, `req-prefix`, `btn-settings`, `tab-transactions`, `asset-vchf-select`,
-// `btn-pay-send`.
+// Selector contract: surfaces are reached by the same taps a user makes — `tab-home`, `balance`
+// (the header chip → the accounts route), `tab-receive`, `req-prefix`, `btn-settings`,
+// `tab-transactions`, `asset-vchf-select`, `btn-pay-send`.
 import {
   setup, onboardWallet, assert, accountOf, faucetAccount, openBalances, selectCurrency, openPaySend,
   railPrincipalText,
@@ -59,18 +59,20 @@ const SURFACES = {
   // Wallet home (Pay tab) — only chrome is interactive (the scan card's QR scanner is a viewport,
   // not a Pressable; the pay-scan DIV is informational).
   home: [],
-  // Home tab (O4) — the balance-first surface: the three uniform action-row buttons (capability-
-  // dispatched: Pay/Receive navigate, Add money fires the DEMO faucet or lands the deposit
-  // surface) plus the activity feed's See-all link, and (O4 S3) the inline ACCOUNTS list — the
-  // retired Balances sheet's body: btn-topup is the DEMO row's faucet button; `asset-*-select`
-  // is each row's whole-row select Pressable; btn-toggle-testnet reveals the testnet rows.
-  // The headline block itself is informational. SOL is uniform with the IC rows (whole-row
-  // select — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
-  homeTab: ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money', 'btn-home-activity-all',
-            'btn-topup', 'btn-toggle-testnet',
-            'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select',
-            'asset-cketh-select', 'asset-vchf-select', 'asset-icp-select',
-            'asset-sol-select'],
+  // Home tab — the LANDING surface (2026-09-08): the primary Scan button, the two secondary
+  // action-row buttons (Receive navigates; Add money funds the HOME rail), the accounts
+  // affordance, and the activity feed's See-all link. The headline block itself is informational.
+  homeTab: ['btn-home-scan', 'btn-home-receive', 'btn-home-add-money', 'btn-home-accounts',
+            'btn-home-activity-all'],
+  // The ACCOUNTS route — the retired Balances sheet's body, its own surface since 2026-09-08.
+  // btn-accounts-back leaves the route; btn-topup is the practice row's faucet; `asset-*-select`
+  // is each row's whole-row select Pressable; btn-accounts-convert is the per-asset Convert action
+  // on the SELECTED row; btn-toggle-testnet reveals the testnet rows. SOL is uniform with the IC
+  // rows (whole-row select — on-chain deposit/send lives in the Pay/Receive tab sub-modes).
+  accounts: ['btn-accounts-back', 'btn-accounts-convert', 'btn-topup', 'btn-toggle-testnet',
+             'asset-demo-select', 'asset-ckbtc-select', 'asset-ckusdc-select',
+             'asset-cketh-select', 'asset-vchf-select', 'asset-icp-select',
+             'asset-sol-select'],
   // Receive tab + currency picker (open via req-prefix). The picker rows are req-pick-<assetTestKey>;
   // the wallet's IC-mainnet catalog ships DEMO/ckBTC/ckUSDC/ckETH/VCHF/ICP (the REAL prod rows —
   // six mainnet IC assets since the 2026-08-28 catalog transplant), so all six picker rows assert.
@@ -78,7 +80,7 @@ const SURFACES = {
   receive: ['req-prefix', 'amount-input', 'memo-input', 'btn-request',
             'req-pick-demo', 'req-pick-ckbtc', 'req-pick-ckusdc', 'req-pick-cketh',
             'req-pick-vchf', 'req-pick-icp', 'req-pick-sol'],
-  // Balances hub — RETIRED with the sheet (O4 S3); its rows are censused on `homeTab` above.
+  // Balances hub — RETIRED with the sheet (O4 S3); its rows are censused on `accounts` above.
   // Settings sheet (open via `btn-settings`). btn-reset-* are revealed only after tapping btn-reset
   // (the confirmation dialog); listed separately below to keep this census aligned with the visible
   // surface at first open. btn-backup + btn-settings-restore are the always-visible section entries
@@ -186,15 +188,22 @@ export async function run() {
       }
     }
 
-    // 1. Wallet home (Pay tab — the default after onboarding).
+    // 1. The Pay scanner (the harness preamble leaves the app here; the app itself lands on Home).
     await census('home');
     console.log('[41-a11y-census] ✓ census: wallet home (Pay)');
 
-    // 1b. Home tab (O4) — the balance-first surface, one tap from Pay.
+    // 1b. Home tab — the landing surface.
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
     await census('homeTab');
-    console.log('[41-a11y-census] ✓ census: home tab (balance-first surface)');
+    console.log('[41-a11y-census] ✓ census: home tab (the landing overview)');
+
+    // 1c. The accounts route — one tap from Home, and from every other screen via the header chip.
+    await driver.click('btn-home-accounts', { timeoutMs: 4_000 });
+    await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
+    await census('accounts');
+    console.log('[41-a11y-census] ✓ census: accounts route');
+    await driver.click('btn-accounts-back', { timeoutMs: 4_000 });
 
     // 2. Receive + currency picker (open via req-prefix → modal).
     await driver.click('tab-receive', { timeoutMs: 4_000 });
@@ -249,8 +258,8 @@ export async function run() {
     await census('transactions');
     console.log('[41-a11y-census] ✓ census: transactions (empty wallet)');
 
-    // 5. Pay → "Send to address" for the funded VCHF row. Selecting the asset on the Home tab's
-    //    accounts list is the only way to make it active (the row is one whole select Pressable),
+    // 5. Pay → "Send to address" for the funded VCHF row. Selecting the asset in the accounts
+    //    route is the only way to make it active (the row is one whole select Pressable),
     //    and the sub-mode toggle is what opens the send form. Run LAST so it cannot perturb the
     //    surfaces above.
     await openBalances(driver);

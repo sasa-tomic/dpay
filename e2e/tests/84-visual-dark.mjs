@@ -22,7 +22,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
 const BASELINES_DIR = join(SHOTS_DIR, 'baselines-dark');
 
-// Same 5 primary surfaces, in the same capture order as flow 40 (mirrors its tour = flow 35).
+// Same 6 primary surfaces, in the same capture order as flow 40 (mirrors its tour = flow 35).
 // Baseline names are identical so the two dirs diff key-for-key; capture filenames carry the
 // 84-vr-dark- prefix so the two flows never collide in e2e/shots/.
 const SURFACES = [
@@ -31,6 +31,7 @@ const SURFACES = [
   // timestamp), so its module pixels can never be deterministic.
   { capture: '84-vr-dark-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
   { capture: '84-vr-dark-home', baseline: 'home' },
+  { capture: '84-vr-dark-accounts', baseline: 'accounts' },
   { capture: '84-vr-dark-settings', baseline: 'settings' },
   { capture: '84-vr-dark-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
 ];
@@ -77,21 +78,14 @@ export async function run() {
 
     const masks = {};
 
-    // 1. Onboard a funded wallet ($100 demo). Lands on the Pay tab.
+    // 1. Onboard a funded wallet ($100 demo). The harness preamble leaves the app on the Pay tab.
     console.log('[84-visual-dark] onboarding…');
     await onboardWallet(driver, 'e2e-visual-dark');
     await driver.waitForText('∂100.00', { timeoutMs: 5_000 });
-    // Determinism: the home TripStrip flips live when the fundsReady stamp's notify lands
-    // (the journey live seam) — wait for the settled 3-of-4 state before pixel capture.
-    await driver.findByTestID('trip-strip-dot-fundsReady-filled', { timeoutMs: 5_000 });
-    // …and let the strip's own 260ms entrance fade reach rest. The dot appearing only means the
-    // strip MOUNTED; capturing mid-fade samples a partial opacity, which is why this surface
-    // drifted between 0.2% and 0.55% run to run on identical code. Dark surfaces this first — a
-    // bright strip against black moves far more per-channel than the same strip on white.
-    // Waited in FRAMES, not milliseconds — mirrors flow 40.
-    await driver.waitAtRest('trip-strip', { timeoutMs: 8_000 });
+    await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
-    // 2. Capture wallet-Pay surface.
+    // 2. Capture wallet-Pay surface. The TripStrip is Home-only since 2026-09-08, so its fade is
+    //    waited out on the Home surface below instead — mirrors flow 40.
     await driver.screenshot(SURFACES[0].capture);
 
     // 3. Receive → enter an amount → request QR screen.
@@ -105,17 +99,26 @@ export async function run() {
     masks['request-qr'] = await getTestIDRectDevicePx(driver, 'request-qr');
     await driver.screenshot(SURFACES[1].capture);
 
-    // 4. Home tab (the balance-first surface; also dismisses the request screen via the
-    //    ever-present bottom tab bar).
+    // 4. Home tab (the landing overview; also dismisses the request screen via the ever-present
+    //    bottom tab bar). The TripStrip's 260ms entrance fade is the last thing moving here —
+    //    waited in FRAMES, mirrors flow 40. A bright strip against black moves far more per
+    //    channel than the same strip on white, so this surface is the one that needs it most.
     await driver.click('tab-home', { timeoutMs: 5_000 });
-    await driver.findByTestID('home-accounts', { timeoutMs: 5_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    await driver.waitAtRest('trip-strip', { timeoutMs: 8_000 });
     await driver.screenshot(SURFACES[2].capture);
+
+    // 4b. The accounts route — its own surface since 2026-09-08 (mirrors flow 40).
+    await driver.click('btn-home-accounts', { timeoutMs: 5_000 });
+    await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
+    await driver.screenshot(SURFACES[3].capture);
+    await driver.click('btn-accounts-back', { timeoutMs: 4_000 });
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 
     // 5. Settings (Advanced disclosure defaults COLLAPSED — matches flow 40's baseline state).
     await driver.click('btn-settings', { timeoutMs: 4_000 });
     await driver.findByTestID('btn-advanced-toggle', { timeoutMs: 5_000 });
-    await driver.screenshot(SURFACES[3].capture);
+    await driver.screenshot(SURFACES[4].capture);
     await driver.click('btn-settings-close', { timeoutMs: 4_000 });
 
     // 6. Ledger (one faucet row for a fresh wallet). Mask the row TIMESTAMP — same time-varying
@@ -125,7 +128,7 @@ export async function run() {
     if (await driver.isPresent('hist-time-0')) {
       masks['hist-time-0'] = await getTestIDRectDevicePx(driver, 'hist-time-0');
     }
-    await driver.screenshot(SURFACES[4].capture);
+    await driver.screenshot(SURFACES[5].capture);
 
     // 7. Diff each capture against its dark baseline (or seed if missing + REGEN).
     await mkdir(BASELINES_DIR, { recursive: true });
