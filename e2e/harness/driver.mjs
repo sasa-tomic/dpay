@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { resolveExecutablePath } from './browser.mjs';
 import { _testCtx } from './lib.mjs';
+import { installSolAccountsHelper } from './solaccounts.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
@@ -183,6 +184,9 @@ export class Driver {
     // URL='') so the override takes effect. The stub object itself is set at runtime via driver.eval.
     if (o.solStub) {
       await page.evaluateOnNewDocument(() => { globalThis.__DPAY_TEST_SOLANA_RPC_URL = 'stub'; });
+      // …and the account encoder every flow's `getMultipleAccounts` handler answers through, so a
+      // flow declares balances and not SPL byte layouts (harness/solaccounts.mjs).
+      await page.evaluateOnNewDocument(installSolAccountsHelper);
     }
     const driver = new Driver(browser, context, page, ownsBrowser);
     driver.attachPageListeners();
@@ -359,7 +363,11 @@ export class Driver {
       if (typeof node.select === 'function') node.select();
       else if (typeof node.setSelectionRange === 'function') node.setSelectionRange(0, (node.value ?? '').length);
     });
+    // An EMPTY string means CLEAR, not "do nothing". Select-all followed by no keystroke leaves the
+    // field exactly as it was, so `type(id, '')` used to be a silent no-op — a test could assert an
+    // empty-value behaviour and never once empty the field. Backspace deletes the selection.
     if (text) await el.type(text, { delay: 5 });
+    else await this.page.keyboard.press('Backspace');
   }
 
   /** Read the `.value` of the input matched by `testID` (readText reads textContent, which is empty
@@ -380,7 +388,11 @@ export class Driver {
     const el = await this.page.waitForSelector(`input[placeholder="${cssEscape(placeholder)}"]`, { timeout: timeoutMs });
     await el.click({ clickCount: 3 });
     await el.press('Backspace');
+    // An EMPTY string means CLEAR, not "do nothing". Select-all followed by no keystroke leaves the
+    // field exactly as it was, so `type(id, '')` used to be a silent no-op — a test could assert an
+    // empty-value behaviour and never once empty the field. Backspace deletes the selection.
     if (text) await el.type(text, { delay: 5 });
+    else await this.page.keyboard.press('Backspace');
   }
 
   /** Read the textContent of the element matched by `testID` (trimmed). */
@@ -755,6 +767,12 @@ function injectFreezeCss(css) {
 function injectTestGlobals() {
   globalThis.__DPAY_TEST_POLL = {
     balance: 150, history: 150, deposit: 150, receiptPay: 150, receiptRcv: 150,
+    // The IDLE cadences are overridden to the SAME 150 ms as the active ones ON PURPOSE. The suite
+    // must not be paced by production cadence, and a request BUDGET expressed in wall-clock time
+    // would be meaningless here anyway — flow 160 asserts requests PER TICK, which is the unit the
+    // cost is actually incurred in. What the idle cadence does to a real wallet is measured under
+    // fake timers in app/__tests__/usePollCadence.test.tsx.
+    balanceIdle: 150, historyIdle: 150,
   };
   // MC8 U6.7 — a non-empty test project id so WALLETCONNECT_PROJECT_ID is "configured" app-wide.
   globalThis.__DPAY_TEST_WALLETCONNECT_PROJECT_ID = 'e2e-test-project-id';

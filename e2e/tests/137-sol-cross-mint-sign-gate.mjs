@@ -7,7 +7,12 @@
 //   • refusal — the wallet holds EURC (funded, selected) but has NO USDC account: a USDC solreq
 //     is refused at the scan BY NAME (asset + next action), nothing signs, no signed QR appears;
 //   • fail-open — an EURC solreq (request-mint state 'balance') signs right after on the SAME
-//     surface: unconfirmed-or-fundable mints never block the offline-first rail.
+//     surface: unconfirmed-or-fundable mints never block the offline-first rail;
+//   • fail-open WITH A CAVEAT (2026-09-08, M1) — a wallet that has NEVER been able to read the mint
+//     because the endpoint is refusing it signs anyway (an offline payer must keep the ability to
+//     sign a payment that would settle) and SAYS SO on the hand-off screen: it names the token,
+//     states that the payment cannot settle if the account does not exist, and — because the device
+//     is online and the RAIL is what is down — does not tell the payer to go and find signal.
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   armPayScan, openBalances,
@@ -17,9 +22,9 @@ export const meta = {
   id: '137',
   name: 'sol-cross-mint-sign-gate',
   journey: 'pay',
-  covers: ['solreq', 'cross-mint', 'absent-ata', 'refusal', 'fail-open', 'offline-sign'],
-  verifies: 'OPEN_ISSUES 6(a): a solreq naming a KNOWN-absent mint (per-mint state from the balance rail, persisted across restarts) is refused at the scan by name before any sign; a fundable request-mint still signs.',
-  timeoutMs: 45_000,
+  covers: ['solreq', 'cross-mint', 'absent-ata', 'refusal', 'fail-open', 'offline-sign', 'rpc-error', 'honest-copy'],
+  verifies: 'OPEN_ISSUES 6(a): a solreq naming a KNOWN-absent mint (per-mint state from the balance rail, persisted across restarts) is refused at the scan by name before any sign; a fundable request-mint still signs; and a request-mint the endpoint has REFUSED to answer for signs too, carrying a caveat on the hand-off screen that names the token, states the payment cannot settle without the account, and never tells an already-online payer to find signal.',
+  timeoutMs: 60_000,
 };
 
 const MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address
@@ -72,6 +77,8 @@ export async function run() {
         getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         sendTransaction: () => 'sig_' + Math.random().toString(36).slice(2, 12),
         getSignatureStatuses: () => ({context: {slot: 250000001}, value: [{confirmationStatus: 'confirmed'}]}),
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: {amount: '2000000', decimals: 6}}),
         getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
         getBalance: () => ({value: 5000000000}),
         getTokenAccountBalance: () => ({value: {amount: '2000000', decimals: 6, uiAmount: 2, uiAmountString: '2'}}),
@@ -89,19 +96,26 @@ export async function run() {
 
     // Stub v2 (mutable flip, flow 76 pattern): every account still exists EXCEPT the payer's USDC
     // ATA — so the rail confirms EURC funded (2.00, 6 dec) while USDC has NO account.
-    await driver.eval((usdc) => {
+    await driver.eval((cfg) => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
         getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
         getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         sendTransaction: () => 'sig_' + Math.random().toString(36).slice(2, 12),
         getSignatureStatuses: () => ({context: {slot: 250000001}, value: [{confirmationStatus: 'confirmed'}]}),
-        getAccountInfo: (params) => (params[0] === usdc
+        // The balance poll, per MINT: EURC funded, USDC's token account absent — the one difference
+        // this flow turns on (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {
+          lamports: 5000000000,
+          token: {amount: '2000000', decimals: 6},
+          tokens: {[cfg.usdcMint]: null},
+        }),
+        getAccountInfo: (params) => (params[0] === cfg.usdcAta
           ? {value: null}
           : {value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
         getBalance: () => ({value: 5000000000}),
         getTokenAccountBalance: () => ({value: {amount: '2000000', decimals: 6, uiAmount: 2, uiAmountString: '2'}}),
       };
-    }, usdcAta);
+    }, {usdcAta, usdcMint: USDC_MINT});
 
     // Deterministic absent-proof: with USDC selected, the Pay tab's gate must replace the scanner
     // with the ATA-setup card — i.e. the rail has CONFIRMED the USDC account absent.
@@ -137,6 +151,69 @@ export async function run() {
     await driver.waitForText('Share signed code', {timeoutMs: 8_000});
     await driver.screenshot('137-cross-mint-signed');
     console.log('[137-sol-cross-mint-sign-gate] ✓ fundable request-mint signed offline (signed QR shown)');
+
+    // 3. FAIL-OPEN WITH A CAVEAT: the same signature, made with NO fact about the request's mint
+    //    because the endpoint refused every read. A fresh wallet is the only honest way to reach
+    //    this state — a mint observed once STAYS observed (the persisted-fact store), and a fact
+    //    outranks whatever the endpoint is doing now, which is itself part of the gate's contract.
+    console.log('[137-sol-cross-mint-sign-gate] fresh wallet, endpoint refusing from the first poll…');
+    await driver.clearStorage();
+    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`, {timeoutMs: 8_000});
+    await driver.waitReady({timeoutMs: 10_000});
+    await driver.eval(() => {
+      // The measured 2026-09-08 outage: the endpoint ANSWERS and refuses this wallet (HTTP 429).
+      // Reads throw; the blockhash/broadcast half stays alive so the failure is scoped to the READ.
+      // `dpayEndpointRefused` is the marker `solana/errors.ts#isEndpointRefusal` reads, and it is
+      // what separates "the rail refused us" from "nothing answered" — the whole difference between
+      // the two caveats. A plain Error here would exercise the wrong one.
+      const refuse = () => {
+        const e = new Error('solana rpc rate limit (HTTP 429): max usage reached');
+        e.dpayEndpointRefused = true;
+        e.status = 429;
+        throw e;
+      };
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
+        getMultipleAccounts: refuse,
+        getAccountInfo: refuse,
+        getBalance: refuse,
+        getTokenAccountBalance: refuse,
+      };
+    });
+    await skipWalkthroughIfPresent(driver);
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-cross-mint-down', {timeoutMs: 8_000});
+    await driver.click('btn-create');
+    await driver.findByTestID('mnemonic-backup');
+    await driver.click('mnemonic-backup-checkbox');
+    await waitForEnabled(driver, 'btn-mnemonic-continue');
+    await driver.click('btn-mnemonic-continue');
+    await skipPracticeIfPresent(driver);
+    await driver.findByTestID('home-currency-title');
+    await driver.click('home-currency-EUR');
+    await driver.click('btn-home-currency-continue');
+    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    // Wait until the rail has actually REPORTED the refusal — before that the mint is merely
+    // 'loading', which is the OTHER unverified state and carries the other sentence.
+    await driver.click('tab-home');
+    await driver.waitForFunction(
+      () => document.querySelector('[data-testid="rail-unreadable-solana"]') != null,
+      {timeoutMs: 15_000},
+    );
+    await driver.click('tab-pay');
+    await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
+    await armPayScan(driver);
+    await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solreqUri('ef', EURC_MINT, 'EURC'));
+    // It SIGNED — the hand-off QR is there. That is the non-negotiable: a caveat is not a block.
+    await driver.findByTestID('sol-pay-qr', {timeoutMs: 10_000});
+    const caveat = await driver.readText('sol-pay-sign-caveat');
+    assertIncludes(caveat, 'EURC', 'the caveat must name the token whose account could not be checked');
+    assertIncludes(caveat, 'cannot settle', 'and state what it costs if the account does not exist');
+    assertIncludes(caveat, 'My address', 'and where the payer can check or create it');
+    assert(!caveat.includes('Get online'),
+      'the device IS online and the RAIL is down — telling this payer to get online would be a lie');
+    await driver.screenshot('137-cross-mint-rail-down-caveat');
+    console.log('[137-sol-cross-mint-sign-gate] ✓ signed anyway, and said what it could not check');
 
     console.log(`[137-sol-cross-mint-sign-gate] GREEN in ${((Date.now() - start) / 1000).toFixed(2)}s`);
   } finally {

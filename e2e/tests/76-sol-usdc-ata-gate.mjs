@@ -46,6 +46,8 @@ export async function run() {
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS = false;
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS ? {amount: '0', decimals: 6} : null}),
         getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '1'.repeat(32), lastValidBlockHeight: 999999}}),
         getBalance: () => ({value: 5000000000}),
         getAccountInfo: () => ({value: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS
@@ -84,7 +86,12 @@ export async function run() {
 
     // ---- 3. INSUFFICIENT: drop SOL below rent+fee → warning + create DISABLED ----
     console.log('[76-sol-usdc-ata-gate] insufficient SOL: warning + disabled create…');
-    await driver.eval(() => { globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 1000000}); });
+    // Two readers, one wallet: the balance POLL reads accounts in one getMultipleAccounts, the
+    // create's rent pre-check reads getBalance directly. Moving the SOL moves both.
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 1000000});
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getMultipleAccounts = (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 1000000, token: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS ? {amount: '0', decimals: 6} : null});
+    });
     await driver.click('btn-receive-request', {timeoutMs: 5_000});
     // Leave Receive and come back so the balance poll re-fires. The Pay leg is WAITED FOR: while
     // the Receive tab is still active `setMode('receive')` is a no-op, so a second tab press fired
@@ -104,6 +111,7 @@ export async function run() {
     console.log('[76-sol-usdc-ata-gate] one-tap create → confirmed → address QR appears…');
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 5000000000});
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getMultipleAccounts = (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS ? {amount: '0', decimals: 6} : null});
       // The NEXT sendTransaction is the create; on confirmation the ATA exists.
       const orig = globalThis.__DPAY_TEST_SOLANA_RPC_STUB.sendTransaction;
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB.sendTransaction = (tx) => {

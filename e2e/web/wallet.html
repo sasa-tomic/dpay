@@ -34,11 +34,15 @@
       #root { display: flex; flex-direction: column; }
       /* Keyboard focus ring (U-F4): :focus-visible paints ONLY for keyboard focus — pointer/touch
        * focus never shows it (and the e2e visual flow screenshots unfocused elements, so baselines
-       * are unaffected). #FF5A1F is the palette brand tangerine (app/config/palette.ts C.brand).
-       * HTML-only file: never ships to native Android, which has its own focus handling. */
+       * are unaffected). #D03F00 is `LIGHT.brand`, the FILL step of the tangerine ramp — a focus
+       * indicator has to clear 3:1 against what it is drawn on (WCAG 2.4.11), and it is drawn on
+       * BOTH themes' pages from this one rule, so it needs a value that works on both: 4.13:1 on
+       * porcelain, 4.26:1 on the warm near-black. The retired #FF5A1F measured 2.76:1 on
+       * porcelain. HTML-only file: never ships to native Android, which has its own focus
+       * handling. */
       button:focus-visible, [role='button']:focus-visible, a:focus-visible,
       input:focus-visible, textarea:focus-visible {
-        outline: 2px solid #FF5A1F;
+        outline: 2px solid #D03F00;
         outline-offset: 2px;
       }
       /* Space Grotesk + IBM Plex Mono — SUBSETTED WOFF2 built from the exact TTFs Android serves

@@ -39,6 +39,8 @@ export async function run() {
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS = true;
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 0, token: {amount: '0', decimals: 6}}),
         getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '1'.repeat(32), lastValidBlockHeight: 999999}}),
         getBalance: () => ({value: 0}),
         getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
@@ -94,7 +96,10 @@ export async function run() {
     // "Show my SOL address" secondary on the USDC panel carries the USDC origin.
     await driver.click('sol-pay-fund-sol', {timeoutMs: 5_000});
     await driver.findByTestID('sol-receive-address', {timeoutMs: 8_000});
-    await driver.eval(() => { globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 5000000000}); });
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 5000000000});
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getMultipleAccounts = (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: {amount: '0', decimals: 6}});
+    });
     const resume = await driver.findByTestID('btn-sol-receive-return', {timeoutMs: 15_000});
     const resumeText = await resume.evaluate((n) => n.textContent);
     assertIncludes(resumeText, 'Back to paying USDC', 'resume link copy');
@@ -114,9 +119,15 @@ export async function run() {
 
     // ---- 4. FAIL-OPEN: error status keeps the scanner live ----
     console.log('[79-sol-fund-first-pay] RPC error → scanner stays live (fail-open)…');
-    await driver.eval(() => { globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => { throw new Error('rpc down'); }; });
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => { throw new Error('rpc down'); };
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getMultipleAccounts = () => { throw new Error('rpc down'); };
+    });
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 10_000});
-    await driver.eval(() => { delete globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance; globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 0}); });
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 0});
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getMultipleAccounts = (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 0, token: {amount: '0', decimals: 6}});
+    });
     await driver.findByTestID('sol-pay-fund', {timeoutMs: 15_000});
     console.log('[79-sol-fund-first-pay] ✓ error failed open, zero re-gated');
 

@@ -8,9 +8,14 @@
 //   - the Settings sheet's relay input holds the relay URL the app is actually using.
 //   - editing the relay input updates it (it persists in component state — the polls retarget).
 //   - reset shows a confirmation dialog; confirming clears the on-device identity → Onboarding.
+//   - (2026-09-08, M4) the SOLANA ENDPOINT row, the relay row's twin. `setSolanaRpcUrl` has been
+//     the seam every Solana read goes through and App.tsx has applied the stored value at boot
+//     since 2026-09-08, but no screen reached it — so on a phone a dead provider key was a store
+//     release rather than a settings edit. This flow drives the refusal path, because a refusal
+//     that only appears in a thrown Error nobody renders is the same dead end again.
 //
-// Selector contract: `btn-settings`, `settings-relay`, `privacy-policy`, `btn-reset`,
-// `btn-reset-confirm`, `btn-create`.
+// Selector contract: `btn-settings`, `settings-relay`, `settings-sol-rpc`, `btn-sol-rpc-apply`,
+// `settings-sol-rpc-err`, `privacy-policy`, `btn-reset`, `btn-reset-confirm`, `btn-create`.
 import { setup, assert, assertIncludes, assertEq, onboardWallet, accountOf } from '../harness/lib.mjs';
 
 const USERNAME = 'e2e-settings';
@@ -22,8 +27,8 @@ export const meta = {
   id: '12',
   name: 'settings',
   journey: 'system',
-  covers: ['settings', 'relay-config', 'privacy-policy', 'non-custodial', 'reset', 'persist'],
-  verifies: 'Settings: privacy policy is reachable, the non-custodial statement is present, relay URL persists, and reset wallet wipes identity.',
+  covers: ['settings', 'relay-config', 'solana-rpc-config', 'privacy-policy', 'non-custodial', 'reset', 'persist'],
+  verifies: 'Settings: privacy policy is reachable, the non-custodial statement is present, relay URL persists, the Solana endpoint is editable from the phone with an explicit Apply that shows its refusals verbatim and treats an empty value as "use the built-in one", and reset wallet wipes identity.',
   timeoutMs: 20000,
 };
 
@@ -88,6 +93,43 @@ export async function run() {
     const persistedRelay = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
     assertEq(persistedRelay, edited, 'settings-relay must persist across reload (AsyncStorage)');
     console.log(`[12-settings] ✓ relay URL persisted across reload → ${persistedRelay}`);
+
+    // 4c. The SOLANA ENDPOINT row (M4) — the relay row's twin, one section down: a draft, an
+    // explicit Apply, nothing on keystroke. Two things separate it from the relay row and both are
+    // driven here: applying can FAIL with a sentence written for the user, and an empty value is a
+    // real value (it restores the endpoint baked into the build).
+    console.log('[12-settings] the Solana endpoint row: draft, explicit Apply, honest refusal…');
+    await driver.click('btn-advanced-toggle', {timeoutMs: 4_000}); // the reload above collapsed it? no — already open
+    await driver.click('btn-advanced-toggle', {timeoutMs: 4_000}); // …so toggle twice: end open, deterministically
+    await driver.findByTestID('settings-sol-rpc', {timeoutMs: 4_000});
+    assert(!(await driver.isPresent('settings-sol-rpc-err')), 'no refusal is shown before anything is applied');
+    // An endpoint on plain http can be read and rewritten in transit — refused, by name, in place.
+    await driver.type('settings-sol-rpc', 'http://insecure.example', {timeoutMs: 4_000});
+    await driver.click('btn-sol-rpc-apply', {timeoutMs: 4_000});
+    const solErr = await driver.readText('settings-sol-rpc-err', {timeoutMs: 4_000});
+    assertIncludes(solErr, 'https://', 'the refusal must name what the endpoint has to be');
+    assertIncludes(solErr, 'http://', 'and quote what was actually entered');
+    await driver.screenshot('12-settings-sol-rpc-refusal');
+    // Editing clears it — the message belongs to one attempt, not to the screen.
+    // An ACCEPTED endpoint is applied for real: the SOL rail wakes up and reads it, which is the
+    // point of the row and is also why this origin is allowed to fail here. That outbound attempt
+    // IS the assertion that the wiring reaches the rail — a Settings field that changed nothing
+    // would produce no request at all.
+    driver.allowRequestFailuresFrom('https://mainnet.provider.example');
+    await driver.type('settings-sol-rpc', 'https://mainnet.provider.example/?api-key=e2e', {timeoutMs: 4_000});
+    assert(!(await driver.isPresent('settings-sol-rpc-err')), 'editing after a refusal clears the refusal');
+    await driver.click('btn-sol-rpc-apply', {timeoutMs: 4_000});
+    assert(!(await driver.isPresent('settings-sol-rpc-err')), 'a mainnet https endpoint is accepted');
+    assertEq(await driver.readInputValue('settings-sol-rpc'), 'https://mainnet.provider.example/?api-key=e2e',
+      'the accepted endpoint is what the field shows');
+    // EMPTY IS A VALUE: it restores the endpoint baked into the build, so it must be applicable —
+    // and the field then shows what "empty" resolved to, which is how a user learns what it means.
+    // (This build bakes an empty endpoint, which is what puts the SOL rail back to sleep here.)
+    await driver.type('settings-sol-rpc', '', {timeoutMs: 4_000});
+    await driver.click('btn-sol-rpc-apply', {timeoutMs: 4_000});
+    assertEq(await driver.readInputValue('settings-sol-rpc'), '',
+      'clearing the field restores the built-in endpoint and shows it');
+    console.log('[12-settings] ✓ Solana endpoint applied; refusals render verbatim, empty restores the built-in');
 
     // 5. Reset shows a confirmation dialog (UX-V3: reset is no longer one-tap-dangerous).
     console.log('[12-settings] clicking btn-reset (opens confirmation)…');

@@ -14,18 +14,26 @@
 //     retry is automatic (the balance poll re-reads on its own every 2.5s behind the endpoint's
 //     cooldown — so no button is promised that nothing implements, and against a rate limit an
 //     extra manual read is the cause, not the cure);
-//   * the IC rows on the same screen stay silent: the failure is scoped to the rail that failed.
+//   * the IC rows on the same screen stay silent: the failure is scoped to the rail that failed;
+//   * and (2026-09-08, M2) the LANDING SCREEN says it too. Home rendered `displayText ?? '—'` with
+//     no status branch at all, so the largest number on the phone — the home currency's own
+//     balance — went to the same bare dash a first poll shows, on the one screen a user lands on
+//     without asking for anything. This half onboards with home=EUR, whose preferred rail is
+//     EURC·Solana, so the home rail IS the rail that fails.
 //
 // Selector contract: `balance` (the header chip that opens the accounts route), `asset-sol`,
-// `rail-unreadable-solana`, `asset-vchf`.
-import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+// `rail-unreadable-solana`, `asset-vchf`, `home-headline-amount`, `tab-home`.
+import {
+  setup, assert, assertIncludes, onboardWallet, openBalances,
+  skipWalkthroughIfPresent, skipPracticeIfPresent, waitForEnabled,
+} from '../harness/lib.mjs';
 
 export const meta = {
   id: '147',
   name: 'rail-unreadable',
   journey: 'system',
   covers: ['solana', 'balances', 'home', 'rpc-error', 'honest-copy', 'fail-closed'],
-  verifies: 'A rail whose endpoint refuses (HTTP 429) stops rendering the same bare "—" a pending first poll shows: ONE line for the network says the balances could not be refreshed, names the network, says nothing moved and the other accounts still work, and that dpay keeps retrying on its own — stated once no matter how many accounts that network carries, while a rail that answers, and every IC row on the same screen, say nothing.',
+  verifies: 'A rail whose endpoint refuses (HTTP 429) stops rendering the same bare "—" a pending first poll shows: ONE line for the network says the balances could not be refreshed, names the network, says nothing moved and the other accounts still work, and that dpay keeps retrying on its own — stated once no matter how many accounts that network carries, while a rail that answers, and every IC row on the same screen, say nothing. The LANDING screen says the same thing in the same words when the home currency\'s own rail is the one that cannot be read.',
   timeoutMs: 60000,
 };
 
@@ -52,6 +60,9 @@ export async function run() {
       const refuse = () => { throw new Error('solana rpc rate limit (HTTP 429): max usage reached'); };
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
         getGenesisHash: () => '5eykt4UsFv8PJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+        // The balance poll is ONE request for every rail, so the refusal flips every rail at once —
+        // which is exactly what an exhausted key does (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => (st.refusing ? refuse() : globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 2000000000, token: {amount: '0', decimals: 6}})),
         getBalance: () => (st.refusing ? refuse() : {value: 2000000000}),
         getTokenAccountBalance: () => (st.refusing ? refuse() : {value: {amount: '0', decimals: 6, uiAmount: 0, uiAmountString: '0'}}),
         getAccountInfo: () => ({value: {data: ['', 'base64'], owner: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', lamports: 2039280}}),
@@ -91,6 +102,40 @@ export async function run() {
     // Bring the row itself into frame so the artifact shows the state it documents.
     await driver.eval(() => document.querySelector('[data-testid="asset-sol"]')?.scrollIntoView({block: 'center'}));
     await driver.screenshot('147-rail-unreadable');
+
+    // --- the LANDING screen says it too, when the HOME rail is the one that failed (M2) ---------
+    // A second wallet in the same session, onboarded onto EUR: its preferred rail is EURC·Solana,
+    // so the home headline is a Solana number and the outage is the home currency's own outage.
+    console.log('[147-rail-unreadable] home=EUR: the landing headline explains its own dash…');
+    await driver.clearStorage();
+    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`, {timeoutMs: 8_000});
+    await driver.waitReady({timeoutMs: 10_000});
+    await skipWalkthroughIfPresent(driver);
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-rail-unreadable-eur', {timeoutMs: 8_000});
+    await driver.click('btn-create', {timeoutMs: 4_000});
+    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
+    await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
+    await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
+    await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
+    await skipPracticeIfPresent(driver);
+    await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
+    await driver.click('home-currency-EUR', {timeoutMs: 4_000});
+    await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
+    await driver.findByTestID('home-headline-amount', {timeoutMs: 10_000});
+
+    // The endpoint is still refusing (the stub's flag survives the reload — it lives on the page's
+    // own globals, re-installed by evaluateOnNewDocument). The headline is a dash AND a sentence.
+    await driver.waitForFunction(
+      () => document.querySelector('[data-testid="rail-unreadable-solana"]') != null,
+      {timeoutMs: 12_000},
+    );
+    const headline = await driver.readText('home-headline-amount');
+    assert(headline.includes('—'), `an unreadable home rail still shows no number, saw "${headline}"`);
+    const homeLine = await driver.readText('rail-unreadable-solana');
+    assertIncludes(homeLine, 'Solana', 'the landing screen names the network that is not answering');
+    assertIncludes(homeLine, 'Nothing moved', 'and states the funds did not move');
+    assert(homeLine === line, 'the landing screen and the accounts route say the SAME sentence — one fact, one owner');
+    await driver.screenshot('147-rail-unreadable-home');
 
     console.log(`[147-rail-unreadable] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {

@@ -57,6 +57,8 @@ export async function run() {
     await driver.eval((cfg) => {
       globalThis.__E2E_SOL_OWNER = null;
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: cfg.startLamports - cfg.sentLamports - cfg.feeLamports, token: null}),
         getBalance: () => ({value: cfg.startLamports - cfg.sentLamports - cfg.feeLamports}),
         // No USDC token account for this wallet → the USDC balance reads a KNOWN absent, and the
         // ATA's signature query returns nothing.

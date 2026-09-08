@@ -48,6 +48,8 @@ export async function run() {
     // account so both the sender's and the merchant's USDC ATAs exist (no create leg, no rent).
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: {amount: '2000000', decimals: 6}}),
         getGenesisHash: () => '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
         getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         sendTransaction: () => 'sig_' + Math.random().toString(36).slice(2, 12),

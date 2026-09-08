@@ -45,7 +45,7 @@ export async function run() {
   console.log('[155-first-run-backup-resume] setup (relay + web + browser)…');
   const env = await setup();
   try {
-    const {driver, webBaseURL} = env;
+    const {driver, webBaseURL, relayBaseURL} = env;
 
     await skipWalkthroughIfPresent(driver);
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-resume', {timeoutMs: 8_000});
@@ -60,8 +60,11 @@ export async function run() {
     console.log('[155-first-run-backup-resume] ✓ words on screen, no identity written');
 
     // THE KILL. A reload is exactly what the phone dying does to this page: every in-memory
-    // machine is gone and only what was persisted survives.
-    await driver.navigate(webBaseURL, '/', {timeoutMs: 8_000});
+    // machine is gone and only what was persisted survives. The `?relay=` override rides along
+    // because it is not app state — it is the harness telling the build which relay exists at all,
+    // and a bare `/` sends the reloaded app at the BAKED default (127.0.0.1:8787), whose refused
+    // polls the driver reports as unexpected page diagnostics.
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
 
     // 1 + 2: back ON the gate, with the same words.

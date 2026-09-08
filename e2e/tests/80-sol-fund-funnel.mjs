@@ -38,6 +38,8 @@ export async function run() {
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS = false;
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 0, token: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS ? {amount: '0', decimals: 6} : null}),
         getLatestBlockhash: () => ({context: {slot: 100}, value: {blockhash: '1'.repeat(32), lastValidBlockHeight: 999999}}),
         getBalance: () => ({value: 0}),
         getAccountInfo: () => ({value: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS
@@ -86,7 +88,10 @@ export async function run() {
 
     // ---- 3. Stub-fund SOL → create unlocks (one-tap) ----
     console.log('[80-sol-fund-funnel] stub SOL funding → create unlocks…');
-    await driver.eval(() => { globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 5000000000}); });
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getBalance = () => ({value: 5000000000});
+      globalThis.__DPAY_TEST_SOLANA_RPC_STUB.getMultipleAccounts = (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: globalThis.__DPAY_TEST_SOLANA_ATA_EXISTS ? {amount: '0', decimals: 6} : null});
+    });
     // The hatch switched the selected asset to SOL (goToDeposit) — re-select USDC to walk the
     // funnel as the user would (Balances → USDC → Pay).
     await openBalances(driver);

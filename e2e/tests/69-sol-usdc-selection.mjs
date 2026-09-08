@@ -40,6 +40,8 @@ export async function run() {
     // Stub: funded SOL (getBalance). No broadcast happens here.
     await driver.eval(() => {
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, {lamports: 5000000000, token: null}),
         getLatestBlockhash: () => ({value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         getMinimumBalanceForRentExemption: () => 1447680,
         sendTransaction: () => 'sig_unused',

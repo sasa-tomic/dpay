@@ -40,7 +40,7 @@ export async function run() {
   console.log('[156-restore-skips-practice] setup (relay + web + browser)…');
   const env = await setup();
   try {
-    const {driver, webBaseURL} = env;
+    const {driver, webBaseURL, relayBaseURL} = env;
 
     // Mint a real seed the honest way: create a wallet and read its own 24 words off the gate.
     await skipWalkthroughIfPresent(driver);
@@ -61,7 +61,7 @@ export async function run() {
 
     // A NEW device: nothing carried over, not even the walkthrough's own stamp.
     await driver.clearStorage();
-    await driver.navigate(webBaseURL, '/', {timeoutMs: 8_000});
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
     await skipWalkthroughIfPresent(driver);
 
@@ -85,7 +85,7 @@ export async function run() {
     // And it stays gone: the marker is persisted, so the next launch routes past it too.
     // `domcontentloaded` because the wallet's balance poll keeps the network busy — a networkidle
     // wait would time out on a perfectly healthy app.
-    await driver.navigate(webBaseURL, '/', {waitUntil: 'domcontentloaded', timeoutMs: 10_000});
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 10_000});
     await driver.waitReady({timeoutMs: 10_000});
     await driver.findByTestID('balance', {timeoutMs: 12_000});
     assert(!(await driver.isPresent('practice')), 'and it does not come back on the next launch');

@@ -148,7 +148,10 @@ export async function run() {
     });
     assert(kb.tag !== 'BODY' && kb.tag !== '', `Tab should focus a real element, got activeElement=${kb.tag || 'none'}`);
     assert(kb.outlineStyle === 'solid', `keyboard-focused <${kb.tag} role=${kb.role}> must paint the :focus-visible ring (outlineStyle "${kb.outlineStyle}")`);
-    assertIncludes(kb.outlineColor, '255, 90, 31', 'the focus ring must use the brand color #FF5A1F');
+    // The ring is `LIGHT.brand` (#D03F00) and is deliberately the SAME in both themes: a focus
+    // indicator must clear 3:1 on whatever it is drawn on, and this one value does on porcelain
+    // (4.13) and on the warm near-black (4.26). See the rule's comment in e2e/web/wallet.html.
+    assertIncludes(kb.outlineColor, '208, 63, 0', 'the focus ring must use the brand color #D03F00');
     console.log(`[14-keyboard] ✓ Tab focuses <${kb.tag} role=${kb.role}> with the brand focus ring`);
 
     await driver.eval(() => { (document.activeElement)?.blur?.(); });

@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 W, H = 512, 512
 BG = (10, 12, 17)        # #0a0c11
-BRAND = (255, 90, 31)    # #FF5A1F
+BRAND = (208, 63, 0)    # #D03F00 — app/config/palette.ts LIGHT.brand
 
 # Background with subtle radial glow
 img = Image.new('RGBA', (W, H), (*BG, 255))

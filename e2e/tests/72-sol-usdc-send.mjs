@@ -62,6 +62,8 @@ export async function run() {
       const st = {ataExists: false, createDelayMs: 2500, failCreate: false};
       globalThis.__DPAY_TEST_ATA_STATE = st;
       globalThis.__DPAY_TEST_SOLANA_RPC_STUB = {
+        // The balance poll: ONE getMultipleAccounts per tick for wallet+rails (harness/solaccounts.mjs).
+        getMultipleAccounts: (p) => globalThis.__DPAY_SOL_ACCOUNTS(p, st.ataExists ? {lamports: 5000000000, token: {amount: '2500000', decimals: 6}} : {lamports: 5000000000, token: null}),
         getGenesisHash: () => '5eykt4UsFv8PJdTREpY1vzqKqZKvdpKuc147dw2N9d',
         getLatestBlockhash: () => ({context: {slot: 250000000}, value: {blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 999999}}),
         getMinimumBalanceForRentExemption: () => 1447680,
