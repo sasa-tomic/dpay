@@ -185,6 +185,13 @@ After the fix, first run ends at **3 of 4** — `recoverySaved` ✓, `flowUnders
 **The app now opens on Home** (`Wallet`'s initial mode flips from `'pay'` to `'home'`) — §1 F2.
 Everything below is what Home then has to be worth landing on.
 
+**The dissent, and the mitigation that answers it (UX swarm 2026-09-08).** One of three reviewers
+argued against Home-as-landing on measured grounds: a reload lands on Pay today, so scan-to-pay is
+ONE gesture; landing on Home makes it two — a 100% increase on the core gesture, paid on every
+payment, by the user standing at a till. He named the thing that would make him withdraw the
+objection: **a persistent Scan affordance on Home**, so the till gesture stays one tap from cold
+start. Build that with this change — it is what lets the founder's direction cost nothing.
+
 Home keeps: headline, a NEW accounts affordance (`btn-home-accounts`, labelled with the account
 count, in the headline block), the action row, and **Activity raised from 3 rows to 5** — it is now
 the body of the screen, not a footer. The ACCOUNTS section leaves Home.

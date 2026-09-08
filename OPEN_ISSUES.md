@@ -239,6 +239,48 @@ per-rail balance polls into 1, and collapsing `getSolanaTokenBalance`'s 2 round 
 | S2 | Batch the balance polls (5→1/tick) and collapse the per-mint double round trip | 6 | S |
 | S3 | The offline e2e harness stubs the RPC, so it can see none of this. A request-budget assertion (a flow that fails if a cold load exceeds N requests) is the only thing that would have caught it. | 6 | M |
 
+## UX swarm 2026-09-08 — three independent reviewers, live build
+
+Three reviewers drove the deployed wallet in separate browsers with no sight of each other: a
+newcomer/scam lens, a returning-user/efficiency lens, an IA lens. Verdicts on the four reconstructed
+decisions are in [`docs/specs/2026-09-07-ux-decisions.md`](docs/specs/2026-09-07-ux-decisions.md);
+the Home redesign is in
+[`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md). Only
+the defect inventory lives here.
+
+**The finding all three reached independently, and the one to fix first:** every path in the app
+converges on a single node — *"Show my VCHF address."* Pay, Convert, Add money and Receive all
+dead-end there on a new wallet, while **∂100 of spendable practice money sits one tap away and is
+never named**. That is the "looks like scam" mechanism stated as a graph rather than a feeling, and
+it is not a copy problem: rewriting every sentence leaves the shape intact.
+
+| # | Defect | value | effort |
+|---|--------|------:|:------:|
+| X1 | **All four Home actions dead-end on a deposit request** while the wallet holds ∂100 DEMO it can actually spend. The fund gate names the address route and never names the funded account the user already has. Fixing this is the root of the scam read. | 10 | M |
+| X2 | **Home is ~80% currency list** — measured 1308/1652 px and 1347/1691 px by two reviewers independently, nine of ten rows zero or unreadable. Covered by the Home redesign (item 4c). | 9 | M |
+| X3 | **The scanner is fund-gated on the LOCALLY SELECTED asset**, so a returning traveller holding the right asset cannot even *read* a merchant's request when a different asset is selected. The merchant's QR names the asset — read it first, check the balance at Approve, where the low-balance backstop already exists. | 9 | M |
+| X4 | **The home currency is silently overwritten** by any account-row tap or receive-rail toggle, so the setting the whole onboarding exists to establish does not hold. One reviewer watched the headline flip to `USDC·Sol balance / —` after a toggle in an unrelated sheet. | 8 | S |
+| X5 | **The disabled Continue on the currency chooser swallows taps in silence** — 40% opacity in the primary colour, looks pressable, no response, no hint. A dead end with no instruction. | 7 | S |
+| X6 | **Transaction rows are dead** — no press handler, no receipt, no memo/`ref`, no block index, no copy-proof. This is the merchant-reconciliation and dispute path and it does not exist. | 8 | M |
+| X7 | **The header balance chevron is a false affordance** — a `⌄` beside a balance means "switch account" in every wallet; here it navigates to Home and on Home it does nothing at all. | 7 | S |
+| X8 | **The balance is printed twice, ~90–250 px apart** — header eyebrow+amount and Home headline are byte-identical strings in one viewport. | 6 | S |
+| X9 | **One rail's outage is rendered N times** — the Solana banner appears verbatim on all three Solana rows, ~120 words of alarm text. One network → one line, with a retry. | 7 | S |
+| X10 | **The offline-first web wallet cannot open offline** — no service worker (`getRegistrations()` → 0), no manifest; a reload with the network down gives the browser's dinosaur. The one-line pitch is "your phone never needs a connection". | 8 | M |
+| X11 | **No URL routing** — every tab and sheet is `/wallet`, browser Back ejects the user out of the wallet (measured: Settings stayed open while the URL jumped to a previously-visited pay link), no tab is deep-linkable, refresh always dumps you on the landing screen. | 7 | M |
+| X12 | **Fonts ship unsubsetted and uncompressed** — 338 KB of TTF with `encodedBodySize === decodedBodySize` on all four (one file is 130 KB), blocking text paint. WOFF2 subsets cut ~230 KB. The cheapest perceived-speed win available. | 7 | S |
+| X13 | **`fundsReady` is satisfied by play money.** The ∂0.00 case was fixed 2026-09-08, but a wallet holding only DEMO still stamps "FUNDS LOADED" on a trip-readiness check while every real currency reads 0.00. | 7 | S |
+| X14 | **The trip strip is on all four tabs** with no dismiss — a first-run progress meter used as global chrome, telling the user on every screen that they owe the app something. | 6 | S |
+| X15 | **Convert holds a top-level Home slot while being inert for 8 of 10 accounts** (an honest but action-less "not available for X yet" panel) and blocked on the other two. Relocate to the per-asset surface and to the moment a scanned request names an asset the user does not hold — which is the founder's own recipient-side framing. | 7 | S |
+| X16 | **Three unprompted denials in the first six screens** ("does not deposit, buy, or move any money" / "never asks you to deposit or buy anything" / "does not move or convert funds"), plus one on every onboarding frame and every deposit sheet. Each sentence is true; the density is a scam signature. Legitimate products state what they do. | 6 | S |
+| X17 | **Scanner body copy fails WCAG AA** — measured 3.0:1 (`rgb(103,98,87)` on `rgb(23,21,15)`), needs 4.5:1. | 6 | S |
+| X18 | **The header wordmark, gear and theme button collide**, with "ACCOUNT / name" overlapping the wordmark's descender — on every screen, light and dark. | 6 | S |
+| X19 | **8-decimal amounts on the pay-link review** ("Pay 1.25000000 VCHF") where the header and request QR both correctly show 2. | 6 | S |
+| X20 | **Self-send is not warned on the pay-link path**, while `CLAUDE.md` documents that it warns on Send-to-address. Two paths, one rule, one of them missing. | 6 | S |
+| X21 | **Keyboard shortcuts are undiscoverable on the phone-width web wallet** — five exist (`P R L A T`); the hint component returns null below 700 px and the bottom tab bar never passes one. Enter does not submit the Receive amount; Esc does not close Convert though sheets advertise it. | 6 | S |
+| X22 | **DEMO sits at the top of the account list with the largest number on screen** (∂100.00, above BTC and USDC) — play money presented as the user's biggest holding. Sort by home currency, then balance; DEMO under its own practice divider. | 6 | S |
+| X23 | **The account row's chain subtitle may contradict the deposit sheet** — the row says `USDC · Ethereum` while the sheet offers an Internet Computer principal. Both are reachable funding routes for ckUSDC, so this needs verifying before changing; if a user can read it as "send USDC on Ethereum to this IC principal", it is money-loss-shaped. | 7 | S |
+| X24 | **Large dead bands remain in the education flow** — ~350–400 px per walkthrough scene, ~330 px on the rehearsal, and the Pay landing renders 109 px of content in a 915 px viewport. (The form surfaces were fixed 2026-09-08; these are the moment screens.) | 5 | S |
+
 ## Measured UI defects (driven in a real browser 2026-09-08, not code-read)
 
 Everything here was reproduced by driving the shipped app. Fixes in flight are struck as they land.
