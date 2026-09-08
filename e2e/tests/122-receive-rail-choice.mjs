@@ -2,7 +2,7 @@
 //
 // A multi-rail home currency (USD = ckUSDC@IC + USDC@Solana) defaults Receive ▸ "My address" to
 // the wallet's OWN pick (chooseRail — preference when nothing is funded: ckUSDC), NAMES the rail
-// and the reason with the chooser's exact vocabulary, states the rail's fee fact in the rail's OWN
+// (docs/specs/2026-09-07-ux-decisions.md), states the rail's fee fact in the rail's OWN
 // unit (never converted, never merged with the sibling's), and offers the sibling rail's OWN
 // address one toggle away with ITS fee fact. The toggle flip keeps the "My address" sub-mode
 // mounted (it is the rail switch, not the Home accounts row selection that resets sub-modes) — the
@@ -23,7 +23,7 @@ export const meta = {
   name: 'receive-rail-choice',
   journey: 'deposit',
   covers: ['home-currency', 'receive', 'rails', 'ckusdc', 'sol-usdc', 'vchf', 'group-model'],
-  verifies: 'Receive ▸ "My address" on a multi-rail home currency defaults to the wallet\'s rail pick with reason + the rail\'s own fee fact, exposes the sibling rail\'s own address + fee one toggle away without leaving the sub-mode, and asserts both addresses belong to the user; single-rail CHF renders with no rail disclosure.',
+  verifies: 'Receive ▸ "My address" on a multi-rail home currency defaults to the wallet\'s rail pick with no "default rail" suffix and the rail\'s own fee fact, exposes the sibling rail\'s own address + fee one toggle away without leaving the sub-mode, and asserts both addresses belong to the user; single-rail CHF renders with no rail disclosure.',
   timeoutMs: 30000,
 };
 
@@ -66,13 +66,14 @@ export async function run() {
       };
     });
 
-    // 1. Receive ▸ "My address" defaults to the pick (ckUSDC, reason: preference) with its fee fact.
+    // 1. Receive ▸ "My address" defaults to the pick (ckUSDC, reason: preference —
+    //    docs/specs/2026-09-07-ux-decisions.md).
     console.log('[122-receive-rail-choice] opening Receive ▸ My address on the default rail…');
     await driver.click('tab-receive');
     await driver.click('btn-receive-address');
     const why1 = await driver.readText('receive-rail-why');
     assertIncludes(why1, 'ckUSDC · Internet Computer', 'the default rail is named');
-    assertIncludes(why1, "dpay's default rail", 'the reason is disclosed (preference; nothing funded)');
+    assert(!why1.includes('—'), `a pure preference adds no reason suffix, got "${why1}"`);
     const fee1 = await driver.readText('receive-rail-fee');
     assertIncludes(fee1, 'Internet Computer', 'the fee line names the rail\'s network');
     assertIncludes(fee1, 'Fee 0.010000 ckUSDC', 'the fee is stated in the rail\'s own unit (0.01 ckUSDC, 6 decimals)');

@@ -131,7 +131,9 @@ function runCargo(args, timeoutMs) {
  *
  * Stateless by design: POSTs a deliberately-invalid account (4 hex bytes, not 32) so the route
  * returns `400 "account must be 32 bytes hex"` WITHOUT touching the ledger. A `404` means the route
- * is absent → the binary lacks `test-helpers`. Returns true iff the route is present.
+ * is absent → the binary lacks `test-helpers`. Returns true iff the route is present. (A relay
+ * whose faucet is switched OFF answers 503 before it looks at the account — also "present", which
+ * is what this probe asks; the harness always spawns with it on.)
  */
 async function probeFaucetRoute(baseURL, timeoutMs = 3_000) {
   const ctrl = new AbortController();
@@ -208,7 +210,7 @@ async function spawnOnce(opts = {}) {
   const port = opts.port ?? await pickFreePort();
   const addr = `127.0.0.1:${port}`;
   const baseURL = `http://${addr}`;
-  console.log(`[relay] spawning ${RELAY_BIN} at ${addr} (FakeLedger, faucet on)…`);
+  console.log(`[relay] spawning ${RELAY_BIN} at ${addr} (FakeLedger, faucet on, till ${opts.till === false ? 'off' : 'on'})…`);
 
   const env = {
     ...process.env,
@@ -224,7 +226,7 @@ async function spawnOnce(opts = {}) {
     // 114-116 ring up a real signed charge on `POST /api/v1/till`, pay it with a real signed VCHF
     // transfer, and watch `GET /api/v1/till/{id}` credit it. Enabling it costs the other flows
     // nothing — the till's payer-facing routes are shadowed by each OCP flow's own fetch stub.
-    DPAY_ENABLE_TILL: 'true',
+    DPAY_ENABLE_TILL: opts.till === false ? 'false' : 'true',
     // Marker so a future relay feature can detect the e2e harness (no behavior change today).
     DPAY_E2E: '1',
     // Clamp noisy logs (the binary's banner is enough).

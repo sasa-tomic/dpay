@@ -1,13 +1,13 @@
-// Flow 13 — Offline handling: graceful, logged, no crash/blank, with a retry path.
+// Flow 13 — Offline handling: graceful, logged, no crash/blank, honest failure mode.
 //
-// After onboarding against a reachable relay, this flow opens the Settings sheet, points the app at
-// an UNREACHABLE relay (a genuinely-closed port), and triggers a faucet top-up. The app's fetch
-// fails fast with ECONNREFUSED (the REAL "relay unreachable" failure mode); the topUp path catches
-// it and surfaces a clear, honest "Offline — try again when connected" — NOT a crash, NOT a blank
-// screen, NOT a false success. After closing Settings, the wallet stays rendered (balance still
-// visible) and the header shows the offline indicator ("~ approx." — substring 'approx.'; the full
-// label is "~ DEMO approx." after D3 asset-prefixing). Every network op has a timeout
-// (AbortController); failures are logged by the driver (requestfailed) with context.
+// After onboarding against a reachable relay, this flow retargets the app at an UNREACHABLE
+// relay (a genuinely-closed port). The balance poll then fails fast with ECONNREFUSED (the REAL
+// "relay unreachable" failure mode) and the app degrades honestly: the header shows the offline
+// indicator ("~ approx."), the wallet stays rendered, nothing crashes or blanks.
+//
+// Since the capability work (2026-09-07) the DEMO top-up is HIDDEN while the relay is
+// unreachable — `relayCapabilities` fails closed, so the wallet stops advertising a faucet it
+// cannot reach instead of offering a button that can only fail. This flow pins that too.
 //
 // DEAD RELAY CHOICE (NIT 1a-i): the harness grabs a free TCP port (binds to :0 then immediately
 // closes the socket) so NOTHING listens on it → a connect yields ECONNREFUSED. This is the real
@@ -17,7 +17,7 @@
 // unsafe-port block, to lock in the right reason.)
 //
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
-// Balances), `btn-topup` (inside the Home tab's accounts list).
+// Balances), `btn-topup` (inside the Home tab's accounts list — ABSENT offline).
 import { setup, assert, onboardWallet, openBalances, goOffline } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -27,8 +27,8 @@ export const meta = {
   id: '13',
   name: 'offline',
   journey: 'system',
-  covers: ['offline', 'econnrefused', 'graceful', 'retry', 'right-reason'],
-  verifies: 'Relay down → faucet top-up surfaces honest \'Offline\' (ECONNREFUSED, not unsafe-port), no crash; retry path.',
+  covers: ['offline', 'econnrefused', 'graceful', 'capability-fail-closed', 'right-reason'],
+  verifies: 'Relay down → the app degrades honestly (header "~ approx.", wallet rendered, no crash), balance requests fail for the right reason (ECONNREFUSED, not unsafe-port), and the DEMO top-up is hidden rather than advertised (capability fail-closed).',
   timeoutMs: 20000,
 };
 
@@ -46,7 +46,7 @@ export async function run() {
     // Retarget the app at a GENUINELY-DEAD relay (a port nothing listens on → ECONNREFUSED, the real
     // "relay unreachable" failure mode, not an unsafe-port artifact). `goOffline` picks the port,
     // registers the dead origin with the driver (so ECONNREFUSED doesn't fail-close the flow), and
-    // retargets via Settings. The faucet below then fires against this dead relay.
+    // retargets via Settings. The balance poll underneath now fires against this dead relay.
     console.log('[13-offline] going offline (dead relay)…');
     await goOffline(driver);
 
@@ -54,23 +54,23 @@ export async function run() {
     // reason (ECONNREFUSED — a real connection refusal), not the ERR_UNSAFE_PORT artifact.
     const failures = driver.recordRequestFailures();
 
-    // Trigger a faucet top-up against the dead relay from the Home tab's accounts list → the app
-    // catches the failure and surfaces a clear, honest offline message (NOT a false success, NOT a
-    // crash).
-    console.log('[13-offline] opening Home (accounts) to trigger the faucet against the dead relay…');
+    // The capability-fail-closed pin: with the relay unreachable, the Home accounts list must NOT
+    // advertise the DEMO faucet — a hidden action instead of a guaranteed failure.
+    console.log('[13-offline] opening Home (accounts) — the DEMO top-up must be hidden…');
     await openBalances(driver);
-    console.log('[13-offline] clicking btn-topup against the dead relay…');
-    await driver.click('btn-topup', { timeoutMs: 4_000 });
-    const offlineMsg = await driver.waitForText('Offline', { timeoutMs: 10_000 });
-    const body = await driver.bodyText();
-    assert(offlineMsg, `the app should surface a clear offline message. body excerpt:\n${body.slice(0, 500)}`);
-    console.log('[13-offline] ✓ app shows an honest offline message (with a retry path)');
+    assert(!(await driver.isPresent('btn-topup')),
+      'the DEMO top-up must be hidden while the relay is unreachable (capability fail-closed)');
+    console.log('[13-offline] ✓ DEMO top-up hidden, not advertised (fail-closed)');
 
-    // The RIGHT-REASON gate: the faucet request to the dead relay must have failed with a
+    // The RIGHT-REASON gate: the balance poll to the dead relay must have failed with a
     // CONNECTION error (refused), NOT an unsafe-port block. This locks the test to the real failure
     // mode instead of a Chrome port-policy artifact.
-    const failed = failures().filter((f) => f.url.includes('/api/v1/faucet'));
-    assert(failed.length > 0, `the faucet request to the dead relay must have failed (got ${failures().length} failed reqs)`);
+    let failed = [];
+    for (let i = 0; i < 20 && failed.length === 0; i++) {
+      failed = failures().filter((f) => f.url.includes('/api/v1/balances'));
+      if (failed.length === 0) await new Promise((r) => setTimeout(r, 500));
+    }
+    assert(failed.length > 0, `the balance poll to the dead relay must have failed (got ${failures().length} failed reqs)`);
     const errText = failed[0].errorText;
     assert(/CONNECTION|NETWORK|REFUSED|FAILED/i.test(errText),
       `dead relay should fail with a connection error, got "${errText}"`);
@@ -78,11 +78,9 @@ export async function run() {
       `dead relay must NOT be an unsafe-port artifact (that's the wrong failure mode), got "${errText}"`);
     console.log(`[13-offline] ✓ dead relay failed for the right reason: ${errText}`);
 
-    // Back to the wallet surface — the balance poll has been failing underneath; the header should
-    // now show the offline indicator ("~ DEMO approx." — the asset name is prefixed after D3;
-    // substring 'approx.' is what the assertion matches).
-    console.log('[13-offline] back to Pay to verify the wallet surface…');
-    await driver.click('tab-pay', { timeoutMs: 4_000 });
+    // The header should now show the offline indicator ("~ DEMO approx." — the asset name is
+    // prefixed after D3; substring 'approx.' is what the assertion matches).
+    console.log('[13-offline] verifying the offline indicator…');
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
     assert(approx, 'the header should show the offline indicator ("~ DEMO approx.") once the relay is unreachable');
     console.log('[13-offline] ✓ header shows the offline indicator (graceful, no crash)');

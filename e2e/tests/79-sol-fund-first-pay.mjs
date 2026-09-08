@@ -58,7 +58,7 @@ export async function run() {
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const panel = await driver.findByTestID('sol-pay-fund', {timeoutMs: 10_000});
     const panelText = await panel.evaluate((n) => n.textContent);
-    assertIncludes(panelText, 'Add SOL to pay', 'gate headline');
+    assertIncludes(panelText, 'No SOL available', 'gate headline');
     assertIncludes(panelText, 'Show my SOL address', 'primary deposit action');
     const scannerLeak = await driver.eval(() => !!document.querySelector('[data-testid="sol-pay-scan"]'));
     assert(!scannerLeak, 'the scanner must NOT render while gated (zero balance = doomed signature)');
@@ -97,7 +97,7 @@ export async function run() {
     await driver.findByTestID('sol-pay-fund', {timeoutMs: 10_000});
     const backPanel = await driver.findByTestID('sol-pay-fund', {timeoutMs: 5_000});
     const backText = await backPanel.evaluate((n) => n.textContent);
-    assertIncludes(backText, 'Add USDC to pay', 'resume landed on the USDC Pay tab');
+    assertIncludes(backText, 'No USDC available', 'resume landed on the USDC Pay tab');
     console.log('[79-sol-fund-first-pay] ✓ resume funnel: USDC origin → SOL deposit → back to USDC pay');
     // Now the plain zero→scan release from the SOL rail (original invariant).
     await openBalances(driver);
@@ -122,7 +122,7 @@ export async function run() {
     await driver.click('tab-pay', {timeoutMs: 5_000});
     const usdcPanel = await driver.findByTestID('sol-pay-fund', {timeoutMs: 10_000});
     const usdcText = await usdcPanel.evaluate((n) => n.textContent);
-    assertIncludes(usdcText, 'Add USDC to pay', 'USDC gate headline');
+    assertIncludes(usdcText, 'No USDC available', 'USDC gate headline');
     assertIncludes(usdcText, 'Show my USDC address', 'USDC deposit primary');
     assertIncludes(usdcText, 'Show my SOL address', 'SOL-address secondary (fees note pair)');
     const scannerLeak2 = await driver.eval(() => !!document.querySelector('[data-testid="sol-pay-scan"]'));

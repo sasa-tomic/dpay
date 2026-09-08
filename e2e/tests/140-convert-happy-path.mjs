@@ -104,7 +104,12 @@ export async function run() {
     await driver.findByTestID('convert-quote-source', { timeoutMs: 10_000 });
 
     const oracle = await relayQuote(relayBaseURL, ICP_LEDGER, VCHF_LEDGER, AMOUNT_IN);
-    assertEq(oracle.zero_for_one, true, 'relay derives zero_for_one from the pool\'s own pair (ICP is token0)');
+    // The relay derives this from the POOL's own metadata, not from a pin. On the venue as
+    // MEASURED 2026-09-08 (token0 = VCHF, token1 = ICP) an ICP-in trade is token1-in ⇒ FALSE.
+    // The 2026-09-07 build pinned the pair backwards, so this bit read `true` in production and
+    // every ICP→VCHF quote came back at the VCHF→ICP rate (~5.9x against the user).
+    assertEq(oracle.zero_for_one, false, 'relay derives zero_for_one from the pool\'s own pair (ICP is token1)');
+    assertEq(oracle.fee_millionths, 3000, 'the venue\'s OWN fee tier is echoed by the relay, not claimed by dpay');
     const gross = BigInt(oracle.amount_out);
     const minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // the core's exact floor math
     const net = gross - VCHF_FEE;
@@ -129,7 +134,14 @@ export async function run() {
     assertIncludes(await driver.readText('convert-out-fee'), `${fmt8(VCHF_FEE)} VCHF`, `output fee line is the catalog fee (${fmt8(VCHF_FEE)} VCHF)`);
     assertIncludes(await driver.readText('convert-dpay-fee'), 'dpay charges nothing and is paid nothing', 'dpay-paid-nothing line');
 
-    assertIncludes(await driver.readText('convert-impact'), 'Price impact', 'price impact renders from the quote');
+    // A NUMBER, not the unavailable sentence. "Price impact" alone matched both, which is how
+    // "not measurable at this size" shipped as the permanent state of this line: the reference
+    // trade was three significant digits wide, so its own quantization error (0.23%) swamped the
+    // impact being measured and the comparison was discarded at EVERY trade size (fixed
+    // 2026-09-08 — config/convert.ts CONVERT_IMPACT_REF_AMOUNT_IN + CONVERT_IMPACT_PRICE_SCALE).
+    const impact = await driver.readText('convert-impact');
+    assertIncludes(impact, 'Price impact', 'price impact renders from the quote');
+    assert(/Price impact: \d+(\.\d+)?%/.test(impact), `price impact is a measured percentage, not the unavailable line (${impact})`);
 
     const minOutLine = await driver.readText('convert-min-out');
     assertIncludes(minOutLine, `${fmt8(minOut)} VCHF`, `minimum-you'll-receive is the core's min-out at 1% (${fmt8(minOut)} VCHF)`);

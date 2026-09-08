@@ -4,9 +4,9 @@
  *   1. walkthrough → create → backup gate (the ritual sentence reframes the same mandatory
  *      gate — checkbox + disabled Continue, EXACTLY as strong as before).
  *   2. Continue → RECOVERY SAVED ink-stamp beat (~750ms) → auto-advance (ZERO extra taps).
- *   3. The payment rehearsal mounts: 3 beats (request / approve / settle), each with its
- *      testID + verbatim education copy; the offline punchline pins the comprehension truth.
- *   4. "Try with demo funds" → the wallet lands on the Pay tab, funded.
+ *   3. The payment rehearsal mounts: concrete two-phone DEMO Receive / Pay / switch-role steps,
+ *      each with its testID + verbatim education copy.
+ *   4. "Choose my currency" → explicit currency choice → the wallet lands on Home, funded.
  *   5. recoverySaved + flowUnderstood stamps persist in the journey store.
  *
  * This is the ONLY flow that drives the interstitial instead of dismissing it — every other
@@ -24,13 +24,13 @@ export const meta = {
     'recovery-ritual-sentence', 'mnemonic-backup-checkbox', 'btn-mnemonic-continue',
     'recovery-saved-stamp', 'rehearsal', 'rehearsal-step-{1..3}', 'rehearsal-body-{1..3}',
     'rehearsal-punchline', 'btn-rehearsal-next', 'btn-rehearsal-skip',
-    'flowUnderstood-stamp', 'recoverySaved-stamp', 'pay-tab-default-landing',
+    'flowUnderstood-stamp', 'recoverySaved-stamp', 'first-run-home-landing',
   ],
   verifies: [
     'the backup gate stays MANDATORY (ritual sentence reframes, never weakens: checkbox + disabled Continue)',
     'RECOVERY SAVED stamp beat plays after the faucet and auto-advances (no extra tap)',
-    'the ONE-page rehearsal shows all 3 steps together with verbatim education copy + the offline punchline (mounting awards flowUnderstood)',
-    'Try with demo funds lands on the funded Pay surface',
+    'the ONE-page rehearsal shows all 3 concrete two-phone DEMO steps together with verbatim education copy and states DEMO has no cash value',
+    'Choose my currency leads through explicit currency choice to the funded Home surface rather than a funding gate',
     'recoverySaved + flowUnderstood persist in dpay.journey.v1',
   ],
   timeoutMs: 90_000,
@@ -89,30 +89,34 @@ export async function run() {
     // host's frame rate; this is the same point in the animation whatever the load.
     await driver.waitAtRest('rehearsal-body-3', { timeoutMs: 8_000 });
     await driver.screenshot('90-rehearsal-page');
-    // Explore wallet is available on the page.
+    // The always-available Skip practice exit is present.
     await driver.findByTestID('btn-rehearsal-skip', { timeoutMs: 4_000 });
     const punch = await driver.readText('rehearsal-punchline');
-    assertIncludes(punch, 'offline', 'the punchline names the offline truth');
+    assertIncludes(punch, 'no cash value', 'the punchline states DEMO is valueless practice money');
     assertEq(punch, M.education.rehearsal.punchline, 'punchline verbatim');
-    console.log('[90-rehearsal] ✓ one page: 3 steps + offline punchline pinned');
+    console.log('[90-rehearsal] ✓ one page: two-phone DEMO practice + no-cash-value truth pinned');
 
     // 5. Page-mount award: flowUnderstood persists (idempotent, once).
     const journeyMid = await driver.eval(() => localStorage.getItem('dpay.journey.v1'));
     assertIncludes(journeyMid, 'flowUnderstood', 'mounting the rehearsal page awards flowUnderstood');
     assertIncludes(journeyMid, 'recoverySaved', 'the recovery beat awarded recoverySaved');
 
-    // 6. Try with demo funds → the wallet lands FUNDED on the Pay surface (default tab).
-    await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
+    // 6. Choose a currency → the fresh wallet lands FUNDED on Home, not the Pay funding gate.
+    await driver.waitForText('Choose my currency', { timeoutMs: 4_000 });
     await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 });
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
     await chooseHomeCurrencyIfPresent(driver);
-    // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
+    // The first currency choice lands on HOME (the bottom Tab styles `active` but exposes no
+    // aria-selected, so pin the SURFACE: `home-accounts` is mounted only by the Home tab).
+    await driver.findByTestID('home-accounts', { timeoutMs: 8_000 });
+    assert(!(await driver.isPresent('pay-fund')), 'first currency choice must not land on the Pay funding gate');
+    // This flow also proves the advertised test faucet still funded DEMO when the capability is on.
     await selectDemoAsset(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
-    const payScan = await driver.eval(() => !!document.querySelector('[data-testid="btn-settings"]'));
-    assert(payScan, 'wallet chrome present (Pay surface is the default landing tab)');
-    console.log('[90-rehearsal] ✓ Try with demo funds → funded wallet on Pay');
+    const walletChrome = await driver.eval(() => !!document.querySelector('[data-testid="btn-settings"]'));
+    assert(walletChrome, 'wallet chrome present');
+    console.log('[90-rehearsal] ✓ explicit currency choice → funded wallet, with first landing on Home');
 
     // 7. Both stamps persisted through the transition into the wallet.
     const journey = await driver.eval(() => localStorage.getItem('dpay.journey.v1'));

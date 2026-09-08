@@ -2,8 +2,8 @@
 // (Objective 2, docs/specs/2026-09-04-currency-first-wallet-plan.md).
 //
 // Flow 118 pinned that a row names the ledger token on its settlement chain; this flow pins that a
-// row names EVERY rail of the currency, with the rail dpay would pick listed first and its reason
-// attached. What each assertion protects:
+// row names EVERY rail of the currency, with the rail dpay would pick listed first. What each
+// assertion protects:
 //
 //   * USD is a TWO-rail currency here (ckUSDC on the Internet Computer, USDC on Solana) — a row
 //     that named only ckUSDC would present "US dollars" as one token, which is exactly the merged-
@@ -12,11 +12,10 @@
 //   * CHF is a ONE-rail currency (VCHF on the Internet Computer) — its row must not carry a
 //     Solana line that would promise a rail the catalog does not have.
 //   * EUR is a TWO-rail currency too (EURC on Solana, VEUR on the Internet Computer — the
-//     dual-rail addition), and its preferred rail is the DEEP-liquidity one: EURC first with
-//     its reason, VEUR named after it. Preference is a catalog-backed statement, not an
+//     dual-rail addition), and its preferred rail is the DEEP-liquidity one: EURC first, then
+//     VEUR. Preference is a catalog-backed statement, not an
 //     accident of enumeration.
-//   * The preferred rail is FIRST and says WHY (chooseRail, reason 'preference' on a fresh wallet
-//     with no balances) — the choice the wallet will make is stated before the user commits.
+//   * The preferred rail is FIRST, without exposing the internal “dpay default rail” policy label.
 //   * Settings shows the same group shape for the main currency, so "Main currency: USD" there
 //     never reads as one token either.
 //   * The byte-stable chooser testIDs still drive the flow (home-currency-<CCY>,
@@ -30,7 +29,7 @@ export const meta = {
   name: 'home-currency-rails',
   journey: 'onboard',
   covers: ['home-currency', 'onboard', 'ckusdc', 'solana-usdc', 'eur', 'eurc', 'veur', 'settings', 'group-model'],
-  verifies: 'The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; EUR: EURC · Solana first — the deep-liquidity preference — then VEUR · Internet Computer; CHF: VCHF only), preferred rail first with its reason, Settings shows the same group for the main currency, and Continue still works.',
+  verifies: 'The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; EUR: EURC · Solana first — the deep-liquidity preference — then VEUR · Internet Computer; CHF: VCHF only), keeps the preferred rail first without a “dpay default rail” suffix, Settings shows the same group for the main currency, and Continue still works.',
   timeoutMs: 30000,
 };
 
@@ -53,17 +52,17 @@ export async function run() {
     await skipRehearsalIfPresent(driver);
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
 
-    // --- 2. the USD row names BOTH rails, preferred first, with its reason ----------------------
+    // --- 2. the USD row names BOTH rails, preferred first ---------------------------------------
     const usdRow = await driver.readText('home-currency-USD');
     assertIncludes(usdRow, 'ckUSDC · Internet Computer',
       'the USD row must name the IC rail as ledger token · settlement chain');
     assertIncludes(usdRow, 'USDC · Solana',
       'the USD row must ALSO name the Solana rail — USD is a two-rail currency, and hiding one would read as one merged balance');
-    assertIncludes(usdRow, "ckUSDC · Internet Computer — dpay's default rail",
-      'the preferred rail comes first and states its reason (chooseRail: preference on a fresh wallet)');
+    assert(!usdRow.includes("dpay's default rail"),
+      `the chooser must not expose its internal preference label. Got: ${JSON.stringify(usdRow)}`);
     assert(usdRow.indexOf('ckUSDC') < usdRow.indexOf('USDC · Solana'),
       `the preferred rail must be listed first. Got: ${JSON.stringify(usdRow)}`);
-    console.log('[120-home-currency-rails] ✓ USD row names both rails, preferred first with its reason');
+    console.log('[120-home-currency-rails] ✓ USD row names both rails, preferred first without policy jargon');
 
     // --- 2b. the EUR row names BOTH rails, deep-liquidity EURC preferred first -------------------
     const eurRow = await driver.readText('home-currency-EUR');
@@ -71,8 +70,8 @@ export async function run() {
       'the EUR row names the Solana rail as ledger token · settlement chain');
     assertIncludes(eurRow, 'VEUR · Internet Computer',
       'the EUR row ALSO names the IC rail — EUR is a two-rail currency');
-    assertIncludes(eurRow, "EURC · Solana — dpay's default rail",
-      'the preferred EUR rail is the deep-liquidity one (EURC), first with its reason');
+    assert(!eurRow.includes("dpay's default rail"),
+      `the EUR row must not expose the internal preference label. Got: ${JSON.stringify(eurRow)}`);
     assert(eurRow.indexOf('EURC') < eurRow.indexOf('VEUR'),
       `the preferred EUR rail must be listed first. Got: ${JSON.stringify(eurRow)}`);
     console.log('[120-home-currency-rails] ✓ EUR row names both rails, EURC preferred first');

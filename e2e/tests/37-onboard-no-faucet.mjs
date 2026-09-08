@@ -1,15 +1,14 @@
-// Flow 37 — Onboarding-time faucet failure: onboard against a DEAD relay → wallet created with $0
-// AND an honest offline indicator (no fake funding, no crash, no stall).
+// Flow 37 — Onboarding against a DEAD relay: wallet creation never asks for or promises funding,
+// still reaches the wallet with $0, and shows an honest offline indicator.
 //
 // Onboarding's `create()` (Onboarding.tsx) generates the on-device keypair + persists the identity,
-// then fires a BEST-EFFORT faucet POST bounded by a 4s timeout. If the relay is unreachable the
-// faucet throw is CAUGHT and SURFACED: instead of silently transitioning to the wallet at $0, the
-// app shows an honest "starter funds couldn't be added" message + a "Continue" button so the user
-// explicitly proceeds knowing starter funds weren't added (then the wallet mounts). This flow proves
-// that contract end-to-end against the REAL failure mode (ECONNREFUSED to a genuinely-closed port,
-// not Chrome's ERR_UNSAFE_PORT artifact):
+// then discovers relay capabilities. If the relay is unreachable, capabilities fail closed and no
+// speculative faucet POST is made. This flow proves that contract end-to-end:
 //   - the wallet IS created (identity persisted, header username renders, balance element mounts);
-//   - the faucet request fails for the RIGHT reason (a connection refusal);
+//   - capability discovery DID reach the dead relay and failed for the RIGHT reason (a connection
+//     refusal) — the gate that separates "asked and was refused" from "never asked because the page
+//     never loaded", which is the only thing that makes the no-faucet assertion below mean anything;
+//   - NO faucet request is made at all;
 //   - the header NEVER shows ∂100.00 (the funded happy path) — it shows the honest offline state
 //     ("~ … approx." label + "—" amount, because the balance poll also can't reach the dead relay);
 //   - the account genuinely holds $0 on the real ledger (it was never funded anywhere).
@@ -19,7 +18,7 @@
 //
 // Selector contract: `balance` (header balance Pressable), `header-who` (username), the offline
 // label "~ DEMO approx." (Wallet.tsx renders it when `online === false`; asset-name-prefixed after D3).
-import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled, skipWalkthroughIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
+import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -28,8 +27,8 @@ export const meta = {
   id: '37',
   name: 'onboard-no-faucet',
   journey: 'onboard',
-  covers: ['onboard', 'faucet-failure', 'offline', 'dead-relay', 'right-reason', 'zero-balance'],
-  verifies: 'Onboard against a dead relay → faucet failure surfaces an honest "Continue" prompt (not a silent $0 transition), wallet created with $0 (∂100 never shown), honest "~ … approx." offline indicator, faucet fails with ECONNREFUSED.',
+  covers: ['onboard', 'capability-failure', 'offline', 'dead-relay', 'right-reason', 'zero-balance', 'no-funding-solicitation'],
+  verifies: 'Onboard against a dead relay → capability discovery reaches the relay and fails with a connection refusal (not an unsafe-port artifact), no faucet request follows, wallet is created with $0 (∂100 never shown), and the balance carries the honest offline indicator.',
   timeoutMs: 20000,
 };
 
@@ -46,36 +45,32 @@ export async function run() {
     const DEAD_RELAY = `http://127.0.0.1:${deadPort}`;
     driver.allowRequestFailuresFrom(DEAD_RELAY);
 
-    // Load the app against the DEAD relay from the start (the `?relay=` query is read at module load
-    // → Onboarding's create() will POST the faucet to the dead relay). setup() first navigated to the
+    // Record BEFORE the navigate: Onboarding's capability probe fires on mount, so a recorder
+    // installed after waitReady() could miss the very request this flow needs to see fail.
+    const failures = driver.recordRequestFailures();
+
+    // Load the app against the DEAD relay from the start (the `?relay=` query is read at module
+    // load → Onboarding's capability probe goes to the dead relay). setup() first navigated to the
     // good relay; re-navigate now so onboarding is primed with the dead URL before we tap Create.
     console.log(`[37-onboard-no-faucet] loading the app against the dead relay (${DEAD_RELAY})…`);
     await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(DEAD_RELAY)}`, { timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 10_000 });
 
-    // Capture the underlying request failures so we can prove the faucet failed for the RIGHT reason.
-    const failures = driver.recordRequestFailures();
-
-    // Onboard: type a username + tap Create. create() fires the best-effort faucet (which must fail).
+    // Onboard: wallet creation must remain independent from relay funding.
     console.log('[37-onboard-no-faucet] skipping first-run walkthrough if present…');
     await skipWalkthroughIfPresent(driver);
-    console.log('[37-onboard-no-faucet] onboarding (faucet will fail)…');
+    console.log('[37-onboard-no-faucet] onboarding (capabilities fail closed)…');
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-nofaucet', { timeoutMs: 8_000 });
     await driver.click('btn-create', { timeoutMs: 4_000 });
 
-    // D4-B: dismiss the mnemonic backup screen so finishCreate() runs the faucet (which fails against
-    // the dead relay). Without this the backup screen holds and the faucet never fires.
+    // Dismiss the mandatory backup screen; creation then proceeds without funding.
     await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
 
-    // The faucet fails (dead relay) → create() sets pendingId + shows the honest "Continue" prompt
-    // instead of auto-transitioning. Tap Continue to proceed to the wallet at $0.
-    await driver.findByTestID('onboard-faucet-failed', { timeoutMs: 10_000 });
-    await driver.click('btn-onboard-continue', { timeoutMs: 4_000 });
-
-    // The wallet MOUNTS after the explicit Continue (onCreated(pendingId) fires).
+    await skipRehearsalIfPresent(driver);
+    // The wallet mounts without a funding-failure detour.
     await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
     const who = await driver.readText('header-who');
@@ -108,17 +103,30 @@ export async function run() {
     assert(ledgerBal === '0', `the unfunded account should read $0 on the ledger, got ${ledgerBal}`);
     console.log('[37-onboard-no-faucet] ✓ ledger confirms $0 (account never funded)');
 
-    // RIGHT-REASON gate: the onboarding faucet POST must have failed with a CONNECTION error
-    // (refused), not an unsafe-port artifact (which would let this pass for the wrong reason).
+    // THE RIGHT-REASON GATE. `no faucet request` is only evidence of the capability contract if the
+    // app actually asked the dead relay something and was refused — otherwise a page that never
+    // loaded, or a relay URL that was never adopted, would satisfy it just as well. So pin the
+    // capability probe's own failure first: it must have happened, and it must be a CONNECTION
+    // refusal, not Chrome's ERR_UNSAFE_PORT (which would mean the port choice, not the relay being
+    // dead, produced the error — the artifact `pickFreePort()` exists to avoid).
+    let capFail = null;
+    for (let i = 0; i < 20 && capFail === null; i++) {
+      capFail = failures().find((f) => f.url.startsWith(DEAD_RELAY) && f.url.includes('/api/v1/capabilities')) ?? null;
+      if (capFail === null) await new Promise((r) => setTimeout(r, 250));
+    }
+    assert(capFail !== null,
+      `capability discovery must have REACHED the dead relay and failed; no /api/v1/capabilities failure was recorded. Seen: ${JSON.stringify(failures().map((f) => f.url))}`);
+    assert(/CONNECTION|NETWORK|REFUSED|FAILED/i.test(capFail.errorText),
+      `capability discovery must fail with a connection error, got "${capFail.errorText}"`);
+    assert(!/UNSAFE_PORT/i.test(capFail.errorText),
+      `the dead relay must be REFUSED, not blocked as an unsafe port, got "${capFail.errorText}"`);
+    console.log(`[37-onboard-no-faucet] ✓ capabilities failed for the right reason (${capFail.errorText})`);
+
+    // And only THEN: no speculative faucet POST followed the failed discovery.
     const faucetFails = failures().filter((f) => f.url.includes('/api/v1/faucet'));
-    assert(faucetFails.length > 0,
-      `the onboarding faucet POST to the dead relay must have failed (got ${failures().length} failed reqs)`);
-    const errText = faucetFails[0].errorText;
-    assert(/CONNECTION|NETWORK|REFUSED|FAILED/i.test(errText),
-      `dead-relay faucet should fail with a connection error, got "${errText}"`);
-    assert(!/UNSAFE_PORT/i.test(errText),
-      `dead relay must NOT be an unsafe-port artifact (wrong failure mode), got "${errText}"`);
-    console.log(`[37-onboard-no-faucet] ✓ faucet failed for the right reason: ${errText}`);
+    assert(faucetFails.length === 0,
+      `onboarding must not request funding when capabilities are unavailable; got ${faucetFails.length} faucet failures`);
+    console.log('[37-onboard-no-faucet] ✓ no speculative faucet request followed');
 
     await driver.screenshot('37-onboard-no-faucet');
 

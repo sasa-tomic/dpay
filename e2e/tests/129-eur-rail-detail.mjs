@@ -67,16 +67,19 @@ export async function run() {
     const panel = await driver.readText('home-currency-detail');
     assert(panel.indexOf('EURC') < panel.indexOf('VEUR'),
       `the preferred rail (EURC) must be first in the panel. Got: ${JSON.stringify(panel)}`);
-    assertIncludes(await driver.readText('rail-detail-sol-eurc'), "EURC · Solana — dpay's default rail",
-      'the pick carries its reason (chooseRail: preference on a fresh wallet)');
+    const eurcBlock = await driver.readText('rail-detail-sol-eurc');
+    assertIncludes(eurcBlock, 'EURC · Solana', 'the pick names its rail');
+    // docs/specs/2026-09-07-ux-decisions.md
+    assert(!eurcBlock.includes('— dpay'),
+      `a pure preference adds no reason suffix. Got: ${JSON.stringify(eurcBlock)}`);
     const veurBlock = await driver.readText('rail-detail-veur');
     assert(!veurBlock.includes('— dpay'),
-      `only the PICK carries a reason; the sibling states facts. Got: ${JSON.stringify(veurBlock)}`);
+      `the sibling states facts, no reason suffix. Got: ${JSON.stringify(veurBlock)}`);
     assertIncludes(veurBlock, 'VEUR · Internet Computer', 'the sibling names its rail');
     // Chain tags: the settlement chain as a pill, proper noun, uppercase.
     assertIncludes(veurBlock, 'IC', 'the VEUR block tags the Internet Computer');
     assertIncludes(await driver.readText('rail-detail-sol-eurc'), 'SOLANA', 'the EURC block tags Solana');
-    console.log('[129-eur-rail-detail] ✓ detail panel: both rails, preferred-first with its reason');
+    console.log('[129-eur-rail-detail] ✓ detail panel: both rails, preferred first, no preference suffix');
 
     // --- 3. every panel line is a catalog field, in the rail's OWN units ------------------------
     assertEq((await driver.readText('rail-detail-fee-sol-eurc')).trim(),

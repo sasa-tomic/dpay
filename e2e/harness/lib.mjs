@@ -330,15 +330,15 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
 /**
  * Dismiss the payment rehearsal if it is showing (Trip Ready J3). On the create path the
  * RECOVERY SAVED stamp beat plays first (~750ms) before the rehearsal mounts, so poll for the
- * rehearsal's Explore-wallet exit OR the wallet balance — one of the two appears on every path
- * (restore path + faucet-failed continue skip the beats entirely and land on the wallet).
+ * rehearsal's skip exit OR the wallet balance — one of the two appears on every path
+ * (the restore path skips the beats entirely and lands on the wallet).
  * A no-op when absent; onboardWallet calls this after the backup ack, and flows that tap
  * btn-mnemonic-continue manually (01, 23, 37, 68, 82, 88) call it explicitly.
  */
 export async function skipRehearsalIfPresent(driver, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
   // Same press-confirmed-by-effect rule as `skipWalkthroughIfPresent` above, for the same reason:
-  // Explore-wallet unmounts the rehearsal that carries the button being pressed.
+  // the skip unmounts the rehearsal that carries the button being pressed.
   // "Onboarding is over" is now TWO possible surfaces: the wallet itself, or the home-currency
   // question that stands in front of it on a first run (2026-09-04). Waiting only for `balance`
   // made every create-path flow fail here with the chooser plainly on screen.

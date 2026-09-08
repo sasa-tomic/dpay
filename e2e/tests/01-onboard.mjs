@@ -28,7 +28,7 @@ export const meta = {
   name: 'onboard',
   journey: 'onboard',
   covers: ['onboard', 'faucet', 'first-balance', 'empty-history', 'non-custodial'],
-  verifies: 'New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody honesty copy present at create + backup.',
+  verifies: 'New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody + never-moves-money honesty copy present at create + backup.',
   timeoutMs: 20000,
 };
 
@@ -49,10 +49,11 @@ export async function run() {
     console.log('[01-onboard] onboarding screen — waiting for username input…');
     await driver.typeByPlaceholder(ONBOARD_PLACEHOLDER, ONBOARD_USERNAME, { timeoutMs: 8_000 });
 
-    // 1b. M7 — the create-button subtext uses user-benefit language (not the dev-facing
-    //     "Generates a key on this device…"). Asserts the new copy is present.
+    // 1b. M7 (reworded 2026-09-07) — the create-button subtext is honest user-benefit language:
+    //     creating a wallet never solicits money, and DEMO is named as valueless practice money.
     const onboardBody = await driver.bodyText();
-    assertIncludes(onboardBody, 'demo funds to get started', 'onboarding subtext is user-benefit language (M7)');
+    assertIncludes(onboardBody, 'does not deposit, buy, or move any money', 'onboarding must state creation never moves money');
+    assertIncludes(onboardBody, 'practice money with no cash value', 'onboarding must state DEMO is valueless');
 
     // 1c. Custody honesty (2026-08-22): the create form states the implicit model in plain words —
     //     no account, key never leaves the phone, dpay cannot move the money. The explicit term

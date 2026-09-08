@@ -30,7 +30,7 @@
 // Selector contract: `asset-sol-usdc-select`, `btn-pay-send`, `sol-send-address-input`,
 // `sol-send-amount-input`, `sol-send-review-amount`, `sol-send-ata-note`, `btn-sol-send-confirm`,
 // `sol-send-outcome`, `sol-send-signature`, `sol-send-err`.
-import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '77',
@@ -145,9 +145,16 @@ export async function run() {
 
     const err = await driver.findByTestID('sol-send-err', {timeoutMs: 12_000});
     const errTxt = await err.evaluate((n) => (n.textContent ?? '').trim());
-    assertIncludes(errTxt, "They don't have a USDC account yet", 'the pre-check error should lead with the recipient explanation');
-    assertIncludes(errTxt, 'creating it needs about 0.002044280 SOL', 'the pre-check error should carry the exact rent+fee floor');
-    assertIncludes(errTxt, 'send a little SOL here first', 'the pre-check error should close with the remediation');
+    // The WHOLE sentence, not a prefix. The prefix version of this assertion ended at the amount
+    // and therefore passed for two years' worth of "…0.002044280 SOL of SOL in this wallet" — the
+    // unit printed twice, on the error path, in every locale (fixed 2026-09-08: `fmtAsset` owns
+    // the unit, so the i18n template must not re-append it; pinned in __tests__/solana-ata-copy).
+    assertEq(
+      errTxt,
+      "They don't have a USDC account yet — creating it needs about 0.002044280 SOL in this wallet "
+      + '(one-time rent + fee, paid by you) — send a little SOL here first',
+      'the pre-check error renders the whole sentence, with the rent amount carrying its unit ONCE',
+    );
     console.log('[77-sol-usdc-withdraw] ✓ rent pre-check failure surfaced verbatim');
 
     // No success state: the sheet stays on the form — no "Sent ✓", no signature, no broadcast.

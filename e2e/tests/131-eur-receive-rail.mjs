@@ -68,7 +68,8 @@ export async function run() {
     await driver.click('btn-receive-address');
     const why1 = await driver.readText('receive-rail-why');
     assertIncludes(why1, 'EURC · Solana', 'the default rail is the stated preference (EURC), named');
-    assertIncludes(why1, "dpay's default rail", 'the reason is disclosed (preference; nothing funded)');
+    // docs/specs/2026-09-07-ux-decisions.md
+    assert(!why1.includes('—'), `a pure preference adds no reason suffix, got "${why1}"`);
     assertEq((await driver.readText('receive-rail-fee')).trim(),
       'Solana · Fee 0.000005000 SOL + one-time account rent 0.002039280 SOL',
       'the EURC fee fact: signature fee + the one-time ATA rent, in SOL — never converted');
@@ -81,7 +82,7 @@ export async function run() {
     assertIncludes(toggleTxt, 'Solana', 'the rail toggle offers the Solana side');
     assertIncludes(toggleTxt, 'Internet Computer', 'the rail toggle offers the IC side');
     await driver.screenshot('131-eur-receive-eurc');
-    console.log('[131-eur-receive-rail] ✓ default rail disclosed (EURC, preference, own ATA + fees)');
+    console.log('[131-eur-receive-rail] ✓ default rail disclosed (EURC, no preference suffix, own ATA + fees)');
 
     // 2. One toggle right: VEUR@IC — own principal, e8s fee, and the thin note ON the disclosure.
     console.log('[131-eur-receive-rail] flipping to the sibling rail (VEUR)…');

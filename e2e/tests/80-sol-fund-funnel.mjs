@@ -107,7 +107,7 @@ export async function run() {
     await driver.click('btn-sol-pay-ata-create', {timeoutMs: 5_000});
     const usdcPanel = await driver.findByTestID('sol-pay-fund', {timeoutMs: 15_000});
     const usdcText = await usdcPanel.evaluate((n) => n.textContent);
-    assertIncludes(usdcText, 'Add USDC to pay', 'post-create Pay surface = USDC fund panel');
+    assertIncludes(usdcText, 'No USDC available', 'post-create Pay surface = USDC fund panel');
     console.log('[80-sol-fund-funnel] ✓ create confirmed → USDC fund panel');
 
     // ---- 5b. Badge truth: badge GONE after the create ----

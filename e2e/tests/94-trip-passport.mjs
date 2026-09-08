@@ -22,7 +22,7 @@
 // Selector contract: `trip-strip`, `trip-strip-dot-<key>[-filled]`, `passport-archive`,
 // `passport-slot-<key>[-filled]`, `passport-count`, `passport-hint`, `trip-ready-capstone`,
 // `btn-passport-done`, `btn-trip-readiness`, `btn-trip-strip`, `btn-passport-close`.
-import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance, armPayScan, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance, accountOf, armPayScan, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
 import {generateKeypair, randNonceHex, buildRequestQR} from '../harness/wire.mjs';
 
 export const meta = {
@@ -62,8 +62,8 @@ export async function run() {
     // the longest `Animated` delay on the page, so its coming to rest means the whole rise is over.
     await driver.waitAtRest('rehearsal-body-3', { timeoutMs: 8_000 });
     // (One-page rehearsal: all 3 steps mounted together — mounting awards flowUnderstood.)
-    await driver.waitForText('Try with demo funds', { timeoutMs: 4_000 });
-    await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 }); // "Try with demo funds"
+    await driver.waitForText('Choose my currency', { timeoutMs: 4_000 });
+    await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 }); // "Choose my currency"
     await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
     await chooseHomeCurrencyIfPresent(driver);
     // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
@@ -192,6 +192,57 @@ export async function run() {
     await driver.click('btn-trip-readiness', { timeoutMs: 4_000 });
     await driver.findByTestID('passport-archive', { timeoutMs: 5_000 });
     console.log('[94-trip-passport] ✓ fresh boot: no strip, archive intact, stamps persisted');
+
+    // --- 7. D4 pin: a wallet holding ∂0.00 must NOT wear FUNDS LOADED. ------------------------
+    // `fundsReady` is decided from the LIVE balance map (decideFundsReady over buildAssetBalances),
+    // and `demoView` used to report ANY demo amount — 0 included — as a funded 'ok', so an empty
+    // wallet stamped itself and the strip's third dot filled (measured 2026-09-08; spec §0 D4).
+    // The stamp is one-way, so the decision can only be observed again on a wallet that has money
+    // to lose and a journey that has not yet earned it: pay the balance to zero, roll the journey
+    // back to the two stamps that do not depend on money, and reload into a live re-decision.
+    console.log('[94-trip-passport] D4: draining to ∂0.00 and re-deciding fundsReady…');
+    // Step 6 left the archive open inside Settings; close both and wait for the Pay surface to be
+    // back before arming it (the same full-screen-modal trap step 2 documents).
+    await driver.click('btn-passport-close', { timeoutMs: 4_000 });
+    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+    await driver.findByTestID('pay-scan', { timeoutMs: 8_000 });
+    const me = await accountOf(driver);
+    const rest = await getBalance(relayBaseURL, me.publicHex, 0);
+    assert(Number(rest) > 0, `the payer must still hold demo funds to drain (got ${rest})`);
+    const sink = await generateKeypair();
+    const drainQR = buildRequestQR(sink.publicHex, Number(rest), randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'Sink');
+    await armPayScan(driver);
+    await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, drainQR);
+    await driver.waitForText('Paid', { timeoutMs: 10_000 });
+    assert(String(await getBalance(relayBaseURL, me.publicHex, 0)) === '0', 'the payer must be drained to exactly 0');
+    await driver.click('btn-new', { timeoutMs: 6_000 });
+
+    // Roll the journey back to what a never-funded wallet would hold, then reload so the strip and
+    // the funds decision both run fresh against the (now empty) balances.
+    await driver.eval(() => {
+      const now = Date.now();
+      localStorage.setItem('dpay.journey.v1', JSON.stringify({
+        stamps: ['walkthroughDone', 'recoverySaved', 'flowUnderstood'],
+        at: {walkthroughDone: now, recoverySaved: now, flowUnderstood: now},
+        seen: [],
+      }));
+    });
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    await driver.waitReady({ timeoutMs: 8_000 });
+    await selectDemoAsset(driver);
+    await driver.waitForText('∂0.00', { timeoutMs: 15_000 });
+    await driver.findByTestID('trip-strip', { timeoutMs: 5_000 });
+    // The two money-independent capabilities stay filled; FUNDS LOADED does not, and must not fill
+    // on any later poll either — the wallet is empty and the app has to say so.
+    for (const key of ['recoverySaved', 'flowUnderstood']) {
+      await driver.findByTestID(`trip-strip-dot-${key}-filled`, { timeoutMs: 3_000 });
+    }
+    await driver.findByTestID('trip-strip-dot-fundsReady', { timeoutMs: 3_000 });
+    assert(!(await driver.isPresent('trip-strip-dot-fundsReady-filled')),
+      'a wallet holding ∂0.00 must NOT fill the FUNDS LOADED dot (D4)');
+    const j3 = await readJourney(driver);
+    assert(!j3.stamps.includes('fundsReady'), `an empty wallet must not stamp fundsReady (got ${j3.stamps.join(',')})`);
+    console.log('[94-trip-passport] ✓ D4: ∂0.00 leaves FUNDS LOADED unfilled and unstamped');
 
     await driver.screenshot('94-trip-passport');
 

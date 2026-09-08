@@ -10,7 +10,7 @@
 import { mkdirSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setup, stopSession, openBalances } from '../harness/lib.mjs';
+import { setup, stopSession, openBalances, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, '..', 'shots', 'ux');
@@ -57,8 +57,14 @@ async function run() {
     await sleep(1200);
     // One-page rehearsal: a single shot carries all 3 steps + punchline + CTA.
     await shoot(driver, 'A07-phone-rehearsal-page');
-    await driver.click('btn-rehearsal-next'); // "Try with demo funds"
-    await driver.findByTestID('balance', { timeoutMs: 15_000 });
+    await driver.click('btn-rehearsal-next'); // "Choose my currency"
+    // The rehearsal's exit hands over to the first-run currency question, not straight to the
+    // wallet; answering it lands Home. The DEMO shots below then need DEMO selected explicitly.
+    await driver.findByTestID('home-currency-title', { timeoutMs: 15_000 });
+    await sleep(600);
+    await shoot(driver, 'A08-phone-home-currency');
+    await chooseHomeCurrencyIfPresent(driver);
+    await selectDemoAsset(driver); // leaves the app on the Pay scanner
     await driver.waitForText('∂100.00', { timeoutMs: 15_000 });
     await sleep(600);
     await shoot(driver, 'A10-phone-wallet-pay');

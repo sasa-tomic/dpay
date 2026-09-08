@@ -45,13 +45,14 @@ export async function run() {
     await driver.findByTestID('btn-walkthrough-skip', { timeoutMs: 5_000 });
     console.log('[88-walkthrough] ✓ dots + Skip present');
 
-    // 2. Scene 1 — the offline truth: the SHOP's connection sends the payment.
+    // 2. Scene 1 — the payment sequence: the RECEIVING phone's connection can send the payment.
     await driver.findByTestID('walkthrough-scene-1', { timeoutMs: 5_000 });
     assert(!(await driver.isPresent('walkthrough-scene-2')), 'only scene 1 may be mounted');
     const body1 = await driver.readText('walkthrough-body-1');
-    assertIncludes(body1, 'own internet connection', 'scene 1 must name the shop\'s own connection');
-    assertIncludes(body1, 'no signal', 'scene 1 must state the phone can pay without signal');
-    console.log('[88-walkthrough] ✓ scene 1 offline hand-off copy pinned');
+    assertIncludes(body1, 'receiving phone shows a request', 'scene 1 must open with the request');
+    assertIncludes(body1, 'check the amount and asset', 'scene 1 must name the check-before-approve step');
+    assertIncludes(body1, 'if your phone is offline', 'scene 1 must state the other connection can send it');
+    console.log('[88-walkthrough] ✓ scene 1 two-phone payment copy pinned');
 
     // 3. Advance → scene 2 (the key/custody truth).
     await driver.click('btn-walkthrough-next', { timeoutMs: 5_000 });

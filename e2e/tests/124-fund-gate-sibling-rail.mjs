@@ -45,6 +45,10 @@ export async function run() {
     await driver.click('btn-home-currency-continue');
     await driver.findByTestID('balance', {timeoutMs: 10_000});
 
+    // The FIRST currency choice lands on Home (docs/specs/2026-09-07-ux-decisions.md); the gate
+    // this flow exercises lives on the Pay tab, so go there.
+    await driver.click('tab-pay', {timeoutMs: 5_000});
+
     assertIncludes(await driver.readText('active-asset-label'), 'US dollars',
       'home=USD must start on the preferred ckUSDC rail');
 

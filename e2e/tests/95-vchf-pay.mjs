@@ -19,7 +19,8 @@
 //   * (7) The payer's Ledger shows the outgoing row: "−1.00000001 VCHF" (U+2212) + the payee's
 //         short principal as counterparty.
 //   * Fund-first honesty + real instructions: an UNFUNDED VCHF selection parks the Pay tab on the
-//         fund panel ("Add VCHF to pay" + the practical "Send VCHF to your address" instruction
+//         fund panel ("No VCHF available" + the practical "first receive VCHF at your address"
+//         instruction
 //         with a primary that opens the ICRC receive-address surface — the wallet's own ICRC-1
 //         principal; no onramp and no minter, yet fully receivable by plain transfer).
 //
@@ -52,7 +53,7 @@ export const meta = {
   name: 'vchf-pay',
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'asset-selector', 'no-ramp', 'deeplink', 'explicit-approve', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send VCHF to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a 1.00000001 VCHF deeplink request reviews with exact unit/amount and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key.',
+  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a 1.00000001 VCHF deeplink request reviews with exact unit/amount and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + deeplink reload + settle polls
 };
 
@@ -94,8 +95,8 @@ export async function run() {
     const fundPanel = await driver.findByTestID('pay-fund', { timeoutMs: 6_000 });
     assert(fundPanel != null, 'unfunded VCHF selection parks Pay tab on the fund panel');
     const fundBody = await driver.bodyText();
-    assertIncludes(fundBody, 'Add VCHF to pay', 'fund panel title names VCHF');
-    assertIncludes(fundBody, 'Send VCHF to your address', 'fund panel gives the practical top-up instruction');
+    assertIncludes(fundBody, 'No VCHF available', 'fund panel title names VCHF');
+    assertIncludes(fundBody, 'receive VCHF at your address', 'fund panel gives the practical receive-first instruction');
     // Tap through: the primary lands on the Receive ▸ My-address ICRC surface, which shows THIS
     // wallet's own ICRC-1 account (its self principal) + the no-memo instruction.
     await driver.click('pay-fund-go', { timeoutMs: 5_000 });

@@ -16,7 +16,7 @@
 //   * (7) The payer's Ledger shows the outgoing row: "−1.00000001 ICP" (U+2212) + the payee's
 //         short principal as counterparty.
 //   * Fund-first honesty + real instructions: an UNFUNDED ICP selection parks the Pay tab on the
-//         fund panel ("Add ICP to pay" + the practical "Send ICP to your address" instruction
+//         fund panel ("No ICP available" + the practical "first receive ICP at your address" instruction
 //         with a primary that opens the ICRC receive-address surface — the wallet's own ICRC-1
 //         principal; no onramp and no minter, yet fully receivable by plain transfer).
 //
@@ -85,8 +85,8 @@ export async function run() {
     const fundPanel = await driver.findByTestID('pay-fund', { timeoutMs: 6_000 });
     assert(fundPanel != null, 'unfunded ICP selection parks Pay tab on the fund panel');
     const fundBody = await driver.bodyText();
-    assertIncludes(fundBody, 'Add ICP to pay', 'fund panel title names ICP');
-    assertIncludes(fundBody, 'Send ICP to your address', 'fund panel gives the practical top-up instruction');
+    assertIncludes(fundBody, 'No ICP available', 'fund panel title names ICP');
+    assertIncludes(fundBody, 'receive ICP at your address', 'fund panel gives the practical receive-first instruction');
     // Tap through: the primary lands on the Receive ▸ My-address ICRC surface showing THIS
     // wallet's own ICRC-1 principal (founder hard rule 2026-08-29 — real instructions, no dead end).
     await driver.click('pay-fund-go', { timeoutMs: 5_000 });

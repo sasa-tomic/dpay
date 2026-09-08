@@ -6,10 +6,11 @@
 //   * asset-vchf → "VCHF · Internet Computer"
 //   * asset-icp  → "ICP · Internet Computer"
 // and still NO ramp actions anywhere in the sheet (the bundled rows carry no onramp/offramp).
-// Mirrors flow 37's dead-relay onboarding (faucet fails closed, wallet reaches $0 home).
+// Mirrors flow 37's dead-relay onboarding (capability discovery fails closed → no speculative
+// faucet request, wallet reaches $0 home).
 import {
-  setup, assert, assertIncludes, pickFreePort, skipWalkthroughIfPresent, waitForEnabled,
-  chooseHomeCurrencyIfPresent,
+  setup, assert, assertIncludes, pickFreePort, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  waitForEnabled, chooseHomeCurrencyIfPresent,
 } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -38,7 +39,8 @@ export async function run() {
     await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(DEAD_RELAY)}`, { timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 10_000 });
 
-    // Manual onboarding (faucet cannot succeed offline).
+    // Manual onboarding (a dead relay advertises no faucet, so none is attempted — the wallet
+    // proceeds straight through to the chooser at ∂0/$0).
     await skipWalkthroughIfPresent(driver);
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-cold-assets', { timeoutMs: 8_000 });
     await driver.click('btn-create');
@@ -46,8 +48,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await driver.findByTestID('onboard-faucet-failed', { timeoutMs: 10_000 });
-    await driver.click('btn-onboard-continue');
+    await skipRehearsalIfPresent(driver);
     await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 8_000 }); // wallet home mounted at $0
 
