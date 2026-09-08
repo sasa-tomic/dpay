@@ -9,7 +9,7 @@
 //   • fail-open — an EURC solreq (request-mint state 'balance') signs right after on the SAME
 //     surface: unconfirmed-or-fundable mints never block the offline-first rail.
 import {
-  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   armPayScan, openBalances,
 } from '../harness/lib.mjs';
 
@@ -58,7 +58,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-EUR');
     await driver.click('btn-home-currency-continue');

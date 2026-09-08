@@ -24,7 +24,7 @@
 //     reloads stop throwing the user off their asset.
 import {
   setup, assert, assertIncludes, waitForEnabled,
-  skipWalkthroughIfPresent, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent, openBalances,
+  skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, openBalances,
 } from '../harness/lib.mjs';
 
 export const meta = {
@@ -54,7 +54,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
 
     // The chooser is the wallet's gate, so it must be on screen BEFORE any balance is.
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});

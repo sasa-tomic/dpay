@@ -62,17 +62,31 @@ export async function run() {
     await driver.findByTestID('pay-scan', { timeoutMs: 3_000 });
 
     // --- T : single-key top-up (demo money) -----------------------------------------
-    console.log('[14-keyboard] pressing T (→ top-up +∂100 demo money)…');
+    // The proof that T FIRED is the relay's own answer, not a bigger number: onboarding already
+    // spent this account's hourly top-up, so the honest outcome of a second ask — in production and
+    // now in the offline fixture too — is the cooldown refusal.
+    //
+    // AND IT MUST LAND ON THIS SCREEN. T is global, so it fires from the Pay tab, which carries no
+    // faucet button at all; until 2026-09-08 the refusal was printed inside the accounts route, so
+    // pressing it here returned nothing whatsoever and the flow had to navigate before it could
+    // assert. A control that answers nothing where it was used is the dead end the founder's
+    // 2026-08-29 rule forbids — so the assertion happens BEFORE any navigation.
+    console.log('[14-keyboard] pressing T from the Pay tab (→ ask the demo faucet)…');
     await driver.pressKey('t');
-    const topped = await driver.waitForText('∂200.00', { timeoutMs: 6_000 });
-    assert(topped, 'T should add demo money (balance ∂100.00 → ∂200.00)');
-    console.log('[14-keyboard] ✓ T triggered the top-up');
+    await driver.findByTestID('topup-err', { timeoutMs: 6_000 });
+    const said = await driver.readText('topup-err');
+    assert(/faucet cooldown: try again in ~\d+ (h|min|s)/.test(said),
+      `T must reach the faucet and bring back its own reason, got ${JSON.stringify(said)}`);
+    assert(await driver.isPresent('pay-scan'), 'the refusal must appear on the Pay tab itself, without navigating anywhere');
+    assert(!(await driver.isPresent('btn-topup')), 'and it must do so on a surface that has no faucet button at all');
+    console.log(`[14-keyboard] ✓ T reached the faucet from Pay and answered in place: ${said}`);
 
     // --- A : single-key Accounts (the money hub — the per-asset list, its own route) -----------
     console.log('[14-keyboard] pressing A (→ Accounts)…');
     await driver.pressKey('a');
     await driver.findByTestID('accounts-list', { timeoutMs: 3_000 });
     console.log('[14-keyboard] ✓ A landed the accounts route (per-asset list)');
+    assert((await driver.bodyText()).includes('∂100.00'), 'a refused top-up must credit nothing');
 
     // Back to Pay via the P shortcut (the sheet-era Esc-close is gone with the sheet).
     await driver.pressKey('p');

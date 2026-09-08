@@ -13,7 +13,7 @@
 // Selector contract: `btn-create`, `mnemonic-backup`, `mnemonic-word-{0..23}`,
 // `mnemonic-backup-checkbox`, `btn-mnemonic-continue`, `btn-settings`, `btn-reset`,
 // `btn-reset-confirm`, `btn-restore`, `restore-mnemonic-input`, `btn-restore-confirm`, `balance`.
-import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -66,8 +66,8 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
-    // Trip Ready J2B/J3 — dismiss the recovery-beat + rehearsal interstitial (create path only).
-    await skipRehearsalIfPresent(driver);
+    // The recovery beat plays, then the first-run practice payment; leave it (create path only).
+    await skipPracticeIfPresent(driver);
 
     // 4. Wallet loaded — read the original identity's publicHex (the assertion target).
     await chooseHomeCurrencyIfPresent(driver);

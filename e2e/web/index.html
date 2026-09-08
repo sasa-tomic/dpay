@@ -30,14 +30,13 @@
         outline: 2px solid #FF5A1F;
         outline-offset: 2px;
       }
-      /* Space Grotesk + IBM Plex Mono — same TTFs Android serves from res/font. Family names
-         match the RN res/font resource names (the ttf filenames) so ONE fontFamily string in
-         styles.ts resolves on both platforms. E2e determinism: fonts load lazily and renderers
-         fall back to system stack if not ready — no layout assertions depend on font metrics. */
-      @font-face { font-family: 'space_grotesk_500'; src: url('./fonts/space_grotesk_500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
-      @font-face { font-family: 'space_grotesk_600'; src: url('./fonts/space_grotesk_600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
-      @font-face { font-family: 'space_grotesk_700'; src: url('./fonts/space_grotesk_700.ttf') format('truetype'); font-weight: 700; font-display: swap; }
-      @font-face { font-family: 'plex_mono_500'; src: url('./fonts/plex_mono_500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
+      /* Space Grotesk + IBM Plex Mono — the SAME subsetted WOFF2 the shipped wallet uses (see the
+         note in wallet.html). E2e determinism: fonts load lazily and renderers fall back to the
+         system stack if not ready — no layout assertions depend on font metrics. */
+      @font-face { font-family: 'space_grotesk_500'; src: url('./fonts/space_grotesk_500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'space_grotesk_600'; src: url('./fonts/space_grotesk_600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+      @font-face { font-family: 'space_grotesk_700'; src: url('./fonts/space_grotesk_700.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+      @font-face { font-family: 'plex_mono_500'; src: url('./fonts/plex_mono_500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
     </style>
   </head>
   <body>

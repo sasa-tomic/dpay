@@ -57,8 +57,8 @@ export const meta = {
   id: '40',
   name: 'visual-regression',
   journey: 'tour',
-  covers: ['visual-regression', 'pixel-diff'],
-  verifies: 'Pixel-diff the 5 primary surfaces (Pay, Receive+QR, Home, Settings, Ledger) vs committed baselines; fails on drift >0.5%.',
+  covers: ['visual-regression', 'pixel-diff', 'row-layout'],
+  verifies: 'Pixel-diff the 6 primary surfaces (Pay, Receive+QR, Home, Accounts, Settings, Ledger) vs committed baselines, failing on drift >0.5%; and prove the ledger amount cannot be moved by a wider timestamp, so a baseline can only go red for a code change.',
   timeoutMs: 25_000,
 };
 
@@ -138,6 +138,36 @@ export async function run() {
       masks['hist-time-0'] = await getTestIDRectDevicePx(driver, 'hist-time-0');
     }
     await driver.screenshot(SURFACES[5].capture);
+
+    // 6b. THE LEDGER ROW'S LAYOUT INVARIANT, asserted rather than assumed — and asserted HERE
+    //     because it is what makes the baseline above trustworthy. A masked region hides what is
+    //     inside it; it cannot hide what moves BESIDE it. Until 2026-09-08 the timestamp sat to the
+    //     right of the amount, so the one character the wall clock gains every day when the hour
+    //     crosses 1↔2 digits pushed the amount 7.2 px sideways — a measured 0.153%-per-row drift
+    //     with no code change behind it, i.e. a baseline that could go red for a non-reason. The
+    //     amount is now the last item on the row (`S.histAmt` carries the rule); this proves it, by
+    //     widening the rendered timestamp by exactly that one character and re-measuring. It runs
+    //     AFTER the capture and the mask rect, so it perturbs neither.
+    if (await driver.isPresent('hist-amt-0')) {
+      const rectOf = (testID) => driver.eval(
+        (sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: r.x, w: r.width }; },
+        `[data-testid="${testID}"]`,
+      );
+      const amt0 = await rectOf('hist-amt-0');
+      const time0 = await rectOf('hist-time-0');
+      await driver.eval(
+        (sel) => { const el = document.querySelector(sel); el.textContent = el.textContent.replace(/(\D)(\d:\d\d)/, '$11$2'); },
+        '[data-testid="hist-time-0"]',
+      );
+      const time1 = await rectOf('hist-time-0');
+      const amt1 = await rectOf('hist-amt-0');
+      assert(time1.w > time0.w, `the probe must actually widen the timestamp (was ${time0.w}, now ${time1.w})`);
+      assert(
+        amt1.x === amt0.x,
+        `the amount moved ${(amt1.x - amt0.x).toFixed(2)} px when the hour gained a digit — a timestamp must never be able to push the amount (see S.histAmt)`,
+      );
+      console.log(`[40-visual-regression] ✓ ledger amount pinned at x=${amt0.x.toFixed(2)} across a ${(time1.w - time0.w).toFixed(1)}px timestamp change`);
+    }
 
     // 7. Diff each capture against its baseline (or seed if missing + REGEN).
     await mkdir(BASELINES_DIR, { recursive: true });
@@ -230,6 +260,14 @@ async function diffOrSeed(baselinePath, capturePath, baselineName, masks = []) {
   // reviewable). Without this gate, `just e2e-visual-seed` would overwrite every baseline with a
   // fresh capture (incl. non-deterministic masked regions like the random request QR), making the
   // commit diff noisy and obscuring which surface actually moved.
+  //
+  // KNOW ITS TRAP: a real UI change that lands UNDER tolerance is never re-seeded, so the baseline
+  // keeps the old pixels and the surface sits at a permanent non-zero diff that eats the margin
+  // meant for the NEXT change. Measured 2026-09-08: `wallet-pay` and `receive-request` had held
+  // 0.465% of a 0.5% budget across every run since the header block moved 16 px right (the other
+  // four baselines already carried the new position) — a gate with 7% of its margin left, for a
+  // change everyone had already accepted. When a surface reads a stable non-zero diff, LOOK at the
+  // diff png and then DELETE that baseline so REGEN seeds it fresh; do not leave it riding.
   if (REGEN && !r.ok) {
     await copyFile(capturePath, baselinePath);
     console.log(`[40-visual-regression] re-seeded drifted baseline ${baselineName} (${r.diffPct.toFixed(3)}% → 0%) → ${baselinePath}`);

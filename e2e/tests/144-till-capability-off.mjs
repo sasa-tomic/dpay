@@ -12,7 +12,7 @@
 // selector, so `TillCharge` is unreachable and no POST is constructible — the assertion would be
 // true of a till-ENABLED relay too. The absence of the selector IS the constraint.
 import {
-  setup, assert, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   chooseHomeCurrencyIfPresent,
 } from '../harness/lib.mjs';
 import { startRelay } from '../harness/relay.mjs';
@@ -43,7 +43,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await chooseHomeCurrencyIfPresent(driver, 'CHF');
 
     // (1) NEGATIVE HALF — till off. `receive-code-form` is the selector's container, so its absence

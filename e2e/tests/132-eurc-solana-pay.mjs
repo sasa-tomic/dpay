@@ -7,7 +7,7 @@
 // a mint that is NOT in the catalog is refused BY NAME with its pubkey, never guessed at, never
 // silently routed to another token.
 import {
-  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   armPayScan,
 } from '../harness/lib.mjs';
 
@@ -40,7 +40,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-EUR');
     await driver.click('btn-home-currency-continue');

@@ -7,9 +7,16 @@
 //   (a) Add money on Home lands the EXISTING deposit surface for the home rail (Receive → My
 //       address), the same surface the fund gates use — even when another account is selected;
 //   (b) the DEMO faucet is not a Home action any more: it is the practice row's own button in the
-//       accounts route, and a tap there raises the practice balance;
-//   (c) the `T` hotkey still fires the faucet from anywhere, and its outcome is visible where the
-//       user is — a hotkey that fails silently is a bug (founder rule 2026-08-29).
+//       accounts route;
+//   (c) the `T` hotkey still fires the faucet from anywhere, and its answer is visible on the
+//       accounts route — a hotkey that fails silently is a bug (founder rule 2026-08-29).
+//
+// WHAT A TAP CAN PROVE, AND WHY IT IS NOT "+∂100" (corrected 2026-09-08). The faucet gives one
+// top-up per (account, currency) per hour, and ONBOARDING HAS ALREADY SPENT IT — so inside a flow
+// there is no second credit to observe, on any wallet, in production or here. This flow used to
+// assert ∂100 → ∂200 → ∂300 because the offline fixture faucet had no cooldown at all; it now has
+// the same one production has, so what a tap proves is that the button and the hotkey reach the
+// relay and that its own refusal reaches the user. The successful credit is flow 01's ∂100.
 import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -20,7 +27,7 @@ export const meta = {
   name: 'home-add-money',
   journey: 'deposit',
   covers: ['home-tab', 'add-money', 'faucet'],
-  verifies: 'Home add-money lands the deposit surface for the HOME rail even while another account is selected; the DEMO faucet lives on the practice row in the accounts route and raises the ∂ balance there',
+  verifies: 'Home add-money lands the deposit surface for the HOME rail even while another account is selected; the DEMO faucet is not a Home action but the practice row\'s own button, and both it and the T hotkey carry the relay\'s own cooldown refusal back to the user without moving money',
   timeoutMs: 25000,
 };
 
@@ -52,26 +59,34 @@ export async function run() {
       'funding the home rail SELECTS it — the account you asked to fund is the account you land on');
     console.log(`[134-home-add-money] ✓ add-money landed the home rail's deposit surface (address ${addr.slice(0, 12)}…)`);
 
-    // (b) The faucet is the practice row's own button, in the accounts route.
+    // (c) FIRST, because it is the half whose proof is the FIRST refusal line to appear: the T
+    //     hotkey reaches the relay from a surface that carries no faucet button at all.
+    await openBalances(driver);
+    await selectCurrency(driver, 'demo');
+    await driver.click('tab-home', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    assert(!(await driver.isPresent('btn-topup')), 'the faucet is NOT a Home action — that is what (b) is about');
+    await driver.pressKey('t');
+    // ON HOME, with no navigation: the refusal is rendered once by the wallet shell above the mode
+    // switch, so it reaches whichever surface the hotkey was pressed on. It used to live inside the
+    // accounts route, so this flow had to go there before it could see anything — i.e. the answer
+    // existed but the user pressing T on Home never saw it.
+    await driver.findByTestID('topup-err', { timeoutMs: 8_000 });
+    assertIncludes(await driver.readText('topup-err'), 'faucet cooldown',
+      'the T hotkey reached the relay from Home and its own reason came back — a hotkey that answers nothing is a bug');
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 4_000 });
+    console.log('[134-home-add-money] ✓ T hotkey fired the faucet from Home, and the relay\'s reason is on Home');
+
+    // (b) The faucet button lives on the practice row, and a refused tap moves no money.
     console.log('[134-home-add-money] tapping the practice row faucet…');
     await openBalances(driver);
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'the practice row starts at the faucet-seeded ∂100.00');
     await driver.click('btn-topup', { timeoutMs: 4_000 });
-    const rose = await driver.waitForText('∂200.00', { timeoutMs: 8_000 });
-    assert(rose, 'the faucet top-up must land: the practice row should read ∂200.00 (faucet adds ∂100 per tap)');
-    assertIncludes(await driver.readText('asset-demo'), '∂200.00', 'the practice row reflects the risen balance in its own token unit');
-    console.log('[134-home-add-money] ✓ practice faucet fired from its own row (∂100.00 → ∂200.00)');
-
-    // (c) The T hotkey still works from anywhere, and Home renders its outcome. This relay HAS a
-    //     faucet, so the honest outcome is a third ∂100 — the error line is flow 37's branch.
-    await selectCurrency(driver, 'demo');
-    await driver.click('tab-home', { timeoutMs: 4_000 });
-    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
-    await driver.pressKey('t');
-    await openBalances(driver);
-    const third = await driver.waitForText('∂300.00', { timeoutMs: 8_000 });
-    assert(third, 'the T hotkey must fire the faucet from a surface that has no faucet button');
-    console.log('[134-home-add-money] ✓ T hotkey fired the faucet from Home (∂200.00 → ∂300.00)');
+    await driver.findByTestID('topup-err', { timeoutMs: 8_000 });
+    assertIncludes(await driver.readText('topup-err'), 'try again in',
+      'the refusal names WHEN to retry — the relay\'s own text, verbatim (N5)');
+    assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'a refused top-up credits nothing');
+    console.log('[134-home-add-money] ✓ practice faucet fired from its own row; refused, and nothing moved');
 
     await driver.screenshot('134-home-add-money');
 

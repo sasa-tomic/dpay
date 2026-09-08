@@ -328,55 +328,70 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
 }
 
 /**
- * Dismiss the payment rehearsal if it is showing (Trip Ready J3). On the create path the
- * RECOVERY SAVED stamp beat plays first (~750ms) before the rehearsal mounts, so poll for the
- * rehearsal's skip exit OR the wallet balance — one of the two appears on every path
- * (the restore path skips the beats entirely and lands on the wallet).
+ * Leave the first-run PRACTICE payment if it is showing (2026-09-08; it replaced the two-phone
+ * rehearsal leaflet). On the create path the RECOVERY SAVED stamp beat plays first (~750ms) before
+ * practice mounts, so poll for one of practice's two exits OR the surface that comes after it —
+ * one of them appears on every path (the restore path skips practice entirely).
+ *
+ * There are TWO exits and which one is on screen is a real fact about the run, not a race: the
+ * request card carries `btn-practice-skip`, and every outcome and every fail-closed branch carries
+ * `btn-practice-continue` instead. A flow whose relay has no faucet (37) lands on the second, so
+ * this helper takes whichever it finds rather than assuming the happy one.
+ *
  * A no-op when absent; onboardWallet calls this after the backup ack, and flows that tap
- * btn-mnemonic-continue manually (01, 23, 37, 68, 82, 88) call it explicitly.
+ * btn-mnemonic-continue manually call it explicitly.
  */
-export async function skipRehearsalIfPresent(driver, opts = {}) {
+export async function skipPracticeIfPresent(driver, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
   // Same press-confirmed-by-effect rule as `skipWalkthroughIfPresent` above, for the same reason:
-  // the skip unmounts the rehearsal that carries the button being pressed.
-  // "Onboarding is over" is now TWO possible surfaces: the wallet itself, or the home-currency
+  // the exit unmounts the screen that carries the button being pressed.
+  // "Onboarding is over" is TWO possible surfaces: the wallet itself, or the home-currency
   // question that stands in front of it on a first run (2026-09-04). Waiting only for `balance`
   // made every create-path flow fail here with the chooser plainly on screen.
   const done = async () => (await driver.isPresent('balance')) || (await driver.isPresent('btn-home-currency-continue'));
   const deadline = Date.now() + timeoutMs;
-  let sawSkip = false;
+  let exit = null;
   while (Date.now() < deadline) {
     if (await done()) return;
-    if (await driver.isPresent('btn-rehearsal-skip')) { sawSkip = true; break; }
+    if (await driver.isPresent('btn-practice-skip')) { exit = 'btn-practice-skip'; break; }
+    if (await driver.isPresent('btn-practice-continue')) { exit = 'btn-practice-continue'; break; }
     await new Promise(r => setTimeout(r, 100));
   }
-  if (!sawSkip) return;
+  if (exit === null) return; // neither surface — the documented no-op (a restore path has neither)
 
+  // Press, and confirm by EFFECT — then press again if the screen moved under us. Practice resolves
+  // asynchronously (a balance read, a capability probe, sometimes a faucet call), and the exit it
+  // offers depends on the answer: the request card's Skip, or a fail-closed branch's Continue. A
+  // press aimed at one the instant it becomes the other lands on a node React has already replaced,
+  // which is a no-op that no exception reports. Re-deciding and re-pressing is what makes this
+  // helper immune to that, without slowing the ordinary case (the first press almost always lands).
   let pressErr = null;
-  try { await driver.click('btn-rehearsal-skip', {timeoutMs}); }
-  catch (e) { pressErr = e; }
-  try {
-    const settle = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const now = (await driver.isPresent('btn-practice-skip')) ? 'btn-practice-skip'
+      : (await driver.isPresent('btn-practice-continue')) ? 'btn-practice-continue'
+      : null;
+    if (now !== null) {
+      try { await driver.click(now, {timeoutMs: 2_000}); }
+      catch (e) { pressErr = e; }
+    }
+    const settle = Date.now() + 2_000;
     while (Date.now() < settle) {
       if (await done()) return;
       await new Promise(r => setTimeout(r, 100));
     }
-    throw new Error('neither the wallet nor the currency question appeared');
   }
-  catch (e) {
-    throw new Error(
-      `[lib] the rehearsal Skip was pressed but the wallet never appeared within ${timeoutMs}ms`
-      + `${pressErr ? ` (the press itself reported: ${pressErr.message})` : ''}`
-      + `. On screen: ${JSON.stringify((await driver.bodyText()).slice(0, 300))}`,
-    );
-  }
+  throw new Error(
+    `[lib] practice was left but the wallet never appeared within ${timeoutMs}ms`
+    + `${pressErr ? ` (the last press reported: ${pressErr.message})` : ''}`
+    + `. On screen: ${JSON.stringify((await driver.bodyText()).slice(0, 300))}`,
+  );
 }
 
 /**
  * Answer the first-run home-currency question if it is showing (2026-09-04).
  *
  * The wallet asks "which currency do you think in?" whenever no currency is stored, which is every
- * fresh context — so this sits on the same shared preamble as the walkthrough and the rehearsal,
+ * fresh context — so this sits on the same shared preamble as the walkthrough and practice,
  * and follows the same two rules they do: poll for EITHER surface before deciding (the gate is
  * resolved from storage, so an instantaneous isPresent races the boot), and confirm the press by
  * its EFFECT, because Continue unmounts the very button being clicked.
@@ -452,8 +467,8 @@ export async function selectDemoAsset(driver, opts = {}) {
  * silent no-op. The faucet funds synchronously in finishCreate(); the balance poll (fast-poll seam =
  * 150ms in test, 2.5s in prod) reflects it on the next tick, so waitForText('∂100.00') lands quickly.
  *
- * Trip Ready J2B/J3: after the backup ack the RECOVERY SAVED beat plays (~750ms) and then the
- * payment rehearsal mounts — skipRehearsalIfPresent dismisses it (restore paths never see it).
+ * After the backup ack the RECOVERY SAVED beat plays (~750ms) and then the first-run PRACTICE
+ * payment mounts — skipPracticeIfPresent leaves it (restore paths never see it).
  */
 export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
@@ -466,7 +481,7 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
   await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
   await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
-  await skipRehearsalIfPresent(driver);
+  await skipPracticeIfPresent(driver);
   // The home-currency question, then back onto DEMO: the wallet now opens in the user's chosen
   // currency, and this preamble's contract with every downstream flow is a funded DEMO wallet.
   await chooseHomeCurrencyIfPresent(driver);

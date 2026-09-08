@@ -5,14 +5,15 @@
 // tab only since 2026-09-08 — it was global chrome on all four tabs, a first-run progress meter
 // telling the user on every screen that they owed the app something, X14) and the full-screen
 // archive (the permanent record + celebration surface, opened from the strip or Settings).
-//   1. Onboard WITH the rehearsal driven in full (flow-90 pattern — unlike `onboardWallet`,
-//      which skips it): recoverySaved (backup beat) + flowUnderstood (rehearsal mount) = 2 of the
-//      4 PASSPORT stamps (walkthroughDone is journey chrome, not a slot). fundsReady is NOT among
-//      them, and that is the assertion of record for X13: the wallet holds ∂100.00 of faucet-
-//      minted practice money and FUNDS LOADED is a TRIP-readiness claim, which practice money
-//      cannot support. (This also retires the D4 ∂0.00 pin: DEMO can no longer decide the stamp at
-//      ANY amount, so draining to zero would prove nothing the first step does not. D4's surviving
-//      half — the row dimming at ∂0.00 — is pinned in app/__tests__/assetBalances.test.ts.)
+//   1. Onboard WITH the first-run practice payment driven in full (unlike `onboardWallet`, which
+//      leaves it): recoverySaved (backup beat) + flowUnderstood = 2 of the 4 PASSPORT stamps
+//      (walkthroughDone is journey chrome, not a slot). fundsReady is NOT among
+//      them, and that is the assertion of record for X13: the wallet holds practice money — ∂99.00
+//      of it, the ∂1.00 having just been really spent — and FUNDS LOADED is a TRIP-readiness
+//      claim, which practice money cannot support. (This also retires the D4 ∂0.00 pin: DEMO can
+//      no longer decide the stamp at ANY amount, so draining to zero would prove nothing the first
+//      step does not. D4's surviving half — the row dimming at ∂0.00 — is pinned in
+//      app/__tests__/assetBalances.test.ts.)
 //   2. A REAL asset is funded → the stamp flips LIVE, 2 OF 4 → 3 OF 4, without a reload: the
 //      strip and the archive both re-decide from the balance map, never from a sticky flag.
 //   3. Incomplete contract: NO Done affordance anywhere.
@@ -51,29 +52,30 @@ export async function run() {
   try {
     const {driver, relayBaseURL, webBaseURL} = env;
 
-    // --- 1. Onboard WITH the rehearsal (flow-90 pattern): 3 of the 4 passport stamps. ----------
-    console.log('[94-trip-passport] onboarding (walkthrough skip + backup beat + rehearsal driven in full)…');
+    // --- 1. Onboard WITH the practice payment made: 2 of the 4 passport stamps. ---------------
+    console.log('[94-trip-passport] onboarding (walkthrough skip + backup beat + a real practice payment)…');
     await skipWalkthroughIfPresent(driver);
     await driver.typeByPlaceholder('e.g. Alice', 'e2e-passport', { timeoutMs: 8_000 });
     await driver.click('btn-create', { timeoutMs: 4_000 });
     await driver.findByTestID('mnemonic-backup', { timeoutMs: 8_000 });
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
-    // (The RECOVERY SAVED ink-stamp beat auto-advances to the rehearsal — zero extra taps.)
-    await driver.findByTestID('rehearsal', { timeoutMs: 15_000 });
-    await driver.findByTestID('rehearsal-step-1', { timeoutMs: 8_000 });
-    // Entrance rise finish, in FRAMES not milliseconds (flow 90's idiom): `rehearsal-body-3` holds
-    // the longest `Animated` delay on the page, so its coming to rest means the whole rise is over.
-    await driver.waitAtRest('rehearsal-body-3', { timeoutMs: 8_000 });
-    // (One-page rehearsal: all 3 steps mounted together — mounting awards flowUnderstood.)
-    await driver.waitForText('Choose my currency', { timeoutMs: 4_000 });
-    await driver.click('btn-rehearsal-next', { timeoutMs: 4_000 }); // "Choose my currency"
-    await driver.waitGone('rehearsal', { timeoutMs: 8_000 });
+    // (The RECOVERY SAVED ink-stamp beat auto-advances to practice — zero extra taps.)
+    // The payment is MADE, not skipped: this flow's subject is what the passport says about a
+    // wallet that has done everything first run offers, and a settled practice payment is one of
+    // those things.
+    await driver.findByTestID('practice', { timeoutMs: 15_000 });
+    await driver.click('btn-practice-review', { timeoutMs: 8_000 });
+    await driver.click('btn-approve', { timeoutMs: 8_000 });
+    await driver.findByTestID('practice-outcome', { timeoutMs: 30_000 });
+    await driver.click('btn-practice-continue', { timeoutMs: 8_000 });
+    await driver.waitGone('practice', { timeoutMs: 8_000 });
     await chooseHomeCurrencyIfPresent(driver);
     // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
     await selectDemoAsset(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });
-    await driver.waitForText('∂100.00', { timeoutMs: 15_000 }); // faucet funded → fundsReady
+    // ∂99.00, not ∂100.00: the practice payment really spent a franc of play money.
+    await driver.waitForText('∂99.00', { timeoutMs: 15_000 });
 
     const j1 = await readJourney(driver);
     assert(j1, 'journey store must exist after onboarding');
@@ -84,6 +86,8 @@ export async function run() {
     // trip-ready: practice money is valueless by construction, so a FUNDS LOADED stamp over it
     // would be a claim the app has not verified (anti-scam rule R4).
     assert(!j1.stamps.includes('fundsReady'), `practice money alone must NOT stamp fundsReady (got ${j1.stamps.join(',')})`);
+    // …and the practice payee is not a counterparty, so the FIRST PAYMENT slot stays open. This is
+    // the line that makes "one payment to go" true after a first run that made a payment.
     assert(!j1.stamps.includes('paymentTested'), 'no payment yet → paymentTested must NOT be stamped');
     console.log('[94-trip-passport] ✓ journey after onboarding: 2 of 4 — practice money earns no FUNDS LOADED');
 

@@ -13,7 +13,7 @@
 //
 // Selector contract: `pay-fund`, `fund-sibling-rail`, `fund-sibling-holds`,
 // `btn-fund-sibling-switch`, `active-asset-label`, `btn-sol-start-scan`.
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent} from '../harness/lib.mjs';
 
 export const meta = {
   id: '124',
@@ -39,7 +39,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-USD');
     await driver.click('btn-home-currency-continue');
@@ -75,6 +75,14 @@ export async function run() {
     // 2. The pointer names the sibling rail and its amount, unit included — never a merged or
     //    converted figure (no-synthetic-sums rule).
     await driver.findByTestID('fund-sibling-rail', {timeoutMs: 5_000});
+    // The pointer's PRESENCE is not this flow's subject — WHICH account it names is. Since the
+    // pointer widened to any funded account (2026-09-08), the practice balance satisfies the
+    // presence check on the first poll, so reading the line here raced the SPL stub's own poll and
+    // read the practice sentence instead. Wait for the account this flow is about.
+    await driver.waitForFunction(
+      () => (document.querySelector('[data-testid="fund-sibling-holds"]')?.textContent ?? '').includes('USDC · Solana'),
+      {timeoutMs: 15_000},
+    );
     assertEq(await driver.readText('fund-sibling-holds'), 'You hold 2.50 USDC on USDC · Solana',
       'the pointer must name the funded sibling rail and its own-unit amount');
     console.log('[124-fund-gate-sibling-rail] ✓ pointer: You hold 2.50 USDC on USDC · Solana');

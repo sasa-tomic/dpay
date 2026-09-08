@@ -210,7 +210,7 @@ async function spawnOnce(opts = {}) {
   const port = opts.port ?? await pickFreePort();
   const addr = `127.0.0.1:${port}`;
   const baseURL = `http://${addr}`;
-  console.log(`[relay] spawning ${RELAY_BIN} at ${addr} (FakeLedger, faucet on, till ${opts.till === false ? 'off' : 'on'})…`);
+  console.log(`[relay] spawning ${RELAY_BIN} at ${addr} (FakeLedger, faucet ${opts.faucet === false ? 'off' : 'on'}, till ${opts.till === false ? 'off' : 'on'})…`);
 
   const env = {
     ...process.env,
@@ -220,7 +220,10 @@ async function spawnOnce(opts = {}) {
     CARGO_HOME: process.env.CARGO_HOME ?? CARGO_HOME_DIR,
     DPAY_RELAY_ADDR: addr,
     DPAY_LEDGER: 'memory',
-    DPAY_ENABLE_FAUCET: 'true',
+    // The demo faucet is ON for every flow but the ones whose SUBJECT is a relay that hands out
+    // no practice money — the first-run screens have to be honest about that and must not ask
+    // the user for funds instead (anti-scam rule R1), and the only way to see it is to serve it.
+    DPAY_ENABLE_FAUCET: opts.faucet === false ? 'false' : 'true',
     // The OpenCryptoPay till is OFF by default in a shipped relay (founder decision 2026-09-04) and
     // ON here, because the merchant half of the app is driven against these very routes: flows
     // 114-116 ring up a real signed charge on `POST /api/v1/till`, pay it with a real signed VCHF

@@ -8,7 +8,11 @@
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141210" />
     <meta name="color-scheme" content="light dark" />
     <meta name="description" content="dpay web wallet — the same app, in your browser. Non-custodial: your key never leaves this device." />
-    <link rel="icon" href="data:," />
+    <link rel="icon" href="/icon-192.png" />
+    <!-- Both files are emitted by the web-prod build (see `dpayWebProdAssets` in
+         e2e/vite.config.js) and served from the relay's root, which is also the service worker's
+         scope: the wallet spans /wallet and /assets/, so nothing narrower would see both. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>dpay · Wallet</title>
     <!-- CSP: wasm-unsafe-eval is REQUIRED (the DpayCore shim compiles /assets/dpay-core-*.wasm).
          connect-src allows any scheme so the ?relay=<url> override (a user-chosen relay endpoint)
@@ -37,17 +41,23 @@
         outline: 2px solid #FF5A1F;
         outline-offset: 2px;
       }
-      /* Space Grotesk + IBM Plex Mono — same TTFs Android serves from res/font. Family names
-         match the RN res/font resource names (the ttf filenames) so ONE fontFamily string in
-         styles.ts resolves on both platforms. Served as hashed /assets/* by the vite build. */
-      @font-face { font-family: 'space_grotesk_500'; src: url('./fonts/space_grotesk_500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
-      @font-face { font-family: 'space_grotesk_600'; src: url('./fonts/space_grotesk_600.ttf') format('truetype'); font-weight: 600; font-display: swap; }
-      @font-face { font-family: 'space_grotesk_700'; src: url('./fonts/space_grotesk_700.ttf') format('truetype'); font-weight: 700; font-display: swap; }
-      @font-face { font-family: 'plex_mono_500'; src: url('./fonts/plex_mono_500.ttf') format('truetype'); font-weight: 500; font-display: swap; }
+      /* Space Grotesk + IBM Plex Mono — SUBSETTED WOFF2 built from the exact TTFs Android serves
+         from res/font (scripts/subset-web-fonts.py, run by `just fonts`; it proves coverage is
+         unchanged over every codepoint the app can paint). Family names match the RN res/font
+         resource names so ONE fontFamily string in styles.ts resolves on both platforms. Served
+         as hashed /assets/* by the vite build, and NEVER re-compressed by the relay — woff2 is
+         brotli inside the container. */
+      @font-face { font-family: 'space_grotesk_500'; src: url('./fonts/space_grotesk_500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
+      @font-face { font-family: 'space_grotesk_600'; src: url('./fonts/space_grotesk_600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+      @font-face { font-family: 'space_grotesk_700'; src: url('./fonts/space_grotesk_700.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+      @font-face { font-family: 'plex_mono_500'; src: url('./fonts/plex_mono_500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="./entry.tsx"></script>
+    <!-- Offline boot (OPEN_ISSUES X10). A separate module from the app bundle, and loaded only by
+         THIS page — see e2e/web/sw-register.ts for why the e2e dist has no worker. -->
+    <script type="module" src="./sw-register.ts"></script>
   </body>
 </html>

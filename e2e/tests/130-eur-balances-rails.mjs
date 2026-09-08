@@ -10,7 +10,7 @@
 //     back), not on non-EUR rows.
 //   * No badge colours change and no group total appears — the note is text, not chrome.
 import {
-  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   openBalances,
 } from '../harness/lib.mjs';
 
@@ -39,7 +39,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
     await driver.click('home-currency-EUR', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});

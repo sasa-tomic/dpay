@@ -18,7 +18,7 @@
 //
 // Selector contract: `active-asset-label`, `sol-send-address-input`, `sol-send-amount-input`,
 // `sol-send-review`, `btn-sol-send-confirm`, `sol-send-outcome`.
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent} from '../harness/lib.mjs';
 
 export const meta = {
   id: '123',
@@ -47,7 +47,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-USD');
     await driver.click('btn-home-currency-continue');

@@ -1,13 +1,24 @@
-// Flow 02 — Faucet top-up (explicit, repeatable demo $ via the REAL relay).
+// Flow 02 — The demo faucet gives ∂100 once, and SAYS SO when it will not give more.
 //
-// Onboarding already funds ∂100 on create (a best-effort faucet POST in Onboarding.create). This
-// flow tests the EXPLICIT, repeatable faucet affordance: the `btn-topup` button inside the Balances
-// sheet (the wallet's single money hub — top-up consolidated here so demo funds have ONE home) that
-// POSTs /api/v1/faucet {account, amount: 10000} on demand and uses the response `{balance}` for an
-// immediate refresh. Proves the faucet→balance path end-to-end through the REAL relay + REAL
-// FakeLedger (mint), and that the button is repeatable (balance grows again).
+// WHAT THIS FLOW USED TO ASSERT, AND WHY IT WAS WRONG (2026-09-08). It pressed `btn-topup` twice
+// and asserted ∂100 → ∂200 → ∂300, "proving" the button was repeatable. The SHIPPED faucet has
+// never been repeatable: the production relay enforces one top-up per (account, currency) per hour
+// (`crates/dpay-relay/src/faucet.rs`), and onboarding has already spent that hour's top-up on
+// create. Only the offline fixture faucet had no cooldown, so the suite was pinning a behaviour
+// that exists nowhere but the fixture — the exact drift OPEN_ISSUES filed as "FakeLedger has no
+// rate-limit — accepted simplification". Both builds now run the one predicate, so this flow can
+// assert what a user actually gets.
 //
-// Selector contract: `balance` (header balance → opens Balances), `btn-topup` (inside Balances).
+// The three things asserted here, none of which had any coverage before:
+//   1. onboarding's own top-up lands (∂100.00);
+//   2. pressing the button again is REFUSED, and the refusal carries the relay's own verbatim wait
+//      ("faucet cooldown: try again in ~59 min") — the N5 contract, so the user is told WHEN, not
+//      just "unavailable";
+//   3. the balance does not move on a refusal — no phantom credit, no optimistic write.
+//
+// Selector contract: `balance` (header balance → opens the accounts route), `btn-topup`,
+// `topup-err` (the one-line refusal; rendered by the wallet shell, so it shows on whichever
+// surface the top-up was asked for — flows 14 and 134 are the ones that pin that).
 import { setup, assert, onboardWallet, openBalances } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -17,8 +28,8 @@ export const meta = {
   id: '02',
   name: 'faucet',
   journey: 'onboard',
-  covers: ['faucet', 'topup', 'balance-delta'],
-  verifies: 'Returning user taps \'Add demo money\' → faucet top-up works, balance increases.',
+  covers: ['faucet', 'topup', 'cooldown', 'balance-delta'],
+  verifies: 'Demo faucet funds ∂100 once; a second top-up inside the hour is refused with the relay\'s own retry time and the balance does not move.',
   timeoutMs: 25000,
 };
 
@@ -29,30 +40,34 @@ export async function run() {
   try {
     const { driver } = env;
 
-    // 1. Onboard → wallet. The faucet funds ∂100.00 on create (verified in flow 01).
+    // 1. Onboard → wallet. The faucet funds ∂100.00 on create (verified in flow 01) and, in doing
+    //    so, spends this account's top-up for the window.
     console.log('[02-faucet] onboarding…');
     await onboardWallet(driver, 'e2e-faucet');
 
-    // 2. Open the accounts route where the demo faucet now lives.
+    // 2. Open the accounts route where the demo faucet lives.
     console.log('[02-faucet] opening the accounts route…');
     await openBalances(driver);
     await driver.findByTestID('btn-topup', { timeoutMs: 4_000 });
+    const funded = await driver.waitForText('∂100.00', { timeoutMs: 8_000 });
+    assert(funded, 'onboarding must have funded ∂100.00 through the real faucet');
 
-    // 3. Tap the explicit faucet button. The app POSTs /api/v1/faucet and applies the response
-    //    balance immediately (no waiting on the 2.5s poll). The balance text is in the DOM behind
-    //    the overlay, so waitForText sees it. Allow time for the mint + React re-render.
-    console.log('[02-faucet] clicking btn-topup (+∂100)…');
+    // 3. Press the button. The relay refuses — the same refusal the deployed relay gives — and the
+    //    app renders its reason VERBATIM (N5): the wait, not a generic failure.
+    console.log('[02-faucet] clicking btn-topup inside the cooldown window…');
     await driver.click('btn-topup', { timeoutMs: 4_000 });
-    const grew = await driver.waitForText('∂200.00', { timeoutMs: 8_000 });
+    await driver.findByTestID('topup-err', { timeoutMs: 8_000 });
+    const said = await driver.readText('topup-err', { timeoutMs: 4_000 });
+    assert(
+      /faucet cooldown: try again in ~\d+ (h|min|s)/.test(said),
+      `the refusal must carry the relay's own retry time, got: ${JSON.stringify(said)}`,
+    );
+    console.log(`[02-faucet] ✓ refused verbatim: ${said}`);
+
+    // 4. Nothing was credited. A refusal that moved the number would be worse than the refusal.
     const body = await driver.bodyText();
-    assert(grew, `balance should read ∂200.00 after the faucet top-up (∂100 + ∂100). body excerpt:\n${body.slice(0, 500)}`);
-    console.log('[02-faucet] ✓ balance grew ∂100.00 → ∂200.00 through the REAL faucet');
-
-    // 4. Repeatable: a second tap adds another ∂100 (∂200 → ∂300). Proves it is not a one-shot.
-    console.log('[02-faucet] clicking btn-topup again (repeatable)…');
-    await driver.click('btn-topup', { timeoutMs: 4_000 });
-    const grewAgain = await driver.waitForText('∂300.00', { timeoutMs: 8_000 });
-    assert(grewAgain, `faucet must be repeatable: balance should read ∂300.00 after a second +∂100`);
+    assert(body.includes('∂100.00'), `balance must still read ∂100.00 after a refused top-up. body excerpt:\n${body.slice(0, 500)}`);
+    assert(!body.includes('∂200.00'), 'a refused top-up must not credit anything');
 
     await driver.screenshot('02-faucet');
 

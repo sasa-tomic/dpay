@@ -12,7 +12,7 @@
 // account's public hex; the EURC ATA is base58-shaped and stable across a flip-away-and-back
 // (the harness has no independent ATA derivation — stability under one identity is the bound).
 import {
-  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   accountOf, railPrincipalText,
 } from '../harness/lib.mjs';
 
@@ -43,7 +43,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-EUR');
     await driver.click('btn-home-currency-continue');

@@ -8,14 +8,16 @@
 //
 // This flow drives the transition in the REAL app through the SOL RPC stub seam:
 //   * a rail that ANSWERS renders its balance and says nothing extra — no false alarm;
-//   * the same rail, once its endpoint starts refusing (the measured 429, verbatim), grows a line
-//     that names the network, states it is that connection and not the user's wallet, that the
-//     coins are untouched and the other accounts still work, and that the retry is automatic
-//     (the balance poll re-reads on its own — so no button is promised that nothing implements);
+//   * the same rail, once its endpoint starts refusing (the measured 429, verbatim), grows ONE
+//     line FOR THE NETWORK (X9 — it used to be repeated verbatim on every affected account) that
+//     names the network, states nothing moved and the other accounts still work, and that the
+//     retry is automatic (the balance poll re-reads on its own every 2.5s behind the endpoint's
+//     cooldown — so no button is promised that nothing implements, and against a rate limit an
+//     extra manual read is the cause, not the cure);
 //   * the IC rows on the same screen stay silent: the failure is scoped to the rail that failed.
 //
 // Selector contract: `balance` (the header chip that opens the accounts route), `asset-sol`,
-// `asset-sol-unreadable`, `asset-vchf`.
+// `rail-unreadable-solana`, `asset-vchf`.
 import {setup, assert, assertIncludes, onboardWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
@@ -23,13 +25,14 @@ export const meta = {
   name: 'rail-unreadable',
   journey: 'system',
   covers: ['solana', 'balances', 'home', 'rpc-error', 'honest-copy', 'fail-closed'],
-  verifies: 'A rail whose endpoint refuses (HTTP 429) stops rendering the same bare "—" a pending first poll shows: its row says the balance could not be refreshed, names the network, says it is that connection and not the wallet, that the funds are untouched and the other accounts still work, and that dpay keeps retrying on its own — while a rail that answers, and every IC row on the same screen, say nothing.',
+  verifies: 'A rail whose endpoint refuses (HTTP 429) stops rendering the same bare "—" a pending first poll shows: ONE line for the network says the balances could not be refreshed, names the network, says nothing moved and the other accounts still work, and that dpay keeps retrying on its own — stated once no matter how many accounts that network carries, while a rail that answers, and every IC row on the same screen, say nothing.',
   timeoutMs: 60000,
 };
 
-/** Is the unreadable line on the SOL row right now? */
-const unreadableShown = (driver) =>
-  driver.eval(() => document.querySelector('[data-testid="asset-sol-unreadable"]') != null);
+/** How many outage banners for the Solana network are on screen right now? X9's assertion is a
+ *  COUNT: three Solana accounts share one endpoint, so one refusal is ONE fact. */
+const outageBanners = (driver) =>
+  driver.eval(() => document.querySelectorAll('[data-testid="rail-unreadable-solana"]').length);
 
 export async function run() {
   const start = Date.now();
@@ -62,21 +65,25 @@ export async function run() {
       () => (document.querySelector('[data-testid="asset-sol"]')?.textContent ?? '').includes('2 SOL'),
       {timeoutMs: 12_000},
     );
-    assert((await unreadableShown(driver)) === false, 'a rail that answers carries no unreadable line');
+    assert((await outageBanners(driver)) === 0, 'a rail that answers carries no outage banner');
 
     // --- the endpoint starts refusing: the row explains itself ---------------------------------
     console.log('[147-rail-unreadable] endpoint starts refusing (HTTP 429) → the row explains…');
     await driver.eval(() => { globalThis.__DPAY_TEST_SOL_RPC_STATE.refusing = true; });
     await driver.waitForFunction(
-      () => document.querySelector('[data-testid="asset-sol-unreadable"]') != null,
+      () => document.querySelector('[data-testid="rail-unreadable-solana"]') != null,
       {timeoutMs: 12_000},
     );
-    const line = await driver.readText('asset-sol-unreadable');
+    const line = await driver.readText('rail-unreadable-solana');
     assertIncludes(line, 'Solana', 'the line names the network that is not answering');
-    assertIncludes(line, 'not your wallet', 'the line states whose side the failure is on');
-    assertIncludes(line, 'untouched', 'the line states the funds did not move');
+    assertIncludes(line, 'Nothing moved', 'the line states the funds did not move');
     assertIncludes(line, 'other accounts still work', 'the line points at what the user can still do');
     assertIncludes(line, 'keeps retrying', 'the line states the recovery is automatic (there is no button to press)');
+    // X9 — three Solana accounts are unreadable at once (one endpoint, one refusal). The banner is
+    // stated ONCE for the network; before this it was repeated verbatim on each of them.
+    const solRows = await driver.eval(() => document.querySelectorAll('[data-testid^="asset-sol"][data-testid$="-select"]').length);
+    assert(solRows >= 3, `the screen must carry >=3 Solana accounts for the count to mean anything, saw ${solRows}`);
+    assert((await outageBanners(driver)) === 1, 'one network outage renders exactly ONE banner');
 
     // The failure is scoped to the rail that failed — the IC rows claim nothing about it.
     const vchfRow = await driver.readText('asset-vchf');

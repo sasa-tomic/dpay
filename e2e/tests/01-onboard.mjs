@@ -15,7 +15,7 @@
 // reads ∂100.00 — NOT ∂0.00. Asserting ∂0.00 would require disabling the faucet, which would break
 // the "use the REAL relay + REAL FakeLedger" rule. We assert ∂100.00 (proves faucet→balance
 // end-to-end) and note this deviation. Empty history is asserted verbatim (no payments settled yet).
-import { setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
 
 const ONBOARD_USERNAME = 'e2e-alice';
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
@@ -76,8 +76,8 @@ export async function run() {
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
     // Trip Ready J2B/J3 — the create path plays the RECOVERY SAVED beat then the payment
-    // rehearsal before the wallet; dismiss it (faucet-failed + restore paths never see it).
-    await skipRehearsalIfPresent(driver);
+    // practice payment before the wallet; leave it (faucet-failed + restore paths never see it).
+    await skipPracticeIfPresent(driver);
 
     // 3. The Wallet screen mounts. The balance Text (testID="balance") is the gate. The app polls
     //    /api/v1/balances every 2.5s; the faucet funds the account synchronously in create(), so by

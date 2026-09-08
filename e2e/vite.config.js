@@ -19,6 +19,9 @@ import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
@@ -61,6 +64,109 @@ const rnExtensions = [
   '.json',
 ];
 
+// The app icon the web manifest points at: the SAME PNG the APK's launcher uses. Read from the
+// Android res tree at build time rather than copied into e2e/web, so the project has ONE icon.
+const ICON_SRC = join(REPO_ROOT, 'app/android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png');
+
+// Extensions worth precompressing. WOFF2 is brotli INSIDE the container and PNG is already
+// deflated — re-compressing either spends bytes rather than saving them, and the relay would then
+// have to decide which of two encodings to serve. wasm/js/html/json compress 3–4× (measured:
+// wallet.js 1_386_466 → 327_616, dpay-core.wasm 393_133 → 119_439).
+const COMPRESSIBLE = new Set(['.js', '.mjs', '.html', '.css', '.wasm', '.json', '.webmanifest', '.svg', '.txt']);
+
+/**
+ * web-prod only. Emits the PWA surface OPEN_ISSUES X10 is about — `/manifest.webmanifest`,
+ * `/icon-192.png` and `/sw.js` — then brotli-precompresses every compressible dist file into a
+ * `.br` sibling that `crates/dpay-relay/build.rs` pairs with its origin file.
+ *
+ * The service worker's whole policy is in `e2e/web/sw.js`; this plugin only fills in the two
+ * things a template cannot know: the exact precache list (every emitted asset, so a lazily
+ * imported chunk is available offline too) and a VERSION that is a hash over the CONTENT of all
+ * of them, which is what makes the update path deterministic.
+ */
+function dpayWebProdAssets() {
+  const digest = (buf) => createHash('sha256').update(buf).digest('hex');
+  return {
+    name: 'dpay-web-prod-assets',
+    apply: 'build',
+    // AFTER vite's own html plugin: `wallet.html` only enters the bundle in that plugin's
+    // generateBundle, and the shell document is the one file the precache cannot be built without.
+    enforce: 'post',
+    generateBundle(_opts, bundle) {
+      const icon = readFileSync(ICON_SRC);
+      const manifest = JSON.stringify(
+        {
+          name: 'dpay · Wallet',
+          short_name: 'dpay',
+          description:
+            'dpay web wallet — the same app, in your browser. Non-custodial: your key never leaves this device.',
+          start_url: '/wallet',
+          scope: '/wallet',
+          display: 'standalone',
+          background_color: '#F4F1E8',
+          theme_color: '#F4F1E8',
+          icons: [{ src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' }],
+        },
+        null,
+        2,
+      );
+      // Emitted AFTER their bytes are folded into the precache list below: rolldown does not make
+      // a file emitted from this hook visible in `bundle` during the same hook, so reading them
+      // back would silently leave them out of both the precache and the version.
+      this.emitFile({ type: 'asset', fileName: 'icon-192.png', source: icon });
+      this.emitFile({ type: 'asset', fileName: 'manifest.webmanifest', source: manifest });
+
+      // Precache = the shell document + every emitted asset (lazy chunks included, so Transactions
+      // and the SOL rail open offline too) + the two root files above. Served paths, not dist
+      // paths: `wallet.html` is what the relay answers `/wallet` with, and `/sw.js` is never
+      // cached by the worker that IS it.
+      const bytesOf = (f) => Buffer.from(f.type === 'chunk' ? f.code : f.source);
+      const shell = [
+        ['/wallet', bytesOf(bundle['wallet.html'])],
+        ['/icon-192.png', icon],
+        ['/manifest.webmanifest', Buffer.from(manifest)],
+        ...Object.keys(bundle)
+          .filter((f) => f !== 'wallet.html')
+          .map((f) => [`/${f}`, bytesOf(bundle[f])]),
+      ].sort(([a], [b]) => (a < b ? -1 : 1));
+      const precache = shell.map(([p]) => p);
+      const parts = shell.map(([p, bytes]) => `${p}:${digest(bytes)}`);
+      const version = digest(Buffer.from(parts.join('\n'))).slice(0, 16);
+      const template = readFileSync(join(WEB, 'sw.js'), 'utf8');
+      const source = template
+        .replace('__DPAY_SW_VERSION__', version)
+        .replace('__DPAY_SW_PRECACHE__', JSON.stringify(precache, null, 2));
+      if (source.includes('__DPAY_SW_')) {
+        throw new Error('sw.js template placeholders were not both substituted');
+      }
+      this.emitFile({ type: 'asset', fileName: 'sw.js', source });
+    },
+    // After rollup has written the dist: brotli the compressible files at max quality. Build-time
+    // cost (~5s, once) instead of per-request CPU, and the relay ships the bytes verbatim.
+    writeBundle(opts) {
+      const walk = (dir) => {
+        for (const name of readdirSync(dir)) {
+          const p = join(dir, name);
+          if (statSync(p).isDirectory()) walk(p);
+          else if (COMPRESSIBLE.has(name.slice(name.lastIndexOf('.')))) {
+            const raw = readFileSync(p);
+            writeFileSync(
+              `${p}.br`,
+              brotliCompressSync(raw, {
+                params: {
+                  [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
+                  [zlibConstants.BROTLI_PARAM_SIZE_HINT]: raw.length,
+                },
+              }),
+            );
+          }
+        }
+      };
+      walk(opts.dir);
+    },
+  };
+}
+
 // The ONE divergent shim between the two builds: the e2e harness uses the inject-only camera
 // (window.__DPAY_TEST_SCAN) because headless chrome has no lens to point at a printed QR; the
 // web-prod build (/wallet) uses the REAL getUserMedia + jsQR camera. Everything else — including
@@ -70,7 +176,9 @@ export default defineConfig(({ mode }) => {
   const camera = webProd ? join(WEB, 'camera-real.tsx') : join(WEB, 'camera.ts');
   return {
     root: WEB,
-    plugins: [react()],
+    // The PWA surface + brotli precompression exist ONLY in the shipped build; the e2e dist is
+    // served by sirv to a fresh browser context per flow and ships nowhere.
+    plugins: webProd ? [react(), dpayWebProdAssets()] : [react()],
     // Resolve the real app from the repo root (vite root is e2e/web; App.tsx lives at app/App.tsx).
     resolve: {
       alias: [

@@ -1,7 +1,7 @@
 // Flow 37 — Onboarding against a DEAD relay: wallet creation never asks for or promises funding,
 // still reaches the wallet with $0, and shows an honest offline indicator.
 //
-// Onboarding's `create()` (Onboarding.tsx) generates the on-device keypair + persists the identity,
+// Onboarding's `create()` (Onboarding.tsx) generates the on-device keypair + parks it as pending,
 // then discovers relay capabilities. If the relay is unreachable, capabilities fail closed and no
 // speculative faucet POST is made. This flow proves that contract end-to-end:
 //   - the wallet IS created (identity persisted, header username renders, balance element mounts);
@@ -18,7 +18,7 @@
 //
 // Selector contract: `balance` (header balance Pressable), `header-who` (username), the offline
 // label "~ DEMO approx." (Wallet.tsx renders it when `online === false`; asset-name-prefixed after D3).
-import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
+import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -28,8 +28,8 @@ export const meta = {
   name: 'onboard-no-faucet',
   journey: 'onboard',
   covers: ['onboard', 'capability-failure', 'offline', 'dead-relay', 'right-reason', 'zero-balance', 'no-funding-solicitation'],
-  verifies: 'Onboard against a dead relay → capability discovery reaches the relay and fails with a connection refusal (not an unsafe-port artifact), no faucet request follows, wallet is created with $0 (∂100 never shown), and the balance carries the honest offline indicator.',
-  timeoutMs: 20000,
+  verifies: 'Onboard against a dead relay → capability discovery reaches the relay and fails with a connection refusal (not an unsafe-port artifact), no faucet request follows, the first-run practice screen fails closed with a retry and NO deposit address or add-money action, the wallet is created with $0 (∂100 never shown), and the balance carries the honest offline indicator.',
+  timeoutMs: 30000,
 };
 
 export async function run() {
@@ -69,7 +69,21 @@ export async function run() {
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
 
-    await skipRehearsalIfPresent(driver);
+    // The first-run PRACTICE screen against a dead relay. It cannot read a balance, so it takes
+    // its OFFLINE branch — and the assertion of record for this flow's `no-funding-solicitation`
+    // slug is what that branch does NOT do: it offers a retry and a way on, and never a deposit
+    // address or an add-money action. A screen that answered "we couldn't fund you" with "here is
+    // where to send money" is the exact shape the 2026-09-08 first-run redesign exists to remove.
+    await driver.findByTestID('practice', { timeoutMs: 15_000 });
+    await driver.findByTestID('practice-offline', { timeoutMs: 15_000 });
+    assert(!(await driver.isPresent('practice-offline-go')),
+      'the offline practice branch must offer no funding primary');
+    assert(!(await driver.isPresent('deposit-address')), 'and no deposit address');
+    assert(await driver.isPresent('practice-offline-check'), 'it offers a re-check');
+    assert(await driver.isPresent('btn-practice-continue'), 'and a way on');
+    console.log('[37-onboard-no-faucet] ✓ practice fails closed with a retry and no solicitation');
+
+    await skipPracticeIfPresent(driver);
     // The wallet mounts without a funding-failure detour.
     await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 10_000 });

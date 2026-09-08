@@ -16,7 +16,7 @@
 //
 // The single-rail control: home=CHF on VCHF renders EXACTLY as before — same principal sheet,
 // NO rail disclosure anywhere (the component renders null outside a two-rail group).
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent, accountOf, openBalances, selectCurrency, railPrincipalText} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, accountOf, openBalances, selectCurrency, railPrincipalText} from '../harness/lib.mjs';
 
 export const meta = {
   id: '122',
@@ -45,7 +45,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-USD');
     await driver.click('btn-home-currency-continue');

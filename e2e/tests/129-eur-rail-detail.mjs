@@ -15,7 +15,7 @@
 //   * Back collapses the panel WITHOUT unpicking the row; Continue still commits, and EUR lands
 //     the wallet on EURC@Solana — the stated preference, not the catalog's enumeration order.
 import {
-  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   openBalances,
 } from '../harness/lib.mjs';
 
@@ -44,7 +44,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
 
     assert(await driver.isPresent('home-currency-EUR'),

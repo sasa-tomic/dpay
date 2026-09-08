@@ -50,7 +50,7 @@ export const meta = {
   journey: 'tour',
   covers: ['visual-regression', 'pixel-diff', 'dark-theme'],
   verifies:
-    'Pixel-diff the 5 primary surfaces under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks.',
+    'Pixel-diff the 6 primary surfaces under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks.',
   timeoutMs: 25_000,
 };
 

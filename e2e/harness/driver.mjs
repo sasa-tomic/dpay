@@ -22,6 +22,10 @@ const FAILURES_DIR = join(SHOTS_DIR, 'failures');
 // failing flow was doing right before it went RED.
 const TIMELINE_MAX = 200;
 const CONSOLE_MAX = 500;
+/** Resource types whose HTTP error status is always a broken BUILD, never product behaviour: the
+ *  page itself, the JS chunks, the stylesheet, the fonts, the images and the core wasm (`other`).
+ *  Deliberately excludes `fetch`/`xhr` — see the `response` listener. */
+const ASSET_RESOURCE_TYPES = new Set(['document', 'script', 'stylesheet', 'font', 'image', 'media', 'other']);
 
 // iPhone-12-ish viewport — the RN app's styles are designed for a phone; this keeps the layout
 // correct (and matches what golden-shot visual regression would compare against).
@@ -112,6 +116,29 @@ export class Driver {
       const intentionalAbort = errorText === 'net::ERR_ABORTED';
       if (this.closing || intentionalAbort || url.endsWith('/favicon.ico') || this.isRequestFailureAllowed(url)) return;
       this.recordUnexpectedDiagnostic(`requestfailed: ${url} — ${errorText}`);
+    });
+    // A 404 IS NOT A `requestfailed`, AND THAT WAS THE HOLE. Puppeteer emits `requestfailed` only
+    // for transport failures — an HTTP error status is a perfectly successful response and arrives
+    // as `requestfinished`. Chrome's own `Failed to load resource: … 404` console line is dropped a
+    // few lines above as a URL-less duplicate, so between the two, a MISSING ASSET was invisible to
+    // this gate: the whole suite would stay green with a bundle chunk, a font or the core wasm
+    // 404ing. (This is the residue of the "receipt-poll 404 console lines — cosmetic" disposition:
+    // an expected 404 taught the harness to ignore a class that also contains real failures.)
+    //
+    // Scope is STATIC ASSETS only. `fetch`/`xhr` are the app's own API calls, where a 404 is often
+    // the product working as designed — an unknown till charge, a relay that serves no till, a
+    // capabilities probe against a relay that has none — and those are asserted by the flows that
+    // provoke them, not here.
+    this.page.on('response', (res) => {
+      if (this.closing || res.status() < 400) return;
+      const req = res.request();
+      if (!ASSET_RESOURCE_TYPES.has(req.resourceType())) return;
+      const url = res.url();
+      // The one allowlisted asset: Chrome requests /favicon.ico implicitly and `e2e/web/index.html`
+      // declares no icon, so it 404s once per page load. (The SHIPPED page, wallet.html, does
+      // declare one — this is harness-only.)
+      if (url.endsWith('/favicon.ico') || this.isRequestFailureAllowed(url)) return;
+      this.recordUnexpectedDiagnostic(`asset ${req.resourceType()} ${url} answered HTTP ${res.status()}`);
     });
   }
 

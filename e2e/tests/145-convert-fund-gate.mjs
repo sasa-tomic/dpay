@@ -128,11 +128,22 @@ export async function run() {
       const doc = document.documentElement;
       let widest = 0;
       let scrolled = 0;
+      let widestId = null;
       document.querySelectorAll('*').forEach((el) => {
-        if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) widest = Math.max(widest, el.scrollWidth - el.clientWidth);
+        // An element that declares `text-overflow: ellipsis` is TRUNCATING ON PURPOSE and says so
+        // on screen with the ellipsis itself — that is the opposite of the defect this measures,
+        // which is content sliding out of view with no mark that anything is missing. (The header
+        // username ellipsizes since X18, so that it yields the row's width to the account chip
+        // instead of pushing it off the phone; without this exemption the guard would forbid the
+        // very fix.) Everything else that exceeds its own box is still fatal.
+        if (getComputedStyle(el).textOverflow === 'ellipsis') return;
+        if (el.scrollWidth > el.clientWidth + 1 && el.clientWidth > 0) {
+          const d = el.scrollWidth - el.clientWidth;
+          if (d > widest) { widest = d; widestId = el.getAttribute('data-testid') ?? el.tagName; }
+        }
         scrolled = Math.max(scrolled, el.scrollLeft);
       });
-      return { docOverflow: doc.scrollWidth - doc.clientWidth, widest, scrolled };
+      return { docOverflow: doc.scrollWidth - doc.clientWidth, widest, widestId, scrolled };
     });
     assertEq(overflow.scrolled, 0, 'nothing on the Convert screen is scrolled sideways');
     assertEq(overflow.widest, 0, `no element overflows its own box horizontally (${JSON.stringify(overflow)})`);

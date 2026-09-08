@@ -20,7 +20,7 @@
 // inlined on the Home tab before that, and a Balances sheet before that. `openBalances` owns the
 // navigation, so this flow reads the same either way.)
 import {
-  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   openBalances,
 } from '../harness/lib.mjs';
 
@@ -49,7 +49,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
     await driver.click('home-currency-USD', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});

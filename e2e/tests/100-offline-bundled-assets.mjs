@@ -9,7 +9,7 @@
 // Mirrors flow 37's dead-relay onboarding (capability discovery fails closed → no speculative
 // faucet request, wallet reaches $0 home).
 import {
-  setup, assert, assertIncludes, pickFreePort, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertIncludes, pickFreePort, skipWalkthroughIfPresent, skipPracticeIfPresent,
   waitForEnabled, chooseHomeCurrencyIfPresent, openBalances,
 } from '../harness/lib.mjs';
 
@@ -48,7 +48,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await chooseHomeCurrencyIfPresent(driver);
     await driver.findByTestID('balance', { timeoutMs: 8_000 }); // wallet home mounted at $0
 

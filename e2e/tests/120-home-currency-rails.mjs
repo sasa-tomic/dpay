@@ -21,7 +21,7 @@
 //   * The byte-stable chooser testIDs still drive the flow (home-currency-<CCY>,
 //     btn-home-currency-continue) — the ~106 flows that ride chooseHomeCurrencyIfPresent.
 import {
-  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipRehearsalIfPresent,
+  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
 } from '../harness/lib.mjs';
 
 export const meta = {
@@ -49,7 +49,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
 
     // --- 2. the USD row names BOTH rails, preferred first ---------------------------------------

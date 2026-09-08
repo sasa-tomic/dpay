@@ -53,12 +53,22 @@ async function run() {
     // RECOVERY SAVED beat plays ~750ms then auto-advances — catch it mid-flight.
     await sleep(350);
     await shoot(driver, 'A06-phone-recovery-beat');
-    await driver.findByTestID('rehearsal', { timeoutMs: 15_000 });
+    await driver.findByTestID('practice', { timeoutMs: 15_000 });
     await sleep(1200);
-    // One-page rehearsal: a single shot carries all 3 steps + punchline + CTA.
-    await shoot(driver, 'A07-phone-rehearsal-page');
-    await driver.click('btn-rehearsal-next'); // "Choose my currency"
-    // The rehearsal's exit hands over to the first-run currency question, not straight to the
+    // The first-run practice payment: the request card, then the REAL review, then whatever the
+    // ledger actually said. Three shots, because the last one is the judgement call the spec
+    // flagged as its least sure claim — does a real ∂1.00 payment read as a success?
+    await shoot(driver, 'A07-phone-practice-request');
+    await driver.click('btn-practice-review', { timeoutMs: 8_000 });
+    await driver.findByTestID('btn-approve', { timeoutMs: 8_000 });
+    await sleep(600);
+    await shoot(driver, 'A07b-phone-practice-review');
+    await driver.click('btn-approve', { timeoutMs: 8_000 });
+    await driver.findByTestID('practice-outcome', { timeoutMs: 20_000 });
+    await sleep(600);
+    await shoot(driver, 'A07c-phone-practice-outcome');
+    await driver.click('btn-practice-continue', { timeoutMs: 8_000 });
+    // Practice hands over to the first-run currency question, not straight to the
     // wallet; answering it lands Home. The DEMO shots below then need DEMO selected explicitly.
     await driver.findByTestID('home-currency-title', { timeoutMs: 15_000 });
     await sleep(600);

@@ -12,7 +12,7 @@
 //
 // Selector contract: `home-currency-title`, `home-currency-pick-first`,
 // `btn-home-currency-continue`, `home-currency-CHF`, `balance`.
-import {setup, assert, assertEq, skipWalkthroughIfPresent, skipRehearsalIfPresent, waitForEnabled} from '../harness/lib.mjs';
+import {setup, assert, assertEq, skipWalkthroughIfPresent, skipPracticeIfPresent, waitForEnabled} from '../harness/lib.mjs';
 
 export const meta = {
   id: '149',
@@ -38,7 +38,7 @@ export async function run() {
     await driver.click('mnemonic-backup-checkbox');
     await waitForEnabled(driver, 'btn-mnemonic-continue');
     await driver.click('btn-mnemonic-continue');
-    await skipRehearsalIfPresent(driver);
+    await skipPracticeIfPresent(driver);
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
 
     // Nothing is preselected, and nothing is nagging yet.
