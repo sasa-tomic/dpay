@@ -20,7 +20,7 @@ export const errorsDe: ErrorMessages = {
     senderNoTokenAccount: asset =>
       `Deine Wallet hat noch kein ${asset}-Konto. Geh einmal online und öffne Empfangen ▸ „Mein ${asset}-Konto erstellen“, um es anzulegen — oder zahl diesem Händler mit einem Asset, das du schon hast`,
     recipientNoTokenAccount: (solAmount, asset) =>
-      `Die Person hat noch kein ${asset}-Konto — zum Erstellen brauchst du etwa ${solAmount} SOL in dieser Wallet (einmalige Kontomiete + Gebühr, von dir bezahlt) — sende zuerst etwas SOL hierher`,
+      `Die Person hat noch kein ${asset}-Konto — zum Erstellen brauchst du etwa ${solAmount} in dieser Wallet (einmalige Kontomiete + Gebühr, von dir bezahlt) — sende zuerst etwas SOL hierher`,
     ownTokenAccountRent: (solAmount, asset) =>
       `Für dein ${asset}-Konto brauchst du etwa ${solAmount} in dieser Wallet (einmalige Kontomiete + Gebühr) — sende zuerst etwas SOL hierher`,
   },

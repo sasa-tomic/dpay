@@ -442,7 +442,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   // ring up a total the till cannot charge.
   const opening = phase.k === 'opening';
   return (
-    <View style={S.center}>
+    <View style={S.centerTop}>
       <Text style={S.label}>{M.receive.till.chargeLabel}</Text>
       <View style={S.amountRow}>
         <View style={S.prefixBtn}><Text style={S.currency}>{CHF}</Text></View>

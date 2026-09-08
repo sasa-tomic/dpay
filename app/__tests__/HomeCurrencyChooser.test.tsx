@@ -8,8 +8,8 @@
  *     stated preference — before VEUR), each stating ONLY catalog-backed facts: rail line, chain
  *     tag, fee in the rail's own unit (`M.receive.rail` vocabulary — the same voice the Receive
  *     disclosure uses), liquidity (thin→warn, deep→pro), ramp capability.
- *   • The default-pick reason appears on EXACTLY the rail `chooseRail` picks — never on the
- *     sibling.
+ *   • Preference still determines rail order, but is never rendered as a reason suffix
+ *     (docs/specs/2026-09-07-ux-decisions.md).
  *   • The STRUCTURAL PIN: a COLLAPSED card carries only the currency name + its rail lines — no
  *     fee, no liquidity, no ramp string ever leaks into the collapsed shape (the "no fourth
  *     string" rule that keeps the chooser's preamble-compatible surface byte-stable).
@@ -73,6 +73,15 @@ const isPresent = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
   tree.root.findAll(node => node.props && node.props.testID === testID).length > 0;
 
 describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
+  test('requires an explicit currency choice before Continue', () => {
+    const tree = mountChooser();
+    const button = tree.root.findAll(node => node.props?.testID === 'btn-home-currency-continue')[0]!;
+    expect(button.props.disabled).toBe(true);
+    press(tree, 'home-currency-CHF');
+    expect(tree.root.findAll(node => node.props?.testID === 'btn-home-currency-continue')[0]!.props.disabled).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
   test('a collapsed multi-rail card carries ONLY the name + rail lines (no fourth string)', () => {
     const tree = mountChooser();
     // EUR is offered (both rails catalogued) and its collapsed card names both rail lines…
@@ -140,14 +149,12 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('the default-pick reason sits on EXACTLY the rail chooseRail picks', () => {
+  test('the preferred rail stays first without a default-rail suffix', () => {
     const tree = mountChooser();
     press(tree, 'home-currency-EUR');
-    // Fresh wallet, no balances: EURC is the stated preference → its block (and only its block)
-    // carries the reason line.
-    const reason = "EURC · Solana — dpay's default rail";
-    expect(rowText(tree, 'rail-detail-sol-eurc')).toContain(reason);
-    expect(rowText(tree, 'rail-detail-veur')).not.toContain('dpay');
+    expect(rowText(tree, 'rail-detail-sol-eurc')).toContain('EURC · Solana');
+    expect(rowText(tree, 'rail-detail-sol-eurc')).not.toContain('default rail');
+    expect(rowText(tree, 'rail-detail-veur')).not.toContain('default rail');
     act(() => { tree.unmount(); });
   });
 
@@ -157,8 +164,9 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
     press(tree, 'home-currency-EUR');
     press(tree, 'btn-home-currency-back');
     expect(isPresent(tree, 'home-currency-detail')).toBe(false);
-    // The row stays picked: the collapsed card still carries the reason-marked preferred line.
-    expect(cardText(tree, 'home-currency-EUR')).toContain("EURC · Solana — dpay's default rail");
+    // The row stays picked and the preferred line remains first without implementation jargon.
+    expect(cardText(tree, 'home-currency-EUR')).toContain('EURC · Solana');
+    expect(cardText(tree, 'home-currency-EUR')).not.toContain('default rail');
     press(tree, 'btn-home-currency-continue');
     expect(onChoose).toHaveBeenCalledWith('EUR');
     act(() => { tree.unmount(); });

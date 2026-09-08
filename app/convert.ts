@@ -33,6 +33,7 @@ import type {CurrencyDescriptor} from './config/catalog';
 import {
   CONVERT_POOL_PRINCIPAL,
   CONVERT_APPROVE_LIFETIME_S,
+  CONVERT_IMPACT_PRICE_SCALE,
   CONVERT_IMPACT_REF_AMOUNT_IN,
   CONVERT_IMPACT_WARN_BPS,
   CONVERT_STALE_MS,
@@ -50,6 +51,7 @@ export type SwapQuoteBody = {
   amount_in: string;
   amount_out: string;
   zero_for_one: boolean;
+  fee_millionths: number; // the VENUE's own fee tier, off the pool's metadata (3000 = 0.30%)
   fetched_at: number; // unix seconds
 };
 
@@ -60,6 +62,7 @@ export type ConvertQuote = {
   amountIn: string; // raw e8s decimal
   amountOutGross: string; // raw e8s decimal, GROSS (output fee not yet subtracted)
   zeroForOne: boolean;
+  feeMillionths: number; // the venue's own fee tier, echoed — dpay never claims a number here
   fetchedAtMs: number; // device clock at fetch (staleness display + refresh)
   impactBps: number | null; // measured against the venue's own near-zero reference trade
 };
@@ -77,7 +80,8 @@ async function getSwapQuote(relayUrl: string, tokenIn: string, tokenOut: string,
   if (r.status === 422) throw new Error(M.convert.errors.quoteRefused());
   if (!r.ok) throw new Error(M.convert.errors.quoteUnavailable(String(r.status)));
   const j = await r.json().catch(() => null) as SwapQuoteBody | null;
-  if (j == null || typeof j.amount_out !== 'string' || typeof j.zero_for_one !== 'boolean') {
+  if (j == null || typeof j.amount_out !== 'string' || typeof j.zero_for_one !== 'boolean'
+    || typeof j.fee_millionths !== 'number') {
     throw new Error(M.convert.errors.quoteUnavailable('shape'));
   }
   return j;
@@ -102,12 +106,18 @@ export async function fetchConvertQuote(
   const inN = BigInt(trade.amount_in);
   const refInN = BigInt(ref.amount_in);
   let impactBps: number | null = null;
-  if (inN > 0n && refInN > 0n && BigInt(trade.amount_out) <= inN * 10n && BigInt(ref.amount_out) > 0n) {
-    // price(this trade) vs price(near-zero trade), scaled to bps and floored.
-    const price = (BigInt(trade.amount_out) * 10_000n) / inN;
-    const refPrice = (BigInt(ref.amount_out) * 10_000n) / refInN;
-    if (refPrice > 0n && price <= refPrice) {
-      impactBps = Number(((refPrice - price) * 10_000n) / refPrice);
+  if (inN > 0n && refInN > 0n) {
+    // price(this trade) vs price(near-zero trade), both as out-units per in-unit ×1e12.
+    const price = (BigInt(trade.amount_out) * CONVERT_IMPACT_PRICE_SCALE) / inN;
+    const refPrice = (BigInt(ref.amount_out) * CONVERT_IMPACT_PRICE_SCALE) / refInN;
+    if (refPrice > 0n) {
+      // A larger trade can never get a BETTER unit price out of the same curve in the same
+      // direction, so a negative gap is not a discount — it is the pool's own flooring, bounded at
+      // 0.025 bps by the reference size (config/convert.ts). Reporting 0 states what that
+      // measurement supports; nulling here would have parked the line on "unmeasurable" for every
+      // trade small enough that the noise outweighs an impact of, honestly, zero.
+      const drop = refPrice - price;
+      impactBps = drop <= 0n ? 0 : Number((drop * 10_000n) / refPrice);
     }
   }
   return {
@@ -117,6 +127,7 @@ export async function fetchConvertQuote(
     amountIn: trade.amount_in,
     amountOutGross: trade.amount_out,
     zeroForOne: trade.zero_for_one,
+    feeMillionths: trade.fee_millionths,
     fetchedAtMs: Date.now(),
     impactBps,
   };
@@ -166,64 +177,6 @@ export function isQuoteStale(quote: ConvertQuote, nowMs: number = Date.now()): b
   const seam = (globalThis as unknown as {__DPAY_TEST_CONVERT_STALE_MS?: number}).__DPAY_TEST_CONVERT_STALE_MS;
   const threshold = seam ?? CONVERT_STALE_MS;
   return nowMs - quote.fetchedAtMs > threshold;
-}
-
-// --- the pool's swap Result decoder (pure; golden-pinned by jest against goldens.rs) ---------------
-
-/** DIDL type table for the pool's `Result<nat, PoolSwapError>` reply (icrc.rs SWAP_RESULT_TABLE).
- *  The pool is a MOTOKO canister — its Result arms are lowercase `ok`/`err` on the wire (the
- *  venue's .did), NOT the capitalized Ok/Err the Rust ICRC ledgers serve. */
-export const SWAP_RESULT_TABLE_HEX =
-  '4449444c026b029cc2017de58eb402016b04fd84aff9047fab8e83800e71a4a4a1b50e71eb9cdbd50f7f0100';
-
-export type SwapResult =
-  | {ok: true; amountOutGross: string}
-  | {ok: false; variant: 'CommonError' | 'InsufficientFunds' | 'InternalError' | 'UnsupportedToken'; detail?: string};
-
-function readUleb(hex: string, i: number): [bigint, number] {
-  let v = 0n;
-  let shift = 0n;
-  for (;;) {
-    if (i + 2 > hex.length) throw new Error(M.convert.errors.swapReplyShape());
-    const b = parseInt(hex.slice(i, i + 2), 16);
-    i += 2;
-    v |= BigInt(b & 0x7f) << shift;
-    if ((b & 0x80) === 0) return [v, i];
-    shift += 7n;
-  }
-}
-
-/** Decode the pool's reply bytes (hex): the 44-byte table prefix, then variant 0 (#ok nat) or
- *  variant 1 (#err {CommonError | InternalError(text) | UnsupportedToken(text) | InsufficientFunds}). */
-export function decodeSwapResult(replyHex: string): SwapResult {
-  const hex = replyHex.toLowerCase();
-  const table = SWAP_RESULT_TABLE_HEX;
-  if (hex.length < table.length + 2 || hex.slice(0, table.length) !== table) {
-    throw new Error(M.convert.errors.swapReplyShape());
-  }
-  let i = table.length;
-  const tag = hex.slice(i, i + 2);
-  i += 2;
-  if (tag === '00') {
-    const [v, next] = readUleb(hex, i);
-    if (next !== hex.length) throw new Error(M.convert.errors.swapReplyShape());
-    return {ok: true, amountOutGross: v.toString()};
-  }
-  if (tag !== '01') throw new Error(M.convert.errors.swapReplyShape());
-  const arm = hex.slice(i, i + 2);
-  i += 2;
-  if (arm === '00') return {ok: false, variant: 'CommonError'};
-  if (arm === '03') return {ok: false, variant: 'InsufficientFunds'};
-  if (arm === '01' || arm === '02') {
-    const [len, afterLen] = readUleb(hex, i);
-    const textEnd = afterLen + Number(len) * 2;
-    if (textEnd > hex.length) throw new Error(M.convert.errors.swapReplyShape());
-    const text = hex.slice(afterLen, textEnd);
-    let detail = '';
-    for (let p = 0; p < text.length; p += 2) detail += String.fromCharCode(parseInt(text.slice(p, p + 2), 16));
-    return {ok: false, variant: arm === '01' ? 'InternalError' : 'UnsupportedToken', detail};
-  }
-  throw new Error(M.convert.errors.swapReplyShape());
 }
 
 // --- the §4 state machine record -------------------------------------------------------------------
@@ -528,14 +481,13 @@ export async function executeConvert(
     await saveConvertRecord(rec);
   }
   if (rec.step === 'swapping') {
-    const decodeSwapReply = async (replyArgHex: string) => {
-      const res = decodeSwapResult(replyArgHex);
-      return res.ok
-        ? {ok: true}
-        : {ok: false, errVariant: res.variant, errDetail: res.detail ?? ''};
-    };
+    // The pool's Result is decoded by the compiled core (dpay_icp::icrc::decode_swap_result), the
+    // same bytes-to-outcome the relay and the fake gateway use — never a TS re-read of the wire.
+    // Called through a wrapper, not a detached method reference: `DpayCore` is a NativeModules
+    // object, and a bare reference would only break on a device (the same shape rail.ts uses).
     const outcome = await submitEnvelope(
-      CONVERT_POOL_PRINCIPAL, rec.swapEnvelopeHex, rec.swapRequestIdHex, decodeSwapReply,
+      CONVERT_POOL_PRINCIPAL, rec.swapEnvelopeHex, rec.swapRequestIdHex,
+      (replyArgHex: string) => DpayCore.icpDecodeSwapResult(replyArgHex),
     );
     if (outcome === 'unknown') {
       rec = {...rec, step: 'stuck', failureCode: 'unknown'};

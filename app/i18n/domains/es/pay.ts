@@ -147,11 +147,13 @@ export const payEs: PayMessages = {
   },
 
   fundsSymbol: 'fondos',
-  fundTitle: (symbol, action) => `Añade ${symbol} para ${action === 'pay' ? 'pagar' : 'enviar'}`,
+  fundTitle: symbol => `No hay ${symbol} disponible`,
   fundBody: (symbol, action) =>
-    `Esta billetera todavía no tiene ${symbol}. Envía ${symbol} a tu dirección y podrás ${action === 'pay' ? 'pagar' : 'enviar'} enseguida.`,
+    action === 'pay'
+      ? `Esta billetera no tiene ${symbol}. Para pagar una solicitud de ${symbol}, primero recibe ${symbol} en tu dirección.`
+      : `Esta billetera no tiene ${symbol}. Para enviar ${symbol}, primero recibe ${symbol} en tu dirección.`,
   fundBodyNoDeposits: symbol =>
-    `Esta billetera todavía no tiene ${symbol}, y ${symbol} aún no admite depósitos. Añade fondos en otro activo o vuelve a intentarlo pronto.`,
+    `Esta billetera no tiene ${symbol} y dpay no puede mostrar una dirección de depósito. Recibe ${symbol} de otra billetera antes de gastarlo.`,
   fundBodyToken: symbol => `Envía ${symbol} (Solana) a tu dirección de ${symbol}. Deja un poco de SOL en la billetera para las comisiones de red.`,
   showMyAddress: symbol => `Ver mi dirección de ${symbol}`,
   createTokenAccount: symbol => `Crear mi cuenta de ${symbol}`,

@@ -142,9 +142,6 @@ export const onboardingDe: OnboardingMessages = {
     ack: 'Ich habe alle 24 Wörter aufgeschrieben',
   },
 
-  faucetFailed:
-    'Wallet erstellt, aber das Startguthaben konnte nicht hinzugefügt werden. Der Server ist womöglich offline — du kannst später im Guthaben-Bereich aufladen.',
-
   restore: {
     phraseLabel: 'Wiederherstellungsphrase',
     phrasePlaceholder: 'Gib deine 24 Wiederherstellungswörter ein',
@@ -184,9 +181,9 @@ export const onboardingDe: OnboardingMessages = {
   create: {
     action: 'Wallet erstellen',
     busy: 'Wird erstellt…',
-    hint: 'Erzeugt deinen Schlüssel auf dem Gerät und fügt Demo-Guthaben hinzu',
+    hint: 'Erstellt einen Wallet-Schlüssel auf diesem Gerät; keine Einzahlung und kein Kauf nötig',
   },
 
-  demoNote: 'Erstellt deine Wallet und fügt für den Start ∂100 Demo-Guthaben hinzu.',
-  demoGlyphNote: ' ist das Symbol für Demo-Dollar — Spielgeld, ∂1 = $1.',
+  demoNote: 'Beim Erstellen der Wallet wird kein Geld eingezahlt, gekauft oder bewegt.',
+  demoGlyphNote: ' ist Übungsgeld ohne Geldwert — ∂1 ist einfach eine DEMO-Einheit.',
 };

@@ -67,33 +67,8 @@ describe('buildAssetBalances — per-asset balance map', () => {
     expect(m['ic:1'].displayText).toBe('0 BTC');
   });
 
-  it('DEMO: non-null ⇒ ok with the ∂ formatter; offline ⇒ "~" prefix baked in; NEVER dims (ok)', () => {
-    const online = buildAssetBalances({
-      catalog: CATALOG, assets, icBalances: {}, primaryBalance: '10000', online: true,
-      solState: {balance: null, status: 'unavailable'},
-      tokenStates: {},
-    });
-    expect(online['ic:0'].displayText).toBe('∂100.00');
-    expect(online['ic:0'].status).toBe('ok');
-
-    const offline = buildAssetBalances({
-      catalog: CATALOG, assets, icBalances: {}, primaryBalance: '9100', online: false,
-      solState: {balance: null, status: 'unavailable'},
-      tokenStates: {},
-    });
-    expect(offline['ic:0'].displayText).toBe('~∂91.00');
-    expect(offline['ic:0'].status).toBe('ok'); // DEMO never dims, even offline
-  });
-
-  it('DEMO: null primaryBalance ⇒ "—" + ok (never zero/absent)', () => {
-    const m = buildAssetBalances({
-      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
-      solState: {balance: null, status: 'unavailable'},
-      tokenStates: {},
-    });
-    expect(m['ic:0'].displayText).toBe('—');
-    expect(m['ic:0'].status).toBe('ok');
-  });
+  // (The DEMO rail's own truth table — funded / zero / unknown / the offline "~" marker — and its
+  // composition with decideFundsReady live in assetBalances.test.ts.)
 
   it('SOL: ok + non-zero ⇒ ok; ok + zero ⇒ zero; unavailable ⇒ "—" (the jest/e2e default)', () => {
     const sol = (balance: string | null, st: 'ok' | 'unavailable'): BalanceView => {

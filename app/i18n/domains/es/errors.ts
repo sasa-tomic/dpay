@@ -21,7 +21,7 @@ export const errorsEs: ErrorMessages = {
     senderNoTokenAccount: asset =>
       `Tu billetera aún no tiene una cuenta de ${asset}. Conéctate una vez a internet y abre Recibir ▸ «Crear mi cuenta de ${asset}» para crearla — o paga a este comercio con un activo que ya tengas`,
     recipientNoTokenAccount: (solAmount, asset) =>
-      `Aún no tiene una cuenta de ${asset}: crearla requiere unos ${solAmount} de SOL en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
+      `Aún no tiene una cuenta de ${asset}: crearla requiere unos ${solAmount} en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
     ownTokenAccountRent: (solAmount, asset) =>
       `Crear tu cuenta de ${asset} requiere unos ${solAmount} en esta billetera (renta de la cuenta y comisión, una sola vez); envía un poco de SOL aquí primero`,
   },

@@ -71,6 +71,41 @@ import {deriveAta, USDC_MINT_ADDRESS, USDC_DECIMALS} from './spl';
 /** Page size, matching the IC rail's `limit=20`. */
 export const SOL_HISTORY_LIMIT = 20;
 
+/**
+ * Confirmed transaction DETAILS, cached by signature. A confirmed transaction's detail is
+ * immutable, and the 15s history poll used to re-read the same ≤20 of them for as long as the app
+ * was open — 80 `getTransaction` calls a minute from a wallet nobody was touching (measured
+ * 2026-09-08, alongside the HTTP 429 the shipped RPC key now answers with). Reading each one once
+ * is the whole fix.
+ *
+ * This cannot pin a rolled-back transaction on screen: the SIGNATURE LIST is still fetched fresh
+ * every cycle, and the cache is only ever consulted for signatures that list still returns — a
+ * transaction that disappears from the chain disappears from the list, and with it from the rows.
+ * A `null` detail (the node does not have the transaction yet) is deliberately NOT cached; that is
+ * a state that changes.
+ */
+const detailCache = new Map<string, SolanaTransactionDetail>();
+/** Cache ceiling: an app session reads one wallet's recent page, so this is generous — bounded
+ *  only so a long-lived session can never grow it without limit. Oldest insertion is evicted
+ *  first (Map iterates in insertion order). */
+const DETAIL_CACHE_MAX = 200;
+
+function rememberDetail(signature: string, detail: SolanaTransactionDetail): void {
+  detailCache.set(signature, detail);
+  while (detailCache.size > DETAIL_CACHE_MAX) {
+    const oldest = detailCache.keys().next();
+    if (oldest.done === true) return;
+    detailCache.delete(oldest.value);
+  }
+}
+
+/** Drop every cached detail. The ONE caller is the test suite, which must not carry one case's
+ *  transaction bodies into the next; production never invalidates, because the cached fact cannot
+ *  go stale (see `detailCache`). */
+export function resetSolanaHistoryCache(): void {
+  detailCache.clear();
+}
+
 export type SolanaHistoryToken = 'SOL' | 'USDC';
 
 /** One movement of ONE token in ONE transaction. A transaction can produce two rows (a USDC
@@ -276,8 +311,12 @@ export async function fetchSolanaHistory(
   const recent = [...bySignature.values()].sort((a, b) => b.slot - a.slot).slice(0, limit);
 
   const details = await Promise.all(recent.map(async (info) => {
+    const cached = detailCache.get(info.signature);
+    if (cached !== undefined) return cached;
     try {
-      return await getTransaction(rpcUrl, info.signature, opts);
+      const detail = await getTransaction(rpcUrl, info.signature, opts);
+      if (detail !== null) rememberDetail(info.signature, detail);
+      return detail;
     } catch (e) {
       console.warn(`fetchSolanaHistory: getTransaction failed for ${info.signature}: `, e);
       return undefined; // already logged; counted as dropped below

@@ -8,7 +8,7 @@ import {currencyName, currencyOfAsset, preferredRail, railLineLabel, type HomeCu
 import {CurrencyRow} from './CurrencyRow';
 import {HistoryRow} from './HistoryRow';
 import {HotkeyHint} from './HotkeyHint';
-import {IconArrowDownLeft, IconPlus, IconQr, IconSwap} from './icons';
+import {IconAlert, IconArrowDownLeft, IconPlus, IconQr, IconSwap} from './icons';
 import {RailLiquidityNote} from './RailLiquidityNote';
 import type {AssetId, Txn} from '../lib/types';
 import type {BalanceView} from '../lib/assetBalances';
@@ -39,7 +39,7 @@ import type {BalanceView} from '../lib/assetBalances';
 // The activity feed shows the newest ledger rows through the SAME HistoryRow the Transactions tab
 // renders (own token units per row), capped at 3 with a See-all link into the full tab — its own
 // home-hist-* testIDs, never the Ledger's hist-* anchors.
-export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, homeCurrency, homeAsset, online, history, topUpBusy, topUpErr, hasTestnet, showTestnet, onToggleTestnet, onPay, onReceive, onDeposit, onTopUp, onConvert, onSelect, onSeeAll}: {
+export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, homeCurrency, homeAsset, online, history, demoFaucetAvailable, topUpBusy, topUpErr, hasTestnet, showTestnet, onToggleTestnet, onPay, onReceive, onDeposit, onTopUp, onConvert, onSelect, onSeeAll}: {
   assets: SelectableAsset[];
   selectedAsset: SelectableAsset | null;
   selectedId: AssetId | null;
@@ -49,6 +49,7 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
   homeAsset: SelectableAsset | null;
   online: boolean;
   history: Txn[];
+  demoFaucetAvailable: boolean;
   topUpBusy: boolean;
   topUpErr: string | null;
   hasTestnet: boolean;
@@ -76,8 +77,9 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
   const amount = selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—';
   // The SAME DEMO capability test the Balances row uses (ic + currency 0), not a name match.
   const isDemo = selectedAsset !== null && selectedAsset.protocol === 'ic' && selectedAsset.currency === 0;
-  const addMoneyLabel = isDemo ? M.wallet.balances.demoFundsLabel : M.wallet.home.actions.addMoney;
-  const addMoneyHint = isDemo ? M.wallet.balances.demoFundsHint : M.wallet.home.actions.addMoneyHint;
+  const canAddMoney = !isDemo || demoFaucetAvailable;
+  const addMoneyLabel = isDemo && demoFaucetAvailable ? M.wallet.balances.demoFundsLabel : M.wallet.home.actions.addMoney;
+  const addMoneyHint = isDemo && demoFaucetAvailable ? M.wallet.balances.demoFundsHint : M.wallet.home.actions.addMoneyHint;
   const rows = history.slice(0, 3);
   // The home currency's rail group, marked — never summed and never reordered: each rail keeps its
   // own row and balance (the founder's honesty rule: same-currency rails on different chains must
@@ -92,7 +94,12 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
   const showToggle = hasTestnet || showTestnet;
   return (
     <View>
-      <View style={S.homeHeadline} accessibilityLabel={M.wallet.home.headlineA11y(amount, eyebrowName)}>
+      {/* No hand-built accessible name here: the block is not interactive, so a screen reader
+          reads the two lines it renders. The name it used to carry was a SECOND copy of the
+          eyebrow sentence and had already drifted from it — it said "balance" where the screen
+          says "· Main" and dropped the offline "~ approx." marker, announcing a confident figure
+          the wallet cannot know. The eyebrow owns that sentence; the amount owns its unit. */}
+      <View testID="home-headline" style={S.homeHeadline}>
         <Text testID="home-headline-label" style={S.homeEyebrow}>{eyebrow}</Text>
         <Text testID="home-headline-amount" style={S.homeAmount}>{amount}</Text>
       </View>
@@ -105,7 +112,7 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
           <IconArrowDownLeft size={22} color={C.brand} />
           <Text style={S.homeActionLabel}>{M.wallet.home.actions.receive}</Text>
         </Pressable>
-        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, topUpBusy && S.dim]} onPress={() => (isDemo ? onTopUp() : selectedAsset !== null && onDeposit(selectedAsset.id))} disabled={topUpBusy || selectedAsset === null} accessibilityRole="button" accessibilityLabel={addMoneyLabel} accessibilityHint={addMoneyHint}>
+        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, (!canAddMoney || topUpBusy) && S.dim]} onPress={() => (isDemo ? onTopUp() : selectedAsset !== null && onDeposit(selectedAsset.id))} disabled={!canAddMoney || topUpBusy || selectedAsset === null} accessibilityRole="button" accessibilityLabel={addMoneyLabel} accessibilityHint={addMoneyHint} accessibilityState={{disabled: !canAddMoney || topUpBusy || selectedAsset === null}}>
           <IconPlus size={22} color={C.brand} />
           <Text style={S.homeActionLabel}>{addMoneyLabel}</Text>
         </Pressable>
@@ -131,7 +138,7 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
           // lives in the Pay/Receive tabs). Passed via `actions` so tapping it doesn't fire select.
           // D5b: carries the T HotkeyHint (the web keyboard top-up) so the shortcut is
           // discoverable — same badge pattern as the tab bar / header A badge.
-          const faucet = rowIsDemo ? (
+          const faucet = rowIsDemo && demoFaucetAvailable ? (
             <Pressable
               testID="btn-topup"
               style={[S.assetActionBtn, topUpBusy && S.dim]}
@@ -158,6 +165,19 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
           const setupBadge = view?.status === 'absent'
             ? <Text testID="asset-sol-usdc-badge" style={S.assetBadge}>{M.wallet.balances.needsSetup}</Text>
             : null;
+          // A balance the wallet could not READ ('error': the chain's endpoint refused or failed —
+          // the baked Helius key is out of quota today, HTTP 429, so every Solana row lands here on
+          // the shipped build). It rendered the same bare "—" as a first poll still in flight, which
+          // told the user nothing about which of the two it was. Says what happened, whose side it
+          // is on, that nothing moved, and that the retry is automatic (the balance poll re-reads on
+          // its own interval behind the endpoint's cooldown — so no button is promised). Status-
+          // driven, never rail-specific: any rail that reports 'error' gets the same line.
+          const unreadable = view?.status === 'error' ? (
+            <View testID={`asset-${asset.testKey}-unreadable`} style={S.railHealthRow}>
+              <IconAlert size={14} color={C.warn} />
+              <Text style={S.railHealthText}>{M.wallet.balances.railUnreadable(asset.network ?? asset.symbol)}</Text>
+            </View>
+          ) : null;
           // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
           const mainBadge = asset.id === mainId
             ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>
@@ -189,6 +209,7 @@ export function HomeTab({assets, selectedAsset, selectedId, balances, catalog, h
               {mainBadge}
               {railBadge}
               {setupBadge}
+              {unreadable}
               {/* The rail-health footer — ONE shared slot under the badge stack, rendered by the
                   same component everywhere so the thin-liability statement (VEUR) reads with one
                   voice. Warn tone: only THIN rails carry it; deep/untiered rows render nothing

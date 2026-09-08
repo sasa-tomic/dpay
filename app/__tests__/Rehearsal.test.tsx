@@ -44,7 +44,7 @@ describe('Rehearsal (one page)', () => {
   });
   afterEach(() => { jest.useRealTimers(); });
 
-  test('renders all three steps on one page; "Try with demo funds" fires onTry', async () => {
+  test('renders all three steps on one page; "Choose my currency" fires onTry', async () => {
     const onTry = jest.fn();
     const tree = await render({onTry, onSkip: () => {}});
     const ids = new Set<string>(
@@ -53,7 +53,7 @@ describe('Rehearsal (one page)', () => {
       ).map(s => s.props.testID),
     );
     expect([...ids].sort()).toEqual(['rehearsal-step-1', 'rehearsal-step-2', 'rehearsal-step-3']);
-    expect(findByTestID(tree, 'btn-rehearsal-next').props.accessibilityLabel).toBe('Try with demo funds');
+    expect(findByTestID(tree, 'btn-rehearsal-next').props.accessibilityLabel).toBe('Choose my currency');
     await settle(tree);
     act(() => { findByTestID(tree, 'btn-rehearsal-next').props.onPress(); });
     expect(onTry).toHaveBeenCalledTimes(1);
@@ -69,7 +69,7 @@ describe('Rehearsal (one page)', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('"Explore wallet" (onSkip) fires — always-available exit', async () => {
+  test('"Skip practice" (onSkip) fires — always-available exit', async () => {
     const onSkip = jest.fn();
     const tree = await render({onTry: () => {}, onSkip});
     await settle(tree);

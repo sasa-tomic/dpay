@@ -426,4 +426,43 @@ describe('useSolanaBalances — per-mint fact persistence (OPEN_ISSUES 6(a))', (
     expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '5', decimals: 6, status: 'balance'});
     act(() => { tree.unmount(); });
   });
+  // H4 — request rate must never RISE with latency. Measured 2026-09-08 against a 6s-latency
+  // endpoint: the SOL poll fired 8 times in 20s with up to 3 generations concurrently, because the
+  // 2.5s interval fired regardless of what was still outstanding. Under a rate limiter that is the
+  // amplifier that keeps the limit open.
+  test('a SLOW endpoint does not stack SOL polls — a tick while one is in flight is skipped, not queued', async () => {
+    let resolveIt!: (v: string) => void;
+    mockedGetSolanaBalance.mockReturnValue(new Promise<string>((r) => { resolveIt = r; }));
+    mockedGetSolanaTokenBalance.mockReturnValue(new Promise(() => {}));
+    const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    expect(mockedGetSolanaBalance).toHaveBeenCalledTimes(1);
+    // Tick by tick, flushing between: each interval really does fire and really is skipped
+    // (advancing four intervals in one go would prove nothing — the callbacks would run in one
+    // synchronous burst, before any read could have resolved).
+    for (let i = 0; i < 4; i++) await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
+    expect(mockedGetSolanaBalance).toHaveBeenCalledTimes(1); // four ticks passed, still ONE request
+    // …and the guard DEFERS, it never disables: once the read answers, the next tick polls again.
+    mockedGetSolanaBalance.mockResolvedValue('7');
+    await act(async () => { resolveIt('7'); await flushMicrotasks(); });
+    expect(apiRef.current!.sol).toEqual({balance: '7', status: 'ok'});
+    await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
+    expect(mockedGetSolanaBalance).toHaveBeenCalledTimes(2);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the in-flight guard is PER MINT — a stuck mint never stalls its sibling', async () => {
+    mockedGetSolanaBalance.mockReturnValue(new Promise(() => {}));
+    mockedGetSolanaTokenBalance.mockImplementation((_secret: unknown, mint: unknown) =>
+      mint === USDC_MINT_ADDRESS
+        ? new Promise(() => {})                                             // stuck
+        : Promise.resolve({kind: 'balance', amount: '5', decimals: 6}));    // healthy
+    const {tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS, EURC_MINT_ADDRESS]);
+    await act(async () => { await flushMicrotasks(); });
+    for (let i = 0; i < 3; i++) await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
+    const callsFor = (mint: string) => mockedGetSolanaTokenBalance.mock.calls.filter(c => c[1] === mint).length;
+    expect(callsFor(USDC_MINT_ADDRESS)).toBe(1);            // one outstanding read, three ticks skipped
+    expect(callsFor(EURC_MINT_ADDRESS)).toBe(4);            // the healthy mint keeps its cadence
+    act(() => { tree.unmount(); });
+  });
 });

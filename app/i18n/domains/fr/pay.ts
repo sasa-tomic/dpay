@@ -148,11 +148,13 @@ export const payFr: PayMessages = {
   },
 
   fundsSymbol: 'fonds',
-  fundTitle: (symbol, action) => `Ajouter des ${symbol} pour ${action === 'pay' ? 'payer' : 'envoyer'}`,
+  fundTitle: symbol => `Aucun ${symbol} disponible`,
   fundBody: (symbol, action) =>
-    `Ce portefeuille n’a pas encore de ${symbol}. Envoyez des ${symbol} à votre adresse et vous pourrez ${action === 'pay' ? 'payer' : 'envoyer'} aussitôt.`,
+    action === 'pay'
+      ? `Ce portefeuille ne contient aucun ${symbol}. Pour payer une demande en ${symbol}, recevez d’abord des ${symbol} à votre adresse.`
+      : `Ce portefeuille ne contient aucun ${symbol}. Pour envoyer des ${symbol}, recevez-en d’abord à votre adresse.`,
   fundBodyNoDeposits: symbol =>
-    `Ce portefeuille n’a pas encore de ${symbol} — et les ${symbol} ne sont pas encore disponibles en dépôt. Approvisionnez un autre actif, ou revenez bientôt.`,
+    `Ce portefeuille ne contient aucun ${symbol} et dpay ne peut pas afficher d’adresse de dépôt pour cet actif. Recevez des ${symbol} d’un autre portefeuille avant de les dépenser.`,
   fundBodyToken: symbol => `Envoyez des ${symbol} (Solana) à votre adresse ${symbol}. Gardez un peu de SOL dans le portefeuille pour les frais de réseau.`,
   showMyAddress: symbol => `Voir mon adresse ${symbol}`,
   createTokenAccount: symbol => `Créer mon compte ${symbol}`,

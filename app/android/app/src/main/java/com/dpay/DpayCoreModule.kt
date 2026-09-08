@@ -59,6 +59,19 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
             if (r.errDetail != null) putString("errDetail", r.errDetail)
         }
 
+    /** The ICPSwap pool reply marshal — the SAME key names the wasm core's
+     *  `w_icp_decode_swap_result` JSON uses, so the web shim and the phone hand the app one shape.
+     *  Success carries `amountOutGross` only; a refusal carries the venue's own arm + words only. */
+    private fun swapReplyMap(r: uniffi.dpay_ffi.IcpSwapReply) =
+        Arguments.createMap().apply {
+            putBoolean("ok", r.ok)
+            r.amountOutGross?.let { putString("amountOutGross", it) }
+            if (!r.ok) {
+                putString("errVariant", r.errVariant)
+                putString("errDetail", r.errDetail)
+            }
+        }
+
     /** ReadableArray.getString is @Nullable in Kotlin — the JS bridge always passes hex
      *  strings, but fail loud (not NPE) if a slot is ever missing. */
     private fun ridsFrom(arr: com.facebook.react.bridge.ReadableArray): List<ByteArray> =
@@ -422,13 +435,33 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     }
 
     /** Exact-floor minimum-out from a venue quote + slippage in basis points (saturates at 0 for
-     *  bps >= 10000). The compiled core owns this arithmetic — the JS side never recomputes it. */
+     *  bps >= 10000). The compiled core owns this arithmetic — the JS side never recomputes it.
+     *
+     *  A JS number arrives here as a Double. A fractional or out-of-u16 bps is REFUSED, never
+     *  truncated: `0.5.toInt()` is 0, which would silently turn the user's slippage tolerance off
+     *  and sign a min-out equal to the full quote. Fail loud, name the value. */
     @ReactMethod
     fun icpSwapMinOut(quotedOut: String, slippageBps: Double, promise: Promise) {
         try {
-            val bps = slippageBps.toInt()
-            if (bps < 0 || bps > 65535) throw IllegalArgumentException("slippageBps out of u16 range")
-            promise.resolve(uniffi.dpay_ffi.icpSwapMinOut(quotedOut, bps.toUShort()))
+            if (!(slippageBps % 1.0 == 0.0 && slippageBps >= 0.0 && slippageBps <= 65535.0)) {
+                throw IllegalArgumentException(
+                    "slippageBps must be a whole number of basis points in 0..65535, got $slippageBps",
+                )
+            }
+            promise.resolve(uniffi.dpay_ffi.icpSwapMinOut(quotedOut, slippageBps.toInt().toUShort()))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode the ICPSwap pool's own reply to depositFromAndSwap/quote/swap:
+     *  {ok, amountOutGross?} or {ok:false, errVariant, errDetail} — the venue's Motoko
+     *  `variant { ok : nat; err : Error }`. amountOutGross is the pool's GROSS figure; the wallet
+     *  receives it minus the output ledger's fee, so it is never shown as the amount received. */
+    @ReactMethod
+    fun icpDecodeSwapResult(argHex: String, promise: Promise) {
+        try {
+            promise.resolve(swapReplyMap(uniffi.dpay_ffi.icpDecodeSwapResult(unhex(argHex))))
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }

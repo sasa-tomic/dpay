@@ -42,7 +42,7 @@ import {M} from '../i18n';
 // left the field floating shorter than its neighbors), 44pt-min.
 const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans};
 
-export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, codeForm, onCodeFormChange, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
   // "address" = the on-chain deposit flow. The toggle renders when depositFamily is non-null OR
@@ -111,6 +111,18 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   // screen, so navigating away leaves money payable with nobody watching. That is why the toggles
   // above it are hidden while it is live, exactly as they are while a request QR is up.
   const [tillLive, setTillLive] = useState(false);
+
+  // A capability can drop under the merchant (a relay retarget, or a relay that stops serving the
+  // till), and `codeForm` outlives it — it is owned by the wallet so a rail switch cannot lose it.
+  // Left stale, the toggle comes back reading "Till code" over a dpay request form: a mode the
+  // merchant is in without having chosen it. The reset belongs HERE and not beside the capability
+  // probe because `tillLive` is only known here — and it cannot un-mount a charge, live or ended:
+  // in the very state it runs in (`!tillAvailable && !tillLive`) the render below has already
+  // replaced the till form with the dpay one, so this only makes the state agree with the screen.
+  useEffect(() => {
+    if (tillAvailable || tillLive || codeForm !== 'till') return;
+    onCodeFormChange('dpay');
+  }, [tillAvailable, tillLive, codeForm, onCodeFormChange]);
 
   // Phase 5 — lock the idle asset selection while a request QR is showing or a settlement result is
   // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is the
@@ -448,7 +460,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     ) : null;
   if (subMode === 'address' && addressSheet) {
     return (
-      <View style={S.center}>
+      <View style={S.centerTop}>
         <ModeToggle
           testID="receive-mode-toggle"
           value={subMode}
@@ -489,7 +501,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   }
 
   return (
-    <View style={S.center}>
+    <View style={S.centerTop}>
       {(depositFamily || directIcrc) && !tillLive ? (
         <ModeToggle
           testID="receive-mode-toggle"
@@ -506,7 +518,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           receiving; the only reason it is a control at all is that two QR payloads cannot share one
           frame. Hidden while a charge is LIVE, exactly as the toggle above is while a request QR is
           up: flipping away would abandon a code a customer can still pay. */}
-      {!tillLive ? (
+      {tillAvailable && !tillLive ? (
         <>
           <Text style={S.dim2}>{M.receive.till.codeForm}</Text>
           <ModeToggle
@@ -518,7 +530,12 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           />
         </>
       ) : null}
-      {codeForm === 'till' ? (
+      {/* The capability flag gates ENTRY to this form; it never un-mounts a LIVE charge. If the
+          relay is retargeted or drops mid-charge, `tillAvailable` flips false but `tillLive` keeps
+          TillCharge mounted — its own poll then says "Can't check this charge right now", which is
+          the honest rendering of silence. Un-mounting here would render the outage as the ABSENCE
+          of a sale (flow 116's whole contract). */}
+      {(tillAvailable || tillLive) && codeForm === 'till' ? (
         <TillCharge
           identity={identity}
           relayUrl={relayUrl}

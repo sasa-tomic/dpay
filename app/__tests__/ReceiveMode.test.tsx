@@ -14,7 +14,7 @@
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {Share, Platform, Text} from 'react-native';
+import {Share, Platform, StyleSheet, Text, View} from 'react-native';
 
 jest.mock('../services/native', () => ({
   DpayCore: {
@@ -94,9 +94,11 @@ function fullProps(over: Partial<ReceiveModeProps> = {}): ReceiveModeProps {
     subMode: 'request',
     onSubModeChange: () => {},
     // The code form this suite is about is the dpay one (the share affordance lives on its request
-    // QR). The till form's own behaviour is `TillCharge.test.tsx`.
+    // QR). The till form's own behaviour is `TillCharge.test.tsx`; a relay that serves no till
+    // hides the selector entirely, which is also this fixture's posture.
     codeForm: 'dpay',
     onCodeFormChange: () => {},
+    tillAvailable: false,
     selectedCurrency: 0,
     assets: [DEMO_ASSET],
     selectedAssetId: 'ic:0',
@@ -452,5 +454,33 @@ describe('ReceiveMode — the request screen routes the NFC line by the 4-state 
     await makeRequest(tree);
     expect(hasTestID(tree, 'receive-nfc')).toBe(false);
     expect(texts(tree).join(' ')).toContain('Show this to the payer');
+  });
+});
+
+// The layout contract of a Receive branch, stated where the branch is chosen. A mode surface that
+// does not stretch is sized to its own max-content by a centring parent and hangs off both viewport
+// edges (`app/styles.ts`, MODE_SURFACE); a form that is vertically centred parks itself in the
+// middle of the screen behind a dead band. Both are money-screen properties, so both are pinned
+// here rather than left to a pixel diff that cannot see an off-screen element at all.
+function surfaceOf(tree: renderer.ReactTestRenderer): {alignSelf?: string; justifyContent?: string} {
+  return StyleSheet.flatten(tree.root.findAllByType(View)[0].props.style) as {alignSelf?: string; justifyContent?: string};
+}
+
+describe('ReceiveMode — a form is laid out as a form, a code as a moment', () => {
+  test('the amount form starts at the top of the surface and fills the content column', () => {
+    const tree = mountReceive();
+    expect(hasTestID(tree, 'amount-input')).toBe(true);
+    const surface = surfaceOf(tree);
+    expect(surface.justifyContent).toBeUndefined();
+    expect(surface.alignSelf).toBe('stretch');
+  });
+
+  test('the request code keeps the centred surface — and still fills the column', async () => {
+    const tree = mountReceive();
+    await makeRequest(tree);
+    expect(hasTestID(tree, 'request-qr')).toBe(true);
+    const surface = surfaceOf(tree);
+    expect(surface.justifyContent).toBe('center');
+    expect(surface.alignSelf).toBe('stretch');
   });
 });

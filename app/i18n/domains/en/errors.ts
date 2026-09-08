@@ -122,7 +122,7 @@ export const errorsEn: ErrorMessages = {
     senderNoTokenAccount: asset =>
       `Your wallet doesn't have a ${asset} account yet. Get online once and open Receive ▸ Create my ${asset} account to set it up — or pay this merchant with an asset you already hold`,
     recipientNoTokenAccount: (solAmount, asset) =>
-      `They don't have a ${asset} account yet — creating it needs about ${solAmount} of SOL in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`,
+      `They don't have a ${asset} account yet — creating it needs about ${solAmount} in this wallet (one-time rent + fee, paid by you) — send a little SOL here first`,
     ownTokenAccountRent: (solAmount, asset) =>
       `Creating your ${asset} account needs about ${solAmount} in this wallet (one-time account rent + fee) — send a little SOL here first`,
   },

@@ -31,6 +31,24 @@ const liftSm = (p: Palette) => ({
   elevation: 1,
 } as const);
 
+// The mode surface, minus its vertical rule — shared by `center` and `centerTop` so the two differ
+// in exactly one property and cannot drift apart.
+//
+// `alignSelf:'stretch'` is the load-bearing line. A mode surface is a flex ITEM of whatever column
+// it is mounted in, and a column that centers its children (`alignItems:'center'`) sizes a
+// non-stretched item to its own MAX-CONTENT — which flexbox does not clamp to the parent's width.
+// A nested surface therefore grew WIDER than the column it sits in and hung off both edges: the
+// cashier ring-up form measured 533 px inside a 358 px column (x = −71.7) with the `CHF` prefix and
+// the button's corner radii off-screen. Stretching states the contract the surface always had —
+// it fills the content column — at every mount point instead of only where the parent happens to
+// default to `stretch`.
+const MODE_SURFACE = {
+  flexGrow: 1,
+  flexShrink: 0,
+  alignSelf: 'stretch',
+  alignItems: 'center',
+} as const;
+
 function buildStyles(p: Palette) {
   const LIFT = lift(p);
   const LIFT_SM = liftSm(p);
@@ -217,9 +235,27 @@ function buildStyles(p: Palette) {
   convertHeaderSpacer: {width: 26},
   convertAmountLabel: {fontSize: 13, color: p.sub, marginBottom: 6, fontFamily: FONT.sansMedium},
   convertMetaLine: {fontSize: 13, color: p.sub, marginTop: 8, fontFamily: FONT.sans},
-  convertChecklistCard: {backgroundColor: p.card, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch', marginTop: 14, ...LIFT_SM},
-  convertChecklistLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 10, fontFamily: FONT.sans},
-  convertChecklistWarn: {fontSize: 14, color: p.bad, lineHeight: 20, marginBottom: 10, fontFamily: FONT.sansMedium},
+  // Convert reads as ONE decision then its terms (2026-09-08): a lifted white headline card
+  // carrying what the user actually receives + the rate + the quote's attribution, over a
+  // RECESSED panel2 checklist whose every spec-§5 disclosure is still present but visibly
+  // secondary. Before this, the rate and the fee lines were the same 14pt ink inside one grey
+  // wall, and the received amount had no headline at all.
+  convertHeadlineCard: {backgroundColor: p.card, padding: 18, borderRadius: 18, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch', marginTop: 16, ...LIFT},
+  convertHeadlineLabel: {fontSize: 11, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, fontFamily: FONT.mono},
+  convertHeadlineAmount: {fontSize: 32, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.6, marginTop: 6},
+  convertRateRow: {flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: p.line2},
+  convertRateLabel: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
+  convertRateValue: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1, textAlign: 'right'},
+  convertHeadlineMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.mono, marginTop: 8},
+  convertChecklistCard: {backgroundColor: p.panel2, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch', marginTop: 12},
+  convertChecklistLine: {fontSize: 13, color: p.sub, lineHeight: 19, marginBottom: 9, fontFamily: FONT.sans},
+  convertChecklistWarn: {fontSize: 13, color: p.bad, lineHeight: 19, marginBottom: 9, fontFamily: FONT.sansMedium},
+  // The pool principal on its own line: 27 hyphenated characters inside a paragraph wrap
+  // mid-token (browsers break at '-'), so it gets the receipt voice and a line of its own.
+  convertPrincipal: {fontSize: 12, color: p.ink, lineHeight: 18, marginBottom: 9, fontFamily: FONT.mono},
+  convertSlippageLabel: {fontSize: 11, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, fontFamily: FONT.mono, marginBottom: 6},
+  // The minimum is a term, but it is the term that bounds the trade — one weight above its siblings.
+  convertMinOutLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 9, fontFamily: FONT.sansMedium},
   convertSlippageRow: {flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap'},
   convertSlippageChip: {paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field},
   convertSlippageChipOn: {borderColor: p.brand, backgroundColor: p.brand},
@@ -244,12 +280,19 @@ function buildStyles(p: Palette) {
   railPillTextActive: {color: p.ink, fontFamily: FONT.sansBold},
   // Body — content flows from the top; the asset rail follows naturally.
   body: {flexGrow: 1, paddingHorizontal: 16, paddingTop: 10, justifyContent: 'flex-start'},
-  // Mode surface (Pay/Receive phase views + the NFC status takeover). Grows to fill the space
-  // between the tabs and the asset rail, and VERTICALLY centers its content — so a sparse phase
-  // (scan/review/paid/result) no longer packs itself at the top and leaves a dead zone below.
-  // `flexShrink:0` keeps tall content from being clipped: when a phase's content exceeds the free
-  // space it grows the surface (and the parent ScrollView scrolls) instead of being squashed.
-  center: {flexGrow: 1, flexShrink: 0, alignItems: 'center', justifyContent: 'center'},
+  // Mode surface for a MOMENT — a phase the user reads and reacts to rather than fills in
+  // (scan/review/paid/result, an NFC takeover, a dead end that explains itself). Grows to fill the
+  // space between the tabs and the asset rail and VERTICALLY centers its content, so a sparse phase
+  // does not pack itself at the top and leave a dead zone below. `flexShrink:0` keeps tall content
+  // from being clipped: when a phase's content exceeds the free space it grows the surface (and the
+  // parent ScrollView scrolls) instead of being squashed.
+  center: {...MODE_SURFACE, justifyContent: 'center'},
+  // Mode surface for a FORM — a phase the user works down: amount, destination, memo, submit; and
+  // the address/instruction sheets read the same way. Identical to `center` except that content
+  // starts at the top, because centring a form parks it in the middle of the screen with a dead
+  // band above AND below it (measured on the ordinary Receive form: 121 px dead above, 119 below,
+  // 388 px of content in a 628 px box) and moves every field the moment one line of copy wraps.
+  centerTop: MODE_SURFACE,
   label: {fontSize: 15, color: p.sub, marginBottom: 10, textAlign: 'center', fontFamily: FONT.sans},
   err: {color: p.bad, fontSize: 14, textAlign: 'center', marginTop: 10, fontFamily: FONT.sansMedium},
   dim: {opacity: 0.55},
@@ -311,7 +354,13 @@ function buildStyles(p: Palette) {
   paidSub: {fontSize: 16, color: p.sub, marginTop: 6, fontFamily: FONT.sans},
   amountRow: {flexDirection: 'row', alignItems: 'center', backgroundColor: p.field, borderRadius: 18, paddingHorizontal: 18, height: 76, alignSelf: 'stretch', borderWidth: 1, borderColor: p.line2, ...LIFT_SM},
   currency: {fontSize: 34, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
-  amountInput: {flex: 1, fontSize: 34, fontWeight: '700', color: p.ink, marginLeft: 6, fontFamily: FONT.sansBold, letterSpacing: -0.5},
+  // `minWidth: 0` is a NO-OP on Yoga (RN's default) and a FIX on react-native-web: a CSS flex item
+  // defaults to `min-width: auto`, so an `<input>`'s intrinsic ~20-character width (414px at 34pt)
+  // wins over `flex: 1` and pushes the whole app column 41px wider than the viewport. Invisible
+  // until the field is focused — then the browser scrolls the column sideways and the money screen
+  // renders with its left edge cut off (measured on Convert, 2026-09-08; every amount row shares
+  // this style, so every one of them had it).
+  amountInput: {flex: 1, minWidth: 0, fontSize: 34, fontWeight: '700', color: p.ink, marginLeft: 6, fontFamily: FONT.sansBold, letterSpacing: -0.5},
   // Tappable amount-prefix (Receive): wraps the currency glyph + chevron that signals it opens the
   // currency picker. The right border separates it from the typed amount.
   prefixBtn: {flexDirection: 'row', alignItems: 'center', paddingRight: 12, borderRightWidth: 1, borderRightColor: p.line2},
@@ -470,7 +519,14 @@ function buildStyles(p: Palette) {
   sheetHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 20, paddingHorizontal: 22, paddingBottom: 14},
   sheetTitle: {fontSize: 20, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.3},
   sheetClose: {width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: p.card, borderWidth: 1, borderColor: p.line2},
-  sheetBody: {flexGrow: 1, paddingHorizontal: 22, paddingTop: 22, alignItems: 'center'},
+  // A sheet's content column. `alignSelf:'stretch'` for the same reason MODE_SURFACE carries it:
+  // every sheet is now rendered INLINE inside a mode surface that centers its children, so an
+  // unstretched sheet body is sized to its own content and stops matching the column it sits in.
+  // Measured at 390px before this line (all four `alignSelf:auto`): the IC Send-to-address form
+  // 424.7px at x=−17.4 (the scan button and the primary button's right radius off-screen), SOL
+  // "My address" 396px at x=−3, the SOL send form 4px NARROWER than the column, and only the IC
+  // deposit sheet coincidentally correct. Stretching pins all four to the column's 358px.
+  sheetBody: {flexGrow: 1, alignSelf: 'stretch', paddingHorizontal: 22, paddingTop: 22, alignItems: 'center'},
   // Same as sheetBody but vertically CENTERS short content so a sheet with few rows doesn't pack
   // at the top with a dead zone below. Used ONLY on sheets whose content is reliably shorter than
   // the viewport — the tall sheets (DepositSheet address flow, WithdrawSheet form) keep top-aligned
@@ -540,7 +596,11 @@ function buildStyles(p: Palette) {
   withdrawAddrInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 14, height: 56, paddingHorizontal: 16, fontSize: 15, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
   savedAddrChip: {alignSelf: 'flex-start', backgroundColor: p.panel2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8, minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
   savedAddrText: {fontSize: 13, color: p.brand, fontFamily: FONT.mono},
-  withdrawAmtInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 14, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: p.ink, borderWidth: 1, borderColor: p.line2, fontFamily: FONT.sansBold},
+  // `minWidth: 0` is load-bearing at the ONE call site that puts this field in a row — SendSheet's
+  // `amtRow`, where it is given `flex: 1` beside the Max button. Without it the field's intrinsic
+  // <input> width wins under CSS `min-width: auto` and pushes Max 28.7px off the right edge
+  // (measured, and asserted by e2e flow 146). A no-op where the field is stacked in a column.
+  withdrawAmtInput: {alignSelf: 'stretch', minWidth: 0, backgroundColor: p.field, borderRadius: 14, height: 56, paddingHorizontal: 16, fontSize: 22, fontWeight: '700', color: p.ink, borderWidth: 1, borderColor: p.line2, fontFamily: FONT.sansBold},
   // --- unified send-to-address field (AddressField + SendSheet) ---------------------------------
   // The destination input is MULTILINE and wraps: an IC principal is 63 characters and an ICRC-1
   // account with a subaccount is longer still, so a single 56pt line would hide the tail — and the

@@ -61,11 +61,11 @@ export function walkthroughScenes(): readonly WalkthroughScene[] {
 }
 
 /**
- * Trip Ready J3 — the payment REHEARSAL: a 3-beat storyboard of one honest payment
- * (request → approve → settle) shown once after the recovery backup on first create.
- * Each step must stay truthful for BOTH rails (IC + SOL): the shop asks for an exact
- * asset+amount, the payer reviews and approves with their own key, and the shop's own
- * connection settles — the payer's phone never needs signal for steps 2 and 3.
+ * Trip Ready J3 — the payment REHEARSAL, reframed 2026-09-07 as a concrete two-phone DEMO
+ * practice guide (request → scan/approve → switch roles), shown once after the recovery
+ * backup on first create. It is guidance, not a simulation: it never claims a transfer
+ * happened or that the app funded the wallet, and DEMO is named as valueless practice
+ * money. The offline-settlement truth itself lives in walkthrough scene 1.
  */
 export type RehearsalVisual = 'shopRequest' | 'payerReview' | 'shopSettles';
 /** The three beat ids — the catalog keys its step copy by these. */

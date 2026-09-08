@@ -31,8 +31,7 @@ import type {AssetId} from './types';
 //   - 'loading'      ⇒ the first poll has not returned yet; '—'; dim.
 //
 // The Balances sheet dims (`zero` prop) whenever `status !== 'ok'` — the one rule covers every
-// asset + rail (DEMO is special-cased below to always 'ok' so it never dims, preserving the
-// pre-Phase-3 "primary currency never dims" affordance).
+// asset + rail, DEMO included: there is no exemption anywhere in this module.
 export type BalanceStatus = 'ok' | 'zero' | 'absent' | 'unavailable' | 'error' | 'loading';
 
 // One asset's rendered amount + status. `displayText` is the fully-formatted amount string the UI
@@ -90,15 +89,25 @@ export function buildAssetBalances(args: {
   return out as Record<AssetId, BalanceView>;
 }
 
-// DEMO (ic:0) — the primary play-money currency. NEVER marked 'zero' (it is always faucet-top-up-able,
-// so dimming it would mislead); null balance ⇒ '—'. The offline approximation marker is baked in
-// so the header and the Balances row read the same text (the offline hand-off debits DEMO and the
-// poll resets on reconnect; the marker tells the user the number is their best-known, not
-// authoritative). The marker itself is catalog copy — "~" is not how every locale writes "about".
+// DEMO (ic:0) — the primary play-money currency, graded by the SAME rule as every other asset:
+// funded ⇒ 'ok', a zero balance ⇒ 'zero' (dims), an unknown one ⇒ 'loading' ('—'). It used to be
+// exempt — always 'ok' — which made a ∂0.00 wallet render at full colour and stamp `fundsReady`
+// (defect D4, docs/specs/2026-09-08-first-run-redesign.md). The exemption's rationale was
+// backwards: the top-up affordance is the faucet button on the same row, so dimming a zero
+// balance costs nothing and is simply the truth.
+//
+// The offline approximation marker is baked in so the header and the Balances row read the same
+// text (the offline hand-off debits DEMO and the poll resets on reconnect; the marker tells the
+// user the number is their best-known, not authoritative). It never upgrades the status: an
+// approximate zero is still a zero. The marker itself is catalog copy — "~" is not how every
+// locale writes "about".
 function demoView(primaryBalance: string | null, online: boolean): BalanceView {
-  if (primaryBalance == null) return {displayText: '—', status: 'ok'};
+  if (primaryBalance == null) return {displayText: '—', status: 'loading'};
   const amount = usd(primaryBalance);
-  return {displayText: online ? amount : M.wallet.balance.approxAmount(amount), status: 'ok'};
+  return {
+    displayText: online ? amount : M.wallet.balance.approxAmount(amount),
+    status: cmpRaw(primaryBalance, '0') > 0 ? 'ok' : 'zero',
+  };
 }
 
 // A non-DEMO IC catalog asset. A not-yet-polled asset defaults to '0' (the poll seeds '0'); funded ⇒

@@ -155,8 +155,11 @@ export type DpayCoreApi = {
    *  @ReactMethod (bridge-parity guard). */
   icpDepositAndSwapArg(amountIn: string, amountOutMinimum: string, tokenInFee: string, tokenOutFee: string, zeroForOne: boolean): Promise<string>;
   /** Exact-floor min-out from a venue quote + slippage bps (saturates at 0 for bps >= 10000).
-   *  The core owns this math — the app never computes it in TS. */
+   *  The core owns this math — the app never computes it in TS. A fractional or out-of-u16
+   *  `slippageBps` REJECTS on both rails; it is never truncated into a different money setting. */
   icpSwapMinOut(quotedOut: string, slippageBps: number): Promise<string>;
+  /** The ICPSwap pool's own reply to depositFromAndSwap/quote/swap. */
+  icpDecodeSwapResult(argHex: string): Promise<IcpSwapReply>;
   icpBalanceOfArg(ownerText: string, subaccountHex: string): Promise<string>;
   icpMinterAccountArg(ownerText: string, subaccountHex: string): Promise<string>;
   icpRetrieveBtcArg(address: string, amountSats: string, fromSubaccountHex: string): Promise<string>;
@@ -205,6 +208,11 @@ export type IcpStateRead = { timeNs?: string; statuses: IcpRequestStatusOut[] };
 
 /** icpDecodeTransferResult outcome: ok carries the block index; err carries variant + detail. */
 export type IcpTransferOutcome = { ok: boolean; blockIndex?: string; errVariant?: string; errDetail?: string };
+
+/** icpDecodeSwapResult outcome (the venue's `variant { ok : nat; err : Error }`). `amountOutGross`
+ *  is the POOL's figure — the wallet receives it minus the output ledger's own fee, so it is never
+ *  the amount received. Errors carry the venue's own arm tag and its own words. */
+export type IcpSwapReply = { ok: boolean; amountOutGross?: string; errVariant?: string; errDetail?: string };
 
 /** A parsed ICRC-1 textual account. `subaccountHex` is "" for the default (all-zero) subaccount,
  *  so it passes straight into `icpTransferArg`'s `toSubaccountHex` with no branching. */

@@ -69,7 +69,7 @@ const memoInputStyle: TextStyle = {alignSelf: 'stretch', marginTop: 14, minHeigh
  * new token (EURC, …) renders here with no component change. `selectedToken` stays as the
  * native-vs-SPL discriminator ('SOL' ⇔ mint null).
  */
-export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, tokenAtaStatus = 'balance', tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, tokenAtaStatus = 'balance', tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void;
   homeCurrency?: HomeCurrency | null;
@@ -189,7 +189,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       : tokenAtaStatus === 'loading' ? 'checking'
       : 'unverified';
     return (
-      <View style={S.center}>
+      <View style={S.centerTop}>
         {toggle}
         {homeCurrency != null && onReceiveRailChange != null ? (
           <RailDisclosure
@@ -495,23 +495,29 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
 
   // phase === 'form'
   return (
-    <View style={S.center}>
+    <View style={S.centerTop}>
       {toggle}
       {/* The code-form selector, on the SOL rail exactly as on the IC one — the same-surfaces hard
           rule: a control that appeared only where it can succeed would be a per-rail special case,
-          and the merchant would be left guessing whether their phone can do it at all. Here it
-          always lands on the honest closed branch (a till code is paid in VCHF on the Internet
-          Computer, and this request is on Solana) with the one tap that fixes it. No `onLiveChange`:
-          a charge can never go live from this rail, so a live-state reporter would be dead code. */}
-      <Text style={S.dim2}>{M.receive.till.codeForm}</Text>
-      <ModeToggle
-        testID="receive-code-form"
-        value={codeForm}
-        onChange={(v) => onCodeFormChange(v as 'dpay' | 'till')}
-        left={{label: M.receive.till.dpayCode, value: 'dpay', testID: 'btn-code-dpay'}}
-        right={{label: M.receive.till.tillCode, value: 'till', testID: 'btn-code-till'}}
-      />
-      {codeForm === 'till' ? (
+          and the merchant would be left guessing whether their phone can do it at all. What gates
+          it is the RELAY and not the rail: a relay that serves no till shows the selector on
+          neither rail. Where it does show, choosing a till code here lands on the honest closed
+          branch (a till code is paid in VCHF on the Internet Computer, and this request is on
+          Solana) with the one tap that fixes it. No `onLiveChange`: a charge can never go live from
+          this rail, so a live-state reporter would be dead code. */}
+      {tillAvailable ? (
+        <>
+          <Text style={S.dim2}>{M.receive.till.codeForm}</Text>
+          <ModeToggle
+            testID="receive-code-form"
+            value={codeForm}
+            onChange={(v) => onCodeFormChange(v as 'dpay' | 'till')}
+            left={{label: M.receive.till.dpayCode, value: 'dpay', testID: 'btn-code-dpay'}}
+            right={{label: M.receive.till.tillCode, value: 'till', testID: 'btn-code-till'}}
+          />
+        </>
+      ) : null}
+      {tillAvailable && codeForm === 'till' ? (
         <TillCharge
           identity={identity}
           relayUrl={relayUrl}

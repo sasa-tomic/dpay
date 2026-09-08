@@ -17,36 +17,44 @@ export const convertDe: ConvertMessages = {
     'Ein direkter VCHF-↔-USDC-Pool existiert, aber seine Tiefe ist gesättigt (etwa CHF 315) — dpay lehnt ihn ab, statt dir einen veralteten Preis zu zeigen.',
 
   amountLabel: sym => `Betrag (${sym})`,
-  balanceLine: (balance, sym) => `Guthaben: ${balance} ${sym}`,
+  balanceLine: balance => `Guthaben: ${balance}`,
+  receiveHeadline: 'Du erhältst',
   counterparty:
-    'Ausgeführt vom ICPSwap-Pool 65mrh-fqaaa-aaaar-qapoa-cai — ein autonomer On-Chain-Vertrag, kein lizenzierter Anbieter und nicht dpay.',
+    'Ausgeführt vom ICPSwap-Pool — ein autonomer On-Chain-Vertrag, kein lizenzierter Anbieter und nicht dpay.',
   counterpartySigns: 'Dein Handy signiert; der Pool zieht genau den freigegebenen Betrag ab.',
   quoteSource: at => `Quote von ICPSwap, abgerufen ${at}`,
   rateLabel: (inSym, outSym) => `Kurs (${inSym} → ${outSym})`,
   poolFeeTier: tier => `Pool-Gebühr: ${tier} (ICPSwap-Gebührenstufe)`,
-  inputFeeLine: (fee, sym) => `Eingangsgebühr: ${fee} ${sym}`,
-  outputFeeLine: (fee, sym) => `Ausgangsgebühr: ${fee} ${sym}`,
+  inputFeeLine: fee => `Eingangsgebühr: ${fee}`,
+  outputFeeLine: fee => `Ausgangsgebühr: ${fee}`,
   dpayFeeLine: 'dpay verlangt nichts und bekommt nichts dafür.',
   impactLine: pct => `Preiseffekt: ${pct}`,
   impactWarnLine: pct => `Hoher Preiseffekt: ${pct} — die Quote oben enthält ihn bereits.`,
+  impactUnavailable:
+    'Preiseffekt: gerade nicht messbar — ICPSwap hat für den Referenz-Tausch nichts angeboten, es gibt also keinen Kurs zum Vergleich. Der Mindestbetrag unten begrenzt trotzdem, was dich dieser Tausch kosten kann.',
   slippageLabel: 'Slippage',
-  minReceiveLine: (amount, sym, pct) => `Mindestens erhältst du: ${amount} ${sym} (${pct} Slippage)`,
+  minReceiveLine: (amount, pct) => `Mindestens erhältst du: ${amount} (${pct} Slippage)`,
   refusalLine: sym =>
     `Wenn der Pool-Preis bei der Bestätigung über dein Minimum hinaus wandert, scheitert der Tausch: Dein ${sym} bleibt in deiner Wallet, und die Freigabe läuft ungenutzt ab.`,
-  netEndStateLine: (amount, sym) => `Endergebnis: ${amount} ${sym} erwartet in deiner Wallet, nach allen Gebühren.`,
+  netEndStateLine: amount => `Endergebnis: ${amount} erwartet in deiner Wallet, nach allen Gebühren.`,
   confirmButton: 'Neu quoten und bestätigen',
   staleRefreshing: 'Quote veraltet — wird neu geladen…',
   quoteChanged: (oldAmt, newAmt) => `Quote geändert: ${oldAmt} → ${newAmt}. Prüfe und bestätige erneut.`,
 
+  fundBody: (sym, receiveTab, myAddress) =>
+    `Diese Wallet hat kein ${sym}. Um ${sym} umzutauschen, empfange zuerst ${sym} an deiner Adresse: öffne unten „${receiveTab}“ und wähle „${myAddress}“.`,
+  insufficientLine: (needed, balance) =>
+    `Für diesen Umtausch brauchst du ${needed} — der Betrag plus zwei Ledger-Gebühren — und diese Wallet hält ${balance}. Verringere den Betrag oder empfange zuerst mehr.`,
+
   approvingTitle: 'Freigabe läuft',
-  approvingBody: (amount, sym, at) =>
-    `Dein Handy gibt dem Pool frei, genau ${amount} ${sym} abzuziehen. Die Freigabe läuft um ${at} ungenutzt ab.`,
+  approvingBody: (amount, at) =>
+    `Dein Handy gibt dem Pool frei, genau ${amount} abzuziehen. Die Freigabe läuft um ${at} ungenutzt ab.`,
   swappingTitle: 'Tausch läuft',
   swappingBody: 'Der Tausch wird an den ICPSwap-Pool übermittelt. Er kann nur den freigegebenen Betrag abziehen.',
   settlingTitle: 'Abwicklung',
   settlingBody: sym => `Der Pool hat den Tausch angenommen. Dein ${sym} trifft gleich in deiner Wallet ein…`,
   doneTitle: 'Getauscht ✓',
-  doneBody: (amount, sym) => `${amount} ${sym} wurden in deiner Wallet gutgeschrieben.`,
+  doneBody: amount => `${amount} wurden in deiner Wallet gutgeschrieben.`,
   doneTx: tx => `Auszahlungs-Eintrag: ${tx}`,
   pendingTitle: 'Auszahlung ausstehend',
   pendingBody: (sym, pool, at) =>
@@ -62,8 +70,8 @@ export const convertDe: ConvertMessages = {
   stuckTitle: 'Unbekannter Ausgang',
   stuckBody:
     'Der Tausch wurde übermittelt, aber die Antwort des Pools kam nicht an. Starte keinen zweiten Tausch mit denselben Mitteln. Wenn die Auszahlung eintrifft, springt dieser Bildschirm von selbst auf „Getauscht".',
-  stuckSigned: (amount, inSym, minAmount, outSym) =>
-    `Was signiert wurde: Freigabe von ${amount} ${inSym} an den ICPSwap-Pool; Tausch auf mindestens ${minAmount} ${outSym}.`,
+  stuckSigned: (amount, minAmount) =>
+    `Was signiert wurde: Freigabe von ${amount} an den ICPSwap-Pool; Tausch auf mindestens ${minAmount}.`,
   expiryLine: at => `Die ungenutzte Freigabe läuft spätestens um ${at} ab — danach kann der Pool nichts mehr abziehen.`,
 
   errors: {

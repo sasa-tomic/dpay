@@ -22,7 +22,7 @@ export const errorsFr: ErrorMessages = {
     senderNoTokenAccount: asset =>
       `Votre portefeuille n’a pas encore de compte ${asset}. Connectez-vous une fois à Internet et ouvrez Recevoir ▸ « Créer mon compte ${asset} » pour le créer — ou payez ce commerçant avec un actif que vous détenez déjà`,
     recipientNoTokenAccount: (solAmount, asset) =>
-      `Le destinataire n’a pas encore de compte ${asset} — le créer demande environ ${solAmount} de SOL dans ce portefeuille (loyer + frais, une seule fois, à votre charge) — envoyez d’abord un peu de SOL ici`,
+      `Le destinataire n’a pas encore de compte ${asset} — le créer demande environ ${solAmount} dans ce portefeuille (loyer + frais, une seule fois, à votre charge) — envoyez d’abord un peu de SOL ici`,
     ownTokenAccountRent: (solAmount, asset) =>
       `La création de votre compte ${asset} demande environ ${solAmount} dans ce portefeuille (loyer du compte + frais, une seule fois) — envoyez d’abord un peu de SOL ici`,
   },

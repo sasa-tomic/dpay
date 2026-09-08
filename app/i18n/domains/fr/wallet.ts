@@ -31,8 +31,8 @@ export const walletFr: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Francs suisses', USD: 'Dollars américains', EUR: 'Euros'},
     chooseTitle: 'Dans quelle monnaie penses-tu ?',
-    chooseBody: 'dpay affiche cette monnaie en premier et paie avec par défaut. Tu peux aussi détenir les autres, et changer ce choix à tout moment dans les Réglages.',
-    railReason: {destination: 'c’est lui que demande le paiement', funded: 'tu as un solde ici', preference: 'la voie par défaut de dpay'},
+    chooseBody: 'Choisis la monnaie affichée en premier. Cela ne change que l’affichage et les valeurs par défaut ; dpay ne déplace ni ne convertit tes fonds.',
+    railReason: {destination: 'c’est lui que demande le paiement', funded: 'tu as un solde ici'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Principale',
     mainLabel: currency => `${currency} · Principale`,
@@ -58,7 +58,6 @@ export const walletFr: WalletMessages = {
   tab: {pay: 'Payer', receive: 'Recevoir', transactions: 'Transactions', home: 'Accueil'},
 
   home: {
-    headlineA11y: (amount, asset) => `Solde ${asset} : ${amount}`,
     actions: {
       pay: 'Payer',
       payHint: 'Scanner un code ou envoyer à une adresse',
@@ -93,6 +92,8 @@ export const walletFr: WalletMessages = {
     demoFundsLabel: 'Obtenir des fonds de démo',
     demoFundsHint: 'Ajoute ∂100 d’argent de démo à ce portefeuille',
     needsSetup: 'À configurer',
+    railUnreadable: network =>
+      `Le réseau ${network} ne répond pas pour le moment, ce solde n’a donc pas pu être actualisé. C’est cette connexion, pas votre portefeuille : vos fonds sont intacts et vos autres comptes fonctionnent toujours. dpay réessaie tout seul.`,
     select: symbol => `Sélectionner ${symbol}`,
     selectHint: 'Affiche le solde de cet actif sur votre écran d’accueil',
     selectSolanaHint: symbol => `Affiche ${symbol} sur votre écran d’accueil et utilise Solana pour Payer/Recevoir`,
@@ -141,9 +142,9 @@ export const educationFr: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'PAYER AVEC DPAY',
-        title: 'Payez sans réseau',
-        body: 'Votre téléphone peut payer sans le moindre réseau. Le commerçant envoie le paiement à votre place, avec sa propre connexion internet.',
+        eyebrow: 'D’ABORD, LE DÉROULEMENT',
+        title: 'Un téléphone demande, l’autre paie',
+        body: 'Le téléphone qui reçoit affiche une demande. Vous la scannez, vérifiez le montant et l’actif, puis approuvez. Sa connexion envoie le paiement si votre téléphone est hors ligne.',
       },
       key: {
         eyebrow: 'VOTRE ARGENT',
@@ -171,27 +172,27 @@ export const educationFr: EducationMessages = {
   },
 
   rehearsal: {
-    title: 'Un paiement en toute clarté',
-    sheetTitle: 'Répétition',
+    title: 'Entraînez-vous sans risque',
+    sheetTitle: 'Exercice DÉMO',
     steps: {
       request: {
-        title: 'Le commerçant demande',
-        body: 'Le commerçant choisit un actif et un montant précis — son terminal en fait un code de demande.',
+        title: 'Sur l’autre téléphone : demander ∂1',
+        body: 'Ouvrez dpay sur un autre téléphone, choisissez DÉMO, appuyez sur Recevoir, saisissez 1, puis appuyez sur Demander.',
       },
       approve: {
-        title: 'Vous vérifiez et approuvez',
-        body: 'Votre téléphone affiche exactement ce que vous payez. Rien ne bouge tant que vous n’avez pas approuvé avec votre clé.',
+        title: 'Sur ce téléphone : scanner et vérifier',
+        body: 'Choisissez DÉMO, appuyez sur Payer et scannez le code dpay de l’autre téléphone. Vérifiez ∂1 et le destinataire avant d’approuver.',
       },
       settle: {
-        title: 'Le commerçant règle',
-        body: 'La connexion du commerçant envoie le paiement — confirmé en quelques secondes sur son écran.',
+        title: 'Puis inversez les rôles',
+        body: 'Pour vous entraîner à recevoir, créez une demande DÉMO de ∂1 sur ce téléphone et scannez-la avec l’autre.',
       },
     },
-    stageTags: ['01 — DEMANDE', '02 — APPROUVER', '03 — RÉGLER'],
-    punchline: 'C’est tout. Votre téléphone peut rester hors ligne pour approuver et transmettre.',
-    skip: 'Voir le portefeuille',
-    skipHint: 'Passe la répétition et ouvre votre portefeuille',
-    try: 'Essayer avec la démo',
+    stageTags: ['01 — RECEVOIR', '02 — PAYER', '03 — INVERSER'],
+    punchline: 'DÉMO est de l’argent fictif sans valeur. Cette présentation ne vous demande jamais de déposer ou d’acheter quoi que ce soit.',
+    skip: 'Passer l’exercice',
+    skipHint: 'Passez l’exercice et choisissez votre monnaie principale',
+    try: 'Choisir ma monnaie',
   },
 
   coachTips: {

@@ -260,7 +260,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     // merchant broadcasts). Checked BEFORE the funds gate: a balance read while offline is stale.
     if (!online) {
       return (
-        <View style={S.center}>
+        <View style={S.centerTop}>
           {toggle}
           <InstructionPanel
             testID="sol-send-offline"
@@ -280,11 +280,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     if (payGate !== 'none' && payGate !== 'token-absent') {
       const isSol = payGate === 'sol-zero';
       return (
-        <View style={S.center}>
+        <View style={S.centerTop}>
           {toggle}
           <InstructionPanel
             testID="sol-send-fund"
-            title={M.pay.fundTitle(isSol ? 'SOL' : selectedSymbol, 'send')}
+            title={M.pay.fundTitle(isSol ? 'SOL' : selectedSymbol)}
             body={isSol
               ? M.pay.fundBody('SOL', 'send')
               : M.pay.fundBodyToken(selectedSymbol)}
@@ -301,7 +301,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       );
     }
     return (
-      <View style={S.center}>
+      <View style={S.centerTop}>
         {toggle}
         <SolanaWithdrawSheet
           identity={identity}
@@ -701,7 +701,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           {toggle}
           <InstructionPanel
             testID="sol-pay-fund"
-            title={M.pay.fundTitle(isSol ? 'SOL' : selectedSymbol, 'pay')}
+            title={M.pay.fundTitle(isSol ? 'SOL' : selectedSymbol)}
             body={isSol
               ? M.pay.fundBody('SOL', 'pay')
               : M.pay.fundBodyToken(selectedSymbol)}

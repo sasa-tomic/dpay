@@ -101,6 +101,7 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
         history={[]}
         topUpBusy={false}
         topUpErr={null}
+        demoFaucetAvailable={true}
         hasTestnet={false}
         showTestnet={false}
         onToggleTestnet={jest.fn()}

@@ -144,9 +144,6 @@ export const onboardingFr: OnboardingMessages = {
     ack: 'J’ai noté les 24 mots',
   },
 
-  faucetFailed:
-    'Portefeuille créé, mais les fonds de départ n’ont pas pu être ajoutés. Le serveur est peut-être hors ligne — vous pourrez ajouter des fonds plus tard depuis les Soldes.',
-
   restore: {
     phraseLabel: 'Phrase de récupération',
     phrasePlaceholder: 'Saisissez vos 24 mots de récupération',
@@ -186,9 +183,9 @@ export const onboardingFr: OnboardingMessages = {
   create: {
     action: 'Créer le portefeuille',
     busy: 'Création…',
-    hint: 'Génère votre clé sur l’appareil et ajoute des fonds de démo',
+    hint: 'Crée une clé de portefeuille sur cet appareil ; aucun dépôt ni achat requis',
   },
 
-  demoNote: 'Crée votre portefeuille et ajoute ∂100 de fonds de démo pour commencer.',
-  demoGlyphNote: ' est le symbole du dollar de démo — de l’argent fictif, ∂1 = $1.',
+  demoNote: 'Créer le portefeuille ne dépose, n’achète et ne déplace aucun argent.',
+  demoGlyphNote: ' désigne de l’argent d’exercice sans valeur — ∂1 est simplement une unité DÉMO.',
 };

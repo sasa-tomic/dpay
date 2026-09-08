@@ -15,7 +15,7 @@ import {mergeHistoryByTime} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
-import {fetchWithTimeout, readJsonOrEmpty} from '../services/relay';
+import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
@@ -136,6 +136,15 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // surfaces a one-line failure (offline / faucet disabled) without blocking the rest of the UI.
   const [topUpBusy, setTopUpBusy] = useState(false);
   const [topUpErr, setTopUpErr] = useState<string | null>(null);
+  const [capabilities, setCapabilities] = useState<RelayCapabilities>(NO_RELAY_CAPABILITIES);
+  useEffect(() => {
+    let alive = true;
+    // Back to "this relay has told us nothing" for the duration of the probe: the answer belongs
+    // to the URL being asked, so the previous relay's till must not be offered against the new one.
+    setCapabilities(NO_RELAY_CAPABILITIES);
+    relayCapabilities(relayUrl).then(c => { if (alive) setCapabilities(c); });
+    return () => { alive = false; };
+  }, [relayUrl]);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   // Passport deep-link (founder ask 2026-08-24): opening Settings FROM an unfilled
   // "BACKED UP" stamp also auto-reveals the backup (the step's own surface) once. Cleared on
@@ -690,10 +699,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
 
   // Demo top-up: POST /api/v1/faucet {account, amount}. Uses the response balance directly for an
   // immediate refresh (no waiting on the 2.5s poll). Errors are surfaced inline under the button.
-  // Gated on DEMO (currency 0) being in the LIVE catalog: the faucet is a test-helpers-only relay
-  // route (404s in prod), so when the live catalog carries no DEMO row the button is dead weight
-  // that can only ever error — fail honestly BEFORE the POST instead of after.
-  const faucetAvailable = catalog.some(c => c.currency === 0);
+  // Gated on the relay SAYING it serves one (`GET /api/v1/capabilities`, the same flag the faucet
+  // route itself obeys), which replaced a guess made from the catalog carrying a DEMO row. Against
+  // a relay without a faucet the button is dead weight that can only ever error, so fail honestly
+  // BEFORE the POST instead of after.
+  const faucetAvailable = capabilities.demoFaucet;
   const topUp = useCallback(async () => {
     if (topUpBusy) return;
     if (!faucetAvailable) {
@@ -878,7 +888,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
   // hooks, so the hook order is identical in both branches (Rules of Hooks), and it keys on the
   // STORED value alone: a brand-new wallet and one upgrading into this build take the same path.
   if (homeCurrency === null) {
-    return <HomeCurrencyChooser assets={assets} balances={balances} catalog={catalog} onChoose={onSetHomeCurrency} />;
+    return <HomeCurrencyChooser assets={assets} balances={balances} catalog={catalog} onChoose={c => { setMode('home'); onSetHomeCurrency(c); }} />;
   }
 
   return (
@@ -981,6 +991,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               homeAsset={homeAsset}
               online={online}
               history={ledgerHistory}
+              demoFaucetAvailable={capabilities.demoFaucet}
               topUpBusy={topUpBusy}
               topUpErr={topUpErr}
               hasTestnet={hasTestnet}
@@ -1021,6 +1032,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                   identity={identity} relayUrl={relayUrl} nfcStatus={nfc} solAddress={solAddress}
                   subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                   codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
+                  tillAvailable={capabilities.till}
                   catalog={catalog}
                   selectedToken={selectedSolToken}
                   assets={assets}
@@ -1063,6 +1075,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
                     depositNativeEth={depositNativeEth} depositFamily={depositFamily}
                     subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                     codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
+                    tillAvailable={capabilities.till}
                     depositReturnLabel={
                       // Same rule as the SOL rail: the resume link appears ONLY once the deposit
                       // actually landed (a known-positive balance on the asset being funded), never
@@ -1095,6 +1108,12 @@ export function Wallet({identity, relayUrl, setRelayUrl, onReset, onRestore, res
               assetBalances={displayAssetBalances}
               onBack={() => setMode('home')}
               onActivity={onActivity}
+              // The zero-balance gate's action — the SAME deposit trip the Pay tab's gate fires.
+              // No `returnTo`: that argument offers a "back to PAYING <asset>" resume once the
+              // balance lands (returnFromDeposit sets mode 'pay'), and this user came from
+              // Convert, not from Pay. Sending them somewhere they never were is worse than
+              // sending them nowhere.
+              onShowDepositAddress={() => goToDeposit(`ic:${selectedCurrency}`)}
             />
           : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} />}
       </ScrollView>

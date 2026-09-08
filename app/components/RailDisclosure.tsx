@@ -36,10 +36,11 @@ export function RailDisclosure({currency, assets, balances, catalog, selectedAss
   if (rails.length !== 2) return null;
   const shown = rails.find(r => r.id === selectedAssetId) ?? null;
   if (shown == null) return null;
-  // The WHY: the chooser's own line — reason attached when the shown rail IS the wallet's pick,
-  // bare rail line for the sibling (the same vocabulary HomeCurrencyChooser uses).
+  // The WHY: the chooser's own line — reason attached when the shown rail IS the wallet's pick AND
+  // that reason is an actionable one (docs/specs/2026-09-07-ux-decisions.md); bare rail line
+  // otherwise (the same vocabulary HomeCurrencyChooser uses).
   const choice = chooseRail(currency, assets, balances);
-  const why = choice != null && choice.rail.id === shown.id
+  const why = choice != null && choice.rail.id === shown.id && choice.reason !== 'preference'
     ? M.wallet.homeCurrency.railWithReason(railLineLabel(shown), M.wallet.homeCurrency.railReason[choice.reason])
     : railLineLabel(shown);
   // The FEE FACT: the shown rail's own per-transfer fee, plus its one-time cost when it has one

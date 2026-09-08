@@ -17,36 +17,44 @@ export const convertFr: ConvertMessages = {
     'Un pool direct VCHF ↔ USDC existe, mais sa profondeur est saturée (environ CHF 315) : dpay le refuse plutôt que de vous afficher un prix périmé.',
 
   amountLabel: sym => `Montant (${sym})`,
-  balanceLine: (balance, sym) => `Solde : ${balance} ${sym}`,
+  balanceLine: balance => `Solde : ${balance}`,
+  receiveHeadline: 'Tu recevras',
   counterparty:
-    'Exécuté par le pool ICPSwap 65mrh-fqaaa-aaaar-qapoa-cai — un contrat autonome on-chain, pas un prestataire agréé et pas dpay.',
+    'Exécuté par le pool ICPSwap — un contrat autonome on-chain, pas un prestataire agréé et pas dpay.',
   counterpartySigns: 'Ton téléphone signe ; le pool prélève exactement le montant approuvé.',
   quoteSource: at => `Quote ICPSwap, récupérée ${at}`,
   rateLabel: (inSym, outSym) => `Taux (${inSym} → ${outSym})`,
   poolFeeTier: tier => `Frais du pool : ${tier} (palier ICPSwap)`,
-  inputFeeLine: (fee, sym) => `Frais d'entrée : ${fee} ${sym}`,
-  outputFeeLine: (fee, sym) => `Frais de sortie : ${fee} ${sym}`,
+  inputFeeLine: fee => `Frais d'entrée : ${fee}`,
+  outputFeeLine: fee => `Frais de sortie : ${fee}`,
   dpayFeeLine: 'dpay ne prend rien et ne reçoit rien pour cela.',
   impactLine: pct => `Impact sur le prix : ${pct}`,
   impactWarnLine: pct => `Impact élevé sur le prix : ${pct} — la quote ci-dessus l'inclut déjà.`,
+  impactUnavailable:
+    "Impact sur le prix : non mesurable pour l’instant — ICPSwap n’a rien coté pour l’échange de référence, il n’y a donc aucun prix auquel comparer celui-ci. Le minimum garanti ci-dessous borne quand même ce que cet échange peut te coûter.",
   slippageLabel: 'Slippage',
-  minReceiveLine: (amount, sym, pct) => `Minimum garanti : ${amount} ${sym} (${pct} de slippage)`,
+  minReceiveLine: (amount, pct) => `Minimum garanti : ${amount} (${pct} de slippage)`,
   refusalLine: sym =>
     `Si le prix du pool dépasse ton minimum, l'échange échoue : ton ${sym} reste dans ton portefeuille et l'autorisation expire sans être utilisée.`,
-  netEndStateLine: (amount, sym) => `Résultat final : ${amount} ${sym} attendus dans ton portefeuille, nets de tous les frais.`,
+  netEndStateLine: amount => `Résultat final : ${amount} attendus dans ton portefeuille, nets de tous les frais.`,
   confirmButton: 'Requoter et confirmer',
   staleRefreshing: 'Quote périmée — actualisation…',
   quoteChanged: (oldAmt, newAmt) => `La quote a changé : ${oldAmt} → ${newAmt}. Vérifie et confirme à nouveau.`,
 
+  fundBody: (sym, receiveTab, myAddress) =>
+    `Ce portefeuille n'a pas de ${sym}. Pour convertir des ${sym}, reçois d'abord des ${sym} à ton adresse : ouvre « ${receiveTab} » en bas et choisis « ${myAddress} ».`,
+  insufficientLine: (needed, balance) =>
+    `Cette conversion demande ${needed} — le montant plus deux frais de ledger — et ce portefeuille détient ${balance}. Baisse le montant, ou reçois-en d'abord davantage.`,
+
   approvingTitle: 'Approbation en cours',
-  approvingBody: (amount, sym, at) =>
-    `Ton téléphone approuve le prélèvement exact de ${amount} ${sym} par le pool. L'autorisation expire à ${at} si elle ne sert pas.`,
+  approvingBody: (amount, at) =>
+    `Ton téléphone approuve le prélèvement exact de ${amount} par le pool. L'autorisation expire à ${at} si elle ne sert pas.`,
   swappingTitle: 'Échange en cours',
   swappingBody: 'Envoi de l’échange au pool ICPSwap. Il ne peut prélever que le montant approuvé.',
   settlingTitle: 'Règlement',
   settlingBody: sym => `Le pool a accepté l'échange. En attente de ton ${sym} dans ton portefeuille…`,
   doneTitle: 'Converti ✓',
-  doneBody: (amount, sym) => `${amount} ${sym} reçus dans ton portefeuille.`,
+  doneBody: amount => `${amount} reçus dans ton portefeuille.`,
   doneTx: tx => `Référence du versement : ${tx}`,
   pendingTitle: 'Versement en attente',
   pendingBody: (sym, pool, at) =>
@@ -62,8 +70,8 @@ export const convertFr: ConvertMessages = {
   stuckTitle: 'Issue inconnue',
   stuckBody:
     'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
-  stuckSigned: (amount, inSym, minAmount, outSym) =>
-    `Ce qui a été signé : approuver ${amount} ${inSym} au pool ICPSwap ; échanger pour un minimum de ${minAmount} ${outSym}.`,
+  stuckSigned: (amount, minAmount) =>
+    `Ce qui a été signé : approuver ${amount} au pool ICPSwap ; échanger pour un minimum de ${minAmount}.`,
   expiryLine: at => `L'autorisation inutilisée expire au plus tard à ${at} — après, le pool ne peut plus rien prélever.`,
 
   errors: {

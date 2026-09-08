@@ -44,6 +44,38 @@ export async function readJsonOrEmpty(r: Response): Promise<any> {
   });
 }
 
+export type RelayCapabilities = {till: boolean; demoFaucet: boolean};
+
+// What every caller starts from and what every failure path below falls back to: a relay that has
+// told us nothing offers nothing. The ONE literal — a hand-written `{till: false, demoFaucet:
+// false}` elsewhere is the same claim written twice.
+export const NO_RELAY_CAPABILITIES: RelayCapabilities = {till: false, demoFaucet: false};
+
+// Capability discovery is advisory and fail-closed. Older, unreachable, or malformed relays must
+// never make the wallet advertise a cashier or demo-faucet action that can only end in an error.
+// Failing closed QUIETLY is the bug: the wallet then hides the cashier and the top-up with nothing
+// anywhere saying why, which is indistinguishable from a relay that really has neither. So every
+// path out of here that isn't an answer leaves a line naming the URL asked and what came back.
+export async function relayCapabilities(relayUrl: string): Promise<RelayCapabilities> {
+  const url = `${base(relayUrl)}/api/v1/capabilities`;
+  try {
+    const r = await fetchWithTimeout(url);
+    if (!r.ok) {
+      console.warn(`relayCapabilities: ${url} answered HTTP ${r.status} — assuming no till and no demo faucet`);
+      return NO_RELAY_CAPABILITIES;
+    }
+    const j = await readJsonOrEmpty(r);
+    if (typeof j?.till !== 'boolean' || typeof j?.demo_faucet !== 'boolean') {
+      console.warn(`relayCapabilities: ${url} returned ${JSON.stringify(j)}, not the {till, demo_faucet} booleans — assuming no till and no demo faucet`);
+      return NO_RELAY_CAPABILITIES;
+    }
+    return {till: j.till, demoFaucet: j.demo_faucet};
+  } catch (e: unknown) {
+    console.warn(`relayCapabilities: ${url} unreachable — assuming no till and no demo faucet:`, e instanceof Error ? e.message : String(e));
+    return NO_RELAY_CAPABILITIES;
+  }
+}
+
 // Relay deposit client — goes through `fetchWithTimeout` (AbortController optional, errors thrown
 // to the caller) so an omitted-signal caller gets the backstop AND the backstop timer is cleared
 // when the fetch settles. Composing the signal by hand here instead leaked the timer: the composed
@@ -70,4 +102,3 @@ export async function ckerc20OnrampParams(relayUrl: string, currency: number, si
   if (!r.ok) throw new Error(typeof j?.error === 'string' ? j.error : `onramp/ckerc20 ${r.status}`);
   return j as CkErc20OnrampParams;
 }
-

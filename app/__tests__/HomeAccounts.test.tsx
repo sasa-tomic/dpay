@@ -54,6 +54,7 @@ describe('HomeTab accounts — bundled VCHF/ICP rows (zero-balance visible, no r
           history={[]}
           topUpBusy={false}
           topUpErr={null}
+          demoFaucetAvailable={true}
           hasTestnet={false}
           showTestnet={false}
           onToggleTestnet={jest.fn()}
@@ -137,6 +138,7 @@ describe('HomeTab accounts — home-currency rail badges (mark every rail, never
           history={[]}
           topUpBusy={false}
           topUpErr={null}
+          demoFaucetAvailable={true}
           hasTestnet={false}
           showTestnet={false}
           onToggleTestnet={jest.fn()}

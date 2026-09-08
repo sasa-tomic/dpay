@@ -30,8 +30,8 @@ export const walletEs: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Francos suizos', USD: 'Dólares estadounidenses', EUR: 'Euros'},
     chooseTitle: '¿En qué moneda piensas?',
-    chooseBody: 'dpay muestra esta moneda primero y paga con ella por defecto. También puedes tener las demás, y cambiar esto cuando quieras en Ajustes.',
-    railReason: {destination: 'es el que pide el cobro', funded: 'aquí tienes saldo', preference: 'la vía predeterminada de dpay'},
+    chooseBody: 'Elige qué moneda aparece primero. Esto solo cambia la vista y los valores predeterminados; dpay no mueve ni convierte fondos.',
+    railReason: {destination: 'es el que pide el cobro', funded: 'aquí tienes saldo'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Principal',
     mainLabel: currency => `${currency} · Principal`,
@@ -57,7 +57,6 @@ export const walletEs: WalletMessages = {
   tab: {pay: 'Pagar', receive: 'Recibir', transactions: 'Movimientos', home: 'Inicio'},
 
   home: {
-    headlineA11y: (amount, asset) => `Saldo de ${asset}: ${amount}`,
     actions: {
       pay: 'Pagar',
       payHint: 'Escanea un código o envía a una dirección',
@@ -92,6 +91,8 @@ export const walletEs: WalletMessages = {
     demoFundsLabel: 'Conseguir fondos de prueba',
     demoFundsHint: 'Añade ∂100 de dinero de prueba a esta billetera',
     needsSetup: 'Sin configurar',
+    railUnreadable: network =>
+      `La red ${network} no responde ahora mismo, así que este saldo no se pudo actualizar. Es esa conexión, no tu billetera: tus fondos están intactos y tus otras cuentas siguen funcionando. dpay lo reintenta por su cuenta.`,
     select: symbol => `Seleccionar ${symbol}`,
     selectHint: 'Muestra el saldo de este activo en tu pantalla de inicio',
     selectSolanaHint: symbol => `Muestra ${symbol} en tu pantalla de inicio y usa la vía de Solana para Pagar y Recibir`,
@@ -140,9 +141,9 @@ export const educationEs: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'CÓMO PAGA DPAY',
-        title: 'Paga sin señal',
-        body: 'Tu teléfono puede pagar sin nada de señal. La tienda envía el pago por ti, con su propia conexión a internet.',
+        eyebrow: 'PRIMERO, CÓMO FUNCIONA UN PAGO',
+        title: 'Un teléfono solicita y el otro paga',
+        body: 'El teléfono que recibe muestra una solicitud. La escaneas, compruebas el importe y el activo y apruebas. Su conexión envía el pago si tu teléfono está sin conexión.',
       },
       key: {
         eyebrow: 'TU DINERO',
@@ -170,27 +171,27 @@ export const educationEs: EducationMessages = {
   },
 
   rehearsal: {
-    title: 'Un pago honesto',
-    sheetTitle: 'Ensayo',
+    title: 'Practica un pago sin riesgo',
+    sheetTitle: 'Práctica DEMO',
     steps: {
       request: {
-        title: 'La tienda pide',
-        body: 'La tienda elige un activo y un importe exactos, y su terminal los convierte en un código de solicitud.',
+        title: 'En el otro teléfono: solicita ∂1',
+        body: 'Abre dpay en otro teléfono, elige DEMO, toca Recibir, introduce 1 y toca Solicitar.',
       },
       approve: {
-        title: 'Tú revisas y apruebas',
-        body: 'Tu teléfono muestra exactamente lo que vas a pagar. Nada se mueve hasta que lo apruebas con tu clave.',
+        title: 'En este teléfono: escanea y comprueba',
+        body: 'Elige DEMO, toca Pagar y escanea el código dpay del otro teléfono. Comprueba ∂1 y el destinatario antes de aprobar.',
       },
       settle: {
-        title: 'La tienda lo confirma',
-        body: 'La conexión de la tienda envía el pago y se confirma en segundos en su pantalla.',
+        title: 'Después cambia los papeles',
+        body: 'Para practicar cómo recibir, crea una solicitud DEMO de ∂1 en este teléfono y escanéala con el otro.',
       },
     },
-    stageTags: ['01 — SOLICITUD', '02 — APROBACIÓN', '03 — CONFIRMACIÓN'],
-    punchline: 'Eso es todo. Tu teléfono puede estar sin conexión al aprobar y al entregar el pago.',
-    skip: 'Ver mi billetera',
-    skipHint: 'Salta el ensayo y abre tu billetera',
-    try: 'Probar con fondos de prueba',
+    stageTags: ['01 — RECIBIR', '02 — PAGAR', '03 — CAMBIAR'],
+    punchline: 'DEMO es dinero de práctica sin valor. Esta introducción nunca te pide depositar ni comprar nada.',
+    skip: 'Saltar la práctica',
+    skipHint: 'Salta la práctica y elige tu moneda principal',
+    try: 'Elegir mi moneda',
   },
 
   coachTips: {

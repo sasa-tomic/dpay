@@ -292,9 +292,6 @@ export type OnboardingMessages = {
     ack: string;
   };
 
-  /** The faucet couldn't fund the new wallet — an honest state, not a failure screen. */
-  faucetFailed: string;
-
   /** Recover an existing wallet: 24 words (default) or the 64-hex seed. */
   restore: {
     phraseLabel: string;
@@ -369,9 +366,6 @@ export const onboardingEn: OnboardingMessages = {
     ack: "I've written down all 24 words",
   },
 
-  faucetFailed:
-    "Wallet created, but starter funds couldn't be added. The server may be offline — you can add funds later from Balances.",
-
   restore: {
     phraseLabel: 'Recovery phrase',
     phrasePlaceholder: 'Enter your 24 recovery words',
@@ -411,9 +405,9 @@ export const onboardingEn: OnboardingMessages = {
   create: {
     action: 'Create wallet',
     busy: 'Creating…',
-    hint: 'Generate your on-device key and add demo funds',
+    hint: 'Create a wallet key on this device; no deposit or purchase is required',
   },
 
-  demoNote: 'Creates your wallet and adds ∂100 in demo funds to get started.',
-  demoGlyphNote: ' is the demo-dollar symbol — play money, ∂1 = $1.',
+  demoNote: 'Creating a wallet does not deposit, buy, or move any money.',
+  demoGlyphNote: ' is practice money with no cash value — ∂1 is just one DEMO unit.',
 };

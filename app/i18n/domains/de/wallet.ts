@@ -29,8 +29,8 @@ export const walletDe: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Schweizer Franken', USD: 'US-Dollar', EUR: 'Euro'},
     chooseTitle: 'In welcher Währung denkst du?',
-    chooseBody: 'dpay zeigt diese Währung zuerst an und bezahlt standardmässig damit. Du kannst auch alle anderen halten und das jederzeit in den Einstellungen ändern.',
-    railReason: {destination: 'die Zahlung verlangt diesen Weg', funded: 'du hast hier ein Guthaben', preference: 'dpays Standard-Weg'},
+    chooseBody: 'Wähle, welche Währung zuerst erscheint. Das ändert nur Anzeige und Vorgaben; dpay bewegt oder wechselt kein Guthaben.',
+    railReason: {destination: 'die Zahlung verlangt diesen Weg', funded: 'du hast hier ein Guthaben'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Haupt',
     mainLabel: currency => `${currency} · Haupt`,
@@ -56,7 +56,6 @@ export const walletDe: WalletMessages = {
   tab: {pay: 'Bezahlen', receive: 'Empfangen', transactions: 'Verlauf', home: 'Start'},
 
   home: {
-    headlineA11y: (amount, asset) => `${asset}-Guthaben ${amount}`,
     actions: {
       pay: 'Bezahlen',
       payHint: 'Code scannen oder an eine Adresse senden',
@@ -91,6 +90,8 @@ export const walletDe: WalletMessages = {
     demoFundsLabel: 'Demo-Guthaben holen',
     demoFundsHint: 'Fügt dieser Wallet ∂100 Demo-Geld hinzu',
     needsSetup: 'Einrichtung nötig',
+    railUnreadable: network =>
+      `Das ${network}-Netzwerk antwortet gerade nicht, dieses Guthaben konnte deshalb nicht aktualisiert werden. Das ist diese Verbindung, nicht deine Wallet: deine Coins sind unangetastet, und deine anderen Konten funktionieren weiter. dpay versucht es von selbst weiter.`,
     select: symbol => `${symbol} auswählen`,
     selectHint: 'Zeigt das Guthaben dieses Assets auf deinem Startbildschirm',
     selectSolanaHint: symbol => `Zeigt ${symbol} auf deinem Startbildschirm und nutzt Solana zum Bezahlen und Empfangen`,
@@ -139,9 +140,9 @@ export const educationDe: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'SO ZAHLT DPAY',
-        title: 'Bezahlen ohne Signal',
-        body: 'Dein Handy kann ganz ohne Signal bezahlen. Der Laden sendet die Zahlung für dich — über seine eigene Internetverbindung.',
+        eyebrow: 'ZUERST: SO LÄUFT EINE ZAHLUNG',
+        title: 'Ein Handy fordert an, das andere bezahlt',
+        body: 'Das empfangende Handy zeigt eine Anfrage. Du scannst sie, prüfst Betrag und Asset und gibst frei. Ist dein Handy offline, sendet seine Internetverbindung die Zahlung.',
       },
       key: {
         eyebrow: 'DEIN GELD',
@@ -169,27 +170,27 @@ export const educationDe: EducationMessages = {
   },
 
   rehearsal: {
-    title: 'Eine ehrliche Zahlung',
-    sheetTitle: 'Probelauf',
+    title: 'Eine Zahlung sicher üben',
+    sheetTitle: 'DEMO-Übung',
     steps: {
       request: {
-        title: 'Der Laden fordert an',
-        body: 'Der Laden wählt genau ein Asset und einen Betrag — sein Terminal macht daraus einen Anfragecode.',
+        title: 'Auf dem anderen Handy: ∂1 anfordern',
+        body: 'Öffne dpay auf einem anderen Handy, wähle DEMO, tippe auf Empfangen, gib 1 ein und tippe auf Anfordern.',
       },
       approve: {
-        title: 'Du prüfst und gibst frei',
-        body: 'Dein Handy zeigt genau, was du bezahlst. Nichts bewegt sich, bevor du es mit deinem Schlüssel freigibst.',
+        title: 'Auf diesem Handy: scannen und prüfen',
+        body: 'Wähle DEMO, tippe auf Bezahlen und scanne den dpay-Code des anderen Handys. Prüfe ∂1 und den Empfänger vor der Freigabe.',
       },
       settle: {
-        title: 'Der Laden wickelt ab',
-        body: 'Die eigene Verbindung des Ladens sendet die Zahlung — in Sekunden auf seinem Bildschirm bestätigt.',
+        title: 'Dann die Rollen tauschen',
+        body: 'Zum Üben des Empfangens erstellst du auf diesem Handy eine DEMO-Anfrage über ∂1 und scannst sie mit dem anderen Handy.',
       },
     },
-    stageTags: ['01 — ANFRAGE', '02 — FREIGABE', '03 — ABWICKLUNG'],
-    punchline: 'Das war’s. Dein Handy darf bei Freigabe und Übergabe offline sein.',
-    skip: 'Wallet ansehen',
-    skipHint: 'Überspringt den Probelauf und öffnet deine Wallet',
-    try: 'Mit Demo-Guthaben testen',
+    stageTags: ['01 — EMPFANGEN', '02 — BEZAHLEN', '03 — TAUSCHEN'],
+    punchline: 'DEMO ist Spielgeld ohne Geldwert. Diese Einführung fordert dich nie zu einer Einzahlung oder einem Kauf auf.',
+    skip: 'Übung überspringen',
+    skipHint: 'Überspringt die Übung und wählt deine Hauptwährung',
+    try: 'Meine Währung wählen',
   },
 
   coachTips: {

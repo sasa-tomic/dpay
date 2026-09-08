@@ -28,6 +28,7 @@ import {SOL_DECIMALS} from '../solana/identity';
 import {ICP_LEDGER_PRINCIPAL} from '../config/constants';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {MINT_HEX} from '../lib/format';
+import {CONVERT_POOL_PRINCIPAL, CONVERT_VENUE_LEDGERS} from '../config/convert';
 
 // Catalog v2: the bundled fallback is the network-first `BUNDLED_NETWORKS`; the flat IC catalog the
 // metadata/drift-alarm describes below assert against is DERIVED through the same `icpCatalogOf`
@@ -756,6 +757,7 @@ const TRUTH = JSON.parse(
   erc20_contracts: {ckusdc: string};
   decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; veur: number; eurc: number};
   wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
+  swap_venue: {pool: string; token0_ledger: string; token1_ledger: string; fee_millionths: number};
 };
 
 describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
@@ -936,6 +938,27 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
     }
     expect(byId(9).liquidity).toBe('thin');
     expect(byId(9).ramp_partner).toBe('DFX');
+  });
+});
+
+// --- swap_venue drift alarm (app half) --------------------------------------------------------
+// The relay's Rust half pins the OFFLINE fake pool's seed order against this block, and
+// `just swap-venue-probe` pins the LIVE pool against it. This is the third side: the app's own
+// venue constants. Note what is deliberately NOT asserted — an ORDER. The app holds the pair as an
+// unordered set precisely because the 2026-09-07 build pinned the order, got it backwards, and
+// seeded the offline fake from the same pin, so nothing offline could contradict it while
+// production quoted each direction under the other's label
+// (docs/specs/2026-09-08-conversion-hardening-plan.md). Direction now comes from the venue's own
+// metadata, echoed by the relay; the app asserts only WHICH two ledgers, and which pool.
+describe('convert venue vs dfx/catalog_truth.json (app-half drift alarm)', () => {
+  it('the pool the app signs against is the measured venue', () => {
+    expect(CONVERT_POOL_PRINCIPAL).toBe(TRUTH.swap_venue.pool);
+  });
+
+  it('the venue pair is the measured pair, as an unordered set', () => {
+    expect([...CONVERT_VENUE_LEDGERS].sort()).toEqual(
+      [TRUTH.swap_venue.token0_ledger, TRUTH.swap_venue.token1_ledger].sort(),
+    );
   });
 });
 

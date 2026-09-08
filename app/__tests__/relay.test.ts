@@ -200,6 +200,62 @@ describe('fetchWithTimeout helper', () => {
   });
 });
 
+describe('relayCapabilities', () => {
+  const response = (ok: boolean, payload: unknown) => ({
+    ok,
+    status: ok ? 200 : 404,
+    json: () => Promise.resolve(payload),
+  } as unknown as Response);
+
+  test('accepts only the explicit boolean capability shape', async () => {
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.resolve(response(true, {till: true, demo_faucet: false})));
+    const {relayCapabilities} = require('../services/relay');
+    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({till: true, demoFaucet: false});
+  });
+
+  test.each([
+    ['non-OK response', response(false, {})],
+    ['missing field', response(true, {till: true})],
+    ['wrong field type', response(true, {till: 'yes', demo_faucet: true})],
+  ])('fails closed for %s', async (_name, result) => {
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.resolve(result));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const {relayCapabilities} = require('../services/relay');
+    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({till: false, demoFaucet: false});
+    warn.mockRestore();
+  });
+
+  test('fails closed on a network error', async () => {
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.reject(new Error('offline')));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const {relayCapabilities} = require('../services/relay');
+    await expect(relayCapabilities('http://relay.example')).resolves.toEqual({till: false, demoFaucet: false});
+    warn.mockRestore();
+  });
+
+  // Failing closed is the right POLICY and silently failing closed is a bug: the wallet then hides
+  // the cashier and the top-up with nothing anywhere saying why (exactly how a relay that was in
+  // fact serving a faucet came to look like one that wasn't). Every failure path must leave a line
+  // naming the URL that was asked and what came back.
+  test.each([
+    ['non-OK response', response(false, {}), ['404']],
+    ['malformed body', response(true, {till: true}), ['till']],
+    ['network error', Promise.reject(new Error('offline')), ['offline']],
+  ])('logs the URL and the reason for %s', async (_name, result, mustMention) => {
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() =>
+      result instanceof Promise ? result : Promise.resolve(result),
+    );
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const {relayCapabilities} = require('../services/relay');
+    await relayCapabilities('http://relay.example');
+    expect(warn).toHaveBeenCalled();
+    const logged = warn.mock.calls.map(c => c.map(a => String(a)).join(' ')).join('\n');
+    expect(logged).toContain('http://relay.example/api/v1/capabilities');
+    for (const fragment of mustMention) expect(logged).toContain(fragment);
+    warn.mockRestore();
+  });
+});
+
 /**
  * M11 — relay TS client surfaces the JSON `{error}` body on non-OK responses, mirroring
  * `withdrawFunds`. Before this fix, depositInfo/depositAddress/depositRefresh/ckerc20OnrampParams

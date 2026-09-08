@@ -6,9 +6,9 @@
  *
  * Conventions (see keys.ts for the full rationale):
  *   • Interpolation is a typed FUNCTION, never a '{{placeholder}}' string, so a locale can move the
- *     value anywhere in the sentence. That includes the *branching* copy — `fundTitle` takes the
- *     action rather than letting the caller splice an English verb into a template, and
- *     `showToPayer` takes the NFC state rather than concatenating an English suffix.
+ *     value anywhere in the sentence. That includes the *branching* copy — `fundBody` takes the
+ *     action, and `showToPayer` takes the NFC state, rather than letting the caller splice an
+ *     English verb or suffix into a template.
  *   • Money is formatted by fmtCurrencyAmount/fmtAsset at the call site and passed in ALREADY
  *     FORMATTED. This catalog never formats numbers.
  *   • A few strings are read across the two namespaces (ReceiveMode reads `M.pay.notAPaymentCode`,
@@ -216,9 +216,10 @@ export type PayMessages = {
   };
 
   // --- the fund-first gate ------------------------------------------------------------------
-  /** Stand-in noun when the selected asset has no display name yet ("Add funds to pay"). */
+  /** Stand-in noun when the selected asset has no display name yet ("No funds available"). */
   fundsSymbol: string;
-  fundTitle: (symbol: string, action: 'pay' | 'send') => string;
+  /** The gate's headline states the LACK; the action the user was reaching for lives in `fundBody`. */
+  fundTitle: (symbol: string) => string;
   fundBody: (symbol: string, action: 'pay' | 'send') => string;
   fundBodyNoDeposits: (symbol: string) => string;
   /** The token-rail fund body — `symbol` names the token (USDC, EURC, …). */
@@ -439,11 +440,13 @@ export const payEn: PayMessages = {
   },
 
   fundsSymbol: 'funds',
-  fundTitle: (symbol, action) => `Add ${symbol} to ${action}`,
+  fundTitle: symbol => `No ${symbol} available`,
   fundBody: (symbol, action) =>
-    `This wallet has no ${symbol} yet. Send ${symbol} to your address and you can ${action} right away.`,
+    action === 'pay'
+      ? `This wallet has no ${symbol}. To pay a ${symbol} request, first receive ${symbol} at your address.`
+      : `This wallet has no ${symbol}. To send ${symbol}, first receive ${symbol} at your address.`,
   fundBodyNoDeposits: symbol =>
-    `This wallet has no ${symbol} yet — and ${symbol} isn't available for deposits yet. Fund another asset, or check back soon.`,
+    `This wallet has no ${symbol}, and dpay cannot show a deposit address for it. Receive ${symbol} from another wallet before spending it.`,
   fundBodyToken: symbol => `Send ${symbol} (Solana) to your ${symbol} address. Keep a little SOL in the wallet for network fees.`,
   showMyAddress: symbol => `Show my ${symbol} address`,
   createTokenAccount: symbol => `Create my ${symbol} account`,

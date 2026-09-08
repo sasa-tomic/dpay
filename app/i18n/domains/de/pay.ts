@@ -147,11 +147,13 @@ export const payDe: PayMessages = {
   },
 
   fundsSymbol: 'Guthaben',
-  fundTitle: (symbol, action) => `${symbol} zum ${action === 'pay' ? 'Bezahlen' : 'Senden'} aufladen`,
+  fundTitle: symbol => `Kein ${symbol} verfügbar`,
   fundBody: (symbol, action) =>
-    `Diese Wallet hat noch kein ${symbol}. Sende ${symbol} an deine Adresse und du kannst sofort ${action === 'pay' ? 'bezahlen' : 'senden'}.`,
+    action === 'pay'
+      ? `Diese Wallet hat kein ${symbol}. Um eine ${symbol}-Anfrage zu bezahlen, empfange zuerst ${symbol} an deiner Adresse.`
+      : `Diese Wallet hat kein ${symbol}. Um ${symbol} zu senden, empfange zuerst ${symbol} an deiner Adresse.`,
   fundBodyNoDeposits: symbol =>
-    `Diese Wallet hat noch kein ${symbol} — und ${symbol} ist noch nicht für Einzahlungen verfügbar. Lade ein anderes Asset auf oder schau bald wieder vorbei.`,
+    `Diese Wallet hat kein ${symbol}, und dpay kann dafür keine Einzahlungsadresse anzeigen. Empfange ${symbol} von einer anderen Wallet, bevor du es ausgibst.`,
   fundBodyToken: symbol => `Sende ${symbol} (Solana) an deine ${symbol}-Adresse. Behalte etwas SOL in der Wallet für Netzwerkgebühren.`,
   showMyAddress: symbol => `Meine ${symbol}-Adresse zeigen`,
   createTokenAccount: symbol => `Mein ${symbol}-Konto erstellen`,

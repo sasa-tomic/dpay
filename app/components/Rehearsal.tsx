@@ -5,20 +5,19 @@
  * finishCreate success → 'rehearsal'; there is deliberately NO stored "must show" state — an app
  * killed mid-rehearsal simply resumes into the wallet next launch, which the spec accepts).
  *
- * ONE page tells ONE honest payment (request → approve → settle): three badge+line rows — the
- * same postage-mark grammar as the walkthrough's stage tags — with copy verbatim from
- * config/education.ts `rehearsalSteps()`; the closing line (`M.education.rehearsal.punchline`)
- * is the comprehension pin (approval + handoff need no signal). Nothing here fabricates a
- * transaction — it is explicitly a rehearsal, and the exit line says so.
+ * ONE page holds all three practice steps as badge+line rows — the same postage-mark grammar as
+ * the walkthrough's stage tags — with copy verbatim from config/education.ts `rehearsalSteps()`,
+ * which owns what the page is for; the closing line (`M.education.rehearsal.punchline`) is the
+ * honesty pin. Nothing here is simulated and no transfer is claimed.
  *
  * (Was a 3-beat auto-advancing pager — 18s of passive paging doing one screen's job; the round-2
- * UX audit collapsed it to this single scannable page. The whole flow, settle truth included, is
- * visible at a glance, so MOUNTING the page awards the flowUnderstood stamp (idempotent) — a skip
- * from this page has still seen the flow. Reduced motion: entrances render at rest.)
+ * UX audit collapsed it to this single scannable page. Every step is visible at a glance, so
+ * MOUNTING the page awards the flowUnderstood stamp (idempotent) — a skip from this page has still
+ * seen them. Reduced motion: entrances render at rest.)
  *
  * testID contract (e2e flow 90): root `rehearsal`, steps `rehearsal-step-1..3` (all mounted
  * together), bodies `rehearsal-body-1..3`, punchline `rehearsal-punchline`, `btn-rehearsal-next`
- * ("Try with demo funds" → onTry), `btn-rehearsal-skip` ("Explore wallet" → onSkip).
+ * ("Choose my currency" → onTry), `btn-rehearsal-skip` ("Skip practice" → onSkip).
  */
 import React, {useEffect, useRef} from 'react';
 import {Animated, Easing, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
@@ -57,7 +56,7 @@ export function Rehearsal({onTry, onSkip, reducedMotion}: {onTry: () => void; on
   const reduced = reducedMotion ?? hookReduced;
   useEscapeToClose(onSkip);
 
-  // The whole flow — settle truth included — is on this one page, so MOUNTING it is seeing it.
+  // All three steps are on this one page, so MOUNTING it is seeing them.
   // Idempotent; skipped-after-mount runs still stamped (the skip button lives on this page).
   useEffect(() => { void awardStamp(JOURNEY_STAMPS.flowUnderstood); }, []);
 
@@ -65,7 +64,7 @@ export function Rehearsal({onTry, onSkip, reducedMotion}: {onTry: () => void; on
     <SafeAreaView testID="rehearsal" style={S.walkRoot}>
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
       {/* Header — the app's standard sheet chrome (SettingsSheet grammar): title left, the
-          44pt boxed affordance top-right ("Explore wallet" — skip to the funded wallet). */}
+          44pt boxed affordance top-right ("Skip practice" — same exit as the primary). */}
       <View style={S.sheetHead}>
         <Text style={S.sheetTitle}>{M.education.rehearsal.sheetTitle}</Text>
         <Pressable

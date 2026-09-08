@@ -22,7 +22,7 @@
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
-import {Text} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 
 jest.mock('../services/till', () => {
   const actual = jest.requireActual('../services/till') as Record<string, unknown>;
@@ -58,6 +58,7 @@ import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 import {NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET} from '../config/constants';
 import {M} from '../i18n';
+import {S} from '../styles';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
 
 const IDENTITY: Identity = {secretHex: '0b'.repeat(32), publicHex: '66'.repeat(32), username: 'Bahnhof Kiosk'};
@@ -442,6 +443,34 @@ describe('clearing the till', () => {
     expect(has(tree, 'till-ended')).toBe(false);
     expect(has(tree, 'till-qr')).toBe(true);
     expect(visible(tree)).toContain(M.receive.till.cancelUnreachable);
+    act(() => { tree.unmount(); });
+  });
+});
+
+// The counter is the ONE component that mounts a mode surface INSIDE another one (Receive's own),
+// which is how its ring-up form came to be sized to its own max-content and hung 71.7px off both
+// edges of a 358px column. The reason lives in `app/styles.ts` (MODE_SURFACE); what is pinned here
+// is that this component picks the right surface for each of its two shapes.
+function surfaceOf(tree: renderer.ReactTestRenderer): {alignSelf?: string; justifyContent?: string} {
+  return StyleSheet.flatten(tree.root.findAllByType(View)[0].props.style) as {alignSelf?: string; justifyContent?: string};
+}
+
+describe('the counter fits the screen it is nested in', () => {
+  test('the ring-up form fills its column and starts at the top', () => {
+    const tree = mount(VCHF);
+    expect(has(tree, 'till-amount-input')).toBe(true);
+    expect(surfaceOf(tree)).toEqual(StyleSheet.flatten(S.centerTop));
+    expect(surfaceOf(tree).alignSelf).toBe('stretch');
+    expect(surfaceOf(tree).justifyContent).toBeUndefined();
+    act(() => { tree.unmount(); });
+  });
+
+  test('the live code is a moment — centred, and still filling its column', async () => {
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    expect(has(tree, 'till-qr')).toBe(true);
+    expect(surfaceOf(tree).justifyContent).toBe('center');
+    expect(surfaceOf(tree).alignSelf).toBe('stretch');
     act(() => { tree.unmount(); });
   });
 });

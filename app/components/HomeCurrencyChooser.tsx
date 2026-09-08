@@ -60,10 +60,9 @@ export function HomeCurrencyChooser({assets, balances, catalog, onChoose}: {
   onChoose: (c: HomeCurrency) => void;
 }) {
   const offerable = offerableCurrencies(assets);
-  // Pre-select the first offerable currency so Continue is never a dead button, and so a user who
-  // just wants to get on with it taps once. The selection is still explicit — the row shows a
-  // check and Continue commits it.
-  const [picked, setPicked] = useState<HomeCurrency | null>(offerable.length > 0 ? offerable[0] : null);
+  // No implicit default: choosing the currency that appears first is a consequential preference,
+  // so the user must tap a row before Continue becomes available.
+  const [picked, setPicked] = useState<HomeCurrency | null>(null);
   // Whether the picked card shows its per-rail detail panel. Tapping a row sets it from the
   // currency's own rail count, so single-rail currencies NEVER open it and Continue behaves
   // exactly as it did before the detail existed.
@@ -112,7 +111,7 @@ export function HomeCurrencyChooser({assets, balances, catalog, onChoose}: {
                   </View>
                   {ordered.map((rail, i) => (
                     <Text key={rail.id} style={S.assetSub}>
-                      {i === 0 && choice !== null
+                      {i === 0 && choice !== null && choice.reason !== 'preference'
                         ? M.wallet.homeCurrency.railWithReason(railLineLabel(rail), M.wallet.homeCurrency.railReason[choice.reason])
                         : railLineLabel(rail)}
                     </Text>
@@ -149,7 +148,8 @@ const detailHead: TextStyle = {flex: 1, marginTop: 0};
 /**
  * The per-rail detail panel (Stage 5) — one block per rail of the currency's group, in
  * `currencyRails` order (preferred first), each stating ONLY catalog-backed facts: the rail line,
- * the settlement chain as a tag pill, the wallet's pick reason when this rail IS the pick, the
+ * the settlement chain as a tag pill, the wallet's pick reason when this rail IS the pick and that
+ * reason is actionable (docs/specs/2026-09-07-ux-decisions.md), the
  * fee fact in the rail's own unit (the SAME `M.receive.rail` vocabulary RailDisclosure renders —
  * one fee voice everywhere), the liquidity statement (warn tone on thin, plain line on deep), and
  * the ramp statement. The Back button collapses the panel WITHOUT unpicking the row — the check
@@ -199,7 +199,7 @@ export function RailGroupDetail({currency, assets, balances, catalog, onBack}: {
                 <Text style={[S.railDetailLine, detailHead]}>{railLineLabel(rail)}</Text>
                 <Text testID="rail-chain-tag" style={S.railChainTag}>{rail.protocol === 'solana' ? 'SOLANA' : 'IC'}</Text>
               </View>
-              {choice != null && choice.rail.id === rail.id ? (
+              {choice != null && choice.rail.id === rail.id && choice.reason !== 'preference' ? (
                 <Text style={S.railDetailLine}>
                   {M.wallet.homeCurrency.railWithReason(railLineLabel(rail), M.wallet.homeCurrency.railReason[choice.reason])}
                 </Text>

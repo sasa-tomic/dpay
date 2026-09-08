@@ -3,7 +3,7 @@
  * JSON-RPC 2.0 request shape, response parsing, base64 tx encoding, error handling, the bounded-
  * timeout backstop, and the confirmation poll loop. Mirrors the relay.test.ts fetch-mock idiom.
  */
-import {describe, test, expect, jest, afterEach} from '@jest/globals';
+import {describe, test, expect, jest, afterEach, beforeEach} from '@jest/globals';
 
 const realFetch = globalThis.fetch;
 
@@ -23,7 +23,11 @@ function installRpcFetch(responses: Array<unknown | {ok: false; status: number} 
     } else {
       payload = JSON.stringify({jsonrpc: '2.0', id: 1, result: next});
     }
-    return Promise.resolve({ok: httpOk, status, json: () => Promise.resolve(JSON.parse(payload))} as unknown as Response);
+    // `headers` is real on every Response; the rate-limit gate reads `Retry-After` off a 429, so
+    // the mock carries a Headers-shaped reader seeded from an optional `headers` field.
+    const hdrs: Record<string, string> = (next && typeof next === 'object' && 'headers' in (next as any) ? (next as any).headers : {}) ?? {};
+    const headers = {get: (k: string) => hdrs[k] ?? hdrs[k.toLowerCase()] ?? null};
+    return Promise.resolve({ok: httpOk, status, headers, json: () => Promise.resolve(JSON.parse(payload))} as unknown as Response);
   });
   (globalThis as unknown as {fetch: typeof mock}).fetch = mock;
   return {calls};
@@ -70,10 +74,12 @@ describe('solana rpc — request/response', () => {
     await expect(getBalance('https://rpc.example', 'X')).rejects.toThrow('solana rpc: AccountNotFound');
   });
 
+  // 429 is NOT used here: it is the one status with its own behaviour (the rate-limit gate, pinned
+  // in its own describe below), so pinning the generic path on it would test two things at once.
   test('a non-2xx HTTP status throws', async () => {
-    installRpcFetch([{ok: false, status: 429}]);
+    installRpcFetch([{ok: false, status: 503}]);
     const {getBalance} = require('../solana/rpc');
-    await expect(getBalance('https://rpc.example', 'X')).rejects.toThrow('solana rpc http 429');
+    await expect(getBalance('https://rpc.example', 'X')).rejects.toThrow('solana rpc http 503');
   });
 });
 
@@ -399,5 +405,96 @@ describe('solana rpc — Phase 3 freshness methods', () => {
       await rpc.getFeeForMessage('https://stub-freshness.test', 'msg');
       expect(fetchCalls).toBe(0);
     });
+  });
+});
+
+
+// ---------------------------------------------------------------------------------------------
+// H4 — HTTP 429. Measured on a real first load (2026-09-08): the app issued 17 RPC POSTs in 10.4s,
+// every one 429ed, and it re-sent the identical volley every 2.5s forever because nothing anywhere
+// read the status code, honoured `Retry-After`, or backed off. The three Solana rows sat at '—'.
+// These cases pin the gate that replaced that: a 429 becomes a typed, actionable refusal, and the
+// endpoint is left alone for the interval it asked for.
+//
+// The gate's cooldown map is module state, so every case starts from a fresh module registry.
+// (`jest.isolateModules` is NOT usable here: it does not await an async callback, so the body would
+// run on after the test ended and afterEach had already restored real timers.)
+// ---------------------------------------------------------------------------------------------
+describe('solana rpc — 429 rate-limit gate', () => {
+  const URL_A = 'https://rpc.example';
+  beforeEach(() => { jest.resetModules(); });
+
+  test('a 429 throws a rate-limit error, and the NEXT call never reaches the network', async () => {
+    const {calls} = installRpcFetch([{ok: false, status: 429}, {value: 1}]);
+    const {getBalance, SolanaRateLimited} = require('../solana/rpc');
+    await expect(getBalance(URL_A, 'AddrXYZ')).rejects.toBeInstanceOf(SolanaRateLimited);
+    expect(calls.length).toBe(1);
+    // Inside the cooldown the client refuses locally — this is what stops the 2.5s poll from
+    // re-sending the volley the limiter just refused.
+    await expect(getBalance(URL_A, 'AddrXYZ')).rejects.toBeInstanceOf(SolanaRateLimited);
+    expect(calls.length).toBe(1);
+  });
+
+  test('the error says what is happening and how long the wait is (every error path is actionable)', async () => {
+    installRpcFetch([{ok: false, status: 429, headers: {'Retry-After': '7'}}]);
+    const {getBalance} = require('../solana/rpc');
+    const err = await getBalance(URL_A, 'AddrXYZ').catch((e: Error) => e);
+    expect((err as unknown as {retryAfterMs: number}).retryAfterMs).toBe(7000); // the endpoint's own Retry-After
+    expect(err.message).toMatch(/rate limit/i);
+    expect(err.message).toContain('7s');
+  });
+
+  test('the cooldown expires: exactly ONE probe goes out, and a success clears the gate', async () => {
+    jest.useFakeTimers();
+    const {calls} = installRpcFetch([{ok: false, status: 429, headers: {'Retry-After': '5'}}, {value: 42}, {value: 43}]);
+    const {getBalance} = require('../solana/rpc');
+    await expect(getBalance(URL_A, 'A')).rejects.toThrow();
+    expect(calls.length).toBe(1);
+    jest.advanceTimersByTime(4999);
+    await expect(getBalance(URL_A, 'A')).rejects.toThrow(); // still inside the window
+    expect(calls.length).toBe(1);
+    jest.advanceTimersByTime(2);
+    expect(await getBalance(URL_A, 'A')).toBe('42');        // the probe
+    expect(calls.length).toBe(2);
+    expect(await getBalance(URL_A, 'A')).toBe('43');        // gate cleared by the success
+    expect(calls.length).toBe(3);
+  });
+
+  test('repeated refusals back off exponentially to a CAP, instead of hammering at a fixed rate', async () => {
+    jest.useFakeTimers();
+    // No Retry-After header: the client picks the interval and doubles it on every refusal.
+    installRpcFetch(Array.from({length: 12}, () => ({ok: false, status: 429})));
+    const {getBalance, RATE_LIMIT_BASE_MS, RATE_LIMIT_MAX_MS} = require('../solana/rpc');
+    const waitOf = async (): Promise<number> => {
+      const e = await getBalance(URL_A, 'A').catch((x: {retryAfterMs: number}) => x);
+      return e.retryAfterMs;
+    };
+    const first = await waitOf();
+    expect(first).toBe(RATE_LIMIT_BASE_MS);
+    jest.advanceTimersByTime(first);
+    expect(await waitOf()).toBe(RATE_LIMIT_BASE_MS * 2);
+    jest.advanceTimersByTime(RATE_LIMIT_BASE_MS * 2);
+    expect(await waitOf()).toBe(RATE_LIMIT_BASE_MS * 4);
+    // …and it is bounded: a permanently-limited endpoint is probed at the cap, never faster and
+    // never slower (an unbounded backoff would make the wallet look dead forever).
+    for (let i = 0; i < 4; i++) { jest.advanceTimersByTime(RATE_LIMIT_MAX_MS); await waitOf(); }
+    jest.advanceTimersByTime(RATE_LIMIT_MAX_MS);
+    expect(await waitOf()).toBe(RATE_LIMIT_MAX_MS);
+  });
+
+  test('the gate is PER ENDPOINT — a limited URL never silences a different one', async () => {
+    const {calls} = installRpcFetch([{ok: false, status: 429}, {value: 9}]);
+    const {getBalance} = require('../solana/rpc');
+    await expect(getBalance(URL_A, 'A')).rejects.toThrow();
+    expect(await getBalance('https://other.example', 'A')).toBe('9');
+    expect(calls.length).toBe(2);
+  });
+
+  test('a non-429 HTTP error does NOT open a cooldown (only the limiter gets to mute us)', async () => {
+    const {calls} = installRpcFetch([{ok: false, status: 500}, {value: 5}]);
+    const {getBalance} = require('../solana/rpc');
+    await expect(getBalance(URL_A, 'A')).rejects.toThrow(/http 500/);
+    expect(await getBalance(URL_A, 'A')).toBe('5');
+    expect(calls.length).toBe(2);
   });
 });

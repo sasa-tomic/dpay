@@ -142,9 +142,6 @@ export const onboardingEs: OnboardingMessages = {
     ack: 'He anotado las 24 palabras',
   },
 
-  faucetFailed:
-    'Billetera creada, pero no se pudieron añadir los fondos iniciales. Puede que el servidor esté sin conexión: puedes añadir fondos más tarde desde Saldos.',
-
   restore: {
     phraseLabel: 'Frase de recuperación',
     phrasePlaceholder: 'Introduce tus 24 palabras de recuperación',
@@ -184,9 +181,9 @@ export const onboardingEs: OnboardingMessages = {
   create: {
     action: 'Crear billetera',
     busy: 'Creando…',
-    hint: 'Genera tu clave en el dispositivo y añade fondos de prueba',
+    hint: 'Crea una clave de billetera en este dispositivo; no requiere depósito ni compra',
   },
 
-  demoNote: 'Crea tu billetera y añade ∂100 en fondos de prueba para empezar.',
-  demoGlyphNote: ' es el símbolo del dólar de prueba: dinero ficticio, ∂1 = $1.',
+  demoNote: 'Crear la billetera no deposita, compra ni mueve dinero.',
+  demoGlyphNote: ' es dinero de práctica sin valor: ∂1 es solo una unidad DEMO.',
 };

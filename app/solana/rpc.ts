@@ -58,6 +58,58 @@ const DEFAULT_TIMEOUT_MS = 8000;
 const CONFIRM_TIMEOUT_MS = 30000;
 const CONFIRM_POLL_MS = 1500;
 
+/** First cooldown after a 429 that carried no `Retry-After` — longer than the 2.5s balance poll,
+ *  so the very next tick is skipped rather than re-sending the volley that was just refused. */
+export const RATE_LIMIT_BASE_MS = 5000;
+/** Cooldown ceiling. Bounded on purpose: an unbounded backoff turns a temporary limit into a wallet
+ *  that never reads a balance again, which looks broken and is not more polite than probing once a
+ *  minute. */
+export const RATE_LIMIT_MAX_MS = 60000;
+
+/**
+ * The endpoint refused this request with HTTP 429, or a previous 429's cooldown has not elapsed.
+ * Carries the wait the ENDPOINT asked for (`Retry-After`) or the interval this client chose, so
+ * the caller can say what is happening and when it will retry rather than showing a bare failure.
+ */
+export class SolanaRateLimited extends Error {
+  readonly retryAfterMs: number;
+  constructor(url: string, retryAfterMs: number) {
+    super(
+      `solana rpc rate limit (HTTP 429) at ${url} — the endpoint is refusing requests from this ` +
+        `wallet; not sending again for ${Math.round(retryAfterMs / 1000)}s`,
+    );
+    this.name = 'SolanaRateLimited';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** Per-endpoint cooldown: when a 429 arrives, no request goes to that URL until `until`, and the
+ *  next refusal doubles the interval. Keyed by URL so one throttled endpoint never silences
+ *  another. Cleared by any success — the limit is over when the endpoint says it is, by answering.
+ *
+ *  It gates EVERY caller, reads and broadcasts alike. A 429 is the server instructing this client
+ *  to stop; sending a transaction into it would very likely be refused too, and `SolanaRateLimited`
+ *  names the wait, which is a better thing to put in front of a user than a bare `http 429`. */
+const cooldowns = new Map<string, {until: number; waitMs: number}>();
+
+/** `Retry-After` in ms when the endpoint sent a usable one (delta-seconds form — the only form
+ *  Solana RPC providers send), else null so the caller applies its own backoff. */
+function retryAfterMs(headers: Headers): number | null {
+  const raw = headers.get('Retry-After');
+  if (raw === null) return null;
+  const secs = Number(raw.trim());
+  return Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : null;
+}
+
+/** Record a refusal and return the wait it opens: the endpoint's own `Retry-After`, else this
+ *  client's interval, doubling per consecutive refusal up to the cap. */
+function openCooldown(url: string, fromHeader: number | null): number {
+  const prev = cooldowns.get(url);
+  const waitMs = fromHeader ?? Math.min(prev ? prev.waitMs * 2 : RATE_LIMIT_BASE_MS, RATE_LIMIT_MAX_MS);
+  cooldowns.set(url, {until: Date.now() + waitMs, waitMs});
+  return waitMs;
+}
+
 let nextId = 1;
 
 function activeStub(): SolanaRpcStub | undefined {
@@ -77,6 +129,14 @@ async function rpcFetch(url: string, method: string, params: unknown[], opts?: S
     }
     return await handler(params);
   }
+  // The cooldown is checked BEFORE the request is built: while it is open, the point is that no
+  // packet leaves the device. One request is admitted the moment it expires (the probe), and its
+  // outcome either clears the gate or re-opens it wider.
+  const cooling = cooldowns.get(url);
+  if (cooling !== undefined) {
+    const remaining = cooling.until - Date.now();
+    if (remaining > 0) throw new SolanaRateLimited(url, remaining);
+  }
   const {signal, cancel} = composeTimeout(opts?.signal, opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
   try {
     const r = await fetch(url, {
@@ -85,8 +145,12 @@ async function rpcFetch(url: string, method: string, params: unknown[], opts?: S
       body: JSON.stringify({jsonrpc: '2.0', id: nextId++, method, params}),
       signal,
     });
+    if (r.status === 429) throw new SolanaRateLimited(url, openCooldown(url, retryAfterMs(r.headers)));
     if (!r.ok) throw new Error(`solana rpc http ${r.status}`);
     const j: {error?: {message?: string}; result?: unknown} = await r.json();
+    // The endpoint answered: whatever it said, it is talking to us again, so the gate is done.
+    // Cleared on an RPC-level error too — a rejected METHOD is not a refused CLIENT.
+    cooldowns.delete(url);
     if (j.error) throw new Error(`solana rpc: ${j.error.message ?? 'error'}`);
     return j.result;
   } finally {

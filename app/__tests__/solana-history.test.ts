@@ -15,7 +15,7 @@ import {deriveSolanaKeypair} from '../solana/identity';
 import {deriveAta, USDC_MINT_ADDRESS, USDC_DECIMALS, TOKEN_PROGRAM_ADDRESS} from '../solana/spl';
 import {SYSTEM_PROGRAM_ADDRESS} from '../solana/constants';
 import type {SolanaRpcStub} from '../solana/rpc';
-import {fetchSolanaHistory, SOL_HISTORY_LIMIT} from '../solana/history';
+import {fetchSolanaHistory, resetSolanaHistoryCache, SOL_HISTORY_LIMIT} from '../solana/history';
 
 const realFetch = globalThis.fetch;
 
@@ -37,6 +37,9 @@ let warn: ReturnType<typeof jest.spyOn>;
 
 beforeEach(() => {
   warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  // Transaction details are cached by signature across calls (history.ts) — clear it so one
+  // case's bodies can never answer the next case's fetch.
+  resetSolanaHistoryCache();
 });
 
 afterEach(() => {
@@ -475,5 +478,49 @@ describe('solana history — failure paths are loud, and never become rows', () 
     expect(rows).toEqual([]);
     expect(dropped).toBe(0);
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('transaction details are read ONCE', () => {
+  test('a second poll re-reads the signature LIST but no already-known detail', async () => {
+    // Measured 2026-09-08: the 15s history poll re-fetched the same ≤20 immutable details forever
+    // (80 getTransaction/min from an idle wallet) against an RPC key that answers HTTP 429.
+    let listCalls = 0;
+    let detailCalls = 0;
+    const sigs = [sig('SigCachedA', 300), sig('SigCachedB', 299)];
+    const bodies = {
+      SigCachedA: tx({keys: [OWNER, PEER, SYSTEM_PROGRAM_ADDRESS], pre: [1_000_000_000, 0, 1], post: [899_995_000, 100_000_000, 1], slot: 300}),
+      SigCachedB: tx({keys: [PEER, OWNER, SYSTEM_PROGRAM_ADDRESS], pre: [1_000_000_000, 0, 1], post: [899_995_000, 100_000_000, 1], slot: 299}),
+    };
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignaturesForAddress: (params: unknown[]) => {
+        listCalls++;
+        return params[0] === OWNER ? sigs : [];
+      },
+      getTransaction: (params: unknown[]) => {
+        detailCalls++;
+        return (bodies as Record<string, unknown>)[params[0] as string] ?? null;
+      },
+    };
+    const first = await fetchSolanaHistory(RPC, OWNER);
+    expect(first.rows.length).toBeGreaterThan(0);
+    expect(detailCalls).toBe(2);
+    const second = await fetchSolanaHistory(RPC, OWNER);
+    // The list is authoritative and is re-read every cycle (a dropped transaction must vanish);
+    // the details behind it are not re-read.
+    expect(listCalls).toBe(4);   // owner + USDC ATA, twice
+    expect(detailCalls).toBe(2); // …and not one detail more
+    expect(second.rows).toEqual(first.rows);
+  });
+
+  test('a detail the node does not have yet is NOT cached — it is asked for again', async () => {
+    let detailCalls = 0;
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignaturesForAddress: (params: unknown[]) => (params[0] === OWNER ? [sig('SigPending', 400)] : []),
+      getTransaction: () => { detailCalls++; return null; },
+    };
+    await fetchSolanaHistory(RPC, OWNER);
+    await fetchSolanaHistory(RPC, OWNER);
+    expect(detailCalls).toBe(2);
   });
 });

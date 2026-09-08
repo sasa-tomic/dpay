@@ -18,7 +18,8 @@ import {Svg} from 'react-native-svg';
 import {ICONS} from '../components/icons';
 import {AssetGlyph, glyphFor} from '../components/AssetGlyph';
 import type {SelectableAsset} from '../config/assets';
-import {USDC_MINT_ADDRESS} from '../solana/tokens';
+import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
+import {HOME_CURRENCIES, currencyOfAsset} from '../config/currency';
 
 describe('icons registry', () => {
   test('every icon renders a 24-grid Svg with at least one primitive', () => {
@@ -65,6 +66,10 @@ const ASSETS: SelectableAsset[] = [
   {id: 'solana:SOL', protocol: 'solana', token: 'SOL', symbol: 'SOL', networkLabel: 'Solana', network: 'Solana', mint: null, decimals: 9, linkToken: 'SOL', minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'sol'},
   {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'Solana', network: 'Solana', mint: USDC_MINT_ADDRESS, decimals: 6, linkToken: 'USDC', minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'sol-usdc'},
   {id: 'ic:9', protocol: 'ic', currency: 9, symbol: 'CHF', networkLabel: 'Swiss Franc', network: 'Swiss Franc', decimals: 2, linkToken: 'CHF', minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'chf'},
+  // The home-currency rails (config/currency.ts CURRENCY_RAILS), matched by `linkToken`.
+  {id: 'ic:7', protocol: 'ic', currency: 7, symbol: 'VCHF', networkLabel: 'Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'VCHF', minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'vchf'},
+  {id: 'ic:10', protocol: 'ic', currency: 10, symbol: 'VEUR', networkLabel: 'Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'VEUR', minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Partner', rampPartner: 'DFX', visible: true, testKey: 'veur'},
+  {id: 'solana:EURC', protocol: 'solana', token: 'EURC', symbol: 'EURC', networkLabel: 'Solana', network: 'Solana', mint: EURC_MINT_ADDRESS, decimals: 6, linkToken: 'EURC', minFractionDigits: 2, liquidity: 'deep', onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'sol-eurc'},
 ];
 
 describe('glyphFor', () => {
@@ -84,6 +89,45 @@ describe('glyphFor', () => {
     const g = glyphFor(ASSETS[6]);
     expect(g.glyph).toBe('C');
     expect(g.color).toBe('#D8450D');
+  });
+
+  // A home-currency rail wears its CURRENCY's mark, never its rail's. The chooser and the accounts
+  // list both render this one chip, so the rule is pinned here rather than in either surface.
+  // Before this rule, EURC-on-Solana wore ◎ (the Solana mark — it looked like a SOL row) and VCHF
+  // fell through to the first-letter fallback 'V'.
+  describe('home-currency rails carry the currency mark, not the rail token mark', () => {
+    const byId = (id: string) => ASSETS.find(a => a.id === id)!;
+
+    test('CHF: the VCHF rail wears CHF', () => {
+      expect(glyphFor(byId('ic:7')).glyph).toBe('CHF');
+    });
+
+    test('EUR: BOTH rails wear € — the Solana rail is a euro row, not a SOL row', () => {
+      expect(glyphFor(byId('solana:EURC')).glyph).toBe('€');
+      expect(glyphFor(byId('ic:10')).glyph).toBe('€');
+      // …and they are the same chip, so the two EUR rails read as one currency on two rails.
+      expect(glyphFor(byId('solana:EURC'))).toEqual(glyphFor(byId('ic:10')));
+    });
+
+    test('USD: both rails keep $ (the rule that already held, now derived from the currency)', () => {
+      expect(glyphFor(byId('ic:3')).glyph).toBe('$');
+      expect(glyphFor(byId('solana:USDC')).glyph).toBe('$');
+      expect(glyphFor(byId('ic:3'))).toEqual(glyphFor(byId('solana:USDC')));
+    });
+
+    test('an asset OUTSIDE the home-currency model keeps its own family mark', () => {
+      // Native SOL is held and spent, but it is not a currency the wallet is "in".
+      expect(currencyOfAsset(byId('solana:SOL'))).toBeNull();
+      expect(glyphFor(byId('solana:SOL')).glyph).toBe('◎');
+    });
+
+    test('every offerable currency has a distinct mark and hue (no two currencies look alike)', () => {
+      const rails = [byId('ic:7'), byId('ic:3'), byId('solana:EURC')];
+      expect(rails.map(currencyOfAsset)).toEqual([...HOME_CURRENCIES]);
+      const specs = rails.map(glyphFor);
+      expect(new Set(specs.map(s => s.glyph)).size).toBe(3);
+      expect(new Set(specs.map(s => s.color)).size).toBe(3);
+    });
   });
 });
 

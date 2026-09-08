@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {Animated, Easing, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, Animated, Easing, KeyboardAvoidingView, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
@@ -9,7 +9,7 @@ import {hexToWords, stringToWords, wordsToHex, validateMnemonic, wordsToString} 
 import {JOURNEY_STAMPS, hasStamp, loadJourney, awardStamp} from '../lib/journey';
 import type {Identity} from '../lib/types';
 import {DpayCore} from '../services/native';
-import {fetchWithTimeout} from '../services/relay';
+import {fetchWithTimeout, relayCapabilities, type RelayCapabilities} from '../services/relay';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {M} from '../i18n';
 import {useReducedMotion} from '../hooks/useReducedMotion';
@@ -75,6 +75,13 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
   // written down at the gate; the beat only marks it).
   const [beat, setBeat] = useState<'recoverySaved' | 'rehearsal' | null>(null);
   const reducedMotion = useReducedMotion();
+  // The relay capability probe, held as the PROMISE and not as its answer. `finishCreate` runs the
+  // instant the user taps Continue on the backup screen, which is routinely BEFORE a slow relay has
+  // answered — sampling a boolean that still said "no" created the wallet unfunded against a
+  // perfectly healthy relay, with nothing on screen or in the log to say so. Awaiting the promise
+  // is what makes the answer honest instead of merely early; nothing renders off it, so it is a ref.
+  const demoFaucetProbe = useRef<Promise<RelayCapabilities> | null>(null);
+  useEffect(() => { demoFaucetProbe.current = relayCapabilities(relayUrl); }, [relayUrl]);
 
   // Generate a fresh on-device Ed25519 keypair, persist it, then SHOW THE BIP-39 BACKUP before entering
   // the wallet. The faucet fund is DEFERRED to `finishCreate` (run after the user acknowledges the
@@ -111,29 +118,32 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   }
 
-  // Continue create AFTER the user acknowledges the backup: clear the backup screen, run the demo
-  // faucet (best-effort — works when the ledger is reachable; bounded by a 4s timeout so a hanging/
-  // dead relay can't stall onboarding — fail fast → $0, fund later), then enter the wallet. On faucet
-  // failure, `pendingId` is already set so the existing faucet-failed screen renders with Continue.
-  //
-  // Trip Ready J2B: on faucet success the create path now plays the in-memory beat sequence
-  // (RECOVERY SAVED stamp → rehearsal → onCreated) instead of calling onCreated directly. The
-  // faucet-failed path is UNCHANGED (btn-onboard-continue → onCreated — no beat, no rehearsal:
-  // the moment reads as recovery-from-a-hiccup, not celebration).
+  // Continue create AFTER the user acknowledges the backup. DEMO credit is best-effort and only
+  // requested when the relay explicitly advertises a faucet. Wallet creation never depends on
+  // funding, and a relay without a faucet must not produce a scary failure screen.
   async function finishCreate() {
     if (!pendingId) return;
     const id = pendingId;
     setBackupMnemonic(null);
     setBackupChecked(false);
     setBusy(true);
-    try {
-      await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);
-      void awardStamp(JOURNEY_STAMPS.recoverySaved);
-      setBeat('recoverySaved');
-    } catch (e) {
-      console.warn('faucet fetch failed:', e instanceof Error ? e.message : String(e));
-      setBusy(false);
+    const probe = demoFaucetProbe.current;
+    if (probe === null) {
+      // Not reachable through the UI — the mount effect starts the probe before any tap can get
+      // here — but "the wallet was created unfunded and said nothing" is the exact failure this
+      // path exists to prevent, so it is logged rather than assumed away.
+      console.warn('onboarding: no relay capability probe was started — creating the wallet without asking for demo funds');
+    } else if ((await probe).demoFaucet) {
+      try {
+        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/faucet`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({account: id.publicHex})}, BALANCE_TIMEOUT_MS);
+        if (!r.ok) console.warn(`faucet request failed: ${r.status}`);
+      } catch (e) {
+        console.warn('faucet fetch failed:', e instanceof Error ? e.message : String(e));
+      }
     }
+    void awardStamp(JOURNEY_STAMPS.recoverySaved);
+    setBusy(false);
+    setBeat('recoverySaved');
   }
 
   // The RECOVERY SAVED stamp choreography: a passport-stamp landing (tangerine ring, slight
@@ -201,9 +211,10 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
           onSkip={() => { void awardStamp(JOURNEY_STAMPS.walkthroughDone).then(() => setWalkthrough(false)); }}
         />
       ) : beat === 'rehearsal' ? (
-        /* Trip Ready J3 — the payment rehearsal. Both exits enter the wallet (default Pay tab
-           is exactly what "Try with demo funds" wants; Explore wallet is the same entry, the
-           label difference is about intent, not destination). */
+        /* Trip Ready J3 — the payment rehearsal. Both exits ("Choose my currency" and "Skip
+           practice") enter the wallet at the same place: on a first run the home-currency chooser
+           renders INSTEAD of it (Wallet.tsx), which is what the next-button's label points at. The
+           label difference is about intent, not destination. */
         <Rehearsal
           onTry={() => { if (pendingId) onCreated(pendingId); }}
           onSkip={() => { if (pendingId) onCreated(pendingId); }}
@@ -262,14 +273,15 @@ export function Onboarding({relayUrl, onCreated}: {relayUrl: string; onCreated: 
                 <Text style={S.primaryText}>{M.onboarding.continue}</Text>
               </Pressable>
             </>
-          ) : pendingId ? (
-            <>
-              <Text testID="onboard-faucet-failed" style={S.warnNote}>{M.onboarding.faucetFailed}</Text>
-              <Pressable testID="btn-onboard-continue" style={S.primary} onPress={() => onCreated(pendingId!)}
-                accessibilityRole="button" accessibilityLabel={M.onboarding.continue} accessibilityState={{disabled: false}}>
-                <Text style={S.primaryText}>{M.onboarding.continue}</Text>
-              </Pressable>
-            </>
+          ) : pendingId && busy ? (
+            /* The tail of the create sequence: the capability probe is awaited here and, when the
+               relay has a faucet, the demo-funds request goes out. Short, but not instant — a slow
+               relay is exactly when it isn't — and the logo-and-tagline-only screen this replaces
+               read as a hang at the one moment the user has just been told to trust the app. */
+            <View testID="onboard-finishing" style={S.center}>
+              <ActivityIndicator size="large" color={C.brand} />
+              <Text style={S.dim2}>{M.onboarding.create.busy}</Text>
+            </View>
           ) : mode === 'restore' ? (
             <>
               {restoreMode === 'mnemonic' ? (

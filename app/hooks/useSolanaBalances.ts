@@ -91,7 +91,15 @@ export function useSolanaBalances(
     const gen = ++solGenRef.current;
     const ctrl = new AbortController();
     const fresh = () => alive && gen === solGenRef.current;
+    // In-flight guard: a tick that arrives while the previous read is still outstanding is SKIPPED,
+    // not queued. Without it a slow endpoint raises the request rate instead of lowering it — the
+    // 8-reads-in-20s-with-3-concurrent behaviour measured against a 6s-latency RPC (2026-09-08),
+    // which is exactly how a rate limit stays open. It defers, it never disables: the next tick
+    // after the read answers polls normally.
+    let inFlight = false;
     const poll = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const b = await getSolanaBalance(solAddress, ctrl.signal);
         if (!fresh()) return;
@@ -106,6 +114,8 @@ export function useSolanaBalances(
         if (!fresh()) return;
         // Preserve the prior balance (do NOT zero it — plan line ~189). Only flip the status.
         setSol((prev) => ({balance: prev.balance, status: 'error'}));
+      } finally {
+        inFlight = false;
       }
     };
     poll();
@@ -153,7 +163,12 @@ export function useSolanaBalances(
         return changed ? next : prev;
       });
     });
+    // The SOL effect's in-flight guard, per mint: one outstanding read each, so a stuck mint skips
+    // its own ticks without ever stalling a sibling (see that effect for why the guard exists).
+    const inFlight = new Set<string>();
     const pollMint = async (mint: string) => {
+      if (inFlight.has(mint)) return;
+      inFlight.add(mint);
       try {
         const r: SolanaTokenBalanceResult = await getSolanaTokenBalance(secretHex, mint, ctrl.signal);
         if (!fresh()) return;
@@ -191,6 +206,8 @@ export function useSolanaBalances(
           if (pf) return {...prev, [mint]: pf};
           return {...prev, [mint]: {...(live ?? TOKEN_IDLE), status: 'error'}};
         });
+      } finally {
+        inFlight.delete(mint);
       }
     };
     pollMintRef.current = (mint: string) => { pollMint(mint); };

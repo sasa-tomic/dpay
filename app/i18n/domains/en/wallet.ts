@@ -82,9 +82,10 @@ export type WalletMessages = {
     chooseTitle: string;
     chooseBody: string;
     /** Why the rail dpay picks is the one it picks — short qualifiers, attached to its line by
-     *  `railWithReason`. */
-    railReason: {destination: string; funded: string; preference: string};
-    /** One rail's line with its reason attached ("ckUSDC · Internet Computer — dpay's default rail"). */
+     *  `railWithReason`. Only the ACTIONABLE reasons are here: `RailReason` also has `preference`,
+     *  which orders the rails but is never disclosed (docs/specs/2026-09-07-ux-decisions.md). */
+    railReason: {destination: string; funded: string};
+    /** One rail's line with its reason attached ("ckUSDC · Internet Computer — you hold a balance here"). */
     railWithReason: (line: string, reason: string) => string;
     /** The badge on the accounts-list row that IS the main currency. */
     mainBadge: string;
@@ -126,8 +127,6 @@ export type WalletMessages = {
    * always ONE asset's own balance in its own token unit, never a portfolio sum.
    */
   home: {
-    /** The headline block's accessible name — the named asset/currency over its own amount. */
-    headlineA11y: (amount: string, asset: string) => string;
     /** The action row's three uniform buttons (capability-dispatched, one chrome for every asset). */
     actions: {
       pay: string;
@@ -170,6 +169,17 @@ export type WalletMessages = {
     demoFundsLabel: string;
     demoFundsHint: string;
     needsSetup: string;
+    /** The row's balance could not be READ (status 'error' — the chain's endpoint refused or
+     *  failed, e.g. an RPC rate limit). Distinct from a not-yet-answered first poll, which says
+     *  nothing at all. Names the network so the user knows it is not their wallet, states that
+     *  nothing moved, points at the accounts that still work, and says the retry is automatic —
+     *  the polling loop re-reads on its own, so there is no button to promise.
+     *
+     *  It speaks about the READ, never about the figure, because ONE status covers two displays:
+     *  a first poll that failed shows "—", while a later failure keeps the last value it read
+     *  (assetBalances never zeroes a balance on an RPC error). "Balance unreadable" would have
+     *  contradicted the amount still sitting on the row in the second case. */
+    railUnreadable: (network: string) => string;
     select: (symbol: string) => string;
     selectHint: string;
     selectSolanaHint: (symbol: string) => string;
@@ -256,8 +266,8 @@ export const walletEn: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros'},
     chooseTitle: 'Which currency do you think in?',
-    chooseBody: 'dpay shows this currency first and pays in it by default. You can hold any of the others too, and change this any time in Settings.',
-    railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here', preference: 'dpay\'s default rail'},
+    chooseBody: 'Choose which currency appears first. This changes display and defaults only; dpay does not move or convert funds.',
+    railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Main',
     mainLabel: currency => `${currency} · Main`,
@@ -283,7 +293,6 @@ export const walletEn: WalletMessages = {
   tab: {pay: 'Pay', receive: 'Receive', transactions: 'Transactions', home: 'Home'},
 
   home: {
-    headlineA11y: (amount, asset) => `${asset} balance ${amount}`,
     actions: {
       pay: 'Pay',
       payHint: 'Scan a code or send to an address',
@@ -318,6 +327,8 @@ export const walletEn: WalletMessages = {
     demoFundsLabel: 'Get demo funds',
     demoFundsHint: 'Add ∂100 of demo money to this wallet',
     needsSetup: 'Needs setup',
+    railUnreadable: network =>
+      `The ${network} network is not answering right now, so this balance could not be refreshed. It is that connection, not your wallet: your coins are untouched, and your other accounts still work. dpay keeps retrying on its own.`,
     select: symbol => `Select ${symbol}`,
     selectHint: "Show this asset's balance on your home screen",
     selectSolanaHint: symbol => `Show ${symbol} on your home screen and use the Solana rail for Pay/Receive`,
@@ -441,9 +452,9 @@ export const educationEn: EducationMessages = {
   walkthrough: {
     scenes: {
       offline: {
-        eyebrow: 'HOW DPAY PAYS',
-        title: 'Pay without signal',
-        body: 'Your phone can pay with no signal at all. The shop sends the payment for you, using its own internet connection.',
+        eyebrow: 'FIRST, HOW A PAYMENT WORKS',
+        title: 'One phone requests, the other pays',
+        body: 'The receiving phone shows a request. You scan it, check the amount and asset, then approve. Its internet connection sends the payment if your phone is offline.',
       },
       key: {
         eyebrow: 'YOUR MONEY',
@@ -471,27 +482,27 @@ export const educationEn: EducationMessages = {
   },
 
   rehearsal: {
-    title: 'One honest payment',
-    sheetTitle: 'Rehearsal',
+    title: 'Practice one payment safely',
+    sheetTitle: 'DEMO practice',
     steps: {
       request: {
-        title: 'The shop requests',
-        body: "The shop picks an exact asset and amount — its terminal turns that into a request code.",
+        title: 'On the other phone: request ∂1',
+        body: 'Open dpay on another phone, choose DEMO, tap Receive, enter 1, then tap Request.',
       },
       approve: {
-        title: 'You review and approve',
-        body: "Your phone shows exactly what you're paying. Nothing moves until you approve it with your key.",
+        title: 'On this phone: scan and check',
+        body: "Choose DEMO, tap Pay, and scan the other phone's dpay code. Check ∂1 and the recipient before approving.",
       },
       settle: {
-        title: 'The shop settles',
-        body: "The shop's own connection sends the payment — confirmed in seconds on its screen.",
+        title: 'Then switch roles',
+        body: 'To practice receiving, make a ∂1 DEMO request on this phone and scan it with the other phone.',
       },
     },
-    stageTags: ['01 — REQUEST', '02 — APPROVE', '03 — SETTLE'],
-    punchline: "That's it. Your phone can be offline for approval and handoff.",
-    skip: 'Explore wallet',
-    skipHint: 'Skip the rehearsal and open your wallet',
-    try: 'Try with demo funds',
+    stageTags: ['01 — RECEIVE', '02 — PAY', '03 — SWITCH'],
+    punchline: 'DEMO is practice money with no cash value. This walkthrough never asks you to deposit or buy anything.',
+    skip: 'Skip practice',
+    skipHint: 'Skip the practice guide and choose your main currency',
+    try: 'Choose my currency',
   },
 
   coachTips: {

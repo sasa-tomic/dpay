@@ -18,7 +18,7 @@ import {ActivityIndicator, Pressable, Text, TextInput, View} from 'react-native'
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {
-  CONVERT_POOL_FEE_TIER_LABEL,
+  CONVERT_POOL_PRINCIPAL,
   CONVERT_SLIPPAGE_BPS_DEFAULT,
   CONVERT_SLIPPAGE_BPS_OPTIONS,
   resolveConvertDirection,
@@ -41,12 +41,12 @@ import type {Identity} from '../lib/types';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {IconChevronDown, IconSwap} from './icons';
+import {InstructionPanel} from './InstructionPanel';
 
 /** Everything the quote panel needs about the two legs, resolved + validated from the bundled catalog. */
 type ConvertLegs = {
   inDesc: CurrencyDescriptor;
   outDesc: CurrencyDescriptor;
-  zeroForOne: boolean;
   /** Backing display symbols (CHF for VCHF) — the same symbols every other surface shows. */
   inSym: string;
   outSym: string;
@@ -67,6 +67,10 @@ type Props = {
   onBack: () => void;
   /** Fires when a swap reaches a terminal state so Wallet refreshes balances + history rows. */
   onActivity: () => void;
+  /** The zero-balance gate's one action: land the selected asset's own deposit surface
+   *  (Receive ▸ My address) — Wallet's `goToDeposit`, the SAME callback the Pay tab's fund gate
+   *  fires. The gate names that route in its copy, so it also offers it. */
+  onShowDepositAddress: () => void;
 };
 
 const TERMINAL_STEPS = new Set<ConvertRecord['step']>(['done', 'failed_refunded', 'stuck']);
@@ -74,7 +78,7 @@ const TERMINAL_STEPS = new Set<ConvertRecord['step']>(['done', 'failed_refunded'
 const isLiveRecord = (r: ConvertRecord | null): boolean =>
   r !== null && !TERMINAL_STEPS.has(r.step) && r.step !== 'quote' && r.step !== 'confirming';
 
-export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onActivity}: Props) {
+export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onActivity, onShowDepositAddress}: Props) {
   const [amountText, setAmountText] = useState('');
   const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
   const [quote, setQuote] = useState<ConvertQuote | null>(null);
@@ -203,8 +207,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             setQuoteChanged({oldAmt: quote.amountOutGross, newAmt: fresh.amountOutGross});
           }
           if (mountedRef.current) setQuote(fresh);
-        } catch {
+        } catch (e) {
           // unreachable relay: leave the old quote + its timestamp visible; confirm re-quotes anyway.
+          console.warn('convert stale re-quote failed:', e instanceof Error ? e.message : String(e));
         } finally {
           if (mountedRef.current) setStaleRefreshing(false);
         }
@@ -225,8 +230,15 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       try {
         const m = await deriveConvertMath(quote, legs.inFee, legs.outFee, slippageBps);
         if (!cancelled && mountedRef.current) setMath(m);
-      } catch {
-        if (!cancelled && mountedRef.current) setMath(null);
+      } catch (e) {
+        // The min-out is the compiled core's arithmetic: if it cannot run, the screen has no
+        // honest number to show and MUST say so — never a silently blank checklist.
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn('convert math derivation failed:', msg);
+        if (!cancelled && mountedRef.current) {
+          setMath(null);
+          setQuoteErr(msg);
+        }
       }
     })();
     return () => {
@@ -273,7 +285,44 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
 
   const {inSym, outSym, inDecimals, outDecimals} = legs;
   const balanceRaw = selectedAsset != null && selectedAsset.protocol === 'ic' ? assetBalances[selectedAsset.currency] : undefined;
-  const canConfirm = quote != null && math != null && !quoteBusy && !confirmBusy;
+  const balanceN = balanceRaw != null ? BigInt(balanceRaw) : null;
+  const balanceStr = balanceRaw != null ? fmtAsset(balanceRaw, inDecimals, inSym) : null;
+
+  // Fail closed BEFORE the confirm, never after it (2026-09-08: the button was live on a wallet
+  // holding nothing — a confirm that can only be refused by the ledger). A conversion costs the
+  // amount PLUS TWO input-ledger fees: the icrc2_approve, and the pool's own pull — which is
+  // exactly why `prepareConvertRecord` approves `amountIn + inFee`. A null balance (not yet read)
+  // fails OPEN, matching the Pay tab's gate: a balance nobody has measured is not a zero.
+  const parsedIn = parseUserAmount(amountText, inDecimals);
+  const neededN = parsedIn.ok && parsedIn.raw !== '0' ? BigInt(parsedIn.raw) + 2n * BigInt(legs.inFee) : null;
+  const insufficient = balanceN != null && neededN != null && neededN > balanceN;
+
+  // Nothing to convert at all: the Pay tab's fund-gate shape, pointed at the ONE surface that can
+  // fund an IC asset (Receive ▸ My address — reachable from the bottom nav on this very screen).
+  if (balanceN === 0n) {
+    return (
+      <View testID="convert-screen" style={S.convertWrap}>
+        <ConvertHeader title={M.convert.heading(inSym, outSym)} onBack={onBack} />
+        {/* The route this copy names is also the button under it — the same panel, label and
+            callback the Pay tab's fund gate uses. Unconditional: every asset the PoC venue serves
+            (ICP, VCHF) is a direct ICRC row whose My-address surface funds it by plain transfer,
+            so there is no capability branch to make here. */}
+        <InstructionPanel
+          testID="convert-fund"
+          title={M.pay.fundTitle(inSym)}
+          body={M.convert.fundBody(inSym, M.wallet.tab.receive, M.receive.myAddress)}
+          primaryLabel={M.pay.showMyAddress(inSym)}
+          onPrimary={onShowDepositAddress}
+        />
+        <View style={S.convertFooting}>
+          <IconSwap size={20} color={C.sub} />
+        </View>
+      </View>
+    );
+  }
+
+  const canConfirm = quote != null && math != null && !quoteBusy && !confirmBusy && !insufficient;
+  const netStr = math != null ? fmtAsset(math.netOut, outDecimals, outSym) : null;
   return (
     <View testID="convert-screen" style={S.convertWrap}>
       <ConvertHeader title={M.convert.heading(inSym, outSym)} onBack={onBack} />
@@ -291,42 +340,52 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           placeholderTextColor={C.sub}
         />
       </View>
-      {balanceRaw != null ? (
+      {balanceStr != null ? (
         <Text testID="convert-balance" style={S.convertMetaLine}>
-          {M.convert.balanceLine(fmtAsset(balanceRaw, inDecimals, inSym), inSym)}
+          {M.convert.balanceLine(balanceStr)}
+        </Text>
+      ) : null}
+      {insufficient ? (
+        <Text testID="convert-insufficient" style={S.err}>
+          {M.convert.insufficientLine(fmtAsset(neededN!.toString(), inDecimals, inSym), balanceStr!)}
         </Text>
       ) : null}
 
-      <View style={S.convertChecklistCard}>
-        <Text testID="convert-counterparty" style={S.convertChecklistLine}>
-          {M.convert.counterparty}
-          {'\n'}
-          {M.convert.counterpartySigns}
-        </Text>
-        {quote != null ? (
-          <Text testID="convert-quote-source" style={S.convertChecklistLine}>
+      {/* The decision, as one number: what actually lands in the wallet, the rate it came from,
+          and whose quote it is. Everything the user is agreeing TO lives below, in the checklist. */}
+      {math != null && quote != null ? (
+        <View testID="convert-headline" style={S.convertHeadlineCard}>
+          <Text style={S.convertHeadlineLabel}>{M.convert.receiveHeadline}</Text>
+          <Text style={S.convertHeadlineAmount}>{netStr}</Text>
+          <View testID="convert-rate" style={S.convertRateRow}>
+            <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, outSym)}</Text>
+            <Text style={S.convertRateValue}>{fmtAsset(scaledRate(quote.amountOutGross, quote.amountIn), outDecimals, outSym)}</Text>
+          </View>
+          <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(formatClock(new Date(quote.fetchedAtMs)))}
           </Text>
-        ) : null}
-        {math != null ? (
-          <Text testID="convert-rate" style={S.convertChecklistLine}>
-            {M.convert.rateLabel(inSym, outSym)}{'\n'}
-            {fmtAsset(scaledRate(quote!.amountOutGross, quote!.amountIn), outDecimals, outSym)}
-          </Text>
-        ) : null}
+        </View>
+      ) : null}
+
+      <View style={S.convertChecklistCard}>
+        <View testID="convert-counterparty">
+          <Text style={S.convertChecklistLine}>{M.convert.counterparty}</Text>
+          <Text testID="convert-pool-principal" style={S.convertPrincipal}>{CONVERT_POOL_PRINCIPAL}</Text>
+          <Text style={S.convertChecklistLine}>{M.convert.counterpartySigns}</Text>
+        </View>
         {math != null ? (
           <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
-            {M.convert.poolFeeTier(CONVERT_POOL_FEE_TIER_LABEL)}
+            {M.convert.poolFeeTier(formatMillionthsPct(quote!.feeMillionths))}
           </Text>
         ) : null}
         {math != null ? (
           <Text testID="convert-in-fee" style={S.convertChecklistLine}>
-            {M.convert.inputFeeLine(fmtAsset(math.inFee, inDecimals, inSym), inSym)}
+            {M.convert.inputFeeLine(fmtAsset(math.inFee, inDecimals, inSym))}
           </Text>
         ) : null}
         {math != null ? (
           <Text testID="convert-out-fee" style={S.convertChecklistLine}>
-            {M.convert.outputFeeLine(fmtAsset(math.outFee, outDecimals, outSym), outSym)}
+            {M.convert.outputFeeLine(fmtAsset(math.outFee, outDecimals, outSym))}
           </Text>
         ) : null}
         {math != null ? (
@@ -339,30 +398,38 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             testID={math.impactBps != null && math.impactWarn ? 'convert-impact-warn' : 'convert-impact'}
             style={math.impactBps != null && math.impactWarn ? S.convertChecklistWarn : S.convertChecklistLine}>
             {math.impactBps == null
-              ? M.convert.impactLine('—')
+              ? M.convert.impactUnavailable
               : math.impactWarn
                 ? M.convert.impactWarnLine(formatBps(math.impactBps))
                 : M.convert.impactLine(formatBps(math.impactBps))}
           </Text>
         ) : null}
         {math != null ? (
-          <View style={S.convertSlippageRow}>
-            {CONVERT_SLIPPAGE_BPS_OPTIONS.map((bps) => (
-              <Pressable
-                key={bps}
-                testID={`convert-bps-${bps}`}
-                style={[S.convertSlippageChip, slippageBps === bps && S.convertSlippageChipOn]}
-                onPress={() => setSlippageBps(bps)}
-                accessibilityRole="button"
-                accessibilityLabel={formatBps(bps)}>
-                <Text style={[S.convertSlippageChipText, slippageBps === bps && S.convertSlippageChipTextOn]}>{formatBps(bps)}</Text>
-              </Pressable>
-            ))}
+          <View testID="convert-slippage">
+            <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
+            <View
+              testID="convert-slippage-chips"
+              style={S.convertSlippageRow}
+              accessibilityRole="radiogroup"
+              accessibilityLabel={M.convert.slippageLabel}>
+              {CONVERT_SLIPPAGE_BPS_OPTIONS.map((bps) => (
+                <Pressable
+                  key={bps}
+                  testID={`convert-bps-${bps}`}
+                  style={[S.convertSlippageChip, slippageBps === bps && S.convertSlippageChipOn]}
+                  onPress={() => setSlippageBps(bps)}
+                  accessibilityRole="radio"
+                  accessibilityState={{selected: slippageBps === bps}}
+                  accessibilityLabel={formatBps(bps)}>
+                  <Text style={[S.convertSlippageChipText, slippageBps === bps && S.convertSlippageChipTextOn]}>{formatBps(bps)}</Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
         ) : null}
         {math != null ? (
-          <Text testID="convert-min-out" style={S.convertChecklistLine}>
-            {M.convert.minReceiveLine(fmtAsset(math.minOut, outDecimals, outSym), outSym, formatBps(slippageBps))}
+          <Text testID="convert-min-out" style={S.convertMinOutLine}>
+            {M.convert.minReceiveLine(fmtAsset(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
           </Text>
         ) : null}
         {math != null ? (
@@ -370,9 +437,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             {M.convert.refusalLine(inSym)}
           </Text>
         ) : null}
-        {math != null ? (
+        {math != null && netStr != null ? (
           <Text testID="convert-net" style={S.convertChecklistLine}>
-            {M.convert.netEndStateLine(fmtAsset(math.netOut, outDecimals, outSym), outSym)}
+            {M.convert.netEndStateLine(netStr)}
           </Text>
         ) : null}
         {staleRefreshing ? (
@@ -407,6 +474,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         onPress={() => void onConfirm()}
         disabled={!canConfirm}
         accessibilityRole="button"
+        accessibilityState={{disabled: !canConfirm}}
         accessibilityLabel={M.convert.confirmButton}>
         {confirmBusy || quoteBusy ? (
           <View style={S.convertBtnBusyRow}>
@@ -482,7 +550,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <ActivityIndicator size="large" color={C.brand} />
           <Text style={S.convertStateTitle}>{M.convert.approvingTitle}</Text>
           <Text style={S.convertStateBody}>
-            {M.convert.approvingBody(fmtAsset(record.amountIn, 8, inSymbol), inSymbol, formatClock(new Date(record.approveExpiresAtMs)))}
+            {M.convert.approvingBody(fmtAsset(record.amountIn, 8, inSymbol), formatClock(new Date(record.approveExpiresAtMs)))}
           </Text>
         </View>
       ) : null}
@@ -503,7 +571,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
       {record.step === 'done' ? (
         <View testID="convert-done">
           <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAsset(record.outAmountNet ?? '0', 8, outSymbol), outSymbol)}</Text>
+          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAsset(record.outAmountNet ?? '0', 8, outSymbol))}</Text>
           {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
       ) : null}
@@ -536,7 +604,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
           <Text style={S.convertStateMeta}>
-            {M.convert.stuckSigned(fmtAsset(record.amountIn, 8, inSymbol), inSymbol, fmtAsset(record.amountOutMin, 8, outSymbol), outSymbol)}
+            {M.convert.stuckSigned(fmtAsset(record.amountIn, 8, inSymbol), fmtAsset(record.amountOutMin, 8, outSymbol))}
           </Text>
           <Text testID="convert-expiry" style={S.convertStateMeta}>
             {M.convert.expiryLine(formatClock(new Date(record.approveExpiresAtMs)))}
@@ -567,7 +635,6 @@ function resolveLegs(catalog: CurrencyDescriptor[], asset: Extract<SelectableAss
   return {
     inDesc,
     outDesc,
-    zeroForOne: direction.zeroForOne,
     inSym,
     outSym,
     inDecimals: inDesc.decimals,
@@ -583,6 +650,13 @@ function scaledRate(outGross: string, amountIn: string): string {
   const inn = BigInt(amountIn);
   if (inn <= 0n) return '0';
   return ((out * 10n ** 8n) / inn).toString();
+}
+
+/** The venue's own fee tier, in ITS unit (millionths of the trade: 3000 = 0.30%), rendered as a
+ *  percentage. Never fewer than 2 decimals (0.30%, not 0.3%) and never more precision lost than
+ *  the venue published — a fee tier is the pool's fact, so rounding it would be a claim. */
+function formatMillionthsPct(millionths: number): string {
+  return `${(millionths / 10_000).toFixed(4).replace(/(\.\d{2}\d*?)0+$/, '$1')}%`;
 }
 
 /** bps → a display percentage ('0.50%', '1%', '3%', '12.40%'). */

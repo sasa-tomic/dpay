@@ -944,7 +944,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     <>
       <InstructionPanel
         testID="pay-fund"
-        title={M.pay.fundTitle(gateSymbol, subMode === 'send' ? 'send' : 'pay')}
+        title={M.pay.fundTitle(gateSymbol)}
         body={gateCanFund
           ? M.pay.fundBody(gateSymbol, subMode === 'send' ? 'send' : 'pay')
           : M.pay.fundBodyNoDeposits(gateSymbol)}
@@ -995,7 +995,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // address" toggle is likewise `depositFamily || directIcrc`.
   if (subMode === 'send' && sendCapable && gateDesc) {
     return (
-      <View style={S.center}>
+      <View style={S.centerTop}>
         <ModeToggle
           testID="pay-mode-toggle"
           value={subMode}
