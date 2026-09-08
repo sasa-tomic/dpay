@@ -32,9 +32,11 @@ route. Choosing one and deleting the other loses something real either way.
 3. **Card funding lands stable value, and any conversion is a transaction the user signs**, with
    dpay taking no cut. Multiple on-ramp rails, not one provider. **Conditional on legal
    acceptability — that condition is unresolved and is the gate on objective 3.**
-4. **Revolut is the visual and IA reference; the scanner stays the landing screen.** The product is
-   tap-to-pay abroad and the tourist's first gesture is scanning, so the balance home is one tap
-   away rather than in front of it.
+4. **Revolut is the visual and IA reference.** ~~The scanner stays the landing screen … so the
+   balance home is one tap away rather than in front of it.~~ **REVERSED 2026-09-08** — the founder
+   inverted it: Home is the landing and Pay is the one tap. The scanner-first argument was right
+   about the tourist's gesture and wrong about the first impression. See
+   [`2026-09-08-first-run-redesign.md`](2026-09-08-first-run-redesign.md) §1 F2.
 
 ## The measured world — funding and conversion venues
 

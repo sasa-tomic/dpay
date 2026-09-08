@@ -300,8 +300,10 @@ Everything here was reproduced by driving the shipped app. Fixes in flight are s
 - **History names stay PRINCIPAL-prefix by design** post-cutover (ledger memo is the frozen
   16-byte nonce reconciliation key — extending it was REJECTED); a signed name registry is a
   founder follow-up, NOT in-tree.
-- **Default-tab/first-impression** — post-onboarding landing on the Pay scanner is the intended
-  default (flow 90 pins `pay-tab-default-landing`). Deliberate, not an oversight.
+- ~~**Default-tab/first-impression** — landing on the Pay scanner is the intended default.~~
+  **REVERSED by the founder 2026-09-08**: the app opens on Home, Home is a real overview, Pay is one
+  tap away. Reasoning: [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md)
+  §1 F2. Tracked as item 4c; the flows that pin the old landing change with it.
 - **SOL glyph `◎` relies on system font fallback** (U+25CE absent from every bundled font —
   fontTools cmap-verified; renders acceptably on MIUI/Android today). If a device ever shows a
   fallback artifact, swap to an in-font covered glyph (`○`/`●`). Low, visual-only.

@@ -39,23 +39,30 @@ an animation, an unperformable exercise, and a consequential currency decision �
 for money. That sequence is the shape of a drainer regardless of how honest each sentence is, and
 the sentences already are honest.
 
-## 1. Two founder forks — the conservative reading is what gets built
+## 1. Both forks are RESOLVED (2026-09-08)
 
-Both are recorded here rather than silently decided.
+**F1 — where the 24-word backup sits: STAYS immediately after create.** The founder delegated this
+one ("you decide"). Decided against moving it, for three reasons. The complaint being fixed was
+about being asked to *pay money*; the backup screen is not a solicitation — it hands the user their
+key rather than asking them for anything. The argument for moving it (the words gain a referent
+once a payment has happened) is a speculative memory benefit, while the cost if it is wrong is an
+unwritten seed and irrecoverable funds — an asymmetric bet not worth taking for a nicety. And the
+sequence is already fixed by the changes that *were* asked for: a working payment before the
+currency choice, and an overview instead of a fund-me screen at the end.
+**What does change is the hole in the gate:** today an app killed between the identity being
+persisted and the backup being acknowledged skips the backup FOREVER, because `Onboarding` only
+renders when there is no identity. The gate becomes persisted (§7) — stricter than it is now.
 
-**F1 — where the 24-word backup sits.** The design as first drafted moved the backup *after* the
-practice payment, so the app gives before it asks for a secret. That is the highest-consequence
-change in the whole design (its downside is user funds) and the founder did not ask for it.
-**BUILD THE FALLBACK: the backup stays where it is**, immediately after create. The sequence still
-shortens and still ends in a success. *Founder question: move the backup gate to after the practice
-payment? Upside — the words gain a referent, and nothing but valueless DEMO is at stake at that
-point. Downside — a longer window before the seed is written down.*
-
-**F2 — what "home screen should be … or 'Pay'" means.** Two readings: (a) the Home screen's
-CONTENT should be an overview rather than the currency list, or (b) the app should OPEN on an
-overview instead of the scanner — which would supersede the standing `CLAUDE.md` decision that "the
-scanner stays the landing screen — the tourist's first gesture is scanning". **BUILD READING (a).**
-*Founder question: did you mean the landing screen too?*
+**F2 — the landing screen: RESOLVED BY THE FOUNDER, and it supersedes the standing decision.**
+Verbatim: *"I meant the home icon at the bottom of the screen, I suppose that's landing, and yes we
+can reorg the app layout a bit to have the REAL overview at the landing page and then user needs to
+click on pay to open the payment screen; it's one click away, not too bad, and we do want to avoid
+scaring users away with asking them to pay for something."*
+So: **the app opens on Home, and Home is a real overview.** Pay is one tap from there. This
+REPLACES the `CLAUDE.md` decision that "the scanner stays the landing screen — the tourist's first
+gesture is scanning", and the reason given is explicit: greeting a new user with a payment-request
+surface is the thing that read as a scam. The cost is one extra tap on the most frequent action for
+a returning user; the founder accepted that trade in the same sentence.
 
 ## 2. The sequence
 
@@ -173,7 +180,10 @@ honesty rule flow 100 already had to fix once), the Home account row's `zero=` p
 After the fix, first run ends at **3 of 4** — `recoverySaved` ✓, `flowUnderstood` ✓, `fundsReady` ✓,
 `paymentTested` ✗ — and the payment it points at is a real tap-or-scan payment.
 
-## 6. Home is an overview; the currency list is one gesture away
+## 6. Home is the landing AND an overview; the currency list is one gesture away
+
+**The app now opens on Home** (`Wallet`'s initial mode flips from `'pay'` to `'home'`) — §1 F2.
+Everything below is what Home then has to be worth landing on.
 
 Home keeps: headline, a NEW accounts affordance (`btn-home-accounts`, labelled with the account
 count, in the headline block), the action row, and **Activity raised from 3 rows to 5** — it is now
@@ -262,10 +272,13 @@ individually.
 mandatory and first-run-landing assertions move to 145/148). 37 onboard-no-faucet **becomes
 load-bearing** — its `no-funding-solicitation` slug becomes the assertion of record for the
 no-faucet Practice branch. 94 trip-passport gains the **D4 regression pin**: a wallet holding ∂0.00
-must render `trip-strip-dot-fundsReady` UNFILLED. 121/130 retarget to the Accounts route. 133
-asserts Home has no `accounts-list` and does have `btn-home-accounts`. 135 cap 3→5. 136 renamed
-`accounts-page`. 01/23/58/68/82/88/118/120/129/131 are mechanical reorders. 40/84 visual baselines
-reseed (home light+dark, new accounts, new practice).
+must render `trip-strip-dot-fundsReady` UNFILLED. 121/130 retarget to the Accounts route.
+**133 home-surface inverts**: its "Landing stays the Pay scanner" assertion becomes "landing IS
+Home" (§1 F2), and it additionally asserts Home has no `accounts-list` and does have
+`btn-home-accounts`. **90's `pay-tab-default-landing` slug dies with it** — that flow is being
+replaced anyway. 135 cap 3→5. 136 renamed `accounts-page`.
+01/23/58/68/82/88/118/120/129/131 are mechanical reorders. 40/84 visual baselines reseed (home
+light+dark, new accounts, new practice).
 
 ## 9. Risks
 

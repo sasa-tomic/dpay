@@ -21,8 +21,11 @@ deployed); 2, 3 and 4 are not started** — including the Revolut information ar
 3. **Funding by card, through several licensed providers, landing at the user's own address**;
    conversion, where a currency cannot be bought directly, is a transaction the **user** signs, with
    dpay taking no cut. Gated on an unresolved legal question — see the spec.
-4. **Revolut is the golden reference** for the visual system and information architecture. The
-   scanner stays the landing screen (founder decision — the tourist's first gesture is scanning).
+4. **Revolut is the golden reference** for the visual system and information architecture. ~~The
+   scanner stays the landing screen.~~ **REVERSED by the founder 2026-09-08: the app opens on Home,
+   Home is a real overview (balances, movements), and Pay is one tap from it** — greeting a new
+   user with a payment-request surface is what read as a scam. Reasoning and the design:
+   [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md).
 
 Design, every founder decision, the measured venue/ramp evidence behind them, and the code cost:
 [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
