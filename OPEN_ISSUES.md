@@ -136,23 +136,30 @@ DO-NOT-NAG set.
 
 ## PROD STATE (checked, never asserted — floor `cf119bb`)
 
-Re-measured 2026-09-08 at HEAD `79a7257`: `just verify-relay` → **BEHIND by 4**, live relay reports
-`2ddb394`. `just integrity-check` → **MATCH** on the 2026-09-06 pin (`0978386f…`), so the canister
-is untouched since the recorded upgrade.
+Re-measured 2026-09-08 at the END of the session, HEAD `1b3603d`:
 
-**Read the live relay's reported commit with suspicion until the next deploy.** That image was
-built from a DIRTY tree — it serves `/api/v1/capabilities`, a route that does not exist at
-`2ddb394` — and `build.rs` did not mark dirty builds until `5753186`. So the live number names a
-base commit, not the running source. From the next image onward a dirty build reports `<sha>-dirty`
-and `just verify-relay` reports DIRTY as its own outcome.
+- `just integrity-check` → **MATCH** on `e537056e…`. The founder ran the full
+  `just deploy-ic && just apk && just up` mid-session, so the facade WASM changed at `90f5930` IS
+  shipped and the pin is recorded (`docs/UPGRADES.md`).
+- The inverted-quote fix is **live and correct**: `/api/v1/swap_quote` returns 1 ICP →
+  2.41771929 VCHF with `zero_for_one: false` and the venue's own `fee_millionths: 3000` echoed.
+  `/api/v1/capabilities` → `{"till":false,"demo_faucet":true}`, so production funds new wallets
+  again.
+- `just verify-relay` → **DIRTY**. The live image reports `2013349…-dirty`: it was built from a tree
+  that still held the re-baked module-hash pin, which `just deploy-ic` writes and `just up` then
+  compiled. **That hole is now closed** — the image build refuses a dirty tree
+  (`deploy/git-lib.sh`), `deploy-ic` prints the paste-ready UPGRADES row and the exact commit
+  command, and the sequence lives in `docs/OPS.md` §3. The DIRTY state can only be an image built
+  before that gate.
 
-**Unshipped surfaces, both needed:** the facade WASM changed at `90f5930` (lazy-sweep +
-paged-reconcile) and everything from today. Ship as ONE operation —
-`just deploy-ic && just apk && just up` — because the app now requires a quote field the deployed
-relay does not send (see the deploy-order note above). Afterwards: `just integrity-check` re-MATCHes
-(the deploy re-bakes the module-hash pin), `just verify-relay` should report MATCH at HEAD, and
-`just swap-venue-probe` is the check that the live route derives swap direction from the venue
-rather than a pin.
+**Unshipped: everything from this session** (`2013349..1b3603d`). One operation — `just apk &&
+just up` (no canister change since the deploy, so `deploy-ic` is skippable). Afterwards
+`just verify-relay` should say MATCH at HEAD, and `just swap-venue-probe` re-checks that the live
+route still derives swap direction from the venue rather than a pin.
+
+**Verified-clean floor for the next session's review: `1b3603d`** — `just verify` EXIT=0 at that
+commit (149/149 e2e, jest 103 suites / 2125, all Rust suites, 0 warnings across every feature
+combination). Start the next sweep from there.
 
 ## Retired this prune (decision-shaped — do not re-file)
 
