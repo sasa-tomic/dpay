@@ -14,6 +14,18 @@
 // from the same onboarding seed — flow 45's property; the harness has no independent ATA
 // derivation to compare against, and stability under one identity is the honest bound).
 //
+// WHERE THE IC ADDRESS IS READ, and why it moved (2026-09-09). ckUSDC's own deposit sheet is the
+// wallet-signed ckERC20 one, and this flow used to prove it was UNREACHABLE on a USD wallet without
+// knowing it: the home-rail branch resolved first, so the group's IC side rendered the plain ICRC
+// sheet and the Ethereum minter route had no entry point at all for exactly the users whose main
+// currency is dollars — a sheet reachable for one family and not another, which `CLAUDE.md`'s
+// uniform-IA rule calls a bug rather than an exception. The family sheet now wins, and it is the
+// strictly richer surface: it carries the SAME ICRC-1 principal (`ic-also-address`, under "Already
+// on the Internet Computer?") plus the Ethereum route plus an honest "where do I get some" card
+// that has a matching action on the same screen. So the rail disclosure, the fee facts and the
+// sibling toggle are unchanged and still asserted here; only the testID the address is read from
+// differs, and step 5 now pins the reachability that was missing.
+//
 // The single-rail control: home=CHF on VCHF renders EXACTLY as before — same principal sheet,
 // NO rail disclosure anywhere (the component renders null outside a two-rail group).
 import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, accountOf, openBalances, selectCurrency, railPrincipalText, waitForWallet} from '../harness/lib.mjs';
@@ -82,10 +94,14 @@ export async function run() {
     const toggleTxt = await driver.readText('receive-rail-toggle');
     assertIncludes(toggleTxt, 'Internet Computer', 'the rail toggle offers the IC side');
     assertIncludes(toggleTxt, 'Solana', 'the rail toggle offers the Solana side');
-    const icAddr1 = (await driver.readText('deposit-address')).trim();
+    const icAddr1 = (await driver.readText('ic-also-address')).trim();
     assertEq(icAddr1, wantPrincipal, 'the IC rail address is the wallet\'s own ICRC-1 principal');
+    // The reachability this flow could not see before: ckUSDC's own deposit is a transaction the
+    // user's Ethereum wallet signs, and on a USD wallet that surface had no entry point at all.
+    assert(await driver.isPresent('btn-connect-wallet'),
+      'the ckERC20 deposit must be reachable on the home rail too — it was shadowed by the home-currency branch for every USD wallet');
     await driver.screenshot('122-receive-rail-usd-ic');
-    console.log('[122-receive-rail-choice] ✓ default rail disclosed (ckUSDC, preference, own principal)');
+    console.log('[122-receive-rail-choice] ✓ default rail disclosed (ckUSDC, preference, own principal, Ethereum route reachable)');
 
     // 2. One toggle to the sibling rail: its OWN address + fee fact, WITHOUT leaving the sub-mode.
     console.log('[122-receive-rail-choice] flipping to the sibling rail…');
@@ -105,7 +121,7 @@ export async function run() {
     // 3. Toggle back: the IC principal is the SAME (stability under one identity — both addresses
     //    are deterministic derivations of this wallet's seed, not per-visit values).
     await driver.click('btn-receive-rail-left');
-    const icAddr2 = (await driver.readText('deposit-address', {timeoutMs: 10_000})).trim();
+    const icAddr2 = (await driver.readText('ic-also-address', {timeoutMs: 10_000})).trim();
     assertEq(icAddr2, icAddr1, 'the IC rail address is stable across a rail flip (same wallet)');
     console.log('[122-receive-rail-choice] ✓ rail flip is reversible and the IC address is stable');
 
