@@ -301,7 +301,9 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   chain-key burn, delegated to `WithdrawSheet` with its double-burn resume intact. The route, its
   speed and its fee are disclosed BEFORE the amount is entered; refusals name what the address IS
   and what to do instead (founder rule 2026-08-29). Max subtracts the fee; an unregistered fee is
-  shown as "set by the ledger", never as 0; self-send warns, never blocks. **The account shown is the
+  shown as "set by the ledger", never as 0; **paying your own account warns and never blocks, on
+  every path** — this one, a pay link naming your own principal, and your own request QR scanned
+  back (one sentence, rendered by `PayeeLine`; it was here alone until 2026-09-09). **The account shown is the
   account signed (fixed 2026-09-04, `e5d43ac`):** an `owner-checksum.subaccount` destination used to
   be displayed, saved and receipted in full and then paid to the owner's DEFAULT subaccount —
   `prepareTransfer` now parses owner + subaccount out of the one string the screen rendered. One

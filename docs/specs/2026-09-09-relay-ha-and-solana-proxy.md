@@ -24,6 +24,92 @@ no dedup and no in-flight guard, which spent a month of provider quota in five a
 client-side half of that is already fixed and measured (`2026-09-08-solana-rpc-plan.md` owns the
 arithmetic and the per-tick budget; it is not restated here).
 
+### 401 is not 429, and the difference says the key was REVOKED
+
+The founder asked the right question: *over-quota means it ran out, unauthorized means it was
+switched off or deleted — so something changed its status rather than just using it up, and until
+we know what, the same thing can happen to the new key no matter how much we reduce usage.*
+
+Helius's own documentation settles the semantics. **401** is "an invalid API key … or access is
+restricted due to RPC rules" — an authentication fact. **429** is "exceeded the request limit in a
+given timeframe **or is out of credits**" — so credit exhaustion produces 429, and 401 does not
+mean "used up" (`helius.dev/docs/faqs/error-codes`, read 2026-09-09). The old key therefore stopped
+existing or stopped being authorised: deleted, regenerated, or given an IP/domain rule it now fails.
+
+**The most likely explanation is benign and is one look away from being confirmed: creating the
+replacement rotated the old one.** That is a founder-run check — does the old key still appear in
+the dashboard's key list? If it is gone, the question is closed. If it is listed and disabled, it is
+not, and Helius should be asked why, because whatever did it can do it again.
+
+Re-measured 2026-09-09 in this repo: the old key still answers 401, the new key answers 200 on
+`getHealth`. Neither response carries any rate-limit or quota header, so nothing about plan or usage
+is readable from the RPC surface.
+
+### The plan, the arithmetic, and what a usage alarm would actually take
+
+Helius's published tiers (`helius.dev/pricing`, read 2026-09-09): **Free = 1M credits/month at 10
+requests/second**; Developer $49 = 10M; Business $499 = 100M. Most RPC calls are 1 credit.
+
+Against that ceiling the demand is the whole story:
+
+| | requests/min per idle wallet | credits/month, one wallet | free tier (1M) lasts |
+|---|---:|---:|---|
+| Before the 2026-09-08 fix | ~208 | ~9.0M | ~3.3 days |
+| After it (25× cut) | ~8 | ~350k | ~2.8 wallets, then it is gone |
+
+So the free tier does not survive a pilot at any demand this app plausibly has, and **the shared
+read cache in direction 1 is what changes the shape** — N wallets asking the same question in the
+same second cost one upstream request rather than N. That is the quantified argument for the proxy,
+independent of the key question.
+
+**A usage alarm is possible, and not from the app.** Plan and credit usage are not exposed to the
+RPC key; the CLI reads them (`helius usage --json`, `helius apikeys --json`) but authenticates with
+a dashboard JWT or a keypair, not with the API key. Two honest options, both founder-gated:
+
+- the founder reads it in the dashboard, on whatever cadence; Helius advertises "smart alerts" to
+  prevent overages on its pricing page without naming a tier, so whether the free plan has them is
+  unverified and must not be assumed;
+- or a `helius login` is run once on the build box, after which `just check-prod-sol` can assert
+  remaining credits and go RED before the rail does — the same tripwire shape the repo already uses
+  for the swap venue and the OCP ledger.
+
+Until one of those exists, the wallet's own honest-unreadable state is the only thing standing
+between a dead key and a silent blank balance, which is why the failure taxonomy below is a
+requirement rather than polish.
+
+## What the app says when the relay is down and the phone is not
+
+This is the question the founder put to direction 1, and it has a design answer rather than a copy
+answer. Today `RailUnreadableNote` renders one sentence naming the CHAIN: *Solana isn't answering
+right now*. After the proxy, a relay outage renders that same sentence — and it would be **false**.
+Solana would be fine. dpay would be the thing that is down, on a rail whose one-line pitch is about
+not needing a connection.
+
+`CLAUDE.md`'s external-claims rule governs in-app copy exactly as it governs an investor email, so
+blaming the wrong party is a defect, not a nuance. The requirement on R2, testable and ordered
+before it:
+
+1. **Three states, never collapsed into one.** The phone has no connectivity; the relay is
+   unreachable while the phone is online; the relay answered and the upstream cluster refused.
+   `BalanceView.status: 'error'` is a single bucket today and must carry the cause, classified at
+   the transport seam every Solana read already passes through — not guessed at the component.
+2. **The relay-down state names dpay as the cause**, says the money is untouched, and gives the
+   action this document already promises: Settings ▸ Advanced points the wallet at any Solana
+   endpoint and removes dpay from the path entirely. That satisfies the founder's 2026-08-29 rule —
+   a state that only describes itself is a bug — and it is the same property that keeps
+   `docs/REGULATORY.md` §4 constraint 2 answerable.
+3. **It names what still works.** The IC rail submits app-signed envelopes straight to `icp-api.io`
+   and does not touch the relay, so a relay outage leaves Internet Computer balances and payments
+   working. Saying so is useful *and* true — and it is only true because the IC rail stays out of
+   the proxy, which is an argument for keeping it that way.
+4. **No cached value is ever presented as current**, on the client side as well as the relay's. A
+   stale balance rendered as live is worse than a blank one.
+5. **The offline-payment claim is unaffected and must not be quietly widened.** The payer still
+   signs with no connection; the merchant was always online. What a relay outage costs is READS and
+   broadcast, and the copy must not imply otherwise in either direction.
+
+Direction 2 is what makes state (2) rare. It is not what makes it honest.
+
 ## Direction 1 — the proxy
 
 ### The objection, recorded because it was overruled

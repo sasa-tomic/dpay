@@ -130,18 +130,61 @@ than good intentions. The check: re-read each provider's published disclosure an
 table above. Any drift is a copy fix in the same change. This obligation is filed in
 `OPEN_ISSUES.md`; it is not repeated in the app.
 
+## The correction, 2026-09-09 — the route is the deposit MECHANISM, not the chain a token is named after
+
+The first implementation decided how a user gets an asset from `asset.network`. That field is a
+DISPLAY fact naming the chain a chain-key token is *backed by*, and the resolver read it as a fact
+about how money arrives. The two are different for exactly the assets where being wrong costs money.
+
+**What it produced.** ckUSDC's network is "Ethereum", which is not "Internet Computer", so the
+resolver concluded *buy USDC and send it to the address above*. ckUSDC has no deposit address at
+all: it is minted by `approve` + `depositErc20`, signed by the user's own Ethereum wallet, with the
+gas paid separately in ETH (`app/components/CkErc20DepositSheet.tsx`). And the surface that sentence
+rendered on was showing an Internet Computer principal — because `CURRENCY_RAILS.USD` is
+`['ckUSDC', 'USDC']`, which made ckUSDC a two-rail home group whose branch in `ReceiveMode` resolved
+*before* the ckERC20 one. So on the default rail of every USD wallet, a complete and confident
+instruction pointed at a chain the address on screen cannot be reached from.
+
+Two more defects sat behind it, both latent only because the other four surfaces were unwired:
+
+- the "buy it on X" chain came from the row's SUBTITLE, which names the settlement chain, so ckBTC
+  would have said *pays out on BTC · Internet Computer* the moment it was wired;
+- the shipped play-money row carries `linkToken: 'DEMO'` and a null network, which the resolver read
+  as "an Internet Computer token nobody sells" and answered with a convert route. The unit test that
+  proved otherwise had hand-typed a fixture with `linkToken: null` — a wallet the app cannot produce.
+
+**The rule that replaces it, and where it lives.** `depositMechanism()` in `app/config/catalog.ts`
+owns the four answers to "how does money get in", derived from server-declared facts
+(`minter_family`, `token_contract`), and that file states why they are not interchangeable — it is
+not restated here. The property that matters: **the same value picks the deposit sheet and writes
+the instruction under it**, so a surface and its funding copy cannot describe different deposits.
+The `FundingRoutes` card is built by whichever surface routed to the sheet and handed down as a
+node; the sheet chooses only where to place it and in which phase.
+
+The founder's note in `OPEN_ISSUES.md` said these four surfaces "just need wiring up" and that the
+resolver "already answers for them correctly". It did not, and the founder flagged the note itself
+as the defect: a hand-off that asserts unverified correctness will be believed by whoever picks it
+up. Recorded here rather than corrected silently.
+
 ## What landed
 
-**The section itself, 2026-09-09.** `app/components/FundingRoutes.tsx` renders on the VCHF and
-native-ICP deposit surfaces (`IcrcDepositSheet`), driven by the pure resolver + provider table in
-`app/config/funding.ts`. Proven in a browser by e2e flow 162: VCHF names the buy-ICP-then-convert
-route, native ICP is a direct buy, the "up to" qualifier survives to the screen, and the
-attribution and non-endorsement lines render. Unit coverage: `app/__tests__/funding.test.ts`.
+**The section, 2026-09-09.** `app/components/FundingRoutes.tsx` on **all six** deposit surfaces:
+VCHF, native ICP and VEUR (`IcrcDepositSheet`), ckBTC (`DepositSheet`), ckETH and ckUSDC
+(`CkErc20DepositSheet`), and the Solana rows (`SolanaReceiveSheet`). Driven by the pure resolver +
+provider table in `app/config/funding.ts`.
 
-**Not yet wired:** the ckBTC (`DepositSheet`), ckETH/ckUSDC (`CkErc20DepositSheet`) and Solana
-(`SolanaReceiveSheet`) surfaces. Those three take a currency id rather than a `SelectableAsset`, so
-each needs the asset and the home currency threaded through first. The resolver already answers for
-them correctly (`fundingRoute` covers every family, and its tests pin the chain-key and testnet
-cases) — only the wiring is outstanding. Tracked in `OPEN_ISSUES.md`.
+**The mechanism model and the routing fix, the same day.** A USD wallet now reaches the Ethereum
+deposit for ckUSDC at all — it could not before, because the home-rail branch shadowed it — and
+nothing was lost by letting the family win, since that sheet already carries the ICRC-transfer route
+itself.
+
+Proven in a browser. Flow 162: VCHF names the buy-ICP-then-convert route, native ICP is a direct
+buy, the "up to" qualifier survives, and the attribution and non-endorsement lines render. Flow 163,
+which exists for the defect above: on a USD wallet ckUSDC reaches the wallet-signed sheet and its
+card says there is no address, names ETH as a separate holding for the fee, and never says to send
+the token anywhere; ckBTC says buy BTC on **Bitcoin** and does send it to the address shown; the
+Solana rail gets the same address shape with no catalog row behind it. Unit coverage:
+`app/__tests__/funding.test.ts`, now built from the real bundled catalog through the real
+`buildSelectableAssets`, so a fixture cannot describe a wallet nobody has.
 
 Deployment state, as always, lives in `OPEN_ISSUES.md` and not here.

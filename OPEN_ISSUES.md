@@ -7,6 +7,17 @@
 > carry the same two numbers, so the cost of the thing being blocked stays visible.
 
 > Role: known blockers + documented follow-ups. Read top-down; work order first.
+>
+> **Pruned 2026-09-09 (late) — the whole UX-swarm inventory is gone.** F1 and X23 were FIXED, X20
+> was fixed, X17b was already done and is closed with its evidence, and X16/X19/X21/X24 were dropped
+> by the founder as very low user value. Each disposition is written out where the row used to be
+> (§ "UX swarm"), because "closed" without a reason is how a defect comes back. **The one that
+> mattered:** F1 said the funding resolver "already answers correctly for every family; only the
+> wiring is missing". It did not — it inferred a deposit mechanism from a display field and put
+> "buy USDC and send it to the address above" on a screen showing an Internet Computer principal, on
+> the default rail of every USD wallet. The founder flagged his own note as the defect. Correction
+> and the rule that replaces it: `docs/specs/2026-09-09-funding-routes-plan.md`.
+>
 > **Pruned 2026-09-09** — closed and REMOVED, each verified in code rather than assumed: **X6**
 > (transaction rows are pressable and open a receipt — `HistoryRow`, gated by flow 157), **X7** (the
 > header chevron opens the accounts route), **X8** (the Home headline no longer prints the balance a
@@ -14,8 +25,8 @@
 > (the web build ships woff2, not raw TTF), **X18** (the header collision — flow 158), and **X11**
 > (URL routing: every surface has its own URL, browser Back moves inside the wallet, Settings is part
 > of the route, and a foreign query parameter such as a pay link survives navigation — `lib/walletRoute.ts`
-> + `hooks/useWalletHistory.ts`, gated by new flow 161). X16 and X21 were partly closed and are
-> re-stated below with only what remains. Also closed the same day, and not filed because they are
+> + `hooks/useWalletHistory.ts`, gated by new flow 161). X16 and X21 were partly closed here and
+> dropped in full later the same day (above). Also closed the same day, and not filed because they are
 > done: the Receive asset picker was a SECOND account list that hid balances and used raw catalog
 > order — it now renders amounts and runs the accounts route's own `orderAccounts`, and the
 > `showAmount`/`variant` props that made that divergence configurable are deleted. And a receiving
@@ -124,15 +135,17 @@ signing/submission half generalises unchanged, and `app/services/opencryptopay.t
 working device-to-provider CeFi shape to copy. Gaps V1–V11 with value/effort, and the three to do
 first: [`docs/specs/2026-09-08-multi-venue-readiness.md`](docs/specs/2026-09-08-multi-venue-readiness.md).
 
-**5. Funding — a traveller can now be told where to get some, on two surfaces of six.**
-Founder direction 2026-09-09: name several providers unranked with their own published figures, and
-present card → native ICP → in-app Convert → VCHF as a funding route. Decisions, the measured
-provider evidence and what is already built:
+**5. Funding — DONE on all six deposit surfaces, and the note that said it was nearly done was
+wrong.** Founder direction 2026-09-09: name several providers unranked with their own published
+figures, and present card → native ICP → in-app Convert → VCHF as a funding route. Decisions, the
+measured provider evidence, **and the correction** — the resolver inferred how money arrives from a
+display field, which produced a money-loss-shaped instruction on the default rail of every USD
+wallet, and this file's own F1 row asserted that resolver was already correct:
 [`docs/specs/2026-09-09-funding-routes-plan.md`](docs/specs/2026-09-09-funding-routes-plan.md).
+Gated by e2e flows 162 + 163.
 
 | # | Item | value | effort |
 |---|------|------:|:------:|
-| F1 | **Wire `FundingRoutes` into the remaining three deposit surfaces** — ckBTC (`DepositSheet`), ckETH/ckUSDC (`CkErc20DepositSheet`), Solana (`SolanaReceiveSheet`). Each takes a currency id rather than a `SelectableAsset`, so the asset + home currency must be threaded through first. The resolver already answers correctly for every family; only the wiring is missing. | 8 | S-M |
 | F2 | **Re-read the four providers' published fee disclosures and diff against the table.** They are policy figures with a date on them; a stale row is a false claim on a money screen, not a nuance. Owner: whoever next touches funding. | 6 | S |
 
 **4. First-run experience — founder verdict 2026-09-08: "VERY confusing… several screens that just
@@ -283,14 +296,18 @@ The baked key had gone from `429 max usage reached` (2026-09-08) to **`HTTP 401 
 in `app/config/constants.ts`, `just check-prod-sol` PASSES against it, and the old key still answers
 401. **Unshipped** until the next `just apk && just up`.
 
-Two founder directions landed on the back of it, and both are builds rather than config. Design,
-the objection that was raised and overruled, and the order they must ship in:
+**Why 401 and not 429, what the free tier actually holds, and what a usage alarm would take** — all
+of it measured against Helius's own published docs, with the one check only the founder can run:
 [`docs/specs/2026-09-09-relay-ha-and-solana-proxy.md`](docs/specs/2026-09-09-relay-ha-and-solana-proxy.md).
+That file also owns the two founder directions (both builds, not config), the §4.3 objection that
+was raised and overruled, the order they must ship in, and the failure-state contract R3 below.
 
 | # | Item | value | effort |
 |---|------|------:|:------:|
+| R0 | **FOUNDER, one look:** does the OLD Helius key still appear in the dashboard's API-key list? Gone ⇒ making the replacement rotated it and there is nothing unexplained. Still listed and disabled ⇒ something else killed it and can kill the new one, so ask Helius. Nothing else in this section can be sequenced honestly until this is known. | 8 | S |
+| R3 | **Three distinguishable failure states, before R2 ships.** After the proxy, a relay outage renders the app's existing "Solana isn't answering" — which would blame the chain for dpay being down. `BalanceView.status: 'error'` is one bucket and must carry a cause; the relay-down state names dpay, says the money is untouched, names the Settings ▸ Advanced escape, and names what still works (the IC rail never touches the relay). | 8 | M |
 | R1 | **Multi-relay client** — one relay is a single point of failure, and R2 makes that failure total for the Solana rail. Ordered health-based failover over a list; build drift between replicas is a hard error. **Ships before or with R2.** | 8 | M |
-| R2 | **Solana RPC through the relay, reads AND broadcast** (founder decision 2026-09-09, taken with the `docs/REGULATORY.md` §4.3 objection stated). Key leaves the client; reads share a cache. | 7 | M |
+| R2 | **Solana RPC through the relay, reads AND broadcast** (founder decision 2026-09-09, taken with the `docs/REGULATORY.md` §4.3 objection stated). Key leaves the client; reads share a cache — which is the only thing that makes the free tier's 1M credits/month survive more than ~3 wallets. | 7 | M |
 | S2 | Batch the balance polls (5→1/tick) and collapse the per-mint double round trip | 6 | S |
 | S3 | The offline e2e harness stubs the RPC, so it can see none of this. A request-budget assertion (a flow that fails if a cold load exceeds N requests) is the only thing that would have caught it. | 6 | M |
 
@@ -309,15 +326,33 @@ dead-end there on a new wallet, while **∂100 of spendable practice money sits 
 never named**. That is the "looks like scam" mechanism stated as a graph rather than a feeling, and
 it is not a copy problem: rewriting every sentence leaves the shape intact.
 
-| # | Defect | value | effort |
-|---|--------|------:|:------:|
-| X16 | **Denial density — PARTLY CLOSED 2026-09-09.** The first-six-screens count is down from three to one: the currency chooser's "dpay does not move or convert funds" and the practice footer's "never asks you to deposit or buy anything" are gone (all four locales), and the wallet-creation line stays because it answers a fear the user actually has at that moment. **What remains:** five near-identical `custody` sentences across the deposit sheets (`i18n/domains/*/deposit.ts`). Those are earned — money is about to move — but five spellings of one promise is a copy DRY violation. | 4 | S |
-| X17b | **FOUNDER DECISION — ten colour pairings fail WCAG AA and two of them cannot be fixed without changing the brand.** The scanner defect X17 is fixed (3.00:1 → 15.8 light / 7.1 dark, gated by `app/__tests__/contrast.test.ts`). A full audit followed — 256 text nodes, 6 screens × 2 themes, effective background walked up the tree — and found ten more. The measured ceilings, so the trade is explicit rather than guessed: `sub2` (section labels, account subtitles, ledger times) sits at 2.30–3.96:1 and would need to go DARKER than `sub` to reach 4.5:1, collapsing the three-tier ink hierarchy to two; and the tangerine brand is 2.76–3.12:1 as text and 3.12:1 as white-on-fill — **every primary button and active tab label in both themes** — where no tangerine that still reads as tangerine passes (even the darker `brand2` is only 3.64:1). Also failing: `ok` green on credited amounts (3.00:1) and the AssetGlyph monograms on their family tints (3.92–4.45:1). Deciding this is a brand call, not an engineering one. | 7 | M |
-| X19 | **8-decimal amounts on the pay-link review** ("Pay 1.25000000 VCHF") where the header and request QR both correctly show 2. | 6 | S |
-| X20 | **Self-send is not warned on the pay-link path**, while `CLAUDE.md` documents that it warns on Send-to-address. Two paths, one rule, one of them missing. | 6 | S |
-| X21 | **Keyboard — PARTLY CLOSED 2026-09-09.** Enter submits the Receive amount (and is deliberately NOT wired where Enter would sign), and Escape now leaves a ROUTE through the same `leaveRoute` the Android hardware Back button uses, so the two platforms cannot drift. Both pinned by flow 14. **What remains:** the hint badges still vanish below 700 px, so shortcuts are invisible on a narrow desktop window. The right signal is pointer/hover capability rather than width — deferred because it risks churning the visual baselines for the least valuable half of this row. | 4 | S |
-| X23 | **The account row's chain subtitle may contradict the deposit sheet** — the row says `USDC · Ethereum` while the sheet offers an Internet Computer principal. Both are reachable funding routes for ckUSDC, so this needs verifying before changing; if a user can read it as "send USDC on Ethereum to this IC principal", it is money-loss-shaped. | 7 | S |
-| X24 | **Large dead bands remain in the education flow** — ~350–400 px per walkthrough scene, ~330 px on the rehearsal, and the Pay landing renders 109 px of content in a 915 px viewport. (The form surfaces were fixed 2026-09-08; these are the moment screens.) | 5 | S |
+**Closed and dropped 2026-09-09, each for a stated reason rather than by attrition.**
+
+- **X17b (the palette) — CLOSED, already done.** It asked the founder to decide whether the brand
+  orange could move. It had already moved: `9b60009` re-derived the palette (`sub2` 2.30 → 4.97,
+  the accent split into a fill step `brand` and an ink step `brandText`, light-mode brand
+  `#FF5A1F` → `#D03F00`). `app/__tests__/contrast.test.ts` is green at 27/27 and is a CLOSURE
+  proof rather than a sample: every colour the stylesheet can emit must be an approved token, and
+  every token clears 4.5:1 on every surface it can land on, in both themes, with the large-text
+  exemption deliberately unused. The founder's standing view is on record for the next redesign —
+  the style is not sacred and churn is the only cost of changing it.
+- **X16, X19, X21, X24 — DROPPED by the founder 2026-09-09**, verbatim: *"please drop ALL these,
+  it's VERY LOW VALUE for the user."* Five spellings of the custody promise, 8-decimal pay-link
+  amounts, the hint badges below 700 px, the education flow's dead bands — and, from the same
+  sentence though it was never a filed row, Settings opening with "Reset wallet". Deleted rather
+  than parked, per this file's own rule. The standing `CLAUDE.md` rule about elements that earn
+  nothing covers the general case; none of these needs a row.
+- **X20 (self-send) — FIXED.** The warning lives on `PayeeLine`, so every payment path renders it:
+  a pay link naming your own principal, your own request QR scanned back, and the camera signing
+  surface. Same sentence `SendSheet` uses, because it is the same fact. Warned, never blocked.
+- **X23 (the account row's chain) — FIXED, and the founder chose the shape.** A chain-key row now
+  names BOTH its chains in the direction they relate (`USDC · Ethereum → Internet Computer`); rows
+  already on the IC name one. Each half alone had shipped and each was wrong — reasoning in
+  `icAsset` (`app/config/assets.ts`). The near-term native-Ethereum rail the founder asked for on
+  the back of it is planned, with its one unwelcome constraint stated, in
+  [`docs/specs/2026-09-04-currency-first-wallet-plan.md`](docs/specs/2026-09-04-currency-first-wallet-plan.md).
+
+Nothing from the swarm's defect inventory remains open.
 
 ## Tech-debt follow-ups
 

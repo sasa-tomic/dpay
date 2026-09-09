@@ -231,6 +231,38 @@ distinguishing them already exists: `chipLabel` qualifies colliding symbols with
 - **The Solana offline tap has never crossed a radio** (`OPEN_ISSUES.md`). Moving fiat-denominated
   currencies onto Solana raises what that gate is worth, without changing what it is.
 
+## A native Ethereum rail — founder direction 2026-09-09, planned not built
+
+**Every verb here is a roadmap verb.** The founder asked for "support for real ETH in the near
+future" while looking at the ckUSDC account row, and the two are the same subject: today USDC in
+this wallet is only ever *ckUSDC*, USDC bridged onto the Internet Computer, and the row now says so
+in both directions (`USDC · Ethereum → Internet Computer`). A native rail is what would make plain
+`USDC · Ethereum` a row this wallet can honestly carry.
+
+**Why it is feasible, structurally.** It is the SOL rail's twin, and that rail is shipped: a device
+key, direct RPC, no facade, no relay in the value path, no wire change. Ethereum needs secp256k1
+derivation and EIP-1559 signing in `dpay-core` (the ed25519 and SLIP-10 machinery is there; the
+curve is not), and the ERC-20 transfer/`approve` encoders already exist and are golden-pinned
+(`app/cketh.ts`, built for the minter deposit). Reads and broadcast need an endpoint, which lands on
+exactly the question direction 1 of
+[`2026-09-09-relay-ha-and-solana-proxy.md`](2026-09-09-relay-ha-and-solana-proxy.md) is deciding for
+Solana — so this rail should inherit whatever that settles rather than opening a second answer.
+
+**The part that must be said out loud before it reaches a deck.** *Ethereum L1 cannot do the offline
+tap.* The mechanism needs settlement in about a second so the merchant can confirm while the payer
+stands there; the IC finalises in ~1–2s and Solana in ~1s, and Ethereum L1 blocks are ~12s with
+probabilistic finality on top. A native Ethereum rail is therefore a **holding and funding** rail —
+somewhere USDC can live and be sent from — and not a rail dpay's signature feature works on. An L2
+(Base, Arbitrum) is the version of this that could be a payment rail, and that is a separate
+measurement nobody has made. Promising the offline tap "on Ethereum" would be an infeasible roadmap
+claim, which `CLAUDE.md` classes as a lie with a delay.
+
+**What it would have to satisfy**, none of it negotiable: the uniform-IA hard rule (it slots into
+the same Balances / Pay / Receive surfaces the IC and Solana rails share, and gets no parallel
+path); no custody and no dpay-executed swap; gas held by the user in ETH, disclosed before the
+amount is entered the way `SendSheet` already discloses every route; and the same honest-unreadable
+state when the endpoint is down. Sequenced after the Solana endpoint decision, not before it.
+
 ## What landed 2026-09-04 — objective 1, and only objective 1
 
 Built, green on every inner-loop gate (tsc clean; jest 84 suites / 1698; e2e **113/113** incl. the
