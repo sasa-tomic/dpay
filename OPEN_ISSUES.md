@@ -204,14 +204,20 @@ Re-measured 2026-09-08 at the END of the session, HEAD `1b3603d`:
   command, and the sequence lives in `docs/OPS.md` §3. The DIRTY state can only be an image built
   before that gate.
 
-**Unshipped: everything from this session** (`2013349..1b3603d`). One operation — `just apk &&
-just up` (no canister change since the deploy, so `deploy-ic` is skippable). Afterwards
-`just verify-relay` should say MATCH at HEAD, and `just swap-venue-probe` re-checks that the live
-route still derives swap direction from the venue rather than a pin.
+**Unshipped: everything since `2013349`**, which now includes the replacement Helius key and the
+funding-mechanism fix. One operation — `just apk && just up` (no canister change since the deploy,
+so `deploy-ic` is skippable). Afterwards `just verify-relay` should say MATCH at HEAD, and
+`just swap-venue-probe` re-checks that the live route still derives swap direction from the venue
+rather than a pin.
 
-**Verified-clean floor for the next session's review: `1b3603d`** — `just verify` EXIT=0 at that
-commit (149/149 e2e, jest 103 suites / 2125, all Rust suites, 0 warnings across every feature
-combination). Start the next sweep from there.
+**Verified-clean floor for the next session's review: `ddfea4a`** — jest 111 suites / 2269, e2e
+**153/153 GREEN** (`just e2e`, EXIT=0), and every Rust suite green in the same pass (core 61+5,
+canister 61, relay 138, icp 75+123, ffi 6). Start the next sweep from there.
+
+**One thing to know before running the suite:** `DPAY_E2E_NO_FAILFAST=1` is a trap on this box. It
+keeps launching flows past the first RED, oversubscribes the host, and turns one flake into sixteen
+per-test timeout failures that say nothing. The default fail-fast run is the honest signal; re-run a
+single RED alone before believing it.
 
 ## Retired this prune (decision-shaped — do not re-file)
 
