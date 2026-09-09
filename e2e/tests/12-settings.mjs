@@ -29,7 +29,11 @@ export const meta = {
   journey: 'system',
   covers: ['settings', 'relay-config', 'solana-rpc-config', 'privacy-policy', 'non-custodial', 'reset', 'persist'],
   verifies: 'Settings: privacy policy is reachable, the non-custodial statement is present, relay URL persists, the Solana endpoint is editable from the phone with an explicit Apply that shows its refusals verbatim and treats an empty value as "use the built-in one", and reset wallet wipes identity.',
-  timeoutMs: 20000,
+  // Measured 2026-09-09: ~28s of wall clock ALONE on this host — above the 20000 it declared, which
+  // therefore only ever passed on the runner's host-load scale multiplier (the same defect flow 101
+  // had). The flow does a full onboarding, two Settings round trips, a reload, four RPC-field
+  // submissions and a reset-to-onboarding.
+  timeoutMs: 45000,
 };
 
 export async function run() {

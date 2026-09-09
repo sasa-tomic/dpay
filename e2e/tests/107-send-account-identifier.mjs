@@ -45,7 +45,11 @@ export const meta = {
   journey: 'withdraw',
   covers: ['send-to-address', 'account-identifier', 'icp', 'legacy-transfer', 'crc', 'balance-delta'],
   verifies: 'Send ICP to a 64-hex account identifier via the ledger\'s legacy `transfer`: the address is CRC-validated by the real core, the route disclosed with the fee, one envelope signed on-device, and the gateway credits the principal owning that identifier — the address form icrc1_transfer cannot reach.',
-  timeoutMs: 30000,
+  // Measured 2026-09-09: 34-43s of wall clock ALONE on this host — above the 30000 it declared, so
+  // it too passed only on the host-load scale multiplier (see flow 101). Onboarding, a faucet
+  // credit, a rejected address, an accepted one, and a real settled transfer read back off the
+  // ledger.
+  timeoutMs: 60000,
 };
 
 export async function run() {
