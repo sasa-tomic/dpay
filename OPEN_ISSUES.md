@@ -7,6 +7,34 @@
 > carry the same two numbers, so the cost of the thing being blocked stays visible.
 
 > Role: known blockers + documented follow-ups. Read top-down; work order first.
+> **Pruned 2026-09-09** — closed and REMOVED, each verified in code rather than assumed: **X6**
+> (transaction rows are pressable and open a receipt — `HistoryRow`, gated by flow 157), **X7** (the
+> header chevron opens the accounts route), **X8** (the Home headline no longer prints the balance a
+> second time), **X10** (the web wallet has a service worker and a manifest — flow 151), **X12**
+> (the web build ships woff2, not raw TTF), **X18** (the header collision — flow 158), and **X11**
+> (URL routing: every surface has its own URL, browser Back moves inside the wallet, Settings is part
+> of the route, and a foreign query parameter such as a pay link survives navigation — `lib/walletRoute.ts`
+> + `hooks/useWalletHistory.ts`, gated by new flow 161). X16 and X21 were partly closed and are
+> re-stated below with only what remains. Also closed the same day, and not filed because they are
+> done: the Receive asset picker was a SECOND account list that hid balances and used raw catalog
+> order — it now renders amounts and runs the accounts route's own `orderAccounts`, and the
+> `showAmount`/`variant` props that made that divergence configurable are deleted. And a receiving
+> address for an asset you have NOT already selected is now ONE tap from the Receive surface
+> (`AssetSwitchRow`, on BOTH rails per the uniform-IA hard rule) instead of four taps and a tab
+> switch through the accounts route — the switch preserves the address sub-mode, which is why it
+> takes the sub-mode-preserving selector rather than the ordinary one. Gated by flow 162.
+>
+> **Four RED gates were fixed, none of them caused by the session's changes.** They matter more than
+> the features: a gate that fails for a non-reason teaches everyone to ignore it. (1) Flow 40's
+> ledger-layout probe inserted a digit with `/(\D)(\d:\d\d)/`, which cannot match a two-digit hour —
+> so the visual-regression gate was RED from 10:00 to 23:59 every day. (2) Flows 105/106/11 carried
+> per-test budgets SMALLER than their own measured runtime, passing only when the load-scale happened
+> to stretch them. (3) The runner scaled each flow's wall-clock budget for host load but not the
+> driver's inner waits, so a busy machine reported "element not visible within 5000ms" — a statement
+> about the app that was really about the box; `driver.mjs` now scales both from one number.
+> (4) Flow 117 sampled an NFC listener count immediately instead of waiting for it, racing React's
+> mount.
+
 > **Pruned 2026-09-08 (parked-disposition sweep)** — five entries under "Other open issues" whose
 > dispositions ("accepted simplification", "cosmetic", "inherent", "low priority") did not meet the
 > new "pre-existing is not a disposition" bar were worked and REMOVED, not re-annotated: the till
@@ -95,6 +123,17 @@ rejects every CeFi record that will ever exist, and the offline fake holds exact
 signing/submission half generalises unchanged, and `app/services/opencryptopay.ts` is already a
 working device-to-provider CeFi shape to copy. Gaps V1–V11 with value/effort, and the three to do
 first: [`docs/specs/2026-09-08-multi-venue-readiness.md`](docs/specs/2026-09-08-multi-venue-readiness.md).
+
+**5. Funding — a traveller can now be told where to get some, on two surfaces of six.**
+Founder direction 2026-09-09: name several providers unranked with their own published figures, and
+present card → native ICP → in-app Convert → VCHF as a funding route. Decisions, the measured
+provider evidence and what is already built:
+[`docs/specs/2026-09-09-funding-routes-plan.md`](docs/specs/2026-09-09-funding-routes-plan.md).
+
+| # | Item | value | effort |
+|---|------|------:|:------:|
+| F1 | **Wire `FundingRoutes` into the remaining three deposit surfaces** — ckBTC (`DepositSheet`), ckETH/ckUSDC (`CkErc20DepositSheet`), Solana (`SolanaReceiveSheet`). Each takes a currency id rather than a `SelectableAsset`, so the asset + home currency must be threaded through first. The resolver already answers correctly for every family; only the wiring is missing. | 8 | S-M |
+| F2 | **Re-read the four providers' published fee disclosures and diff against the table.** They are policy figures with a date on them; a stale row is a false claim on a money screen, not a nuance. Owner: whoever next touches funding. | 6 | S |
 
 **4. First-run experience — founder verdict 2026-09-08: "VERY confusing… several screens that just
 ask me to pay in some money. Looks like scam."** Three directions landed with it: (a) greet with an
@@ -237,30 +276,21 @@ still answers `zero_for_one: true` for ICP→VCHF where the corrected tree deriv
 `just deploy-ic && just apk && just up` as one operation; do not ship the app alone. After the
 deploy, `just swap-venue-probe` is the check that the live route derives direction from the venue.
 
-## LIVE OUTAGE — the Solana rails are dead in every shipped build (founder-owned, 2026-09-08)
+## Solana rails — the dead key is REPLACED (2026-09-09)
 
-The baked Helius key (`app/config/constants.ts`) answers **`HTTP 429` / `max usage reached`** — I
-curled it directly. So SOL, USDC·Solana and **EURC·Solana** return nothing on every installed build
-and every browser wallet, and the three rows render a bare `—` forever. EURC·Solana is the
-**preferred EUR rail**, so a user who picks Euros lands on a rail the app cannot read at all.
+The baked key had gone from `429 max usage reached` (2026-09-08) to **`HTTP 401 Unauthorized`**
+(measured 2026-09-09) — dead, not throttled. The founder supplied a replacement the same day; it is
+in `app/config/constants.ts`, `just check-prod-sol` PASSES against it, and the old key still answers
+401. **Unshipped** until the next `just apk && just up`.
 
-No client change can fix this — the key is out of quota. **Founder action: replace or upgrade the
-key.** Value 10, effort S (an account action, not code).
+Two founder directions landed on the back of it, and both are builds rather than config. Design,
+the objection that was raised and overruled, and the order they must ship in:
+[`docs/specs/2026-09-09-relay-ha-and-solana-proxy.md`](docs/specs/2026-09-09-relay-ha-and-solana-proxy.md).
 
-What WAS fixed on the client side, because the app was also part of the problem: an idle wallet was
-issuing **≈208 RPC requests/minute** with no batching, no dedup and no in-flight guard — and under a
-slow endpoint the request rate *rose* with latency (up to 3 concurrent generations of the same
-poll). The batching, the cadence work and the outage's USER-FACING half all landed on 2026-09-08 —
-what the app now does per tick is measured by e2e flow 160 and the arithmetic lives in
-`docs/specs/2026-09-08-solana-rpc-plan.md`; what it now SAYS is `RailUnreadableNote` (once per
-network, on the accounts route and on the Home headline, flow 147) and, before a signature,
-`solSignCaveat` (flow 137). **And the key is finally rotatable from the phone**: Settings ▸ Advanced
-carries the Solana endpoint beside the relay URL (`settings-sol-rpc`, flow 12), so replacing a dead
-key is an edit rather than a store release — the founder action below is still the one that fixes
-the outage, but it is no longer the only lever.
-
-| # | Follow-up | value | effort |
-|---|-----------|------:|:------:|
+| # | Item | value | effort |
+|---|------|------:|:------:|
+| R1 | **Multi-relay client** — one relay is a single point of failure, and R2 makes that failure total for the Solana rail. Ordered health-based failover over a list; build drift between replicas is a hard error. **Ships before or with R2.** | 8 | M |
+| R2 | **Solana RPC through the relay, reads AND broadcast** (founder decision 2026-09-09, taken with the `docs/REGULATORY.md` §4.3 objection stated). Key leaves the client; reads share a cache. | 7 | M |
 | S2 | Batch the balance polls (5→1/tick) and collapse the per-mint double round trip | 6 | S |
 | S3 | The offline e2e harness stubs the RPC, so it can see none of this. A request-budget assertion (a flow that fails if a cold load exceeds N requests) is the only thing that would have caught it. | 6 | M |
 
@@ -281,18 +311,11 @@ it is not a copy problem: rewriting every sentence leaves the shape intact.
 
 | # | Defect | value | effort |
 |---|--------|------:|:------:|
-| X6 | **Transaction rows are dead** — no press handler, no receipt, no memo/`ref`, no block index, no copy-proof. This is the merchant-reconciliation and dispute path and it does not exist. | 8 | M |
-| X7 | **The header balance chevron is a false affordance** — a `⌄` beside a balance means "switch account" in every wallet; here it navigates to Home and on Home it does nothing at all. | 7 | S |
-| X8 | **The balance is printed twice, ~90–250 px apart** — header eyebrow+amount and Home headline are byte-identical strings in one viewport. | 6 | S |
-| X10 | **The offline-first web wallet cannot open offline** — no service worker (`getRegistrations()` → 0), no manifest; a reload with the network down gives the browser's dinosaur. The one-line pitch is "your phone never needs a connection". | 8 | M |
-| X11 | **No URL routing** — every tab and sheet is `/wallet`, browser Back ejects the user out of the wallet (measured: Settings stayed open while the URL jumped to a previously-visited pay link), no tab is deep-linkable, refresh always dumps you on the landing screen. | 7 | M |
-| X12 | **Fonts ship unsubsetted and uncompressed** — 338 KB of TTF with `encodedBodySize === decodedBodySize` on all four (one file is 130 KB), blocking text paint. WOFF2 subsets cut ~230 KB. The cheapest perceived-speed win available. | 7 | S |
-| X16 | **Three unprompted denials in the first six screens** ("does not deposit, buy, or move any money" / "never asks you to deposit or buy anything" / "does not move or convert funds"), plus one on every onboarding frame and every deposit sheet. Each sentence is true; the density is a scam signature. Legitimate products state what they do. | 6 | S |
+| X16 | **Denial density — PARTLY CLOSED 2026-09-09.** The first-six-screens count is down from three to one: the currency chooser's "dpay does not move or convert funds" and the practice footer's "never asks you to deposit or buy anything" are gone (all four locales), and the wallet-creation line stays because it answers a fear the user actually has at that moment. **What remains:** five near-identical `custody` sentences across the deposit sheets (`i18n/domains/*/deposit.ts`). Those are earned — money is about to move — but five spellings of one promise is a copy DRY violation. | 4 | S |
 | X17b | **FOUNDER DECISION — ten colour pairings fail WCAG AA and two of them cannot be fixed without changing the brand.** The scanner defect X17 is fixed (3.00:1 → 15.8 light / 7.1 dark, gated by `app/__tests__/contrast.test.ts`). A full audit followed — 256 text nodes, 6 screens × 2 themes, effective background walked up the tree — and found ten more. The measured ceilings, so the trade is explicit rather than guessed: `sub2` (section labels, account subtitles, ledger times) sits at 2.30–3.96:1 and would need to go DARKER than `sub` to reach 4.5:1, collapsing the three-tier ink hierarchy to two; and the tangerine brand is 2.76–3.12:1 as text and 3.12:1 as white-on-fill — **every primary button and active tab label in both themes** — where no tangerine that still reads as tangerine passes (even the darker `brand2` is only 3.64:1). Also failing: `ok` green on credited amounts (3.00:1) and the AssetGlyph monograms on their family tints (3.92–4.45:1). Deciding this is a brand call, not an engineering one. | 7 | M |
-| X18 | **The header wordmark, gear and theme button collide**, with "ACCOUNT / name" overlapping the wordmark's descender — on every screen, light and dark. | 6 | S |
 | X19 | **8-decimal amounts on the pay-link review** ("Pay 1.25000000 VCHF") where the header and request QR both correctly show 2. | 6 | S |
 | X20 | **Self-send is not warned on the pay-link path**, while `CLAUDE.md` documents that it warns on Send-to-address. Two paths, one rule, one of them missing. | 6 | S |
-| X21 | **Keyboard shortcuts are undiscoverable on the phone-width web wallet** — five exist (`P R L A T`); the hint component returns null below 700 px and the bottom tab bar never passes one. Enter does not submit the Receive amount; Esc does not close Convert though sheets advertise it. | 6 | S |
+| X21 | **Keyboard — PARTLY CLOSED 2026-09-09.** Enter submits the Receive amount (and is deliberately NOT wired where Enter would sign), and Escape now leaves a ROUTE through the same `leaveRoute` the Android hardware Back button uses, so the two platforms cannot drift. Both pinned by flow 14. **What remains:** the hint badges still vanish below 700 px, so shortcuts are invisible on a narrow desktop window. The right signal is pointer/hover capability rather than width — deferred because it risks churning the visual baselines for the least valuable half of this row. | 4 | S |
 | X23 | **The account row's chain subtitle may contradict the deposit sheet** — the row says `USDC · Ethereum` while the sheet offers an Internet Computer principal. Both are reachable funding routes for ckUSDC, so this needs verifying before changing; if a user can read it as "send USDC on Ethereum to this IC principal", it is money-loss-shaped. | 7 | S |
 | X24 | **Large dead bands remain in the education flow** — ~350–400 px per walkthrough scene, ~330 px on the rehearsal, and the Pay landing renders 109 px of content in a 915 px viewport. (The form surfaces were fixed 2026-09-08; these are the moment screens.) | 5 | S |
 

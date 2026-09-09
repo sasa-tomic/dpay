@@ -66,13 +66,18 @@ your address — we never hold it."*
 
 ## Fiat and unsupported assets → an embedded licensed provider
 
-**Status: unstarted. This is the only part of this document that is not built.**
+**Status: the embedded-provider hand-off is unstarted; the static "buy here, then send there"
+route naming is built. Nothing else in this document is unbuilt.**
 
 **And the shape below has a hard external limit, measured 2026-09-04:** no card on-ramp anywhere
 delivers a chain-key asset or VCHF — only native ICP reaches the Internet Computer at all. So
 "pre-fill the user's deposit address at a provider" works for Solana and for native ICP, and for
 nothing else on the IC. Which providers reach what, and the bank-transfer route that does reach
 VCHF: `docs/specs/2026-09-04-currency-first-wallet-plan.md`.
+
+**The zero-integration half of this IS built (2026-09-09)** — the deposit surfaces now name where
+a user who holds nothing can get some, per asset, with each provider's own published figures:
+`docs/specs/2026-09-09-funding-routes-plan.md`.
 
 Hand off to an embedded **licensed third-party provider** (Onramper / Transak / Changelly-class
 aggregator) with the user's deposit address **pre-filled as the destination**. The provider is the

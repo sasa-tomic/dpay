@@ -46,6 +46,16 @@ rather than the ten-row currency list, which stays one gesture away; and stop di
 preference as if it were a reason. Diagnosis, design, the two open founder forks, and the build
 order: [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md).
 
+**Active addition (founder directions 2026-09-09).** Three landed together. **(1) A user who holds
+nothing is told where to get some** — several providers, unranked, each carrying its OWN published
+figures with the date they were read, plus card → native ICP → in-app Convert → VCHF as a funding
+route; decisions, the measured evidence and the regulatory checklist it is built against:
+[`docs/specs/2026-09-09-funding-routes-plan.md`](docs/specs/2026-09-09-funding-routes-plan.md).
+**(2) All Solana traffic — reads AND broadcast — moves behind the dpay relay**, and **(3) dpay
+supports several relays for HA**; the two are coupled, the `docs/REGULATORY.md` §4.3 objection to
+(2) was raised and overruled, and both are recorded with that objection in
+[`docs/specs/2026-09-09-relay-ha-and-solana-proxy.md`](docs/specs/2026-09-09-relay-ha-and-solana-proxy.md).
+
 **Delegating swaps to MORE than one venue (founder, same day): not yet possible.** There is no venue
 type at all; the persisted swap record has no venue field and its schema rejects every CeFi record
 that will ever exist. What must change first:
