@@ -190,12 +190,28 @@ export const depositEs: DepositMessages = {
 
   funding: {
     title: '¿Todavía no tiene?',
-    buyThenSend: (token, networkLabel) => [
+    buyThenSend: (token, chain) => [
       {t: 'Compre '},
       {t: token, em: true},
       {t: ' en cualquier exchange o proveedor de tarjeta que pague en '},
-      {t: networkLabel, em: true},
+      {t: chain, em: true},
       {t: ' y envíelo a la dirección de arriba. Llega a su propia cartera — dpay nunca lo recibe.'},
+    ],
+    bridgeWithGas: (token, chain, gasToken) => [
+      {t: 'Para este no hay dirección. Compre '},
+      {t: token, em: true},
+      {t: ' en '},
+      {t: chain, em: true},
+      {t: ' en una cartera suya, y guarde en ella un poco de '},
+      {t: gasToken, em: true},
+      {t: ' para la comisión de red. Después vuelva aquí y conecte esa cartera: ella firma la transferencia, y dpay no custodia ninguna de las dos cosas.'},
+    ],
+    bridgeSelfGas: (token, chain) => [
+      {t: 'Para este no hay dirección. Compre '},
+      {t: token, em: true},
+      {t: ' en '},
+      {t: chain, em: true},
+      {t: ' en una cartera suya — un poco más de lo que quiera mover, porque la comisión de red sale de ahí. Después vuelva aquí y conecte esa cartera: ella firma la transferencia, y dpay nunca la custodia.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Ningún proveedor vende '},
@@ -206,7 +222,8 @@ export const depositEs: DepositMessages = {
       {t: target, em: true},
       {t: '. Ese cambio lo firma usted, y dpay no participa en él.'},
     ],
-    testnetOnly: (symbol, networkLabel) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${networkLabel} y envíelo a la dirección de arriba.`,
+    testnetOnly: (symbol, chain) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${chain} y envíelo a la dirección de arriba.`,
+    testnetOnlyWallet: (symbol, chain) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${chain} en una cartera suya y conecte esa cartera aquí.`,
     bankRoute: provider => `Desde una cuenta bancaria suiza, ${provider} lo vende directamente por transferencia. Requiere verificación de identidad completa y tarda lo que tarda una transferencia bancaria.`,
     providersTitle: 'Dónde se compra',
     costCard: rate => `tarjeta ${rate}`,

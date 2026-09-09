@@ -129,6 +129,7 @@ export const walletEs: WalletMessages = {
   asset: {
     demoSubtitle: 'dinero ficticio para pruebas',
     networkLabel: (symbol, network) => `${symbol} · ${network}`,
+    bridgedLabel: (symbol, from, to) => `${symbol} · ${from} → ${to}`,
     unsupported: 'No admitido',
     testnetName: base => `${base} testnet`,
     testnet: 'Testnet',

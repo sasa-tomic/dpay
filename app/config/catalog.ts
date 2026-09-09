@@ -506,6 +506,67 @@ export function isDirectIcrcAsset(a: CurrencyDescriptor | null | undefined): boo
   return !!a && !a.mintable && a.minter == null && isCompleteDirectIcrcRow(a);
 }
 
+// --- HOW money gets in: the one deposit-mechanism switch ------------------------------------------
+// The question every deposit surface answers is "what do I actually do to end up holding this",
+// and it has exactly four answers in this wallet. They are NOT interchangeable, and the difference
+// between two of them is money:
+//
+//   send-to-address    the sheet shows an address on the asset's OWN chain; sending the named token
+//                      there credits the wallet (ckBTC shows a real Bitcoin address; a Solana row
+//                      shows a Solana address).
+//   icrc-transfer      the address shown is an INTERNET COMPUTER account. The chain to send from is
+//                      the IC — never the chain the asset is backed by. `network` on a chain-key row
+//                      names the BACKING chain ("Ethereum" for ckUSDC), so reading the send-from
+//                      chain off that field points the sender at a chain this address cannot receive.
+//   evm-wallet         there is NO address. The user's own EVM wallet signs `approve` +
+//                      `depositErc20` against the minter's helper contract, and the gas is a
+//                      SEPARATE holding of the chain's native coin. "Send it to the address on
+//                      screen" is not a weaker instruction here, it is a wrong one.
+//   evm-wallet-native  the same wallet-signed shape for the chain's own coin (ckETH): one payable
+//                      `depositEth`, and the fee comes out of the same balance.
+//
+// ONE switch with TWO consumers — `ReceiveMode` picks the deposit sheet with it, and `FundingRoutes`
+// writes the "don't have any yet?" instruction from it — so a surface and its instruction cannot
+// drift apart. They did: the first funding-routes implementation inferred the mechanism from
+// `network !== 'Internet Computer'` and therefore told a ckUSDC holder to buy USDC and send it to an
+// address, on a screen showing an IC principal (`docs/specs/2026-09-09-funding-routes-plan.md`).
+export type DepositMechanism = 'send-to-address' | 'icrc-transfer' | 'evm-wallet' | 'evm-wallet-native' | 'none';
+
+/**
+ * The deposit mechanism for one IC catalog row, from SERVER-DECLARED facts only (`mintable`,
+ * `minter_family`, `token_contract`) — never from a chain name or a display label.
+ *
+ * `none` covers the two rows that have no deposit at all: the facade-minted practice dollar (its
+ * money comes from a faucet, and offering to sell someone play money is a lie besides), and any
+ * row too incomplete to instruct on — which fails closed rather than guessing a mechanism.
+ *
+ * Solana rows have no descriptor and are always `send-to-address`; that is a property of the rail,
+ * asserted where the Solana surface builds its own instruction.
+ */
+export function depositMechanism(a: CurrencyDescriptor | null | undefined): DepositMechanism {
+  if (!a) return 'none';
+  if (a.mintable) return 'none';
+  if (a.minter_family === 'CkBtcUtxo') return 'send-to-address';
+  // The SAME rule Wallet's `depositNativeEth` uses to pick the sheet's branch: a null token
+  // contract is the chain's own coin (ckETH), anything else is an ERC-20 (ckUSDC).
+  if (a.minter_family === 'CkEthErc20') return a.token_contract == null ? 'evm-wallet-native' : 'evm-wallet';
+  if (isDirectIcrcAsset(a)) return 'icrc-transfer';
+  return 'none';
+}
+
+/**
+ * The coin that pays the network fee for an `evm-wallet` deposit, as the catalog itself declares it:
+ * the row's `gas_ledger` names the ledger the fee is charged on (ckUSDC's is the ckETH ledger), and
+ * that row's backing symbol is the coin the user must actually be holding. Null when the asset IS
+ * its own gas (`gas_ledger` unset — ckETH) or when the catalog cannot say, which the copy renders as
+ * the self-funding variant rather than naming a coin this wallet cannot source.
+ */
+export function gasTokenOf(a: CurrencyDescriptor, catalog: CurrencyDescriptor[]): string | null {
+  if (a.gas_ledger == null || a.gas_ledger.length === 0) return null;
+  const gas = catalog.find(c => c.ledger === a.gas_ledger);
+  return gas ? displayName(gas) : null;
+}
+
 // --- the reverse lookup: an ICRC ledger principal → its currency id -----------------------------
 // Every accessor above indexes BY currency id, because that is the handle dpay's own wire carries.
 // An EXTERNAL counterparty cannot: a third-party payment request names the ICRC LEDGER PRINCIPAL,

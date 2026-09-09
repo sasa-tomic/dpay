@@ -28,10 +28,13 @@ import {M} from '../i18n';
  * doomed payment re-tappable, and two call sites deriving that separately is two chances to get it
  * wrong.
  */
-export function PaymentReview({catalog, intent, notes, insufficient, blockApprove, err, busy, onApprove, onCancel}: {
+export function PaymentReview({catalog, intent, notes, isSelf, insufficient, blockApprove, err, busy, onApprove, onCancel}: {
   catalog: CurrencyDescriptor[];
   intent: PayIntent;
   notes?: ReactNode;
+  /** Is the destination this wallet's own account? REQUIRED rather than defaulted, so a new entry
+   *  into this screen has to answer the question instead of inheriting a silent `false`. */
+  isSelf: boolean;
   insufficient: boolean;
   blockApprove: boolean;
   err: string | null;
@@ -46,7 +49,7 @@ export function PaymentReview({catalog, intent, notes, insufficient, blockApprov
           Cancel underneath — the screen named itself three times, and the eyebrow was the copy that
           said the least (founder, 2026-09-09). */}
       <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
-      <PayeeLine intent={intent} />
+      <PayeeLine intent={intent} isSelf={isSelf} />
       {notes}
       {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
           first; the raw request nonce is no longer surfaced (internal protocol data). */}
@@ -91,8 +94,14 @@ export function PaymentReview({catalog, intent, notes, insufficient, blockApprov
  *
  * Exported because PayMode's camera-entry surface (read-only while it signs, no Approve) shows the
  * same two lines, and a payer must read the same destination on both.
+ *
+ * The self-send warning lives HERE, with the destination it is about, for the same reason: paying
+ * your own account was warned about on Send-to-address and silent on every payment path — a link
+ * naming your own principal, or your own request QR scanned back. One rule, one sentence, and it is
+ * the SAME sentence `SendSheet` uses, because it is the same fact (the money returns and the ledger
+ * fee is still charged). A warning, never a block: it is your money and there are reasons to do it.
  */
-export function PayeeLine({intent}: {intent: PayIntent}) {
+export function PayeeLine({intent, isSelf}: {intent: PayIntent; isSelf: boolean}) {
   return (
     <>
       <Text style={S.reviewTo}>{M.pay.toWho(intent.toName || intent.toAccountText)}</Text>
@@ -100,6 +109,7 @@ export function PayeeLine({intent}: {intent: PayIntent}) {
           so the payer can verify where the money goes beyond a claimed name (phishing surface).
           The no-name fallback already renders the account as the primary "to" line. */}
       {intent.toName ? <Text testID="review-payee" style={S.dim2}>{intent.toAccountText}</Text> : null}
+      {isSelf ? <Text testID="review-self" style={S.warnNote}>{M.withdraw.send.selfWarning}</Text> : null}
     </>
   );
 }

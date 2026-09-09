@@ -9,6 +9,7 @@ import {
   type PublishedRate,
 } from '../config/funding';
 import type {SelectableAsset} from '../config/assets';
+import type {DepositMechanism} from '../config/catalog';
 import type {HomeCurrency} from '../config/currency';
 
 /**
@@ -16,10 +17,18 @@ import type {HomeCurrency} from '../config/currency';
  * 2026-09-09; design and measured evidence in `docs/specs/2026-09-09-funding-routes-plan.md`, which
  * this file does not restate).
  *
- * Every deposit sheet in the app already answers "where do I send it" correctly. None of them
- * answered "I don't have any" — and the target user is a traveller who does not. This section is
- * that answer, per asset, in the same shape as `IcrcAccountSection`: a card inside the sheet, no
- * new navigation, no new surface to find.
+ * Every deposit sheet in the app already answers "how does this asset reach me" correctly — an
+ * address on three of them, a wallet to connect on the fourth. None of them answered "I don't have
+ * any" — and the target user is a traveller who does not. This section is that answer, per asset,
+ * in the same shape as `IcrcAccountSection`: a card inside the sheet, no new navigation, no new
+ * surface to find.
+ *
+ * It is BUILT BY THE SURFACE THAT ROUTED TO THE SHEET and handed down as a node, never assembled by
+ * the sheet itself. That is not a style choice: the mechanism that picks the sheet is the mechanism
+ * the instruction must be written from, and a sheet composing its own could describe a deposit it
+ * does not implement — which is exactly what shipped (see `DepositMechanism` in config/catalog.ts).
+ * The sheet still owns WHERE and IN WHICH PHASE it renders, because "don't have any yet?" over a
+ * completed deposit is nonsense and only the sheet knows it completed.
  *
  * ── What this deliberately is NOT ───────────────────────────────────────────────────────────────
  * Not a widget, not an embedded provider, and not a deep link carrying the user's address into a
@@ -34,14 +43,19 @@ import type {HomeCurrency} from '../config/currency';
  * they quote. The attribution line says both of those out loud, because a table of percentages that
  * omitted them would be a false claim under `CLAUDE.md`'s external-claims rule.
  */
-export function FundingRoutes({asset, isTestnet, homeCurrency}: {
+export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
   asset: SelectableAsset;
   /** Server-declared (`isTestnetCurrency`), never inferred from a label. A test coin has no seller
    *  and gets a faucet instruction instead of a provider list. */
   isTestnet: boolean;
+  /** How money actually arrives for this asset — supplied by whichever surface CHOSE the deposit
+   *  sheet (`depositMechanism`), so this card and the screen it sits on are written from the same
+   *  fact. Deriving it here from the asset's chain name is what produced "send it to the address
+   *  above" on a wallet-signed ckERC20 deposit. */
+  mechanism: DepositMechanism;
   homeCurrency: HomeCurrency | null;
 }) {
-  const route = fundingRoute(asset, isTestnet);
+  const route = fundingRoute(asset, isTestnet, mechanism);
   // Play money is not money: it has no seller, its faucet is one tap away on the accounts route,
   // and a "where to buy this" card over it would be the exact solicitation shape the first-run work
   // exists to remove.
@@ -54,10 +68,19 @@ export function FundingRoutes({asset, isTestnet, homeCurrency}: {
 
       {route.kind === 'testnet' ? (
         <Text testID="funding-testnet" style={S.dim2}>
-          {M.deposit.funding.testnetOnly(route.symbol, route.networkLabel)}
+          {route.viaWallet
+            ? M.deposit.funding.testnetOnlyWallet(route.symbol, route.chain)
+            : M.deposit.funding.testnetOnly(route.symbol, route.chain)}
         </Text>
       ) : route.kind === 'buy' ? (
-        <InstrLine runs={M.deposit.funding.buyThenSend(route.token, route.networkLabel)} />
+        <InstrLine runs={M.deposit.funding.buyThenSend(route.token, route.chain)} />
+      ) : route.kind === 'bridge' ? (
+        // Two sentences, not one with a conditional clause: the ERC-20 case needs a SECOND holding
+        // the user must go and get, and the native case needs a margin on the one they are already
+        // buying. Collapsing them would understate one and overstate the other.
+        <InstrLine testID="funding-bridge" runs={route.gasToken !== null
+          ? M.deposit.funding.bridgeWithGas(route.token, route.chain, route.gasToken)
+          : M.deposit.funding.bridgeSelfGas(route.token, route.chain)} />
       ) : (
         <InstrLine runs={M.deposit.funding.buyThenConvert(route.viaToken, route.targetSymbol)} />
       )}

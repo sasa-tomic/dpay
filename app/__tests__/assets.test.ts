@@ -307,22 +307,33 @@ describe('testKey — unique stable ASCII', () => {
 // 6. Network qualification — two USDC assets carry distinct networkLabels
 // =============================================================================================
 describe('Network qualification — IC USDC vs Solana USDC', () => {
-  // X23 — the subtitle names where the asset SETTLES, which is the chain whose address the very
-  // next screen shows. ckUSDC settles on the Internet Computer and is only BACKED by Ethereum; the
-  // subtitle used to name the backing chain, so the account row said "USDC · Ethereum" over an
-  // Internet Computer principal. The two USDC rows still have to be distinguishable — that was
-  // this test's real subject and it still holds, on the chain that actually differs.
-  it('IC USDC names the Internet Computer, Solana USDC names Solana — and never the backing chain', () => {
+  // X23 — a chain-key row names BOTH its chains, in the direction they relate. Each half alone has
+  // shipped and each was wrong: "USDC · Ethereum" put a row that reads as Ethereum USDC over an
+  // Internet Computer principal (money-loss-shaped), and the over-correction to "USDC · Internet
+  // Computer" hid the chain the deposit actually runs on, so the row appeared to contradict its own
+  // deposit sheet ("Send only USDC on Ethereum"). Founder decision 2026-09-09: both, concisely.
+  // The two USDC rows still have to be distinguishable — that was this test's original subject and
+  // it still holds.
+  it('IC USDC names BOTH its chains in direction; Solana USDC names Solana', () => {
     const assets = buildSelectableAssets([DEMO, CKUSDC], {showTestnet: false, solanaEnabled: true, solanaTokens: true});
     const icUsdc = assets.find(a => a.id === 'ic:2')!;
     const solUsdc = assets.find(a => a.id === 'solana:USDC')!;
     expect(icUsdc.networkLabel).not.toBe(solUsdc.networkLabel);
-    expect(icUsdc.networkLabel).toMatch(/Internet Computer/);
-    expect(icUsdc.networkLabel).not.toMatch(/Ethereum/);
+    // The ORDER is the meaning: bridged FROM Ethereum, settles ON the Internet Computer. Reversed,
+    // the row would say the deposit runs on the IC and the address is on Ethereum — both false.
+    expect(icUsdc.networkLabel).toBe('USDC · Ethereum → Internet Computer');
     expect(solUsdc.networkLabel).toMatch(/Solana/);
-    // The BACKING chain is not lost — it moves to the field the deposit sheets read, which is
-    // where "send USDC on Ethereum" is the true instruction.
+    // The backing chain is also still the field the deposit sheets read, which is where "send USDC
+    // on Ethereum" is the true instruction for the minter route.
     expect(icUsdc.network).toBe('Ethereum');
+  });
+
+  it('a row already ON the Internet Computer names one chain, not an arrow to itself', () => {
+    // VCHF/ICP are not bridged from anywhere. "VCHF · Internet Computer → Internet Computer" would
+    // be noise dressed as a fact, so the two-chain form is reserved for rows that have two.
+    const vchf = buildSelectableAssets(icpCatalogOf(BUNDLED_NETWORKS), {showTestnet: false, solanaEnabled: false})
+      .find(a => a.id === 'ic:7')!;
+    expect(vchf.networkLabel).toBe('VCHF · Internet Computer');
   });
 
   it('SOL networkLabel references Solana (distinct from any IC asset)', () => {

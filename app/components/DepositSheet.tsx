@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {View, Text, Pressable, ActivityIndicator, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {C} from '../config/palette';
@@ -32,7 +32,7 @@ import {M} from '../i18n';
  * Fee/min/confirmations still come from the relay's read-only /deposit/info (display-only
  * network facts).
  */
-export function DepositSheet({identity, relayUrl, catalog, currency, display, onClose}: {identity: Identity; relayUrl: string; catalog: CurrencyDescriptor[]; currency: number; display: FamilyDisplay; onClose: () => void}) {
+export function DepositSheet({identity, relayUrl, catalog, currency, display, funding, onClose}: {identity: Identity; relayUrl: string; catalog: CurrencyDescriptor[]; currency: number; display: FamilyDisplay; funding?: ReactNode; onClose: () => void}) {
   const [info, setInfo] = useState<DepositInfo | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [mintedTotal, setMintedTotal] = useState<string | null>(null);
@@ -249,6 +249,11 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, on
               ? <ActivityIndicator size="small" color={C.brandText} />
               : <Text style={S.checkBtnText}>{M.deposit.checkNow}</Text>}
           </Pressable>
+
+          {/* The step BEFORE the address: this sheet shows a real Bitcoin address and says nothing
+              about where a traveller gets Bitcoin. Built by the caller (see IcrcDepositSheet's note
+              on why), placed here — below the address, and never over the minted state. */}
+          {funding}
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
         </>

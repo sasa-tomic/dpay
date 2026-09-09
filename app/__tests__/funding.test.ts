@@ -3,67 +3,134 @@
  * the measured provider evidence live in `docs/specs/2026-09-09-funding-routes-plan.md`).
  *
  * These are claims about the world, not about a renderer, which is why `fundingRoute` is pure and
- * tested here rather than inlined into the deposit surfaces. What is asserted:
- *   - each asset family resolves to the route that actually works for it, including the two that
- *     are easy to get wrong: a chain-key asset is a ONE-HOP buy of its backing asset (you buy BTC
- *     and send it to the address the sheet already shows), while VCHF has no card route anywhere
- *     and must go through native ICP;
- *   - play money is never given a funding route, because it is not money;
- *   - the provider table obeys the regulatory constraints it exists under: alphabetical (no
- *     ranking), no referral parameters, and every figure carrying the date it was read.
+ * tested here rather than inlined into the deposit surfaces.
+ *
+ * ── WHY EVERY ASSET HERE COMES FROM THE REAL CATALOG ─────────────────────────────────────────
+ * The first version of this file hand-typed its `SelectableAsset` fixtures, and one of them was a
+ * shape the app cannot produce: play money with `linkToken: null`, where the real builder emits
+ * `'DEMO'`. So the test that proved "play money is never given a funding route" was proving it
+ * about an asset that does not exist, while the real DEMO row fell through to the convert branch.
+ * Every asset below is now built by `buildSelectableAssets` from `BUNDLED_NETWORKS` — the same two
+ * functions the app calls — so a fixture cannot describe a wallet nobody has.
+ *
+ * ── AND WHY THE MECHANISM IS PASSED IN ───────────────────────────────────────────────────────
+ * `fundingRoute` used to infer how money arrives from `asset.network`, a DISPLAY fact about what a
+ * chain-key asset is backed by. That produced the defect this file now guards: ckUSDC was told to
+ * "buy USDC and send it to the address above" on a screen showing an Internet Computer principal,
+ * when its real deposit is a transaction the user's own Ethereum wallet signs plus separate ETH for
+ * gas. The mechanism now comes from `depositMechanism()` — the catalog's own `minter_family` — and
+ * the same value picks the deposit sheet, so the instruction and the surface cannot disagree.
  */
 import {describe, test, expect} from '@jest/globals';
 import {
-  fundingRoute, fundsByConversion, bankRouteApplies,
+  fundingRoute, bankRouteApplies,
   FUNDING_PROVIDERS, FUNDING_SOURCES_READ_ON,
 } from '../config/funding';
-import type {SelectableAsset} from '../config/assets';
-import {USDC_MINT_ADDRESS} from '../solana/tokens';
+import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
+import {BUNDLED_NETWORKS, depositMechanism, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 
-const demo: SelectableAsset = {id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', networkLabel: 'play money', network: null, decimals: 2, linkToken: null, minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'demo'};
-const ckbtc: SelectableAsset = {id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'BTC', networkLabel: 'BTC · Bitcoin', network: 'Bitcoin', decimals: 8, linkToken: 'ckBTC', minFractionDigits: 0, liquidity: null, onramp: 'Direct', offramp: 'Direct', rampPartner: null, visible: true, testKey: 'ckbtc'};
-const vchf: SelectableAsset = {id: 'ic:7', protocol: 'ic', currency: 7, symbol: 'VCHF', networkLabel: 'VCHF · Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'VCHF', minFractionDigits: 2, liquidity: 'thin', onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'vchf'};
-const icp: SelectableAsset = {id: 'ic:8', protocol: 'ic', currency: 8, symbol: 'ICP', networkLabel: 'ICP · Internet Computer', network: 'Internet Computer', decimals: 8, linkToken: 'ICP', minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'icp'};
-const solUsdc: SelectableAsset = {id: 'solana:USDC', protocol: 'solana', token: 'USDC', symbol: 'USDC', networkLabel: 'USDC · Solana', network: 'Solana', mint: USDC_MINT_ADDRESS, decimals: 6, linkToken: 'USDC', minFractionDigits: 2, liquidity: 'deep', onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'sol-usdc'};
+const CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
+const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: true, solanaEnabled: true, solanaTokens: true});
 
-describe('fundingRoute', () => {
+/** One shipped row, by the id the app itself derives. Throws rather than skipping: a catalog that
+ *  stopped carrying an asset this file reasons about is news, not a reason to pass. */
+function asset(id: string): SelectableAsset {
+  const found = ASSETS.find(a => a.id === id);
+  if (!found) throw new Error(`no asset ${id} in the bundled catalog — this test's premise changed`);
+  return found;
+}
+/** The mechanism the app would use for that row — the same call `ReceiveMode` makes to pick the
+ *  deposit sheet, so these cases describe the screen the user actually lands on. */
+function mech(id: string) {
+  const a = asset(id);
+  return depositMechanism(a.protocol === 'ic' ? CATALOG.find(c => c.currency === a.currency) : null);
+}
+
+const DEMO = 'ic:0', CKBTC = 'ic:1', CKUSDC = 'ic:2', CKETH = 'ic:6', VCHF = 'ic:7', ICP = 'ic:8';
+const SOL_USDC = 'solana:USDC';
+
+describe('fundingRoute — the route is the DEPOSIT MECHANISM, never the chain a token is backed by', () => {
   test('a Solana asset is bought directly and sent to the address on screen', () => {
-    expect(fundingRoute(solUsdc, false)).toEqual({kind: 'buy', token: 'USDC', networkLabel: 'USDC · Solana'});
+    // No descriptor and no minter: every Solana row is bought on Solana and sent to a Solana
+    // address, which is what the rail's own surface asserts when it builds its instruction.
+    expect(fundingRoute(asset(SOL_USDC), false, 'send-to-address'))
+      .toEqual({kind: 'buy', token: 'USDC', chain: 'Solana'});
   });
 
   test('native ICP is bought directly — the ONE card-reachable Internet Computer asset', () => {
-    expect(fundingRoute(icp, false)).toEqual({kind: 'buy', token: 'ICP', networkLabel: 'ICP · Internet Computer'});
+    expect(mech(ICP)).toBe('icrc-transfer');
+    expect(fundingRoute(asset(ICP), false, 'icrc-transfer'))
+      .toEqual({kind: 'buy', token: 'ICP', chain: 'Internet Computer'});
   });
 
-  test('a chain-key asset is a one-hop buy of its BACKING asset, not a conversion', () => {
-    // The easy mistake: ckBTC is not sold anywhere, so it looks like it needs a convert leg. It
-    // does not — the deposit sheet already shows a real Bitcoin address, and the minter does the
-    // rest. The token to buy is plain BTC, which is exactly what the wallet already displays
-    // (backing symbols, never wrapper ids).
-    expect(fundingRoute(ckbtc, false)).toEqual({kind: 'buy', token: 'BTC', networkLabel: 'BTC · Bitcoin'});
+  test('ckBTC is a one-hop buy of plain BTC — the sheet shows a real Bitcoin address', () => {
+    // The easy mistake in the other direction: ckBTC is not sold anywhere, so it looks like it
+    // needs a convert leg. It does not — the UTXO sheet shows a real Bitcoin address and the minter
+    // does the rest. The token to buy is plain BTC (the wallet shows backing symbols, never wrapper
+    // ids) and the chain to buy it on is BITCOIN, not the Internet Computer the row settles on.
+    expect(mech(CKBTC)).toBe('send-to-address');
+    expect(fundingRoute(asset(CKBTC), false, 'send-to-address'))
+      .toEqual({kind: 'buy', token: 'BTC', chain: 'Bitcoin'});
+  });
+
+  test('ckUSDC is NOT a send-to-address deposit, and saying so is money-loss-shaped', () => {
+    // THE DEFECT THIS FILE EXISTS FOR. ckUSDC's deposit is `approve` + `depositErc20` signed by the
+    // user's own Ethereum wallet, with the gas paid separately in ETH — there is no address to send
+    // to. The old resolver read `network === 'Ethereum'` and produced "buy USDC and send it to the
+    // address above", on the surface that shows an Internet Computer principal.
+    expect(mech(CKUSDC)).toBe('evm-wallet');
+    const route = fundingRoute(asset(CKUSDC), false, 'evm-wallet');
+    expect(route).toEqual({kind: 'bridge', token: 'USDC', chain: 'Ethereum', gasToken: 'ETH'});
+    // The gas coin is the catalog's own answer (ckUSDC's `gas_ledger` is the ckETH ledger), not a
+    // constant typed here — a wallet with no ETH cannot complete this deposit at all.
+    const usdc = asset(CKUSDC);
+    expect(usdc.protocol === 'ic' ? usdc.gasToken : null).toBe('ETH');
+  });
+
+  test('ckETH is the same wallet-signed deposit, but it pays its own gas', () => {
+    // `token_contract` is null, so the deposit is ONE payable `depositEth` and the fee comes out of
+    // the same ETH. Naming a separate gas coin here would tell the user to go and get a second
+    // holding they do not need.
+    expect(mech(CKETH)).toBe('evm-wallet-native');
+    expect(fundingRoute(asset(CKETH), false, 'evm-wallet-native'))
+      .toEqual({kind: 'bridge', token: 'ETH', chain: 'Ethereum', gasToken: null});
   });
 
   test('VCHF has no card route anywhere, so it goes through native ICP and a user-signed convert', () => {
-    expect(fundingRoute(vchf, false)).toEqual({kind: 'convert', viaToken: 'ICP', targetSymbol: 'VCHF'});
-    expect(fundsByConversion(vchf, false)).toBe(true);
-    expect(fundsByConversion(icp, false)).toBe(false);
+    expect(mech(VCHF)).toBe('icrc-transfer');
+    expect(fundingRoute(asset(VCHF), false, 'icrc-transfer'))
+      .toEqual({kind: 'convert', viaToken: 'ICP', targetSymbol: 'VCHF'});
   });
 
-  test('a TESTNET coin is sent to a faucet, never to a card provider', () => {
+  test('a TESTNET coin is sent to a faucet, never to a card provider — and keeps its mechanism', () => {
     // The naive check is `network !== 'Internet Computer' ⇒ buy it`, which cheerfully tells the
     // user to purchase testnet BTC from MoonPay. Testnet-ness is server-declared, so it is passed
     // in rather than inferred from a label.
-    expect(fundingRoute({...ckbtc, symbol: 'BTC testnet', networkLabel: 'BTC testnet · Bitcoin Testnet'}, true))
-      .toEqual({kind: 'testnet', symbol: 'BTC testnet', networkLabel: 'BTC testnet · Bitcoin Testnet'});
+    expect(fundingRoute(asset(CKBTC), true, 'send-to-address'))
+      .toEqual({kind: 'testnet', symbol: 'BTC', chain: 'Bitcoin', viaWallet: false});
+    // A faucet coin on the ckERC20 rail still arrives by a signed transaction, so the faucet
+    // instruction must not end with "send it to the address above" either.
+    expect(fundingRoute(asset(CKUSDC), true, 'evm-wallet'))
+      .toEqual({kind: 'testnet', symbol: 'USDC', chain: 'Ethereum', viaWallet: true});
     // And testnet-ness outranks every other branch, including the Solana one.
-    expect(fundingRoute(solUsdc, true).kind).toBe('testnet');
+    expect(fundingRoute(asset(SOL_USDC), true, 'send-to-address').kind).toBe('testnet');
   });
 
-  test('play money is never given a funding route', () => {
+  test('play money is never given a funding route — the REAL play-money row, not a fixture', () => {
     // Offering to sell someone play money is the scam signature the first-run work exists to
-    // remove, and it would be a lie besides — no provider sells it and it has no cash value.
-    expect(fundingRoute(demo, false)).toEqual({kind: 'none'});
-    expect(fundsByConversion(demo, false)).toBe(false);
+    // remove, and it would be a lie besides — no provider sells it and it has no cash value. The
+    // shipped DEMO row carries `linkToken: 'DEMO'` and a null network, which the old resolver read
+    // as "an Internet Computer token nobody sells" and answered with a convert route.
+    expect(asset(DEMO).linkToken).toBe('DEMO');
+    expect(mech(DEMO)).toBe('none');
+    expect(fundingRoute(asset(DEMO), false, 'none')).toEqual({kind: 'none'});
+  });
+
+  test('a row with no honest instruction gets no card, rather than an invented chain', () => {
+    // An IC row whose network the catalog does not declare cannot be instructed on. Fail closed:
+    // no card beats a card naming a chain nobody said.
+    const nameless = {...asset(CKBTC), network: null} as SelectableAsset;
+    expect(fundingRoute(nameless, false, 'send-to-address')).toEqual({kind: 'none'});
   });
 });
 

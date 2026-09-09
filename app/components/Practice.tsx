@@ -307,6 +307,10 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
           <PaymentReview
             catalog={catalog}
             intent={intent}
+            // Never the user's own account: the practice payee is `PRACTICE_PAYEE_PUBKEY`, a fixed
+            // keyless address nobody holds the key to, which is the whole reason the money is gone
+            // for good rather than round-tripping. Stated rather than computed.
+            isSelf={false}
             // Practice only ever reaches this screen with a balance it has just READ, so the
             // warn-but-allow case the Pay tab keeps for a stale offline balance cannot arise here:
             // a shortfall is known, and a known shortfall blocks.

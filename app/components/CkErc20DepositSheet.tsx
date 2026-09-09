@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {C} from '../config/palette';
@@ -38,7 +38,7 @@ import {M} from '../i18n';
 // by `nativeEth` (descriptor.token_contract == null):
 //  - ERC-20 (USDC/USDT/DAI): TWO txs — approve(helper, amount) on the ERC-20, then depositErc20(...).
 //  - native ETH: ONE payable tx — depositEth(principal) carrying the ETH `value` (Wei).
-export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, display, chainId, nativeEth, ledger, icSymbol, onClose}: {
+export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, display, chainId, nativeEth, ledger, icSymbol, funding, onClose}: {
   identity: Identity;
   relayUrl: string;
   currency: number;
@@ -48,6 +48,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   nativeEth: boolean; // true ⇒ native-ETH single-tx deposit (depositEth); false ⇒ ERC-20 two-tx (approve + depositErc20)
   ledger: string; // the ICRC-1 ledger principal for this currency — the WATCH target (signed icrc1_balance_of at the user principal)
   icSymbol: string; // the ICRC-1 ledger token symbol ('ckUSDC'/'ckETH') — names the asset in the "Already on the Internet Computer?" section
+  funding?: ReactNode; // "Don't have any yet?" — built by the caller from the mechanism that chose this sheet
   onClose: () => void;
 }) {
   // phase: 'connect' (no wallet yet) → 'enter' (wallet connected, enter amount) → 'sending' (txs
@@ -557,6 +558,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
             {/* Secondary route: plain ICRC-1 transfer for funds already on the IC (no Ethereum
                 txs, no gas) — the watching poll above detects it like any mint. */}
             <IcrcAccountSection symbol={icSymbol} principal={selfPrincipal} />
+            {/* The step before all of it, for the user who holds nothing anywhere. Only on the
+                CONNECT phase: once a wallet is attached the question is answered. */}
+            {funding}
           </View>
         )
       ) : phase === 'enter' || phase === 'sending' ? (

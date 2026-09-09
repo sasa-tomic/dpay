@@ -6,7 +6,7 @@ import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {encodePayLink, shareOrigin, decodeReceiptDeeplink, parseRailProof} from '../lib/deepLink';
-import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol, isDirectIcrcAsset} from '../config/catalog';
+import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol, depositMechanism, isTestnetCurrency} from '../config/catalog';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {type HomeCurrency, currencyRails} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
@@ -23,6 +23,7 @@ import {TillCharge} from './TillCharge';
 import {DepositSheet} from './DepositSheet';
 import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {IcrcDepositSheet} from './IcrcDepositSheet';
+import {FundingRoutes} from './FundingRoutes';
 import {RailDisclosure} from './RailDisclosure';
 import {AssetPicker} from './AssetPicker';
 import {AssetSwitchRow} from './AssetSwitchRow';
@@ -45,13 +46,13 @@ import {M} from '../i18n';
 // object froze the light theme's white field + near-black ink into the dark theme's memo input.
 const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
 
-export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, depositFamily, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; depositFamily: 'CkBtcUtxo' | 'CkEthErc20' | null; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void}) {
+export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, catalog, depositCurrency, depositDisplay, depositChainId, depositNativeEth, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, depositReturnLabel = null, onReturnFromDeposit, prefillReceipt, onReceiptConsumed, selectedCurrency, assets, selectedAssetId, balances, onSelectAsset, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; online: boolean; nfcStatus: NfcStatus; onReceived: () => void; catalog: CurrencyDescriptor[]; depositCurrency: number; depositDisplay: FamilyDisplay | null; depositChainId: number | null; depositNativeEth: boolean; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; depositReturnLabel?: string | null; onReturnFromDeposit?: () => void; prefillReceipt?: string | null; onReceiptConsumed?: () => void; selectedCurrency: number; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; onLockChange?: (locked: boolean) => void; homeCurrency?: HomeCurrency | null; onReceiveRailChange?: (id: AssetId) => void}) {
   // The within-tab sub-mode is OWNED by Wallet so deeplinks (?screen=deposit, auto-open-ckERC20) can
   // land the user directly on "My address". "request" = the dpay-to-dpay payment-request QR;
-  // "address" = the on-chain deposit flow. The toggle renders when depositFamily is non-null OR
-  // the active asset is a complete no-minter direct-ICRC row (VCHF/ICP — its "My address" is the
-  // user's own ICRC-1 principal; founder hard rule 2026-08-29: every asset gives real top-up
-  // instructions, never a hidden surface or a "check back soon" dead end).
+  // "address" = the on-chain deposit flow. The toggle renders whenever this asset HAS a deposit —
+  // `depositMechanism(...) !== 'none'`, the same switch that picks the sheet behind it (founder hard
+  // rule 2026-08-29: every asset gives real top-up instructions, never a hidden surface or a "check
+  // back soon" dead end).
   //
   // Phase 4 (2026-08-12 unified asset selection rewrite): the merchant's chosen settlement asset
   // arrives as the `selectedCurrency` PROP from Wallet's single owned `selectedAssetId` — there is
@@ -150,7 +151,6 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   // descriptor directly (NOT familyDisplay, which falls back to BTC's 8 + would mis-render DEMO's
   // 2). The amount-input prefix is the currency's display glyph (∂/₿/$) via currencySymbol.
   const reqDesc = catalog.find(c => c.currency === selectedCurrency);
-  const directIcrc = isDirectIcrcAsset(reqDesc);
   const reqDecimals = reqDesc?.decimals ?? 2;
   const reqPrefix = currencySymbol(catalog, selectedCurrency);
 
@@ -410,54 +410,74 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     );
   }
 
-  // "My address" sub-mode: render the on-chain deposit-address flow INLINE for the active IC
-  // asset (mirrors Wallet's old family routing). A two-rail HOME-currency group resolves FIRST:
-  // when the shown rail is the group's IC rail (home=USD on ckUSDC), its "My address" is that
-  // rail's own address — the user's ICRC-1 principal on the group's ledger — disclosed as a rail
-  // pick with its fee fact and a sibling toggle (Objective 2). Otherwise the family routing:
-  // CkBtcUtxo → DepositSheet body; CkEthErc20 → CkErc20DepositSheet body (native-ETH vs ERC-20
-  // via depositNativeEth); a complete no-minter direct-ICRC row (VCHF/ICP) → IcrcDepositSheet —
-  // the user's own ICRC-1 principal with real top-up instructions (founder hard rule 2026-08-29 —
-  // no "check back soon" dead ends). The toggle above lets the user flip back to "Request
-  // payment". The sheets are inline-only (no overlay chrome — the tab body provides the surface).
+  // "My address" sub-mode: render the on-chain deposit flow INLINE for the active IC asset.
+  //
+  // ONE switch decides everything here — `depositMechanism`, the catalog's own answer to "how does
+  // money get in for this row" (config/catalog.ts owns the four answers and why they are not
+  // interchangeable). It picks the sheet AND is handed to the sheet's funding card, so the
+  // instruction is written from the mechanism that is actually running. This used to be three
+  // separate conditions and they disagreed: a two-rail HOME-currency group resolved FIRST, so on a
+  // USD wallet ckUSDC — the DEFAULT rail — took the direct-ICRC sheet, which meant the Ethereum
+  // minter route was unreachable from Receive at all, and the funding card underneath it offered to
+  // buy USDC and send it to the Internet Computer principal on screen. Nothing is lost by letting
+  // the family win: `CkErc20DepositSheet` carries the ICRC-transfer route itself
+  // (`IcrcAccountSection`), so it is the strictly richer of the two, and the rail disclosure below
+  // is keyed on the GROUP rather than on the sheet, so it still renders.
+  //
+  // A complete no-minter direct-ICRC row (VCHF/ICP/VEUR) → IcrcDepositSheet: the user's own ICRC-1
+  // principal with real top-up instructions (founder hard rule 2026-08-29 — no "check back soon"
+  // dead ends). The toggle above lets the user flip back to "Request payment". The sheets are
+  // inline-only (no overlay chrome — the tab body provides the surface).
   const homeRails = homeCurrency != null ? currencyRails(homeCurrency, assets) : [];
   const homeRailShown = homeRails.length === 2 ? homeRails.find(r => r.id === selectedAssetId) ?? null : null;
-  const homeIcRail = homeRailShown != null && homeRailShown.protocol === 'ic' ? homeRailShown : null;
+  const depositDesc = catalog.find(c => c.currency === depositCurrency) ?? null;
+  const mechanism = depositMechanism(depositDesc);
+  // The funding card, built ONCE from the mechanism that chose the sheet below. Each sheet decides
+  // WHERE to place it and in which phase — a completed deposit must not be asked "don't have any
+  // yet?" — but none of them assembles one, so none can describe a deposit it does not implement.
+  const fundingCard = activeAsset != null ? (
+    <FundingRoutes
+      asset={activeAsset}
+      isTestnet={depositDesc !== null && isTestnetCurrency(depositDesc)}
+      mechanism={mechanism}
+      homeCurrency={homeCurrency}
+    />
+  ) : null;
   const addressSheet =
-    homeIcRail != null ? (
-      <IcrcDepositSheet homeCurrency={homeCurrency}
-        identity={identity}
-        catalog={catalog}
-        asset={homeIcRail}
-        onClose={() => onSubModeChange('request')}
-      />
-    ) : depositFamily === 'CkEthErc20' && depositDisplay ? (
-      <CkErc20DepositSheet
-        identity={identity}
-        relayUrl={relayUrl}
-        currency={depositCurrency}
-        decimals={catalog.find(c => c.currency === depositCurrency)?.decimals ?? depositDisplay.amountDecimals}
-        display={depositDisplay}
-        chainId={depositChainId}
-        nativeEth={depositNativeEth}
-        ledger={catalog.find(c => c.currency === depositCurrency)?.ledger ?? ''}
-        icSymbol={catalog.find(c => c.currency === depositCurrency)?.wrapper_name ?? catalog.find(c => c.currency === depositCurrency)?.symbol ?? ''}
-        onClose={() => onSubModeChange('request')}
-      />
-    ) : depositFamily === 'CkBtcUtxo' && depositDisplay ? (
-      <DepositSheet
-        identity={identity}
-        relayUrl={relayUrl}
-        catalog={catalog}
-        currency={depositCurrency}
-        display={depositDisplay}
-        onClose={() => onSubModeChange('request')}
-      />
-    ) : directIcrc && activeAsset ? (
-      <IcrcDepositSheet homeCurrency={homeCurrency}
+    mechanism === 'evm-wallet' || mechanism === 'evm-wallet-native' ? (
+      depositDisplay ? (
+        <CkErc20DepositSheet
+          identity={identity}
+          relayUrl={relayUrl}
+          currency={depositCurrency}
+          decimals={depositDesc?.decimals ?? depositDisplay.amountDecimals}
+          display={depositDisplay}
+          chainId={depositChainId}
+          nativeEth={depositNativeEth}
+          ledger={depositDesc?.ledger ?? ''}
+          icSymbol={depositDesc?.wrapper_name ?? depositDesc?.symbol ?? ''}
+          funding={fundingCard}
+          onClose={() => onSubModeChange('request')}
+        />
+      ) : null
+    ) : mechanism === 'send-to-address' ? (
+      depositDisplay ? (
+        <DepositSheet
+          identity={identity}
+          relayUrl={relayUrl}
+          catalog={catalog}
+          currency={depositCurrency}
+          display={depositDisplay}
+          funding={fundingCard}
+          onClose={() => onSubModeChange('request')}
+        />
+      ) : null
+    ) : mechanism === 'icrc-transfer' && activeAsset ? (
+      <IcrcDepositSheet
         identity={identity}
         catalog={catalog}
         asset={activeAsset}
+        funding={fundingCard}
         onClose={() => onSubModeChange('request')}
       />
     ) : null;
@@ -518,7 +538,11 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
 
   return (
     <View style={S.centerTop}>
-      {(depositFamily || directIcrc) && !tillLive ? (
+      {/* The toggle offers "My address" exactly when a deposit exists to show — the SAME switch
+          that picks the sheet, so the control and its destination cannot disagree. It was two other
+          conditions (a family check OR a direct-ICRC check), which is how a third answer gets to differ from
+          the first two. */}
+      {mechanism !== 'none' && !tillLive ? (
         <ModeToggle
           testID="receive-mode-toggle"
           value={subMode}

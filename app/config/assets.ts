@@ -26,6 +26,7 @@ import {
   assetTestKey,
   displayName,
   familyDisplay,
+  gasTokenOf,
   isPayableAsset,
   isTestnetCurrency,
   solanaAssetsOf,
@@ -71,6 +72,11 @@ export type SelectableAsset =
       onramp: RampCapability;  // funding capability fact, verbatim from the catalog row
       offramp: RampCapability; // cash-out capability fact, verbatim from the catalog row
       rampPartner: string | null; // named ramp partner when a capability is 'Partner' (e.g. DFX)
+      // The coin that pays the network fee on this asset's WALLET-SIGNED deposit (ckUSDC: 'ETH'),
+      // resolved by the catalog from the row's own `gas_ledger`. Null when the asset is its own gas
+      // (ckETH) or has no such deposit at all — the funding copy then says "leave a little extra"
+      // rather than naming a coin nothing declared.
+      gasToken: string | null;
       visible: boolean;        // true on every entry the builder returns (the builder IS the filter)
       testKey: string;         // stable ASCII testID key (unique within a built list)
     }
@@ -131,7 +137,7 @@ export function buildSelectableAssets(
     // former accounts-list filter (now centralized here so every selector gets identical filtering).
     if (!showTestnet && isTestnetCurrency(desc)) continue;
     seenCurrencyIds.add(desc.currency);
-    assets.push(icAsset(desc));
+    assets.push(icAsset(desc, catalog));
   }
   if (solanaEnabled) {
     // Catalog v2: the solana display facts (symbol/decimals/mint/liquidity) are CATALOG-DRIVEN —
@@ -173,34 +179,38 @@ export function visibleSolanaMints(networks?: NetworkSection[]): string[] {
 // Build the SelectableAsset view model for one IC catalog descriptor. Pure; called per visible
 // descriptor. The `id` is `ic:${currency}` — derived from the currency u32 ALONE, so a refreshed
 // descriptor object (same currency id, different metadata/reference) yields the SAME id.
-function icAsset(desc: CurrencyDescriptor): SelectableAsset {
+function icAsset(desc: CurrencyDescriptor, catalog: CurrencyDescriptor[]): SelectableAsset {
   const isPrimary = desc.currency === 0;
   const testnet = !isPrimary && isTestnetCurrency(desc);
   const name = isPrimary ? 'DEMO' : (testnet ? testnetDisplayName(desc) : displayName(desc));
   const network = isPrimary
     ? null
     : (desc.network ?? familyDisplay([desc], desc.currency)?.networkLabel ?? null);
-  // X23 — the row's subtitle names the SETTLEMENT chain, never `desc.network`.
+  // X23 — a chain-key row's subtitle names BOTH of its chains, in the direction they relate.
   //
-  // `desc.network` is the chain a chain-key asset is BACKED by: ckUSDC's is "Ethereum", ckBTC's is
+  // `desc.network` is the chain the asset is BACKED by: ckUSDC's is "Ethereum", ckBTC's is
   // "Bitcoin". Every one of these assets SETTLES on the Internet Computer, and every one of their
-  // receive addresses is an Internet Computer principal. The subtitle was built from the backing
-  // chain, so the ckUSDC account row read "USDC · Ethereum" while the address the very next screen
-  // offers for it is an IC principal — and on a USD-home wallet that row also wears the MAIN badge
-  // and nothing else on it says "Internet Computer" at all. A user who reads a row as "this is my
-  // USDC on Ethereum" and then reads an address off the account can send Ethereum USDC to a place
-  // that cannot receive it. That is money-loss-shaped, and the rail-line helper in
-  // config/currency.ts already says so in as many words about this exact construction — it just
-  // was not the function the row used.
+  // receive addresses is an Internet Computer principal. Naming ONE of the two is wrong in both
+  // directions, and the app has now shipped each mistake:
+  //   • "USDC · Ethereum" — what shipped first. A user reads the row as "my USDC on Ethereum",
+  //     reads an address off the account, and sends Ethereum USDC to a place that cannot receive
+  //     it. Money-loss-shaped, and on a USD-home wallet that row also wears the MAIN badge.
+  //   • "USDC · Internet Computer" — the over-correction. Safe about the address, and it hides the
+  //     chain the deposit actually runs on, so the row and its own deposit sheet ("Send only USDC
+  //     on Ethereum") appear to disagree.
+  // The founder's call, 2026-09-09: show both, concisely. The arrow is what makes the pair readable
+  // rather than merely present — it reads "bridged from Ethereum, lives here".
   // (Named by concept, not by identifier: `rail-choice-isolation.test.ts` greps this file's SOURCE
   // for the chooser's symbols, and that guard is worth more than the convenience of a symbol here.)
   //
-  // The BACKING SYMBOL is kept (the founder's display rule: BTC/USDC/ETH, never the ck* wrapper),
-  // so the change is to the CHAIN half alone. `desc.network` is untouched and still feeds the
-  // deposit sheets, where "send USDC on Ethereum" is the true instruction for the minter route.
+  // The BACKING SYMBOL is kept either way (the founder's display rule: BTC/USDC/ETH, never the ck*
+  // wrapper). A row already ON the Internet Computer (VCHF/ICP/VEUR) has one chain and says one.
+  const settles = prettyNetwork('internet-computer');
   const networkLabel = isPrimary
     ? M.wallet.asset.demoSubtitle
-    : M.wallet.asset.networkLabel(name, prettyNetwork('internet-computer'));
+    : network !== null && network !== settles
+      ? M.wallet.asset.bridgedLabel(name, network, settles)
+      : M.wallet.asset.networkLabel(name, settles);
   return {
     id: `ic:${desc.currency}` as const,
     protocol: 'ic',
@@ -215,6 +225,9 @@ function icAsset(desc: CurrencyDescriptor): SelectableAsset {
     onramp: desc.onramp,
     offramp: desc.offramp,
     rampPartner: desc.ramp_partner,
+    // Resolved from the row's own `gas_ledger` against the catalog it came from — the fee coin for
+    // a wallet-signed ckERC20 deposit, which the funding copy must name before the user starts.
+    gasToken: gasTokenOf(desc, catalog),
     visible: true,
     testKey: icTestKey(desc, isPrimary, testnet),
   };

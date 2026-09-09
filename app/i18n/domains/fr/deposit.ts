@@ -191,12 +191,28 @@ export const depositFr: DepositMessages = {
 
   funding: {
     title: 'Vous n\'en avez pas encore ?',
-    buyThenSend: (token, networkLabel) => [
+    buyThenSend: (token, chain) => [
       {t: 'Achetez des '},
       {t: token, em: true},
       {t: ' auprès d\'une plateforme ou d\'un fournisseur par carte qui verse sur '},
-      {t: networkLabel, em: true},
+      {t: chain, em: true},
       {t: ', puis envoyez-les à l\'adresse ci-dessus. Ils arrivent dans votre propre portefeuille — dpay ne les reçoit jamais.'},
+    ],
+    bridgeWithGas: (token, chain, gasToken) => [
+      {t: 'Pour celui-ci, il n\'y a pas d\'adresse. Achetez des '},
+      {t: token, em: true},
+      {t: ' sur '},
+      {t: chain, em: true},
+      {t: ' dans un portefeuille qui vous appartient, et gardez-y un peu d\''},
+      {t: gasToken, em: true},
+      {t: ' pour les frais de réseau. Revenez ensuite ici et connectez ce portefeuille : c\'est lui qui signe le transfert, et dpay ne détient ni l\'un ni l\'autre.'},
+    ],
+    bridgeSelfGas: (token, chain) => [
+      {t: 'Pour celui-ci, il n\'y a pas d\'adresse. Achetez des '},
+      {t: token, em: true},
+      {t: ' sur '},
+      {t: chain, em: true},
+      {t: ' dans un portefeuille qui vous appartient — un peu plus que ce que vous voulez déplacer, car les frais de réseau en sont déduits. Revenez ensuite ici et connectez ce portefeuille : c\'est lui qui signe le transfert, et dpay ne le détient jamais.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Aucun fournisseur ne vend de '},
@@ -207,7 +223,8 @@ export const depositFr: DepositMessages = {
       {t: target, em: true},
       {t: '. C\'est vous qui signez cet échange, et dpay n\'y prend aucune part.'},
     ],
-    testnetOnly: (symbol, networkLabel) => `${symbol} est de la monnaie de test : elle n\'a aucune valeur et personne n\'en vend. Procurez-vous-en gratuitement sur un faucet public ${networkLabel}, puis envoyez-la à l\'adresse ci-dessus.`,
+    testnetOnly: (symbol, chain) => `${symbol} est de la monnaie de test : elle n\'a aucune valeur et personne n\'en vend. Procurez-vous-en gratuitement sur un faucet public ${chain}, puis envoyez-la à l\'adresse ci-dessus.`,
+    testnetOnlyWallet: (symbol, chain) => `${symbol} est de la monnaie de test : elle n\'a aucune valeur et personne n\'en vend. Procurez-vous-en gratuitement sur un faucet public ${chain} dans un portefeuille qui vous appartient, puis connectez ce portefeuille ici.`,
     bankRoute: provider => `Depuis un compte bancaire suisse, ${provider} en vend directement par virement. Cela exige une vérification d\'identité complète et prend le temps d\'un virement bancaire.`,
     providersTitle: 'Où on en achète',
     costCard: rate => `carte ${rate}`,

@@ -81,7 +81,7 @@ async function renderSheet(currency: number) {
 async function renderSheetInner(currency: number) {
   let tree!: renderer.ReactTestRenderer;
   await act(async () => {
-    tree = renderer.create(<IcrcDepositSheet homeCurrency={null} identity={IDENTITY} catalog={BUNDLED_CATALOG} asset={assetOf(currency)} onClose={() => {}} />);
+    tree = renderer.create(<IcrcDepositSheet identity={IDENTITY} catalog={BUNDLED_CATALOG} asset={assetOf(currency)} onClose={() => {}} />);
   });
   await act(async () => {}); // flush the derivation effect
   return tree;
@@ -157,7 +157,7 @@ describe('IcrcDepositSheet', () => {
     const orphan: SelectableAsset = base.protocol === 'ic' ? {...base, id: 'ic:77', currency: 77} : base;
     let tree!: renderer.ReactTestRenderer;
     await act(async () => {
-      tree = renderer.create(<IcrcDepositSheet homeCurrency={null} identity={IDENTITY} catalog={BUNDLED_CATALOG} asset={orphan} onClose={() => {}} />);
+      tree = renderer.create(<IcrcDepositSheet identity={IDENTITY} catalog={BUNDLED_CATALOG} asset={orphan} onClose={() => {}} />);
     });
     await act(async () => {});
     activeTree = tree;

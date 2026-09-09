@@ -262,14 +262,27 @@ export type DepositMessages = {
    *  that dropped the qualifier would state a maximum as if it were what the user pays. */
   funding: {
     title: string;
-    /** The route: buy this token, then send it to the address this sheet is already showing. */
-    buyThenSend: (token: string, networkLabel: string) => InstrRun[];
+    /** The route: buy this token on `chain`, then send it to the address this sheet is already
+     *  showing. `chain` is the chain THE ADDRESS LIVES ON, which for an Internet Computer account is
+     *  the IC and not the chain the token is backed by — the distinction that made the first version
+     *  of this screen tell a ckUSDC holder to send Ethereum USDC to an IC principal. */
+    buyThenSend: (token: string, chain: string) => InstrRun[];
+    /** No address exists: the deposit is a transaction the user's OWN wallet signs on `chain`, and
+     *  the fee is a SEPARATE holding of `gasToken` they must already have. Never "send it to the
+     *  address above" — there is none, and the sentence loses money if it is followed. */
+    bridgeWithGas: (token: string, chain: string, gasToken: string) => InstrRun[];
+    /** The same wallet-signed deposit for the chain's own coin, which pays its own fee — so it asks
+     *  for a margin rather than a second holding. */
+    bridgeSelfGas: (token: string, chain: string) => InstrRun[];
     /** No provider anywhere sells the target asset, so it is reached through `viaToken` and a swap
      *  the user signs on their own device. */
     buyThenConvert: (viaToken: string, target: string) => InstrRun[];
     /** A test coin: no cash value, nobody sells it, and the practical instruction is a faucet
      *  rather than a provider (founder rule 2026-08-29 — every step gets an action). */
-    testnetOnly: (symbol: string, networkLabel: string) => string;
+    testnetOnly: (symbol: string, chain: string) => string;
+    /** The same faucet, for a coin that reaches the wallet through a signed transaction rather than
+     *  an address — so the sentence cannot end with "send it here". */
+    testnetOnlyWallet: (symbol: string, chain: string) => string;
     /** The Swiss bank alternative to VCHF, bounded by the approval it actually holds. */
     bankRoute: (provider: string) => string;
     /** Heading over the provider list, stating plainly that dpay is not choosing. */
@@ -469,12 +482,28 @@ export const depositEn: DepositMessages = {
 
   funding: {
     title: "Don't have any yet?",
-    buyThenSend: (token, networkLabel) => [
+    buyThenSend: (token, chain) => [
       {t: 'Buy '},
       {t: token, em: true},
       {t: ' from any exchange or card provider that pays out on '},
-      {t: networkLabel, em: true},
+      {t: chain, em: true},
       {t: ', then send it to the address above. It arrives in your own wallet — dpay never receives it.'},
+    ],
+    bridgeWithGas: (token, chain, gasToken) => [
+      {t: 'There is no address for this one. Buy '},
+      {t: token, em: true},
+      {t: ' on '},
+      {t: chain, em: true},
+      {t: ' into a wallet you control, and keep a little '},
+      {t: gasToken, em: true},
+      {t: ' in it for the network fee. Then come back here and connect that wallet — it signs the transfer, and dpay never holds either one.'},
+    ],
+    bridgeSelfGas: (token, chain) => [
+      {t: 'There is no address for this one. Buy '},
+      {t: token, em: true},
+      {t: ' on '},
+      {t: chain, em: true},
+      {t: ' into a wallet you control — a little more than you want to move, because the network fee comes out of it. Then come back here and connect that wallet — it signs the transfer, and dpay never holds it.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'No provider sells '},
@@ -485,7 +514,8 @@ export const depositEn: DepositMessages = {
       {t: target, em: true},
       {t: '. You sign that swap yourself, and dpay takes no part of it.'},
     ],
-    testnetOnly: (symbol, networkLabel) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${networkLabel} faucet, then send it to the address above.`,
+    testnetOnly: (symbol, chain) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${chain} faucet, then send it to the address above.`,
+    testnetOnlyWallet: (symbol, chain) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${chain} faucet into a wallet you control, then connect that wallet here.`,
     bankRoute: provider => `From a Swiss bank account, ${provider} sells it directly by transfer. It needs full identity checks and takes bank-transfer time.`,
     providersTitle: 'Where people buy it',
     costCard: rate => `card ${rate}`,

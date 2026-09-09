@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef, useState} from 'react';
+import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
 import {View, Text, Pressable, ActivityIndicator, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {C} from '../config/palette';
@@ -15,9 +15,6 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {IconCheck, IconCopy} from './icons';
 import {InstrLine} from './InstrLine';
 import {M} from '../i18n';
-import {FundingRoutes} from './FundingRoutes';
-import {isTestnetCurrency} from '../config/catalog';
-import type {HomeCurrency} from '../config/currency';
 
 /**
  * IC-rail receive sheet (2026-08-29 founder hard rule: every funding gate gives useful practical
@@ -35,7 +32,7 @@ import type {HomeCurrency} from '../config/currency';
  * routing); this sheet fails closed only on incomplete data. Receive detection is the same
  * honest watch as DepositSheet: a signed icrc1_balance_of baseline + strictly-higher delta.
  */
-export function IcrcDepositSheet({identity, catalog, asset, homeCurrency, onClose}: {identity: Identity; catalog: CurrencyDescriptor[]; asset: SelectableAsset; homeCurrency: HomeCurrency | null; onClose: () => void}) {
+export function IcrcDepositSheet({identity, catalog, asset, funding, onClose}: {identity: Identity; catalog: CurrencyDescriptor[]; asset: SelectableAsset; funding?: ReactNode; onClose: () => void}) {
   // SelectableAsset is a discriminated union and this sheet is IC-only by contract (ReceiveMode's
   // rail routing never passes a Solana row); a stray non-IC row narrows to a null descriptor and
   // hits the same fail-closed path as an incomplete one.
@@ -184,9 +181,12 @@ export function IcrcDepositSheet({identity, catalog, asset, homeCurrency, onClos
 
           {/* The step BEFORE the address (founder direction 2026-09-09). This sheet's instructions
               are complete and were still a dead end: "send VCHF from an Internet Computer wallet"
-              names a thing the target user has never heard of. Testnet-ness comes from the catalog
-              descriptor — server-declared, never inferred. */}
-          <FundingRoutes asset={asset} isTestnet={desc !== null && isTestnetCurrency(desc)} homeCurrency={homeCurrency} />
+              names a thing the target user has never heard of. Built by the CALLER, because the
+              caller is what picked this sheet: the mechanism that routed here is the mechanism the
+              instruction must be written from, and a sheet that assembled its own could describe a
+              different deposit than the one it implements. Placement is this sheet's, though — it
+              renders only in the waiting state, never over a completed deposit. */}
+          {funding}
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
         </>

@@ -1208,7 +1208,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
                     onReceived={onActivity} catalog={catalog}
                     depositCurrency={selectedCurrency}
                     depositDisplay={depositDisplay} depositChainId={depositChainId}
-                    depositNativeEth={depositNativeEth} depositFamily={depositFamily}
+                    depositNativeEth={depositNativeEth}
                     subMode={receiveSubMode} onSubModeChange={setReceiveSubMode}
                     codeForm={receiveCodeForm} onCodeFormChange={setReceiveCodeForm}
                     tillAvailable={capabilities.till}

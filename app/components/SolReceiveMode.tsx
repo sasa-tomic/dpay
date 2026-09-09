@@ -4,7 +4,7 @@ import {QrCode} from './QrCode';
 import bs58 from 'bs58';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
-import {QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
+import {IS_SOLANA_DEVNET, QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
@@ -31,6 +31,7 @@ import {NfcStatusRow} from './NfcStatusRow';
 import {ModeToggle} from './ModeToggle';
 import {TillCharge} from './TillCharge';
 import {SolanaReceiveSheet} from './SolanaReceiveSheet';
+import {FundingRoutes} from './FundingRoutes';
 import {RailDisclosure} from './RailDisclosure';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
@@ -216,6 +217,13 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       : tokenAtaStatus === 'absent' ? 'absent'
       : tokenAtaStatus === 'loading' ? 'checking'
       : 'unverified';
+    // "Don't have any yet?" — the Solana rail has ONE deposit mechanism and no catalog descriptor
+    // to read it from: a Solana address, on Solana, which every named provider pays out to. It is
+    // asserted here rather than derived because this surface IS that mechanism. Devnet is the rail's
+    // own testnet declaration — a devnet coin comes from a faucet, never from a card provider.
+    const fundingCard = linkAsset != null ? (
+      <FundingRoutes asset={linkAsset} isTestnet={IS_SOLANA_DEVNET} mechanism="send-to-address" homeCurrency={homeCurrency} />
+    ) : null;
     return (
       <View style={S.centerTop}>
         {toggle}
@@ -258,6 +266,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           onRetryAta={isSpl ? onRefreshToken : onRefreshSol}
           returnLabel={depositReturnLabel}
           onReturn={onReturnFromDeposit}
+          funding={fundingCard}
           onClose={() => onSubModeChange('request')}
         />
       </View>

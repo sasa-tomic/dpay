@@ -128,6 +128,7 @@ export const walletDe: WalletMessages = {
   asset: {
     demoSubtitle: 'Spielgeld zum Testen',
     networkLabel: (symbol, network) => `${symbol} · ${network}`,
+    bridgedLabel: (symbol, from, to) => `${symbol} · ${from} → ${to}`,
     unsupported: 'Nicht unterstützt',
     testnetName: base => `${base} Testnet`,
     testnet: 'Testnet',

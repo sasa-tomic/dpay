@@ -189,12 +189,28 @@ export const depositDe: DepositMessages = {
 
   funding: {
     title: 'Noch nichts davon?',
-    buyThenSend: (token, networkLabel) => [
+    buyThenSend: (token, chain) => [
       {t: 'Kaufen Sie '},
       {t: token, em: true},
       {t: ' bei einer Börse oder einem Kartenanbieter mit Auszahlung auf '},
-      {t: networkLabel, em: true},
+      {t: chain, em: true},
       {t: ' und senden Sie es an die Adresse oben. Es landet in Ihrer eigenen Wallet — dpay erhält es nie.'},
+    ],
+    bridgeWithGas: (token, chain, gasToken) => [
+      {t: 'Dafür gibt es keine Adresse. Kaufen Sie '},
+      {t: token, em: true},
+      {t: ' auf '},
+      {t: chain, em: true},
+      {t: ' in eine Wallet, die Ihnen gehört, und halten Sie dort etwas '},
+      {t: gasToken, em: true},
+      {t: ' für die Netzwerkgebühr bereit. Kommen Sie dann hierher zurück und verbinden Sie diese Wallet — sie signiert die Überweisung, und dpay hält weder das eine noch das andere.'},
+    ],
+    bridgeSelfGas: (token, chain) => [
+      {t: 'Dafür gibt es keine Adresse. Kaufen Sie '},
+      {t: token, em: true},
+      {t: ' auf '},
+      {t: chain, em: true},
+      {t: ' in eine Wallet, die Ihnen gehört — etwas mehr, als Sie bewegen wollen, denn die Netzwerkgebühr geht davon ab. Kommen Sie dann hierher zurück und verbinden Sie diese Wallet — sie signiert die Überweisung, und dpay hält sie nie.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Kein Anbieter verkauft '},
@@ -205,7 +221,8 @@ export const depositDe: DepositMessages = {
       {t: target, em: true},
       {t: ' tauschen. Diesen Tausch signieren Sie selbst, und dpay ist daran nicht beteiligt.'},
     ],
-    testnetOnly: (symbol, networkLabel) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${networkLabel}-Faucet und senden Sie es an die Adresse oben.`,
+    testnetOnly: (symbol, chain) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet und senden Sie es an die Adresse oben.`,
+    testnetOnlyWallet: (symbol, chain) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet in eine eigene Wallet und verbinden Sie diese Wallet hier.`,
     bankRoute: provider => `Von einem Schweizer Bankkonto verkauft ${provider} es direkt per Überweisung. Dafür ist eine vollständige Identitätsprüfung nötig, und es dauert so lange wie eine Banküberweisung.`,
     providersTitle: 'Wo man es kauft',
     costCard: rate => `Karte ${rate}`,

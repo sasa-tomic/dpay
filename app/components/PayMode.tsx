@@ -103,6 +103,20 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // through to the QR-only scan surface, with a per-reason explanation in the info popup below.
   const nfcReady = nfcStatus === 'ready';
 
+  // The wallet's own ICRC-1 account — the self-send guard for every payment path (X20). Paying
+  // yourself was warned about on Send-to-address and nowhere else, so a payment link naming your own
+  // principal, or your own request QR scanned back, went through in silence. Derived locally (pure,
+  // no network); a failed derivation leaves the warning absent, which is logged rather than
+  // surfaced — it blocks nothing and is not the payer's problem.
+  const [selfAccount, setSelfAccount] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    DpayCore.icpSelfPrincipal(identity.secretHex)
+      .then((p) => { if (alive) setSelfAccount(p); })
+      .catch((e: unknown) => { console.warn('icpSelfPrincipal failed (no self-send warning):', e instanceof Error ? e.message : String(e)); });
+    return () => { alive = false; };
+  }, [identity.secretHex]);
+
   // The SELECTED asset's facts, derived once: both the scan handler (which must know whether a
   // scanned address has anywhere to go) and the send/fund surfaces below read them.
   const gateDesc = catalog.find(c => c.currency === withdrawCurrency) ?? null;
@@ -812,6 +826,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // lexicographic string compare (which would wrongly rank "9" > "10").
     const insufficient = reqBalance != null && cmpRaw(intent.amount, reqBalance) > 0;
     const blockApprove = online && insufficient;
+    // `toAccount` is the ICRC-1 owner principal on every entry — derived from the request's payee
+    // pubkey on the wire path, parsed from the link on the other — so one comparison covers them
+    // all. Null while the derivation is in flight: no warning is shown, and none is claimed.
+    const isSelf = selfAccount !== null && intent.toAccount === selfAccount;
     if (intent.source === 'link' || intent.source === 'ocp') {
       // Link entry (zero-press): the full review card — the single Approve press IS the consent.
       // An OpenCryptoPay till lands here too, for the same reason: the amount, the destination and
@@ -824,6 +842,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <PaymentReview
           catalog={catalog}
           intent={intent}
+          isSelf={isSelf}
           insufficient={insufficient}
           blockApprove={blockApprove}
           err={err}
@@ -861,7 +880,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       <View style={S.center}>
         <Text style={S.label}>{M.pay.paying}</Text>
         <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
-        <PayeeLine intent={intent} />
+        <PayeeLine intent={intent} isSelf={isSelf} />
         {insufficient ? (
           <Text testID="review-lowbal" style={S.warnNote}>{blockApprove
             ? M.pay.notEnoughBalance

@@ -1,4 +1,4 @@
-import {useCallback, useState} from 'react';
+import {useCallback, useState, type ReactNode} from 'react';
 import {View, Text, Pressable, Platform, ActivityIndicator} from 'react-native';
 import {QrCode} from './QrCode';
 import {IconAlert} from './icons';
@@ -53,6 +53,7 @@ export function SolanaReceiveSheet({
   onRetryAta,
   returnLabel,
   onReturn,
+  funding,
   onClose,
 }: {
   address: string;
@@ -76,6 +77,8 @@ export function SolanaReceiveSheet({
   onRetryAta?: () => void;
   returnLabel?: string | null;
   onReturn?: () => void;
+  /** "Don't have any yet?" — built by the caller from the mechanism that chose this surface. */
+  funding?: ReactNode;
   onClose: () => void;
 }) {
   const {copied, copy: doCopy} = useCopyFeedback();
@@ -225,6 +228,11 @@ export function SolanaReceiveSheet({
           <Text style={S.ghostBtnText}>{returnLabel}</Text>
         </Pressable>
       ) : null}
+
+      {/* The step BEFORE the address (founder direction 2026-09-09). Built by the caller — see
+          IcrcDepositSheet's note on why — and rendered only on the address branch, which is the one
+          state where "I don't have any yet" is the user's actual question. */}
+      {funding}
 
       {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
     </View>

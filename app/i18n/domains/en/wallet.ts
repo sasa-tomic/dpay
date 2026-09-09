@@ -235,6 +235,13 @@ export type WalletMessages = {
     /** The subtitle joiner for every other asset. NOTE: `config/assets.ts#shortNetworkTag`
       * splits the result on this exact ' · ' separator to build the collision chip tag. */
     networkLabel: (symbol: string, network: string) => string;
+    /** The subtitle for a CHAIN-KEY asset, which lives on two chains at once: it is `backing` on
+      * `from` that has been bridged onto `to`, where it settles and where its receive address is.
+      * Naming only ONE of them is wrong in both directions — "USDC · Ethereum" invites a user to
+      * send Ethereum USDC to an Internet Computer principal, and "USDC · Internet Computer" hides
+      * the chain the deposit actually runs on. The arrow carries the direction, which is what makes
+      * the pair readable rather than merely present (founder, 2026-09-09). */
+    bridgedLabel: (symbol: string, from: string, to: string) => string;
     /** The fail-closed sentinel: no honest name/amount could be resolved. */
     unsupported: string;
     /** A testnet currency's display name, and the fallback when no backing symbol exists. */
@@ -370,6 +377,7 @@ export const walletEn: WalletMessages = {
   asset: {
     demoSubtitle: 'play money for testing',
     networkLabel: (symbol, network) => `${symbol} · ${network}`,
+    bridgedLabel: (symbol, from, to) => `${symbol} · ${from} → ${to}`,
     unsupported: 'Unsupported',
     testnetName: base => `${base} testnet`,
     testnet: 'Testnet',

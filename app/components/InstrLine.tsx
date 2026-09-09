@@ -8,9 +8,9 @@ import type {InstrRun} from '../i18n/keys';
  * get the emphasis style. The sentence and the run order come from the catalog so each locale
  * controls word order; only the emphasis mapping lives here, in one place for all three sheets.
  */
-export function InstrLine({runs}: {runs: InstrRun[]}) {
+export function InstrLine({runs, testID}: {runs: InstrRun[]; testID?: string}) {
   return (
-    <Text style={S.instrLine}>
+    <Text testID={testID} style={S.instrLine}>
       {runs.map((r, i) => (r.em ? <Text key={i} style={S.instrAsset}>{r.t}</Text> : r.t))}
     </Text>
   );

@@ -71,7 +71,7 @@ const SELF_PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 // IC row, so its link reads `?asset=DEMO&network=internet-computer`.
 const DEMO_ASSET: SelectableAsset = {
   id: 'ic:0', protocol: 'ic', currency: 0, symbol: 'DEMO', linkToken: 'DEMO',
-  networkLabel: 'play money', network: null, decimals: 2, minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, visible: true, testKey: 'demo',
+  networkLabel: 'play money', network: null, decimals: 2, minFractionDigits: 0, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'demo',
 };
 
 const shareSpy = jest.spyOn(Share, 'share');
@@ -90,7 +90,6 @@ function fullProps(over: Partial<ReceiveModeProps> = {}): ReceiveModeProps {
     depositDisplay: null,
     depositChainId: null,
     depositNativeEth: false,
-    depositFamily: null,
     subMode: 'request',
     onSubModeChange: () => {},
     // The code form this suite is about is the dpay one (the share affordance lives on its request

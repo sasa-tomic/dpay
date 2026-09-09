@@ -27,6 +27,10 @@ import {Share, Platform, Text} from 'react-native';
 jest.mock('../services/native', () => ({
   DpayCore: {
     decodeRequest: jest.fn(),
+    // The self-send guard derives the wallet's own principal on mount. A fixed value that matches
+    // no test payee keeps every OTHER test in this file on the no-warning path, so the tests below
+    // that DO assert the warning have to name the destination themselves.
+    icpSelfPrincipal: jest.fn(async () => 'aaaaa-aa'),
   },
   DpayNfc: {},
 }));
@@ -512,6 +516,31 @@ describe('PayMode — pay-intent scan gate', () => {
     await act(async () => {});
     expect(textByTestID(tree, 'review-payee')).toBe(PAYEE_PRINCIPAL);
     expect(hasTestID(tree, 'review-claimed')).toBe(false);
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('paying your OWN account is warned about — the same warning Send-to-address gives', async () => {
+    // X20. `CLAUDE.md` documented the self-send warning on Send-to-address and it existed nowhere
+    // else, so a link naming your own principal — or your own request QR scanned back — reviewed in
+    // silence, and the money round-tripped minus a ledger fee. Same rule, same sentence, and a
+    // WARNING rather than a block: it is your money and there are legitimate reasons to do it.
+    jest.mocked(DpayCore.icpSelfPrincipal).mockResolvedValue(PAYEE_PRINCIPAL);
+    const tree = mountPay({prefillIntent: {...LINK_INTENT, toAccount: PAYEE_PRINCIPAL}, onPrefillConsumed: () => {}});
+    await act(async () => {});
+    expect(textByTestID(tree, 'review-self')).toBe(M.withdraw.send.selfWarning);
+    expect(hasTestID(tree, 'btn-approve')).toBe(true); // warned, never blocked
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('a link to SOMEONE ELSE carries no self warning — the guard is a comparison, not a banner', async () => {
+    jest.mocked(DpayCore.icpSelfPrincipal).mockResolvedValue('aaaaa-aa');
+    const tree = mountPay({prefillIntent: LINK_INTENT, onPrefillConsumed: () => {}});
+    await act(async () => {});
+    expect(hasTestID(tree, 'review-self')).toBe(false);
     act(() => {
       tree.unmount();
     });
