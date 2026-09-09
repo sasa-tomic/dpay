@@ -156,7 +156,7 @@ export const WALLETCONNECT_PROJECT_ID =
 // reads THIS literal and refuses to ship a build whose default is a public/non-mainnet endpoint or
 // is not answering.
 export const SOLANA_RPC_BAKED =
-  ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://mainnet.helius-rpc.com/?api-key=76929a9c-96d5-4866-9e71-f0e8a8930777');
+  ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://mainnet.helius-rpc.com/?api-key=7afb947e-4379-4204-8368-d1e47367ab54');
 
 /** Where the operator's chosen endpoint persists. Same AsyncStorage pattern as identity/relay. */
 export const SOLANA_RPC_STORAGE_KEY = 'dpay.solanaRpc.v1';

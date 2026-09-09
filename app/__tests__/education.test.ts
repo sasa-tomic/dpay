@@ -93,8 +93,27 @@ describe('education copy (the first-run practice payment + coaching)', () => {
     expect(p.cooldown.body('faucet cooldown: try again in ~58 min')).toContain('faucet cooldown: try again in ~58 min');
   });
 
-  test('the permanent footer labels play money and refuses to sell anything', () => {
-    expect(M.education.practice.punchline).toBe('Practice money has no cash value. dpay never asks you to deposit or buy anything to try it.');
+  test('the permanent footer labels play money and solicits nothing, in every locale', () => {
+    // Behaviour, not a string literal. This test used to pin the English sentence verbatim, which
+    // made it fail on a copy edit that satisfied every requirement it was protecting — and told us
+    // nothing about the other three locales. The two things that actually matter:
+    //
+    //   1. it says the money has no value (otherwise a user can believe they were given ∂100), and
+    //   2. it solicits nothing — the same anti-scam rule R1 the fail-closed branches above obey.
+    //
+    // What it must NOT do is deny something unprompted. The practice screen has just DEMONSTRATED
+    // that dpay asks for nothing; following a demonstration with a denial of the thing demonstrated
+    // is the density the UX swarm flagged (X16 — three denials in the first six screens read as a
+    // scam signature), so the denial clause was removed here and kept where a user actually has the
+    // fear: the wallet-creation screen.
+    for (const [tag, cat] of Object.entries(CATALOGS)) {
+      const punchline = cat.education.practice.punchline;
+      expect(punchline.length).toBeGreaterThan(0);
+      expect(punchline.toLowerCase()).not.toMatch(/deposit|add money|buy|top up|fund your|einzahl|kauf|deposit|comprar|depositar|achet|dépos/);
+      // Names the no-value fact in that locale's own words.
+      expect(punchline.toLowerCase()).toMatch(/no cash value|keinen gegenwert|no tiene valor|aucune valeur/);
+      expect(tag.length).toBe(2);
+    }
   });
 
   test('coaching tips: exactly the four spec surfaces, ≤2 sentences each', () => {

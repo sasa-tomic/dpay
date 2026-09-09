@@ -29,7 +29,7 @@ export const walletDe: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Schweizer Franken', USD: 'US-Dollar', EUR: 'Euro'},
     chooseTitle: 'In welcher Währung denkst du?',
-    chooseBody: 'Wähle, welche Währung zuerst erscheint. Das ändert nur Anzeige und Vorgaben; dpay bewegt oder wechselt kein Guthaben.',
+    chooseBody: 'Wähle, welche Währung zuerst erscheint. Das ändert nur Anzeige und Vorgaben.',
     railReason: {destination: 'die Zahlung verlangt diesen Weg', funded: 'du hast hier ein Guthaben'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Haupt',
@@ -196,7 +196,7 @@ export const educationDe: EducationMessages = {
     refusedBody: 'Es wurde nichts bewegt.',
     continue: 'Einrichtung fortsetzen',
     continueHint: 'Weiter zur Wahl deiner Hauptwährung',
-    punchline: 'Übungsgeld hat keinen Gegenwert. dpay fordert dich nie zu einer Einzahlung oder einem Kauf auf, um es auszuprobieren.',
+    punchline: 'Übungsgeld hat keinen Gegenwert — es ist nur dazu da, die App auszuprobieren.',
     noFaucet: {
       title: 'Hier gibt es kein Übungsgeld',
       body: 'Dieser Server gibt kein Übungsgeld aus, es gibt also nichts zum Üben. In deiner Wallet fehlt nichts — mach weiter und wähle deine Währung. Deine erste echte Zahlung kannst du jederzeit machen.',

@@ -274,7 +274,7 @@ export const walletEn: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros'},
     chooseTitle: 'Which currency do you think in?',
-    chooseBody: 'Choose which currency appears first. This changes display and defaults only; dpay does not move or convert funds.',
+    chooseBody: 'Choose which currency appears first. This changes display and defaults only.',
     railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Main',
@@ -562,7 +562,7 @@ export const educationEn: EducationMessages = {
     refusedBody: 'Nothing moved.',
     continue: 'Continue setup',
     continueHint: 'Go on to choosing your main currency',
-    punchline: 'Practice money has no cash value. dpay never asks you to deposit or buy anything to try it.',
+    punchline: 'Practice money has no cash value — it only exists to let you try the app.',
     noFaucet: {
       title: 'No practice money here',
       body: 'This server is not handing out practice money, so there is nothing to practise with. Nothing is missing from your wallet — carry on and pick your currency, and you can make your first real payment whenever you like.',

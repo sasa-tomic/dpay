@@ -30,7 +30,7 @@ export const walletEs: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Francos suizos', USD: 'Dólares estadounidenses', EUR: 'Euros'},
     chooseTitle: '¿En qué moneda piensas?',
-    chooseBody: 'Elige qué moneda aparece primero. Esto solo cambia la vista y los valores predeterminados; dpay no mueve ni convierte fondos.',
+    chooseBody: 'Elige qué moneda aparece primero. Esto solo cambia la vista y los valores predeterminados.',
     railReason: {destination: 'es el que pide el cobro', funded: 'aquí tienes saldo'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Principal',
@@ -197,7 +197,7 @@ export const educationEs: EducationMessages = {
     refusedBody: 'No se movió nada.',
     continue: 'Seguir con la configuración',
     continueHint: 'Continúa para elegir tu moneda principal',
-    punchline: 'El dinero de práctica no tiene valor. dpay nunca te pide depositar ni comprar nada para probarlo.',
+    punchline: 'El dinero de práctica no tiene valor: solo sirve para probar la aplicación.',
     noFaucet: {
       title: 'Aquí no hay dinero de práctica',
       body: 'Este servidor no reparte dinero de práctica, así que no hay con qué practicar. A tu billetera no le falta nada: sigue y elige tu moneda. Puedes hacer tu primer pago real cuando quieras.',

@@ -31,7 +31,7 @@ export const walletFr: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Francs suisses', USD: 'Dollars américains', EUR: 'Euros'},
     chooseTitle: 'Dans quelle monnaie penses-tu ?',
-    chooseBody: 'Choisis la monnaie affichée en premier. Cela ne change que l’affichage et les valeurs par défaut ; dpay ne déplace ni ne convertit tes fonds.',
+    chooseBody: 'Choisis la monnaie affichée en premier. Cela ne change que l’affichage et les valeurs par défaut.',
     railReason: {destination: 'c’est lui que demande le paiement', funded: 'tu as un solde ici'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Principale',
@@ -198,7 +198,7 @@ export const educationFr: EducationMessages = {
     refusedBody: 'Rien n’a bougé.',
     continue: 'Poursuivre la configuration',
     continueHint: 'Continue vers le choix de votre monnaie principale',
-    punchline: 'L’argent d’entraînement n’a aucune valeur. dpay ne vous demande jamais de déposer ou d’acheter quoi que ce soit pour l’essayer.',
+    punchline: 'L’argent d’entraînement n’a aucune valeur — il sert uniquement à essayer l’application.',
     noFaucet: {
       title: 'Pas d’argent d’entraînement ici',
       body: 'Ce serveur ne distribue pas d’argent d’entraînement, il n’y a donc rien pour s’entraîner. Rien ne manque à votre portefeuille — continuez et choisissez votre monnaie. Vous ferez votre premier vrai paiement quand vous voudrez.',
