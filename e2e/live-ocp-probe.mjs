@@ -73,15 +73,14 @@ try {
 
     const amount = await driver.readText('pay-amount');
     const payee = await driver.readText('review-payee');
-    const host = await driver.readText('ocp-host');
-    const requested = await driver.readText('ocp-requested');
+    const price = await driver.readText('ocp-price');
     console.log(`\n  amount   ${amount}`);
     console.log(`  payee    ${payee}`);
-    console.log(`  host     ${host}`);
-    console.log(`  charging ${requested}\n`);
+    console.log(`  price    ${price}\n`);
 
-    assertIncludes(host, PROVIDER_HOST, 'the review must name the live provider host');
-    assertIncludes(requested, 'CHF 1', "the review must show the till's own price");
+    // ONE line carries both: the till's own fiat price, and the host that set it.
+    assertIncludes(price, PROVIDER_HOST, 'the review must name the live provider host');
+    assertIncludes(price, 'CHF 1', "the review must show the till's own price");
     // The destination is DFX's real receiving principal, and it must be rendered in FULL — it is the
     // one value on the screen a payer can independently check.
     assert(/^[a-z0-9-]{20,}$/.test(payee.trim()), `the full destination principal must render, got "${payee}"`);

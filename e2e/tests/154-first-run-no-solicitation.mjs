@@ -24,7 +24,7 @@
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent,
   chooseHomeCurrencyIfPresent,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 
 export const meta = {
@@ -110,7 +110,7 @@ export async function run() {
 
     // 6. The wallet itself, landing on Home. Nothing is STANDING there asking — no address, no
     //    fund panel — on a wallet the app has just failed to fund.
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
     await assertAbsent(driver, UNPROMPTED, 'the wallet’s landing screen');
     console.log('[154-first-run-no-solicitation] ✓ five first-run surfaces solicit nothing, and the wallet opens on no panel');
 

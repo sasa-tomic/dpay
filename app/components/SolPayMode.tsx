@@ -842,7 +842,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     const approveDisabled = busy || !!err || ocpInsufficient;
     return (
       <View style={S.center}>
-        <Text style={S.label}>{M.pay.reviewPayment}</Text>
+        {/* No screen title: it sat directly above "Pay <amount>" with Approve underneath, and the
+            IC rail's review dropped its own for the same reason (founder, 2026-09-09). */}
         <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(ocp.rawAmount, SOL_DECIMALS, SOL_UNIT))}</Text>
         <Text style={S.reviewTo}>{M.pay.toWho(ocp.details.claimedMerchantName ?? ocp.host)}</Text>
         {/* The FULL destination address, never shortened: the provider chose it, so it is the one
@@ -850,7 +851,6 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         <Text testID="sol-pay-payee" style={S.dim2}>{ocp.to}</Text>
         <OcpQuoteLines
           host={ocp.host}
-          claimedName={ocp.details.claimedMerchantName}
           requested={ocp.details.requestedAmount}
           payableUntil={ocp.payableUntil}
           onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
@@ -920,7 +920,6 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     const approveDisabled = busy || !!err || !amountValid || insufficient;
     return (
       <View style={S.center}>
-        <Text style={S.label}>{M.pay.reviewPayment}</Text>
         {spay.amount !== null ? (
           <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(raw, decimals, unit))}</Text>
         ) : (
@@ -941,7 +940,6 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
             request this is the recipient's WALLET address — the transfer itself targets the
             derived associated token account, and the payable address is the thing to check. */}
         <Text testID="sol-pay-payee" style={S.dim2}>{spay.recipient}</Text>
-        {spayLabel ? <Text style={S.dim2}>{M.pay.ocp.claimedMerchant}</Text> : null}
         {spayMessage ? <Text testID="sol-spay-message" style={S.dim2}>{M.pay.spay.merchantMessage(spayMessage)}</Text> : null}
         {/* The token path may need the recipient's token account created in the same transaction —
             the sender covers its one-time rent. Same disclosure line as the send form. */}

@@ -30,16 +30,13 @@ export type CoachTipCopy = {title: string; body: string};
 export type PassportStampCopy = {label: string; hint: string; short: string};
 
 export type WalletMessages = {
-  /** Header utility cluster: the gear, the theme flip, the account eyebrow. */
+  /** Header utility cluster: the gear and the theme flip. */
   header: {
     settings: string;
     settingsHint: string;
     /** `target` is the mode one tap lands in (Light/Dark) — the icon names the TARGET. */
     themeSwitch: (target: string) => string;
     themeSwitchHint: string;
-    /** The eyebrow above the username, and its accessible name. */
-    account: string;
-    accountLabel: string;
     /** The web wordmark's back-link to the marketing site (web build only). */
     home: string;
     homeHint: string;
@@ -255,8 +252,6 @@ export const walletEn: WalletMessages = {
     settingsHint: 'Open relay, reset, and advanced settings',
     themeSwitch: target => `Switch theme to ${target}`,
     themeSwitchHint: 'Toggles the theme between Light and Dark; set Auto in Settings',
-    account: 'ACCOUNT',
-    accountLabel: 'Account',
     home: 'dpay home',
     homeHint: 'Open the main dpay site',
   },
@@ -582,10 +577,6 @@ export const educationEn: EducationMessages = {
   },
 
   coachTips: {
-    payReview: {
-      title: 'You approve the exact payment',
-      body: 'Approving sends exactly this amount of this asset — from your balance, signed by your key.',
-    },
     receiveRequest: {
       title: 'Show your request code',
       body: "Show this code to your customer. Their phone scans it and approves; your connection confirms.",

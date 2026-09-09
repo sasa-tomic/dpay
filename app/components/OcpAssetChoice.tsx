@@ -40,7 +40,8 @@ export function OcpAssetChoice({declined, options, busy, labelOf, onPick, onCanc
 }) {
   return (
     <View style={S.center}>
-      <Text style={S.label}>{M.pay.reviewPayment}</Text>
+      {/* The heading IS the `ocp-choose` sentence below — a "Review payment" eyebrow above a menu
+          named the wrong screen anyway, and this is the one surface that is not a review. */}
       <Text testID="ocp-choose" style={S.dim2}>{M.pay.ocp.chooseAsset(declined)}</Text>
       {options.map(o => (
         <Pressable

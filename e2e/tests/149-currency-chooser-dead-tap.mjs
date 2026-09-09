@@ -12,7 +12,7 @@
 //
 // Selector contract: `home-currency-title`, `home-currency-pick-first`,
 // `btn-home-currency-continue`, `home-currency-CHF`, `balance`.
-import {setup, assert, assertEq, skipWalkthroughIfPresent, skipPracticeIfPresent, waitForEnabled} from '../harness/lib.mjs';
+import {setup, assert, assertEq, skipWalkthroughIfPresent, skipPracticeIfPresent, waitForEnabled, waitForWallet, WALLET_READY} from '../harness/lib.mjs';
 
 export const meta = {
   id: '149',
@@ -53,7 +53,7 @@ export async function run() {
     const prompt = await driver.readText('home-currency-pick-first');
     assertEq(prompt, 'Tap the currency you want first, then Continue.', 'the early press names the missing step');
     assert(await driver.isPresent('home-currency-title'), 'and commits nothing — the chooser is still on screen');
-    assert(!(await driver.isPresent('balance')), 'no currency was chosen, so the wallet did not open');
+    assert(!(await driver.isPresent(WALLET_READY)), 'no currency was chosen, so the wallet did not open');
     await driver.screenshot('149-currency-chooser-dead-tap');
     console.log(`[149-currency-chooser-dead-tap] ✓ early press answered: "${prompt}"`);
 
@@ -61,7 +61,7 @@ export async function run() {
     await driver.click('home-currency-CHF', {timeoutMs: 5_000});
     assert(!(await driver.isPresent('home-currency-pick-first')), 'the instruction never outlives its cause');
     await driver.click('btn-home-currency-continue', {timeoutMs: 5_000});
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
     console.log('[149-currency-chooser-dead-tap] ✓ picked → Continue commits');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);

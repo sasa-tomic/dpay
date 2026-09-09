@@ -22,7 +22,7 @@
 //
 // Selector contract: `asset-sol-select`, `tab-receive`, `tab-pay`, `sol-req-amount-input`,
 // `btn-sol-req-make`, `sol-req-qr`, `sol-req-status`, `sol-req-sig`, `sol-pay-scan`.
-import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
 import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
 export const meta = {
@@ -93,8 +93,8 @@ export async function run() {
 
     // 1. Select SOL → Receive tab → create the solreq QR.
     console.log('[51-sol-merchant-broadcast] selecting SOL + switching to Receive…');
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
 

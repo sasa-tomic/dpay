@@ -27,7 +27,7 @@
 // Selector contract: `trip-strip`, `trip-strip-dot-<key>[-filled]`, `passport-archive`,
 // `passport-slot-<key>[-filled]`, `passport-count`, `passport-hint`, `trip-ready-capstone`,
 // `btn-passport-done`, `btn-trip-readiness`, `btn-trip-strip`, `btn-passport-close`.
-import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance, accountOf, armPayScan, chooseHomeCurrencyIfPresent, selectDemoAsset, faucetAccount } from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, skipWalkthroughIfPresent, getBalance, accountOf, armPayScan, chooseHomeCurrencyIfPresent, selectDemoAsset, faucetAccount, waitForWallet} from '../harness/lib.mjs';
 import {generateKeypair, randNonceHex, buildRequestQR} from '../harness/wire.mjs';
 
 export const meta = {
@@ -73,7 +73,7 @@ export async function run() {
     await chooseHomeCurrencyIfPresent(driver);
     // The wallet opens on the chosen CURRENCY; this flow is about the DEMO rail, so say so.
     await selectDemoAsset(driver);
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
     // ∂99.00, not ∂100.00: the practice payment really spent a franc of play money.
     await driver.waitForText('∂99.00', { timeoutMs: 15_000 });
 

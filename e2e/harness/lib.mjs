@@ -348,7 +348,7 @@ export async function skipPracticeIfPresent(driver, opts = {}) {
   // "Onboarding is over" is TWO possible surfaces: the wallet itself, or the home-currency
   // question that stands in front of it on a first run (2026-09-04). Waiting only for `balance`
   // made every create-path flow fail here with the chooser plainly on screen.
-  const done = async () => (await driver.isPresent('balance')) || (await driver.isPresent('btn-home-currency-continue'));
+  const done = async () => (await driver.isPresent(WALLET_READY)) || (await driver.isPresent('btn-home-currency-continue'));
   const deadline = Date.now() + timeoutMs;
   let exit = null;
   while (Date.now() < deadline) {
@@ -403,7 +403,7 @@ export async function chooseHomeCurrencyIfPresent(driver, currency = 'CHF', opts
   const deadline = Date.now() + timeoutMs;
   let sawChooser = false;
   while (Date.now() < deadline) {
-    if (await driver.isPresent('balance')) return;
+    if (await driver.isPresent(WALLET_READY)) return;
     if (await driver.isPresent('btn-home-currency-continue')) { sawChooser = true; break; }
     await new Promise(r => setTimeout(r, 100));
   }
@@ -413,7 +413,7 @@ export async function chooseHomeCurrencyIfPresent(driver, currency = 'CHF', opts
   let pressErr = null;
   try { await driver.click('btn-home-currency-continue', {timeoutMs}); }
   catch (e) { pressErr = e; }
-  try { await driver.findByTestID('balance', {timeoutMs}); }
+  try { await driver.findByTestID(WALLET_READY, {timeoutMs}); }
   catch (e) {
     throw new Error(
       `[lib] the home-currency Continue was pressed but the wallet never appeared within ${timeoutMs}ms`
@@ -434,12 +434,13 @@ export async function chooseHomeCurrencyIfPresent(driver, currency = 'CHF', opts
  */
 export async function selectDemoAsset(driver, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 8_000;
-  await driver.click('balance', {timeoutMs});
-  // The header balance chip lands the ACCOUNTS route (2026-09-08). Selecting a row closes no
-  // chrome, so this helper OWNS the return trip: confirm the row's aria-selected state, then
-  // restore Pay so every caller keeps the shared "onboard ends on the Pay scanner" assumption —
-  // which is now something this helper ESTABLISHES rather than inherits, since the app itself
-  // lands on Home.
+  // `openBalances` owns knowing WHICH affordance this screen offers (the header chip everywhere,
+  // Home's labelled pill on Home) — one place, so a third entry point never needs a third copy.
+  await openBalances(driver, {timeoutMs});
+  // Selecting a row closes no chrome, so this helper OWNS the return trip: confirm the row's
+  // aria-selected state, then restore Pay so every caller keeps the shared "onboard ends on the
+  // Pay scanner" assumption — which is now something this helper ESTABLISHES rather than
+  // inherits, since the app itself lands on Home.
   await driver.click('asset-demo-select', {timeoutMs});
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -485,7 +486,7 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   // The home-currency question, then back onto DEMO: the wallet now opens in the user's chosen
   // currency, and this preamble's contract with every downstream flow is a funded DEMO wallet.
   await chooseHomeCurrencyIfPresent(driver);
-  await driver.findByTestID('balance', { timeoutMs: 10_000 });
+  await driver.findByTestID(WALLET_READY, { timeoutMs: 10_000 });
   await selectDemoAsset(driver);
   await driver.waitForText('∂100.00', { timeoutMs });
   return driver;
@@ -529,9 +530,39 @@ export async function accountOf(driver) {
  * helper does not work around it: a flow that needs the list mid-review must leave the review
  * first (flow 71 owns that contract).
  */
+/**
+ * The testID that means "the wallet shell is mounted", for every wait that used to look for the
+ * header balance chip. The chip is NO LONGER that signal: since 2026-09-09 it is absent on Home,
+ * which is the landing screen — so waiting for it hung with the wallet plainly on screen. The tab
+ * bar is the honest anchor: it renders on every wallet surface and on none of the onboarding ones.
+ */
+export const WALLET_READY = 'tab-home';
+
+/** Wait until the wallet shell is mounted. What every flow that used to `findByTestID('balance')`
+ *  after onboarding/restore actually meant. */
+export async function waitForWallet(driver, opts = {}) {
+  return driver.findByTestID(WALLET_READY, { timeoutMs: opts.timeoutMs ?? 10_000 });
+}
+
 export async function openBalances(driver, opts = {}) {
-  await driver.click('balance', { timeoutMs: opts.timeoutMs ?? 5_000 });
-  await driver.findByTestID('asset-demo-select', { timeoutMs: opts.timeoutMs ?? 5_000 });
+  // TWO affordances reach the ONE accounts route, and which one exists depends on the screen the
+  // caller happens to be on. Home has `btn-home-accounts` (its labelled "Accounts · N" pill) and
+  // deliberately has NO header chip: the chip names the SELECTED account while Home's headline
+  // names the HOME CURRENCY, and rendering both put two different accounts in one viewport
+  // (founder, 2026-09-09). Every other screen has the chip and not the pill.
+  //
+  // This is a lookup, not a fallback: neither present is a hard failure with both names, because
+  // the accounts route being unreachable from the current screen is exactly the regression the
+  // "one gesture from every screen" rule (flow 150) exists to catch.
+  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const affordance = (await driver.isPresent('balance'))
+    ? 'balance'
+    : (await driver.isPresent('btn-home-accounts')) ? 'btn-home-accounts' : null;
+  if (affordance === null) {
+    throw new Error('openBalances: this screen offers neither the header chip (`balance`) nor Home\'s `btn-home-accounts` — the accounts route is unreachable from here');
+  }
+  await driver.click(affordance, { timeoutMs });
+  await driver.findByTestID('asset-demo-select', { timeoutMs });
 }
 
 /**

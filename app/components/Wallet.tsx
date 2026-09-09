@@ -994,7 +994,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
           remnant — white icons on #F4F1E8 were near-invisible). */}
       <StatusBar barStyle={isDark() ? 'light-content' : 'dark-content'} backgroundColor={C.bg} translucent={false} />
       <View style={S.header}>
-        <View style={S.headerLeft}>
+        {/* Row 1 — the utility cluster and who this wallet is. Row 2 is the account chip, which
+            used to sit beside this block and squeeze it to ~20 px on any 8-decimal balance. */}
+        <View style={S.headerTop}>
           <Pressable
             testID="btn-settings"
             style={S.headerSettingsBtn}
@@ -1018,73 +1020,68 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
           >
             {nextTheme(resolvedTheme) === 'dark' ? <IconMoon size={20} color={C.sub} /> : <IconSun size={20} color={C.sub} />}
           </Pressable>
-          <View style={S.headerIdentity}>
-            <WordmarkLink style={S.brand} />
-            {/* H4 + audit P1: the header shows ONLY the username. The hex pubkey was developer-facing
-                protocol data ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's
-                removed from the main display. The short hex is no longer appended anywhere in the
-                header. A small "ACCOUNT" eyebrow above the username separates the wordmark from the
-                user identity so the pair no longer reads as a single currency label (a fresh-eyes
-                vision misread). The `header-who` element still holds ONLY the username (e2e contract). */}
-            <Text style={S.whoLabel} accessibilityLabel={M.wallet.header.accountLabel}>{M.wallet.header.account}</Text>
-            {/* One line, ellipsized: a long username must yield the header's width, never take it
-                from the account chip (X18). `textContent` is unchanged, so the e2e `header-who`
-                contract still reads the full name. */}
-            <Text style={S.who} testID="header-who" numberOfLines={1}>{identity.username}</Text>
-          </View>
+          <WordmarkLink style={S.brand} />
+          {/* H4 + audit P1: the header shows ONLY the username. The hex pubkey was developer-facing
+              protocol data ("Alice · 1b8a5ee7…") that made the header read like a debug panel; it's
+              removed from the main display. One line, ellipsized — a long name yields rather than
+              pushes; `textContent` is the whole name (the e2e `header-who` contract). */}
+          <Text style={S.who} testID="header-who" numberOfLines={1}>{identity.username}</Text>
         </View>
-        {/* The header account chip. X7 (UX swarm 2026-09-08): a `⌄` beside a balance means "switch
-            account" in every wallet, and this one navigated to Home — and on Home it did nothing
-            at all. It now opens the ACCOUNTS route, which is what the chevron looked like it did,
-            and it does so from EVERY screen including the Pay scanner — the most literal reading
-            of the founder's "the list of currencies should still be easily accessible". */}
-        <Pressable
-          testID="balance"
-          style={[S.balBox, balancesDisabled && S.dim]}
-          disabled={balancesDisabled}
-          onPress={openAccounts}
-          accessibilityRole="button"
-          accessibilityLabel={M.wallet.balance.label}
-          accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : M.wallet.balance.hint}
-          accessibilityState={{disabled: balancesDisabled}}
-        >
-          <View style={S.balHeaderRow}>
-            <View>
-              {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
-                  map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
-                  polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e).
-                  X8: NOT on Home. There the Home headline prints a balance ~90 px below this one,
-                  and printing the same number twice in one viewport is noise — so on Home the chip
-                  keeps only the account name and the chevron, and becomes purely the switcher its
-                  chevron always claimed to be.
-                  X18: when the amount is hidden the chevron moves UP beside the label instead of
-                  keeping a row to itself — that row was 16 px tall, held nothing but the chevron and
-                  stretched the chip's full width, so the switcher rendered orphaned at the bottom-left
-                  of its own chip (measured on Home: label y 16-32, chevron row y 32-48 at x 251.4). */}
+        {/* The header account chip — WHICH account is selected, how much is in it, and one tap to
+            the ACCOUNTS route (X7, UX swarm 2026-09-08: a `⌄` beside a balance means "switch
+            account" in every wallet, so it now goes where it looked like it went).
+
+            NOT ON HOME (founder, 2026-09-09: "it's obviously wrong"). Home is the only screen that
+            prints its own balance, and it prints a DIFFERENT one: the headline names the HOME
+            CURRENCY while this chip names the SELECTION, and those are deliberately separate — the
+            accounts route changes the selection and must never rewrite the home currency (flow
+            133). Rendered together they put two accounts and two labels in one viewport with
+            nothing saying which is which ("DEMO balance" over "Swiss francs · Main · 0.00 VCHF").
+            X8 had already noticed half of this and hidden the AMOUNT here on Home; what was left
+            was a label that could contradict the headline and a chevron that duplicated Home's own
+            `btn-home-accounts` pill. Both are gone, and Home keeps the labelled affordance.
+            Everywhere else the chip is the only statement of the selection, so it stays. */}
+        {mode === 'home' ? null : (
+          <Pressable
+            testID="balance"
+            style={[S.balBox, balancesDisabled && S.dim]}
+            disabled={balancesDisabled}
+            onPress={openAccounts}
+            accessibilityRole="button"
+            accessibilityLabel={M.wallet.balance.label}
+            accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : M.wallet.balance.hint}
+            accessibilityState={{disabled: balancesDisabled}}
+          >
+            {/* One row, two ends: which account on the left, how much in it on the right. The amount
+                is the widest thing the header ever carries, and on its own row it has the width to
+                be carried — an 8-decimal VCHF balance used to consume the whole header and crush
+                the wordmark beside it (founder report + device measurement, 2026-09-09). */}
+            <View style={S.balHeaderRow}>
               <View style={S.balLabelRow}>
                 <View style={[S.dot, {backgroundColor: online ? C.ok : C.sub2}]} />
                 {/* D3: the header label names the active asset in BOTH branches — online reads "X balance",
                     offline reads "~ X approx.". `activeAssetName` is the single source of truth for the
                     symbol; e2e asserts the active rail via this label (testID active-asset-label). */}
-                <Text testID="active-asset-label" style={S.balLabel}>{balanceEyebrow}</Text>
-                {mode === 'home' ? <IconChevronDown size={16} color={C.sub2} /> : null}
+                <Text testID="active-asset-label" style={S.balLabel} numberOfLines={1}>{balanceEyebrow}</Text>
+                {/* D5a: the A badge rides with the label rather than floating at the row's far edge,
+                    where the switcher chevron now lives. */}
+                <HotkeyHint k="A" />
               </View>
-              {mode === 'home' ? null : (
-                <View style={S.balAmtRow}>
-                  <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
-                  <IconChevronDown size={16} color={C.sub2} />
-                </View>
-              )}
+              <View style={S.balAmtRow}>
+                {/* The header reads the selected asset's pre-formatted displayText from the ONE balance
+                    map. DEMO keeps its offline '~' prefix (baked into the map); an IC asset shows its
+                    polled native-units balance; SOL/USDC show '—' when the RPC is offline (jest/e2e). */}
+                <Text style={S.balAmt}>{selectedAsset ? (balances[selectedAsset.id]?.displayText ?? '—') : '—'}</Text>
+                <IconChevronDown size={16} color={C.sub2} />
+              </View>
             </View>
-            {/* D5a: the A badge sits at the FAR RIGHT edge of the row (label+value column, then the
-                badge) matching the tab-bar pattern — it was inline after the label text, which read
-                as a keyboard glyph attached to the label, not the pressable. */}
-            <HotkeyHint k="A" />
-          </View>
-          {backHint ? (
-            <Text testID="back-exit-hint" style={S.balBackHint}>{M.wallet.balance.backAgainToExit}</Text>
-          ) : null}
-        </Pressable>
+          </Pressable>
+        )}
+        {/* The Android back-to-exit hint lives at HEADER level, not inside the chip: the press it
+            answers happens on HOME, which is the one screen with no chip to hang it on. */}
+        {backHint ? (
+          <Text testID="back-exit-hint" style={S.balBackHint}>{M.wallet.balance.backAgainToExit}</Text>
+        ) : null}
       </View>
 
       {/* Trip Ready J5b (UX hardening 2026-08-23) — the home-surface readiness line. Live progress

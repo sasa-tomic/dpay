@@ -19,7 +19,7 @@
 import {
   setup, assert, assertEq, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   chooseHomeCurrencyIfPresent,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '156',
@@ -56,7 +56,7 @@ export async function run() {
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
     await skipPracticeIfPresent(driver);
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', {timeoutMs: 12_000});
+    await waitForWallet(driver, {timeoutMs: 12_000});
     console.log(`[156-restore-skips-practice] ✓ seed minted (${words[0]} … ${words[23]})`);
 
     // A NEW device: nothing carried over, not even the walkthrough's own stamp.
@@ -80,14 +80,14 @@ export async function run() {
     console.log('[156-restore-skips-practice] ✓ chooser reached, practice marked seen');
 
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', {timeoutMs: 12_000});
+    await waitForWallet(driver, {timeoutMs: 12_000});
 
     // And it stays gone: the marker is persisted, so the next launch routes past it too.
     // `domcontentloaded` because the wallet's balance poll keeps the network busy — a networkidle
     // wait would time out on a perfectly healthy app.
     await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 10_000});
     await driver.waitReady({timeoutMs: 10_000});
-    await driver.findByTestID('balance', {timeoutMs: 12_000});
+    await waitForWallet(driver, {timeoutMs: 12_000});
     assert(!(await driver.isPresent('practice')), 'and it does not come back on the next launch');
     await driver.screenshot('156-restore-skips-practice');
 

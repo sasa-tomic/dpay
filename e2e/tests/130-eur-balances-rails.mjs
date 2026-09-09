@@ -12,7 +12,7 @@
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   openBalances,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '130',
@@ -43,7 +43,7 @@ export async function run() {
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
     await driver.click('home-currency-EUR', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
 
     // --- 2. both EUR rails are distinct rows: MAIN on EURC, VEUR named ---------------------------
     await openBalances(driver);

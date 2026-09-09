@@ -116,8 +116,12 @@ describe('education copy (the first-run practice payment + coaching)', () => {
     }
   });
 
-  test('coaching tips: exactly the four spec surfaces, ≤2 sentences each', () => {
-    expect(Object.keys(M.education.coachTips).sort()).toEqual(['offlineQr', 'payReview', 'pendingOutcome', 'receiveRequest']);
+  test('coaching tips: exactly the three spec surfaces, ≤2 sentences each', () => {
+    // Three, not four: the pay-review tip ("Approving sends exactly this amount of this asset")
+    // restated the 30pt headline it sat under and cost ~180px between the payment and the Approve
+    // button, so it was dropped (founder, 2026-09-09). A tip earns its card by teaching something
+    // the surface does not already say — the remaining three all do.
+    expect(Object.keys(M.education.coachTips).sort()).toEqual(['offlineQr', 'pendingOutcome', 'receiveRequest']);
     for (const tip of Object.values(M.education.coachTips)) {
       expect(tip.title.length).toBeGreaterThan(0);
       // ≤2 sentences, but a one-or-two-word rhetorical opener ("No signal?") that leads into
@@ -130,9 +134,6 @@ describe('education copy (the first-run practice payment + coaching)', () => {
   });
 
   test('each tip names its one right truth', () => {
-    // payReview: the exact asset/amount truth + the user's own key.
-    expect(M.education.coachTips.payReview.body).toMatch(/exactly this amount of this asset/);
-    expect(M.education.coachTips.payReview.body).toMatch(/your key/);
     // receiveRequest: the RECEIVER's connection confirms.
     expect(M.education.coachTips.receiveRequest.body).toMatch(/your connection confirms/);
     // offlineQr: signed proof + the receiver's connection settles.

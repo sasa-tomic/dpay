@@ -17,7 +17,7 @@
 //
 // Selector contract: `mnemonic-backup`, `mnemonic-word-{0..23}`, `mnemonic-backup-checkbox`,
 // `btn-mnemonic-continue`, `btn-create`, `practice`, `balance`.
-import {setup, assert, assertEq, waitForEnabled, skipWalkthroughIfPresent} from '../harness/lib.mjs';
+import {setup, assert, assertEq, waitForEnabled, skipWalkthroughIfPresent, WALLET_READY} from '../harness/lib.mjs';
 
 export const meta = {
   id: '155',
@@ -69,7 +69,7 @@ export async function run() {
 
     // 1 + 2: back ON the gate, with the same words.
     await driver.findByTestID('mnemonic-backup', {timeoutMs: 10_000});
-    assert(!(await driver.isPresent('balance')), 'the wallet must be unreachable until the words are acknowledged');
+    assert(!(await driver.isPresent(WALLET_READY)), 'the wallet must be unreachable until the words are acknowledged');
     assert(!(await driver.isPresent('practice')), 'and so must every screen after it');
     assert(!(await driver.isPresent('btn-create')), 'the resume shows the GATE, not a second create form');
     const after = await readWords(driver);

@@ -10,8 +10,6 @@ export const walletDe: WalletMessages = {
     settingsHint: 'Öffnet Relay, Zurücksetzen und erweiterte Einstellungen',
     themeSwitch: target => `Design auf ${target} umstellen`,
     themeSwitchHint: 'Wechselt zwischen Hell und Dunkel; Auto stellst du in den Einstellungen ein',
-    account: 'KONTO',
-    accountLabel: 'Konto',
     home: 'dpay-Startseite',
     homeHint: 'Öffnet die dpay-Website',
   },
@@ -216,10 +214,6 @@ export const educationDe: EducationMessages = {
   },
 
   coachTips: {
-    payReview: {
-      title: 'Du gibst genau diese Zahlung frei',
-      body: 'Mit der Freigabe wird genau dieser Betrag dieses Assets gesendet — aus deinem Guthaben, signiert mit deinem Schlüssel.',
-    },
     receiveRequest: {
       title: 'Zeig deinen Anfragecode',
       body: 'Zeig diesen Code deiner Kundschaft. Ihr Handy scannt und gibt frei; deine Verbindung bestätigt.',

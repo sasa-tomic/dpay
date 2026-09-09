@@ -13,10 +13,10 @@
 //      take in the wallet's own words, and where to change it. It also asks the provider exactly
 //      ONCE and never requests a destination it could not pay: a refusal must not cost a quote.
 //   2. IT NEVER AUTO-SIGNS. A scanned till lands on an explicit review carrying the amount, the FULL
-//      destination account, the provider HOST the price came from, the countdown, the FIAT PRICE the
-//      till is charging ("CHF 1" — the crypto amount alone is uncheckable against the sale), and the
-//      merchant name marked as CLAIMED. Proven by money, not by pixels: the payer's ledger balance is
-//      unchanged while that review is on screen.
+//      destination account, and ONE provider line: the FIAT PRICE the till is charging ("CHF 1" —
+//      the crypto amount alone is uncheckable against the sale) beside the HOST that set it, which
+//      is what attributes the number to the provider rather than to dpay. Proven by money, not by
+//      pixels: the payer's ledger balance is unchanged while that review is on screen.
 //   3. PAID. Approve → the funds move on the IC rail → the proof is reported once → the paid state.
 //   4. UNRESOLVED — the important one. The transfer settles on-chain and the ONE submission does not
 //      come back definitive. That is neither paid nor failed: the outcome screen must show the block
@@ -28,8 +28,8 @@
 // The till fixture and the fail-closed provider stub live in `../harness/ocp.mjs` — one till, shared
 // with flow 112 (the same code paid on the Solana rail). Fixture provenance is documented there.
 //
-// Selector contract: `ocp-checking`, `ocp-host`, `ocp-expiry`, `ocp-requested`, `ocp-outcome`,
-// `review-claimed`, `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `btn-start-scan`,
+// Selector contract: `ocp-checking`, `ocp-price`, `ocp-expiry`, `ocp-outcome`,
+// `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `btn-start-scan`,
 // `ocp-choose`, `ocp-option-<assetId>`, `btn-review-cancel`
 // (via armPayScan).
 import {
@@ -61,8 +61,8 @@ export const meta = {
   id: '111',
   name: 'opencryptopay-till',
   journey: 'pay',
-  covers: ['opencryptopay', 'scan-fallback', 'explicit-approve', 'claimed-name', 'loss-path', 'unresolved-outcome', 'one-shot-submit', 'honest-instructions', 'fail-closed'],
-  verifies: 'Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (provider host, full destination, countdown, the fiat price the till charges, claimed merchant name) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote.',
+  covers: ['opencryptopay', 'scan-fallback', 'explicit-approve', 'loss-path', 'unresolved-outcome', 'one-shot-submit', 'honest-instructions', 'fail-closed'],
+  verifies: 'Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (full destination, plus ONE line carrying the fiat price the till charges and the host that set it, with no countdown while there is runway) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote.',
   timeoutMs: 45000, // 4 legs: 3 provider round trips (one deliberately slow) + 2 real IC settlements
 };
 
@@ -182,21 +182,25 @@ export async function run() {
       'the review shows the till\'s exact quoted amount, converted at ICP\'s own precision');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the review shows the FULL destination account — the one thing on screen the payer can check');
-    assertEq(await driver.readText('ocp-host'), `Price from ${PROVIDER_HOST}`,
-      'the review names the host the price came from (an LNURL can name any host on earth)');
-    assertIncludes(await driver.readText('review-claimed'), 'Name given by the code',
-      'the merchant name is marked as claimed, never as verified');
-    // WHAT THE TILL IS CHARGING, in the till's own unit. `0.50795551 ICP` is uncheckable against a
-    // price tag; "CHF 1" is the number printed on the till and read out by the cashier, and without
-    // it the payer approves an amount they cannot compare against the price of the sale. It is the
-    // PROVIDER's figure and the line says so — dpay neither quotes nor converts.
-    const charging = await driver.readText('ocp-requested');
-    assertIncludes(charging, 'The merchant is charging CHF 1.',
-      'the review must show the till\'s own price, so the payer can check it against the sale');
-    assertIncludes(charging, 'dpay doesn’t convert',
-      'the fiat ask must be attributed to the merchant\'s provider, never presented as a dpay quote');
-    const expiry = await driver.readText('ocp-expiry');
-    assert(/^Valid for ~\d+ min$/.test(expiry), `the review counts the 300s quote down, got ${JSON.stringify(expiry)}`);
+    // ONE provider line, carrying both facts. WHAT THE TILL IS CHARGING, in the till's own unit:
+    // `0.50795551 ICP` is uncheckable against a price tag; "CHF 1" is the number printed on the
+    // till and read out by the cashier, and without it the payer approves an amount they cannot
+    // compare against the price of the sale. And WHO SET IT — an LNURL can name any host on earth,
+    // so naming the host is both the trust fact and the attribution that keeps the fiat number the
+    // provider's rather than dpay's.
+    const price = await driver.readText('ocp-price');
+    assertEq(price, `CHF 1 · price from ${PROVIDER_HOST}`,
+      'the review states the till\'s own price and the host that set it, in one line');
+    // The policy sentences that used to sit here are gone (founder, 2026-09-09): a payer at a till
+    // cannot act on "dpay doesn't convert" or on being told a merchant name is unverified.
+    assert(!price.includes('convert'), 'the price line must not carry a policy sentence');
+    assert(!(await driver.isPresent('review-claimed')), 'the review carries no unactionable name caveat');
+    // The countdown stays OFF while there is runway. A 300s quote leaves minutes; a countdown then
+    // changes nothing a payer would do and is one more thing to read at a checkout. It appears
+    // inside the last minute, where it IS the reason to hurry (pinned in jest, which can set the
+    // deadline; here the honest assertion is that a live quote shows no clock).
+    assert(!(await driver.isPresent('ocp-expiry')),
+      'a quote with minutes left must not put a countdown on the review');
     assertIncludes(await driver.bodyText(), CLAIMED_MERCHANT, 'the review shows the name the till claims');
 
     // NEVER AUTO-SIGNS — proven with money, not pixels: the Approve press is still pending and the
@@ -206,7 +210,7 @@ export async function run() {
     assertEq(await getBalance(relayBaseURL, accountHex, ICP), String(ICP_SEED),
       'nothing may leave the wallet before the payer approves');
     await driver.screenshot('111-ocp-review');
-    console.log('[111-opencryptopay-till] ✓ explicit review, host + claimed name + countdown, no auto-sign');
+    console.log('[111-opencryptopay-till] ✓ explicit review, one price+host line, no countdown noise, no auto-sign');
 
     // --- 3. paid ------------------------------------------------------------------------------
     console.log('[111-opencryptopay-till] leg 3 — approving…');

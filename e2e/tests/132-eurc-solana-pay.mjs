@@ -9,7 +9,7 @@
 import {
   setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   armPayScan,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '132',
@@ -44,8 +44,11 @@ export async function run() {
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-EUR');
     await driver.click('btn-home-currency-continue');
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
-    const label = await driver.readText('active-asset-label');
+    await waitForWallet(driver, {timeoutMs: 10_000});
+    // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
+    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
+    // flow 158). `home-headline-label` is the currency statement on this surface.
+    const label = await driver.readText('home-headline-label');
     assertIncludes(label, 'uros', 'home=EUR names the currency in the header');
 
     // The SOL RPC simulator (same seam as flow 119): 5 SOL for fees, 2 units (6 dec) of the

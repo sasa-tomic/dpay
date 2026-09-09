@@ -13,7 +13,7 @@
 //
 // Selector contract: `asset-sol-select`, `sol-pay-scan` (immediately, no setup gate),
 // `sol-pay-qr` (valid case), `sol-pay-err` (expired case).
-import {setup, assert, onboardWallet, armPayScan} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armPayScan, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '67',
@@ -63,8 +63,8 @@ export async function run() {
 
     // Select SOL via Balances.
     console.log('[67-sol-no-setup] selecting SOL via Balances…');
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
     // The accounts list is inline on Home (O4 S3) — the row select no longer closes any sheet,

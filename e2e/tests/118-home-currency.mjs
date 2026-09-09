@@ -25,7 +25,7 @@
 import {
   setup, assert, assertIncludes, waitForEnabled,
   skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, openBalances,
-} from '../harness/lib.mjs';
+ waitForWallet, WALLET_READY} from '../harness/lib.mjs';
 
 export const meta = {
   id: '118',
@@ -58,7 +58,7 @@ export async function run() {
 
     // The chooser is the wallet's gate, so it must be on screen BEFORE any balance is.
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
-    assert(!(await driver.isPresent('balance')),
+    assert(!(await driver.isPresent(WALLET_READY)),
       'the wallet must not be reachable until a currency has been chosen');
     console.log('[118-home-currency] ✓ the currency question gates the wallet');
 
@@ -89,12 +89,15 @@ export async function run() {
     // --- 3. choosing CHF lands the wallet on VCHF ----------------------------------------------
     await driver.click('home-currency-CHF', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
 
-    const label = await driver.readText('active-asset-label');
+    // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
+    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
+    // flow 158). `home-headline-label` is the currency statement on this surface.
+    const label = await driver.readText('home-headline-label');
     assertIncludes(label, 'Swiss francs',
-      'the header must name the CURRENCY the user chose, not the token');
-    assertIncludes(label, 'Main', 'the header must mark it as the main currency');
+      'the landing screen must name the CURRENCY the user chose, not the token');
+    assertIncludes(label, 'Main', 'the landing screen must mark it as the main currency');
     // ...and the amount keeps the token's own unit — the wallet is "in francs" without claiming a peg.
     const home = await driver.bodyText();
     assertIncludes(home, 'VCHF', 'the balance must carry the TOKEN unit (VCHF), never a bare CHF amount');
@@ -107,14 +110,18 @@ export async function run() {
     await driver.click('btn-settings', {timeoutMs: 5_000});
     await driver.click('btn-currency-USD', {timeoutMs: 5_000});
     await driver.click('btn-settings-close', {timeoutMs: 5_000});
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
     // The wallet was explicitly left on VCHF, so changing the MAIN currency does not yank the user
     // off the asset they are looking at — it changes what the wallet opens with. Prove it by reload.
     await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`,
       {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
     await chooseHomeCurrencyIfPresent(driver); // must NOT appear — a currency is stored
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
+    // THE SELECTION, not the home currency — the two now deliberately disagree (main is USD, the
+    // user is on VCHF), which is the whole point of this assertion. Home states only the currency,
+    // so the selection is read where the wallet states it: the Pay header chip.
+    await driver.click('tab-pay', {timeoutMs: 5_000});
     const afterReload = await driver.readText('active-asset-label');
     assertIncludes(afterReload, 'VCHF',
       `a reload must resume the asset the user was on, not reset to the main currency. Got ${JSON.stringify(afterReload)}`);
@@ -125,7 +132,7 @@ export async function run() {
     // and the label follows the main currency once the two agree.
     await openBalances(driver);
     await driver.click('asset-ckusdc-select', {timeoutMs: 5_000});
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
     const usdLabel = await driver.readText('active-asset-label');
     assertIncludes(usdLabel, 'US dollars',
       `with USD as the main currency, its own rail must read as the main currency. Got ${JSON.stringify(usdLabel)}`);

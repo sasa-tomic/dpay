@@ -6,6 +6,7 @@ import {type CurrencyDescriptor} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {currencyName, type HomeCurrency} from '../config/currency';
 import {HistoryRow} from './HistoryRow';
+import {HotkeyHint} from './HotkeyHint';
 import {IconArrowDownLeft, IconChevronDown, IconPlus, IconScan} from './icons';
 import {RailUnreadableNote, railUnreadable} from './RailUnreadableNote';
 import type {AssetId, Txn} from '../lib/types';
@@ -109,6 +110,10 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
         accessibilityHint={M.wallet.home.accounts.openHint}
         accessibilityState={{disabled: false}}>
         <Text style={S.homeAccountsBtnText}>{M.wallet.home.accounts.open(assets.length)}</Text>
+        {/* The `a` shortcut's badge. It rides the header chip on every other screen; Home has no
+            chip (it would name a different account than the headline above), so the badge belongs
+            on the affordance Home does have — otherwise the shortcut is undiscoverable here. */}
+        <HotkeyHint k="A" />
         <IconChevronDown size={14} color={C.sub2} />
       </Pressable>
       <Pressable

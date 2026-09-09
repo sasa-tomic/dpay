@@ -69,4 +69,4 @@ export function walkthroughScenes(): readonly WalkthroughScene[] {
  * Only the KEY set lives here (it is the surface id CoachTip.tsx maps to a glyph, and the
  * `seen` marker journey.ts stores); the words are read straight from `M.education.coachTips`.
  */
-export type CoachTipKey = 'payReview' | 'receiveRequest' | 'offlineQr' | 'pendingOutcome';
+export type CoachTipKey = 'receiveRequest' | 'offlineQr' | 'pendingOutcome';

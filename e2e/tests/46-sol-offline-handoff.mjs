@@ -15,7 +15,7 @@
 // Selector contract: `asset-sol-select` (the SOL row in the Balances sheet),
 // `sol-pay-scan`, `sol-pay-amount`, `sol-pay-qr`,
 // `btn-sol-pay-handed`, `sol-pay-status`.
-import {setup, assert, onboardWallet, armPayScan} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armPayScan, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '46',
@@ -66,8 +66,8 @@ export async function run() {
     // 2. Select SOL via the Balances sheet (the selected asset implies the rail).
     //    SolPayMode mounts immediately in 'scan' — NO setup needed in v2.
     console.log('[46-sol-offline-handoff] selecting SOL as the active asset via Balances…');
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
     // The accounts list is inline on Home (O4 S3) — the row select no longer closes any sheet,

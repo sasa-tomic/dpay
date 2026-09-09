@@ -90,7 +90,6 @@ describe('NfcTapView J5 motion — one beat per phase', () => {
     for (const phase of ['pending', 'declined', 'error'] as NfcTapPhase[]) {
       await act(async () => { tree.update(<NfcTapView phase={phase} reason={null} role="card" testID="nfc-status" formattedAmt="∂25.00" networkLabel="IC" onClose={() => {}} />); });
       expect(find('offline-peak')).toHaveLength(0);
-      expect(find('paid-stamp')).toHaveLength(0);
       const text = tree.root.findAllByType(Text).map(t => String(t.props.children)).join(' ');
       expect(text).not.toContain("Don't need it");
       expect(text).not.toContain('settled');

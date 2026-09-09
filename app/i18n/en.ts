@@ -66,7 +66,6 @@ export const en: Messages = {
     paidAmount: amount => `Paid ✓ ${amount}`.trim(),
     receivedAmount: amount => `Received ✓ ${amount}`.trim(),
     settled: 'The payment settled',
-    settledStamp: 'settled',
     paying: (amount, network) => (network ? `Paying ${amount} on ${network}` : `Paying ${amount}`),
     collecting: (amount, network) => (network ? `Collecting ${amount} on ${network}` : `Collecting ${amount}`),
     holdToSend: 'Hold the phones together to send',

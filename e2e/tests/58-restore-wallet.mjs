@@ -16,7 +16,7 @@
 // Selector contract: `btn-restore`, `btn-restore-mode-toggle`, `restore-seed-input`, `username-input`,
 // `btn-restore-confirm`, `balance`. The secretHex-equality gate is the proof: a fresh generateKeypair() would never yield
 // this exact seed.
-import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent, chooseHomeCurrencyIfPresent, waitForWallet} from '../harness/lib.mjs';
 
 // Fixed 32-byte seed (64 hex chars, all 0x22). Deterministic so the secretHex-equality assertion
 // is meaningful. Same seed the FFI roundtrip proves derives a matching keypair.
@@ -71,7 +71,7 @@ export async function run() {
     // 6. The Wallet screen mounts — balance testID is the gate (mirrors flow 01's wallet-loaded check).
     console.log('[58-restore-wallet] wallet screen — waiting for balance…');
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
 
     // 7. The stored identity's secretHex EQUALS the entered seed (proves keypairFromSecret, not
     //    generate). publicHex is a non-empty 64-hex value derived from it.

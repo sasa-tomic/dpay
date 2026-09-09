@@ -48,7 +48,6 @@ export const payFr: PayMessages = {
   unsupportedAsset: 'Actif non pris en charge',
   unsupportedAssetBody: currency =>
     `Ce paiement demande un actif que ce portefeuille ne peut pas payer (monnaie ${currency}). dpay ne convertit jamais, il n’y a donc aucune solution de repli. Demandez au commerçant un actif pris en charge.`,
-  reviewPayment: 'Vérifier le paiement',
   paying: 'Vous payez',
   payAmount: amount => `Payer ${amount}`,
   notEnoughBalance: 'Solde insuffisant pour ce paiement.',
@@ -58,7 +57,6 @@ export const payFr: PayMessages = {
   approveHint: 'Signe le montant affiché avec votre clé et l’envoie',
   signing: 'Signature…',
   signsOffline: 'La signature se fait hors ligne — le commerçant règle en envoyant le paiement.',
-  linkNameClaimed: 'Nom fourni par l’expéditeur — vérifiez le compte ci-dessus.',
 
   link: {
     title: 'Ce lien de paiement ne peut pas être payé',
@@ -99,8 +97,7 @@ export const payFr: PayMessages = {
       `${host} n’a donné à dpay aucun moyen de lui signaler un paiement : payer ici vous coûterait votre argent sans que la vente soit créditée. Rien n’a été payé. Scanner à nouveau n’y changera rien — demandez au commerçant un autre moyen de paiement.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `Le prix de ce code vient de ${quoteHost}, mais il demande que la preuve de votre paiement soit envoyée à ${proofHost}. Un paiement ne peut pas répondre à deux sociétés différentes : dpay s’est arrêté. Rien n’a été payé — demandez au commerçant de montrer son propre code de paiement.`,
-    tillCharging: price =>
-      `Le commerçant demande ${price}. Son prestataire de paiement a fixé le montant ci-dessus — dpay ne convertit pas.`,
+    tillPrice: (price, host) => `${price} · prix de ${host}`,
     checkingTill: 'Vérification auprès du prestataire de paiement du commerçant…',
     badCode:
       'Ce code est abîmé, ou ce n’est pas un code de paiement. Demandez au commerçant de le montrer à nouveau, et vérifiez que rien ne le recouvre.',
@@ -143,7 +140,6 @@ export const payFr: PayMessages = {
       `Votre transfert n’est pas passé : rien n’a été payé et votre argent est toujours dans votre portefeuille — ${reason}. Scannez le code à nouveau pour payer à cette caisse.`,
     transferFailed:
       'Le réseau Solana a rejeté votre transaction : rien n’a été payé, le montant est toujours dans votre portefeuille (de petits frais de réseau ont été prélevés). Scannez le code à nouveau pour réessayer.',
-    claimedMerchant: 'Nom fourni par le code — dpay ne le vérifie pas.',
     providerHost: host => `Prix de ${host}`,
   },
 

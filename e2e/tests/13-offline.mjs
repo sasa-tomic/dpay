@@ -18,7 +18,7 @@
 //
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header
 // chip → the accounts route), `btn-topup` (inside the accounts list — ABSENT offline).
-import { setup, assert, onboardWallet, openBalances, goOffline } from '../harness/lib.mjs';
+import { setup, assert, onboardWallet, openBalances, goOffline, waitForWallet} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -86,7 +86,7 @@ export async function run() {
     console.log('[13-offline] ✓ header shows the offline indicator (graceful, no crash)');
 
     // The wallet is still rendered (no blank/crash): the balance element is still present.
-    await driver.findByTestID('balance', { timeoutMs: 4_000 });
+    await waitForWallet(driver, { timeoutMs: 4_000 });
     console.log('[13-offline] ✓ wallet still rendered (no crash/blank)');
 
     await driver.screenshot('13-offline');

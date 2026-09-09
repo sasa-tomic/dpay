@@ -11,7 +11,7 @@
 import {
   setup, assert, assertIncludes, pickFreePort, skipWalkthroughIfPresent, skipPracticeIfPresent,
   waitForEnabled, chooseHomeCurrencyIfPresent, openBalances,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -50,7 +50,7 @@ export async function run() {
     await driver.click('btn-mnemonic-continue');
     await skipPracticeIfPresent(driver);
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', { timeoutMs: 8_000 }); // wallet home mounted at $0
+    await waitForWallet(driver, { timeoutMs: 8_000 }); // wallet home mounted at $0
 
     // Offline indicator (header shows "approx." when online === false).
     assert(await driver.waitForText('approx.', { timeoutMs: 6_000 }), 'header shows the offline approx. indicator');

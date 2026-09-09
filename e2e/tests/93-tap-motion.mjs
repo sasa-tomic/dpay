@@ -11,7 +11,7 @@
 //
 // No real signing fires on the IC side (pure UI-phase proof, exactly flow 11); the SOL side
 // stops before the request event (the reader halves of both rails are flow 86/87's job).
-import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '93',
@@ -87,7 +87,6 @@ export async function run() {
     assert(await driver.waitForText('Not confirmed', {timeoutMs: 4_000}), 'pending shows "Not confirmed"');
     assert(await has(driver, 'tap-ellipsis'), 'pending mounts the stillness ellipsis');
     assert(!await has(driver, 'tap-success-stamp'), 'HONESTY: pending must not carry a settled mark (stamp ring is gone everywhere)');
-    assert(!await has(driver, 'paid-stamp'), 'HONESTY: pending must not carry the paid stamp');
     assert(!await has(driver, 'offline-peak'), 'HONESTY: pending must not carry the peak');
     assert(!(await driver.bodyText()).includes("Don't need it"), 'HONESTY: no campaign line on pending');
     await driver.screenshot('93-tap-motion-pending');
@@ -110,8 +109,8 @@ export async function run() {
       const btns = [...document.querySelectorAll('button')];
       btns.find((b) => (b.textContent || '').includes('Done'))?.click();
     });
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
     // The accounts list is inline on Home (O4 S3) — the row select no longer closes any sheet,

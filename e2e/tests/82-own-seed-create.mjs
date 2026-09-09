@@ -16,7 +16,7 @@
 // The fixed seed is 0x22 × 32 (flow 58's SEED) so the hex-equality assertion is meaningful; its
 // mnemonic (precomputed from the same codec app/lib/bip39.ts implements) is
 // "captain baby mass dust" ×5 + "captain baby mass fault".
-import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
+import { setup, assert, assertEq, accountOf, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, waitForWallet} from '../harness/lib.mjs';
 
 const SEED = '22'.repeat(32);
 const WORDS = `${'captain baby mass dust '.repeat(5).trim()} captain baby mass fault`.replace(/\s+/g, ' ').trim();
@@ -75,7 +75,7 @@ export async function run() {
     // The recovery beat plays, then the first-run practice payment; leave it (create path only).
     await skipPracticeIfPresent(driver);
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
     let identity = await accountOf(driver);
     assert(identity != null, `identity should be stored (got ${JSON.stringify(identity)})`);
     assertEq(identity.secretHex, SEED, 'created secretHex equals the pasted words\' hex encoding');
@@ -101,7 +101,7 @@ export async function run() {
     // Trip Ready J2B/J3 — same interstitial on the hex-form create path.
     await skipPracticeIfPresent(driver);
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
     identity = await accountOf(driver);
     assertEq(identity.secretHex, SEED, 'hex-form create stored the normalized seed');
     console.log('[82-own-seed-create] ✓ hex-form create stored the pasted seed');

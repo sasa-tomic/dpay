@@ -34,7 +34,7 @@
 // Selector contract: `btn-settings`, `settings-relay`, `btn-settings-close`, `balance` (header →
 // Balances), `asset-ckbtc-select` (BTC row whole-row select), `btn-receive-address` (Receive → "My
 // address"), `deposit-status` (absent — no address fetched).
-import { setup, assert, assertIncludes, onboardWallet, goOffline, openBalances, selectCurrency, openReceiveAddress, pickFreePort } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, goOffline, openBalances, selectCurrency, openReceiveAddress, pickFreePort, waitForWallet} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -105,7 +105,7 @@ export async function run() {
     console.log('[22-deposit-error] ✓ no spinner/address (terminal error state, not stuck loading)');
 
     // The wallet surface is still intact (no crash/blank): balance still rendered.
-    await driver.findByTestID('balance', { timeoutMs: 4_000 });
+    await waitForWallet(driver, { timeoutMs: 4_000 });
     console.log('[22-deposit-error] ✓ wallet surface intact (no crash)');
 
     await driver.screenshot('22-deposit-error');

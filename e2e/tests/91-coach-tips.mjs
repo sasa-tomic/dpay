@@ -1,9 +1,6 @@
 /**
  * 91-coach-tips — Trip Ready J4: first-use coaching is anchored, dismissible, and remembered.
  *
- *   payReview       → mounts ONLY on the DEEPLINK review (the one surface that still reviews —
- *                     the camera path auto-signs now, one-press rule 2026-08-24); dismiss →
- *                     re-enter review (same identity): gone (journey seen-marker).
  *   receiveRequest  → mounts on the Receive request-QR phase; dismiss → new request: gone.
  *   offlineQr       → mounts on the OFFLINE hand-off QR (relay dead, value path alive).
  *   pendingOutcome  → mounts on the pending "Sent — awaiting the merchant's confirmation" view,
@@ -19,9 +16,9 @@ export const meta = {
   id: 91,
   name: 'coach-tips',
   journey: 'onboard',
-  covers: ['coach-payReview', 'coach-receiveRequest', 'coach-offlineQr', 'coach-pendingOutcome',
+  covers: ['coach-receiveRequest', 'coach-offlineQr', 'coach-pendingOutcome',
     'btn-coach-*-dismiss', 'journey-seen-markers', 'one-time-coaching'],
-  verifies: 'each coaching tip mounts on its surface exactly once per identity: presence, dismiss, re-entry → absent; pendingOutcome never appears on a confirmed Paid screen; the offline hand-off still settles (counterparty submit + reconcile)',
+  verifies: 'each coaching tip mounts on its surface exactly once per identity: presence, dismiss, re-entry → absent; the payment review carries none at all; pendingOutcome never appears on a confirmed Paid screen; the offline hand-off still settles (counterparty submit + reconcile)',
   timeoutMs: 60_000,
 };
 
@@ -71,39 +68,31 @@ export async function run() {
     console.log(`[${meta.name}] ✓ receiveRequest: shown once, dismissed, remembered`);
     await env.driver.click('tab-pay', {timeoutMs: 4_000});
 
-    // --- payReview: mounts ONLY on the PAYMENT-LINK review (the one remaining review surface —
-    //     the camera scan AUTO-SIGNS now, so a scan-then-sign never shows this tip). Arrive by
-    //     opening a shared payment link (flow 49's navigation pattern).
+    // --- THE PAYMENT REVIEW CARRIES NO TIP AT ALL. There WAS one here ("You approve the exact
+    //     payment"), and it restated the 30pt headline it sat under while costing ~180px between
+    //     the payment details and the Approve button — dropped 2026-09-09 on the founder's rule
+    //     that an element earns its place by adding value the surface does not already carry.
+    //     Asserted on the surface it used to occupy, so re-adding it fails here.
     const bobPrincipal = await railPrincipalText(bob.publicHex);
     const payLink = (ref) => `/wallet/pay/${bobPrincipal}?asset=DEMO&network=internet-computer&amount=25&label=bob&ref=${ref}`
       + `&relay=${encodeURIComponent(env.relayBaseURL)}`;
     await env.driver.navigate(env.webBaseURL, payLink(randNonceHex()), {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await env.driver.waitReady({timeoutMs: 10_000});
-    await env.driver.findByTestID('coach-payReview', {timeoutMs: 6_000});
-    assert(await env.driver.isPresent('btn-approve'), 'the payment-link review carries its single Approve (zero-press entry)');
-    await settle('payReview'); // let the tip's 480ms rise+fade entrance finish before the shot
-    await env.driver.screenshot('91-coach-review');
-    await env.driver.click('btn-coach-payReview-dismiss', {timeoutMs: 4_000});
-    await env.driver.waitGone('coach-payReview', {timeoutMs: 6_000});
-    await env.driver.click('btn-review-cancel', {timeoutMs: 4_000});
-    // Same identity, fresh payment-link review (new ref) → absent.
-    await env.driver.navigate(env.webBaseURL, payLink(randNonceHex()), {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
-    await env.driver.waitReady({timeoutMs: 10_000});
     await env.driver.waitForText('Pay ∂25.00', {timeoutMs: 6_000});
-    assert(!(await env.driver.isPresent('coach-payReview')), 'payReview tip must not re-show after dismissal');
+    assert(await env.driver.isPresent('btn-approve'), 'the payment-link review carries its single Approve (zero-press entry)');
+    assert(!(await env.driver.isPresent('coach-payReview')), 'the payment review must carry no coaching card');
+    await env.driver.screenshot('91-coach-review');
     await env.driver.click('btn-review-cancel', {timeoutMs: 4_000});
-    console.log(`[${meta.name}] ✓ payReview (payment-link review): shown once, never blocks Approve, remembered`);
+    console.log(`[${meta.name}] ✓ payment review: no coaching card, Approve unobstructed`);
 
     // --- offlineQr + pendingOutcome: the flow-20 offline hand-off, coached exactly once. -------
-    //     (The camera scan AUTO-SIGNS while offline — no review, no btn-approve, no payReview tip;
-    //     the seen-marker from the payment-link legs above stays set regardless.)
+    //     (The camera scan AUTO-SIGNS while offline — no review, no btn-approve.)
     await goOffline(env.driver, {keepGateway: true});
     await env.driver.waitForText('approx.', {timeoutMs: 8_000});
     const req3 = buildRequestQR(bob.publicHex, PAY_CENTS, randNonceHex(), Math.floor(Date.now() / 1000) + 600, 0, 'bob');
     await waitForScanner(env.driver);
     await env.driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), req3);
     await env.driver.waitForText('signed on this device ✓', {timeoutMs: 10_000});
-    assert(!(await env.driver.isPresent('coach-payReview')), 'payReview stays dismissed on the offline auto-sign path (no review exists)');
     await env.driver.findByTestID('coach-offlineQr', {timeoutMs: 6_000});
     await settle('offlineQr'); // entrance finish before the shot
     await env.driver.screenshot('91-coach-offlineqr');
@@ -140,13 +129,14 @@ export async function run() {
     await env.driver.waitForText('∂75.00', {timeoutMs: 10_000});
     console.log(`[${meta.name}] ✓ hand-off settled + reconciled — coaching never blocked the money path`);
 
-    // --- all four seen-markers persisted on this identity. -------------------------------------
+    // --- all three seen-markers persisted on this identity. ------------------------------------
     const journey = await env.driver.eval(() => localStorage.getItem('dpay.journey.v1'));
-    for (const key of ['payReview', 'receiveRequest', 'offlineQr', 'pendingOutcome']) {
+    for (const key of ['receiveRequest', 'offlineQr', 'pendingOutcome']) {
       assertIncludes(journey, `"${key}"`, `seen-marker "${key}" persisted`);
     }
+    assert(!journey.includes('"payReview"'), 'the retired payReview tip must leave no marker behind');
     assertIncludes(journey, '"recoverySaved"', 'recoverySaved stamp rode along untouched');
-    console.log(`[${meta.name}] ✓ all four seen-markers persisted (stamps intact)`);
+    console.log(`[${meta.name}] ✓ all three seen-markers persisted (stamps intact)`);
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[${meta.name}] GREEN in ${elapsed}s`);

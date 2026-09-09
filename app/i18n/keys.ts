@@ -105,8 +105,6 @@ export type Messages = {
     paidAmount: (amount: string) => string;
     receivedAmount: (amount: string) => string;
     settled: string;
-    /** The ink stamp pressed onto the success frame — a mark, not the sentence `settled` is. */
-    settledStamp: string;
     /** In-flight sub-line. `network` is null for DEMO (internal) and SOL — no "on …" suffix. */
     paying: (amount: string, network: string | null) => string;
     collecting: (amount: string, network: string | null) => string;

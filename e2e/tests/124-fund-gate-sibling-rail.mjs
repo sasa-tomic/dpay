@@ -13,7 +13,7 @@
 //
 // Selector contract: `pay-fund`, `fund-sibling-rail`, `fund-sibling-holds`,
 // `btn-fund-sibling-switch`, `active-asset-label`, `btn-sol-start-scan`.
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '124',
@@ -43,7 +43,7 @@ export async function run() {
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-USD');
     await driver.click('btn-home-currency-continue');
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
 
     // The FIRST currency choice lands on Home (docs/specs/2026-09-07-ux-decisions.md); the gate
     // this flow exercises lives on the Pay tab, so go there.

@@ -102,7 +102,6 @@ export const fr: Messages = {
     paidAmount: amount => `Payé ✓ ${amount}`.trim(),
     receivedAmount: amount => `Reçu ✓ ${amount}`.trim(),
     settled: 'Le paiement est réglé',
-    settledStamp: 'réglé',
     paying: (amount, network) => (network ? `Paiement de ${amount} sur ${network}` : `Paiement de ${amount}`),
     collecting: (amount, network) =>
       network ? `Encaissement de ${amount} sur ${network}` : `Encaissement de ${amount}`,

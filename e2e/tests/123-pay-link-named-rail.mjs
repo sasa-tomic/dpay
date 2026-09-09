@@ -18,7 +18,7 @@
 //
 // Selector contract: `active-asset-label`, `sol-send-address-input`, `sol-send-amount-input`,
 // `sol-send-review`, `btn-sol-send-confirm`, `sol-send-outcome`.
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '123',
@@ -51,11 +51,14 @@ export async function run() {
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-USD');
     await driver.click('btn-home-currency-continue');
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
 
     // 1. Baseline: USD home selects the PREFERRED ckUSDC rail (flow 118's remembered-asset rule).
     //    This is what the named-rail link must override — by naming, not by choosing.
-    assertIncludes(await driver.readText('active-asset-label'), 'US dollars',
+    // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
+    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
+    // flow 158). `home-headline-label` is the currency statement on this surface.
+    assertIncludes(await driver.readText('home-headline-label'), 'US dollars',
       'home=USD must start on the preferred ckUSDC rail');
 
     // The SOL RPC stub: USDC FUNDED (2.5 USDC — the sibling is the richer rail here, tempting any

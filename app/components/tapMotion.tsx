@@ -35,10 +35,9 @@
  * (active phases), `tap-key-beat` (awaitingApproval), `tap-ellipsis` (pending).
  */
 import React, {useEffect, useRef} from 'react';
-import {Animated, Easing, Text, View} from 'react-native';
+import {Animated, Easing, View} from 'react-native';
 import Svg, {Circle, Rect} from 'react-native-svg';
 import {C} from '../config/palette';
-import {M} from '../i18n';
 import {S} from '../styles';
 import {useReducedMotion} from '../hooks/useReducedMotion';
 import {IconKey} from './icons';
@@ -218,36 +217,6 @@ export function TapShakeSettle({children, testID}: {children: React.ReactElement
   return (
     <Animated.View testID={testID} style={{transform: [{translateX: x}]}}>
       {children}
-    </Animated.View>
-  );
-}
-
-/**
- * The normal paid card's compact calm stamp — one quiet fade-in (≤700ms) in the same stampChip
- * grammar (brand border, −3° tilt, mono uppercase), consistent with the tap success stamp. No
- * celebration escalation; NEVER mounts on a pending/unknown/already card (honest-money rule —
- * the caller gates on the CONFIRMED fresh settle). Reduced → appears at rest.
- */
-export function PaidStamp() {
-  const reduced = useReducedMotion();
-  const op = useRef(new Animated.Value(reduced ? 1 : 0)).current;
-  const scale = useRef(new Animated.Value(reduced ? 1 : 0.94)).current;
-  useEffect(() => {
-    if (reduced) return;
-    const a = Animated.parallel([
-      Animated.timing(op, {toValue: 1, duration: 380, delay: 180, easing: EASE_OUT, useNativeDriver: false}),
-      Animated.spring(scale, {toValue: 1, friction: 6, tension: 70, delay: 180, useNativeDriver: false}),
-    ]);
-    a.start();
-    return () => { a.stop(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return (
-    <Animated.View
-      testID="paid-stamp"
-      pointerEvents="none"
-      style={[S.paidStamp, {opacity: op, transform: [{scale}, {rotate: '-3deg'}]}]}>
-      <Text style={S.paidStampText}>{M.nfc.settledStamp}</Text>
     </Animated.View>
   );
 }

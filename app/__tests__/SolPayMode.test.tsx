@@ -616,8 +616,8 @@ describe('SolPayMode — OpenCryptoPay till', () => {
 
     expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.01221422');
     expect(textByTestID(tree, 'sol-pay-payee')).toBe(MERCHANT);
-    expect(textByTestID(tree, 'ocp-host')).toBe(M.pay.ocp.providerHost('api.dfx.swiss'));
-    expect(textByTestID(tree, 'review-claimed')).toBe(M.pay.ocp.claimedMerchant);
+    expect(textByTestID(tree, 'ocp-price')).toContain('api.dfx.swiss');
+    expect(hasTestID(tree, 'review-claimed')).toBe(false);
     // The one-press rule does NOT reach a till: every value here came from a stranger's server.
     expect(hasTestID(tree, 'btn-approve')).toBe(true);
     expect(sendSol).not.toHaveBeenCalled();
@@ -682,18 +682,18 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     warn.mockRestore();
   });
 
-  test('the review shows what the till is charging in ITS OWN unit, in the IC rail’s words', async () => {
+  test('the review states the till’s price and its host in ONE line, in the IC rail’s words', async () => {
     // `0.01221422 SOL` is uncheckable against a price tag; "CHF 1" is what the till prints. One
-    // component renders it for both rails (`OcpQuoteLines`), so the payer meets the same sentence
-    // whichever asset is selected — CLAUDE.md's same-surfaces rule — and it is the MERCHANT's
-    // figure: dpay neither quotes nor converts.
+    // component renders it for both rails (`OcpQuoteLines`), so the payer meets the same line
+    // whichever asset is selected — CLAUDE.md's same-surfaces rule — and naming the host is what
+    // marks the price as the MERCHANT's rather than dpay's.
     const tree = mountTill();
     await scanTill(tree);
 
-    expect(textByTestID(tree, 'ocp-requested')).toBe(M.pay.ocp.tillCharging('CHF 1'));
+    expect(textByTestID(tree, 'ocp-price')).toBe(M.pay.ocp.tillPrice('CHF 1', 'api.dfx.swiss'));
   });
 
-  test('a till that states no price of its own simply omits the line, and still pays', async () => {
+  test('a till that states no price of its own still names the host, and still pays', async () => {
     jest.mocked(resolveOcpScan).mockResolvedValue({
       kind: 'ok',
       target: {...OCP_TARGET, details: {...OCP_TARGET.details, requestedAmount: null}},
@@ -701,7 +701,7 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     const tree = mountTill();
     await scanTill(tree);
 
-    expect(hasTestID(tree, 'ocp-requested')).toBe(false);
+    expect(textByTestID(tree, 'ocp-price')).toBe(M.pay.ocp.providerHost('api.dfx.swiss'));
     expect(hasTestID(tree, 'btn-approve')).toBe(true);
   });
 
@@ -769,16 +769,25 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     expect(sendSol).not.toHaveBeenCalled();
   });
 
-  test('the countdown runs to the payable deadline, not to the quote’s expiry', async () => {
+  test('the countdown stays off while there is runway, and appears counting to the PAYABLE deadline', async () => {
+    // The IC rail's twin (PayMode.test) — one component renders this for both rails, and the
+    // same-surfaces rule says a payer meets the identical behaviour whichever asset is selected.
     const now = Date.now();
     jest.mocked(resolveOcpScan).mockResolvedValue({
       kind: 'ok',
       target: {...OCP_TARGET, expiresAt: now + 300_000, payableUntil: now + 185_000},
     });
-    const tree = mountTill();
+    let tree = mountTill();
     await scanTill(tree);
-    expect(textByTestID(tree, 'ocp-expiry')).toBe(M.receive.validForMin(3));
-    expect(textByTestID(tree, 'ocp-expiry')).not.toBe(M.receive.validForMin(5));
+    expect(hasTestID(tree, 'ocp-expiry')).toBe(false);
+
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: now + 120_000, payableUntil: now + 42_000},
+    });
+    tree = mountTill();
+    await scanTill(tree);
+    expect(textByTestID(tree, 'ocp-expiry')).toMatch(/^Expires in 0:4[01]$/);
   });
 
   test('the runway this rail asks for is the bound its send actually runs under', async () => {

@@ -66,7 +66,6 @@ export type PayMessages = {
   // --- review + sign ------------------------------------------------------------------------
   unsupportedAsset: string;
   unsupportedAssetBody: (currency: number) => string;
-  reviewPayment: string;
   paying: string;
   payAmount: (amount: string) => string;
   notEnoughBalance: string;
@@ -76,9 +75,6 @@ export type PayMessages = {
   approveHint: string;
   signing: string;
   signsOffline: string;
-  /** Review of a payment that arrived as a shared LINK: the payee name came out of a URL and is
-   *  unverified, so the account shown above it is the part the payer can actually check. */
-  linkNameClaimed: string;
 
   // --- a shared payment link that cannot be paid --------------------------------------------
   // Every branch names the asset/chain the link asked for and ends with the one action the payer
@@ -137,11 +133,15 @@ export type PayMessages = {
      *  money's proof. Names both, because which two they are is the whole point. */
     proofElsewhere: (quoteHost: string, proofHost: string) => string;
     /** What the till is charging in ITS OWN unit ("CHF 1"), on the review beside the asset amount.
-     *  `price` arrives ALREADY FORMATTED (this catalog never formats numbers). It is the MERCHANT's
-     *  figure, said so plainly: dpay neither quotes nor converts, and the provider — not dpay —
-     *  decided how much crypto that fiat price costs. Without it the payer approves "0.0000162 BTC"
-     *  with no way to check it against the price on the till. */
-    tillCharging: (price: string) => string;
+     *  `price` arrives ALREADY FORMATTED (this catalog never formats numbers). Without it the payer
+     *  approves "0.0000162 BTC" with no way to check it against the price on the till.
+     *
+     *  It is the MERCHANT's figure, and naming `host` in the same breath is what says so — the
+     *  provider, not dpay, decided how much crypto that fiat price costs. That attribution used to
+     *  be a second sentence of policy ("dpay doesn't convert"), which is a note to dpay rather than
+     *  to the person at the till (founder, 2026-09-09). `providerHost` says the same thing with no
+     *  price, for a provider that sent none. */
+    tillPrice: (price: string, host: string) => string;
     /** Shown while the two provider reads are in flight — up to half a minute of nothing, on a
      *  screen the payer just pointed at a QR code. */
     checkingTill: string;
@@ -211,7 +211,6 @@ export type PayMessages = {
      *  (the network fee did). Definitive — the payer must pay again, which is the opposite of what
      *  the unknown-outcome copy tells them. */
     transferFailed: string;
-    claimedMerchant: string;
     providerHost: (host: string) => string;
   };
 
@@ -352,7 +351,6 @@ export const payEn: PayMessages = {
   unsupportedAsset: 'Unsupported asset',
   unsupportedAssetBody: currency =>
     `This payment requests an asset this wallet can’t pay (currency ${currency}). dpay never swaps, so there’s no fallback. Ask the merchant to request a supported asset.`,
-  reviewPayment: 'Review payment',
   paying: 'Paying',
   payAmount: amount => `Pay ${amount}`,
   notEnoughBalance: 'Not enough balance to cover this payment.',
@@ -362,7 +360,6 @@ export const payEn: PayMessages = {
   approveHint: 'Sign the displayed amount with your key and send it',
   signing: 'Signing…',
   signsOffline: 'This signs offline — the merchant settles when they submit it.',
-  linkNameClaimed: 'Name given by the sender — check the account above.',
 
   link: {
     title: 'This payment link can’t be paid',
@@ -403,8 +400,7 @@ export const payEn: PayMessages = {
       `${host} gave dpay no way to report a payment back to it, so paying here would take your money without the sale being credited. Nothing has been paid. Scanning again won’t change this — ask the merchant for another way to pay.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `This code’s price comes from ${quoteHost}, but it asks for the proof of your payment to be sent to ${proofHost} instead. One payment can’t answer to two different companies, so dpay stopped. Nothing has been paid — ask the merchant to show their own payment code.`,
-    tillCharging: price =>
-      `The merchant is charging ${price}. Their payment provider set the amount above — dpay doesn’t convert.`,
+    tillPrice: (price, host) => `${price} · price from ${host}`,
     checkingTill: 'Checking with the merchant’s payment provider…',
     badCode:
       'This code is damaged, or it isn’t a payment code. Ask the merchant to show it again, and check that nothing is covering it.',
@@ -447,7 +443,6 @@ export const payEn: PayMessages = {
       `Your transfer did not go through, so nothing was paid and your money is still in your wallet — ${reason}. Scan the code again to pay this till.`,
     transferFailed:
       'The Solana network rejected your transaction, so nothing was paid — the amount is still in your wallet (a small network fee was charged). Scan the code again to try once more.',
-    claimedMerchant: 'Name given by the code — dpay doesn’t verify it.',
     providerHost: host => `Price from ${host}`,
   },
 

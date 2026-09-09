@@ -22,7 +22,7 @@
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   openBalances,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '121',
@@ -53,7 +53,7 @@ export async function run() {
     await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
     await driver.click('home-currency-USD', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
 
     // --- 2. home=USD: BOTH rails visible, MAIN on ckUSDC only, sibling named, nothing summed ------
     await openBalances(driver);
@@ -88,7 +88,7 @@ export async function run() {
     await driver.click('btn-settings', {timeoutMs: 5_000});
     await driver.click('btn-currency-CHF', {timeoutMs: 5_000});
     await driver.click('btn-settings-close', {timeoutMs: 5_000});
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
     await openBalances(driver);
     assert(await driver.isPresent('asset-vchf-main'),
       'the single-rail home currency keeps its MAIN badge on VCHF');

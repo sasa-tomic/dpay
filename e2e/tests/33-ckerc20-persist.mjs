@@ -20,7 +20,7 @@
 // verbatim). Selector contract: `asset-ckusdc-select` (USDC row whole-row select),
 // `btn-receive-address` (Receive → "My address"), `ckerc20-deposit`, `btn-connect-wallet`,
 // `btn-approve`, `ckerc20-amount`, `ckerc20-status`, `btn-ckerc20-new`, `btn-ckerc20-check`.
-import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, openReceiveAddress, waitForWallet} from '../harness/lib.mjs';
 
 // Install a recording EIP-1193 mock identical to flow 16's (chainId 0x1 = Ethereum mainnet, receipt
 // status 0x1 = success). After reload this is GONE (window.ethereum is undefined) — proving the
@@ -173,7 +173,7 @@ export async function run() {
     // the sheet (it lands on the wallet main screen, not the deposit sheet).
     await driver.navigate(webBaseURL, navPath, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 8_000 });
-    await driver.findByTestID('balance', { timeoutMs: 8_000 }); // wallet main screen rendered
+    await waitForWallet(driver, { timeoutMs: 8_000 }); // wallet main screen rendered
     assert(!(await driver.isPresent('ckerc20-deposit')),
       'after escape + reload, the deposit sheet must NOT re-open (the key was cleared)');
     console.log('[33-ckerc20-persist] ✓ post-escape reload lands on the wallet (key cleared, no auto-open)');

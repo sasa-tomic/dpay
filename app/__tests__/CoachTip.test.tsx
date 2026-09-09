@@ -71,17 +71,17 @@ describe('CoachTip', () => {
   });
 
   test('dismissal hides the card and persists the seen-marker (one-time, survives remount)', async () => {
-    const tree = await render({tipKey: 'payReview'});
-    expect(() => findByTestID(tree, 'coach-payReview')).not.toThrow();
-    await dismiss(tree, 'payReview');
-    expect(absent(tree, 'coach-payReview')).toBe(true);
+    const tree = await render({tipKey: 'offlineQr'});
+    expect(() => findByTestID(tree, 'coach-offlineQr')).not.toThrow();
+    await dismiss(tree, 'offlineQr');
+    expect(absent(tree, 'coach-offlineQr')).toBe(true);
     await act(async () => { jest.advanceTimersByTime(200); });
     const raw = await AsyncStorage.getItem(JOURNEY_STORAGE_KEY);
-    expect(JSON.parse(raw as string).seen).toEqual(['payReview']);
+    expect(JSON.parse(raw as string).seen).toEqual(['offlineQr']);
 
     // A fresh mount (surface re-entered, same identity) no longer shows it.
-    const again = await render({tipKey: 'payReview'});
-    expect(absent(again, 'coach-payReview')).toBe(true);
+    const again = await render({tipKey: 'offlineQr'});
+    expect(absent(again, 'coach-offlineQr')).toBe(true);
     act(() => { tree.unmount(); again.unmount(); });
   });
 

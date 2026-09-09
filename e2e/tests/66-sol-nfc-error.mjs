@@ -21,7 +21,7 @@
 //
 // Selector contract: `sol-nfc-status`, `asset-sol-select`, `sol-pay-scan`, `tab-receive`,
 // `sol-req-amount-input`, `btn-sol-req-make`, `sol-req-qr`.
-import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '66',
@@ -84,8 +84,8 @@ export async function run() {
 
     // Select SOL → SolPayMode mounts in 'scan' (v2: no setup, card armed immediately).
     console.log('[66-sol-nfc-error] selecting SOL (card mounts immediately, no setup)…');
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
     // The accounts list is inline on Home (O4 S3) — the row select no longer closes any sheet,

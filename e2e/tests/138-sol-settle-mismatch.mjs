@@ -20,7 +20,7 @@
 // proves the other three classifications reach the merchant UI with honest copy.
 //
 // Selector contract: same as flow 51 + `sol-req-reconcile` (durable unknown-state card).
-import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
 import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
 export const meta = {
@@ -144,8 +144,8 @@ export async function run() {
       };
     });
 
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
 

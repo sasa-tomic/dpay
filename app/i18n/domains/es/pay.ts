@@ -47,7 +47,6 @@ export const payEs: PayMessages = {
   unsupportedAsset: 'Activo no admitido',
   unsupportedAssetBody: currency =>
     `Este pago pide un activo que esta billetera no puede pagar (moneda ${currency}). dpay nunca cambia un activo por otro, así que no hay alternativa. Pide al comercio que solicite un activo admitido.`,
-  reviewPayment: 'Revisa el pago',
   paying: 'Pagando',
   payAmount: amount => `Pagar ${amount}`,
   notEnoughBalance: 'No tienes saldo suficiente para este pago.',
@@ -57,7 +56,6 @@ export const payEs: PayMessages = {
   approveHint: 'Firma con tu clave el importe mostrado y lo envía',
   signing: 'Firmando…',
   signsOffline: 'Esto se firma sin conexión: el comercio lo confirma al enviarlo.',
-  linkNameClaimed: 'Nombre indicado por quien envía: comprueba la cuenta de arriba.',
 
   link: {
     title: 'Este enlace de pago no se puede pagar',
@@ -98,8 +96,7 @@ export const payEs: PayMessages = {
       `${host} no le ha dado a dpay ninguna forma de informarle de un pago, así que pagar aquí te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no cambiará esto: pide al comercio otra forma de pago.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `El precio de este código viene de ${quoteHost}, pero pide que el comprobante de tu pago se envíe a ${proofHost}. Un pago no puede responder ante dos empresas distintas, así que dpay se ha detenido. No se ha pagado nada: pide al comercio que muestre su propio código de pago.`,
-    tillCharging: price =>
-      `El comercio cobra ${price}. Su proveedor de pagos fijó el importe de arriba; dpay no convierte.`,
+    tillPrice: (price, host) => `${price} · precio de ${host}`,
     checkingTill: 'Comprobando con el proveedor de pagos del comercio…',
     badCode:
       'Este código está dañado, o no es un código de pago. Pide al comercio que lo muestre otra vez y comprueba que no lo tape nada.',
@@ -142,7 +139,6 @@ export const payEs: PayMessages = {
       `Tu transferencia no se realizó, así que no se ha pagado nada y tu dinero sigue en tu billetera: ${reason}. Vuelve a escanear el código para pagar en esta caja.`,
     transferFailed:
       'La red de Solana rechazó tu transacción, así que no se ha pagado nada: el importe sigue en tu billetera (se ha cobrado una pequeña comisión de red). Vuelve a escanear el código para intentarlo de nuevo.',
-    claimedMerchant: 'Nombre indicado por el código: dpay no lo verifica.',
     providerHost: host => `Precio de ${host}`,
   },
 

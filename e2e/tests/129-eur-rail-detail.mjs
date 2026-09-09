@@ -17,7 +17,7 @@
 import {
   setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   openBalances,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '129',
@@ -115,8 +115,11 @@ export async function run() {
     // --- 5. Continue commits: EUR lands the wallet on EURC@Solana -------------------------------
     await driver.click('home-currency-EUR', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
-    const label = await driver.readText('active-asset-label');
+    await waitForWallet(driver, {timeoutMs: 10_000});
+    // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
+    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
+    // flow 158). `home-headline-label` is the currency statement on this surface.
+    const label = await driver.readText('home-headline-label');
     assertIncludes(label, 'uros', 'the header names the CURRENCY (euros), not the token');
     assert(!(await driver.isPresent('home-currency-detail')),
       'the detail panel is a chooser surface — it must not leak into the wallet');

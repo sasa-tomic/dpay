@@ -11,8 +11,6 @@ export const walletEs: WalletMessages = {
     settingsHint: 'Abre los ajustes de servidor, borrado y avanzados',
     themeSwitch: target => `Cambiar el tema a ${target}`,
     themeSwitchHint: 'Alterna el tema entre Claro y Oscuro; elige Auto en Ajustes',
-    account: 'CUENTA',
-    accountLabel: 'Cuenta',
     home: 'Inicio de dpay',
     homeHint: 'Abre el sitio principal de dpay',
   },
@@ -217,10 +215,6 @@ export const educationEs: EducationMessages = {
   },
 
   coachTips: {
-    payReview: {
-      title: 'Tú apruebas el pago exacto',
-      body: 'Al aprobar se envía exactamente este importe de este activo, desde tu saldo y firmado con tu clave.',
-    },
     receiveRequest: {
       title: 'Muestra tu código de solicitud',
       body: 'Muéstrale este código a tu cliente. Su teléfono lo escanea y lo aprueba; tu conexión lo confirma.',

@@ -102,7 +102,6 @@ export const de: Messages = {
     paidAmount: amount => `Bezahlt ✓ ${amount}`.trim(),
     receivedAmount: amount => `Empfangen ✓ ${amount}`.trim(),
     settled: 'Die Zahlung wurde abgewickelt',
-    settledStamp: 'abgewickelt',
     paying: (amount, network) => (network ? `Zahlung von ${amount} auf ${network}` : `Zahlung von ${amount}`),
     collecting: (amount, network) => (network ? `Empfang von ${amount} auf ${network}` : `Empfang von ${amount}`),
     holdToSend: 'Halte die Handys zusammen zum Senden',

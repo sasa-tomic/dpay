@@ -47,7 +47,6 @@ export const payDe: PayMessages = {
   unsupportedAsset: 'Asset nicht unterstützt',
   unsupportedAssetBody: currency =>
     `Diese Zahlung verlangt ein Asset, das diese Wallet nicht bezahlen kann (Währung ${currency}). dpay tauscht nie um, deshalb gibt es keinen Ausweg. Bitte den Händler, ein unterstütztes Asset anzufordern.`,
-  reviewPayment: 'Zahlung prüfen',
   paying: 'Du zahlst',
   payAmount: amount => `${amount} bezahlen`,
   notEnoughBalance: 'Dein Guthaben reicht für diese Zahlung nicht aus.',
@@ -57,7 +56,6 @@ export const payDe: PayMessages = {
   approveHint: 'Signiert den angezeigten Betrag mit deinem Schlüssel und sendet ihn',
   signing: 'Signieren…',
   signsOffline: 'Das wird offline signiert — der Händler wickelt beim Einreichen ab.',
-  linkNameClaimed: 'Name vom Absender angegeben — prüfe das Konto darüber.',
 
   link: {
     title: 'Dieser Zahlungslink kann nicht bezahlt werden',
@@ -98,8 +96,7 @@ export const payDe: PayMessages = {
       `${host} hat dpay keinen Weg genannt, eine Zahlung dorthin zu melden — eine Zahlung hier würde also dein Geld kosten, ohne dass der Verkauf gutgeschrieben wird. Es wurde nichts bezahlt. Erneutes Scannen ändert daran nichts — bitte den Händler um eine andere Zahlungsmöglichkeit.`,
     proofElsewhere: (quoteHost, proofHost) =>
       `Der Preis dieses Codes kommt von ${quoteHost}, aber der Nachweis deiner Zahlung soll stattdessen an ${proofHost} gehen. Eine Zahlung kann nicht zwei verschiedenen Firmen gegenüber gelten, deshalb hat dpay abgebrochen. Es wurde nichts bezahlt — bitte den Händler, seinen eigenen Zahlungscode zu zeigen.`,
-    tillCharging: price =>
-      `Der Händler verlangt ${price}. Sein Zahlungsanbieter hat den Betrag oben festgelegt — dpay rechnet nicht um.`,
+    tillPrice: (price, host) => `${price} · Preis von ${host}`,
     checkingTill: 'Wird beim Zahlungsanbieter des Händlers geprüft…',
     badCode:
       'Dieser Code ist beschädigt oder gar kein Zahlungscode. Bitte den Händler, ihn erneut zu zeigen, und achte darauf, dass nichts ihn verdeckt.',
@@ -142,7 +139,6 @@ export const payDe: PayMessages = {
       `Deine Überweisung ging nicht durch, es wurde also nichts bezahlt und dein Geld ist noch in deiner Wallet — ${reason}. Scanne den Code erneut, um an dieser Kasse zu zahlen.`,
     transferFailed:
       'Das Solana-Netzwerk hat deine Transaktion abgelehnt, es wurde also nichts bezahlt — der Betrag ist noch in deiner Wallet (eine kleine Netzwerkgebühr wurde berechnet). Scanne den Code erneut und versuche es noch einmal.',
-    claimedMerchant: 'Name aus dem Code — dpay prüft ihn nicht.',
     providerHost: host => `Preis von ${host}`,
   },
 

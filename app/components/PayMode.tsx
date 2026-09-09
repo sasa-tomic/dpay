@@ -35,7 +35,6 @@ import {awardPaymentTested} from '../lib/readiness';
 import {shouldShowOfflinePeak} from '../lib/peak';
 import {CoachTip} from './CoachTip';
 import {OfflinePeak} from './OfflinePeak';
-import {PaidStamp} from './tapMotion';
 import {IconCheck, IconClock, IconShare} from './icons';
 import {M} from '../i18n';
 
@@ -691,10 +690,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <View style={[S.check, warn && S.checkAlready]}>{mark}</View>
         <Text style={[S.paidText, warn && S.alreadyText]}>{headline}</Text>
         <Text style={S.paidSub}>{sub}</Text>
-        {/* Trip Ready J5 — the compact calm stamp: ONLY on the CONFIRMED fresh settle (never on
-            pending/already — the honest-money rule keeps the stamp mark off unresolved states).
-            One quiet fade-in, consistent with the tap success stamp; additive to the check. */}
-        {!warn ? <PaidStamp /> : null}
+        {/* No third settlement mark. The green check disc and the headline already say it; a
+            tilted "SETTLED" chip under them was the same fact a third time, and the Solana rail's
+            identical paid card never had one (founder, 2026-09-09 — same-surfaces rule). */}
         {/* Trip Ready J4 — the honest-pending first-use tip: ONLY on the offline hand-off state
             (paid.pending with no note), never on a confirmed settle and never on an
             OpenCryptoPay outcome — "check back here" would contradict the note right below it,
@@ -834,17 +832,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           onCancel={reset}
           notes={
             <>
-              {/* A link's payee name is UNVERIFIED — anyone can write any name into a URL. Say so,
-                  once, right where the name is read: the account above it is the checkable part. */}
-              {intent.source === 'link' && intent.toName ? <Text testID="review-claimed" style={S.dim2}>{M.pay.linkNameClaimed}</Text> : null}
-              {/* The till quote's own three lines. `onTooLate` writes the reason into `err`, which
-                  both explains the state and disables Approve — a price with no room left for the
-                  whole sequence must never be payable, because the provider would refuse the proof
-                  AFTER the money moved. */}
+              {/* The till quote's own line. `onTooLate` writes the reason into `err`, which both
+                  explains the state and disables Approve — a price with no room left for the whole
+                  sequence must never be payable, because the provider would refuse the proof AFTER
+                  the money moved. */}
               {intent.source === 'ocp' && ocp ? (
                 <OcpQuoteLines
                   host={ocp.host}
-                  claimedName={intent.toName || null}
                   requested={ocp.details.requestedAmount}
                   payableUntil={ocp.payableUntil}
                   onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}

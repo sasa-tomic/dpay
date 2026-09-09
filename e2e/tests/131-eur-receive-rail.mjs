@@ -14,7 +14,7 @@
 import {
   setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   accountOf, railPrincipalText,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '131',
@@ -47,7 +47,7 @@ export async function run() {
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-EUR');
     await driver.click('btn-home-currency-continue');
-    await driver.findByTestID('balance');
+    await waitForWallet(driver);
     const account = await accountOf(driver);
     const wantPrincipal = await railPrincipalText(account.publicHex);
 

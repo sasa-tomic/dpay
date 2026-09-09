@@ -18,7 +18,7 @@
 //
 // Selector contract: `balance` (header balance Pressable), `header-who` (username), the offline
 // label "~ DEMO approx." (Wallet.tsx renders it when `online === false`; asset-name-prefixed after D3).
-import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent } from '../harness/lib.mjs';
+import { setup, assert, pickFreePort, getBalance, accountOf, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, waitForWallet} from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -86,7 +86,7 @@ export async function run() {
     await skipPracticeIfPresent(driver);
     // The wallet mounts without a funding-failure detour.
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
     const who = await driver.readText('header-who');
     assert(who === 'e2e-nofaucet', `wallet header should show the username after onboarding, got "${who}"`);
     const identity = await accountOf(driver);

@@ -20,7 +20,7 @@ import {M} from '../i18n';
 import {type CoachTipKey} from '../config/education';
 import {hasSeen, loadJourney, markSeen} from '../lib/journey';
 import {useReducedMotion} from '../hooks/useReducedMotion';
-import {IconArrowUpRight, IconClock, IconClose, IconQr, IconWifiOff} from './icons';
+import {IconClock, IconClose, IconQr, IconWifiOff} from './icons';
 
 // The per-surface glyph — the icon restates the tip's truth at a glance (outgoing payment,
 // request code, no signal, unresolved clock). Never a celebration mark.
@@ -31,7 +31,6 @@ import {IconArrowUpRight, IconClock, IconClose, IconQr, IconWifiOff} from './ico
 // wrong-colour icon now that they do not — the same reason `styles.ts` rebuilds `S` rather than
 // caching hexes.
 const TIP_ICONS: Record<CoachTipKey, {icon: React.FC<{size?: number; color?: string}>; tint: 'brandText' | 'warn'}> = {
-  payReview: {icon: IconArrowUpRight, tint: 'brandText'},
   receiveRequest: {icon: IconQr, tint: 'brandText'},
   offlineQr: {icon: IconWifiOff, tint: 'warn'},
   pendingOutcome: {icon: IconClock, tint: 'warn'},

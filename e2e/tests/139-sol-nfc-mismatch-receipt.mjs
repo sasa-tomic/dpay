@@ -13,7 +13,7 @@
 // no bounce back to the scan screen).
 //
 // Selector contract: `asset-sol-select`, `sol-pay-scan`, `sol-nfc-status`, `__DPAY_SOL_NFC_LAST`.
-import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '139',
@@ -72,8 +72,8 @@ export async function run() {
     await onboardWallet(driver, 'e2e-sol-mismatch');
 
     console.log('[139-sol-nfc-mismatch-receipt] selecting SOL via Balances…');
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('tab-pay', {timeoutMs: 5_000});

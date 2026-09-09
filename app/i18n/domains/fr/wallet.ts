@@ -12,8 +12,6 @@ export const walletFr: WalletMessages = {
     settingsHint: 'Ouvre le serveur, la réinitialisation et les paramètres avancés',
     themeSwitch: target => `Passer au thème ${target}`,
     themeSwitchHint: 'Bascule le thème entre Clair et Sombre ; choisissez Auto dans les Paramètres',
-    account: 'COMPTE',
-    accountLabel: 'Compte',
     home: 'Accueil dpay',
     homeHint: 'Ouvre le site principal de dpay',
   },
@@ -218,10 +216,6 @@ export const educationFr: EducationMessages = {
   },
 
   coachTips: {
-    payReview: {
-      title: 'Vous approuvez le paiement exact',
-      body: 'Approuver envoie exactement ce montant de cet actif — depuis votre solde, signé par votre clé.',
-    },
     receiveRequest: {
       title: 'Montrez votre code de demande',
       body: 'Montrez ce code à votre client. Son téléphone le scanne et approuve ; votre connexion confirme.',

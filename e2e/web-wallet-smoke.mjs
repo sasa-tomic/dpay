@@ -130,8 +130,10 @@ try {
   // 4. the wallet chrome the real app renders for a returning user. Onboarding re-appearing here
   //    would mean the identity was lost. TestIDs, not aria-labels: the labels are localized copy
   //    (`M.wallet.tab.*`) and the testIDs are the byte-stable contract — see Tab.tsx.
-  await driver.findByTestID('balance', { timeoutMs: 15_000 });
-  for (const id of ['balance', 'header-who', 'btn-settings', 'tab-home', 'tab-pay', 'tab-receive', 'tab-transactions']) {
+  // The landing screen is HOME, whose accounts affordance is its own labelled pill — the header
+  // chip is deliberately not rendered there (it would name a different account than the headline).
+  await driver.findByTestID('btn-home-accounts', { timeoutMs: 15_000 });
+  for (const id of ['btn-home-accounts', 'header-who', 'btn-settings', 'tab-home', 'tab-pay', 'tab-receive', 'tab-transactions']) {
     (await driver.isPresent(id)) ? ok(`${id} renders`) : bad(`${id} missing`);
   }
 

@@ -11,7 +11,7 @@
 //
 // testID contract: `offline-peak` (mounted-but-settled for the card's lifetime — deterministic
 // to catch after the ~2s moment), `first-offline-stamp` (the settled remnant mark), and
-// `paid-stamp` (the compact calm stamp on every confirmed paid card). The honesty core: the
+// The honesty core: the
 // pending "Sent" hand-off view (btn-paid) must carry NEITHER the peak NOR the stamp.
 import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf, goOffline, setRelay, armPayScan} from '../harness/lib.mjs';
 import {generateKeypair, buildRequestQR, randNonceHex} from '../harness/wire.mjs';
@@ -65,8 +65,7 @@ export async function run() {
     const qrBody = await driver.bodyText();
     assert(!qrBody.includes("Don't need it"), 'the un-confirmed hand-off QR view must NOT show the campaign line');
     await absent(driver, 'offline-peak');
-    await absent(driver, 'paid-stamp');
-    console.log(`[${meta.name}] ✓ hand-off moment honest: no peak, no stamp`);
+    console.log(`[${meta.name}] ✓ hand-off moment honest: no peak`);
 
     // Counterparty submits the envelope; A reconciles to Paid.
     const envelopeBytes = b64urlToBytes(payload);
@@ -134,13 +133,14 @@ export async function run() {
     await setRelay(driver, env.relayBaseURL);
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'second offline payment reconciles to Paid ✓');
 
-    // No peak anywhere (neither the moment nor the remnant), no campaign line; the CALM paid
-    // stamp still shows (it is not the one-shot — only the peak is) — faded-in, not just mounted.
+    // No peak anywhere (neither the moment nor the remnant), no campaign line. The paid card is
+    // the check disc + the headline and nothing else: the tilted "SETTLED" chip that used to ride
+    // under them was the same fact a third time, and went 2026-09-09.
     await absent(driver, 'offline-peak');
     await absent(driver, 'first-offline-stamp');
+    await absent(driver, 'paid-stamp');
     assert(!(await driver.bodyText()).includes("Don't need it"), 'second offline paid must NOT re-run the peak');
-    await driver.waitAtRest('paid-stamp', {timeoutMs: 6_000});
-    console.log(`[${meta.name}] ✓ second offline payment: quiet (no peak), calm stamp only`);
+    console.log(`[${meta.name}] ✓ second offline payment: quiet — no peak, no stamp`);
 
     // --- The ONLINE paid path never peaks — but the calm stamp rides the confirmed card. -------
     await driver.click('btn-new', {timeoutMs: 4_000});
@@ -153,9 +153,9 @@ export async function run() {
     // Online auto-sign: decode → sign → submitTransfer → settled → Paid ✓ (no Approve press).
     assert(await driver.waitForText('Paid ✓', {timeoutMs: 12_000}), 'online auto-sign settles to Paid ✓ (flow 03-style)');
     await absent(driver, 'offline-peak');
+    await absent(driver, 'paid-stamp');
     assert(!(await driver.bodyText()).includes("Don't need it"), 'the ONLINE paid path must NEVER peak');
-    await driver.waitAtRest('paid-stamp', {timeoutMs: 6_000});
-    console.log(`[${meta.name}] ✓ online paid: no peak ever, calm stamp only`);
+    console.log(`[${meta.name}] ✓ online paid: no peak ever, no stamp`);
 
     // Ledger truth after all three payments (100 − 25 − 25 − 25).
     const aliceBal = await getBalance(env.relayBaseURL, alice.publicHex, 0);

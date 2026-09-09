@@ -3,7 +3,6 @@ import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
 import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
 import type {PayIntent} from '../lib/types';
-import {CoachTip} from './CoachTip';
 import {M} from '../i18n';
 
 /**
@@ -20,11 +19,10 @@ import {M} from '../i18n';
  * `review-payee`, `review-lowbal`, `review-err`, `btn-approve`, `btn-review-cancel`) — the e2e
  * suite's contract for the pay path is unchanged by construction.
  *
- * What varies between entries is passed as `notes`, rendered between the payee block and the
- * coaching tip: a payment LINK adds its claimed-name caveat, an OpenCryptoPay till adds its three
- * quote lines, practice adds its fee row and the sentence about one phone playing both sides. The
- * component itself knows nothing about where a payment came from, so no entry can quietly grow its
- * own review.
+ * What varies between entries is passed as `notes`, rendered under the payee block: an
+ * OpenCryptoPay till adds its one quote line, practice adds its fee row and the sentence about one
+ * phone playing both sides. The component itself knows nothing about where a payment came from, so
+ * no entry can quietly grow its own review.
  *
  * `approveDisabled` is computed HERE, once: a shown error or a blocked balance must never leave a
  * doomed payment re-tappable, and two call sites deriving that separately is two chances to get it
@@ -44,14 +42,12 @@ export function PaymentReview({catalog, intent, notes, insufficient, blockApprov
   const approveDisabled = busy || !!err || blockApprove;
   return (
     <View style={S.center}>
-      <Text style={S.label}>{M.pay.reviewPayment}</Text>
+      {/* No screen title. "Review payment" sat directly above "Pay <amount>" with Approve and
+          Cancel underneath — the screen named itself three times, and the eyebrow was the copy that
+          said the least (founder, 2026-09-09). */}
       <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
       <PayeeLine intent={intent} />
       {notes}
-      {/* Trip Ready J4 — one-time first-use coaching, mounted in the reading zone (right under
-          the amount/payee block it explains) so it is seen without scrolling; inline, never
-          covers the buttons. Shows until dismissed; dismissal persists via journey seen-markers. */}
-      <CoachTip tipKey="payReview" />
       {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen
           first; the raw request nonce is no longer surfaced (internal protocol data). */}
       {insufficient ? (

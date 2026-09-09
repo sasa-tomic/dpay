@@ -503,13 +503,15 @@ describe('PayMode — pay-intent scan gate', () => {
     });
   });
 
-  test('a payment link shows the FULL destination account and marks the sender-given name as claimed', async () => {
-    // The account is the identity; the label is only what the sender wrote into the URL. Both are
-    // on screen, and the caveat sits with the name (phishing surface).
+  test('a payment link shows the FULL destination account — the account IS the check, with no caveat line', async () => {
+    // The account is the identity; the label is only what the sender wrote into the URL. The
+    // account is therefore on screen in full, and the sentence that used to say the name was
+    // unverified is NOT: it warned about a name while the checkable thing sat right under it, and
+    // no payer could act on it (founder, 2026-09-09).
     const tree = mountPay({prefillIntent: LINK_INTENT, onPrefillConsumed: () => {}});
     await act(async () => {});
     expect(textByTestID(tree, 'review-payee')).toBe(PAYEE_PRINCIPAL);
-    expect(hasTestID(tree, 'review-claimed')).toBe(true);
+    expect(hasTestID(tree, 'review-claimed')).toBe(false);
     act(() => {
       tree.unmount();
     });
@@ -734,10 +736,9 @@ describe('PayMode — OpenCryptoPay till', () => {
     expect(textByTestID(tree, 'pay-amount')).toContain('1.00');
     // The full account, not a short form: the provider chose it, so it is the checkable part.
     expect(textByTestID(tree, 'review-payee')).toBe(TILL_PRINCIPAL);
-    expect(textByTestID(tree, 'ocp-host')).toBe(M.pay.ocp.providerHost('api.dfx.swiss'));
-    // The merchant name came out of the provider's JSON — marked as claimed, with the OCP wording
-    // rather than the payment link's.
-    expect(textByTestID(tree, 'review-claimed')).toBe(M.pay.ocp.claimedMerchant);
+    // ONE line carries the provider's price and the host that set it — the attribution IS the host.
+    expect(textByTestID(tree, 'ocp-price')).toContain('api.dfx.swiss');
+    expect(hasTestID(tree, 'review-claimed')).toBe(false);
     // NEVER auto-signed: the amount and the destination came from a stranger's server.
     expect(prepareTransfer).not.toHaveBeenCalled();
     expect(payAndReport).not.toHaveBeenCalled();
@@ -877,22 +878,24 @@ describe('PayMode — OpenCryptoPay till', () => {
     warn.mockRestore();
   });
 
-  test('the review shows what the till is charging in ITS OWN unit, as the merchant’s figure', async () => {
+  test('the review states the till’s own price and the host that set it, in ONE line', async () => {
     // `1.00000000 VCHF` is uncheckable on its own: the number on the till and in the cashier's
-    // mouth is "CHF 1", so without this line the payer approves an amount they cannot compare
-    // against the price of the sale. The copy attributes it to the merchant's provider — dpay
-    // neither quotes nor converts (CLAUDE.md non-negotiable) — and it is the PROVIDER's own
-    // `requestedAmount`, never a figure this wallet derived.
+    // mouth is "CHF 1", so without it the payer approves an amount they cannot compare against the
+    // price of the sale. It is the PROVIDER's own `requestedAmount`, never a figure this wallet
+    // derived — and naming the host in the same line IS that attribution, which is why the policy
+    // sentence that used to follow it ("dpay doesn't convert") is gone: it addressed dpay, not the
+    // person at the till (founder, 2026-09-09).
     const tree = mountTill();
     await scanTill(tree);
 
-    expect(textByTestID(tree, 'ocp-requested')).toBe(M.pay.ocp.tillCharging('CHF 1'));
-    expect(textByTestID(tree, 'ocp-requested')).toContain('dpay doesn’t convert');
+    expect(textByTestID(tree, 'ocp-price')).toBe(M.pay.ocp.tillPrice('CHF 1', 'api.dfx.swiss'));
+    expect(textByTestID(tree, 'ocp-price')).not.toContain('convert');
   });
 
-  test('a till that states no price of its own simply omits the line, and still pays', async () => {
-    // Display context never blocks a payment (the same rule as the claimed merchant name): a
-    // provider that sends no readable `requestedAmount` loses the line, not the Approve button.
+  test('a till that states no price of its own still names the host, and still pays', async () => {
+    // Display context never blocks a payment: a provider that sends no readable `requestedAmount`
+    // loses the PRICE, not the host beside it and not the Approve button — the host is the trust
+    // fact, and it is available whether or not a price came with it.
     jest.mocked(resolveOcpScan).mockResolvedValue({
       kind: 'ok',
       target: {...OCP_TARGET, details: {...OCP_TARGET.details, requestedAmount: null}},
@@ -900,7 +903,7 @@ describe('PayMode — OpenCryptoPay till', () => {
     const tree = mountTill();
     await scanTill(tree);
 
-    expect(hasTestID(tree, 'ocp-requested')).toBe(false);
+    expect(textByTestID(tree, 'ocp-price')).toBe(M.pay.ocp.providerHost('api.dfx.swiss'));
     expect(hasTestID(tree, 'btn-approve')).toBe(true);
   });
 
@@ -917,19 +920,32 @@ describe('PayMode — OpenCryptoPay till', () => {
   // The countdown counts to the last instant Approve can be pressed — NOT to the quote's expiry.
   // Showing the quote's own countdown invites a press the sequence cannot complete: the funds move
   // first and the ONE proof submission then lands on a dead quote, spending everything for nothing.
-  test('the countdown runs to the payable deadline, not to the quote’s expiry', async () => {
+  test('the countdown stays off while there is runway, and appears counting to the PAYABLE deadline', async () => {
     const now = Date.now();
     jest.mocked(resolveOcpScan).mockResolvedValue({
       kind: 'ok',
       target: {...OCP_TARGET, expiresAt: now + 300_000, payableUntil: now + 185_000},
     });
-    const tree = mountTill();
+    let tree = mountTill();
     await scanTill(tree);
-    // ~3 min of runway inside a 5 min quote. Showing the quote's own countdown would invite a press
-    // the sequence cannot complete — the funds move first and the ONE submission then lands on a
-    // dead quote.
-    expect(textByTestID(tree, 'ocp-expiry')).toBe(M.receive.validForMin(3));
-    expect(textByTestID(tree, 'ocp-expiry')).not.toBe(M.receive.validForMin(5));
+    // ~3 min of runway: a countdown here changes nothing a payer would do, and is one more thing
+    // to read at a till. It is not rendered at all.
+    expect(hasTestID(tree, 'ocp-expiry')).toBe(false);
+
+    // Inside the last minute it IS the reason to hurry, so it appears — and it counts to the last
+    // instant Approve can be pressed, NOT to the quote's expiry. Showing the quote's own deadline
+    // would invite a press the sequence cannot complete: the funds move first and the ONE proof
+    // submission then lands on a dead quote, spending everything for nothing.
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, expiresAt: now + 120_000, payableUntil: now + 42_000},
+    });
+    tree = mountTill();
+    await scanTill(tree);
+    // A range, not an exact second: the test's own wall clock runs between the mock and the read.
+    // What is pinned is which deadline it counts to — 42s of PAYABLE runway inside a 2-minute
+    // quote reads as seconds-to-payable, never as the quote's own minute and a half.
+    expect(textByTestID(tree, 'ocp-expiry')).toMatch(/^Expires in 0:4[01]$/);
   });
 
   test('the runway this rail asks for covers the poll budget it actually uses', async () => {

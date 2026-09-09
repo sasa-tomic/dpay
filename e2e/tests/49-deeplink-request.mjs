@@ -21,7 +21,7 @@
 // prod code. `?relay=` rides alongside the link's own params so the loaded page still talks to the
 // test relay (relay-config reads it at module load; the link parser ignores unknown params).
 //
-// Selector contract: `pay-amount`, `review-payee`, `review-claimed`, `btn-approve`, `btn-new`, `balance`.
+// Selector contract: `pay-amount`, `review-payee`, `btn-approve`, `btn-new`, `balance`.
 import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
@@ -85,7 +85,10 @@ export async function run() {
     assert(reviewPayee === bobPrincipal,
       `review must show the full destination account: expected ${bobPrincipal}, got "${reviewPayee}"`);
     // ...and the name beside it is marked as CLAIMED (anyone can write any name into a URL).
-    await driver.findByTestID('review-claimed', { timeoutMs: 4_000 });
+    // The FULL destination account is the check on a link's claimed name, and it is the only one
+    // offered: the "name given by the sender" caveat was dropped 2026-09-09 — it warned about a
+    // name while the checkable thing sat right under it, and no payer could act on it.
+    assert(!(await driver.isPresent('review-claimed')), 'a link review carries no unactionable name caveat');
     // SECURITY INVARIANT: the link prefilled the review only — it must NOT have reached Paid.
     assert(!/\bPaid\b/.test(reviewBody), 'a payment link must NOT auto-pay — review screen only (no "Paid")');
     await driver.findByTestID('btn-approve', { timeoutMs: 4_000 });

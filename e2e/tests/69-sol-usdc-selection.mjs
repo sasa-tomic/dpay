@@ -16,7 +16,7 @@
 // Selector contract: asset-ckusdc-select, tab-receive, req-prefix, req-pick-ckusdc, req-pick-sol,
 // req-pick-sol-usdc, amount-input, memo-input, sol-req-prefix, sol-req-amount-input,
 // btn-sol-req-make.
-import {setup, assertEq, assertIncludes, onboardWallet} from '../harness/lib.mjs';
+import {setup, assertEq, assertIncludes, onboardWallet, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '69',
@@ -54,8 +54,8 @@ export async function run() {
     // 1. Select IC USDC via Balances. The unified selection state (selectedAssetId='ic:2') is the
     //    ONE source of truth — the Receive prefix + the open picker must BOTH reflect it.
     console.log('[69-sol-usdc-selection] selecting IC USDC (ckUSDC) via Balances…');
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-ckusdc-select', {timeoutMs: 5_000});
     await driver.click('asset-ckusdc-select', {timeoutMs: 5_000});
     await driver.click('tab-receive', {timeoutMs: 5_000});

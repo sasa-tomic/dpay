@@ -22,7 +22,7 @@
 // Selector contract: `btn-settings`, `btn-settings-restore`, `settings-restore-seed-input`,
 // `btn-settings-restore-confirm`, `btn-settings-restore-cancel`, `balance`, `header-who`.
 // Mirrors flow 58 (Onboarding restore) + flow 57 (Settings backup).
-import { setup, assert, assertEq, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { setup, assert, assertEq, onboardWallet, accountOf, waitForWallet} from '../harness/lib.mjs';
 
 // A second deterministic 32-byte seed, distinct from identity A's. The different-seed step types
 // this into the form to prove the wallet key actually changes (a fresh generate would never match).
@@ -76,7 +76,7 @@ export async function run() {
 
     // The wallet re-mounts under the replaced identity → Settings sheet unmounts + `balance` is
     // back. Wait for it before re-reading the identity from localStorage.
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
     const idAfterSame = await accountOf(driver);
     assert(idAfterSame != null, `identity should be present after same-seed restore (got ${JSON.stringify(idAfterSame)})`);
     assertEq(idAfterSame.secretHex, seedA, 'same-seed restore: secretHex should equal A\'s seed');
@@ -102,7 +102,7 @@ export async function run() {
     await driver.findByTestID('settings-restore-seed-input', { timeoutMs: 5_000 });
     await driver.type('settings-restore-seed-input', wordsA.join(' '), { timeoutMs: 5_000 });
     await driver.click('btn-settings-restore-confirm', { timeoutMs: 5_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
     const idAfterWords = await accountOf(driver);
     assertEq(idAfterWords?.secretHex, seedA, 'words restore: secretHex should round-trip to A\'s seed');
     assertEq(idAfterWords?.publicHex, pubA, 'words restore: publicHex should equal A\'s (deterministic derivation)');
@@ -120,7 +120,7 @@ export async function run() {
     await driver.findByTestID('settings-restore-seed-input', { timeoutMs: 5_000 });
     await driver.type('settings-restore-seed-input', SEED_B, { timeoutMs: 5_000 });
     await driver.click('btn-settings-restore-confirm', { timeoutMs: 5_000 });
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
 
     const idB = await accountOf(driver);
     assert(idB != null, `identity B should be present after different-seed restore (got ${JSON.stringify(idB)})`);

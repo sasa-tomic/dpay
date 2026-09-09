@@ -24,7 +24,7 @@
 //
 // The till fixture is READ from the committed golden, not authored here (`../harness/ocp.mjs`).
 //
-// Selector contract: `ocp-host`, `ocp-expiry`, `ocp-requested`, `ocp-outcome`, `review-claimed`,
+// Selector contract: `ocp-price`, `ocp-expiry`, `ocp-outcome`,
 // `pay-amount`, `review-payee`, `btn-approve`, `btn-new` (and `btn-start-scan` via armPayScan).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
@@ -45,7 +45,7 @@ export const meta = {
   id: '113',
   name: 'dpay-till',
   journey: 'pay',
-  covers: ['opencryptopay', 'tx-ledger-spelling', 'vchf', 'explicit-approve', 'claimed-name', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'settle'],
+  covers: ['opencryptopay', 'tx-ledger-spelling', 'vchf', 'explicit-approve', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'settle'],
   verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer pays it — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name and the CHF price, and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) carrying the till\'s per-charge `ref` as the transfer\'s on-chain memo, then reports the proof exactly once — as `<vchf ledger>:<block index>`, the spelling a non-ICP ICRC ledger requires and the one whose absence cost a real payment — → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
   timeoutMs: 45000, // 2 legs: 4 provider round trips + 2 real IC settlements
 };
@@ -115,14 +115,16 @@ export async function run() {
       'the review shows the till\'s exact quoted amount, in the one asset that till takes');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the review shows the FULL destination account — the merchant\'s own, not dpay\'s');
-    assertEq(await driver.readText('ocp-host'), `Price from ${till.host}`,
-      'the review names the host the price came from, even when that host is our own relay');
-    assertIncludes(await driver.readText('review-claimed'), 'Name given by the code',
-      'a merchant name is marked CLAIMED on our own till too — dpay does not verify it');
-    assertIncludes(await driver.bodyText(), DPAY_TILL.merchant, 'the review shows the name the till claims');
-    assertIncludes(await driver.readText('ocp-requested'), `The merchant is charging ${DPAY_TILL.requestedAmount.asset} 10`,
+    // ONE provider line, and it names the host even when that host is our OWN relay — a dpay till
+    // is not exempt from the trust disclosure it asks of every other provider.
+    const price = await driver.readText('ocp-price');
+    assertIncludes(price, `${DPAY_TILL.requestedAmount.asset} 10`,
       'the review shows the till\'s own price, so the payer can check it against the sale');
-    assert(/^Valid for ~\d+ min$/.test(await driver.readText('ocp-expiry')), 'the review counts the quote down');
+    assertIncludes(price, till.host, 'the review names the host that set the price');
+    assertIncludes(await driver.bodyText(), DPAY_TILL.merchant, 'the review shows the name the till claims');
+    assert(!(await driver.isPresent('review-claimed')), 'the review carries no unactionable name caveat');
+    assert(!(await driver.isPresent('ocp-expiry')),
+      'a quote with minutes left must not put a countdown on the review');
     assert(await driver.isPresent('btn-approve'), 'a scanned till must still require an explicit Approve press');
     assertEq(await getBalance(relayBaseURL, accountHex, VCHF), String(SEED),
       'nothing may leave the wallet before the payer approves');

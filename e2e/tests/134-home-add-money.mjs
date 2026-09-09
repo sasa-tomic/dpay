@@ -48,7 +48,14 @@ export async function run() {
     assertIncludes(await driver.readText('home-headline-label'), 'Swiss francs', 'the home rail names the CURRENCY');
     assertIncludes(await driver.readText('home-headline-label'), 'Main', 'the home rail carries the Main badge');
     assertIncludes(await driver.readText('home-headline-amount'), 'VCHF', 'the amount stays in the VCHF token unit — the currency is only the NAME');
+    // The SELECTION is a different fact from the home currency, and Home deliberately states only
+    // the latter — so this reads it where the wallet does state it (the Pay header chip), then
+    // returns to Home for the Add money tap. That round trip IS the assertion: two facts, two
+    // surfaces, neither one overwriting the other.
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
     assertIncludes(await driver.readText('active-asset-label'), 'DEMO', 'the SELECTED account is still the practice rail');
+    await driver.click('tab-home', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
 
     console.log('[134-home-add-money] tapping add-money (deposit path)…');
     await driver.click('btn-home-add-money', { timeoutMs: 4_000 });

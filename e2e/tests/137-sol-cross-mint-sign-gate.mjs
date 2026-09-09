@@ -16,7 +16,7 @@
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
   armPayScan, openBalances,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '137',
@@ -67,7 +67,7 @@ export async function run() {
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-EUR');
     await driver.click('btn-home-currency-continue');
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
 
     // Stub v1 (same seam as flow 132): every account exists — the Receive tab's address sheet is
     // 'ready' so the payer's USDC ATA (derived locally by the app) can be READ from the UI.
@@ -192,7 +192,7 @@ export async function run() {
     await driver.findByTestID('home-currency-title');
     await driver.click('home-currency-EUR');
     await driver.click('btn-home-currency-continue');
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
+    await waitForWallet(driver, {timeoutMs: 10_000});
     // Wait until the rail has actually REPORTED the refusal — before that the mint is merely
     // 'loading', which is the OTHER unverified state and carries the other sentence.
     await driver.click('tab-home');

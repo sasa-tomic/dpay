@@ -55,7 +55,7 @@ const SURFACES = {
   // Always-present (header + tabbar) on every surface. link-home is the web-only wordmark
   // back-link to the site root (WordmarkLink in Logo.tsx) — on native it degrades to inert
   // text, so the census (web) is its only role/label gate.
-  chrome: ['btn-settings', 'btn-theme', 'balance', 'link-home', 'tab-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
+  chrome: ['btn-settings', 'btn-theme', 'link-home', 'tab-home', 'tab-pay', 'tab-receive', 'tab-transactions'],
   // Wallet home (Pay tab) — only chrome is interactive (the scan card's QR scanner is a viewport,
   // not a Pressable; the pay-scan DIV is informational).
   home: [],
@@ -158,7 +158,15 @@ export async function run() {
     // labels/roles into `allMissing` so the final summary is a single throw with the full list
     // (one throw per element would stop the census at the first miss).
     async function census(surface) {
-      const expected = [...SURFACES.chrome, ...(SURFACES[surface] || [])];
+      // The header account chip is chrome on every surface EXCEPT the landing screen: Home states
+      // the HOME CURRENCY in its own headline, and the chip states the SELECTION — two different
+      // accounts, so only one of them renders there (founder, 2026-09-09; flow 158 pins it).
+      // Home's own `btn-home-accounts` carries the route instead, and is censused below.
+      const expected = [
+        ...SURFACES.chrome,
+        ...(surface === 'homeTab' ? [] : ['balance']),
+        ...(SURFACES[surface] || []),
+      ];
       const found = await driver.eval((testids) => {
         const out = {};
         for (const id of testids) {

@@ -15,7 +15,7 @@
 // reads ∂100.00 — NOT ∂0.00. Asserting ∂0.00 would require disabling the faucet, which would break
 // the "use the REAL relay + REAL FakeLedger" rule. We assert ∂100.00 (proves faucet→balance
 // end-to-end) and note this deviation. Empty history is asserted verbatim (no payments settled yet).
-import { setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent, selectDemoAsset, waitForWallet} from '../harness/lib.mjs';
 
 const ONBOARD_USERNAME = 'e2e-alice';
 const ONBOARD_PLACEHOLDER = 'e.g. Alice';
@@ -87,7 +87,7 @@ export async function run() {
     // The balance element appears once the wallet mounts (the app's first state is balance=null →
     // shows '—'; once the first poll completes it reads the faucet-funded ∂100.00).
     await chooseHomeCurrencyIfPresent(driver);
-    await driver.findByTestID('balance', { timeoutMs: 10_000 });
+    await waitForWallet(driver, { timeoutMs: 10_000 });
     // The wallet opens on the chosen CURRENCY now, so the demo rail this assertion is about has to
     // be selected explicitly. Flow 118 is where the currency landing itself is proven.
     await selectDemoAsset(driver);

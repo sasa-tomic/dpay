@@ -16,7 +16,7 @@
 //   - sol-req-status ("Received") does NOT render (no false success).
 //
 // Selector contract: same as flow 51.
-import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
 
 export const meta = {
   id: '53',
@@ -77,8 +77,8 @@ export async function run() {
 
     // 1. Select SOL → Receive tab → create the solreq QR.
     console.log('[53-sol-merchant-error] selecting SOL + switching to Receive…');
-    await driver.findByTestID('balance', {timeoutMs: 8_000});
-    await driver.click('balance', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver, {timeoutMs: 5_000});
     await driver.findByTestID('asset-sol-select', {timeoutMs: 5_000});
     await driver.click('asset-sol-select', {timeoutMs: 5_000});
 

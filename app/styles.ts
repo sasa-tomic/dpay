@@ -118,26 +118,26 @@ function buildStyles(p: Palette) {
   seedInput: {backgroundColor: p.field, borderRadius: 16, minHeight: 56, paddingHorizontal: 18, paddingVertical: 14, fontSize: 16, fontFamily: FONT.mono, color: p.ink, marginBottom: 8, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch'},
   // Header — borderless on porcelain (whitespace separates chrome from content; hairlines under
   // the header read as spreadsheet chrome). Balanced horizontal padding.
-  header: {paddingTop: 16, paddingLeft: 16, paddingRight: 16, paddingBottom: 12, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12},
-  // X18 — the header row must never grow past the column. `flexShrink` is the load-bearing pair:
-  // both RNW and Yoga default a View to flexShrink 0, so before this the identity block was sized
-  // to the username and simply PUSHED the account chip off the screen. Measured at 390 px with the
-  // 22-character name "Bartholomew Fitzgerald": the chip's right edge sat at x = 410.2, i.e. 20.2 px
-  // off-viewport, on every tab that shows an amount, in BOTH themes — and the identity block and the
-  // chip were flush (0 px apart) on all of them. The left cluster now yields its width instead
-  // (`headerIdentity` shrinks, the username ellipsizes), and the chip keeps its own.
-  headerLeft: {flexDirection: 'row', alignItems: 'flex-start', gap: 4, flexShrink: 1},
-  // The wordmark + ACCOUNT + username block. `marginLeft` on top of headerLeft's 4px gap gives the
-  // two utility buttons and the identity a real separation (12 px): they are different things, and
-  // at 4 px the ∂ read as a third button (the "collide" half of X18).
-  headerIdentity: {flexShrink: 1, marginLeft: 8},
+  // Paddings and gap are tight on purpose: two rows cost more vertical space than one, and this
+  // is the header of a screen whose job is below it. Measured against the one-row version, the
+  // trim gives back most of the difference without letting the rows touch.
+  header: {paddingTop: 14, paddingLeft: 16, paddingRight: 16, paddingBottom: 10, gap: 6},
+  // TWO ROWS, not one (founder, 2026-09-09: "move balance below ∂pay, to give it more room").
+  // Side by side, the balance and the identity were competing for one 390 px line and the balance
+  // always won: `balBox` could not shrink, so an 8-decimal amount like "3.99029806 VCHF" took the
+  // row and the identity block collapsed to ~20 px — "∂pay" rendered one glyph per line and the
+  // eyebrow wrapped to A/C/C/O/U/N/T (measured on the device, 2026-09-09). Giving each its own row
+  // removes the competition entirely: nothing can squeeze anything, at any name or amount length.
+  headerTop: {flexDirection: 'row', alignItems: 'center', gap: 8},
   headerSettingsBtn: {width: 40, height: 40, borderRadius: 14, backgroundColor: p.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.line2},
-  brand: {fontSize: 24},
-  // ACCOUNT eyebrow above the username separates the wordmark "∂pay" from the user identity so
-  // the pair no longer reads as a single currency label. Mono = the receipt voice. The `who` line
-  // below stays the authoritative username text (e2e `header-who` reads it verbatim).
-  whoLabel: {fontSize: 10, fontWeight: '600', color: p.sub2, marginTop: 6, letterSpacing: 1.2, textTransform: 'uppercase', fontFamily: FONT.mono},
-  who: {fontSize: 13, color: p.sub, marginTop: 2, fontFamily: FONT.sansMedium},
+  // `marginLeft` on top of headerTop's 8px gap separates the utility buttons from the identity —
+  // at 4 px the ∂ read as a third button (the "collide" half of X18).
+  brand: {fontSize: 24, marginLeft: 4},
+  // The username, inline beside the wordmark. `flexShrink` lets a long name ellipsize rather than
+  // push anything; the ACCOUNT eyebrow that used to sit above it is gone (founder 2026-09-09) — it
+  // labelled a name with a word that told the user nothing, and existed only because the crushed
+  // column made "∂pay" and the name read as one string.
+  who: {fontSize: 13, color: p.sub, fontFamily: FONT.sansMedium, flexShrink: 1},
   // NFC takeover badge — a soft ring on porcelain (no filled disc); the glyph/icon carries tone.
   nfcBadge: {width: 108, height: 108, borderRadius: 54, borderWidth: 3, borderColor: p.line, alignItems: 'center', justifyContent: 'center', marginBottom: 26},
   nfcGlyph: {fontSize: 54, fontWeight: '700', lineHeight: 62},
@@ -156,10 +156,6 @@ function buildStyles(p: Palette) {
   // warn tone, no rotation, no scale press, deliberately slow).
   nfcEllipsis: {flexDirection: 'row', gap: 7, marginTop: 20, alignItems: 'center'},
   nfcEllipsisDot: {width: 6, height: 6, borderRadius: 3, backgroundColor: p.warn},
-  // The paid-card stamp chip — the same stampChip language, compact + calm, additive to the
-  // existing Paid view (never replaces the check/paidText marks).
-  paidStamp: {marginTop: 18, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 999, borderWidth: 1.5, borderColor: p.brandText, backgroundColor: 'transparent'},
-  paidStampText: {color: p.brandText, fontFamily: FONT.mono, fontSize: 12, fontWeight: '600', letterSpacing: 2.4, textTransform: 'uppercase'},
   // ── The one-shot offline peak (J5) ───────────────────────────────────────────────────────
   // Full-width moment ABOVE the paid card: the campaign line as a strong editorial line and
   // the "no signal the whole time" microcopy. Settles INTO the card (~2s).
@@ -208,14 +204,13 @@ function buildStyles(p: Palette) {
   passportSlotDate: {color: p.sub, fontFamily: FONT.mono, fontSize: 9, letterSpacing: 1, marginTop: 3, textTransform: 'uppercase', textAlign: 'center'},
   passportCapstoneText: {color: inv.brandText, fontFamily: FONT.mono, fontSize: 15, fontWeight: '600', letterSpacing: 2.2, textTransform: 'uppercase', textAlign: 'center', lineHeight: 20},
   passportCapstoneMicro: {fontSize: 13, color: inv.ink, marginTop: 14, textAlign: 'center', fontFamily: FONT.sans, opacity: 0.85},
-  // `flexShrink: 0` states the other half of the X18 contract: the account chip carries the
-  // wallet's balance and the switcher, so it is the header element that keeps its width and the
-  // identity block is the one that yields.
-  balBox: {alignItems: 'flex-end', flexShrink: 0},
-  // The header balance pressable's outer row: the label+value column, then the A hotkey badge
-  // at the far right edge (DOM order label → value → badge, mirroring the tab-bar badge pattern).
-  balHeaderRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
-  balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5},
+  // The account chip owns the header's second row outright, so it no longer competes with the
+  // identity for width and the amount can be as long as the ledger makes it.
+  balBox: {alignSelf: 'stretch'},
+  // Eyebrow (dot + asset name + A hotkey badge) on the left, amount + switcher chevron on the
+  // right — the account-selector shape, and the reason the amount has the whole right side.
+  balHeaderRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10},
+  balLabelRow: {flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1},
   balAmtRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   // The practice faucet's refusal, rendered ONCE by Wallet above the mode switch. It sits outside
   // the scroll body because the `T` hotkey fires from EVERY surface and its answer has to be on
@@ -228,7 +223,7 @@ function buildStyles(p: Palette) {
   balAmt: {fontSize: 28, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -0.5},
   // The transient Android back-to-exit hint under the header balance (inline Text, not a
   // toast — no native module, matches the caption tone but with a warn tint for visibility).
-  balBackHint: {fontSize: 12, color: p.warn, marginTop: 6, fontFamily: FONT.sansMedium},
+  balBackHint: {fontSize: 12, color: p.warn, marginTop: 6, textAlign: 'right', fontFamily: FONT.sansMedium},
   // Bottom navigation bar (O4 S1) — the persistent primary nav, replacing the old top pill row.
   // Rendered AFTER the ScrollView inside the SafeAreaView so it never scrolls away; the
   // SafeAreaView owns the bottom safe-area inset (web env() inset; native MainActivity's API-35

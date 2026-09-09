@@ -22,7 +22,7 @@
 //     btn-home-currency-continue) — the ~106 flows that ride chooseHomeCurrencyIfPresent.
 import {
   setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
-} from '../harness/lib.mjs';
+ waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '120',
@@ -88,8 +88,11 @@ export async function run() {
     // --- 4. Continue still works, byte-stable testIDs and all ------------------------------------
     await driver.click('home-currency-USD', {timeoutMs: 4_000});
     await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
-    await driver.findByTestID('balance', {timeoutMs: 10_000});
-    const label = await driver.readText('active-asset-label');
+    await waitForWallet(driver, {timeoutMs: 10_000});
+    // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
+    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
+    // flow 158). `home-headline-label` is the currency statement on this surface.
+    const label = await driver.readText('home-headline-label');
     assertIncludes(label, 'US dollars', 'choosing USD must land the wallet on its preferred rail, in the currency\'s name');
     console.log(`[120-home-currency-rails] ✓ continue works: ${JSON.stringify(label)}`);
 
