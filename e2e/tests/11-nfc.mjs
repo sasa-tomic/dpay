@@ -33,7 +33,10 @@ export const meta = {
   journey: 'nfc',
   covers: ['nfc-phases', 'event-bus', 'auto-sign'],
   verifies: 'NFC transport phases render via the RNW event bus; a request AUTO-SIGNS on arrival (one-press rule) — the wire exists with no Approve click.',
-  timeoutMs: 15000,
+  // 30s, not 15s: measured 19.9s ALONE on an idle host — i.e. the flow could never fit its own
+  // budget, and only passed when the load-scale happened to stretch it far enough. Same class as
+  // flows 105/106. A budget smaller than the flow's measured cost is a coin toss, not a gate.
+  timeoutMs: 30000,
 };
 
 export async function run() {

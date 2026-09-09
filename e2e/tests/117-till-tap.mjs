@@ -147,6 +147,15 @@ export async function run() {
       `the unauthenticated status route must not disclose the reference, got ${JSON.stringify(idle.reference)}`);
 
     // --- UNIT 2: the counter armed the reader FROM that charge ------------------------------------
+    // WAIT for the reader, do not SAMPLE it. This was a bare `eval` fired immediately after the
+    // HTTP round trips above, so it raced React's mount of the reader NfcTap and went red under
+    // host load on a tree where nothing was wrong. The thing being asserted is "the counter arms a
+    // reader", which is a statement about what eventually holds — not about which side of a render
+    // the assertion happens to land on.
+    await driver.waitForFunction(
+      () => window.__DPAY_TEST_NFC_COUNT() >= 1,
+      { label: 'the counter mounts a reader NfcTap (>=1 DpayNfcEvent listener)', timeoutMs: 5_000 },
+    );
     const listeners = await driver.eval(() => window.__DPAY_TEST_NFC_COUNT());
     assert(listeners >= 1, `the counter must mount a reader NfcTap, got ${listeners} DpayNfcEvent listeners`);
     const armedHex = await until('reader mode arming', () => driver.eval(() => window.__DPAY_TEST_NFC_READER_REQUEST ?? null));

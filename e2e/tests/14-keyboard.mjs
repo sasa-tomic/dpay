@@ -23,9 +23,9 @@ export const meta = {
   id: '14',
   name: 'keyboard',
   journey: 'system',
-  covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard', 'focus-visible'],
-  verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / open the accounts route / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4).',
-  timeoutMs: 15000,
+  covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard', 'focus-visible', 'escape-leaves-route', 'enter-submits'],
+  verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / open the accounts route / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4); Escape leaves a ROUTE the way the hardware Back button does; Enter in the Receive amount submits the request (and is deliberately absent where Enter would sign).',
+  timeoutMs: 25000,
 };
 
 export async function run() {
@@ -164,6 +164,32 @@ export async function run() {
     console.log('[14-keyboard] ✓ mouse focus stays ring-free (:focus-visible only)');
     await driver.pressKey('Escape'); // close the settings sheet the click opened (useEscapeToClose)
     await driver.waitGone('btn-settings-close', { timeoutMs: 3_000 });
+
+    // --- Escape LEAVES A ROUTE (X21) ------------------------------------------------------------
+    // The accounts list and Convert are routes, not sheets, so they grew their own Back chevron and
+    // never picked up the Escape affordance every overlay advertises — one surface in the app was
+    // teaching the user that Escape does nothing. Wallet now shares ONE `leaveRoute` between the
+    // Android hardware Back button and this key, so the two platforms cannot drift.
+    await driver.pressKey('a');
+    await driver.findByTestID('accounts-list', { timeoutMs: 3_000 });
+    await driver.pressKey('Escape');
+    await driver.waitGone('accounts-list', { timeoutMs: 3_000 });
+    console.log('[14-keyboard] ✓ Escape leaves the accounts route, as the hardware Back button does');
+
+    // --- Enter SUBMITS the Receive amount (X21) -------------------------------------------------
+    // Every short web form has taught the user that Enter in the last field does the thing the form
+    // is for. This one made them reach for the mouse. Note WHERE this is asserted: the Receive
+    // request form mints no payment and moves no money, so Enter is safe here — it is deliberately
+    // NOT wired on the Send or Convert amount, where Enter would sign.
+    await driver.click('tab-receive', { timeoutMs: 3_000 });
+    // The tab was last left in its "My address" sub-mode by the deposit step above; the request
+    // form is the other half of the same toggle.
+    await driver.click('btn-receive-request', { timeoutMs: 3_000 });
+    await driver.findByTestID('amount-input', { timeoutMs: 3_000 });
+    await driver.type('amount-input', '1.50');
+    await driver.pressKey('Enter');
+    await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
+    console.log('[14-keyboard] ✓ Enter in the Receive amount submits the request');
 
     await driver.screenshot('14-keyboard');
 

@@ -155,8 +155,20 @@ export async function run() {
       );
       const amt0 = await rectOf('hist-amt-0');
       const time0 = await rectOf('hist-time-0');
+      // Widen by prepending a digit rather than by pattern-matching the hour.
+      //
+      // THE BUG THIS REPLACES, because it made the gate lie for most of every day: the probe used
+      // to insert a digit with `/(\D)(\d:\d\d)/`, which by construction cannot match a timestamp
+      // whose hour is ALREADY two digits — the character before the `\d:\d\d` is then a digit, not
+      // a `\D`. So from 10:00 to 23:59 the replace was a no-op, the width did not change, and this
+      // assertion failed on a tree where nothing was wrong. A gate that is red for 14 hours a day
+      // is worse than no gate: it teaches everyone to ignore it.
+      //
+      // Prepending is format-agnostic — 24-hour, 12-hour, with or without a date prefix — and it
+      // reproduces the thing under test exactly, which is one extra character of timestamp width,
+      // not the specific hour that produced it.
       await driver.eval(
-        (sel) => { const el = document.querySelector(sel); el.textContent = el.textContent.replace(/(\D)(\d:\d\d)/, '$11$2'); },
+        (sel) => { const el = document.querySelector(sel); el.textContent = `8${el.textContent}`; },
         '[data-testid="hist-time-0"]',
       );
       const time1 = await rectOf('hist-time-0');

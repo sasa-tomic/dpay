@@ -45,7 +45,8 @@ export const meta = {
   journey: 'withdraw',
   covers: ['send-to-address', 'auto-route', 'ckbtc', 'icrc1_transfer', 'route-disclosure', 'balance-delta'],
   verifies: 'One destination field routes ckBTC by what is pasted: a Bitcoin address discloses the Bitcoin chain (~10 min, 0.0005 minimum) and shows the burn body; an IC principal discloses the Internet Computer and sends a plain icrc1_transfer that credits the recipient on the ckBTC ledger — a route that did not exist before.',
-  timeoutMs: 30000,
+  // Same reasoning as flow 105: measured ~31s under mild load against a 30s budget.
+  timeoutMs: 45000,
 };
 
 export async function run() {

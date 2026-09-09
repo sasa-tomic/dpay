@@ -293,6 +293,10 @@ export async function runTestsSubset(tests, opts = {}) {
     : resolveConcurrency();
   const timeoutScale = explicitScale ?? resolveTimeoutScale(resolved.load, resolved.concurrency);
 
+  // Publish the scale to the driver so a flow's INNER waits stretch with the host exactly as its
+  // wall-clock budget does. Two notions of "how slow is this host" is how a loaded machine produced
+  // "element not visible within 5000ms" — a statement about the app that was really about the box.
+  process.env.DPAY_E2E_TIMEOUT_SCALE = String(timeoutScale);
   const { results, firstFailure } = await runPool(tests, resolved.concurrency, timeoutScale);
 
   // Tear down the shared relay + web server + browser once the run is done (pass OR fail) — UNLESS

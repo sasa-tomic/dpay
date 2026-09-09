@@ -43,7 +43,12 @@ export const meta = {
   journey: 'withdraw',
   covers: ['send-to-address', 'wrong-chain', 'account-identifier', 'crc', 'fail-closed', 'instructions'],
   verifies: 'Send-to-address refusals are specific and actionable: a Bitcoin / Ethereum address is named as such and pointed at the right network, a 64-hex ICP account identifier is named and the principal asked for instead, and a checksum-broken principal is called incomplete — each with the send button left disabled.',
-  timeoutMs: 30000,
+  // 45s, not 30s: measured 23.8s ALONE on an idle host, which left under 6s of headroom for a flow
+  // that types into eleven fields and waits on a refusal for each. Any contention — another flow,
+  // another process on the box — pushed it past even the harness's load-scaled budget, so it went
+  // red on a tree where nothing was wrong. A budget that only passes on an idle machine is a
+  // flake generator, not a gate.
+  timeoutMs: 45000,
 };
 
 export async function run() {

@@ -41,6 +41,47 @@ const FREEZE_CSS = `
   }
 `;
 
+/**
+ * The host-load timeout scale, published by `run.mjs` before any flow starts.
+ *
+ * WHY THIS EXISTS. The runner already scales each flow's WALL-CLOCK budget by host load, so a busy
+ * machine gets a longer allowance instead of a uniformly red suite. But every wait INSIDE a flow —
+ * `navigate`, `findByTestID`, `waitForText` — carried a fixed millisecond budget that no load
+ * measurement touched. So on a loaded box the inner wait blew first, and the failure read as
+ * "element not visible within 5000ms": a statement about the app when it was a statement about the
+ * machine. Three flows went red that way on a tree where nothing was wrong (105, 106, 156), and
+ * each one cost a round of investigation before the cause was clear.
+ *
+ * Scaling both together keeps ONE notion of "how slow is this host" instead of two that disagree.
+ * It cannot mask a genuine hang: the per-test wall clock still bounds the flow and is scaled by the
+ * same factor, so a flow that never finishes still fails — with the timeout that describes it.
+ */
+let cachedScale = null;
+
+/** A caller-supplied or default wait, stretched by the host-load scale.
+ *
+ *  Read LAZILY, not at module load. `run.mjs` publishes the scale after it has measured the host,
+ *  by which time this module has long been imported — a module-scope constant captured 1 and every
+ *  inner wait stayed unscaled, which is the exact bug this helper was added to fix. Cached after
+ *  the first read: the scale does not change within a run. */
+function scaled(ms) {
+  if (cachedScale === null) {
+    const raw = process.env.DPAY_E2E_TIMEOUT_SCALE;
+    if (raw === undefined) {
+      cachedScale = 1;
+    } else {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) {
+        console.warn(`[driver] ignoring DPAY_E2E_TIMEOUT_SCALE="${raw}" — not a positive number`);
+        cachedScale = 1;
+      } else {
+        cachedScale = n;
+      }
+    }
+  }
+  return Math.round(ms * cachedScale);
+}
+
 export class Driver {
   /** The base URL the app was loaded from (set by `navigate`). */
   baseURL = null;
@@ -273,7 +314,7 @@ export class Driver {
     this._recordTimeline('navigate', `${base}${path}`);
     this.baseURL = base;
     const url = `${base}${path}`;
-    const timeoutMs = opts.timeoutMs ?? 8_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 8_000);
     const waitUntil = opts.waitUntil ?? 'networkidle0';
     this.navigationDepth += 1;
     try {
@@ -287,7 +328,7 @@ export class Driver {
 
   /** Wait for `window.__DPAY_READY === true` (set by shims.ts after the shims are installed). */
   async waitReady(opts = {}) {
-    const timeoutMs = opts.timeoutMs ?? 10_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 10_000);
     try {
       await this.page.waitForFunction('window.__DPAY_READY === true', { timeout: timeoutMs });
     } catch (e) {
@@ -298,7 +339,7 @@ export class Driver {
   /** Find an element by RN `testID` (RNW renders it as `data-testid`). Returns the ElementHandle. */
   async findByTestID(testID, opts = {}) {
     this._recordTimeline('findByTestID', testID);
-    const timeoutMs = opts.timeoutMs ?? 5_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
     try {
       return await this.page.waitForSelector(`[data-testid="${cssEscape(testID)}"]`, { timeout: timeoutMs });
     } catch (e) {
@@ -314,7 +355,7 @@ export class Driver {
    *  would let a flow continue on a dead page and pass/fail opaquely. So only a TimeoutError
    *  resolves to false; every other error is rethrown loud with the waited-for text + cause. */
   async waitForText(text, opts = {}) {
-    const timeoutMs = opts.timeoutMs ?? 5_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
     try {
       await this.page.waitForFunction(
         (t) => (document.body?.innerText ?? '').includes(t),
@@ -384,7 +425,7 @@ export class Driver {
    */
   async typeByPlaceholder(placeholder, text, opts = {}) {
     this._recordTimeline('typeByPlaceholder', `${placeholder}:${text}`);
-    const timeoutMs = opts.timeoutMs ?? 5_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
     const el = await this.page.waitForSelector(`input[placeholder="${cssEscape(placeholder)}"]`, { timeout: timeoutMs });
     await el.click({ clickCount: 3 });
     await el.press('Backspace');
@@ -447,7 +488,7 @@ export class Driver {
    */
   async waitForFunction(fn, opts = {}) {
     this._recordTimeline('waitForFunction', opts.label ?? fn);
-    const timeoutMs = opts.timeoutMs ?? 5_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
     try {
       await this.page.waitForFunction(fn, { timeout: timeoutMs }, ...(opts.args ?? []));
     } catch (e) {
@@ -481,7 +522,7 @@ export class Driver {
    */
   async waitAtRest(testID, opts = {}) {
     this._recordTimeline('waitAtRest', testID);
-    const timeoutMs = opts.timeoutMs ?? 8_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 8_000);
     const minOpacity = opts.minOpacity ?? 0.99;
     const out = await this.page.evaluate((cfg) => new Promise((resolve) => {
       const deadline = performance.now() + cfg.timeoutMs;
@@ -528,7 +569,7 @@ export class Driver {
    */
   async settleFrames(count = 3, opts = {}) {
     this._recordTimeline('settleFrames', count);
-    const timeoutMs = opts.timeoutMs ?? 5_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 5_000);
     const painted = await this.page.evaluate((cfg) => new Promise((resolve) => {
       let n = 0;
       const step = () => { n += 1; if (n >= cfg.count) { resolve(n); return; } requestAnimationFrame(step); };
@@ -543,7 +584,7 @@ export class Driver {
   /** Wait until NO element matches `testID` (e.g. a sheet closed and unmounted). */
   async waitGone(testID, opts = {}) {
     this._recordTimeline('waitGone', testID);
-    const timeoutMs = opts.timeoutMs ?? 3_000;
+    const timeoutMs = scaled(opts.timeoutMs ?? 3_000);
     try {
       await this.page.waitForFunction(
         (sel) => !document.querySelector(sel),
