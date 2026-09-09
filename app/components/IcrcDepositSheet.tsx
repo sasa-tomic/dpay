@@ -15,6 +15,9 @@ import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {IconCheck, IconCopy} from './icons';
 import {InstrLine} from './InstrLine';
 import {M} from '../i18n';
+import {FundingRoutes} from './FundingRoutes';
+import {isTestnetCurrency} from '../config/catalog';
+import type {HomeCurrency} from '../config/currency';
 
 /**
  * IC-rail receive sheet (2026-08-29 founder hard rule: every funding gate gives useful practical
@@ -32,7 +35,7 @@ import {M} from '../i18n';
  * routing); this sheet fails closed only on incomplete data. Receive detection is the same
  * honest watch as DepositSheet: a signed icrc1_balance_of baseline + strictly-higher delta.
  */
-export function IcrcDepositSheet({identity, catalog, asset, onClose}: {identity: Identity; catalog: CurrencyDescriptor[]; asset: SelectableAsset; onClose: () => void}) {
+export function IcrcDepositSheet({identity, catalog, asset, homeCurrency, onClose}: {identity: Identity; catalog: CurrencyDescriptor[]; asset: SelectableAsset; homeCurrency: HomeCurrency | null; onClose: () => void}) {
   // SelectableAsset is a discriminated union and this sheet is IC-only by contract (ReceiveMode's
   // rail routing never passes a Solana row); a stray non-IC row narrows to a null descriptor and
   // hits the same fail-closed path as an incomplete one.
@@ -178,6 +181,12 @@ export function IcrcDepositSheet({identity, catalog, asset, onClose}: {identity:
               ? <ActivityIndicator size="small" color={C.brandText} />
               : <Text style={S.checkBtnText}>{M.deposit.checkNow}</Text>}
           </Pressable>
+
+          {/* The step BEFORE the address (founder direction 2026-09-09). This sheet's instructions
+              are complete and were still a dead end: "send VCHF from an Internet Computer wallet"
+              names a thing the target user has never heard of. Testnet-ness comes from the catalog
+              descriptor — server-declared, never inferred. */}
+          <FundingRoutes asset={asset} isTestnet={desc !== null && isTestnetCurrency(desc)} homeCurrency={homeCurrency} />
 
           {Platform.OS === 'web' ? <Text style={S.dim2}>{M.deposit.pressEsc}</Text> : null}
         </>

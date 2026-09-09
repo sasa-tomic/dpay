@@ -25,6 +25,7 @@ import {CkErc20DepositSheet} from './CkErc20DepositSheet';
 import {IcrcDepositSheet} from './IcrcDepositSheet';
 import {RailDisclosure} from './RailDisclosure';
 import {AssetPicker} from './AssetPicker';
+import {AssetSwitchRow} from './AssetSwitchRow';
 import {useReportLock} from '../hooks/useReportLock';
 import {useShareFeedback, shareConfirmLabel} from '../hooks/useShareFeedback';
 import {useJourney} from '../lib/journey';
@@ -424,7 +425,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   const homeIcRail = homeRailShown != null && homeRailShown.protocol === 'ic' ? homeRailShown : null;
   const addressSheet =
     homeIcRail != null ? (
-      <IcrcDepositSheet
+      <IcrcDepositSheet homeCurrency={homeCurrency}
         identity={identity}
         catalog={catalog}
         asset={homeIcRail}
@@ -453,7 +454,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         onClose={() => onSubModeChange('request')}
       />
     ) : directIcrc && activeAsset ? (
-      <IcrcDepositSheet
+      <IcrcDepositSheet homeCurrency={homeCurrency}
         identity={identity}
         catalog={catalog}
         asset={activeAsset}
@@ -470,6 +471,19 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           left={{label: M.receive.requestPayment, value: 'request', testID: 'btn-receive-request'}}
           right={{label: M.receive.myAddress, value: 'address', testID: 'btn-receive-address'}}
         />
+        {/* One tap to any other asset's address, instead of four taps and a tab switch through the
+            accounts route. `onReceiveRailChange` is the sub-mode-preserving selector — Wallet's
+            ordinary handleSelect resets the sub-mode and would bounce the user to the request form. */}
+        {activeAsset != null && onReceiveRailChange != null ? (
+          <AssetSwitchRow
+            asset={activeAsset}
+            assets={assets}
+            balances={balances}
+            selectedId={selectedAssetId}
+            homeCurrency={homeCurrency}
+            onSelect={onReceiveRailChange}
+          />
+        ) : null}
         {homeRailShown != null && onReceiveRailChange != null ? (
           <RailDisclosure
             currency={homeCurrency!}
@@ -563,7 +577,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           <Text style={S.currency}>{reqPrefix}</Text>
           <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
-        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} />
+        {/* X21 — Enter submits. Every other form on the web has taught the user that pressing
+            Enter in the last field of a short form does the thing the form is for; this one made
+            them reach for the mouse, and the keyboard shortcuts that DO exist stop at the tab
+            level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
+            hardware keyboard attached to a phone. Both fields submit: the memo is optional, so
+            either one can legitimately be the last field the user touches. */}
+        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} onSubmitEditing={makeRequest} returnKeyType="done" />
       </View>
       <TextInput
         testID="memo-input"
@@ -575,6 +595,8 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         accessibilityLabel={M.receive.memo}
         accessibilityHint={M.receive.memoHint}
         maxLength={32}
+        onSubmitEditing={makeRequest}
+        returnKeyType="done"
       />
       <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel={M.receive.request} accessibilityHint={M.receive.requestHint} accessibilityState={{disabled: false}}><Text style={S.primaryText}>{M.receive.request}</Text></Pressable>
       {err ? <Text style={S.err}>{err}</Text> : null}
@@ -583,6 +605,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         assets={assets}
         selectedId={selectedAssetId}
         balances={balances}
+        homeCurrency={homeCurrency}
         onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
         onClose={() => setPickOpen(false)}
       />

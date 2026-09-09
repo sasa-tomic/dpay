@@ -15,14 +15,29 @@
 // `req-pick-sol` / `req-pick-sol-usdc` / `req-pick-ckbtc` etc. continue to resolve every Receive
 // flow that filters by those IDs (63 picker-sol-rail, 69 sol-usdc-selection).
 //
-// `showAmount` defaults false (the picker is a selector, not a balance list); Balances passes true.
 // `title` defaults "Receive in" (the picker copy the e2e net reads on the Receive prefix path).
+//
+// ── It is the accounts list, so it looks like the accounts list (UX swarm 2026-09-08) ───────────
+// This picker and the accounts route render the same set of accounts, and they used to disagree
+// about both of the things a list of accounts is for. The picker showed NO balances — so a
+// merchant chose which asset to be paid in without being able to see what they held — and it
+// listed them in raw catalog order while the route applied a stated policy. Two lists of one set,
+// disagreeing, is the UI form of the DRY violation.
+//
+// Both are now fixed at the source: amounts always render, and the order comes from
+// `orderAccounts` — the SAME exported policy function the accounts route uses, so the two cannot
+// drift. The `showAmount` and `variant` props that used to make this configurable are gone: no
+// caller passed either (the Balances sheet that wanted `variant='card'` was retired in the
+// 2026-09-08 accounts-route move), and a configurable answer to "should a list of money show the
+// money" is how the two lists diverged in the first place.
 import {Modal, Pressable, ScrollView, View, Text} from 'react-native';
 import {S} from '../styles';
 import {CurrencyRow} from './CurrencyRow';
+import {orderAccounts} from './AccountsTab';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {type SelectableAsset} from '../config/assets';
 import {type BalanceView} from '../lib/assetBalances';
+import type {HomeCurrency} from '../config/currency';
 import type {AssetId} from '../lib/types';
 import {M} from '../i18n';
 
@@ -31,11 +46,14 @@ export type AssetPickerProps = {
   assets: SelectableAsset[];
   selectedId: AssetId | null;
   balances?: Record<AssetId, BalanceView>;
+  /** Orders the rows the way the accounts route does (home currency's rails first, then accounts
+   *  that hold something, then the rest, practice money last). Null only where the wallet has no
+   *  home currency yet, in which case catalog order is the honest answer — there is no "your"
+   *  currency to put first. */
+  homeCurrency?: HomeCurrency | null;
   onSelect: (id: AssetId) => void;
   onClose: () => void;
   title?: string;            // default "Receive in" (the picker copy)
-  showAmount?: boolean;      // default false (omit amounts; picker is a selector)
-  variant?: 'plain' | 'card'; // default 'plain' (the Modal picker); 'card' for Balances-style rows
 };
 
 /**
@@ -44,7 +62,8 @@ export type AssetPickerProps = {
  * the selection (re-derives + re-mounts the right Receive form), and the Modal closes. NO local
  * selection state; NO SOL special-case branch.
  */
-export function AssetPicker({open, assets, selectedId, balances, onSelect, onClose, title = M.receive.receiveInTitle, showAmount = false, variant = 'plain'}: AssetPickerProps) {
+export function AssetPicker({open, assets, selectedId, balances, homeCurrency = null, onSelect, onClose, title = M.receive.receiveInTitle}: AssetPickerProps) {
+  const ordered = homeCurrency === null ? assets : orderAccounts(assets, balances ?? {}, homeCurrency);
   // Esc closes the Modal (the same affordance every sheet uses). The backdrop Pressable below
   // handles a tap-outside-to-close; Esc covers the web keyboard path.
   useEscapeToClose(onClose);
@@ -59,21 +78,20 @@ export function AssetPicker({open, assets, selectedId, balances, onSelect, onClo
           {/* Bounded scroller (S.pickScroll) — a Modal has no scroll surface, so a long catalog
               would push the bottom rows off a small screen with no way to reach them. */}
           <ScrollView style={S.pickScroll}>
-            {assets.map(asset => {
+            {ordered.map(asset => {
               const view = balances?.[asset.id];
-              const testId = variant === 'card' ? `asset-${asset.testKey}` : `req-pick-${asset.testKey}`;
               return (
                 <CurrencyRow
                   key={asset.testKey}
-                  testId={testId}
+                  testId={`req-pick-${asset.testKey}`}
                   asset={asset}
-                  amount={showAmount ? view?.displayText : undefined}
+                  amount={view?.displayText}
                   active={asset.id === selectedId}
                   zero={view ? view.status !== 'ok' : undefined}
                   onPress={() => { onSelect(asset.id); onClose(); }}
                   accessibilityLabel={M.receive.receiveIn(asset.symbol)}
                   accessibilityHint={asset.protocol === 'solana' ? M.receive.switchToRail(asset.symbol) : M.receive.receiveIn(asset.networkLabel)}
-                  variant={variant}
+                  variant="plain"
                 />
               );
             })}

@@ -252,6 +252,46 @@ export type DepositMessages = {
     fundHint: (asset: string) => string;
     err: string;
   };
+
+  /** "Don't have any yet?" — the step BEFORE the address (founder direction 2026-09-09; design and
+   *  measured provider evidence in docs/specs/2026-09-09-funding-routes-plan.md).
+   *
+   *  Every figure rendered here is a provider's OWN published number, relayed with the date it was
+   *  read and never computed by dpay (docs/REGULATORY.md §4 item 7). `upTo` vs `from` is the
+   *  load-bearing distinction: no provider publishes a price, only a ceiling or a floor, so copy
+   *  that dropped the qualifier would state a maximum as if it were what the user pays. */
+  funding: {
+    title: string;
+    /** The route: buy this token, then send it to the address this sheet is already showing. */
+    buyThenSend: (token: string, networkLabel: string) => InstrRun[];
+    /** No provider anywhere sells the target asset, so it is reached through `viaToken` and a swap
+     *  the user signs on their own device. */
+    buyThenConvert: (viaToken: string, target: string) => InstrRun[];
+    /** A test coin: no cash value, nobody sells it, and the practical instruction is a faucet
+     *  rather than a provider (founder rule 2026-08-29 — every step gets an action). */
+    testnetOnly: (symbol: string, networkLabel: string) => string;
+    /** The Swiss bank alternative to VCHF, bounded by the approval it actually holds. */
+    bankRoute: (provider: string) => string;
+    /** Heading over the provider list, stating plainly that dpay is not choosing. */
+    providersTitle: string;
+    /** One provider's published cost, assembled from the parts below. */
+    costCard: (rate: string) => string;
+    costBank: (rate: string) => string;
+    costMin: (amount: string) => string;
+    costSpread: (rate: string) => string;
+    /** A published CEILING — never a price. */
+    upTo: (pct: string) => string;
+    /** A published FLOOR — also never a price. */
+    from: (pct: string) => string;
+    /** The provider publishes no single figure for this method. Said plainly rather than filled in
+     *  with a number derived from one of their examples. */
+    varies: string;
+    /** Attribution + the two caveats that make the figures honest: they are the providers' own, on
+     *  a date, and the real total includes a margin most of them do not itemise. */
+    attribution: (readOn: string) => string;
+    /** Said out loud so a list of names cannot be read as a recommendation. */
+    noEndorsement: string;
+  };
 };
 
 export const depositEn: DepositMessages = {
@@ -425,6 +465,38 @@ export const depositEn: DepositMessages = {
     fund: 'Fund from Trust Wallet',
     fundHint: asset => `Opens Trust Wallet to send ${asset} to your dpay address`,
     err: "Couldn't open Trust Wallet. Try again.",
+  },
+
+  funding: {
+    title: "Don't have any yet?",
+    buyThenSend: (token, networkLabel) => [
+      {t: 'Buy '},
+      {t: token, em: true},
+      {t: ' from any exchange or card provider that pays out on '},
+      {t: networkLabel, em: true},
+      {t: ', then send it to the address above. It arrives in your own wallet — dpay never receives it.'},
+    ],
+    buyThenConvert: (viaToken, target) => [
+      {t: 'No provider sells '},
+      {t: target, em: true},
+      {t: ' directly. The route that works: buy '},
+      {t: viaToken, em: true},
+      {t: ' with a card, send it to the address above, then use Convert to swap it for '},
+      {t: target, em: true},
+      {t: '. You sign that swap yourself, and dpay takes no part of it.'},
+    ],
+    testnetOnly: (symbol, networkLabel) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${networkLabel} faucet, then send it to the address above.`,
+    bankRoute: provider => `From a Swiss bank account, ${provider} sells it directly by transfer. It needs full identity checks and takes bank-transfer time.`,
+    providersTitle: 'Where people buy it',
+    costCard: rate => `card ${rate}`,
+    costBank: rate => `bank ${rate}`,
+    costMin: amount => `min ${amount}`,
+    costSpread: rate => `plus ${rate} margin`,
+    upTo: pct => `up to ${pct}`,
+    from: pct => `from ${pct}`,
+    varies: 'varies by country',
+    attribution: readOn => `Each provider's own published figures, read ${readOn}. They are limits, not prices — your exact fee is shown before you pay, and most providers also take a margin inside the rate they quote.`,
+    noEndorsement: 'Listed alphabetically. dpay does not recommend any of them, is not paid by any of them, and is not involved in what you buy.',
   },
 };
 

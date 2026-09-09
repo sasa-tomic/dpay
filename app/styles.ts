@@ -725,6 +725,22 @@ function buildStyles(p: Palette) {
   depositCopy: {alignSelf: 'stretch', marginTop: 12},
   depositStatus: {marginTop: 22, alignSelf: 'stretch', backgroundColor: p.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: p.line2, ...LIFT_SM},
   depositStatusTitle: {fontSize: 12, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, marginBottom: 6, fontFamily: FONT.mono},
+  // "Don't have any yet?" — one provider's published cost (FundingRoutes). Three stacked lines
+  // rather than a row, because a name + a cost breakdown + a source domain do not fit side by side
+  // at phone width without truncating exactly the part that makes the figure checkable.
+  // The Receive tab's "which asset's address am I looking at" switch (AssetSwitchRow). A quiet
+  // chip rather than a button: it names the current asset and opens the picker, and it sits under
+  // the request/address toggle on BOTH rails' Receive surfaces.
+  assetSwitchWrap: {alignSelf: 'stretch', alignItems: 'center', marginBottom: 10},
+  assetSwitchBtn: {flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card},
+  assetSwitchText: {fontSize: 14, color: p.ink, fontFamily: FONT.sans},
+  fundingProviderRow: {alignSelf: 'stretch', marginTop: 10},
+  fundingProviderName: {fontSize: 14, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
+  fundingProviderCost: {fontSize: 13, color: p.sub, fontFamily: FONT.mono, marginTop: 2},
+  // The source domain: `sub` and not `sub2`, deliberately. It is the line that makes every figure
+  // above it checkable, so it must clear AA like body text rather than sit in the section-label
+  // tier (`sub2` measures 2.30–3.96:1 — see OPEN_ISSUES X17b).
+  fundingProviderSource: {fontSize: 12, color: p.sub, fontFamily: FONT.mono, marginTop: 2},
   depositStatusMain: {fontSize: 16, fontWeight: '700', color: p.ink, marginBottom: 4, fontFamily: FONT.sansBold},
   depositStatusRow: {fontSize: 13, color: p.sub, fontFamily: FONT.mono},
   // Manual "Check now" — secondary (outline brand), debounced + spinner while in-flight.

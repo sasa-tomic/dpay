@@ -1,16 +1,19 @@
 /**
  * AssetPicker — the unified asset selector (Phase 4, 2026-08-12 unified asset selection rewrite).
- * ONE picker consumed by both Receive forms + Balances, with a single `onSelect(AssetId)` contract
- * (no `onSelectSol`, no rail prop, no SOL special-case). Verifies:
+ * ONE picker consumed by both Receive forms, with a single `onSelect(AssetId)` contract (no
+ * `onSelectSol`, no rail prop, no SOL special-case). Verifies:
  *   - renders EVERY SelectableAsset in the list (no row dropped/silently filtered).
- *   - the testID contract: `req-pick-<testKey>` (plain) and `asset-<testKey>` (card) — the e2e net
- *     taps these to select an asset; a rename here would break flows 63/69 silently.
+ *   - the testID contract: `req-pick-<testKey>` — the e2e net taps these to select an asset; a
+ *     rename here would break flows 63/69 silently.
  *   - the active (selected) row is flagged active; non-selected rows are not.
  *   - tapping a row fires `onSelect(asset.id)` THEN `onClose()` — the order matters: Wallet's
  *     handleSelect runs the rail-switch / reconcile; the picker closes regardless of outcome.
  *   - NO local selection state in the picker (selection is owned by the parent). Re-rendering with
  *     a different `selectedId` moves the active flag; the picker itself is stateless beyond `open`.
- *   - balances render when `showAmount` is true and are omitted when false (default).
+ *   - every row carries its balance, unconditionally, and the rows are ordered by the SAME
+ *     `orderAccounts` policy the accounts route uses. Both were defects the 2026-09-08 UX swarm
+ *     found: the picker hid balances and used raw catalog order, so it and the accounts route were
+ *     two disagreeing views of one set of accounts.
  *
  * Uses react-test-renderer (the project's only renderer; no @testing-library). Fixtures mirror the
  * real SelectableAsset shape from config/assets.ts (ic + solana variants).
@@ -21,6 +24,7 @@ import {Modal} from 'react-native';
 import renderer, {act} from 'react-test-renderer';
 import type {ReactTestInstance} from 'react-test-renderer';
 import {AssetPicker} from '../components/AssetPicker';
+import {orderAccounts} from '../components/AccountsTab';
 import type {SelectableAsset} from '../config/assets';
 import {USDC_MINT_ADDRESS} from '../solana/tokens';
 import type {BalanceView} from '../lib/assetBalances';
@@ -72,26 +76,6 @@ describe('AssetPicker', () => {
       // The plain-variant testID is `req-pick-<testKey>` — flow 63 taps `req-pick-sol` and flow 69
       // taps `req-pick-sol-usdc`. A dropped/renamed row here would break those e2e flows.
       expect(() => findByTestID(tree, `req-pick-${asset.testKey}`)).not.toThrow();
-    }
-    act(() => { tree.unmount(); });
-  });
-
-  test('renders every SelectableAsset with the asset-<testKey> testID (card variant)', () => {
-    let tree!: renderer.ReactTestRenderer;
-    act(() => {
-      tree = renderer.create(
-        <AssetPicker
-          open={true}
-          assets={ASSETS}
-          selectedId={'ic:0'}
-          variant="card"
-          onSelect={() => {}}
-          onClose={() => {}}
-        />,
-      );
-    });
-    for (const asset of ASSETS) {
-      expect(() => findByTestID(tree, `asset-${asset.testKey}`)).not.toThrow();
     }
     act(() => { tree.unmount(); });
   });
@@ -194,7 +178,11 @@ describe('AssetPicker', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('showAmount=false (default) omits the balance text from rows; showAmount=true threads it through', () => {
+  test('every row carries its balance — the picker is a list of MONEY, not a list of names', () => {
+    // The picker and the accounts route render the same accounts. This one used to omit amounts
+    // entirely, so a merchant chose which asset to be paid in without being able to see what they
+    // held. `showAmount` is gone with the defect: there is no configuration under which a list of
+    // accounts should hide the balances.
     let tree!: renderer.ReactTestRenderer;
     act(() => {
       tree = renderer.create(
@@ -208,12 +196,16 @@ describe('AssetPicker', () => {
         />,
       );
     });
-    // Default: no amount on any row (the picker is a selector, not a balance list).
-    const solRowDefault = tree.root.find(node => node.props && node.props.testId === 'req-pick-sol');
-    expect(solRowDefault.props.amount).toBeUndefined();
+    const solRow = tree.root.find(node => node.props && node.props.testId === 'req-pick-sol');
+    expect(solRow.props.amount).toBe('◎0.025');
     act(() => { tree.unmount(); });
+  });
 
-    // With showAmount=true: the balance displayText is threaded to each row.
+  test('rows are ordered by the SAME policy the accounts route uses when a home currency is known', () => {
+    // Two lists of one set of accounts, in two different orders, is the UI form of a DRY
+    // violation. `orderAccounts` is the single policy; this asserts the picker runs it rather than
+    // rendering raw catalog order.
+    let tree!: renderer.ReactTestRenderer;
     act(() => {
       tree = renderer.create(
         <AssetPicker
@@ -221,14 +213,19 @@ describe('AssetPicker', () => {
           assets={ASSETS}
           selectedId={'ic:0'}
           balances={BALANCES}
-          showAmount={true}
+          homeCurrency={'USD'}
           onSelect={() => {}}
           onClose={() => {}}
         />,
       );
     });
-    const solRowWithAmount = tree.root.find(node => node.props && node.props.testId === 'req-pick-sol');
-    expect(solRowWithAmount.props.amount).toBe('◎0.025');
+    const rendered = tree.root
+      .findAll(node => node.props && typeof node.props.testId === 'string' && node.props.testId.startsWith('req-pick-'))
+      .map(node => node.props.testId);
+    const expected = orderAccounts(ASSETS, BALANCES, 'USD').map(a => `req-pick-${a.testKey}`);
+    expect(rendered).toEqual(expected);
+    // And the practice rail is last, which is the visible consequence users notice.
+    expect(rendered[rendered.length - 1]).toBe('req-pick-demo');
     act(() => { tree.unmount(); });
   });
 

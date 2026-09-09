@@ -34,6 +34,7 @@ import {SolanaReceiveSheet} from './SolanaReceiveSheet';
 import {RailDisclosure} from './RailDisclosure';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
 import {AssetPicker} from './AssetPicker';
+import {AssetSwitchRow} from './AssetSwitchRow';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
 import {encodePayLink, shareOrigin} from '../lib/deepLink';
@@ -218,6 +219,18 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
     return (
       <View style={S.centerTop}>
         {toggle}
+        {/* Same control, same place, same gesture as the IC Receive surface — the uniform-IA hard
+            rule. See AssetSwitchRow for why it takes the sub-mode-preserving selector. */}
+        {linkAsset != null && onReceiveRailChange != null ? (
+          <AssetSwitchRow
+            asset={linkAsset}
+            assets={assets}
+            balances={balances}
+            selectedId={selectedAssetId}
+            homeCurrency={homeCurrency}
+            onSelect={onReceiveRailChange}
+          />
+        ) : null}
         {homeCurrency != null && onReceiveRailChange != null ? (
           <RailDisclosure
             currency={homeCurrency}
@@ -642,6 +655,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
         assets={assets}
         selectedId={selectedAssetId}
         balances={balances}
+        homeCurrency={homeCurrency}
         onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
         onClose={() => setPickOpen(false)}
       />

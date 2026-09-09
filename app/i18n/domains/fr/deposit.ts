@@ -188,6 +188,38 @@ export const depositFr: DepositMessages = {
     fundHint: asset => `Ouvre Trust Wallet pour envoyer des ${asset} vers votre adresse dpay`,
     err: 'Impossible d’ouvrir Trust Wallet. Réessayez.',
   },
+
+  funding: {
+    title: 'Vous n\'en avez pas encore ?',
+    buyThenSend: (token, networkLabel) => [
+      {t: 'Achetez des '},
+      {t: token, em: true},
+      {t: ' auprès d\'une plateforme ou d\'un fournisseur par carte qui verse sur '},
+      {t: networkLabel, em: true},
+      {t: ', puis envoyez-les à l\'adresse ci-dessus. Ils arrivent dans votre propre portefeuille — dpay ne les reçoit jamais.'},
+    ],
+    buyThenConvert: (viaToken, target) => [
+      {t: 'Aucun fournisseur ne vend de '},
+      {t: target, em: true},
+      {t: ' directement. La voie qui fonctionne : achetez des '},
+      {t: viaToken, em: true},
+      {t: ' par carte, envoyez-les à l\'adresse ci-dessus, puis utilisez Convertir pour les échanger contre des '},
+      {t: target, em: true},
+      {t: '. C\'est vous qui signez cet échange, et dpay n\'y prend aucune part.'},
+    ],
+    testnetOnly: (symbol, networkLabel) => `${symbol} est de la monnaie de test : elle n\'a aucune valeur et personne n\'en vend. Procurez-vous-en gratuitement sur un faucet public ${networkLabel}, puis envoyez-la à l\'adresse ci-dessus.`,
+    bankRoute: provider => `Depuis un compte bancaire suisse, ${provider} en vend directement par virement. Cela exige une vérification d\'identité complète et prend le temps d\'un virement bancaire.`,
+    providersTitle: 'Où on en achète',
+    costCard: rate => `carte ${rate}`,
+    costBank: rate => `banque ${rate}`,
+    costMin: amount => `min. ${amount}`,
+    costSpread: rate => `plus ${rate} de marge`,
+    upTo: pct => `jusqu\'à ${pct}`,
+    from: pct => `à partir de ${pct}`,
+    varies: 'variable selon le pays',
+    attribution: readOn => `Chiffres publiés par chaque fournisseur, consultés le ${readOn}. Ce sont des plafonds, pas des prix — vos frais exacts s\'affichent avant le paiement, et la plupart des fournisseurs prennent en plus une marge dans le taux proposé.`,
+    noEndorsement: 'Par ordre alphabétique. dpay n\'en recommande aucun, n\'est payé par aucun, et n\'intervient pas dans votre achat.',
+  },
 };
 
 export const withdrawFr: WithdrawMessages = {

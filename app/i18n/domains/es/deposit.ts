@@ -187,6 +187,38 @@ export const depositEs: DepositMessages = {
     fundHint: asset => `Abre Trust Wallet para enviar ${asset} a tu dirección de dpay`,
     err: 'No se pudo abrir Trust Wallet. Inténtalo de nuevo.',
   },
+
+  funding: {
+    title: '¿Todavía no tiene?',
+    buyThenSend: (token, networkLabel) => [
+      {t: 'Compre '},
+      {t: token, em: true},
+      {t: ' en cualquier exchange o proveedor de tarjeta que pague en '},
+      {t: networkLabel, em: true},
+      {t: ' y envíelo a la dirección de arriba. Llega a su propia cartera — dpay nunca lo recibe.'},
+    ],
+    buyThenConvert: (viaToken, target) => [
+      {t: 'Ningún proveedor vende '},
+      {t: target, em: true},
+      {t: ' directamente. La ruta que funciona: compre '},
+      {t: viaToken, em: true},
+      {t: ' con tarjeta, envíelo a la dirección de arriba y use Convertir para cambiarlo por '},
+      {t: target, em: true},
+      {t: '. Ese cambio lo firma usted, y dpay no participa en él.'},
+    ],
+    testnetOnly: (symbol, networkLabel) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${networkLabel} y envíelo a la dirección de arriba.`,
+    bankRoute: provider => `Desde una cuenta bancaria suiza, ${provider} lo vende directamente por transferencia. Requiere verificación de identidad completa y tarda lo que tarda una transferencia bancaria.`,
+    providersTitle: 'Dónde se compra',
+    costCard: rate => `tarjeta ${rate}`,
+    costBank: rate => `banco ${rate}`,
+    costMin: amount => `mín. ${amount}`,
+    costSpread: rate => `más ${rate} de margen`,
+    upTo: pct => `hasta ${pct}`,
+    from: pct => `desde ${pct}`,
+    varies: 'varía según el país',
+    attribution: readOn => `Cifras publicadas por cada proveedor, consultadas el ${readOn}. Son límites, no precios — su comisión exacta se muestra antes de pagar, y la mayoría de proveedores añade además un margen dentro del tipo que ofrece.`,
+    noEndorsement: 'Por orden alfabético. dpay no recomienda ninguno, ninguno le paga, y dpay no interviene en su compra.',
+  },
 };
 
 export const withdrawEs: WithdrawMessages = {

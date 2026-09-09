@@ -186,6 +186,38 @@ export const depositDe: DepositMessages = {
     fundHint: asset => `Öffnet Trust Wallet, um ${asset} an deine dpay-Adresse zu senden`,
     err: 'Trust Wallet konnte nicht geöffnet werden. Versuche es erneut.',
   },
+
+  funding: {
+    title: 'Noch nichts davon?',
+    buyThenSend: (token, networkLabel) => [
+      {t: 'Kaufen Sie '},
+      {t: token, em: true},
+      {t: ' bei einer Börse oder einem Kartenanbieter mit Auszahlung auf '},
+      {t: networkLabel, em: true},
+      {t: ' und senden Sie es an die Adresse oben. Es landet in Ihrer eigenen Wallet — dpay erhält es nie.'},
+    ],
+    buyThenConvert: (viaToken, target) => [
+      {t: 'Kein Anbieter verkauft '},
+      {t: target, em: true},
+      {t: ' direkt. Der Weg, der funktioniert: '},
+      {t: viaToken, em: true},
+      {t: ' mit Karte kaufen, an die Adresse oben senden und dann über Umtauschen in '},
+      {t: target, em: true},
+      {t: ' tauschen. Diesen Tausch signieren Sie selbst, und dpay ist daran nicht beteiligt.'},
+    ],
+    testnetOnly: (symbol, networkLabel) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${networkLabel}-Faucet und senden Sie es an die Adresse oben.`,
+    bankRoute: provider => `Von einem Schweizer Bankkonto verkauft ${provider} es direkt per Überweisung. Dafür ist eine vollständige Identitätsprüfung nötig, und es dauert so lange wie eine Banküberweisung.`,
+    providersTitle: 'Wo man es kauft',
+    costCard: rate => `Karte ${rate}`,
+    costBank: rate => `Bank ${rate}`,
+    costMin: amount => `mind. ${amount}`,
+    costSpread: rate => `zzgl. ${rate} Marge`,
+    upTo: pct => `bis zu ${pct}`,
+    from: pct => `ab ${pct}`,
+    varies: 'je nach Land verschieden',
+    attribution: readOn => `Jeweils die vom Anbieter selbst veröffentlichten Angaben, abgerufen am ${readOn}. Es sind Obergrenzen, keine Preise — Ihre genaue Gebühr wird vor der Zahlung angezeigt, und die meisten Anbieter nehmen zusätzlich eine Marge im angebotenen Kurs.`,
+    noEndorsement: 'Alphabetisch aufgeführt. dpay empfiehlt keinen davon, wird von keinem bezahlt und ist an Ihrem Kauf nicht beteiligt.',
+  },
 };
 
 export const withdrawDe: WithdrawMessages = {
