@@ -50,6 +50,8 @@ import {HomeCurrencyChooser} from './HomeCurrencyChooser';
 import {type HomeCurrency, currencyName, currencyOfAsset, preferredRail} from '../config/currency';
 import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
+import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
+import {useWalletHistory} from '../hooks/useWalletHistory';
 
 export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   // The wallet's surfaces. Four are TABS (home/pay/receive/ledger — the bottom bar switches
@@ -61,7 +63,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
   // user with a payment-request surface is what read as a scam. The cost — one extra tap on the
   // returning traveller's most frequent action — is paid back by Home's primary Scan button, which
   // lands the camera in exactly one tap.
-  type Mode = 'pay' | 'receive' | 'ledger' | 'home' | 'accounts' | 'convert';
+  // The Mode vocabulary lives in `lib/walletRoute.ts` beside the URL vocabulary it translates to
+  // (X11): the two differ in exactly one word ('ledger' ↔ 'transactions'), which is the kind of
+  // difference that rots when it is declared in two files.
+  type Mode = WalletMode;
   const [mode, setMode] = useState<Mode>('home');
   // Where the accounts ROUTE was entered from, so Back returns there instead of guessing 'home'.
   // A ref, not state: nothing renders from it, and it must be written during the same tick as the
@@ -175,6 +180,41 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
     return () => { alive = false; };
   }, [relayUrl]);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+
+  // ── URL routing (OPEN_ISSUES X11) ─────────────────────────────────────────────────────────────
+  // Web-only, and a no-op on native (`useWalletHistory` short-circuits on Platform.OS). The wallet
+  // was ONE URL for every tab and every sheet, so the browser's Back button left the wallet
+  // entirely instead of moving inside it, nothing was linkable, and a refresh always landed on the
+  // home screen. The route is DERIVED from the surface state rather than being a second source of
+  // truth — there is no route state here to drift out of step with `mode`.
+  //
+  // What rides in the URL is what a link must be able to reproduce: the screen, the within-tab
+  // sub-mode (arriving at "Send to address" must give that form, not the scanner), and whether
+  // Settings is open (so Back CLOSES it, the same rule Android's hardware Back already follows).
+  // What does NOT ride in it: the selected asset, any draft amount, and every money-critical
+  // in-flight state. A URL that could re-enter a half-signed payment is a URL that can be shared.
+  const route: WalletRoute = {
+    screen: screenForMode(mode),
+    ...(mode === 'pay' && paySubMode === 'send' ? {sub: 'send' as const} : {}),
+    ...(mode === 'receive' && receiveSubMode === 'address' ? {sub: 'address' as const} : {}),
+    ...(settingsOpen ? {settings: true as const} : {}),
+  };
+  const applyRoute = useCallback((r: WalletRoute) => {
+    // `accounts` goes through openAccounts so the route remembers where it was entered from and
+    // its own Back control still returns there — a URL-driven entry is an entry like any other.
+    if (r.screen === 'accounts') {
+      openAccounts();
+    } else {
+      setMode(modeForScreen(r.screen));
+    }
+    // Only the named screen's sub-mode is applied. Resetting the other tab's sub-mode would make a
+    // Back press quietly discard a choice the user made on a screen the URL says nothing about.
+    if (r.screen === 'pay') setPaySubMode(r.sub === 'send' ? 'send' : 'scan');
+    if (r.screen === 'receive') setReceiveSubMode(r.sub === 'address' ? 'address' : 'request');
+    setSettingsOpen(r.settings === true);
+  }, [openAccounts]);
+  useWalletHistory(route, applyRoute);
+
   // Passport deep-link (founder ask 2026-08-24): opening Settings FROM an unfilled
   // "BACKED UP" stamp also auto-reveals the backup (the step's own surface) once. Cleared on
   // Settings close so a later manual gear-open never re-reveals the seed.
@@ -791,6 +831,27 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
     l: () => setMode('ledger'),
   }, {ignoreIfInputFocused: true, enabled: !anySheetOpen});
 
+  // Leaving a ROUTE — the ONE rule, shared by the Android hardware Back button and the web Escape
+  // key. `accounts` returns to whatever opened it; `convert` returns to the accounts list that
+  // launched it. Returns whether a route was actually left, which is what the BackHandler needs in
+  // order to decide whether to fall through to its exit-confirm.
+  //
+  // It is one function because it was two: the hardware rule lived in the BackHandler and Escape
+  // simply did not exist on these surfaces (X21 — "Esc does not close Convert though sheets
+  // advertise it"). Two copies of a navigation rule is how one platform quietly grows a different
+  // idea of where Back goes.
+  const leaveRoute = useCallback((): boolean => {
+    if (mode === 'accounts') { closeAccounts(); return true; }
+    if (mode === 'convert') { openAccounts(); return true; }
+    return false;
+  }, [mode, closeAccounts, openAccounts]);
+
+  // Escape carries NO input guard, deliberately: dismissing the surface you are on must work while
+  // a field is focused, which is the universal dialog behaviour `useEscapeToClose` already relies
+  // on. It IS gated on `anySheetOpen`, because a sheet over a route owns Escape first — otherwise
+  // one press would close the sheet AND navigate out from under it.
+  useHotkeys({escape: () => { leaveRoute(); }}, {enabled: !anySheetOpen});
+
   // D6 — Android hardware BACK must not exit the app instantly from the home screen. The sheets
   // register no BackHandler of their own, so back closes the open sheet first; otherwise the first
   // press shows a transient inline "Press back again to exit" hint and only a second press within
@@ -805,11 +866,10 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (settingsOpen) { setSettingsOpen(false); return true; }
-      // A ROUTE is left by Back before the app is: accounts returns to whatever it was opened
-      // from, convert returns to the accounts list that launched it. This is the difference
-      // between a route and a tab, and it is why the accounts list is not a modal.
-      if (mode === 'accounts') { closeAccounts(); return true; }
-      if (mode === 'convert') { openAccounts(); return true; }
+      // A ROUTE is left by Back before the app is. This is the difference between a route and a
+      // tab, and it is why the accounts list is not a modal. The rule itself lives in `leaveRoute`,
+      // shared with the web Escape key so the two platforms cannot disagree about where Back goes.
+      if (leaveRoute()) return true;
       if (Date.now() - lastBackRef.current < 2000) { BackHandler.exitApp(); return true; }
       lastBackRef.current = Date.now();
       setBackHint(true);
@@ -821,7 +881,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
       sub.remove();
       if (backHintTimerRef.current) { clearTimeout(backHintTimerRef.current); backHintTimerRef.current = null; }
     };
-  }, [settingsOpen, mode, closeAccounts, openAccounts]);
+  }, [settingsOpen, leaveRoute]);
 
   // The ONE selection setter. Setting the selection is a deliberate user action, so it dismisses the
   // Balances sheet AND resets the within-tab sub-modes + clears any idle draft (the scan/send +
