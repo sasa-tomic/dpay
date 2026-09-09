@@ -314,8 +314,13 @@ was raised and overruled, the order they must ship in, and the failure-state con
 | R3 | **Three distinguishable failure states, before R2 ships.** After the proxy, a relay outage renders the app's existing "Solana isn't answering" — which would blame the chain for dpay being down. `BalanceView.status: 'error'` is one bucket and must carry a cause; the relay-down state names dpay, says the money is untouched, names the Settings ▸ Advanced escape, and names what still works (the IC rail never touches the relay). | 8 | M |
 | R1 | **Multi-relay client** — one relay is a single point of failure, and R2 makes that failure total for the Solana rail. Ordered health-based failover over a list; build drift between replicas is a hard error. **Ships before or with R2.** | 8 | M |
 | R2 | **Solana RPC through the relay, reads AND broadcast** (founder decision 2026-09-09, taken with the `docs/REGULATORY.md` §4.3 objection stated). Key leaves the client; reads share a cache — which is the only thing that makes the free tier's 1M credits/month survive more than ~3 wallets. | 7 | M |
-| S2 | Batch the balance polls (5→1/tick) and collapse the per-mint double round trip | 6 | S |
-| S3 | The offline e2e harness stubs the RPC, so it can see none of this. A request-budget assertion (a flow that fails if a cold load exceeds N requests) is the only thing that would have caught it. | 6 | M |
+
+**S2 and S3 were already DONE and were stale here (removed 2026-09-09).** S2 — the balance poll is
+ONE `getMultipleAccounts` per tick reading the wallet account, every mint's token account and every
+mint account together; it replaced the five-requests-every-2.5-seconds fan-out
+(`app/hooks/useSolanaBalances.ts`). S3 — flow 160 `sol-request-budget` IS the request-budget
+assertion: it fails if the poll issues the old per-rail fan-out, if a history tick re-reads a
+transaction detail, or if a backgrounded app issues anything at all.
 
 ## UX swarm 2026-09-08 — three independent reviewers, live build
 
