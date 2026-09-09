@@ -33,7 +33,12 @@ export const meta = {
   journey: 'pay',
   covers: ['vchf', 'icp', 'icp-mainnet', 'insufficient', 'unknown-currency', 'unsupported-asset', 'fail-closed', 'no-swap'],
   verifies: 'Insufficient VCHF and ICP requests park on review-lowbal with no approve/paid button and no signed envelope; an unknown-currency (99) request hits the unsupported-asset branch with no fallback; the payee receives nothing and the payer keeps exactly its seeded balances.',
-  timeoutMs: 30000, // three blocked legs + two tiny faucets + recorder checks under parallel load
+  // 30000 was wrong from the day this landed and only ever passed on the host-load scale multiplier:
+  // measured 2026-09-09, this flow takes ~51s of wall clock ALONE on an idle machine, and it RED'd
+  // at HEAD (before that day's UI work) with "exceeded its per-test timeout of 45825ms". The budget
+  // now reflects what the flow actually does — onboarding (~16s on its own, flow 01) plus three
+  // blocked legs, each a faucet credit, a balance-poll wait, a scan and a cancel.
+  timeoutMs: 70000,
 };
 
 export async function run() {
