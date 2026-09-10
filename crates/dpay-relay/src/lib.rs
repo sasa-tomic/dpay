@@ -22,6 +22,7 @@
 pub mod app;
 pub mod catalog;
 pub mod ledger;
+pub mod solana;
 pub mod till;
 
 /// Unix seconds now — the ONE clock reading in this crate, and it stops rather than guesses.
@@ -38,6 +39,20 @@ pub(crate) fn now_secs() -> u64 {
         Err(e) => panic!(
             "dpay-relay: the system clock is before the unix epoch ({e}) — this relay cannot time \
              a charge, a quote or a faucet cooldown"
+        ),
+    }
+}
+
+/// The same single clock as [`now_secs`], read at millisecond grain — its only reader is the
+/// solana read cache's expiry math, whose test seams use sub-second TTLs (second granularity
+/// would make a 60ms test window expire "never" and a real 2s TTL untestable offline). Same
+/// stop-rather-than-guess failure mode as [`now_secs`].
+pub(crate) fn now_millis() -> u64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_millis() as u64,
+        Err(e) => panic!(
+            "dpay-relay: the system clock is before the unix epoch ({e}) — this relay cannot time \
+             a charge, a quote, a faucet cooldown or a cache entry"
         ),
     }
 }

@@ -55,6 +55,12 @@
 //!   With BOTH features (the live-test config) the AGENT branch owns the route. Whichever is
 //!   compiled refuses on [`AppState::faucet_available`] — the same flag `/capabilities` reports —
 //!   with 503 and a reason naming the knob that is missing.
+//! - `POST /api/v1/solana/rpc` — the Solana JSON-RPC proxy (spec 2026-09-09, Direction 1;
+//!   [`crate::solana`]). The client's JSON-RPC envelope in, the upstream's answer back VERBATIM:
+//!   a pure pipe for `sendTransaction` and everything unallowlisted, a short-TTL shared read
+//!   cache for the explicit read allowlist (that is what makes a free-tier RPC quota survive N
+//!   wallets). Registered on every build; unconfigured (`DPAY_SOLANA_RPC_URL` unset) it answers
+//!   503 naming the variable. No value is inspected, held or moved — see [`crate::solana`].
 //!
 //! Read-only by construction apart from the play-money faucet: there is no value-moving route
 //! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
@@ -138,6 +144,11 @@ pub struct AppState {
     /// `null`; the pin is still reported). Set by [`AppState::with_facade_canister`] from
     /// `DPAY_CANISTER_ID` in main.rs when the ledger is the agent IC path.
     facade_canister: Option<String>,
+    /// The Solana JSON-RPC proxy (`crate::solana`) — `POST /api/v1/solana/rpc`. The route is
+    /// registered on EVERY build (no till-style gate): a proxy whose upstream is unset still
+    /// answers, honestly, 503 naming `DPAY_SOLANA_RPC_URL`. The default state here carries that
+    /// unconfigured proxy; `main` replaces it via [`AppState::with_solana`] from the env.
+    pub solana: Arc<crate::solana::SolanaProxy>,
 }
 
 impl AppState {
@@ -153,6 +164,12 @@ impl AppState {
             ))),
             apk: Arc::new(None),
             apk_version: String::new(),
+            // The unconfigured solana proxy: /api/v1/solana/rpc answers 503 naming the env var
+            // until `with_solana` points it at DPAY_SOLANA_RPC_URL (see `crate::solana`).
+            solana: Arc::new(crate::solana::SolanaProxy::new(
+                None,
+                crate::solana::DEFAULT_TIMEOUT,
+            )),
             #[cfg(feature = "test-helpers")]
             fake_ic: None,
             facade_canister: None,
@@ -178,6 +195,15 @@ impl AppState {
     /// honestly reports it has no live hash rather than pretending to read one.
     pub fn with_facade_canister(mut self, canister: String) -> Self {
         self.facade_canister = Some(canister);
+        self
+    }
+
+    /// Point the Solana RPC proxy at its upstream (`crate::solana::SolanaProxy`). `main` builds
+    /// it from `DPAY_SOLANA_RPC_URL` (+ `DPAY_SOLANA_TIMEOUT_MS`); tests build it against the
+    /// local stub upstream. The proxy's URL is SECRET (it carries the provider api key) — it is
+    /// never logged here or anywhere else.
+    pub fn with_solana(mut self, proxy: crate::solana::SolanaProxy) -> Self {
+        self.solana = Arc::new(proxy);
         self
     }
 
@@ -207,7 +233,10 @@ impl AppState {
     /// production window to seconds so the rollover is observable; prod never calls this.
     #[cfg(any(feature = "agent", feature = "test-helpers"))]
     pub fn set_faucet_cooldown_window(&self, window_secs: u64) {
-        *self.faucet_cooldown.lock().unwrap_or_else(|p| p.into_inner()) =
+        *self
+            .faucet_cooldown
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) =
             crate::faucet::FaucetCooldown::with_window(window_secs);
     }
 }
@@ -242,7 +271,11 @@ pub fn app(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/capabilities", get(capabilities))
         .route("/version", get(version))
-        .route("/integrity", get(integrity));
+        .route("/integrity", get(integrity))
+        // The Solana JSON-RPC proxy (spec 2026-09-09, Direction 1) — registered ALWAYS, unlike
+        // the till below: an unconfigured proxy still answers (503 naming DPAY_SOLANA_RPC_URL),
+        // because a route that vanishes makes the client guess. Pure pipe + read cache.
+        .route("/solana/rpc", axum::routing::post(crate::solana::rpc_proxy));
 
     // --- the OpenCryptoPay till, OFF unless the operator asks for it -----------------------------
     //
@@ -296,6 +329,22 @@ pub fn app(state: AppState) -> Router {
     // its resolution (`settle_pending`). See `FakeIc::set_swap_pool_knobs`.
     #[cfg(feature = "test-helpers")]
     let api = api.route("/test/swap_pool", axum::routing::post(test_swap_pool));
+    // Test-only Solana JSON-Rpc UPSTREAM (flow 165 `e2e/tests/165-solana-via-relay.mjs`): the
+    // harness points the RPC proxy (src/solana.rs, `DPAY_SOLANA_RPC_URL` set explicitly in
+    // harness/relay.mjs) at this route ON THE SAME SERVER, so the flow drives the REAL client
+    // path — app → POST /api/v1/solana/rpc → this stub — offline, with no provider key. The
+    // `/hits` twin counts envelope arrivals so the flow can prove the request went THROUGH
+    // the proxy (the app never sees this route's address directly).
+    #[cfg(feature = "test-helpers")]
+    let api = api
+        .route(
+            "/test/solana-upstream",
+            axum::routing::post(solana_stub_rpc),
+        )
+        .route(
+            "/test/solana-upstream/hits",
+            axum::routing::get(solana_stub_hits),
+        );
 
     // `GET /api/v1/swap_quote` — the delegated-conversion PoC's venue quote (spec 2026-09-07
     // §2, the FIXED contract): the relay is a READ PROXY (same class as the balance fan-out) —
@@ -356,7 +405,10 @@ pub fn app(state: AppState) -> Router {
             .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
             .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
             .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
-            .route(crate::till::TILL_CODE_PATH, get(crate::till::till_code_page))
+            .route(
+                crate::till::TILL_CODE_PATH,
+                get(crate::till::till_code_page),
+            )
             .route("/till/{id}", get(crate::till::till_page))
     } else {
         router
@@ -369,7 +421,10 @@ pub fn app(state: AppState) -> Router {
     // on the pre-state router so the submit handler's State<AppState> extractor resolves.
     #[cfg(feature = "test-helpers")]
     let router = router
-        .route("/api/v2/canister/{canister}/{kind}", axum::routing::post(crate::ic_gateway::submit))
+        .route(
+            "/api/v2/canister/{canister}/{kind}",
+            axum::routing::post(crate::ic_gateway::submit),
+        )
         .route("/api/v2/status", get(crate::ic_gateway::status));
 
     let router = router.with_state(state);
@@ -388,13 +443,19 @@ pub fn app(state: AppState) -> Router {
 /// Permissive CORS middleware (test-only, feature-gated). Adds `Access-Control-Allow-Origin: *` to
 /// every response + intercepts OPTIONS preflight with a 204.
 #[cfg(feature = "test-helpers")]
-async fn test_cors_middleware(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+async fn test_cors_middleware(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
     use axum::http::Method;
     if req.method() == Method::OPTIONS {
         let mut resp = Response::new(axum::body::Body::empty());
         *resp.status_mut() = StatusCode::NO_CONTENT;
         let h = resp.headers_mut();
-        h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, header::HeaderValue::from_static("*"));
+        h.insert(
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            header::HeaderValue::from_static("*"),
+        );
         h.insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
             header::HeaderValue::from_static("GET, POST, OPTIONS"),
@@ -468,14 +529,23 @@ async fn faucet(State(state): State<AppState>, Json(req): Json<FaucetRequest>) -
     // Currency defaults to DEMO_USD — the faucet's whole point is play money for the demo. A missing
     // amount is the demo's $100.00 top-up.
     let currency = req.currency.unwrap_or(DEMO_USD);
-    let amount = req.amount.map(|x| x.0).unwrap_or(crate::faucet::FAUCET_AMOUNT);
+    let amount = req
+        .amount
+        .map(|x| x.0)
+        .unwrap_or(crate::faucet::FAUCET_AMOUNT);
     if let Some(refusal) = faucet_cooldown_refusal(&state, &pk, currency as u32, amount) {
         return refusal;
     }
     use dpay_icp::principal::Principal as IcpPrincipal;
     let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
     let bal = fake.faucet_credit(currency, &owner, u128::from(amount));
-    (StatusCode::OK, Json(BalanceBody { balance: U64String(bal.min(u64::MAX as u128) as u64) })).into_response()
+    (
+        StatusCode::OK,
+        Json(BalanceBody {
+            balance: U64String(bal.min(u64::MAX as u128) as u64),
+        }),
+    )
+        .into_response()
 }
 
 /// `POST /api/v1/faucet` JSON `{account: <hex>, currency?, amount?}` → `{balance}` — the
@@ -505,11 +575,17 @@ async fn faucet_agent(State(state): State<AppState>, Json(req): Json<FaucetReque
     }
     let pk = ok_or_bail!(parse_hex_array(&req.account, "account"));
     let currency = req.currency.unwrap_or(DEMO_USD);
-    let amount = req.amount.map(|x| x.0).unwrap_or(crate::faucet::FAUCET_AMOUNT);
+    let amount = req
+        .amount
+        .map(|x| x.0)
+        .unwrap_or(crate::faucet::FAUCET_AMOUNT);
     if !crate::faucet::is_self_service_top_up(amount) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            format!("faucet amount is fixed at {} (minor units)", crate::faucet::FAUCET_AMOUNT),
+            format!(
+                "faucet amount is fixed at {} (minor units)",
+                crate::faucet::FAUCET_AMOUNT
+            ),
         );
     }
     // Relay-side rate limit, the same one the offline fixture runs — see [`faucet_cooldown_refusal`].
@@ -517,15 +593,20 @@ async fn faucet_agent(State(state): State<AppState>, Json(req): Json<FaucetReque
         return refusal;
     }
     match state.ledger.faucet_mint(&pk, currency, amount).await {
-        Ok(balance) => {
-            (StatusCode::OK, Json(BalanceBody { balance: U64String(balance) })).into_response()
-        }
+        Ok(balance) => (
+            StatusCode::OK,
+            Json(BalanceBody {
+                balance: U64String(balance),
+            }),
+        )
+            .into_response(),
         // The canister's own refusal text (e.g. "currency 0 is not mintable", or an
         // unauthorized-controllership change) — surfaced verbatim per the app's N5 contract.
         Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
-        Err(LedgerError::Transient(msg)) => {
-            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
-        }
+        Err(LedgerError::Transient(msg)) => err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("ledger unavailable: {msg}"),
+        ),
     }
 }
 
@@ -540,7 +621,10 @@ async fn hide_outcome(
     Json(req): Json<HideOutcomeRequest>,
 ) -> Response {
     let Some(fake) = state.fake_ic.clone() else {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fake-IC gateway not attached",
+        );
     };
     let rid: [u8; 32] = ok_or_bail!(parse_hex_array(&req.request_id, "request_id"));
     let polls = req.polls.unwrap_or(1).min(64) as usize;
@@ -555,12 +639,12 @@ async fn hide_outcome(
 /// eventual resolution the pending_withdrawal e2e flow needs. `fee_millionths` (default 3000 =
 /// the PoC pool's 0.30% tier) and `impact_bps` (default 0) shape the deterministic quote curve.
 #[cfg(feature = "test-helpers")]
-async fn test_swap_pool(
-    State(state): State<AppState>,
-    Json(req): Json<SwapPoolKnobs>,
-) -> Response {
+async fn test_swap_pool(State(state): State<AppState>, Json(req): Json<SwapPoolKnobs>) -> Response {
     let Some(fake) = state.fake_ic.clone() else {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fake-IC gateway not attached",
+        );
     };
     fake.set_swap_pool_knobs(
         req.fee_millionths,
@@ -569,6 +653,243 @@ async fn test_swap_pool(
         req.settle_pending,
     );
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+}
+
+// ── Test-only Solana JSON-RPC upstream (test-helpers) ─────────────────────────────────────────
+//
+// Flow 165 (`e2e/tests/165-solana-via-relay.mjs`) drives the REAL Solana client path — the
+// app's RPC walk → this relay's proxy route (`src/solana.rs`) → an upstream — fully offline:
+// the harness points `DPAY_SOLANA_RPC_URL` (harness/relay.mjs) at THIS stub on the same
+// server. The stub speaks just enough JSON-RPC for a balance render:
+//
+//   • `getMultipleAccounts` answers POSITIONALLY — the app always sends
+//     [wallet, ata, mint, ata, mint, …] (one canonical ATA + its mint per registered token),
+//     so index 0 is the wallet (2 SOL), every ODD index is a token account (3.000000 raw
+//     units of the mint at the FOLLOWING index — whose bytes are bs58-decoded from that
+//     address and planted at the token-account's mint offset so the app's
+//     `decodeSplTokenAmount` mint check passes), and every even index ≥ 2 is a mint
+//     (6 decimals — both registered mainnet tokens, USDC and EURC, are 6-decimal).
+//   • `getGenesisHash` answers mainnet-beta's frozen id (the client's `SOL_GENESIS_HASH`) so
+//     the cluster-identity checks stay coherent.
+//   • every other read gets a sane constant; `sendTransaction` echoes a stub signature.
+//
+// The proxy relays these VERBATIM, and its read cache (2s for getMultipleAccounts) applies
+// upstream of the hit counter — a flow asserting hit GROWTH must out-wait that TTL.
+#[cfg(feature = "test-helpers")]
+static SOLANA_STUB_HITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// `POST /api/v1/test/solana-upstream` — the stub JSON-RPC upstream (see the section comment).
+#[cfg(feature = "test-helpers")]
+async fn solana_stub_rpc(body: axum::body::Bytes) -> Response {
+    use std::sync::atomic::Ordering;
+    SOLANA_STUB_HITS.fetch_add(1, Ordering::Relaxed);
+    let envelope: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
+    };
+    let id = envelope.get("id").cloned().unwrap_or(serde_json::json!(1));
+    let method = envelope
+        .get("method")
+        .and_then(|m| m.as_str())
+        .unwrap_or("");
+    let params = envelope
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::json!([]));
+    let result = match method {
+        "getMultipleAccounts" => serde_json::json!({
+            "context": {"slot": 1000},
+            "value": solana_stub_accounts(&params),
+        }),
+        "getBalance" => serde_json::json!({"context": {"slot": 1000}, "value": 2_000_000_000u64}),
+        "getGenesisHash" => serde_json::json!("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d"),
+        "getLatestBlockhash" => serde_json::json!({
+            "context": {"slot": 1000},
+            "value": {
+                "blockhash": "StubBlockhash111111111111111111111111111111111",
+                "lastValidBlockHeight": 1_000_000u64,
+            },
+        }),
+        "getBlockHeight" => serde_json::json!(1_000_000u64),
+        "isBlockhashValid" => serde_json::json!({"context": {"slot": 1000}, "value": true}),
+        "getSignatureStatuses" => serde_json::json!({"context": {"slot": 1000}, "value": [null]}),
+        "getSignaturesForAddress" => serde_json::json!([]),
+        "getFeeForMessage" => {
+            serde_json::json!({"context": {"slot": 1000}, "value": {"lamports": 5000u64}})
+        }
+        "getAccountInfo" => serde_json::json!({"context": {"slot": 1000}, "value": null}),
+        "getTransaction" => serde_json::json!(null),
+        "getTokenAccountBalance" => serde_json::json!({
+            "context": {"slot": 1000},
+            "value": {"amount": "3000000", "decimals": 6, "uiAmount": 3.0, "uiAmountString": "3"},
+        }),
+        // A stub signature: flow 165 never broadcasts, so nothing parses this as a real one.
+        "sendTransaction" => serde_json::json!(
+            "STUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUBSTUB"
+        ),
+        other => {
+            // Unsupported method: answer as a PROVIDER would (200 + JSON-RPC error envelope),
+            // so the client's refusal path — not the transport path — handles it.
+            return (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {"code": -32601, "message": format!("stub upstream: unsupported method {other}")},
+                })),
+            )
+                .into_response();
+        }
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result})),
+    )
+        .into_response()
+}
+
+/// The positional `getMultipleAccounts` answer — see the section comment for the layout.
+#[cfg(feature = "test-helpers")]
+fn solana_stub_accounts(params: &serde_json::Value) -> serde_json::Value {
+    use base64::Engine as _;
+    let addrs: Vec<String> = params
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    // A 165-byte SPL token account: mint bytes at 0..32, amount at 64..72, zeros elsewhere —
+    // exactly the fields `decodeSplTokenAmount` reads (app/solana/spl.ts).
+    let token_blob = |mint: Option<&str>| -> String {
+        let mut blob = vec![0u8; 165];
+        if let Some(bytes) = mint.and_then(solana_stub_bs58_decode) {
+            let n = bytes.len().min(32);
+            blob[..n].copy_from_slice(&bytes[..n]);
+        }
+        blob[64..72].copy_from_slice(&3_000_000u64.to_le_bytes());
+        base64::engine::general_purpose::STANDARD.encode(blob)
+    };
+    // An 82-byte SPL mint: decimals at byte 44 — the only field `decodeSplMintDecimals` reads.
+    let mint_blob = || -> String {
+        let mut blob = vec![0u8; 82];
+        blob[44] = 6;
+        base64::engine::general_purpose::STANDARD.encode(blob)
+    };
+    let value: Vec<serde_json::Value> = addrs
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            if i == 0 {
+                serde_json::json!({
+                    "lamports": 2_000_000_000u64,
+                    "owner": "11111111111111111111111111111111",
+                    "data": ["", "base64"],
+                    "executable": false,
+                    "rentEpoch": 0,
+                    "space": 0,
+                })
+            } else if i % 2 == 1 {
+                serde_json::json!({
+                    "lamports": 2_039_280u64,
+                    "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                    "data": [token_blob(addrs.get(i + 1).map(String::as_str)), "base64"],
+                    "executable": false,
+                    "rentEpoch": 0,
+                    "space": 165,
+                })
+            } else {
+                serde_json::json!({
+                    "lamports": 1_461_600u64,
+                    "owner": "11111111111111111111111111111111",
+                    "data": [mint_blob(), "base64"],
+                    "executable": false,
+                    "rentEpoch": 0,
+                    "space": 82,
+                })
+            }
+        })
+        .collect();
+    serde_json::json!(value)
+}
+
+/// Minimal bs58 DECODE (alphabet table + big-number base conversion, leading-'1' zeros): the
+/// app's token-account decoder re-encodes a blob's first 32 bytes and requires the mint
+/// ADDRESS, so the stub must plant that address's own bytes there. Hand-rolled because the
+/// relay tree has no bs58 dependency and this is its only consumer (test-helpers only).
+#[cfg(feature = "test-helpers")]
+fn solana_stub_bs58_decode(s: &str) -> Option<Vec<u8>> {
+    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut digits: Vec<u8> = Vec::new(); // big-endian base-256 accumulator
+    for ch in s.bytes() {
+        let val = u32::try_from(ALPHABET.iter().position(|&a| a == ch)?).ok()?;
+        let mut carry = val;
+        for byte in digits.iter_mut().rev() {
+            let acc = u32::from(*byte) * 58 + carry;
+            *byte = (acc & 0xff) as u8;
+            carry = acc >> 8;
+        }
+        while carry > 0 {
+            digits.insert(0, (carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+    let zeros = s.bytes().take_while(|&b| b == b'1').count();
+    let mut out = vec![0u8; zeros];
+    out.extend(digits);
+    Some(out)
+}
+
+/// `GET /api/v1/test/solana-upstream/hits` → `{"hits": N}` — how many envelopes the stub has
+/// served (the flow's proof that the app's request reached the UPSTREAM through the proxy).
+#[cfg(feature = "test-helpers")]
+async fn solana_stub_hits() -> Response {
+    use std::sync::atomic::Ordering;
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"hits": SOLANA_STUB_HITS.load(Ordering::Relaxed)})),
+    )
+        .into_response()
+}
+
+#[cfg(all(test, feature = "test-helpers"))]
+mod solana_stub_tests {
+    use super::solana_stub_bs58_decode;
+
+    #[test]
+    fn bs58_all_ones_decode_to_zero_bytes() {
+        // A system-program address ('111…1') is 32 leading zeros — the identity edge of the
+        // alphabet's leading-'1' rule.
+        assert_eq!(
+            solana_stub_bs58_decode("11111111111111111111111111111111").unwrap(),
+            vec![0u8; 32]
+        );
+    }
+
+    #[test]
+    fn bs58_decodes_a_real_mainnet_mint_to_exact_bytes() {
+        // USDC's mainnet mint (app/solana/tokens.ts) — the exact string the app plants in the
+        // address list and re-encodes from the blob during decode. Byte-VALUE equality, not just
+        // length: the stub plants these bytes at every token account's mint offset, so a decoder
+        // returning any OTHER 32 bytes would pass a len()==32 check while silently corrupting
+        // every planted account. Expected bytes decoded with the reference implementation
+        // (app/node_modules/bs58) — an independent oracle, not this decoder re-reading itself.
+        assert_eq!(
+            solana_stub_bs58_decode("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").unwrap(),
+            vec![
+                198, 250, 122, 243, 190, 219, 173, 58, 61, 101, 243, 106, 171, 201, 116, 49, 177,
+                187, 228, 194, 210, 246, 224, 228, 124, 166, 2, 3, 69, 47, 93, 97,
+            ]
+        );
+    }
+
+    #[test]
+    fn bs58_rejects_non_alphabet_chars() {
+        assert!(solana_stub_bs58_decode("0OIl").is_none());
+    }
 }
 
 /// The direction rule for `GET /api/v1/swap_quote`, shared by both builds and PURE: given what
@@ -611,7 +932,10 @@ async fn swap_quote_fake(
         return err(StatusCode::BAD_REQUEST, "unknown_pool");
     }
     let Some(fake) = state.fake_ic.clone() else {
-        return err(StatusCode::SERVICE_UNAVAILABLE, "fake-IC gateway not attached");
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fake-IC gateway not attached",
+        );
     };
     let meta = fake.swap_pool_metadata();
     let zero_for_one = match swap_quote_direction(&meta, &qs.token_in, &qs.token_out) {
@@ -619,17 +943,20 @@ async fn swap_quote_fake(
         Err(resp) => return resp,
     };
     let amount_out = fake.swap_pool_quote(zero_for_one, u128::from(qs.amount_in.0));
-    (StatusCode::OK, Json(SwapQuoteBody {
-        pool: qs.pool,
-        token_in: qs.token_in,
-        token_out: qs.token_out,
-        amount_in: qs.amount_in,
-        amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
-        zero_for_one,
-        fee_millionths: meta.fee_millionths,
-        fetched_at: crate::now_secs(),
-    }))
-    .into_response()
+    (
+        StatusCode::OK,
+        Json(SwapQuoteBody {
+            pool: qs.pool,
+            token_in: qs.token_in,
+            token_out: qs.token_out,
+            amount_in: qs.amount_in,
+            amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
+            zero_for_one,
+            fee_millionths: meta.fee_millionths,
+            fetched_at: crate::now_secs(),
+        }),
+    )
+        .into_response()
 }
 /// `GET /api/v1/swap_quote` — the production branch (agent build; also the owner when
 /// test-helpers is co-enabled for the live tests): reads the REAL pool's OWN `metadata` to
@@ -649,7 +976,10 @@ async fn swap_quote_agent(
         Ok(m) => m,
         Err(LedgerError::Rejected(msg)) => return err(StatusCode::UNPROCESSABLE_ENTITY, msg),
         Err(LedgerError::Transient(msg)) => {
-            return err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
+            return err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("ledger unavailable: {msg}"),
+            )
         }
     };
     let zero_for_one = match swap_quote_direction(&meta, &qs.token_in, &qs.token_out) {
@@ -661,8 +991,9 @@ async fn swap_quote_agent(
         .swap_pool_quote(&qs.pool, zero_for_one, u128::from(qs.amount_in.0))
         .await
     {
-        Ok(amount_out) => {
-            (StatusCode::OK, Json(SwapQuoteBody {
+        Ok(amount_out) => (
+            StatusCode::OK,
+            Json(SwapQuoteBody {
                 pool: qs.pool,
                 token_in: qs.token_in,
                 token_out: qs.token_out,
@@ -671,13 +1002,14 @@ async fn swap_quote_agent(
                 zero_for_one,
                 fee_millionths: meta.fee_millionths,
                 fetched_at: crate::now_secs(),
-            }))
-            .into_response()
-        }
+            }),
+        )
+            .into_response(),
         Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
-        Err(LedgerError::Transient(msg)) => {
-            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
-        }
+        Err(LedgerError::Transient(msg)) => err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("ledger unavailable: {msg}"),
+        ),
     }
 }
 
@@ -755,7 +1087,9 @@ async fn balances(State(state): State<AppState>, Path(hex_pk): Path<String>) -> 
     let mut map: std::collections::BTreeMap<String, U64String> = std::collections::BTreeMap::new();
     for (currency, res) in results {
         match res {
-            Ok(Ok(bal)) => { map.insert(currency.to_string(), U64String(bal)); }
+            Ok(Ok(bal)) => {
+                map.insert(currency.to_string(), U64String(bal));
+            }
             Ok(Err(e)) => {
                 eprintln!("dpay-relay: balances: currency {currency} query failed: {e}");
             }
@@ -789,7 +1123,12 @@ async fn transactions(
     let limit = qs.limit.unwrap_or(30).min(100);
     let memo = match qs.memo.as_deref() {
         Some(m) if m.len() == 32 && m.bytes().all(|b| b.is_ascii_hexdigit()) => Some(m),
-        Some(_) => return err(StatusCode::BAD_REQUEST, "memo must be exactly 32 hex characters"),
+        Some(_) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "memo must be exactly 32 hex characters",
+            )
+        }
         None => None,
     };
     // With the fake-IC gateway attached (test-helpers), history reads the gateway's principal-keyed
@@ -801,20 +1140,31 @@ async fn transactions(
         use dpay_icp::principal::Principal as IcpPrincipal;
         let owner = IcpPrincipal::self_authenticating_ed25519(&pk);
         let rows = fake.transactions(&owner, currency, limit as usize, memo);
-        return (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response();
+        return (
+            StatusCode::OK,
+            Json(TransactionsBody { transactions: rows }),
+        )
+            .into_response();
     }
     // History needs the currency's LEDGER principal — resolve it from the compiled catalog (the
     // same source /balances fans out over), then walk that ledger's own transaction log.
     let catalog = ic_rows();
     let Some(desc) = catalog.iter().find(|d| d.currency == currency) else {
-        return err(StatusCode::BAD_REQUEST, format!("unknown currency {currency}"));
+        return err(
+            StatusCode::BAD_REQUEST,
+            format!("unknown currency {currency}"),
+        );
     };
     match state
         .ledger
         .transactions_on_ledger(&desc.ledger, pk, currency, limit, memo)
         .await
     {
-        Ok(rows) => (StatusCode::OK, Json(TransactionsBody { transactions: rows })).into_response(),
+        Ok(rows) => (
+            StatusCode::OK,
+            Json(TransactionsBody { transactions: rows }),
+        )
+            .into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
 }
@@ -826,11 +1176,14 @@ async fn transactions(
 async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQuery>) -> Response {
     let currency = qs.currency.unwrap_or(DEMO_USD);
     match state.ledger.deposit_info(currency).await {
-        Ok(i) => (StatusCode::OK, Json(DepositInfoBody {
-            min_confirmations: i.min_confirmations,
-            deposit_fee: i.deposit_fee,
-            deposit_min_amount: i.deposit_min_amount,
-        }))
+        Ok(i) => (
+            StatusCode::OK,
+            Json(DepositInfoBody {
+                min_confirmations: i.min_confirmations,
+                deposit_fee: i.deposit_fee,
+                deposit_min_amount: i.deposit_min_amount,
+            }),
+        )
             .into_response(),
         Err(e) => err(StatusCode::SERVICE_UNAVAILABLE, format!("{e}")),
     }
@@ -854,10 +1207,7 @@ async fn currencies() -> Response {
 /// value in the tx). Only meaningful for CkEthErc20-family currencies (e.g. ckUSDC = currency 2,
 /// native ckETH = a CkEthErc20 currency with token_contract null); a non-CkEthErc20 currency is a
 /// `Transient` (no onramp configured) → 503. Error mapping: Rejected → 422, Transient → 503.
-async fn ckerc20_onramp(
-    State(state): State<AppState>,
-    Query(qs): Query<CkErc20Query>,
-) -> Response {
+async fn ckerc20_onramp(State(state): State<AppState>, Query(qs): Query<CkErc20Query>) -> Response {
     let currency = qs.currency.unwrap_or(DEMO_USD);
     match state.ledger.ckerc20_onramp_params(currency).await {
         Ok(p) => (
@@ -870,12 +1220,12 @@ async fn ckerc20_onramp(
         )
             .into_response(),
         Err(LedgerError::Rejected(msg)) => err(StatusCode::UNPROCESSABLE_ENTITY, msg),
-        Err(LedgerError::Transient(msg)) => {
-            err(StatusCode::SERVICE_UNAVAILABLE, format!("ledger unavailable: {msg}"))
-        }
+        Err(LedgerError::Transient(msg)) => err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("ledger unavailable: {msg}"),
+        ),
     }
 }
-
 
 /// The palette every static page paints from, generated from `app/config/palette.ts`
 /// (`scripts/relay-palette-css.mjs`) and substituted for the `{{PALETTE}}` token below.
@@ -933,7 +1283,10 @@ async fn apk_download(State(state): State<AppState>, headers: HeaderMap) -> Resp
     // dropping it would turn "this CDN sends a malformed validator" into a 56 MB re-download nobody
     // can explain.
     let not_modified = match headers.get(header::IF_NONE_MATCH).map(|v| v.to_str()) {
-        Some(Ok(v)) => v.split(',').any(|t| { let t = t.trim(); t == etag || t == "*" }),
+        Some(Ok(v)) => v.split(',').any(|t| {
+            let t = t.trim();
+            t == etag || t == "*"
+        }),
         Some(Err(e)) => {
             eprintln!("dpay-relay: apk: If-None-Match is not text ({e}); serving the full build");
             false
@@ -943,7 +1296,10 @@ async fn apk_download(State(state): State<AppState>, headers: HeaderMap) -> Resp
     if not_modified {
         return (
             StatusCode::NOT_MODIFIED,
-            [(header::CACHE_CONTROL, "public, max-age=300"), (header::ETAG, etag.as_str())],
+            [
+                (header::CACHE_CONTROL, "public, max-age=300"),
+                (header::ETAG, etag.as_str()),
+            ],
         )
             .into_response();
     }
@@ -1037,7 +1393,10 @@ async fn wallet_pay_page(Path(_recipient): Path<String>, headers: HeaderMap) -> 
 async fn assetlinks() -> Response {
     (
         [
-            (header::CONTENT_TYPE, HeaderValue::from_static("application/json")),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            ),
             (header::CACHE_CONTROL, HeaderValue::from_static("no-cache")),
         ],
         include_str!("../assets/assetlinks.json"),
@@ -1118,7 +1477,10 @@ fn serve_dist_asset(route: &str, headers: &HeaderMap) -> Response {
     let mut resp = match asset.brotli.filter(|_| accepts_brotli(headers)) {
         Some(br) => (
             [
-                (header::CONTENT_TYPE, HeaderValue::from_static(asset.content_type)),
+                (
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static(asset.content_type),
+                ),
                 (header::CACHE_CONTROL, HeaderValue::from_static(cache)),
                 (header::CONTENT_ENCODING, HeaderValue::from_static("br")),
             ],
@@ -1127,7 +1489,10 @@ fn serve_dist_asset(route: &str, headers: &HeaderMap) -> Response {
             .into_response(),
         None => (
             [
-                (header::CONTENT_TYPE, HeaderValue::from_static(asset.content_type)),
+                (
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static(asset.content_type),
+                ),
                 (header::CACHE_CONTROL, HeaderValue::from_static(cache)),
             ],
             asset.bytes,
@@ -1379,7 +1744,10 @@ fn parse_hex_array<const N: usize>(s: &str, label: &str) -> Result<[u8; N], Resp
     let decoded = hex::decode(s.trim()).ok();
     match decoded.and_then(|b| <[u8; N]>::try_from(b).ok()) {
         Some(arr) => Ok(arr),
-        None => Err(err(StatusCode::BAD_REQUEST, format!("{label} must be {N} bytes hex"))),
+        None => Err(err(
+            StatusCode::BAD_REQUEST,
+            format!("{label} must be {N} bytes hex"),
+        )),
     }
 }
 
@@ -1412,7 +1780,9 @@ async fn health(State(state): State<AppState>) -> Response {
     } else {
         (
             StatusCode::SERVICE_UNAVAILABLE,
-            Json(HealthBody { status: "unhealthy" }),
+            Json(HealthBody {
+                status: "unhealthy",
+            }),
         )
             .into_response()
     }
@@ -1439,12 +1809,15 @@ async fn capabilities(State(state): State<AppState>) -> Response {
 /// (`scripts/verify-relay-version.sh` compares it to `git rev-parse HEAD`). Feature-unconditional: the
 /// prod image carries it too (no `agent` requirement). No state, no I/O — cheap + always reachable.
 async fn version() -> Response {
-    (StatusCode::OK, Json(VersionBody {
-        name: "dpay-relay",
-        version: env!("CARGO_PKG_VERSION"),
-        commit: env!("DPAY_BUILD_COMMIT"),
-        commit_date: env!("DPAY_BUILD_DATE"),
-    }))
+    (
+        StatusCode::OK,
+        Json(VersionBody {
+            name: "dpay-relay",
+            version: env!("CARGO_PKG_VERSION"),
+            commit: env!("DPAY_BUILD_COMMIT"),
+            commit_date: env!("DPAY_BUILD_DATE"),
+        }),
+    )
         .into_response()
 }
 
@@ -1455,7 +1828,11 @@ async fn version() -> Response {
 /// this branch is the documented escape hatch for deliberately unpinned builds).
 fn pinned_facade_hash() -> Option<&'static str> {
     let pin = env!("DPAY_PINNED_FACADE_HASH");
-    if pin.is_empty() { None } else { Some(pin) }
+    if pin.is_empty() {
+        None
+    } else {
+        Some(pin)
+    }
 }
 
 /// The integrity verdict: `MATCH` (live equals the pin — the deployed facade is the recorded
@@ -1503,12 +1880,15 @@ async fn integrity(State(state): State<AppState>) -> Response {
     };
     let pinned = pinned_facade_hash();
     let status = classify_integrity(live.as_deref(), pinned);
-    (StatusCode::OK, Json(IntegrityBody {
-        facade_canister: state.facade_canister.clone(),
-        live_module_hash: live,
-        pinned_module_hash: pinned.map(str::to_string),
-        status,
-        relay_commit: env!("DPAY_BUILD_COMMIT"),
-    }))
+    (
+        StatusCode::OK,
+        Json(IntegrityBody {
+            facade_canister: state.facade_canister.clone(),
+            live_module_hash: live,
+            pinned_module_hash: pinned.map(str::to_string),
+            status,
+            relay_commit: env!("DPAY_BUILD_COMMIT"),
+        }),
+    )
         .into_response()
 }

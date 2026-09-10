@@ -57,6 +57,15 @@
 //!                           it as a secret (same sensitivity as the PEM itself).
 //!   DPAY_APK_PATH           path to an Android build to serve at `GET /download/dpay.apk` and light
 //!                           up the landing page's download button. Unset → downloads disabled.
+//!   DPAY_SOLANA_RPC_URL     the Solana JSON-RPC provider endpoint proxied at POST
+//!                           /api/v1/solana/rpc (spec 2026-09-09, Direction 1) — the FULL URL
+//!                           including its api key (e.g. `https://…-rpc.com/?api-key=…`).
+//!                           SECRET deploy config: never logged, never echoed in a response,
+//!                           never committed. Unset is legal — the route still registers and
+//!                           answers 503 naming this variable; only a SET-but-malformed URL
+//!                           refuses startup (EXIT_CONFIG).
+//!   DPAY_SOLANA_TIMEOUT_MS  per-call upstream timeout for the solana proxy in milliseconds
+//!                           (default 10000). `0` or non-numeric → startup refuses (EXIT_CONFIG).
 
 use std::net::SocketAddr;
 use std::process;
@@ -96,6 +105,14 @@ async fn main() {
     } else {
         state
     };
+    // The Solana RPC proxy (spec 2026-09-09, Direction 1): the route is registered on EVERY
+    // build — an unconfigured proxy answers 503 naming DPAY_SOLANA_RPC_URL rather than 404ing
+    // — and gets its upstream + per-call timeout here. The URL is SECRET (it embeds the
+    // provider api key): never logged, never echoed in a response.
+    let state = state.with_solana(dpay_relay::solana::SolanaProxy::new(
+        cfg.solana_rpc_url.clone(),
+        cfg.solana_timeout,
+    ));
     // IC-rail cutover (test-helpers / memory mode only): attach the fake-IC `/api/v2` gateway.
     // The app signs envelopes and POSTs them HERE instead of icp-api.io; the gateway verifies the
     // real envelope signature and moves principal-keyed balances. Prod (`agent` mode) never builds
@@ -113,14 +130,22 @@ async fn main() {
     println!(
         "POST /api/v1/faucet: {} — the offline fixture faucet (DPAY_ENABLE_FAUCET={}), which \
          credits the fake-IC gateway.",
-        if faucet_available { "ENABLED" } else { "unavailable" },
+        if faucet_available {
+            "ENABLED"
+        } else {
+            "unavailable"
+        },
         cfg.faucet
     );
     #[cfg(feature = "agent")]
     println!(
         "POST /api/v1/faucet: {} — the production faucet, gated by the relay agent's identity \
          (DPAY_CONTROLLER_SEED), not by DPAY_ENABLE_FAUCET (={}, not consulted on this build).",
-        if faucet_available { "ENABLED" } else { "unavailable" },
+        if faucet_available {
+            "ENABLED"
+        } else {
+            "unavailable"
+        },
         cfg.faucet
     );
     #[cfg(not(any(feature = "test-helpers", feature = "agent")))]
@@ -142,6 +167,22 @@ async fn main() {
         println!(
             "OpenCryptoPay till OFF — /api/v1/till and /v1/lnurlp/* are not registered (404). \
              Set DPAY_ENABLE_TILL=true to serve them."
+        );
+    }
+    // The proxy's one banner line says WHETHER, never WHERE: the upstream URL embeds the
+    // provider api key, and even the docker log must not carry it.
+    if cfg.solana_rpc_url.is_some() {
+        println!(
+            "POST /api/v1/solana/rpc: ENABLED — pure pipe + read cache against the configured \
+             upstream (DPAY_SOLANA_RPC_URL). sendTransaction and every unallowlisted method are \
+             passed through byte-faithfully, uncached; allowlisted reads share a per-method TTL \
+             cache; upstream failures come back with their own status, never a stale cache hit."
+        );
+    } else {
+        println!(
+            "POST /api/v1/solana/rpc: unconfigured — the route answers 503 until \
+             DPAY_SOLANA_RPC_URL (the provider endpoint, full URL incl. api key) is set in the \
+             deploy environment."
         );
     }
 
@@ -223,6 +264,11 @@ struct Config {
     ledger: LedgerCfg,
     faucet: bool,
     till: bool,
+    /// The solana proxy's upstream, when configured (`DPAY_SOLANA_RPC_URL`). Carries the
+    /// provider api key — treat as secret end to end.
+    solana_rpc_url: Option<String>,
+    /// Per-call upstream timeout for the solana proxy (`DPAY_SOLANA_TIMEOUT_MS`).
+    solana_timeout: std::time::Duration,
 }
 
 impl Config {
@@ -303,11 +349,44 @@ impl Config {
             None => false,
         };
 
+        // The Solana RPC proxy's upstream (spec 2026-09-09, Direction 1). UNSET is a legal
+        // state — the route still registers and answers 503 naming the variable — but a set
+        // value that isn't a URL is refused here rather than surfacing as a 504 per request
+        // with no hint why. The value embeds the provider api key, so it never appears in an
+        // error message, a log line, or a response (url::ParseError's text names the defect,
+        // not the URL — deliberately not interpolated here).
+        let solana_rpc_url = match non_empty("DPAY_SOLANA_RPC_URL") {
+            Some(url) => {
+                reqwest::Url::parse(&url)
+                    .map_err(|e| format!("DPAY_SOLANA_RPC_URL is not a valid URL: {e}"))?;
+                Some(url)
+            }
+            None => None,
+        };
+        let solana_timeout = match non_empty("DPAY_SOLANA_TIMEOUT_MS") {
+            Some(raw) => {
+                let ms: u64 = raw
+                    .parse()
+                    .map_err(|e| format!("DPAY_SOLANA_TIMEOUT_MS={raw:?} is not a number: {e}"))?;
+                if ms == 0 {
+                    return Err(
+                        "DPAY_SOLANA_TIMEOUT_MS=0 — a zero timeout refuses every upstream call \
+                         before it is made"
+                            .into(),
+                    );
+                }
+                std::time::Duration::from_millis(ms)
+            }
+            None => dpay_relay::solana::DEFAULT_TIMEOUT,
+        };
+
         Ok(Config {
             addr,
             ledger,
             faucet,
             till,
+            solana_rpc_url,
+            solana_timeout,
         })
     }
 }
@@ -368,7 +447,10 @@ async fn build_ledger(cfg: &Config) -> (Arc<dyn Ledger>, bool) {
         } => connect_ic(url, canister_id, *fetch_root_key).await,
         LedgerCfg::Memory => {
             println!("read surface on the in-memory demo catalog (balances are always 0 — value lives on the IC rail)");
-            (Arc::new(FakeLedger::new()), memory_faucet_available(cfg.faucet))
+            (
+                Arc::new(FakeLedger::new()),
+                memory_faucet_available(cfg.faucet),
+            )
         }
     }
 }
@@ -467,7 +549,11 @@ fn parse_controller_seed() -> Option<[u8; 32]> {
 }
 
 #[cfg(not(feature = "agent"))]
-async fn connect_ic(_url: &str, _canister_id: &str, _fetch_root_key: bool) -> (Arc<dyn Ledger>, bool) {
+async fn connect_ic(
+    _url: &str,
+    _canister_id: &str,
+    _fetch_root_key: bool,
+) -> (Arc<dyn Ledger>, bool) {
     eprintln!(
         "dpay-relay: DPAY_LEDGER=ic, but this binary was built WITHOUT the `agent` feature, so it \
          has no way to reach a real canister. Rebuild with `--features agent` (see deploy/build.sh)."

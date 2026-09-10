@@ -62,6 +62,16 @@ services:
       # above. SECRET: treat like the PEM itself.
       DPAY_CONTROLLER_SEED: ${DPAY_CONTROLLER_SEED:-}
 
+      # The Solana JSON-RPC proxy (POST /api/v1/solana/rpc): the FULL provider endpoint INCLUDING
+      # its api key (e.g. https://mainnet.helius-rpc.com/?api-key=…). SECRET — never logged by
+      # the relay, never echoed in a response, never committed. Unset → the route answers 503
+      # naming this variable (registered on every build, so it never 404s). The proxy is a pure
+      # pipe for sendTransaction and shares allowlisted reads over a short TTL cache
+      # (crates/dpay-relay/src/solana.rs).
+      DPAY_SOLANA_RPC_URL: ${DPAY_SOLANA_RPC_URL:-}
+      # Per-call upstream timeout for the proxy, ms (default 10000; 0 refused at startup).
+      DPAY_SOLANA_TIMEOUT_MS: ${DPAY_SOLANA_TIMEOUT_MS:-}
+
     # Lets DPAY_IC_URL point at a dfx replica running on the host (http://host.docker.internal:4943)
     # — the pre-mainnet rehearsal: the real container, the real agent path, a replica you own.
     extra_hosts:

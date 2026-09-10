@@ -197,7 +197,7 @@
     <h2>4. When information is shared</h2>
     <p>Different Pay does not share information for advertising. Information is disclosed only as needed to provide a feature you request, operate the service, or meet legal obligations:</p>
     <ul>
-      <li><strong>Internet Computer, Solana, and ledger services.</strong> Public wallet addresses and transaction data are submitted to Internet Computer canisters, ICRC ledgers, and chain-key minter services — and, for the Solana asset rail, to Solana RPC endpoints — to execute payments, deposits, withdrawals, and receipts.</li>
+      <li><strong>Internet Computer, Solana, and ledger services.</strong> Public wallet addresses and transaction data are submitted to Internet Computer canisters, ICRC ledgers, and chain-key minter services — and, for the Solana asset rail, to Solana RPC endpoints — to execute payments, deposits, withdrawals, and receipts. Solana reads and broadcast transactions transit Different Pay's relay proxy before reaching the Solana network; the relay sees the transaction data it forwards but does not hold keys or custody funds.</li>
       <li><strong>Blockchain networks.</strong> Funding or withdrawing assets can publish addresses, amounts, and transaction data to networks such as Bitcoin, Ethereum, or Solana, where records are generally public and permanent.</li>
       <li><strong>WalletConnect and connected wallets.</strong> If you choose an external-wallet funding flow, WalletConnect and your selected wallet or provider handle pairing, connection, public account details, and transaction requests under their own terms. Different Pay never receives the external wallet's private key.</li>
       <li><strong>Cloudflare.</strong> Cloudflare provides network delivery, TLS termination, security, and tunnel infrastructure and may process standard network and security metadata on our behalf.</li>
@@ -223,6 +223,7 @@
 
     <h3>Service and ledger records</h3>
     <p>The relay may retain temporary payment receipt data in process memory and limited operational or security records for as long as reasonably needed to settle requests, prevent duplicate actions, troubleshoot failures, secure the service, and meet legal obligations.</p>
+    <p>For the Solana rail, the relay keeps a short-lived in-memory cache of read responses (seconds, varying by request type) shared across wallets to conserve provider quota. No Solana data is persisted by the relay beyond the operational and security records described above.</p>
     <p>Distributed ledger and blockchain transaction records are maintained by their networks. They are generally permanent and cannot be changed or deleted by us. Copies already submitted to merchants, external wallets, providers, or network participants are also outside our control.</p>
     <p>You may contact us to request access to or deletion of personal information controlled by us. We will verify and respond to the request as required by applicable law, but we cannot delete distributed-ledger records or data controlled independently by a third party.</p>
   </section>

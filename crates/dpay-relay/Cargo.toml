@@ -36,7 +36,7 @@ test-helpers = []
 dpay-core = { path = "../dpay-core" }
 dpay-icp = { path = "../dpay-icp" }
 axum = "0.8.9"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
 tower = "0.5.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -57,6 +57,12 @@ sha2 = "0.10"
 # real randomness, not a hash of a clock. Already in the tree at 0.2.17 (rand_core pulls it for
 # ed25519-dalek's key generation), so this names an existing edge rather than adding a crate.
 getrandom = "0.2"
+# The solana RPC proxy's one-hop upstream client (`src/solana.rs`). Pinned to the 0.12 line that
+# ic-agent already locks into the tree (0.12.28, in the offline registry cache) so this adds NO
+# new crates. rustls-tls, NOT default-tls (native-tls → system OpenSSL): the deploy image
+# deliberately has no system OpenSSL — see the ic-agent note below, same choice. The proxy sets
+# `redirect(Policy::none())`: a pure pipe forwards exactly one hop and never chases redirects.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 # --- `agent` feature only ---
 # ic-agent 0.48.1 is the current crates.io release (2026-07-07); it depends on candid ^0.10.10,
