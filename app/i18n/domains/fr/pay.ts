@@ -291,7 +291,7 @@ export const receiveFr: ReceiveMessages = {
     chargeHint: 'Affiché en francs, payé en VCHF — un franc, un VCHF, sans conversion.',
     ringUp: 'Encaisser',
     ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code qu’il peut payer',
-    ringingUp: 'Ouverture…',
+    ringingUp: 'Encaissement…',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Un montant de caisse s’arrête au centime — saisissez 10.50 plutôt que 10.505.'
@@ -333,7 +333,7 @@ export const receiveFr: ReceiveMessages = {
       'Impossible de vérifier ce montant pour l’instant — la caisse est injoignable. Cela ne veut PAS dire qu’il est impayé. Laissez le code affiché : cet écran le dira dès qu’il pourra joindre la caisse.',
     expiredWatching:
       'Ce code a expiré : plus personne ne peut le payer. Si le client a déjà envoyé l’argent, il peut encore arriver — surveillance encore un instant.',
-    cancel: 'Annuler le montant',
+    cancel: "Annuler l'encaissement",
     cancelHint: 'Effacer ce montant pour que le code n’accepte plus de paiement',
     cancelling: 'Annulation…',
     cancelFailed: said =>

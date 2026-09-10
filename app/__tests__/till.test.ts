@@ -43,6 +43,7 @@ import {
   TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillRawUnits,
 } from '../services/till';
 import type {Identity} from '../lib/types';
+import {applyFormatLocale} from '../i18n/intl';
 
 const GOLDEN = JSON.parse(
   readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8'),
@@ -117,6 +118,26 @@ describe('a franc price, in integers', () => {
     expect(chfCents('10')).toEqual({ok: true, cents: '1000'});
     expect(chfCents('0.05')).toEqual({ok: true, cents: '5'});
     expect(chfCents(' 4.5 ')).toEqual({ok: true, cents: '450'});
+  });
+
+  test("takes the comma key a German, French or Spanish decimal-pad renders", () => {
+    // The cashier cannot choose their keyboard's decimal mark: on a de/fr/es device the pad shows
+    // a COMMA, and `10,50` is what "ten francs fifty" looks like there. Without the canonicalizer
+    // this is refused as not-a-number and the example price in the error copy (`10.50`) is
+    // literally untypeable — a total loss of the merchant surface across most of Europe.
+    try {
+      applyFormatLocale('de-DE');
+      expect(chfCents('10,50')).toEqual({ok: true, cents: '1050'});
+      expect(chfCents(',5')).toEqual({ok: true, cents: '50'});
+      applyFormatLocale('fr-FR');
+      expect(chfCents('4,5')).toEqual({ok: true, cents: '450'});
+      applyFormatLocale('es-ES');
+      expect(chfCents('0,05')).toEqual({ok: true, cents: '5'});
+    } finally {
+      applyFormatLocale('en-US');
+    }
+    // In English the canonicalizer is a no-op, so a comma is still refused rather than guessed at.
+    expect(chfCents('10,50')).toEqual({ok: false, reason: 'not-a-number'});
   });
 
   test('refuses what a till cannot charge, and says which rule it broke', () => {
@@ -205,7 +226,7 @@ describe('ringing up a charge', () => {
   });
 
   test('tells a relay that serves no till apart from a till that refused', async () => {
-    // An unregistered route 404s with nothing to say (`DPAY_ENABLE_TILL` unset) — a first-class
+    // An unregistered route 404s with nothing to say (`DPAY_ENABLE_TILL=false`) — a first-class
     // state with its own instruction. A live till's 404 carries the envelope and a sentence.
     serve(404, null, {unreadable: true});
     expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({kind: 'not-served', addr: RELAY});

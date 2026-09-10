@@ -41,6 +41,7 @@ import {DpayCore} from './native';
 import {fetchWithTimeout} from './relay';
 import {relayAddresses, relayAddressesRevision} from './relayAddresses';
 import {parseDecimalToUnits} from '../lib/amount';
+import {canonicalizeDecimal} from '../i18n/intl';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import {base, nowSecs, randNonceHex} from '../lib/format';
 import type {Identity} from '../lib/types';
@@ -95,8 +96,9 @@ export type TillOpenOutcome =
   | {kind: 'open'; charge: TillCharge}
   /** The till answered with a price that is not the one that was rung up. Nothing is shown. */
   | {kind: 'mispriced'; quoted: string}
-  /** The relay serves no till (`DPAY_ENABLE_TILL` unset — its routes are not registered, so the
-   *  POST 404s with nothing to say). A first-class state, not an error: this relay simply is not a
+  /** The relay serves no till (`DPAY_ENABLE_TILL=false` — its routes are not registered, so the
+   *  POST 404s with nothing to say; since 2026-09-10 that is an explicit operator refusal, not
+   *  the default). A first-class state, not an error: this relay simply is not a
    *  till, and the merchant needs to hear that rather than "something went wrong". `addr` is the
    *  relay that ANSWERED — the sentence must name the relay actually asked, which under a walk or
    *  a pin need not be the caller's preferred URL. */
@@ -133,10 +135,14 @@ export type TillVoidOutcome =
 
 /** What the cashier typed, as whole CHF cents — or which rule it broke. Integer end to end: the
  *  same exact BigInt parser every other amount field in this app uses, at CHF's two decimals, so a
- *  price can never be wrong in the last digit. `too-precise` is told apart from `not-a-number`
- *  because they send the cashier to do different things (round the rappen vs type a number). */
+ *  price can never be wrong in the last digit. The input goes through `canonicalizeDecimal` first
+ *  for the same reason every other amount field does: a decimal-pad renders a COMMA key on a
+ *  German, French or Spanish device, and without the rewrite `10,50` would be refused as
+ *  not-a-number — the till's entry price, untypeable across most of Europe. `too-precise` is told
+ *  apart from `not-a-number` because they send the cashier to do different things (round the
+ *  rappen vs type a number). */
 export function chfCents(text: string): {ok: true; cents: string} | {ok: false; reason: 'too-precise' | 'not-a-number' | 'too-large'} {
-  const parsed = parseDecimalToUnits(text.trim(), CHF_DECIMALS);
+  const parsed = parseDecimalToUnits(canonicalizeDecimal(text.trim()), CHF_DECIMALS);
   if (!parsed.ok) {
     // `overflow` is a SIZE, not a shape: the parser reached a value no u64 can hold. Telling that
     // cashier to "type a number" would be telling them the wrong thing about the number they typed.
@@ -374,7 +380,7 @@ export async function openTillCharge(
   const json = await readJson(r);
   if (!r.ok) {
     // A 404 with no readable body is the route not being REGISTERED — this relay serves no till
-    // (`DPAY_ENABLE_TILL`). Every real refusal from a live till carries the envelope and a sentence.
+    // (`DPAY_ENABLE_TILL=false`). Every real refusal from a live till carries the envelope and a sentence.
     if (r.status === 404 && said(json) === null) return {kind: 'not-served', addr};
     return {kind: 'refused', said: said(json), status: r.status};
   }

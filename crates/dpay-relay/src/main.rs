@@ -37,9 +37,10 @@
 //!   DPAY_ENABLE_TILL        register the OpenCryptoPay till's eight routes (`POST /api/v1/till`,
 //!                           `POST /api/v1/till/void`, `GET /api/v1/till/{id}`,
 //!                           `GET /v1/lnurlp/{id}|/cb/{id}|/tx/{id}`, `GET /pl/`, `GET /till/{id}`
-//!                           — the cashier's watch page). Default FALSE,
-//!                           on every build and every ledger — the gate, and what a merchant must
-//!                           sign to reach the two POSTs: `app.rs` and `till.rs`.
+//!                           — the cashier's watch page). Default TRUE on every build and every
+//!                           ledger (founder decision 2026-09-10); `false` is the operator's
+//!                           opt-out. The gate, and what a merchant must sign to reach the two
+//!                           POSTs: `app.rs` and `till.rs`.
 //!   DPAY_CONTROLLER_SEED    (ic, agent build) hex-encoded 32-byte Ed25519 seed of the facade
 //!                           canister's CONTROLLER key. When set, the relay's agent signs its
 //!                           calls with this identity and `POST /api/v1/faucet` is served: the
@@ -159,14 +160,15 @@ async fn main() {
     // visible without a probe.
     if cfg.till {
         println!(
-            "OpenCryptoPay till ENABLED (DPAY_ENABLE_TILL) — /api/v1/till, /api/v1/till/void and \
-             /v1/lnurlp/* are served. Ringing up and cancelling both require the merchant's own \
-             signature over the request (dpay_core::TillOpen); the payer routes are public reads."
+            "OpenCryptoPay till ENABLED (DPAY_ENABLE_TILL unset or true) — /api/v1/till, \
+             /api/v1/till/void and /v1/lnurlp/* are served. Ringing up and cancelling both \
+             require the merchant's own signature over the request (dpay_core::TillOpen); the \
+             payer routes are public reads."
         );
     } else {
         println!(
             "OpenCryptoPay till OFF — /api/v1/till and /v1/lnurlp/* are not registered (404). \
-             Set DPAY_ENABLE_TILL=true to serve them."
+             DPAY_ENABLE_TILL=false is set; unset it (or set true) to serve them."
         );
     }
     // The proxy's one banner line says WHETHER, never WHERE: the upstream URL embeds the
@@ -340,13 +342,14 @@ impl Config {
             None => matches!(ledger, LedgerCfg::Memory),
         };
 
-        // The till is served only when asked for, on every ledger and every build: which surfaces an
-        // image exposes is the operator's call, and one it never made is one it did not ask for. A
-        // malformed value is a config error, not a silent "off": an operator who meant to turn it on
-        // must hear about it.
+        // The till is served BY DEFAULT on every ledger and every build (founder decision
+        // 2026-09-10, reversing the 2026-09-04 opt-in): an operator who does not want the surface
+        // must say `DPAY_ENABLE_TILL=false` — an explicit act, not a default nobody chose. A
+        // malformed value is a config error, not a silent default: an operator who meant the
+        // opposite of what they typed must hear about it.
         let till = match non_empty("DPAY_ENABLE_TILL") {
             Some(s) => parse_bool("DPAY_ENABLE_TILL", &s)?,
-            None => false,
+            None => true,
         };
 
         // The Solana RPC proxy's upstream (spec 2026-09-09, Direction 1). UNSET is a legal

@@ -290,7 +290,7 @@ export const receiveEs: ReceiveMessages = {
     chargeHint: 'Se marca en francos y se paga en VCHF: un franco, un VCHF, sin conversión.',
     ringUp: 'Cobrar',
     ringUpHint: 'Abrir este importe en tu caja y mostrar al cliente un código que pueda pagar',
-    ringingUp: 'Abriendo…',
+    ringingUp: 'Cobrando…',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Un importe de caja llega hasta el céntimo: pon 10.50 en lugar de 10.505.'

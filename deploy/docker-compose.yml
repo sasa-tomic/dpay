@@ -48,10 +48,11 @@ services:
       # DPAY_CONTROLLER_SEED below.
       DPAY_ENABLE_FAUCET: ${DPAY_ENABLE_FAUCET:-false}
 
-      # The OpenCryptoPay till (POST /api/v1/till + /api/v1/till/void + /v1/lnurlp/*). Its routes
-      # are not registered unless this is true, and the merchant routes carry their own signed
-      # authorisation rather than a deploy-time secret: crates/dpay-relay/src/app.rs.
-      DPAY_ENABLE_TILL: ${DPAY_ENABLE_TILL:-false}
+      # The OpenCryptoPay till (POST /api/v1/till + /api/v1/till/void + /v1/lnurlp/*). Served BY
+      # DEFAULT (founder decision 2026-09-10) — set DPAY_ENABLE_TILL=false to un-register all
+      # eight routes. The merchant routes carry their own signed authorisation rather than a
+      # deploy-time secret: crates/dpay-relay/src/app.rs.
+      DPAY_ENABLE_TILL: ${DPAY_ENABLE_TILL:-true}
 
       # The faucet (agent build): hex Ed25519 seed of the canister CONTROLLER key (the same key
       # material as DPAY_DFX_IDENTITY's identity.pem). Set → the relay signs its faucet `mint`

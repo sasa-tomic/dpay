@@ -277,24 +277,25 @@ pub fn app(state: AppState) -> Router {
         // because a route that vanishes makes the client guess. Pure pipe + read cache.
         .route("/solana/rpc", axum::routing::post(crate::solana::rpc_proxy));
 
-    // --- the OpenCryptoPay till, OFF unless the operator asks for it -----------------------------
+    // --- the OpenCryptoPay till, ON unless the operator refuses it --------------------------------
     //
     // The eight routes below (three here; the standard's three, the camera landing page and the
-    // cashier page on the root router) are registered only when `DPAY_ENABLE_TILL` is set — founder
-    // decision 2026-09-04,
-    // taken against a production probe of `POST /api/v1/till`. That route was UNAUTHENTICATED:
-    // anyone could ring up a charge naming any ed25519 pubkey and any merchant name, and this relay
-    // then served a full payment page for it on dpay's own domain under dpay's own certificate — a
-    // phishing primitive aimed at the exact control the payer's review relies on, which host served
-    // the quote.
+    // cashier page on the root router) are registered unless `DPAY_ENABLE_TILL=false` — founder
+    // decision 2026-09-10, reversing the 2026-09-04 opt-in that was taken against a production
+    // probe of `POST /api/v1/till`. That route was UNAUTHENTICATED at the time: anyone could ring
+    // up a charge naming any ed25519 pubkey and any merchant name, and this relay then served a
+    // full payment page for it on dpay's own domain under dpay's own certificate — a phishing
+    // primitive aimed at the exact control the payer's review relies on, which host served the
+    // quote.
     //
-    // Both merchant routes now require the ring-up to be SIGNED by the very key its destination
-    // account derives from (`crate::till`, rule 0; `dpay_core::validate_till_open`), so a charge
-    // exists only where somebody who can SPEND from that account asked for one, an anonymous caller
-    // can no longer force a cashier to re-ring by voiding their pending charge, and the unbounded
-    // `merchant_name` is both signed and clamped rather than an anonymous way to spend this relay's
-    // memory. The flag stays because "which surfaces does this image serve" is an operator's call to
-    // make per deploy, not because the surface is known-broken.
+    // Both merchant routes have required the ring-up to be SIGNED by the very key its destination
+    // account derives from ever since (`crate::till`, rule 0; `dpay_core::validate_till_open`), so
+    // a charge exists only where somebody who can SPEND from that account asked for one, an
+    // anonymous caller can no longer force a cashier to re-ring by voiding their pending charge,
+    // and the unbounded `merchant_name` is both signed and clamped rather than an anonymous way to
+    // spend this relay's memory. With that fixed, the founder turned the default ON; the flag
+    // remains because "which surfaces does this image serve" is still an operator's call to make
+    // per deploy — now as an explicit opt-out rather than an opt-in.
     //
     // The gate is at REGISTRATION, not inside the handlers: an unregistered route is refused by the
     // router with an empty 404 and no handler code is reachable, so there is one code path rather

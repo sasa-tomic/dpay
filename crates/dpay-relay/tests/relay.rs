@@ -3801,8 +3801,10 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
 ///
 /// The two halves ride the SAME eight requests: a relay with the till on answers every one of them
 /// (which is what makes the requests well-formed, the charge live and the quote real), and a
-/// DEFAULT relay — plain `AppState::new`, the shape `main` builds without `DPAY_ENABLE_TILL` —
-/// refuses all eight. The refusal is pinned as a BARE 404: an empty body is axum's own answer for a
+/// till-less relay — plain `AppState::new`, the shape an explicit `DPAY_ENABLE_TILL=false` builds
+/// (`main` calls `with_till`; since the 2026-09-10 founder decision an UNSET env builds a
+/// till-serving relay, so this is the opt-out's shape, not the default's) — refuses all eight.
+/// The refusal is pinned as a BARE 404: an empty body is axum's own answer for a
 /// path it has no route for, whereas every 404 this till can produce carries the provider's
 /// `{statusCode, message, error}` envelope (the test above pins that). The empty body is therefore
 /// the proof that no handler ran, rather than a handler politely declining.

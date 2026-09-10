@@ -224,11 +224,12 @@ async function spawnOnce(opts = {}) {
     // no practice money — the first-run screens have to be honest about that and must not ask
     // the user for funds instead (anti-scam rule R1), and the only way to see it is to serve it.
     DPAY_ENABLE_FAUCET: opts.faucet === false ? 'false' : 'true',
-    // The OpenCryptoPay till is OFF by default in a shipped relay (founder decision 2026-09-04) and
-    // ON here, because the merchant half of the app is driven against these very routes: flows
-    // 114-116 ring up a real signed charge on `POST /api/v1/till`, pay it with a real signed VCHF
-    // transfer, and watch `GET /api/v1/till/{id}` credit it. Enabling it costs the other flows
-    // nothing — the till's payer-facing routes are shadowed by each OCP flow's own fetch stub.
+    // The OpenCryptoPay till is ON by default in a shipped relay since the 2026-09-10 founder
+    // decision; the harness still sets it EXPLICITLY so `opts.till === false` (flow 144) exercises
+    // the operator opt-out deterministically whatever the binary's default. Flows 114-116 ring up
+    // a real signed charge on `POST /api/v1/till`, pay it with a real signed VCHF transfer, and
+    // watch `GET /api/v1/till/{id}` credit it. Enabling it costs the other flows nothing — the
+    // till's payer-facing routes are shadowed by each OCP flow's own fetch stub.
     DPAY_ENABLE_TILL: opts.till === false ? 'false' : 'true',
     // Marker so a future relay feature can detect the e2e harness (no behavior change today).
     DPAY_E2E: '1',

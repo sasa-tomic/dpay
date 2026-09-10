@@ -17,7 +17,7 @@
 |------|---------|
 | ICP | Internet Computer — decentralized ledger with fast finality; dpay's settlement layer. |
 | canister | ICP smart contract. The facade described here — verify sig/nonce/expiry/cap/balance, move funds, return a receipt — is the DORMANT settlement kernel; since the 2026-08-19/20 cutover no dpay canister is on the value path. Authority: `docs/CANISTERS.md`. |
-| relay | Rust + axum service (`crates/dpay-relay`). It does NOT settle payments — settlement left it in the 2026-08-19 cutover; the app signs and submits its own IC envelopes. It serves the compiled currency catalog, read-only balances/history, the web wallet, the faucet, and — only when `DPAY_ENABLE_TILL` is set — the OpenCryptoPay till. |
+| relay | Rust + axum service (`crates/dpay-relay`). It does NOT settle payments — settlement left it in the 2026-08-19 cutover; the app signs and submits its own IC envelopes. It serves the compiled currency catalog, read-only balances/history, the web wallet, the faucet, and — by default since 2026-09-10, opt-out `DPAY_ENABLE_TILL=false` — the OpenCryptoPay till. |
 | dfx | ICP SDK / CLI used to build and deploy the canister. |
 | ckUSDC | Chain-key USDC on ICP. It settles today, and so do ckBTC, ckETH, VCHF, native ICP, and SOL/USDC on Solana — the "would, one day" framing this row used to carry is years stale. Shipped set: `positioning.md`. |
 | nonce | Unique per-payment value the merchant mints once. On the shipped rail it is the payee's reconciliation handle (it rides as the ICRC memo), NOT the thing that stops a replay; on the facade/DEMO rail it is the ledger nonce. Per-rail truth: `dpay_core::PaymentRequest`. |

@@ -323,9 +323,10 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
 - **OpenCryptoPay — dpay pays a merchant till, and now SERVES one (2026-09-01 → 2026-09-04).** A shop
   rings a price up in francs on its own dpay phone, shows a code, and is paid VCHF at its OWN
   account; the relay is the provider endpoint and never holds a key that could move that money.
-  **The till ships OFF: its eight routes register only when `DPAY_ENABLE_TILL` is set, and the
-  default is false on every build and every ledger** — an operator's choice about which surfaces an
-  image serves. A ring-up, and a cancellation, must be SIGNED by the key whose account gets paid
+  **The till ships ON: its eight routes register unless `DPAY_ENABLE_TILL=false` is set — the
+  default flipped true on every build and every ledger by founder decision 2026-09-10, reversing
+  the 2026-09-04 opt-in that predated the signed ring-up** (an operator can still un-serve the
+  surface per deploy). A ring-up, and a cancellation, must be SIGNED by the key whose account gets paid
   (`dpay_core::validate_till_open`, domain `dpay-till-open-v1`, bytes pinned by
   `dfx/till_open_signing.json`). The counter sits inside Receive ▸ Request payment on every asset
   and arms the NFC reader with the charge's own reference, so a TAP pays the same charge a scan

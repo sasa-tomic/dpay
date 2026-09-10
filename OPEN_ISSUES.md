@@ -184,7 +184,11 @@ DO-NOT-NAG set.
   till v1 build is complete (`702c359`; plan
   [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md));
   what remains of it is the two-handset tap (below). The cashier page (`8805027`), the OCP tx-id
-  fix and the bearer-token revisit are done and recorded below/inline.
+  fix and the bearer-token revisit are done and recorded below/inline. **The till is served by
+  DEFAULT since 2026-09-10 (founder, same session): `DPAY_ENABLE_TILL` unset → true at every
+  layer — binary, compose, `.env.example` — with `false` as the operator opt-out. Production
+  serves it from the next founder relay deploy (the live image still runs the opt-in era's
+  default); check with `curl -s https://dpay.kalaj.org/api/v1/capabilities` → `till:true`.**
 
 ## PROD STATE (checked, never asserted — floor `1adc94f`)
 
