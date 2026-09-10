@@ -36,10 +36,18 @@ export const STORAGE_KEY = 'dpay.identity.v1';
 // could recover. A resume reads this key and shows the SAME words (they are derived from the seed,
 // so they are the same 24 either way). Nothing but Onboarding reads it.
 export const PENDING_IDENTITY_STORAGE_KEY = 'dpay.identity.pending.v1';
-// The user-chosen relay URL persists across reloads (AsyncStorage, like identity + the currency
-// catalog) so changing networks in Settings survives an app restart. Default is `relayConfig`'s
-// value when no persisted choice exists (the harness passes ?relay=; prod codegens the real URL).
+// LEGACY single-relay choice from before the R1 address list: nothing writes it anymore. It is
+// read ONCE at load and migrated to a one-entry RELAY_LIST_STORAGE_KEY list (see
+// services/relayAddresses.ts). The user-chosen relay ADDRESSES persist across reloads
+// (AsyncStorage, like identity + the currency catalog) so changing networks in Settings survives
+// an app restart; the list default is `relayConfig`'s value when no persisted choice exists (the
+// harness passes ?relay=; prod codegens the real URL).
 export const RELAY_STORAGE_KEY = 'dpay.relay.v1';
+// R1 (spec 2026-09-09 §"Direction 2") — the operator's ordered relay address LIST, JSON array of
+// http(s) URLs, first entry = preferred. One entry is a valid list (an operator with one relay
+// sees no behavior change). A LEGACY single value under RELAY_STORAGE_KEY above migrates to a
+// one-entry list at load (see services/relayAddresses.ts); nothing writes the legacy key anymore.
+export const RELAY_LIST_STORAGE_KEY = 'dpay.relays.v1';
 // Whether the user has unhid testnet currencies in the Balances sheet. Defaults to false (testnet
 // assets are hidden by default per the founder decision); persisted so the choice survives a
 // restart. Mirrors the identity/relay AsyncStorage pattern.
@@ -141,52 +149,134 @@ export const WALLETCONNECT_PROJECT_ID =
 
 // ── The Solana RPC endpoint for the native device-key SOL rail (balances, history, send) ────────
 //
-// ONE value, in one place, with one way to change it at runtime. The baked default below is what a
-// fresh install talks to; `setSolanaRpcUrl` replaces it for this device, and the persisted choice
-// (`SOLANA_RPC_STORAGE_KEY`, read at boot in App.tsx) is what makes that survive a restart. Mirrors
-// the relay URL slot (`RELAY_STORAGE_KEY`) deliberately: an operator running a pilot points the
-// wallet at their OWN provider key without a fork, and rotating a key stops being a store release.
-// Until 2026-09-08 this was a build-time literal and nothing else, which is why a dead key meant a
-// multi-day outage rather than a settings edit (docs/specs/2026-09-08-solana-rpc-plan.md §1.4).
+// ONE getter — `solanaRpcUrl()` — in one place, with one way to change it at runtime. Every
+// Solana read and broadcast already calls it per use, and R2 changed ZERO call sites: what
+// changed is the DEFAULT (spec 2026-09-09-relay-ha-and-solana-proxy §"Direction 1 — the
+// proxy"). Until 2026-09-10 a provider URL + API key was baked right here, so the key shipped
+// in every client bundle and its death (HTTP 401/429, measured 2026-09-08/09) was a multi-day
+// outage. The default is now DERIVED from the ACTIVE relay address —
+// `${relayBase}/api/v1/solana/rpc`, the relay's Solana JSON-RPC proxy — and the provider key
+// lives in relay configuration (the deploy environment), never in the app bundle, never in git.
 //
-// The test override `__DPAY_TEST_SOLANA_RPC_URL=''` DISABLES SOL for the offline inner loop
-// (jest.setup.js sets it globally; the e2e driver injects it via evaluateOnNewDocument): an empty
-// URL makes the balance seam no-op and the SOL rows render `—`, so jest/e2e never touch a real
-// cluster. Prod never sets the global → the baked default stands. `scripts/check-prod-sol.mjs`
-// reads THIS literal and refuses to ship a build whose default is a public/non-mainnet endpoint or
-// is not answering.
-export const SOLANA_RPC_BAKED =
-  ((globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL ?? 'https://mainnet.helius-rpc.com/?api-key=7afb947e-4379-4204-8368-d1e47367ab54');
+// The precedence, top wins (the code in `solanaRpcUrls()` below is the authority):
+//   1. the OPERATOR override — `setSolanaRpcUrl`, persisted under `SOLANA_RPC_STORAGE_KEY`,
+//      read at boot in App.tsx, editable in Settings ▸ Advanced. This is the escape hatch
+//      that keeps docs/REGULATORY.md §4 constraint 2 answerable: an operator (or a user who
+//      does not want dpay in their Solana path) points the wallet at ANY Solana endpoint and
+//      the relay leaves the path entirely — a single candidate, nothing to walk. `''` CLEARS
+//      it — follow the relay again, NOT an offline switch.
+//   2. `__DPAY_TEST_SOLANA_RPC_URL` — the test override, captured at module load exactly as
+//      the old baked literal was. jest.setup.js sets '' (SOL is OFF for the offline inner
+//      loop: an empty URL makes the balance seam no-op and the SOL rows render `—`); the e2e
+//      driver injects '' or 'stub' (harness/driver.mjs) or a harness relay's proxy URL
+//      (flow 165); prod never sets the global. A single candidate: the derivation never
+//      fights it.
+//   3. the relay-derived list — `setRelayBaseForSolana` holds the ACTIVE relay bases (the
+//      R1 list; App.tsx re-points them synchronously whenever the list resolves or changes),
+//      each base + `SOLANA_RPC_PROXY_PATH`, deduplicated, in list order — the multi-home
+//      walk. Constants cannot import services (layering), so the bases arrive through that
+//      setter; before any wiring the list is `[WALLET_ORIGIN]` — the same
+//      https://dpay.kalaj.org the shipped relay list defaults to (relayConfig.ts), reused
+//      rather than duplicated.
+const SOLANA_RPC_TEST_OVERRIDE: string | undefined =
+  (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string}).__DPAY_TEST_SOLANA_RPC_URL;
+
+/** The relay route every Solana RPC call is proxied through when no operator override is set
+ *  (R2). Exported for the pins in `__tests__/solana-rpc-config.test.ts`; the fixed contract the
+ *  relay serves and `scripts/check-prod-sol.mjs` probes before any ship. */
+export const SOLANA_RPC_PROXY_PATH = '/api/v1/solana/rpc';
+
+// The relay bases the default list derives from, in walk order. WALLET_ORIGIN is the
+// PRE-WIRING fallback only: App calls `setRelayBaseForSolana` with the live relay list at
+// mount and on every list change (synchronously in the same tick that installs the list —
+// see App.tsx), so this value serves module-load-time reads and jest suites that never mount
+// App. Trailing slashes are stripped and duplicates dropped on the way in (a `?relay=` entry
+// may carry one verbatim, and `…//api/…` would 404 — the same normalization `base` in
+// lib/format.ts applies to walk addresses; inlined here because constants.ts imports nothing
+// by design).
+let relayBasesForSolana: string[] = [WALLET_ORIGIN];
+
+/** Normalize one relay base for the derivation: trimmed, trailing `/`s stripped. */
+function normalizedSolanaBase(base: string): string {
+  return base.trim().replace(/\/+$/, '');
+}
 
 /** Where the operator's chosen endpoint persists. Same AsyncStorage pattern as identity/relay. */
 export const SOLANA_RPC_STORAGE_KEY = 'dpay.solanaRpc.v1';
 
-let activeSolanaRpc = SOLANA_RPC_BAKED;
+// null = no operator choice — follow the relay-derived default.
+let operatorSolanaRpc: string | null = null;
 
-/** The endpoint every Solana read and broadcast uses RIGHT NOW. A function, not a constant,
- *  because the operator's choice arrives after module load (from storage, or from Settings). Call
- *  it per use — never capture it at module scope, or a rotation would need a restart. */
+/**
+ * The CANDIDATE LIST every Solana read and broadcast walks, in order (R2 multi-home, the
+ * same policy R1 gave the IC surfaces: one pass, ordered, transport-trouble → next). The
+ * precedence, one winner:
+ *   1. the OPERATOR override — a single URL; the operator removed dpay from the path
+ *      entirely, so there is nothing to walk to (no second home was chosen).
+ *   2. the test override — likewise a single candidate: '' means the rail is OFF (the list
+ *      is `['']`, and the seam's empty-head gate no-ops), 'stub' or a URL is the whole list.
+ *   3. the relay-derived list — every relay base + `SOLANA_RPC_PROXY_PATH`, de-duplicated,
+ *      in the relay list's own order (the first relay is the preferred home; the rest are
+ *      failovers).
+ * A function, not a constant, because every input changes after module load (the operator's
+ * choice from storage or Settings, the relay bases from the R1 list). Call it per use.
+ */
+export function solanaRpcUrls(): string[] {
+  if (operatorSolanaRpc !== null) return [operatorSolanaRpc];
+  if (SOLANA_RPC_TEST_OVERRIDE !== undefined) return [SOLANA_RPC_TEST_OVERRIDE];
+  return relayBasesForSolana.map((base) => `${base}${SOLANA_RPC_PROXY_PATH}`);
+}
+
+/** The endpoint every Solana read and broadcast uses RIGHT NOW: the HEAD of the candidate
+ *  list — the preferred home, the one availability checks (the seam's rail gate,
+ *  `isSolanaRpcAvailable`, `isSolanaDevnet`) read. The walk itself lives in
+ *  `solana/rpc.ts` over `solanaRpcUrls()`; nothing outside the seam needs the tail. A
+ *  function, not a constant, for the same reason as the list: never capture it at module
+ *  scope, or a rotation would need a restart. */
 export function solanaRpcUrl(): string {
-  return activeSolanaRpc;
+  return solanaRpcUrls()[0] ?? '';
+}
+
+/** Re-point the DERIVED default list at the ACTIVE relay list (R2). App.tsx calls this
+ *  synchronously in the same tick that installs a relay list (the boot effect's initial
+ *  wiring, the persisted-list load, and the Settings list mutator) — ONE mechanism, so the
+ *  derivation can never lag a re-point the way a derived useEffect could (child effects run
+ *  before a parent's, so the first balance poll of a re-pointed wallet reads the OLD base
+ *  under that design; the synchronous call reads the new one). Accepts one base or the
+ *  whole list; empty/duplicate entries are dropped, trailing slashes stripped. An operator's
+ *  explicit endpoint always wins over this (see `solanaRpcUrls`); an all-empty input is
+ *  ignored rather than corrupting the derivation. */
+export function setRelayBaseForSolana(base: string | readonly string[]): void {
+  const input = typeof base === 'string' ? [base] : base;
+  const bases: string[] = [];
+  for (const entry of input) {
+    const trimmed = normalizedSolanaBase(entry);
+    if (trimmed === '' || bases.includes(trimmed)) continue;
+    bases.push(trimmed);
+  }
+  if (bases.length === 0) return;
+  relayBasesForSolana = bases;
 }
 
 /**
- * Point this device at a different Solana endpoint. `''` restores the baked default.
+ * Point this device at a different Solana endpoint. `''` clears the choice: the wallet follows
+ * the relay-derived default again (never an offline switch).
  *
  * THROWS, with an actionable message, on anything it will not accept — the caller (Settings, or
  * the boot loader reading the persisted value) shows or logs it. Two refusals, both fail-closed:
  *   • not an `https:` URL. A Solana endpoint can lie about a balance or a blockhash; over plain
  *     http anyone on the path can. The cluster-identity check (`SOL_GENESIS_HASH`) catches a wrong
  *     CHAIN, not a wrong ANSWER.
- *   • a devnet/testnet host. `IS_SOLANA_DEVNET` below is derived from the BAKED default so that
- *     the "DEVNET" badge and the wrong-cluster warnings stay honest without every screen having to
- *     re-derive them; refusing a non-mainnet override is what keeps that derivation true. Devnet
- *     remains selectable the way it always was — by editing the baked default in a dev build.
+ *   • a devnet/testnet host. `isSolanaDevnet()` below is derived from the EFFECTIVE endpoint so
+ *     that the "DEVNET" badge and the wrong-cluster warnings stay honest without every screen
+ *     having to re-derive them; refusing a non-mainnet override is what keeps that derivation
+ *     true. Devnet remains selectable the way it always was — via the
+ *     `__DPAY_TEST_SOLANA_RPC_URL` override in a dev/test build.
  */
 export function setSolanaRpcUrl(url: string): void {
   const trimmed = url.trim();
   if (trimmed === '') {
-    activeSolanaRpc = SOLANA_RPC_BAKED;
+    operatorSolanaRpc = null;
     return;
   }
   let parsed: URL;
@@ -201,15 +291,20 @@ export function setSolanaRpcUrl(url: string): void {
   if (/devnet|testnet/i.test(parsed.host)) {
     throw new Error(`"${parsed.host}" is a devnet/testnet endpoint. This wallet holds mainnet funds; a test cluster would show none of them. Use your provider's mainnet endpoint.`);
   }
-  activeSolanaRpc = trimmed;
+  operatorSolanaRpc = trimmed;
 }
 
-// Whether the SOL rail runs on a devnet/testnet cluster. Derived from the BAKED default, and true
-// only in a dev build that edited it: `setSolanaRpcUrl` refuses a non-mainnet override precisely so
-// this stays correct without being re-derived per screen. Used to badge SOL screens ("DEVNET") and
-// warn on the receive-address sheet — mainnet SOL sent to a devnet key is a real fund-loss risk. A
-// prod build that leaves this true is caught by scripts/check-prod-sol.mjs.
-export const IS_SOLANA_DEVNET = /devnet|testnet/i.test(SOLANA_RPC_BAKED);
+// Whether the SOL rail runs on a devnet/testnet cluster. Derived from the EFFECTIVE endpoint —
+// the operator override if set, else the default (test override or relay-derived). Pre-R2 this
+// read the baked literal, which nothing could change at runtime; the endpoint is runtime state
+// now, so the badge reads it live. The realistic true cases are a dev build's test override
+// naming a devnet host and a relay base whose host does; the money-critical cluster guard
+// remains `SOL_GENESIS_HASH` (getGenesisHash fail-closes on mismatch) — this badge is the
+// naming heuristic that warns BEFORE a send. Used to badge SOL screens ("DEVNET") and warn on
+// the receive-address sheet — mainnet SOL sent to a devnet key is a real fund-loss risk.
+export function isSolanaDevnet(): boolean {
+  return /devnet|testnet/i.test(solanaRpcUrl());
+}
 
 // SOL native send: getLatestBlockhash + sendTransaction + confirmTransaction (which polls up to
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
@@ -229,7 +324,7 @@ export const SOL_BROADCAST_TIMEOUT_MS = SOL_SEND_TIMEOUT_MS * 2;
 //   • SOL_GENESIS_HASH — the immutable mainnet-beta cluster id; mismatch fail-closes the request.
 //   • SOL_PAYMENT_MAX_WINDOW_SECONDS — the codec's frozen max request lifetime (iat..exp ≤ 90s).
 // The genesis hash accepts a `__DPAY_TEST_SOL_GENESIS_HASH` override so a unit test can mutate the
-// expected cluster identity (mirrors the SOLANA_RPC_BAKED + POLL override seam).
+// expected cluster identity (mirrors the Solana-RPC + POLL override seams).
 export const SOL_PAYMENT_COMMITMENT = 'confirmed' as const;
 export const SOL_GENESIS_HASH =
   ((globalThis as unknown as {__DPAY_TEST_SOL_GENESIS_HASH?: string}).__DPAY_TEST_SOL_GENESIS_HASH ??

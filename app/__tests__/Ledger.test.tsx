@@ -21,6 +21,7 @@ import {buildSelectableAssets} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {M} from '../i18n';
 import type {AssetId, Txn} from '../lib/types';
+import type {SolanaReadFailure} from '../solana';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {
@@ -59,9 +60,9 @@ function testIDs(tree: renderer.ReactTestRenderer): string[] {
   return [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
 }
 
-function mount(history: Txn[], dropped = 0): renderer.ReactTestRenderer {
+function mount(history: Txn[], dropped = 0, staleFailure: SolanaReadFailure | null = null): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
-  act(() => { tree = renderer.create(<Ledger history={history} catalog={CATALOG} assets={ASSETS} dropped={dropped} onOpenReceipt={() => {}} />); });
+  act(() => { tree = renderer.create(<Ledger history={history} catalog={CATALOG} assets={ASSETS} dropped={dropped} staleFailure={staleFailure} onOpenReceipt={() => {}} />); });
   return tree;
 }
 
@@ -211,6 +212,42 @@ describe('Ledger — the dropped-transactions honesty note', () => {
     const tree = mount([txn('solana:SOL', '1', TS_NEW)], 1);
     expect(texts(tree)).toContain(M.wallet.ledger.dropped(1));
     expect(texts(tree)).not.toContain(M.wallet.ledger.dropped(2));
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('Ledger — the stale-history honesty line', () => {
+  // R3 (spec 2026-09-09 §"What the app says…"): a stale SOL history rendered as current is worse
+  // than a marked one. When the last poll failed (seam-classified `staleFailure`), the rows shown
+  // are the LAST KNOWN truth and the `sol-history-stale` line says so — the same shape the dropped
+  // note has: a note, in both branches, purely conditional.
+  test('a set failure renders the stale line naming the network, in the populated-list branch', () => {
+    const tree = mount([txn('solana:SOL', '1000000000', TS_NEW)], 0, 'refused');
+    expect(testIDs(tree)).toContain('sol-history-stale');
+    expect(texts(tree)).toContain(M.errors.rail.historyStale('Solana'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('a set failure renders the line in the EMPTY branch too — zero rows is not "current & empty"', () => {
+    const tree = mount([], 0, 'unreachable');
+    expect(testIDs(tree)).toContain('sol-history-stale');
+    expect(texts(tree)).toContain(M.errors.rail.historyStale('Solana'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('failure = null (the default, and the rail-off offline case) renders nothing', () => {
+    const tree = mount([txn('solana:SOL', '1', TS_NEW)]);
+    expect(testIDs(tree)).not.toContain('sol-history-stale');
+    act(() => { tree.unmount(); });
+    const empty = mount([]);
+    expect(testIDs(empty)).not.toContain('sol-history-stale');
+    act(() => { empty.unmount(); });
+  });
+
+  test('the stale line and the dropped note are independent — both can show at once', () => {
+    const tree = mount([txn('solana:SOL', '1', TS_NEW)], 2, 'unreadable');
+    expect(testIDs(tree)).toContain('sol-history-stale');
+    expect(testIDs(tree)).toContain('ledger-dropped-note');
     act(() => { tree.unmount(); });
   });
 });

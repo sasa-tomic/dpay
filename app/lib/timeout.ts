@@ -19,6 +19,32 @@ export function composeTimeout(
   return {signal: ctrl.signal, cancel: () => clearTimeout(timer)};
 }
 
+/** ALWAYS-armed timeout composition: unlike `composeTimeout` above (where a caller signal means the
+ *  caller owns the deadline and the backstay does not arm), this arms `timeoutMs` on a fresh
+ *  internal controller EVERY call and forwards a caller signal first-wins via an `abort` listener.
+ *  It exists for per-ATTEMPT deadlines inside a multi-address walk (`services/relay.ts`): each
+ *  attempt needs its own real deadline regardless of any walk-level signal, so one hung address
+ *  burns only its attempt's budget and the walk moves on — while a caller abort still ends the
+ *  whole walk at once. `cancel()` clears the timer AND detaches the listener, so a settled attempt
+ *  leaves neither a live timer nor a dangling no-op abort. */
+export function composeArmedTimeout(
+  callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): {signal: AbortSignal; cancel: () => void} {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const onCaller = () => ctrl.abort();
+  if (callerSignal?.aborted) ctrl.abort();
+  else callerSignal?.addEventListener('abort', onCaller, {once: true});
+  return {
+    signal: ctrl.signal,
+    cancel: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener('abort', onCaller);
+    },
+  };
+}
+
 export function withTimeout(timeoutMs: number): {signal: AbortSignal; cancel: () => void} {
   return composeTimeout(undefined, timeoutMs);
 }

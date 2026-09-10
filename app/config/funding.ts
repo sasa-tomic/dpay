@@ -25,8 +25,9 @@
 // ── Why these are ranges and not prices, which is the whole reason `cap` exists ─────────────────
 // Measured 2026-09-09 against each provider's own disclosure: NOT ONE of them publishes a price.
 // They publish a maximum ("up to 4.5%"), and three of the four take a spread that is not counted as
-// a fee at all — Transak states its quote is CoinGecko mid plus 2.5%, MoonPay says the spread is
-// baked into the displayed price. Printing "MoonPay: 4.5%" would therefore be false twice over: a
+// a fee at all — Transak states its quote is CoinGecko mid plus a spread of 0% to 2.5% (read
+// 2026-09-10; it said a flat 2.5% the day before), MoonPay says the spread is baked into the
+// displayed price. Printing "MoonPay: 4.5%" would therefore be false twice over: a
 // ceiling presented as a price, and a cost omitted. `cap` carries that distinction into the copy so
 // the screen cannot accidentally state a number as if it were what the user will pay.
 import {prettyNetwork, type SelectableAsset} from './assets';
@@ -64,8 +65,11 @@ export type FundingProvider = {
   /** Verbatim, in the currency the provider publishes it in — a foreign-currency amount, not a
    *  number to localise. Null when the provider publishes no minimum. */
   minFee: string | null;
-  /** A margin the provider discloses ON TOP of the fee, where it quantifies one. */
-  spreadPct: number | null;
+  /** A margin the provider discloses ON TOP of the fee, where it quantifies one — as a
+   *  `PublishedRate`, not a bare number, because Transak publishes "0% to 2.5%": rendering the top
+   *  of that range as "plus 2.5% margin" would state a ceiling as the margin, which is the same
+   *  overstatement `cap` exists for on the fee itself. */
+  spread: PublishedRate | null;
   /** The published disclosure this row was read from. Shown so the user can check it. */
   source: string;
 };
@@ -73,7 +77,7 @@ export type FundingProvider = {
 /** The date every figure in `FUNDING_PROVIDERS` was read from its source. ONE date for the whole
  *  table, deliberately: a per-row date invites half the table going stale unnoticed. Re-reading is
  *  a tripwire filed in `OPEN_ISSUES.md`. */
-export const FUNDING_SOURCES_READ_ON = '2026-09-09';
+export const FUNDING_SOURCES_READ_ON = '2026-09-10';
 
 /**
  * The providers, ALPHABETICALLY. Do not reorder. Do not add a "recommended" flag. Do not add a
@@ -86,18 +90,25 @@ export const FUNDING_PROVIDERS: readonly FundingProvider[] = [
     card: {kind: 'flat', pct: 2.5},
     bank: {kind: 'flat', pct: 0.5},
     minFee: null,
-    spreadPct: null,
-    source: 'docs.cdp.coinbase.com/onramp',
+    spread: null,
+    // The docs restructured between reads: the fee bullets (2.5% card / 0.5% ACH) moved to the
+    // FAQ page under the same section, so the source now names the page, not just the section.
+    source: 'docs.cdp.coinbase.com/onramp/additional-resources/faq',
   },
   {
     key: 'moonpay',
     name: 'MoonPay',
     card: {kind: 'cap', pct: 4.5},
-    bank: {kind: 'floor', pct: 1},
+    // Re-read 2026-09-10: the pricing disclosure publishes NO bank-specific figure any more. The
+    // only "1%" on the page is the Virtual Account Transaction Fee ("typically about 1%") — a
+    // different product, and "typically" is neither a floor nor a cap. A "from 1%" this table could
+    // no longer point at would be exactly the stale claim it exists to avoid, so the part is
+    // omitted rather than kept.
+    bank: null,
     minFee: '$3.99',
     // Disclosed but not quantified by MoonPay ("the spread is included in the price shown"), so it
     // is named in the shared caveat line rather than given a number this table cannot source.
-    spreadPct: null,
+    spread: null,
     source: 'moonpay.com/legal/pricing_disclosure',
   },
   {
@@ -106,21 +117,24 @@ export const FUNDING_PROVIDERS: readonly FundingProvider[] = [
     card: {kind: 'cap', pct: 3.9},
     bank: {kind: 'cap', pct: 1.4},
     minFee: '€2.49',
-    spreadPct: null,
+    spread: null,
     source: 'rampnetwork.com/pricing-policy',
   },
   {
     key: 'transak',
     name: 'Transak',
     // Transak publishes no single percentage for either method — its rate is per-corridor, and the
-    // 0.99% that appears in its docs is a worked EXAMPLE, not a published rate. Presenting a
-    // derived number as the provider's own figure is exactly the overstatement this table exists
-    // to avoid, so both methods say `varies` and the spread it genuinely does publish carries the
-    // cost signal.
+    // per-method fee tables on its disclosure page are IMAGES, so no figure is even in the text.
+    // Presenting a derived number as the provider's own figure is exactly the overstatement this
+    // table exists to avoid, so both methods say `varies` and the spread it genuinely does publish
+    // carries the cost signal.
     card: {kind: 'varies'},
     bank: {kind: 'varies'},
     minFee: null,
-    spreadPct: 2.5,
+    // Re-read 2026-09-10: the quote is "CoinGecko at the time of the transaction, plus a spread of
+    // 0% to 2.5%, depending on how volatile the currency is" — a RANGE, where the day before it
+    // read as a flat 2.5%. Transcribed as the ceiling of that range, rendered "up to 2.5%".
+    spread: {kind: 'cap', pct: 2.5},
     source: 'support.transak.com/en/articles/7845942',
   },
 ];

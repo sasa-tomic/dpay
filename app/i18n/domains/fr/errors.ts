@@ -32,8 +32,17 @@ export const errorsFr: ErrorMessages = {
   },
 
   rail: {
+    refused: network =>
+      `Le point d’accès ${network} a refusé la requête, ces soldes ne sont donc plus à jour. Rien n’a bougé, vos autres comptes fonctionnent et dpay continue de réessayer.`,
+    offline: network =>
+      `Vous semblez hors ligne — les soldes ${network} ne sont pas à jour, rien n’a bougé. Ils se mettent à jour au retour de la connexion ; payer par QR fonctionne aussi hors ligne.`,
+    unreachable: network =>
+      `${network} est injoignable alors que vous êtes en ligne — le relais de dpay n’arrive pas à joindre ${network} en ce moment, et votre argent est intact. Rien n’a bougé ; vos paiements Internet Computer fonctionnent toujours, et vous pouvez toujours signer des paiements hors ligne. Dans Paramètres ▸ Avancé, vous pouvez pointer ce portefeuille vers n’importe quel point d’accès ${network}.`,
     unreadable: network =>
-      `${network} ne répond pas, ces soldes ne sont donc plus à jour. Rien n’a bougé, vos autres comptes fonctionnent et dpay continue de réessayer.`,
+      `Le point d’accès ${network} a répondu avec des données illisibles, ces soldes ne sont plus à jour. Rien n’a bougé, vos autres comptes fonctionnent et dpay continue de réessayer.`,
+    historyStale: network =>
+      `L’historique ${network} n’est pas à jour — rien n’a bougé, il se met à jour tout seul.`,
+    unreachableHint: () => 'Ouvre Paramètres ▸ Avancé.',
   },
 
   ethWallet: {

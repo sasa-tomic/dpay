@@ -70,7 +70,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
     // Widened 2026-09-08 (X1): without a home currency there is no "sibling", but the wallet still
     // holds dollars, and the whole defect was screens that refused to say so. The button names the
     // ASSET here — "Switch to Solana" would be meaningless about which Solana account.
-    const {tree, onSwitch} = mount({homeCurrency: null, selectedAssetId: 'ic:2', balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}}});
+    const {tree, onSwitch} = mount({homeCurrency: null, selectedAssetId: 'ic:2', balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}}});
     expect(textOf(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
     expect(ctaOf(tree)).toBe('Switch to USDC');
     act(() => { tree.root.findByProps({testID: 'btn-fund-sibling-switch'}).props.onPress(); });
@@ -84,7 +84,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
     const {tree, onSwitch} = mount({
       homeCurrency: 'CHF',
       selectedAssetId: 'ic:7',
-      balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}},
+      balances: {'ic:0': {displayText: '∂100.00', status: 'ok', failure: null}},
     });
     const line = textOf(tree, 'fund-sibling-holds');
     expect(line).toBe(M.pay.fundSibling.practice('∂100.00'));
@@ -101,7 +101,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
       homeCurrency: 'CHF',
       selectedAssetId: 'ic:7',
       purpose: 'send',
-      balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}},
+      balances: {'ic:0': {displayText: '∂100.00', status: 'ok', failure: null}},
     });
     expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
   });
@@ -110,7 +110,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
     const {tree, onSwitch} = mount({
       homeCurrency: 'USD',
       selectedAssetId: 'ic:2',
-      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}},
     });
     expect(textOf(tree, 'fund-sibling-holds')).toBe(M.pay.fundSibling.holds('2.50 USDC', 'USDC · Solana'));
     expect(textOf(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
@@ -120,7 +120,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
 
   test('the unfunded twin renders nothing — a zero/absent/unavailable sibling is not a pointer', () => {
     for (const status of ['zero', 'absent', 'unavailable', 'error', 'loading'] as const) {
-      const {tree} = mount({homeCurrency: 'USD', selectedAssetId: 'ic:2', balances: {'solana:USDC': {displayText: '0.00 USDC', status}}});
+      const {tree} = mount({homeCurrency: 'USD', selectedAssetId: 'ic:2', balances: {'solana:USDC': {displayText: '0.00 USDC', status, failure: null}}});
       expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
     }
   });
@@ -129,7 +129,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
     const {tree, onSwitch} = mount({
       homeCurrency: 'USD',
       selectedAssetId: 'solana:USDC',
-      balances: {'ic:2': {displayText: '5.00 ckUSDC', status: 'ok'}},
+      balances: {'ic:2': {displayText: '5.00 ckUSDC', status: 'ok', failure: null}},
     });
     expect(textOf(tree, 'fund-sibling-holds')).toBe('You hold 5.00 ckUSDC on ckUSDC · Internet Computer');
     act(() => { tree.root.findByProps({testID: 'btn-fund-sibling-switch'}).props.onPress(); });
@@ -141,8 +141,8 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
       homeCurrency: 'USD',
       selectedAssetId: 'solana:USDC',
       balances: {
-        'ic:2': {displayText: '5.00 ckUSDC', status: 'ok'},
-        'solana:USDC': {displayText: '0.00 USDC', status: 'zero'},
+        'ic:2': {displayText: '5.00 ckUSDC', status: 'ok', failure: null},
+        'solana:USDC': {displayText: '0.00 USDC', status: 'zero', failure: null},
       },
     });
     expect(textOf(tree, 'fund-sibling-holds')).toContain('ckUSDC');
@@ -152,7 +152,7 @@ describe('FundedSiblingRail — when the pointer renders at all', () => {
     const {tree} = mount({
       homeCurrency: 'CHF',
       selectedAssetId: 'ic:7',
-      balances: {'ic:7': {displayText: '0.00 VCHF', status: 'zero'}},
+      balances: {'ic:7': {displayText: '0.00 VCHF', status: 'zero', failure: null}},
     });
     expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
   });
@@ -167,7 +167,7 @@ describe('FundedSiblingRail — the lock is an affordance gate, not a knowledge 
           <FundedSiblingRail
             homeCurrency="USD"
             assets={ASSETS}
-            balances={{'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}}}
+            balances={{'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}}}
             selectedAssetId="ic:2"
             purpose="pay"
           />

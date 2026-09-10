@@ -1,8 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {POLL, BALANCE_TIMEOUT_MS} from '../config/constants';
-import {base} from '../lib/format';
-import {fetchWithTimeout} from '../services/relay';
+import {relayFetch} from '../services/relay';
 
 type Args = {
   relayUrl: string;
@@ -74,9 +73,9 @@ export function useBalancePoll(args: Args): {
     const gen = ++genRef.current;
     // AbortController tied to this effect's lifetime. On teardown it aborts the in-flight batch fetch
     // IMMEDIATELY, so a slow old-relay poll cannot resolve after the new relay's poll and overwrite the
-    // fresh balance. fetchWithTimeout uses the caller signal AS-IS when present (see services/relay.ts
-    // composeTimeout), so the per-fetch BALANCE_TIMEOUT_MS is composed below via `timed` (first-abort-
-    // wins: the effect controller OR the per-fetch timeout).
+    // fresh balance. The walk (relayFetch) arms its own per-attempt internal deadlines, so the
+    // per-fetch outer bound is composed below via `timed` (first-abort-wins: the effect controller
+    // OR the outer timer — which sits 1 s after the walk's attempt-0 budget; see below).
     const ctrl = new AbortController();
 
     // Compose the effect's abort signal with a per-fetch timeout. First abort wins; never throws.
@@ -103,10 +102,17 @@ export function useBalancePoll(args: Args): {
       // + best-effort (a hiccup on one ledger OMITS that currency, never failing the batch), so a
       // missing entry keeps the prior value (no flap on a single miss). Covers EVERY catalog currency
       // (primary 0 + every non-primary), so an unfunded asset still reads its real zero balance.
-      const t = timed(BALANCE_TIMEOUT_MS);
+      // Wave-2: the outer timer sits 1 s STRICTLY AFTER the walk's own BALANCE_TIMEOUT_MS
+      // budget. The walk's attempt-0 internal deadline (BALANCE_TIMEOUT_MS) must win the tie
+      // against this outer timer: at a tied 4000/4000 the caller's abort fired first, so a hung
+      // preferred relay read as a CALLER decision (unmount) — never a transport failure — and
+      // never failed over, never cooled the address; every 2.5 s poll re-hung on the same dead
+      // address forever. OUR timer classifying the hang is what arms failover + cooldown; the
+      // +1000 keeps this caller signal the walk's hard cap, just strictly after attempt 0.
+      const t = timed(BALANCE_TIMEOUT_MS + 1000);
       try {
         try {
-          const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balances/${publicHex}`, {signal: t.signal}, BALANCE_TIMEOUT_MS);
+          const r = await relayFetch(relayUrl, `/api/v1/balances/${publicHex}`, {signal: t.signal}, BALANCE_TIMEOUT_MS);
           if (r.ok) {
             // The body is a flat {currency: minor-units-string} map (JSON keys are strings). A parse
             // failure / non-object body is treated like an offline blip (no state change to balances).

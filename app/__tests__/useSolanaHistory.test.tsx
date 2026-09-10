@@ -13,16 +13,24 @@ import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 
-jest.mock('../solana', () => ({getSolanaHistory: jest.fn()}));
+jest.mock('../solana', () => ({
+  getSolanaHistory: jest.fn(),
+  classifyTransportFailure: jest.fn(async () => 'unreachable' as const),
+}));
 
-import {getSolanaHistory} from '../solana';
-import type {SolanaHistory, SolanaHistoryRow} from '../solana';
+import {classifyTransportFailure, getSolanaHistory} from '../solana';
+import type {SolanaHistoryResult, SolanaHistoryRow} from '../solana';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {POLL} from '../config/constants';
 import {M} from '../i18n';
+import {errorsEn} from '../i18n/domains/en/errors';
+import {errorsDe} from '../i18n/domains/de/errors';
+import {errorsEs} from '../i18n/domains/es/errors';
+import {errorsFr} from '../i18n/domains/fr/errors';
 import type {Txn} from '../lib/types';
 
 const mockedGetSolanaHistory = getSolanaHistory as jest.MockedFunction<typeof getSolanaHistory>;
+const mockedClassify = classifyTransportFailure as jest.MockedFunction<typeof classifyTransportFailure>;
 
 const ADDRESS = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 const PEER = 'Cy5PMxYMFTs4NoSxyUtp54G2HPbmvJr8qZnxnWUqiLT9';
@@ -44,8 +52,8 @@ function row(overrides: Partial<SolanaHistoryRow> = {}): SolanaHistoryRow {
   };
 }
 
-function history(rows: SolanaHistoryRow[], dropped = 0): SolanaHistory {
-  return {rows, dropped};
+function history(rows: SolanaHistoryRow[], dropped = 0): SolanaHistoryResult {
+  return {kind: 'history', rows, dropped};
 }
 
 /** Exposes the hook's live return value to the test across re-renders. */
@@ -67,6 +75,8 @@ let warn: ReturnType<typeof jest.spyOn>;
 beforeEach(() => {
   jest.useFakeTimers();
   mockedGetSolanaHistory.mockReset();
+  mockedClassify.mockReset();
+  mockedClassify.mockResolvedValue('unreachable');
   warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -166,23 +176,71 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('the rail being OFF (seam returns null) leaves the list untouched, with no network claim', async () => {
-    mockedGetSolanaHistory.mockResolvedValue(null);
-    const {rows, tree} = await mount();
-    expect(mockedGetSolanaHistory).toHaveBeenCalledWith(ADDRESS);
+  test('the rail being OFF (seam answers offline) leaves the list untouched — not an error, nothing to mark', async () => {
+    mockedGetSolanaHistory.mockResolvedValue({kind: 'offline'});
+    const {rows, apiRef, tree} = await mount();
+    expect(mockedGetSolanaHistory).toHaveBeenCalledWith(ADDRESS, expect.any(AbortSignal));
     expect(rows()).toEqual([]);
+    expect(apiRef.current!.failure).toBe(null); // offline ≠ failure: no stale marker may render
     act(() => { tree.unmount(); });
   });
 
-  test('a failed poll KEEPS the prior list and logs the address (an outage is not an empty ledger)', async () => {
+  test('a raw rejection with a LIVE signal is a seam defect: rows kept, cause classified (never silently current)', async () => {
     mockedGetSolanaHistory.mockResolvedValue(history([row()]));
     const {rows, apiRef, tree} = await mount();
     expect(rows()).toHaveLength(1);
 
-    mockedGetSolanaHistory.mockRejectedValue(new Error('RPC node degraded'));
+    // The seam classifies every rail failure into a value; a live-signal throw reaching the hook is
+    // a defect — and even that must not let stale rows render as current. The oracle (mocked here)
+    // decides the cause, exactly as the balance poll's residual catch now does.
+    mockedClassify.mockResolvedValueOnce('offline');
+    mockedGetSolanaHistory.mockRejectedValue(new Error('fetch failed'));
     await act(async () => { await apiRef.current!.refreshHistory(); });
-    expect(rows()).toHaveLength(1); // unchanged
+    expect(rows()).toHaveLength(1);                  // unchanged rows — an outage is not an empty ledger
+    expect(apiRef.current!.failure).toBe('offline'); // …but the list is marked stale with the oracle's verdict
     expect(warn).toHaveBeenCalledWith(expect.stringContaining(ADDRESS), expect.any(Error));
+    act(() => { tree.unmount(); });
+  });
+
+  test('an aborted/cancelled read is silenced: the address switch aborts the signal and drops the late result (rows AND failure)', async () => {
+    let oldReject!: (e: unknown) => void;
+    mockedGetSolanaHistory.mockReturnValueOnce(new Promise<SolanaHistoryResult>((_, rej) => { oldReject = rej; }));
+    mockedGetSolanaHistory.mockResolvedValueOnce(history([row({signature: 'Sig3333333333333333333333333333333333333333'})]));
+    const apiRef: React.MutableRefObject<ReturnType<typeof useSolanaHistory> | null> = {current: null};
+    let tree!: renderer.ReactTestRenderer;
+    await act(async () => { tree = renderer.create(<Harness address={ADDRESS} apiRef={apiRef} />); });
+    act(() => { tree.update(<Harness address={'NewAddr00000000000000000000000000000000000000'} apiRef={apiRef} />); });
+    // The cancelled poll's rejection arrives AFTER the switch: its signal is aborted (the cleanup
+    // path), so it sets nothing — no failure, no rows. (The new address's own initial read was
+    // skipped meanwhile by the one-in-flight guard, which is correct: skip, never queue.)
+    await act(async () => { oldReject(new Error('The user aborted a request.')); for (let i = 0; i < 10; i++) await Promise.resolve(); });
+    expect(apiRef.current!.failure).toBe(null);
+    expect(apiRef.current!.history).toEqual([]);
+    // The new address then reads cleanly on the next tick — the cancellation left no scar.
+    await act(async () => { await apiRef.current!.refreshHistory(); });
+    expect(apiRef.current!.history.map(t => t.nonce)).toEqual(['Sig3333333333333333333333333333333333333333']);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a classified read failure EXPOSES the cause and keeps the last known rows (never silent again)', async () => {
+    mockedGetSolanaHistory.mockResolvedValue(history([row()]));
+    const {rows, apiRef, tree} = await mount();
+    expect(rows()).toHaveLength(1);
+    expect(apiRef.current!.failure).toBe(null);
+
+    // The seam classified this at the transport layer (endpoint answered, did not serve us); the
+    // hook must NOT swallow it — the rows stay (last truth) and the cause rides out for the marker.
+    mockedGetSolanaHistory.mockResolvedValue({kind: 'error', failure: 'refused'});
+    await act(async () => { await apiRef.current!.refreshHistory(); });
+    expect(rows()).toHaveLength(1);                        // an outage is not an empty ledger
+    expect(apiRef.current!.failure).toBe('refused');      // ... but the list is now marked stale
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('refused'));
+
+    // Recovery: ONE clean read and the stale marker is gone — it must not outlive the fix.
+    mockedGetSolanaHistory.mockResolvedValue(history([row({signature: 'Sig2222222222222222222222222222222222222222'})]));
+    await act(async () => { await apiRef.current!.refreshHistory(); });
+    expect(apiRef.current!.failure).toBe(null);
+    expect(rows()[0].nonce).toBe('Sig2222222222222222222222222222222222222222'); // the fresh rows replaced the old
     act(() => { tree.unmount(); });
   });
 
@@ -213,4 +271,20 @@ describe('useSolanaHistory — lifecycle and failure handling', () => {
     await act(async () => { jest.advanceTimersByTime(POLL.history * 3); });
     expect(mockedGetSolanaHistory).toHaveBeenCalledTimes(2); // the interval was cleared
   });
+});
+
+describe('history staleness copy — rail.historyStale (all four locales)', () => {
+  // Assertions for the key this slice ADDED live here, not in HomeRailHonesty (that file belongs to
+  // the parallel balance-note work). The cause keys (refused/offline/…) stay covered there.
+  const LOCALES = {en: errorsEn, de: errorsDe, es: errorsEs, fr: errorsFr};
+  for (const [tag, errors] of Object.entries(LOCALES)) {
+    test(`${tag}: names the network, never 'undefined', and stays a short list line`, () => {
+      const line = errors.rail.historyStale('Solana');
+      expect(typeof line).toBe('string');
+      expect(line).toContain('Solana'); // the network name is interpolated, not dropped
+      expect(line).not.toContain('undefined');
+      expect(line.length).toBeGreaterThan(20); // a sentence, not a fragment
+      expect(line.length).toBeLessThan(180);   // compact — the ledger's list surface
+    });
+  }
 });

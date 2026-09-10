@@ -221,7 +221,7 @@ describe('AccountsTab — Convert lives on the selected row (X15)', () => {
 
 describe('orderAccounts — X22: play money is never the biggest number on screen', () => {
   const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
-  const view = (displayText: string, status: 'ok' | 'zero') => ({displayText, status});
+  const view = (displayText: string, status: 'ok' | 'zero') => ({displayText, status, failure: null});
 
   test('the practice rail sorts LAST even when it is the only funded account', () => {
     // The exact defect: a fresh wallet holds ∂100.00 and nothing else, and DEMO led the list with

@@ -47,9 +47,11 @@ export type ErrorMessages = {
      * what to do — and the two differ in exactly that last part, because the user's move differs:
      *   • `senderTokenAccountUnverified` — no fact and no answer from the endpoint. Finding signal
      *     fixes it.
-     *   • `senderTokenAccountUnverifiedRailDown` — the endpoint ANSWERED and refused this wallet
-     *     (or served bytes that cannot be trusted). The device is online and the RAIL is down, so
-     *     "get online" would be a lie; the account can only be checked once Solana answers again.
+     *   • `senderTokenAccountUnverifiedRailDown` — the rail is why there is no fact: the endpoint
+     *     ANSWERED and refused this wallet, served bytes that cannot be trusted, or nothing on the
+     *     rail's path answered while the phone IS online (the IC-boundary probe answered — the
+     *     service side is down). "Get online" would be a lie in all three; the account can only be
+     *     checked once Solana answers again.
      */
     senderTokenAccountUnverified: (asset: string) => string;
     senderTokenAccountUnverifiedRailDown: (asset: string) => string;
@@ -66,13 +68,39 @@ export type ErrorMessages = {
    * to print the identical ~48-word paragraph on each of them (three copies, ~120 words of alarm
    * text, for one fact). One network's outage is one fact.
    *
-   * It promises NO button. `hooks/useSolanaBalances.ts` already re-polls every `POLL.balance`
+   * Four keys, four CAUSES (R3, spec 2026-09-09-relay-ha-and-solana-proxy: "three states, never
+   * collapsed into one") — classified at the transport seam, never guessed at the component:
+   *   - `refused`: the endpoint answered and did not serve us. The rail is down, the phone is
+   *     online, and dpay keeps retrying behind the endpoint's cooldown.
+   *   - `offline`: nothing answered anywhere — the rail's endpoint AND the IC boundary probe.
+   *     The phone has no connectivity; NO ONE is named as the cause, because the wallet cannot
+   *     see that far. Must not imply an outage on dpay's side or the rail's.
+   *   - `unreachable`: the rail's path is down while the phone IS online. The copy names dpay's
+   *     side of the path, says the money is untouched, names what still works — every claim
+   *     verified against the code: IC PAYMENTS go straight to icp-api.io (the oracle's probe
+   *     literally is that check), and signSolPayment/signSplPayment are pure/offline, so payments
+   *     can still be SIGNED offline (their later broadcast still needs a rail — the copy must not
+   *     imply otherwise) — and gives the escape: Settings ▸ Advanced points the wallet at any
+   *     Solana endpoint, which removes dpay's choice from the path.
+   *   - `unreadable`: the endpoint answered with bytes that could not be trusted.
+   *
+   * It promises NO RETRY. `hooks/useSolanaBalances.ts` already re-polls every `POLL.balance`
    * (2.5s in a shipped build) with an in-flight guard, so by the time a user could read this line
    * and tap, several retries have already run — and against a rate limit an extra manual read is
-   * what caused the failure, not what fixes it.
+   * what caused the failure, not what fixes it. (The unreachable note's Settings ▸ Advanced
+   * Pressable is NAVIGATION to the escape that sentence names, not a retry.)
    */
   rail: {
+    refused: (network: string) => string;
+    offline: (network: string) => string;
+    unreachable: (network: string) => string;
     unreadable: (network: string) => string;
+    /** The TRANSACTIONS list's staleness line (Ledger's `sol-history-stale`): the last history read
+     *  failed, so the rows shown are the last known truth. The cause-specific rail copy above is the
+     *  BALANCE surface's (it says "balances"); this sentence only marks the list itself. */
+    historyStale: (network: string) => string;
+    /** accessibilityHint for the unreachable note's tappable Settings ▸ Advanced escape. */
+    unreachableHint: (network: string) => string;
   };
 
   /** The user's OWN Ethereum wallet during the ckERC20 onramp (injected provider / WalletConnect). */
@@ -179,8 +207,20 @@ export const errorsEn: ErrorMessages = {
   },
 
   rail: {
+    refused: network =>
+      `${network}’s endpoint refused the request, so these balances are out of date. Nothing moved, your other accounts still work, and dpay keeps retrying.`,
+    offline: network =>
+      `You appear to be offline, so ${network} balances could not be refreshed — nothing moved. They update on their own when a connection returns, and paying by QR still works offline.`,
+    unreachable: network =>
+      `${network} is unreachable while you are online — dpay’s relay can’t reach ${network} right now, and your money is untouched. Nothing moved, your Internet Computer payments still work, and you can still sign payments offline. Settings ▸ Advanced can point this wallet at any ${network} endpoint.`,
     unreadable: network =>
-      `${network} isn't answering, so these balances are out of date. Nothing moved, your other accounts still work, and dpay keeps retrying.`,
+      `${network} answered with data this wallet cannot read, so these balances are out of date. Nothing moved, your other accounts still work, and dpay keeps retrying.`,
+    historyStale: network =>
+      `${network} history is out of date — nothing moved, and it refreshes on its own.`,
+    /** accessibilityHint for the unreachable note's Settings ▸ Advanced Pressable (the founder
+     *  UX directive that made the escape tappable). Says where the tap lands — never a promise
+     *  the tap fixes the outage. */
+    unreachableHint: () => 'Opens Settings ▸ Advanced.',
   },
 
   ethWallet: {

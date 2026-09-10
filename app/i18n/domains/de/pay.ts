@@ -346,8 +346,8 @@ export const receiveDe: ReceiveMessages = {
       `Die Buchung wurde NICHT storniert: „${said}“ Sie kann weiterhin bezahlbar sein — lies das und entscheide dann, ob du etwas herausgibst.`,
     cancelFailedNoReason: status =>
       `Die Buchung wurde ohne Begründung NICHT storniert (HTTP ${status}) — behandle sie als weiterhin bezahlbar. Versuch es erneut und gib auf diesen Code nichts heraus, bis er storniert ist oder abläuft.`,
-    cancelUnreachable:
-      'Die Kasse war nicht erreichbar, diese Buchung wurde also NICHT storniert — sie bleibt bezahlbar, bis sie abläuft. Versuch es erneut, sobald die Verbindung steht.',
+    cancelUnreachable: host =>
+      `dpay hat ${host} nicht erreicht, diese Buchung wurde also NICHT storniert — sie bleibt bezahlbar, bis sie abläuft. Versuch es erneut, sobald die Verbindung steht.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'Dieser Code ist abgelaufen'

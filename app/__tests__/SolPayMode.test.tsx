@@ -1138,7 +1138,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
     const onSwitchRail = jest.fn();
     const tree = mountTill({
       homeCurrency: 'USD',
-      balances: {'ic:2': {displayText: '5.00 ckUSDC', status: 'ok'}},
+      balances: {'ic:2': {displayText: '5.00 ckUSDC', status: 'ok', failure: null}},
       payGate: 'token-zero',
       selectedToken: 'USDC',
       onSwitchRail,
@@ -1155,7 +1155,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
     // nothing to say and the gate stayed a dead end while the wallet held dollars one tap away.
     const tree = mountTill({
       homeCurrency: 'USD',
-      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}},
       payGate: 'sol-zero',
       selectedToken: 'SOL',
     });
@@ -1194,7 +1194,7 @@ describe('SolPayMode — the fund-first surfaces: the camera, and the funded acc
       homeCurrency: 'CHF',
       payGate: 'sol-zero',
       selectedToken: 'SOL',
-      balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}},
+      balances: {'ic:0': {displayText: '∂100.00', status: 'ok', failure: null}},
       onSwitchRail,
     });
     expect(textByTestID(tree, 'fund-sibling-holds')).toBe(M.pay.fundSibling.practice('∂100.00'));

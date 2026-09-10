@@ -40,10 +40,10 @@ const ASSETS: SelectableAsset[] = [
 ];
 
 const BALANCES: Record<AssetId, BalanceView> = {
-  'ic:0': {displayText: '∂100.00', status: 'ok'},
-  'ic:2': {displayText: '$0.00', status: 'zero'},
-  'solana:SOL': {displayText: '◎0.025', status: 'ok'},
-  'solana:USDC': {displayText: '—', status: 'absent'},
+  'ic:0': {displayText: '∂100.00', status: 'ok', failure: null},
+  'ic:2': {displayText: '$0.00', status: 'zero', failure: null},
+  'solana:SOL': {displayText: '◎0.025', status: 'ok', failure: null},
+  'solana:USDC': {displayText: '—', status: 'absent', failure: null},
 };
 
 // Find the Pressable (or any node) whose RN `testID` prop matches. CurrencyRow renders the row's

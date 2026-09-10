@@ -16,7 +16,7 @@ import {describe, it, expect} from '@jest/globals';
 import {buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances, type BalanceView} from '../lib/assetBalances';
 import {decideFundsReady} from '../lib/readiness';
-import type {CurrencyDescriptor} from '../config/catalog';
+import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 
 const mk = (d: Partial<CurrencyDescriptor> & Pick<CurrencyDescriptor, 'currency' | 'minter_family'>): CurrencyDescriptor => ({
   ledger: '', mintable: false, minter: null, symbol: null, decimals: null,
@@ -47,23 +47,23 @@ function mapWith(icBalances: Record<number, string>, primaryBalance: string | nu
 
 describe('demoView — the DEMO rail is graded like every other asset', () => {
   it('a funded balance ⇒ ok, formatted with the ∂ unit', () => {
-    expect(mapFor('10000')['ic:0']).toEqual({displayText: '∂100.00', status: 'ok'});
+    expect(mapFor('10000')['ic:0']).toEqual({displayText: '∂100.00', status: 'ok', failure: null});
   });
 
   it('offline ⇒ the "~" approximation marker is baked in, and a funded approximation still reads ok', () => {
     // The marker says "best-known, not authoritative"; it does not make the money unknown, so the
     // status stays 'ok' and the header + the row read byte-identical text.
-    expect(mapFor('9100', false)['ic:0']).toEqual({displayText: '~∂91.00', status: 'ok'});
+    expect(mapFor('9100', false)['ic:0']).toEqual({displayText: '~∂91.00', status: 'ok', failure: null});
   });
 
   it('D4: a ZERO balance ⇒ zero (dims) — the faucet button on the row is the top-up affordance, not a colour', () => {
-    expect(mapFor('0')['ic:0']).toEqual({displayText: '∂0.00', status: 'zero'});
+    expect(mapFor('0')['ic:0']).toEqual({displayText: '∂0.00', status: 'zero', failure: null});
     // …and offline the zero is still a zero: the marker never upgrades an empty wallet.
-    expect(mapFor('0', false)['ic:0']).toEqual({displayText: '~∂0.00', status: 'zero'});
+    expect(mapFor('0', false)['ic:0']).toEqual({displayText: '~∂0.00', status: 'zero', failure: null});
   });
 
   it('D4: an UNKNOWN balance (no poll returned yet) ⇒ loading + "—" — unknown is never a funded state', () => {
-    expect(mapFor(null)['ic:0']).toEqual({displayText: '—', status: 'loading'});
+    expect(mapFor(null)['ic:0']).toEqual({displayText: '—', status: 'loading', failure: null});
   });
 });
 
@@ -90,5 +90,34 @@ describe('decideFundsReady over the REAL map (the D4 regression pin)', () => {
     // "unknown", so an offline reading of a funded rail still counts.
     expect(decideFundsReady(mapWith({2: '2500000'}, '0'))).toBe(true);
     expect(decideFundsReady(mapWith({2: '2500000'}, '0', false))).toBe(true);
+  });
+});
+
+describe('R3 — a token error state carries its classified cause into the view (audit blocker)', () => {
+  // The audit's blocker case: an SPL token row in 'error' must PRESERVE its amount (never zero
+  // it) AND carry the seam-classified `failure` into `BalanceView.failure` — the field the rail
+  // note reads to pick its sentence. Uses the REAL bundled networks (USDC·Solana with its own
+  // mint, symbol and decimals), never a hand-written asset.
+  const NETWORKS = BUNDLED_NETWORKS;
+  const NET_CATALOG = icpCatalogOf(NETWORKS);
+  const NET_ASSETS = buildSelectableAssets(NET_CATALOG, {
+    showTestnet: false, solanaEnabled: true, solanaTokens: true, networks: NETWORKS,
+  });
+  const usdcSol = NET_ASSETS.flatMap(a => (a.protocol === 'solana' && a.symbol === 'USDC' ? [a] : []))[0];
+
+  it('an error token state preserves the amount and carries failure into BalanceView.failure', () => {
+    expect(usdcSol).toBeDefined(); // the registry pins the USDC mainnet mint on the row
+    const balances = buildAssetBalances({
+      catalog: NET_CATALOG,
+      assets: NET_ASSETS,
+      icBalances: {},
+      primaryBalance: '0',
+      online: true,
+      solState: {balance: '1000', status: 'ok'},
+      tokenStates: {
+        [usdcSol!.mint!]: {amount: '1500000', decimals: 6, status: 'error', failure: 'offline'},
+      },
+    });
+    expect(balances[usdcSol!.id]).toEqual({displayText: '1.50 USDC', status: 'error', failure: 'offline'});
   });
 });

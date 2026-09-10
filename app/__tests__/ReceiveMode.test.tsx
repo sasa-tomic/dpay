@@ -60,8 +60,8 @@ const IDENTITY: Identity = {secretHex: '11'.repeat(32), publicHex: '22'.repeat(3
 // Record<AssetId, BalanceView> requires both SOL keys (the ic:${number} template adds none). The
 // request flow never reads them; a minimal honest view keeps the prop type-checkable.
 const BALANCES: Record<AssetId, BalanceView> = {
-  'solana:SOL': {displayText: '—', status: 'unavailable'},
-  'solana:USDC': {displayText: '—', status: 'unavailable'},
+  'solana:SOL': {displayText: '—', status: 'unavailable', failure: null},
+  'solana:USDC': {displayText: '—', status: 'unavailable', failure: null},
 };
 
 // The wallet's own ICRC-1 account (mocked DpayCore.icpSelfPrincipal) — the destination of the

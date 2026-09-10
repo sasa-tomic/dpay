@@ -31,8 +31,17 @@ export const errorsEs: ErrorMessages = {
   },
 
   rail: {
+    refused: network =>
+      `El endpoint de ${network} rechazó la solicitud, así que estos saldos están desactualizados. No se movió nada, tus otras cuentas funcionan y dpay sigue reintentando.`,
+    offline: network =>
+      `Parece que estás sin conexión — los saldos de ${network} no están actualizados, no se movió nada. Se actualizan solos al volver la conexión; pagar por QR sigue funcionando.`,
+    unreachable: network =>
+      `${network} es inaccesible aunque estás en línea — el relay de dpay no puede alcanzar ${network} en este momento, y tu dinero está intacto. No se movió nada, tus pagos de Internet Computer siguen funcionando, y puedes seguir firmando pagos sin conexión. En Ajustes ▸ Avanzado puedes apuntar esta billetera a cualquier endpoint de ${network}.`,
     unreadable: network =>
-      `${network} no responde, así que estos saldos están desactualizados. No se movió nada, tus otras cuentas funcionan y dpay sigue reintentando.`,
+      `${network} respondió con datos que esta billetera no puede leer, así que estos saldos están desactualizados. No se movió nada, tus otras cuentas funcionan y dpay sigue reintentando.`,
+    historyStale: network =>
+      `El historial de ${network} está desactualizado — no se movió nada y se actualiza solo.`,
+    unreachableHint: () => 'Abre Ajustes ▸ Avanzado.',
   },
 
   ethWallet: {

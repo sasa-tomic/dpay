@@ -103,7 +103,7 @@ describe('useSolanaBalances', () => {
   test('initial state is loading on every rail', () => {
     mockedRead.mockReturnValue(new Promise(() => {})); // never resolves
     const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
-    expect(apiRef.current!.sol).toEqual({balance: null, status: 'loading'});
+    expect(apiRef.current!.sol).toEqual({balance: null, status: 'loading', failure: null});
     expect(apiRef.current!.tokens).toEqual({[USDC_MINT_ADDRESS]: IDLE_TOKEN});
     act(() => { tree.unmount(); });
   });
@@ -120,7 +120,7 @@ describe('useSolanaBalances', () => {
     await act(async () => { await flushMicrotasks(); });
     expect(mockedRead).toHaveBeenCalledTimes(1);
     expect(mockedRead).toHaveBeenCalledWith(SECRET_HEX, [USDC_MINT_ADDRESS, EURC_MINT_ADDRESS], expect.anything());
-    expect(apiRef.current!.sol).toEqual({balance: '1500000000', status: 'ok'});
+    expect(apiRef.current!.sol).toEqual({balance: '1500000000', status: 'ok', failure: null});
     expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: '1234567', decimals: 6, status: 'balance', failure: null});
     expect(apiRef.current!.tokens[EURC_MINT_ADDRESS]).toEqual({amount: '42', decimals: 6, status: 'balance', failure: null});
 
@@ -144,7 +144,7 @@ describe('useSolanaBalances', () => {
     mockedRead.mockResolvedValue(read({kind: 'offline'}, {[USDC_MINT_ADDRESS]: {kind: 'offline'}}));
     const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
-    expect(apiRef.current!.sol).toEqual({balance: null, status: 'unavailable'});
+    expect(apiRef.current!.sol).toEqual({balance: null, status: 'unavailable', failure: null});
     expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toEqual({amount: null, decimals: null, status: 'unavailable', failure: null});
     act(() => { tree.unmount(); });
   });
@@ -156,7 +156,7 @@ describe('useSolanaBalances', () => {
     }));
     const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, [USDC_MINT_ADDRESS, EURC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
-    expect(apiRef.current!.sol).toEqual({balance: '900', status: 'ok'});
+    expect(apiRef.current!.sol).toEqual({balance: '900', status: 'ok', failure: null});
     expect(apiRef.current!.tokens[USDC_MINT_ADDRESS]).toMatchObject({status: 'error', failure: 'unreadable'});
     expect(apiRef.current!.tokens[EURC_MINT_ADDRESS]).toEqual({amount: '42', decimals: 6, status: 'balance', failure: null});
     act(() => { tree.unmount(); });
@@ -167,9 +167,9 @@ describe('useSolanaBalances', () => {
     mockedRead.mockResolvedValueOnce(read({kind: 'error', failure: 'refused'}, {}));
     const {apiRef, tree} = renderHook(SECRET_HEX, SOL_ADDRESS, []);
     await act(async () => { await flushMicrotasks(); });
-    expect(apiRef.current!.sol).toEqual({balance: '2000000000', status: 'ok'});
+    expect(apiRef.current!.sol).toEqual({balance: '2000000000', status: 'ok', failure: null});
     await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
-    expect(apiRef.current!.sol).toEqual({balance: '2000000000', status: 'error'}); // balance PRESERVED
+    expect(apiRef.current!.sol).toEqual({balance: '2000000000', status: 'error', failure: 'refused'}); // balance PRESERVED
     act(() => { tree.unmount(); });
   });
 
@@ -288,7 +288,7 @@ describe('useSolanaBalances', () => {
     const {apiRef, tree} = renderHook(SECRET_HEX, null, [USDC_MINT_ADDRESS]);
     await act(async () => { await flushMicrotasks(); });
     expect(mockedRead).not.toHaveBeenCalled();
-    expect(apiRef.current!.sol).toEqual({balance: null, status: 'loading'});
+    expect(apiRef.current!.sol).toEqual({balance: null, status: 'loading', failure: null});
     act(() => { tree.unmount(); });
   });
 
@@ -319,7 +319,7 @@ describe('useSolanaBalances', () => {
     // …and the guard DEFERS, it never disables: once the read answers, the next tick polls again.
     mockedRead.mockResolvedValue(read(lamports('7'), {[USDC_MINT_ADDRESS]: balance('1')}));
     await act(async () => { resolveIt(read(lamports('7'), {[USDC_MINT_ADDRESS]: balance('1')})); await flushMicrotasks(); });
-    expect(apiRef.current!.sol).toEqual({balance: '7', status: 'ok'});
+    expect(apiRef.current!.sol).toEqual({balance: '7', status: 'ok', failure: null});
     await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
     expect(mockedRead).toHaveBeenCalledTimes(2);
     act(() => { tree.unmount(); });

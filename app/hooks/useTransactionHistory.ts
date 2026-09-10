@@ -2,8 +2,8 @@ import {useCallback, useEffect, useMemo, useState} from 'react';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {POLL, HISTORY_TIMEOUT_MS} from '../config/constants';
 import {M} from '../i18n';
-import {short, fmtTime, base} from '../lib/format';
-import {fetchWithTimeout} from '../services/relay';
+import {short, fmtTime} from '../lib/format';
+import {relayFetch} from '../services/relay';
 import {DpayCore} from '../services/native';
 import type {Txn, TransactionsRow} from '../lib/types';
 
@@ -44,7 +44,7 @@ export function useTransactionHistory(args: Args): {history: Txn[]; refreshHisto
     let anySucceeded = false;
     const perCurrency = await Promise.all(currencies.map(async (currency) => {
       try {
-        const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/transactions/${publicHex}?currency=${currency}&limit=20`, undefined, HISTORY_TIMEOUT_MS);
+        const r = await relayFetch(relayUrl, `/api/v1/transactions/${publicHex}?currency=${currency}&limit=20`, undefined, HISTORY_TIMEOUT_MS);
         const j = await r.json().catch(() => null);
         if (r.ok && j && Array.isArray(j.transactions)) { anySucceeded = true; return j.transactions as TransactionsRow[]; }
         return [];

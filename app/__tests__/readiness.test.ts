@@ -19,7 +19,7 @@ function journeyWith(...stamps: string[]): Journey {
 }
 
 function view(displayText: string, status: BalanceView['status']): BalanceView {
-  return {displayText, status};
+  return {displayText, status, failure: null};
 }
 
 describe('READINESS_STAMPS / passportStamps()', () => {

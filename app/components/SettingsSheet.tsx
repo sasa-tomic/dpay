@@ -22,10 +22,12 @@ import {LOCALES, LOCALE_ENDONYM, type LocaleChoice} from '../i18n/locale';
 import {type HomeCurrency, currencyName, offerableCurrencies, railsLabel} from '../config/currency';
 import type {SelectableAsset} from '../config/assets';
 import {M} from '../i18n';
+import {parseRelayListText, reprobeRelayAddresses} from '../services/relayAddresses';
+import {relayBuildDrift} from '../services/relay';
 
 /**
  * Settings sheet — server config + reset (app configuration only). Moved off the main wallet screen
- * (UX-V2: the relay URL + bare red reset were dev chrome on a consumer surface) into its own overlay.
+ * (UX-V2: the relay address list + bare red reset were dev chrome on a consumer surface) into its own overlay.
  * Reset requires a confirmation dialog (UX-V3: one-tap identity wipe was dangerous). The demo faucet
  * used to live here too, but top-up is now consolidated in the Balances sheet (the wallet's single
  * money hub) so demo funds have exactly ONE home — no duplication between Settings and the balances.
@@ -44,9 +46,14 @@ import {M} from '../i18n';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrl, setRelayUrl, setSolanaRpc, onSolanaRpcApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, onOpenStep}: {
-  relayUrl: string;
-  setRelayUrl: (s: string) => void;
+export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep}: {
+  // R1: the operator's ordered relay address list (first = preferred). The editor below is a
+  // LIST editor — one address per line — but it keeps the relay row's old draft/Apply contract:
+  // nothing applies on keystroke, and an empty draft is a VALUE (it restores the addresses baked
+  // into the build). An invalid line never reaches `setRelayUrls`; its refusal renders under the
+  // field naming the line.
+  relayUrls: string[];
+  setRelayUrls: (urls: string[]) => void;
   // Apply + persist the Solana endpoint (App.tsx `persistSolanaRpc`). Unlike `setRelayUrl` this one
   // THROWS on a refusal — plain http, a devnet host, an unparseable string — and the message is
   // written for the user, so the row below renders it verbatim rather than swallowing it.
@@ -89,6 +96,10 @@ export function SettingsSheet({relayUrl, setRelayUrl, setSolanaRpc, onSolanaRpcA
   // the unfilled "BACKED UP" stamp's destination (Wallet sets it when routing from the
   // passport). A manual gear-open (absent/false) keeps the normal two-step confirm gate.
   openBackup?: boolean;
+  // Outage deep-link (R3): auto-expand the Advanced disclosure on mount — the section the
+  // unreachable rail note's copy names, so the escape lands on its destination (Wallet sets it
+  // when routing from the note's Pressable). A manual gear-open (absent/false) keeps it collapsed.
+  openAdvanced?: boolean;
   // Passport deep-link: hand a wallet-home step key (fundsReady → Balances, paymentTested →
   // Pay) up to Wallet's routing map after this sheet closes itself. Optional — Settings-hosted
   // archive instances without it fall back to closing both surfaces.
@@ -134,34 +145,106 @@ export function SettingsSheet({relayUrl, setRelayUrl, setSolanaRpc, onSolanaRpcA
   const [restoreErr, setRestoreErr] = useState<string | null>(null);
   const {copied, copy: doCopy, clear: clearCopied} = useCopyFeedback();
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [draftRelay, setDraftRelay] = useState(relayUrl);
-  // `lastApplied` tracks the URL the app is actually using (the parent's `relayUrl` updates AFTER
+  // The draft is the list as TEXT — one address per line, order = priority. Editing text, not a
+  // list of rows, keeps the "paste my operator's setup in one go" path that the single-URL field
+  // always had (a two-replica operator pastes two lines; a one-replica operator sees no change).
+  const [draftRelay, setDraftRelay] = useState(relayUrls.join('\n'));
+  // `lastApplied` tracks the text the app is actually using (the parent's `relayUrls` updates AFTER
   // Apply succeeds). It's the source of truth for the "draft differs from active" gate so the Apply
-  // button stays neutral after a successful apply (when draftRelay === relayUrl === lastApplied).
-  const [lastApplied, setLastApplied] = useState(relayUrl);
-  useEffect(() => { setDraftRelay(relayUrl); setLastApplied(relayUrl); }, [relayUrl]);
+  // button stays neutral after a successful apply (when draftRelay === lastApplied).
+  const [lastApplied, setLastApplied] = useState(relayUrls.join('\n'));
+  const [relayErr, setRelayErr] = useState<string | null>(null);
+  useEffect(() => { setDraftRelay(relayUrls.join('\n')); setLastApplied(relayUrls.join('\n')); }, [relayUrls]);
+  // If the walk hit build drift since the sheet last rendered, say it HERE — this is the screen an
+  // operator lands on to fix the address list. English + verbatim, like the Solana refusals: the
+  // message names addresses and commits (data), not product copy.
+  const relayDrift = relayBuildDrift();
+  // Drift recovery below re-probes in place (no list edit, so no `relayUrls` change, so no re-render
+  // from the parent); this epoch exists purely to force THIS sheet to re-render once the latch is
+  // cleared so the drift line disappears on the Apply that cleared it.
+  const [, bumpDriftView] = useState(0);
+  // Wave-2: while the Advanced disclosure is OPEN, refresh the drift view on a 1 s interval.
+  // `relayDrift` is walk state latched by ANY relay call in the app — not by this sheet — so
+  // without a re-render trigger a walk that latches drift (or an Apply that re-probes it clear)
+  // mid-open would stay invisible on this screen until the next unrelated render. A 1 s poll
+  // while the one expanded section that renders the drift line is open is the minimal answer;
+  // no event system.
+  useEffect(() => {
+    if (!advancedOpen) return;
+    const id = setInterval(() => bumpDriftView((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [advancedOpen]);
 
   // Passport deep-link: fires the same state btn-backup-confirm sets (the reveal itself — a
   // deliberate stamp tap is not the accidental shoulder-surf the two-step gate guards against).
   useEffect(() => { if (openBackup) setBackupRevealed(true); }, [openBackup]);
 
-  const relayClean = draftRelay.trim();
-  const relayDirty = relayClean.length > 0 && relayClean !== lastApplied.trim();
-  const applyRelay = () => { if (relayDirty) { setRelayUrl(draftRelay); setLastApplied(draftRelay.trim()); } };
+  useEffect(() => { if (openAdvanced) setAdvancedOpen(true); }, [openAdvanced]);
 
-  // The Solana endpoint row — the relay row's twin, with two deliberate differences.
+  // Dirty = differs from what the app uses — INCLUDING empty (empty is a VALUE: it restores the
+  // addresses baked into the build, the same contract the Solana endpoint row established).
+  const relayClean = draftRelay.trim();
+  const relayDirty = relayClean !== lastApplied.trim();
+  // Apply is reachable on an edit (dirty) OR while drift is showing — the operator whose replica
+  // was redeployed at the SAME URL (the drift message's own advice) has no edit to make, and
+  // without this arm Apply would be disabled with nothing to tap. No drift + no edit = nothing
+  // to apply, and the button stays disabled as before.
+  const relayApplyEnabled = relayDirty || relayDrift != null;
+  // Apply parses the WHOLE draft first (one address per line): a refusal names the bad line and
+  // nothing applies — not even the good lines around it — because half a list is exactly the
+  // "silently kept something the operator did not choose" this sheet exists to prevent. An EMPTY
+  // draft parses to [] and applies like any other value (the parent restores the baked default).
+  const applyRelay = () => {
+    if (!relayApplyEnabled) return;
+    const parsed = parseRelayListText(draftRelay);
+    if ('err' in parsed) {
+      setRelayErr(parsed.err);
+      return;
+    }
+    setRelayErr(null);
+    if (relayDirty) {
+      setRelayUrls(parsed.urls);
+      setLastApplied(draftRelay.trim());
+      return;
+    }
+    // Clean draft + latched drift = same-address redeploy recovery: the LIST is what the operator
+    // wants, the SESSION's build caches are what are stale. Re-probe in place — bump the revision
+    // the walk keys its fingerprint memo, baseline and sticky drift to — which clears the latch
+    // (relayBuildDrift reads null under a moved revision) and makes the next call re-fingerprint
+    // every replica. The parent is not told: nothing about the list changed.
+    reprobeRelayAddresses();
+    bumpDriftView(n => n + 1);
+  };
+
+  // The Solana endpoint row — the relay row's twin, with one deliberate difference.
   //
-  //   • EMPTY IS A VALUE. `setSolanaRpcUrl('')` restores the endpoint baked into this build, so
-  //     clearing the field is the way back and must therefore be applicable. (The relay row refuses
-  //     an empty draft because a relay URL has no such fallback — there is nothing to fall back to.)
-  //     After an apply the field is re-seeded from `solanaRpcUrl()`, so clearing it shows the user
-  //     exactly which endpoint "empty" means.
+  //   • EMPTY IS A VALUE, in BOTH rows, each restoring its own default: here
+  //     `setSolanaRpcUrl('')` follows the relay-derived default again; in the relay row (R1) an
+  //     empty draft applies as [] and the parent restores the baked relay default. Clearing
+  //     either field is the way back and must therefore be applicable. After an apply this
+  //     field is re-seeded from `solanaRpcUrl()`, so clearing it shows the user exactly which
+  //     endpoint "empty" means.
   //   • APPLYING CAN FAIL. `setSolanaRpc` throws an actionable refusal; it is caught here and shown
-  //     next to the input, and nothing is persisted on that path.
+  //     next to the input, and nothing is persisted on that path. (The relay row parses instead:
+  //     its refusals are line-numbered parse errors, not endpoint refusals.)
   const [draftSolRpc, setDraftSolRpc] = useState(solanaRpcUrl);
   const [appliedSolRpc, setAppliedSolRpc] = useState(solanaRpcUrl);
   const [solRpcErr, setSolRpcErr] = useState<string | null>(null);
   const solRpcDirty = draftSolRpc.trim() !== appliedSolRpc.trim();
+  // Draft staleness (R2): with no operator override the resolved endpoint FOLLOWS the relay
+  // list, which the relay row above can change while this sheet is open. Re-seed both states
+  // when the resolved endpoint moves — but only while the draft is CLEAN, so a half-typed
+  // edit is never clobbered by an adjacent row's apply.
+  const liveSolRpc = solanaRpcUrl();
+  useEffect(() => {
+    if (draftSolRpc.trim() === appliedSolRpc.trim()) {
+      setDraftSolRpc(liveSolRpc);
+      setAppliedSolRpc(liveSolRpc);
+    }
+    // Re-seed keys off the RESOLVED endpoint only; the clean-dirty check is deliberately
+    // evaluated at that moment, not as a dep (a dep would re-fire on every keystroke).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSolRpc]);
   const applySolRpc = () => {
     if (!solRpcDirty) return;
     try {
@@ -228,7 +311,7 @@ export function SettingsSheet({relayUrl, setRelayUrl, setSolanaRpc, onSolanaRpcA
       const id: Identity = {secretHex: kp.secretHex, publicHex: kp.publicHex, username};
       await onRestore(id);
       onClose();
-      // On success the sheet unmounts (Wallet setSettingsOpen(false)); no need to reset local form
+      // On success the sheet unmounts (Wallet closeSettings()); no need to reset local form
       // state — the component is gone.
     } catch (err: unknown) {
       setRestoreErr(err instanceof Error ? err.message : String(err));
@@ -574,8 +657,8 @@ export function SettingsSheet({relayUrl, setRelayUrl, setSolanaRpc, onSolanaRpcA
             </View>
           </View>
 
-          {/* Advanced: Server (the relay URL) — disclosure COLLAPSES by default so a curious
-              consumer doesn't see the relay URL input + a one-paste-away brick on first open.
+          {/* Advanced: Server (the relay address list) — disclosure COLLAPSES by default so a curious
+              consumer doesn't see the relay address input + a one-paste-away brick on first open.
               The header is the toggle; testID `btn-advanced-toggle` is the expansion step the e2e
               flows add before reading `settings-relay`. Expanding is one tap — keep it cheap.
               RIGHT BELOW Theme (founder rule 2026-08-24) — the two settings blocks stay together,
@@ -604,24 +687,31 @@ export function SettingsSheet({relayUrl, setRelayUrl, setSolanaRpc, onSolanaRpcA
                   testID="settings-relay"
                   style={S.relayInput}
                   value={draftRelay}
-                  onChangeText={setDraftRelay}
+                  onChangeText={(t: string) => { setDraftRelay(t); if (relayErr != null) setRelayErr(null); }}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  multiline
                   placeholder={M.settings.advanced.serverPlaceholder}
                   placeholderTextColor={C.sub2}
                   accessibilityLabel={M.settings.advanced.serverLabel}
                   accessibilityHint={M.settings.advanced.serverHint}
                 />
+                {/* Build drift (R1): replicas in the list run different builds — the walk REFUSES to
+                    mix them and this is where the operator lands to fix the list. Loud, by name.
+                    Apply is ENABLED while this shows even on a clean draft: a same-URL redeploy has
+                    no edit to make, and applying clean re-probes every replica (see applyRelay). */}
+                {relayDrift ? <Text testID="settings-relay-drift" style={S.err}>{relayDrift.message}</Text> : null}
+                {relayErr != null ? <Text testID="settings-relay-err" style={S.err}>{relayErr}</Text> : null}
                 <Pressable
                   testID="btn-relay-apply"
-                  style={[S.applyBtn, !relayDirty && S.disabledFlat]}
-                  disabled={!relayDirty}
+                  style={[S.applyBtn, !relayApplyEnabled && S.disabledFlat]}
+                  disabled={!relayApplyEnabled}
                   onPress={applyRelay}
                   accessibilityRole="button"
                   accessibilityLabel={M.settings.advanced.applyA11y}
                   accessibilityHint={M.settings.advanced.applyHint}
-                  accessibilityState={{disabled: !relayDirty}}>
-                  <Text style={[S.applyBtnText, !relayDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
+                  accessibilityState={{disabled: !relayApplyEnabled}}>
+                  <Text style={[S.applyBtnText, !relayApplyEnabled && S.disabledText]}>{M.settings.advanced.apply}</Text>
                 </Pressable>
                 {/* The Solana endpoint — the same draft/Apply shape, one section down. It was
                     configurable in code and read from storage at boot since 2026-09-08 but

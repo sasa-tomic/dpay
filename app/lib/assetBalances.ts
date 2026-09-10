@@ -19,6 +19,7 @@ import {type SelectableAsset} from '../config/assets';
 import {usd, fmtAssetCompact} from './format';
 import {cmpRaw} from './amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
+import type {SolanaReadFailure} from '../solana';
 import type {AssetId} from './types';
 
 // The unified per-asset balance status. Every value is meaningful for styling/gating:
@@ -41,16 +42,23 @@ export type BalanceStatus = 'ok' | 'zero' | 'absent' | 'unavailable' | 'error' |
 // on the surfaces where the user commits money, and is never sourced from this map. `displayText`
 // already includes any offline approximation marker for DEMO ("~∂91.00") so the header and the
 // sheet read byte-identical text.
-export type BalanceView = {displayText: string; status: BalanceStatus};
+//
+// `failure` is WHY an 'error' status has no fact (R3, spec 2026-09-09: three states never collapsed
+// into one). Set ONLY on status 'error' — null everywhere else — so the outage note can say the
+// right sentence: endpoint-refused vs phone-offline vs path-down-while-online vs untrustworthy
+// bytes. `import type` from the seam keeps this module pure (the type is erased; no network code).
+export type BalanceView = {displayText: string; status: BalanceStatus; failure: SolanaReadFailure | null};
 
 // The SOL hook status union (mirrors `SolBalanceStatus` from hooks/useSolanaBalances.ts without a
-// React import — structural typing keeps this module pure/testable).
-export type SolStateInput = {balance: string | null; status: 'loading' | 'ok' | 'unavailable' | 'error'};
+// React import — structural typing keeps this module pure/testable). `failure` mirrors the hook's
+// SOL-state field: why an 'error' status has no fact, null otherwise.
+export type SolStateInput = {balance: string | null; status: 'loading' | 'ok' | 'unavailable' | 'error'; failure?: SolanaReadFailure | null};
 
 // The SPL-token hook status union (mirrors `SolTokenStatus`). 'absent' (no token account) stays
 // distinct from 'balance' (a real, possibly-zero amount) and from 'unavailable'
 // (offline/incoherent) — plan invariant #10. One shape for EVERY registered token (USDC, EURC, …).
-export type TokenStateInput = {amount: string | null; decimals: number | null; status: 'loading' | 'absent' | 'balance' | 'unavailable' | 'error'};
+// `failure` mirrors the hook's per-mint field.
+export type TokenStateInput = {amount: string | null; decimals: number | null; status: 'loading' | 'absent' | 'balance' | 'unavailable' | 'error'; failure?: SolanaReadFailure | null};
 
 /** Back-compat alias — the per-mint token input carries the exact former USDC-only shape. */
 export type UsdcStateInput = TokenStateInput;
@@ -102,11 +110,12 @@ export function buildAssetBalances(args: {
 // approximate zero is still a zero. The marker itself is catalog copy — "~" is not how every
 // locale writes "about".
 function demoView(primaryBalance: string | null, online: boolean): BalanceView {
-  if (primaryBalance == null) return {displayText: '—', status: 'loading'};
+  if (primaryBalance == null) return {displayText: '—', status: 'loading', failure: null};
   const amount = usd(primaryBalance);
   return {
     displayText: online ? amount : M.wallet.balance.approxAmount(amount),
     status: cmpRaw(primaryBalance, '0') > 0 ? 'ok' : 'zero',
+    failure: null,
   };
 }
 
@@ -118,6 +127,7 @@ function icAssetView(catalog: CurrencyDescriptor[], currency: number, balance: s
   return {
     displayText: fmtCurrencyAmountCompact(catalog, currency, balance),
     status: cmpRaw(balance, '0') > 0 ? 'ok' : 'zero',
+    failure: null,
   };
 }
 
@@ -127,19 +137,22 @@ function icAssetView(catalog: CurrencyDescriptor[], currency: number, balance: s
 function solView(solState: SolStateInput, minFractionDigits: number): BalanceView {
   switch (solState.status) {
     case 'ok':
-      if (solState.balance == null) return {displayText: '—', status: 'unavailable'};
-      if (cmpRaw(solState.balance, '0') === 0) return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'zero'};
-      return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'ok'};
+      if (solState.balance == null) return {displayText: '—', status: 'unavailable', failure: null};
+      if (cmpRaw(solState.balance, '0') === 0) return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'zero', failure: null};
+      return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'ok', failure: null};
     case 'unavailable':
-      return {displayText: '—', status: 'unavailable'};
+      return {displayText: '—', status: 'unavailable', failure: null};
     case 'error':
       return {
         displayText: solState.balance == null ? '—' : fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits),
         status: 'error',
+        // The CAUSE travels with the row (R3): the hook classified it at the transport seam; the
+        // note picks its sentence from this field, never from a guess at the component.
+        failure: solState.failure ?? null,
       };
     case 'loading':
     default:
-      return {displayText: '—', status: 'loading'};
+      return {displayText: '—', status: 'loading', failure: null};
   }
 }
 
@@ -154,24 +167,25 @@ function solView(solState: SolStateInput, minFractionDigits: number): BalanceVie
 function tokenView(state: TokenStateInput, symbol: string, decimals: number, minFractionDigits: number): BalanceView {
   switch (state.status) {
     case 'balance':
-      if (state.amount == null) return {displayText: '—', status: 'zero'};
-      if (cmpRaw(state.amount, '0') === 0) return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'zero'};
-      return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'ok'};
+      if (state.amount == null) return {displayText: '—', status: 'zero', failure: null};
+      if (cmpRaw(state.amount, '0') === 0) return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'zero', failure: null};
+      return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'ok', failure: null};
     case 'absent':
       // D3: a missing token account is a KNOWN zero (the RPC answered — the account simply doesn't
       // exist), so render a real "0.00 <symbol>" with normal formatting. The '—' placeholder is
       // reserved strictly for unknown/unreachable states (offline / error / loading). Status stays
       // 'absent' so the row still dims and the receive/send setup-gate surfaces keep their trigger.
-      return {displayText: fmtAssetCompact('0', decimals, symbol, undefined, minFractionDigits), status: 'absent'};
+      return {displayText: fmtAssetCompact('0', decimals, symbol, undefined, minFractionDigits), status: 'absent', failure: null};
     case 'unavailable':
-      return {displayText: '—', status: 'unavailable'};
+      return {displayText: '—', status: 'unavailable', failure: null};
     case 'error':
       return {
         displayText: state.amount == null ? '—' : fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits),
         status: 'error',
+        failure: state.failure ?? null,
       };
     case 'loading':
     default:
-      return {displayText: '—', status: 'loading'};
+      return {displayText: '—', status: 'loading', failure: null};
   }
 }

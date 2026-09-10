@@ -660,7 +660,8 @@ export type ReceiveMessages = {
     /** A cancellation that did not clear the till — the charge is still payable in every case. */
     cancelFailed: (said: string) => string;
     cancelFailedNoReason: (status: number) => string;
-    cancelUnreachable: string;
+    /** `host` = the relay address(es) actually tried (the pin alone, or the whole walk). */
+    cancelUnreachable: (host: string) => string;
 
     /** The four ways a charge stops being payable without being paid. They are told apart because
      *  they send the cashier — and the customer standing there — to do different things. */
@@ -805,8 +806,8 @@ export const receiveEn: ReceiveMessages = {
       `The charge was NOT cancelled: “${said}” It may still be payable — read that, then decide whether to hand anything over.`,
     cancelFailedNoReason: status =>
       `The charge was NOT cancelled (HTTP ${status}) and no reason was given, so treat it as still payable. Try again, and don’t hand anything over on this code until it clears or expires.`,
-    cancelUnreachable:
-      'The till could not be reached, so this charge was NOT cancelled — it stays payable until it expires. Try again once the connection is back.',
+    cancelUnreachable: host =>
+      `dpay could not reach ${host}, so this charge was NOT cancelled — it stays payable until it expires. Try again once the connection is back.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'This code expired'

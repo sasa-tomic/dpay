@@ -26,7 +26,7 @@ import type {IcpStateRead} from '../lib/types';
 import {M} from '../i18n';
 
 export const IC_GATEWAY_DEFAULT = 'https://icp-api.io';
-// Test/harness override seam (same pattern as SOLANA_RPC_BAKED): the e2e fake-IC gateway and the
+// Test/harness override seam (same pattern as the Solana RPC override): the e2e fake-IC gateway and the
 // dfx replica suite inject its base URL before the bundle evaluates; prod never sets it. Read
 // PER CALL (not at module load) so a test can flip the gateway at runtime — the only way the
 // harness can simulate an IC-unreachable (airplane-mode) payer for the offline handoff flow.

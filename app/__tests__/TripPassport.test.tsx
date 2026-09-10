@@ -207,8 +207,8 @@ describe('Passport deep-link wiring (the SettingsSheet host)', () => {
   const SHEET_DEFAULTS = {
     setSolanaRpc: () => {},
     onSolanaRpcApplied: () => {},
-    relayUrl: 'http://127.0.0.1:4391',
-    setRelayUrl: () => {},
+    relayUrls: ['http://127.0.0.1:4391'],
+    setRelayUrls: () => {},
     localeChoice: null,
     homeCurrency: 'CHF' as const,
     onSetHomeCurrency: () => {},
@@ -248,6 +248,15 @@ describe('Passport deep-link wiring (the SettingsSheet host)', () => {
     const tree = await mountSheet({openBackup: true});
     expect(hasTestID(tree, 'mnemonic-words')).toBe(true);
     expect(hasTestID(tree, 'btn-backup')).toBe(false); // past the entry + confirm gate
+  });
+
+  test('openAdvanced: the Advanced disclosure expands on mount (the outage escape destination)', async () => {
+    const tree = await mountSheet({openAdvanced: true});
+    expect(hasTestID(tree, 'settings-sol-rpc')).toBe(true); // advanced content visible without the toggle
+    act(() => { tree.unmount(); });
+    const plain = await mountSheet();
+    expect(hasTestID(plain, 'settings-sol-rpc')).toBe(false); // a manual gear-open keeps it collapsed
+    act(() => { plain.unmount(); });
   });
 
   test('archive onStep: recoverySaved reveals the backup LOCALLY (Settings stays open); fundsReady closes + hands the key up', async () => {

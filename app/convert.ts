@@ -25,10 +25,10 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {DpayCore} from './services/native';
-import {fetchWithTimeout} from './services/relay';
+import {relayFetch} from './services/relay';
 import {submitTransfer as railSubmitTransfer} from './services/rail';
 import {icStampExpiry} from './services/icp';
-import {base, randNonceHex} from './lib/format';
+import {randNonceHex} from './lib/format';
 import type {CurrencyDescriptor} from './config/catalog';
 import {
   CONVERT_POOL_PRINCIPAL,
@@ -68,12 +68,12 @@ export type ConvertQuote = {
 };
 
 async function getSwapQuote(relayUrl: string, tokenIn: string, tokenOut: string, amountIn: string, timeoutMs: number): Promise<SwapQuoteBody> {
-  const u = `${base(relayUrl)}/api/v1/swap_quote?pool=${encodeURIComponent(CONVERT_POOL_PRINCIPAL)}`
+  const path = `/api/v1/swap_quote?pool=${encodeURIComponent(CONVERT_POOL_PRINCIPAL)}`
     + `&token_in=${encodeURIComponent(tokenIn)}&token_out=${encodeURIComponent(tokenOut)}`
     + `&amount_in=${encodeURIComponent(amountIn)}`;
   let r: Response;
   try {
-    r = await fetchWithTimeout(u, undefined, timeoutMs);
+    r = await relayFetch(relayUrl, path, undefined, timeoutMs);
   } catch {
     throw new Error(M.convert.errors.quoteUnreachable());
   }
@@ -382,13 +382,15 @@ export async function probeConvertSettlement(args: {
 }): Promise<SettleWatch> {
   const {relayUrl, publicHex, myPrincipalLower, record} = args;
   try {
-    const r = await fetchWithTimeout(
-      `${base(relayUrl)}/api/v1/transactions/${publicHex}?currency=${record.outCurrency}&limit=10`,
+    const r = await relayFetch(
+      relayUrl,
+      `/api/v1/transactions/${publicHex}?currency=${record.outCurrency}&limit=10`,
       undefined,
       6000,
     );
-    const refundR = record.inCurrency === record.outCurrency ? null : await fetchWithTimeout(
-      `${base(relayUrl)}/api/v1/transactions/${publicHex}?currency=${record.inCurrency}&limit=10`,
+    const refundR = record.inCurrency === record.outCurrency ? null : await relayFetch(
+      relayUrl,
+      `/api/v1/transactions/${publicHex}?currency=${record.inCurrency}&limit=10`,
       undefined,
       6000,
     );

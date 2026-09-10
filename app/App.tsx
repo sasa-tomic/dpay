@@ -10,7 +10,7 @@
  * request QR is `<base64url request>|<username>`: the request is the signed, money-critical payload;
  * the username is unsigned display metadata (the account is the source of truth).
  *
- * This is the app root: it loads the persisted identity + relay URL, runs the on-device self-check,
+ * This is the app root: it loads the persisted identity + relay address list, runs the on-device self-check,
  * and is THE first-run router. Everything else — the palette, format helpers, constants, hooks,
  * services, styles, and all presentational components — lives under
  * `./{config,lib,hooks,services,styles.ts,components}`. See `2026-07-31-app-split-plan.md`.
@@ -33,7 +33,8 @@ import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
-import {STORAGE_KEY, RELAY_STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY, SOLANA_RPC_STORAGE_KEY, setSolanaRpcUrl} from './config/constants';
+import {STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY, SOLANA_RPC_STORAGE_KEY, setRelayBaseForSolana, setSolanaRpcUrl} from './config/constants';
+import {loadPersistedRelayAddresses, parseRelayAddress, persistRelayAddresses, setRelayAddresses, splitRelayListParam} from './services/relayAddresses';
 import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
 import {parseHomeCurrency, type HomeCurrency} from './config/currency';
 import {runSolSelfCheck} from './solana/selfcheck';
@@ -57,7 +58,16 @@ installLogSink();
 
 export default function App() {
   const [identity, setIdentity] = useState<Identity | null | undefined>(undefined); // undefined = loading
-  const [relayUrl, setRelayUrl] = useState(RELAY_DEFAULT);
+  // R1 — the operator's ordered relay address LIST (spec 2026-09-09 §"Direction 2"). `RELAY_DEFAULT`
+  // may itself carry several comma-separated addresses (the `?relay=` harness override); the baked
+  // default is the fallback when nothing is persisted. `relayUrl` below stays the RESOLVED ACTIVE
+  // address (the list's first entry) and keeps flowing down to every hook exactly as before — the
+  // list lives beside it, not instead of it. `?relay=` wins until something is persisted (the
+  // harness runs fresh contexts; a persisted choice must survive a plain reload, which flow 12
+  // pins). Entries stay verbatim (today's `?relay=` is accepted verbatim, trailing slash included);
+  // only VALIDATED lists are installed into the walk module below.
+  const [relayUrls, setRelayUrls] = useState<string[]>(() => splitRelayListParam(RELAY_DEFAULT));
+  const relayUrl = relayUrls[0];
   // Wave 8 two-tier theme: `null` = Auto (follow the OS scheme live — the styles.ts module-load
   // probe keeps first paint correct in the meantime); an explicit choice pins the palette and
   // wins from then on. The header flip pins Light/Dark; Settings offers the full 3-way choice.
@@ -99,20 +109,33 @@ export default function App() {
   const deviceTag = useMemo(() => deviceLocaleTag(), []);
   const activeLocale = applyLocale(localeChoice, deviceTag);
 
-  // Load identity + the persisted relay URL + the persisted theme choice on mount. All live in
-  // AsyncStorage; the relay URL defaults to `relayConfig`'s value (the ?relay= override in the
-  // harness, or the codegen'd prod URL) and the theme to "follow the OS scheme" when no persisted
-  // choice exists.
+  // Load identity + the persisted relay list + the persisted theme choice on mount. All live in
+  // AsyncStorage; the relay list defaults to `relayConfig`'s value (the ?relay= override — possibly
+  // a comma list — in the harness, or the codegen'd prod URL) and the theme to "follow the OS
+  // scheme" when no persisted choice exists.
   useEffect(() => {
+    // Wire the walk module BEFORE any component can fetch: with no persisted list the module
+    // stays on the baked/`?relay=` default list (validated entries only — an invalid `?relay=`
+    // entry degrades to "no operator list", i.e. the single-address behavior of every pre-R1
+    // build, rather than throwing at boot).
+    const initialValid = splitRelayListParam(RELAY_DEFAULT)
+      .map((u) => parseRelayAddress(u))
+      .filter((u): u is string => u != null);
+    if (initialValid.length > 0) setRelayAddresses(initialValid);
+    // R2, synchronously in the SAME tick: the SOL rail's default derives from this list, and
+    // wiring it here (not in a separate effect) means no render ever sees the relay list move
+    // while the Solana derivation still points at the old base — the first balance poll of the
+    // first render reads the right home.
+    if (initialValid.length > 0) setRelayBaseForSolana(initialValid);
     Promise.all([
       AsyncStorage.getItem(STORAGE_KEY),
-      AsyncStorage.getItem(RELAY_STORAGE_KEY),
+      loadPersistedRelayAddresses(),
       AsyncStorage.getItem(THEME_STORAGE_KEY),
       AsyncStorage.getItem(LOCALE_STORAGE_KEY),
       AsyncStorage.getItem(HOME_CURRENCY_STORAGE_KEY),
       AsyncStorage.getItem(SOLANA_RPC_STORAGE_KEY),
     ])
-      .then(([idV, relayV, themeV, localeV, currencyV, solRpcV]) => {
+      .then(([idV, relayListV, themeV, localeV, currencyV, solRpcV]) => {
         // The operator's Solana endpoint, applied BEFORE the wallet renders (the balance hooks read
         // it on their first poll). A stored value was validated when it was set, so a rejection here
         // means the store was corrupted: say so loudly and stay on the built-in default rather than
@@ -125,7 +148,15 @@ export default function App() {
           }
         }
         setIdentity(idV ? JSON.parse(idV) : null);
-        if (typeof relayV === 'string' && relayV.length > 0) setRelayUrl(relayV);
+        // R1: a non-empty persisted list (dpay.relays.v1, or the migrated legacy dpay.relay.v1)
+        // replaces the default list — both the walk module and the UI state. An EMPTY result is
+        // "no persisted choice", not "no relays": the defaults stay. R2: the Solana derivation
+        // follows in the same tick, before the setRelayUrls re-render's child effects can poll.
+        if (relayListV.length > 0) {
+          setRelayAddresses(relayListV);
+          setRelayBaseForSolana(relayListV);
+          setRelayUrls(relayListV);
+        }
         setThemeChoice(parseTheme(themeV)); // null (incl. legacy 'auto') → keep following the OS scheme
         setLocaleChoice(parseLocale(localeV)); // null (incl. 'system' or a dropped locale) → follow the device
         setHomeCurrency(parseHomeCurrency(currencyV)); // null → not chosen yet → the Wallet asks
@@ -137,16 +168,43 @@ export default function App() {
       });
   }, []);
 
-  // Set the relay URL AND persist it (best-effort; a persist failure is logged, never swallowed).
-  // This is the single mutator SettingsSheet's input binds to, so every edit endures across reloads.
-  const persistRelay = useCallback((url: string) => {
-    setRelayUrl(url);
-    AsyncStorage.setItem(RELAY_STORAGE_KEY, url).catch((e: unknown) => {
-      console.log(`[dpay] failed to persist relay URL: ${e instanceof Error ? e.message : String(e)}`);
+  // R2 — the SOL rail's DEFAULT candidate list derives from the ACTIVE relay list (spec
+  // 2026-09-09 §"Direction 1 — the proxy"): `setRelayBaseForSolana` is called SYNCHRONOUSLY at
+  // every place a list is installed (the mount effect's initial wiring, the persisted-list
+  // load above, and `persistRelayList` below) — one mechanism, no derived effect. A derived
+  // `useEffect(() => setRelayBaseForSolana(relayUrl), [relayUrl])` was tried first and is
+  // wrong on timing: child effects run BEFORE a parent's, so the first Solana poll after a
+  // re-point would fire under the STALE base (module-load default) while the state update was
+  // still queued. An operator's explicit Solana endpoint (Settings ▸ Advanced /
+  // SOLANA_RPC_STORAGE_KEY) sits ABOVE the derivation and is untouched by this wiring.
+
+  // Set the relay address list AND persist it (best-effort; a persist failure is logged, never
+  // swallowed). This is the single mutator the Settings list editor binds to, so every edit
+  // endures across reloads. R1: an EMPTY list is a value — it restores the addresses baked into
+  // this build (same contract as the Solana RPC row's empty draft). `setRelayAddresses` re-validates
+  // and throws; the Settings row parses first with the same validator, so a throw here means the
+  // two validators diverged — it surfaces in the row rather than silently keeping half a list.
+  const persistRelayList = useCallback((urls: string[]) => {
+    const list = urls.length > 0 ? urls : splitRelayListParam(RELAY_DEFAULT);
+    setRelayUrls(list);
+    // Only a fully-valid list is installed into the walk (an urls argument from the Settings
+    // parser is always valid — this re-validation is the same rule, one place deeper; a baked
+    // default that somehow names garbage degrades to the pre-R1 single-address walk instead of
+    // throwing in the Settings row).
+    const valid = list.map((u) => parseRelayAddress(u)).filter((u): u is string => u != null);
+    if (valid.length > 0) {
+      setRelayAddresses(valid);
+      // Same-tick Solana derivation re-point as the boot effect: the list editor is the one
+      // surface where the relay list changes mid-session, and the very next balance poll must
+      // walk the NEW homes.
+      setRelayBaseForSolana(valid);
+    }
+    persistRelayAddresses(list).catch((e: unknown) => {
+      console.log(`[dpay] failed to persist relay address list: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
-  // The Solana endpoint's single mutator — the runtime twin of persistRelay, and the reason the
+  // The Solana endpoint's single mutator — the runtime twin of the relay list mutator above, and the reason the
   // Settings row exists at all: `setSolanaRpcUrl` has been the seam every Solana read goes through
   // since 2026-09-08, but nothing on a phone could reach it, so a dead provider key was a store
   // release rather than a settings edit.
@@ -266,5 +324,5 @@ export default function App() {
     // same marker, so first run is never blocked by it.
     return <View style={S.screenFrame}><Practice identity={identity} relayUrl={relayUrl} onDone={() => markJourneySeen(FIRST_RUN_PRACTICE)} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrl={relayUrl} setRelayUrl={persistRelay} setSolanaRpc={persistSolanaRpc} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrls={relayUrls} setRelayUrls={persistRelayList} setSolanaRpc={persistSolanaRpc} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
 }

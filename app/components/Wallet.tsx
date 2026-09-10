@@ -53,7 +53,8 @@ import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
 import {useWalletHistory} from '../hooks/useWalletHistory';
 
-export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; relayUrl: string; setRelayUrl: (s: string) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
+export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
+  const relayUrl = relayUrls[0];
   // The wallet's surfaces. Four are TABS (home/pay/receive/ledger — the bottom bar switches
   // between them and each is a destination); two are ROUTES (accounts/convert — entered from a
   // control, left by Back, never a bottom-bar destination).
@@ -180,6 +181,27 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
     return () => { alive = false; };
   }, [relayUrl]);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  // The one stable opener, shared by the header gear and the unreachable rail note's escape
+  // (founder UX directive: the copy names Settings ▸ Advanced — the note makes that actionable).
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  // The outage variant: opens Settings AND auto-expands the Advanced disclosure — the section the
+  // unreachable copy names. Cleared on sheet close (below), so a later gear-open stays collapsed.
+  const [settingsAdvanced, setSettingsAdvanced] = useState<boolean>(false);
+  const openSettingsFromOutage = useCallback(() => { setSettingsOpen(true); setSettingsAdvanced(true); }, []);
+  // Passport deep-link (founder ask 2026-08-24): opening Settings FROM an unfilled
+  // "BACKED UP" stamp also auto-reveals the backup (the step's own surface) once. Cleared on
+  // Settings close (closeSettings below) so a later manual gear-open never re-reveals the seed.
+  const [settingsOpenBackup, setSettingsOpenBackup] = useState<boolean>(false);
+  // The ONE close path (R3 audit): every way the Settings sheet can close — its own onClose,
+  // Android hardware Back, and the web browser Back via applyRoute — funnels here, because the
+  // one-shot deep-link flags above (Advanced disclosure, seed backup) must reset on EVERY close.
+  // The two Back paths used to call setSettingsOpen(false) directly, leaving the flags armed, so
+  // a later plain gear-open re-expanded the disclosure / re-revealed the seed.
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    setSettingsAdvanced(false);
+    setSettingsOpenBackup(false);
+  }, []);
 
   // ── URL routing (OPEN_ISSUES X11) ─────────────────────────────────────────────────────────────
   // Web-only, and a no-op on native (`useWalletHistory` short-circuits on Platform.OS). The wallet
@@ -211,14 +233,13 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
     // Back press quietly discard a choice the user made on a screen the URL says nothing about.
     if (r.screen === 'pay') setPaySubMode(r.sub === 'send' ? 'send' : 'scan');
     if (r.screen === 'receive') setReceiveSubMode(r.sub === 'address' ? 'address' : 'request');
-    setSettingsOpen(r.settings === true);
-  }, [openAccounts]);
+    // Settings: a route that carries the flag OPENS the sheet (plain setter — a route never
+    // carries the deep-link flags); a route without it closes through the ONE funnel, so web
+    // Back resets the deep-link flags exactly like the sheet's own close does.
+    if (r.settings === true) setSettingsOpen(true); else closeSettings();
+  }, [openAccounts, closeSettings]);
   useWalletHistory(route, applyRoute);
 
-  // Passport deep-link (founder ask 2026-08-24): opening Settings FROM an unfilled
-  // "BACKED UP" stamp also auto-reveals the backup (the step's own surface) once. Cleared on
-  // Settings close so a later manual gear-open never re-reveals the seed.
-  const [settingsOpenBackup, setSettingsOpenBackup] = useState<boolean>(false);
   // Passport deep-link: an unfilled "SAW THE FLOW" stamp opens the walkthrough replay here —
   // the SAME replay Settings hosts (AppModal + Walkthrough onClose/onDone, mirror of
   // SettingsSheet's usage; the replay never awards stamps).
@@ -286,6 +307,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
     () => (!solAddress ? [] : visibleSolanaMints(networks)),
     [solAddress, networks],
   );
+  // No relayUrl threading (R3 audit): the seam's offline/unreachable oracle probes the IC boundary
+  // (icp-api.io / __DPAY_TEST_IC_GATEWAY), NOT the relay — post-proxy the Solana rail path IS the
+  // relay, so a relay outage must not read as "this phone is offline".
   const {sol: solState, tokens: tokenStates, refreshSol, refreshToken, refreshTokens} = useSolanaBalances(identity.secretHex, solAddress, solanaMints);
   // Defined AFTER the destructure (TDZ): manual re-poll for the fund-first "Check again" —
   // fire-and-forget polls get a self-clearing busy flag (UI affordance, not lifecycle tracking).
@@ -311,8 +335,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
   // `buildSelectableAssets`' `solanaEnabled` is: no device key ⇒ no rail ⇒ no polling. The two
   // lists are merged newest-first below and rendered by the ONE Ledger surface both rails share;
   // `solDropped` (transactions the reader could not parse) rides along so the Ledger can say the
-  // list may be short — they still exist on-chain.
-  const {history: solHistory, dropped: solDropped, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
+  // list may be short — they still exist on-chain. `failure` does the same for a FAILED poll: the
+  // last known rows stay, marked stale (`sol-history-stale`) instead of rendering as current.
+  const {history: solHistory, dropped: solDropped, failure: solHistoryFailure, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(history, solHistory), [history, solHistory]);
 
   // One-time token-account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
@@ -865,7 +890,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
     // e2e driver treats unexpected console.error as RED).
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (settingsOpen) { setSettingsOpen(false); return true; }
+      if (settingsOpen) { closeSettings(); return true; }
       // A ROUTE is left by Back before the app is. This is the difference between a route and a
       // tab, and it is why the accounts list is not a modal. The rule itself lives in `leaveRoute`,
       // shared with the web Escape key so the two platforms cannot disagree about where Back goes.
@@ -881,7 +906,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
       sub.remove();
       if (backHintTimerRef.current) { clearTimeout(backHintTimerRef.current); backHintTimerRef.current = null; }
     };
-  }, [settingsOpen, leaveRoute]);
+  }, [settingsOpen, leaveRoute, closeSettings]);
 
   // The ONE selection setter. Setting the selection is a deliberate user action, so it dismisses the
   // Balances sheet AND resets the within-tab sub-modes + clears any idle draft (the scan/send +
@@ -1000,7 +1025,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
           <Pressable
             testID="btn-settings"
             style={S.headerSettingsBtn}
-            onPress={() => setSettingsOpen(true)}
+            onPress={openSettings}
             accessibilityRole="button"
             accessibilityLabel={M.wallet.header.settings}
             accessibilityHint={M.wallet.header.settingsHint}
@@ -1124,6 +1149,9 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
               onOpenAccounts={openAccounts}
               onSeeAll={() => setMode('ledger')}
               onOpenReceipt={setReceiptTxn}
+              // The unreachable rail note's Settings ▸ Advanced escape (founder UX directive) —
+              // opens Settings with the Advanced disclosure already expanded.
+              onOpenSettings={openSettingsFromOutage}
             />
           : mode === 'accounts'
           ? <AccountsTab
@@ -1140,6 +1168,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
               onSelect={handleSelect}
               onTopUp={topUp}
               onConvert={() => setMode('convert')}
+              onOpenSettings={openSettingsFromOutage}
             />
           : mode === 'pay'
           ? (activeSol && solAddress
@@ -1258,7 +1287,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
               // alone. Withheld while locked, exactly as the Pay pointer's button is.
               onSwitchAsset={payRailSwitch}
             />
-          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} onOpenReceipt={setReceiptTxn} />}
+          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row
@@ -1276,11 +1305,11 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
 
       {settingsOpen ? (
         <SettingsSheet
-          relayUrl={relayUrl}
-          setRelayUrl={setRelayUrl}
+          relayUrls={relayUrls}
+          setRelayUrls={setRelayUrls}
           setSolanaRpc={setSolanaRpc}
           onSolanaRpcApplied={recheckSolBalances}
-          onClose={() => { setSettingsOpen(false); setSettingsOpenBackup(false); }}
+          onClose={closeSettings}
           onReset={onReset}
           onRestore={onRestore}
            secretHex={identity.secretHex}
@@ -1293,6 +1322,7 @@ export function Wallet({identity, relayUrl, setRelayUrl, setSolanaRpc, onReset, 
             onSetHomeCurrency={onSetHomeCurrency}
             assets={assets}
             openBackup={settingsOpenBackup}
+            openAdvanced={settingsAdvanced}
             onOpenStep={goToPassportStep}
          />
       ) : null}

@@ -27,8 +27,8 @@ import {THEME_STORAGE_KEY} from '../config/constants';
 const SET_SHEET_DEFAULTS = {
   setSolanaRpc: () => {},
   onSolanaRpcApplied: () => {},
-  relayUrl: 'http://127.0.0.1:4391',
-  setRelayUrl: () => {},
+  relayUrls: ['http://127.0.0.1:4391'],
+  setRelayUrls: () => {},
   localeChoice: null,
   onSetLocale: () => {},
   onClose: () => {},

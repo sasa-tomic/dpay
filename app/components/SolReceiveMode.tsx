@@ -4,7 +4,7 @@ import {QrCode} from './QrCode';
 import bs58 from 'bs58';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
-import {IS_SOLANA_DEVNET, QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
+import {isSolanaDevnet, QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
 import {fmtAsset, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
@@ -222,7 +222,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
     // asserted here rather than derived because this surface IS that mechanism. Devnet is the rail's
     // own testnet declaration — a devnet coin comes from a faucet, never from a card provider.
     const fundingCard = linkAsset != null ? (
-      <FundingRoutes asset={linkAsset} isTestnet={IS_SOLANA_DEVNET} mechanism="send-to-address" homeCurrency={homeCurrency} />
+      <FundingRoutes asset={linkAsset} isTestnet={isSolanaDevnet()} mechanism="send-to-address" homeCurrency={homeCurrency} />
     ) : null;
     return (
       <View style={S.centerTop}>

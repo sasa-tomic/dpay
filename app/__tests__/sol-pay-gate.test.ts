@@ -94,11 +94,15 @@ describe('solSplSignGate — per-request-mint solreq sign gate (OPEN_ISSUES 6(a)
     expect(solSplSignGate(EURC_MINT_ADDRESS, {})).toBe('unverified');
     expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('loading', null)})).toBe('unverified');
     expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('unavailable', null)})).toBe('unverified');
-    // a degraded poll observes NOTHING — even one that preserved an amount is not an existence fact
-    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', '0', 'unreachable')})).toBe('unverified');
+    // a degraded poll observes NOTHING — even one that preserved an amount is not an existence
+    // fact; and 'offline' (the oracle classified the PHONE as offline) keeps the plain-unverified
+    // advice "get signal", which is exactly right for that payer.
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', '0', 'offline')})).toBe('unverified');
+    // a pre-R3 error view with NO classified failure (back-compat): never a crash, never 'allow'.
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', '0')})).toBe('unverified');
   });
 
-  it('an endpoint that REFUSED the wallet is its own state — the rail is down, not the phone', () => {
+  it('a rail that is down while the phone is online is its own state — refused, unreadable, or unreachable', () => {
     // This is the state the outage produced: the device is online, the endpoint answers 429, and
     // the wallet has no fact for the mint. It still SIGNS (a payer who does hold the account must
     // not be blocked by someone else's quota), but the surface has to be able to say that the
@@ -108,6 +112,11 @@ describe('solSplSignGate — per-request-mint solreq sign gate (OPEN_ISSUES 6(a)
       .toBe('unverified-rail-down');
     // …and 'unreadable' bytes are the same class of thing: the endpoint answered, we learnt nothing.
     expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', null, 'unreadable')}))
+      .toBe('unverified-rail-down');
+    // …and 'unreachable' (R3 audit): nothing answered on the rail's path while the IC-boundary
+    // probe DID answer — the phone is online and the service side is down, so the plain-
+    // 'unverified' advice ("retry when you have signal") would be wrong advice for this cause.
+    expect(solSplSignGate(EURC_MINT_ADDRESS, {[EURC_MINT_ADDRESS]: token('error', null, 'unreachable')}))
       .toBe('unverified-rail-down');
   });
 

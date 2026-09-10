@@ -227,7 +227,7 @@ describe('ringing up', () => {
   });
 
   test('a relay that serves no till is a named dead end, not a spinner', async () => {
-    jest.mocked(openTillCharge).mockResolvedValue({kind: 'not-served'});
+    jest.mocked(openTillCharge).mockResolvedValue({kind: 'not-served', addr: 'https://till.example'});
     const tree = mount(VCHF);
     await ringUp(tree);
     expect(has(tree, 'till-failed')).toBe(true);
@@ -435,14 +435,16 @@ describe('clearing the till', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('a cancellation that did not happen leaves the code up and says it is still payable', async () => {
-    jest.mocked(cancelTillCharge).mockResolvedValue({kind: 'unreachable', detail: 'ECONNREFUSED'});
+  test('a cancellation that did not happen names the unreachable host and says it is still payable', async () => {
+    jest.mocked(cancelTillCharge).mockResolvedValue({kind: 'unreachable', detail: 'ECONNREFUSED', tried: [RELAY]});
     const tree = mount(VCHF);
     await ringUp(tree);
     await act(async () => { node(tree, 'btn-till-cancel').props.onPress(); await flush(); });
     expect(has(tree, 'till-ended')).toBe(false);
     expect(has(tree, 'till-qr')).toBe(true);
-    expect(visible(tree)).toContain(M.receive.till.cancelUnreachable);
+    // Wave-2: the refusal copy carries the host attribution (symmetric with the open path).
+    expect(visible(tree)).toContain(M.receive.till.cancelUnreachable('till.example'));
+    expect(visible(tree)).toContain('till.example');
     act(() => { tree.unmount(); });
   });
 });

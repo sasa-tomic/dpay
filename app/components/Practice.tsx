@@ -45,7 +45,7 @@ import {cmpRaw} from '../lib/amount';
 import {icpCatalogOf, fmtCurrencyAmount} from '../config/catalog';
 import {useCatalog} from '../hooks/useCatalog';
 import {DpayCore} from '../services/native';
-import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities} from '../services/relay';
+import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, relayFetch} from '../services/relay';
 import {prepareTransfer, submitTransfer, wireRequestToIntent} from '../services/rail';
 import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -117,7 +117,7 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
    *  a DIFFERENT fact from a zero balance and drives a different branch. */
   const readBalance = useCallback(async (): Promise<string | null> => {
     try {
-      const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/balances/${identity.publicHex}`, {}, BALANCE_TIMEOUT_MS);
+      const r = await relayFetch(relayUrl, `/api/v1/balances/${identity.publicHex}`, {}, BALANCE_TIMEOUT_MS);
       if (!r.ok) {
         console.warn(`practice: balances answered HTTP ${r.status}`);
         return null;

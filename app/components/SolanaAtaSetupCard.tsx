@@ -1,7 +1,7 @@
 import {View, Text, Pressable, ActivityIndicator} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {IS_SOLANA_DEVNET} from '../config/constants';
+import {isSolanaDevnet} from '../config/constants';
 import {fmtAsset} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
@@ -79,7 +79,7 @@ export function SolanaAtaSetupCard({
             ) : null}
           </>
         ) : null}
-        {IS_SOLANA_DEVNET ? (
+        {isSolanaDevnet() ? (
           // P4 — the '⚠' text glyph became a leading IconAlert (warnRow mirrors warnNote's
           // sizing in row form). No e2e/jest asserts this text; the testID moves to the wrapper.
           <View testID="sol-devnet-warning" style={S.warnRow}>

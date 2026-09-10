@@ -339,8 +339,8 @@ export const receiveEs: ReceiveMessages = {
       `El cobro NO se anuló: «${said}» Puede seguir siendo pagable: léelo y decide antes de entregar nada.`,
     cancelFailedNoReason: status =>
       `El cobro NO se anuló (HTTP ${status}) y no se dio ningún motivo, así que trátalo como pagable. Inténtalo otra vez y no entregues nada con este código hasta que se anule o caduque.`,
-    cancelUnreachable:
-      'No se pudo contactar con la caja, así que este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo otra vez cuando vuelva la conexión.',
+    cancelUnreachable: host =>
+      `dpay no pudo contactar con ${host}, así que este cobro NO se anuló: sigue siendo pagable hasta que caduque. Inténtalo otra vez cuando vuelva la conexión.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'Este código ha caducado'

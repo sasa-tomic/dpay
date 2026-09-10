@@ -162,7 +162,7 @@ describe('the provider table obeys the constraints it exists under', () => {
     // A row with nothing to say is a name with an implied endorsement and no information.
     for (const p of FUNDING_PROVIDERS) {
       const states = (r: typeof p.card) => r !== null && r.kind !== 'varies';
-      const hasFigure = states(p.card) || states(p.bank) || p.minFee !== null || p.spreadPct !== null;
+      const hasFigure = states(p.card) || states(p.bank) || p.minFee !== null || p.spread !== null;
       expect(hasFigure).toBe(true);
       expect(p.source.length).toBeGreaterThan(0);
     }
@@ -180,11 +180,16 @@ describe('the provider table obeys the constraints it exists under', () => {
     const by = (k: string) => FUNDING_PROVIDERS.find(p => p.key === k);
     expect(by('coinbase')?.card).toEqual({kind: 'flat', pct: 2.5});
     expect(by('moonpay')?.card).toEqual({kind: 'cap', pct: 4.5});
-    expect(by('moonpay')?.bank).toEqual({kind: 'floor', pct: 1});
+    // Re-read 2026-09-10: MoonPay's pricing disclosure no longer publishes a bank figure at all
+    // (its only "1%" is the Virtual Account Transaction Fee — a different product, and "typically
+    // about" is not a floor). Omitted rather than kept as a claim the source no longer supports.
+    expect(by('moonpay')?.bank).toBeNull();
     // Transak's docs contain a 0.99% worked EXAMPLE and no published rate. Presenting a derived
     // number as the provider's own figure is the overstatement this table exists to avoid.
     expect(by('transak')?.card).toEqual({kind: 'varies'});
     expect(by('transak')?.bank).toEqual({kind: 'varies'});
-    expect(by('transak')?.spreadPct).toBe(2.5);
+    // The spread IS quantified — as "0% to 2.5%" over CoinGecko mid (re-read 2026-09-10; it read
+    // as a flat 2.5% the day before). Transcribed as the ceiling, so it renders "up to 2.5%".
+    expect(by('transak')?.spread).toEqual({kind: 'cap', pct: 2.5});
   });
 });

@@ -21,7 +21,7 @@ function assetLabelOf(asset: TrustWalletAsset, assetName?: string): string {
  * The SAME ghost-tier secondary on every eligible My-address surface (DepositSheet = mainnet
  * BTC; SolanaReceiveSheet = mainnet SOL + USDC) — the same-surfaces hard rule: this is an
  * Add-money entry point, uniform across eligible rails; ineligible rails simply don't render
- * it (the caller owns eligibility — see isTrustWalletFundableBtc / IS_SOLANA_DEVNET).
+ * it (the caller owns eligibility — see isTrustWalletFundableBtc / isSolanaDevnet).
  *
  * Android-only: web keeps the WalletConnect story (a browser tab would dead-end the funding
  * funnel, and the e2e harness never sees this button by construction — jest owns its

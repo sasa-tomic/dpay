@@ -9,7 +9,8 @@
  *
  * The row is the relay row's twin — a draft, an explicit Apply, nothing on keystroke — with the two
  * differences that matter and are pinned here:
- *   • EMPTY IS A VALUE (it restores the endpoint baked into the build), so it must be applicable,
+ *   • EMPTY IS A VALUE (it follows the relay-derived default again — under jest, the '' test
+ *     override), so it must be applicable,
  *     and the field is re-seeded from the RESOLVED endpoint afterwards so the user can see what
  *     "empty" meant.
  *   • APPLYING CAN FAIL, loudly: `setSolanaRpcUrl` throws an actionable refusal for plain http and
@@ -24,8 +25,8 @@ import {setSolanaRpcUrl, solanaRpcUrl} from '../config/constants';
 import {M} from '../i18n';
 
 const DEFAULTS = {
-  relayUrl: 'http://127.0.0.1:4391',
-  setRelayUrl: () => {},
+  relayUrls: ['http://127.0.0.1:4391'],
+  setRelayUrls: (_urls: string[]) => {},
   onClose: () => {},
   onReset: () => {},
   onRestore: async () => {},
@@ -44,7 +45,7 @@ let tree: renderer.ReactTestRenderer | null = null;
 
 afterEach(async () => {
   if (tree) { const t = tree; tree = null; await act(async () => { t.unmount(); }); }
-  setSolanaRpcUrl(''); // back to the build's baked endpoint — this module state is global
+  setSolanaRpcUrl(''); // back to the default — this module state is global
 });
 
 function node(t: renderer.ReactTestRenderer, testID: string) {
@@ -118,7 +119,7 @@ describe('SettingsSheet — the Solana endpoint row', () => {
     await type(t, 'http://insecure.example');
     await apply(t);
     expect(textOf(t, 'settings-sol-rpc-err')).toContain('https://');
-    expect(solanaRpcUrl()).toBe(''); // the jest build's baked value — untouched
+    expect(solanaRpcUrl()).toBe(''); // the jest default ('') — untouched
     expect(repolls.n).toBe(0);
     // …and the draft is left alone so the user can correct it rather than retype it.
     expect(node(t, 'settings-sol-rpc').props.value).toBe('http://insecure.example');
@@ -141,7 +142,7 @@ describe('SettingsSheet — the Solana endpoint row', () => {
     expect(has(t, 'settings-sol-rpc-err')).toBe(false);
   });
 
-  test('clearing the field is applicable, and restores the endpoint baked into the build', async () => {
+  test('clearing the field is applicable, and follows the relay-derived default again', async () => {
     const applied: string[] = [];
     const t = await mountAdvanced(applied);
     await type(t, 'https://mainnet.provider.example/?api-key=theirs');
@@ -151,7 +152,7 @@ describe('SettingsSheet — the Solana endpoint row', () => {
     expect(node(t, 'btn-sol-rpc-apply').props.disabled).toBe(false); // empty is a VALUE, not a no-op
     await apply(t);
     expect(applied[1]).toBe('');
-    expect(solanaRpcUrl()).toBe(''); // the jest build bakes an empty endpoint
+    expect(solanaRpcUrl()).toBe(''); // the jest default is the empty test override
     // The field re-seeds from the RESOLVED endpoint, which is how the user learns what empty meant.
     expect(node(t, 'settings-sol-rpc').props.value).toBe(solanaRpcUrl());
   });

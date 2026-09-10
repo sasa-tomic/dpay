@@ -369,9 +369,9 @@ describe('solanaTokenCoherent — pure coherence predicate', () => {
 });
 
 describe('solanaTokenAvailable — default jest state is fail-closed', () => {
-  // jest.setup.js sets __DPAY_TEST_SOLANA_RPC_URL='' ⇒ SOLANA_RPC_BAKED is '' at module load and
-  // no override replaces it ⇒ solanaRpcUrl() answers '' ⇒ solanaTokenAvailable() MUST be false
-  // under the default jest state (no real devnet hit).
+  // jest.setup.js sets __DPAY_TEST_SOLANA_RPC_URL='' ⇒ the '' test override is the default at
+  // module load and no operator override replaces it ⇒ solanaRpcUrl() answers '' ⇒
+  // solanaTokenAvailable() MUST be false under the default jest state (no real devnet hit).
   it('returns false when the RPC URL is empty (default offline inner loop)', () => {
     expect(solanaTokenAvailable(MAINNET_MINT)).toBe(false);
   });
@@ -506,8 +506,8 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {},
     });
-    expect(balances['ic:7']).toEqual({displayText: '0.00 VCHF', status: 'zero'});
-    expect(balances['ic:8']).toEqual({displayText: '0 ICP', status: 'zero'});
+    expect(balances['ic:7']).toEqual({displayText: '0.00 VCHF', status: 'zero', failure: null});
+    expect(balances['ic:8']).toEqual({displayText: '0 ICP', status: 'zero', failure: null});
   });
 
   it('NO Add money / Cash out actions for VCHF/ICP: ramps Unavailable, no minter, not mintable', () => {

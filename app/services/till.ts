@@ -39,6 +39,7 @@
 // reads.
 import {DpayCore} from './native';
 import {fetchWithTimeout} from './relay';
+import {relayAddresses, relayAddressesRevision} from './relayAddresses';
 import {parseDecimalToUnits} from '../lib/amount';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import {base, nowSecs, randNonceHex} from '../lib/format';
@@ -96,13 +97,18 @@ export type TillOpenOutcome =
   | {kind: 'mispriced'; quoted: string}
   /** The relay serves no till (`DPAY_ENABLE_TILL` unset — its routes are not registered, so the
    *  POST 404s with nothing to say). A first-class state, not an error: this relay simply is not a
-   *  till, and the merchant needs to hear that rather than "something went wrong". */
-  | {kind: 'not-served'}
+   *  till, and the merchant needs to hear that rather than "something went wrong". `addr` is the
+   *  relay that ANSWERED — the sentence must name the relay actually asked, which under a walk or
+   *  a pin need not be the caller's preferred URL. */
+  | {kind: 'not-served'; addr: string}
   /** The till refused, and said why. `said` is its own sentence — the price bound, the clock skew,
    *  the reused nonce — every one of which already names the fix. */
   | {kind: 'refused'; said: string | null; status: number}
-  /** The relay could not be reached at all. */
-  | {kind: 'unreachable'; detail: string}
+  /** The relay could not be reached at all. `tried` names the address(es) this call actually
+   *  tried — the pin ALONE once a session is pinned to an address still in the configured list
+   *  (a mid-session failure is a fact about that one relay), else every address of the walk —
+   *  so the merchant's error never blames a relay that was not asked. */
+  | {kind: 'unreachable'; detail: string; tried: string[]}
   /** This device could not produce the signature. Nothing was sent. */
   | {kind: 'unsigned'; detail: string};
 
@@ -118,7 +124,11 @@ export type TillVoidOutcome =
   /** Includes the one refusal that matters: the charge was already PAID, with the block that paid
    *  it named in `said`. Money moved, so nothing rings it away. */
   | {kind: 'refused'; said: string | null; status: number}
-  | {kind: 'unreachable'; detail: string}
+  /** Same attribution as the open path's `unreachable`: the addresses actually asked — the pin
+   *  ALONE once a session is pinned to an address still in the configured list, else the whole
+   *  walk in order — so the "could NOT cancel" copy names who did not answer instead of blaming
+   *  the caller's preferred URL. */
+  | {kind: 'unreachable'; detail: string; tried: string[]}
   | {kind: 'unsigned'; detail: string};
 
 /** What the cashier typed, as whole CHF cents — or which rule it broke. Integer end to end: the
@@ -225,6 +235,106 @@ async function signedBody(identity: Identity, cents: string): Promise<Record<str
  *  costs a retry rather than a payment. */
 const TILL_TIMEOUT_MS = 15000;
 
+// R1 — the till's ONE deliberate exception to multi-address selection (spec 2026-09-09
+// §"Direction 2"): a till charge is RELAY-HELD, session-affine state. The charge id, its expiry
+// and its settlement live on the relay that opened it, so the till client resolves ONE relay per
+// session — the first address that answers — and stays there even if that address later fails:
+// a mid-session failover would ask a replica that never heard of the charge and hand the cashier
+// "not found" for a charge that is open elsewhere. The pin is bounded by MEMBERSHIP, not by
+// eternity: it speaks for the session only while the configured list still carries its address
+// (a reorder keeps it; a removal kills it — see `tillFetch`). Every other relay surface
+// multi-homes through `services/relay.ts#relayFetch` instead.
+let tillRelayPin: string | null = null;
+
+/** The relay this session's till is pinned to, if any (diagnostics + tests). */
+export function tillSessionRelay(): string | null {
+  return tillRelayPin;
+}
+
+/** Test seam: forget the pin (the pin's own clock is the session; only tests shorten it). */
+export function resetTillRelayPinForTest(): void {
+  tillRelayPin = null;
+}
+
+/** The addresses a failed till call ACTUALLY tried — the pin ALONE once a session is pinned to
+ *  an address the configured list still carries (a mid-session failure is a fact about that one
+ *  relay), else every address of the walk in order. Carried on `TillOpenOutcome.unreachable.tried`
+ *  and the warn lines so a failure is attributed to the relay(s) that did not answer, never to
+ *  the caller's preferred URL by default. */
+class TillUnreachable extends Error {
+  readonly tried: string[];
+  constructor(tried: string[], cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'TillUnreachable';
+    this.tried = tried;
+  }
+}
+
+/**
+ * The till's ordered walk — `relayFetch`'s shape WITHOUT the build gate, and with the pin above:
+ * while unpinned it tries [the caller's relay, ...the operator list] in order; ONLY an OK (2xx)
+ * answer pins — a till charge is relay-held state, so only a relay that can actually hold one
+ * earns the session. A <500 non-2xx (a non-till relay's 404, a live till's 4xx refusal) is
+ * remembered as the walk's answer but does NOT pin: the walk keeps looking for a 2xx further
+ * down, and the next charge retries the walk, so a non-till relay sitting early in the list can
+ * never hide a working till behind it. Once pinned, every call goes to the pin ALONE — ignoring
+ * the caller's relay argument — for exactly as long as the configured list still carries the
+ * pinned address (exact equality under the same `base` normalization the walk composes with): a
+ * list edit that REMOVED the address kills the pin, and the call becomes the normal walk over
+ * the new list, so a merchant who removes an address is never left with a shadow connection the
+ * app keeps asking behind their back. At walk end the remembered <500 answer wins over the
+ * synthetic all-dead error (a relay refusing to serve is a fact the cashier should hear);
+ * otherwise the throw is `TillUnreachable`, naming every address tried.
+ */
+async function tillFetch(relayUrl: string, path: string, init: RequestInit, timeoutMs: number): Promise<{r: Response; addr: string}> {
+  const first = base(relayUrl);
+  const list = relayAddresses().map((a) => base(a));
+  if (tillRelayPin != null && list.includes(tillRelayPin)) {
+    try {
+      return {r: await fetchWithTimeout(`${tillRelayPin}${path}`, init, timeoutMs), addr: tillRelayPin};
+    } catch (e) {
+      // The CALLER's abort is not a transport failure (see relayFetch for the same rule).
+      if (init?.signal?.aborted) throw e;
+      throw new TillUnreachable([tillRelayPin], e);
+    }
+  }
+  // A pin whose address left the list is DEAD, not dormant — drop it so the walk below (and a
+  // 2xx from it) can establish a session the CURRENT list endorses.
+  tillRelayPin = null;
+  const rest = list.filter((a) => a !== first);
+  const walk = [first, ...rest];
+  // Wave-2 pin guard: capture the list revision at walk entry; only a walk that FINISHES under
+  // the same revision may pin. A stale walk (the operator re-pointed the list mid-walk) may
+  // still complete its own call — its 2xx answer is a fact — but must not pin an address the
+  // operator just removed: the pin outlives the call (every later till request goes to it
+  // ALONE), so it may only ever name an address the CURRENT list endorses — and see the
+  // membership rule above, which enforces the same bound from the other side every call.
+  const walkRevision = relayAddressesRevision();
+  let last: unknown;
+  let answered: {r: Response; addr: string} | null = null;
+  for (const addr of walk) {
+    try {
+      const r = await fetchWithTimeout(`${addr}${path}`, init, timeoutMs);
+      if (r.ok) {
+        if (relayAddressesRevision() === walkRevision) tillRelayPin = addr;
+        return {r, addr};
+      }
+      if (r.status >= 500) {
+        last = new Error(`HTTP ${r.status}`);
+        continue;
+      }
+      // <500 non-2xx: an answer for THIS call, but NOT a pin (see the doc comment above).
+      if (answered == null) answered = {r, addr};
+    } catch (e) {
+      // The CALLER's abort is not a transport failure (see relayFetch for the same rule).
+      if (init?.signal?.aborted) throw e;
+      last = e;
+    }
+  }
+  if (answered != null) return answered;
+  throw new TillUnreachable(walk, last instanceof Error ? last : new Error('all relay addresses failed for a till call'));
+}
+
 /**
  * `POST /api/v1/till` — ring up a charge on the merchant's own account.
  *
@@ -247,26 +357,29 @@ export async function openTillCharge(
     return {kind: 'unsigned', detail};
   }
   let r: Response;
+  let addr: string;
   try {
-    r = await fetchWithTimeout(
-      `${base(relayUrl)}/api/v1/till`,
+    ({r, addr} = await tillFetch(
+      relayUrl,
+      '/api/v1/till',
       {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
       TILL_TIMEOUT_MS,
-    );
+    ));
   } catch (e) {
     const detail = errText(e);
-    console.warn(`till: ring-up could not reach ${relayUrl}: ${detail}`);
-    return {kind: 'unreachable', detail};
+    const tried = e instanceof TillUnreachable ? e.tried : [base(relayUrl)];
+    console.warn(`till: ring-up could not reach ${tried.join(', ')}: ${detail}`);
+    return {kind: 'unreachable', detail, tried};
   }
   const json = await readJson(r);
   if (!r.ok) {
     // A 404 with no readable body is the route not being REGISTERED — this relay serves no till
     // (`DPAY_ENABLE_TILL`). Every real refusal from a live till carries the envelope and a sentence.
-    if (r.status === 404 && said(json) === null) return {kind: 'not-served'};
+    if (r.status === 404 && said(json) === null) return {kind: 'not-served', addr};
     return {kind: 'refused', said: said(json), status: r.status};
   }
   if (typeof json !== 'object' || json === null) {
-    return {kind: 'unreachable', detail: `ring-up answered HTTP ${r.status} with an unreadable body`};
+    return {kind: 'unreachable', detail: `ring-up answered HTTP ${r.status} with an unreadable body`, tried: [addr]};
   }
   const o = json as Record<string, unknown>;
   const id = str(o, 'id');
@@ -283,7 +396,7 @@ export async function openTillCharge(
       || reference === null || !/^[0-9a-f]{32}$/.test(reference)) {
     const detail = `ring-up answered without {id, qr, amount, reference, created_secs, expires_at}: ${JSON.stringify(o).slice(0, 200)}`;
     console.warn(`till: ${detail}`);
-    return {kind: 'unreachable', detail};
+    return {kind: 'unreachable', detail, tried: [addr]};
   }
   // THE PRICE CHECK. The till states its price as a decimal and means an integer number of raw
   // units; the cashier rang up cents. The charge is only honest when the two land on the same
@@ -301,10 +414,11 @@ export async function openTillCharge(
 export async function tillChargeStatus(relayUrl: string, id: string): Promise<TillStatusOutcome> {
   let r: Response;
   try {
-    r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/till/${encodeURIComponent(id)}`, undefined, TILL_TIMEOUT_MS);
+    ({r} = await tillFetch(relayUrl, `/api/v1/till/${encodeURIComponent(id)}`, {}, TILL_TIMEOUT_MS));
   } catch (e) {
     const detail = errText(e);
-    console.warn(`till: could not check charge ${id}: ${detail}`);
+    const where = e instanceof TillUnreachable ? e.tried.join(', ') : base(relayUrl);
+    console.warn(`till: could not check charge ${id} at ${where}: ${detail}`);
     return {kind: 'unchecked', detail};
   }
   const json = await readJson(r);
@@ -368,16 +482,19 @@ export async function cancelTillCharge(relayUrl: string, identity: Identity): Pr
     return {kind: 'unsigned', detail};
   }
   let r: Response;
+  let answeredBy: string;
   try {
-    r = await fetchWithTimeout(
-      `${base(relayUrl)}/api/v1/till/void`,
+    ({r, addr: answeredBy} = await tillFetch(
+      relayUrl,
+      '/api/v1/till/void',
       {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
       TILL_TIMEOUT_MS,
-    );
+    ));
   } catch (e) {
     const detail = errText(e);
-    console.warn(`till: cancellation could not reach ${relayUrl}: ${detail}`);
-    return {kind: 'unreachable', detail};
+    const tried = e instanceof TillUnreachable ? e.tried : [base(relayUrl)];
+    console.warn(`till: cancellation could not reach ${tried.join(', ')}: ${detail}`);
+    return {kind: 'unreachable', detail, tried};
   }
   const json = await readJson(r);
   if (!r.ok) return {kind: 'refused', said: said(json), status: r.status};
@@ -385,7 +502,7 @@ export async function cancelTillCharge(relayUrl: string, identity: Identity): Pr
   if (status === null) {
     const detail = `cancellation answered HTTP ${r.status} with an unreadable status body`;
     console.warn(`till: ${detail}`);
-    return {kind: 'unreachable', detail};
+    return {kind: 'unreachable', detail, tried: [answeredBy]};
   }
   return {kind: 'cancelled', status};
 }

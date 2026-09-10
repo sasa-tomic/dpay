@@ -51,7 +51,7 @@ import type {BalanceView} from '../lib/assetBalances';
  *  Activity is the body of the screen rather than a footer under it. */
 export const ACTIVITY_ROWS = 5;
 
-export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll, onOpenReceipt}: {
+export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings}: {
   assets: SelectableAsset[];
   homeCurrency: HomeCurrency;
   /** The home currency's preferred rail — the account this screen IS. Null only when the catalog
@@ -72,6 +72,9 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
   /** Open a row's receipt — the SAME surface the Transactions tab opens (X6). Wallet owns it, so
    *  the overlay mounts at the app root instead of inside this feed's own box. */
   onOpenReceipt: (t: Txn) => void;
+  /** Opens Settings — the unreachable rail note's Settings ▸ Advanced escape (founder UX
+   *  directive). Optional: without it the note renders as the plain fact it always was. */
+  onOpenSettings?: () => void;
 }) {
   // The headline names the CURRENCY and carries the home rail's own token unit — "Swiss francs ·
   // Main" over "12.40 VCHF". The currency is the LABEL, the token is the UNIT: VCHF is a third
@@ -100,7 +103,7 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
       {/* An UNREADABLE headline is not a dash. The accounts route has said so since flow 147; the
           landing screen — where the home rail's number is the largest thing on the phone — printed
           the same bare "—" a first poll in flight prints. Same fact, same renderer, same words. */}
-      {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} /> : null}
+      {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} failure={homeBalance?.failure} onOpenSettings={onOpenSettings} /> : null}
       <Pressable
         testID="btn-home-accounts"
         style={S.homeAccountsBtn}

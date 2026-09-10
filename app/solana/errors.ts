@@ -48,6 +48,45 @@ export function isEndpointRefusal(e: unknown): boolean {
 }
 
 /**
+ * The RELAY answered, but its Solana leg is dead: every candidate in the walk came back with
+ * the relay's own `dpayRelayError` marker (`solana-upstream-unreachable`, or
+ * `solana-unconfigured` — the relay's deploy is missing `DPAY_SOLANA_RPC_URL`). Thrown by the
+ * candidate walk in `solana/rpc.ts` at exhaustion, when at least one candidate produced that
+ * marker (marker beats a relayed upstream status — one dead relay leg says more about the
+ * path than a provider 5xx says about the provider).
+ *
+ * Classification (R3, `app/solana.ts`): this is TRANSPORT-class — 'unreachable' — NOT a
+ * refusal. The distinction it carries: the phone IS online (a dpay relay answered HTTP) and
+ * the IC boundary is fine, so R3's connectivity re-probe of icp-api.io would be a pointless
+ * 2.5s round trip to confirm a fact this error already proves. The seam maps it directly to
+ * 'unreachable' without probing — the same truthful copy ("dpay's relay can't reach Solana")
+ * the probe path yields, minus the detour.
+ *
+ * Branded with a field for the same two-module-instances reason as `SolanaEndpointRefused`:
+ * thrown inside the dynamically-imported network module, caught in the statically-imported
+ * seam, where `instanceof` would silently answer false.
+ */
+export class SolanaRelayPathDown extends Error {
+  /** The BRAND — see `isRelayPathDown`; the field cannot be duplicated apart across the two
+   *  module instances the way a class object can. */
+  readonly dpayRelayPathDown = true;
+  /** The marker code the relay sent (`solana-upstream-unreachable` | `solana-unconfigured`) —
+   *  carried for logs/diagnosis; the copy keys off the class, not the code. */
+  readonly relayErrorCode: string;
+  constructor(message: string, relayErrorCode: string) {
+    super(message);
+    this.name = 'SolanaRelayPathDown';
+    this.relayErrorCode = relayErrorCode;
+  }
+}
+
+/** Was this failure the relay's Solana leg being down (vs an endpoint refusing, vs nothing
+ *  answering)? The one supported test — the brand field, never `instanceof`. */
+export function isRelayPathDown(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as {dpayRelayPathDown?: unknown}).dpayRelayPathDown === true;
+}
+
+/**
  * The endpoint refused this request with HTTP 429, or a previous 429's cooldown has not elapsed.
  * Carries the wait the ENDPOINT asked for (`Retry-After`) or the interval this client chose, so
  * the caller can say what is happening and when it will retry rather than showing a bare failure.

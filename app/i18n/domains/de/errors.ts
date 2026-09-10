@@ -30,8 +30,17 @@ export const errorsDe: ErrorMessages = {
   },
 
   rail: {
+    refused: network =>
+      `${network}s Endpunkt hat die Anfrage abgelehnt, diese Guthaben sind daher nicht aktuell. Nichts wurde bewegt, deine anderen Konten funktionieren, und dpay versucht es weiter.`,
+    offline: network =>
+      `Du scheinst offline zu sein — ${network}-Guthaben sind nicht aktuell, nichts wurde bewegt. Bei neuer Verbindung geht alles wieder, und Bezahlen per QR geht auch offline.`,
+    unreachable: network =>
+      `${network} ist nicht erreichbar, obwohl du online bist — das dpay-Relay erreicht ${network} gerade nicht, und dein Geld ist unberührt. Nichts wurde bewegt, deine IC-Zahlungen funktionieren weiterhin, und du kannst Zahlungen weiterhin offline signieren. Unter Einstellungen ▸ Erweitert kannst du diese Wallet auf einen beliebigen ${network}-Endpunkt zeigen lassen.`,
     unreadable: network =>
-      `${network} antwortet nicht, diese Guthaben sind daher nicht aktuell. Nichts wurde bewegt, deine anderen Konten funktionieren, und dpay versucht es weiter.`,
+      `${network} antwortete mit unlesbaren Daten, diese Guthaben sind nicht aktuell. Nichts wurde bewegt, deine anderen Konten funktionieren, und dpay versucht es weiter.`,
+    historyStale: network =>
+      `Der ${network}-Verlauf ist nicht aktuell — nichts wurde bewegt, er aktualisiert sich von selbst.`,
+    unreachableHint: () => 'Öffnet Einstellungen ▸ Erweitert.',
   },
 
   ethWallet: {

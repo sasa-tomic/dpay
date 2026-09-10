@@ -1261,7 +1261,7 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
 
   test('X1: the practice balance a new wallet holds is NAMED, and is one tap away', () => {
     const onSwitchRail = jest.fn();
-    const tree = unfunded({balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}}, onSwitchRail});
+    const tree = unfunded({balances: {'ic:0': {displayText: '∂100.00', status: 'ok', failure: null}}, onSwitchRail});
     expect(textByTestID(tree, 'fund-sibling-holds')).toBe(M.pay.fundSibling.practice('∂100.00'));
     pressByTestID(tree, 'btn-fund-sibling-switch');
     expect(onSwitchRail).toHaveBeenCalledWith('ic:0');
@@ -1272,7 +1272,7 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
     const tree = unfunded({
       subMode: 'send',
       withdrawFamily: 'CkEthErc20',
-      balances: {'ic:0': {displayText: '∂100.00', status: 'ok'}},
+      balances: {'ic:0': {displayText: '∂100.00', status: 'ok', failure: null}},
     });
     expect(hasTestID(tree, 'pay-fund')).toBe(true);
     expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
@@ -1281,7 +1281,7 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
 
   test('an unfunded ckUSDC surface with a funded USDC sibling names it and offers the one-tap switch', () => {
     const onSwitchRail = jest.fn();
-    const tree = unfunded({balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}}, onSwitchRail});
+    const tree = unfunded({balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}}, onSwitchRail});
     expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
     pressByTestID(tree, 'btn-fund-sibling-switch');
     expect(onSwitchRail).toHaveBeenCalledWith('solana:USDC');
@@ -1289,7 +1289,7 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
   });
 
   test('nothing funded anywhere: the instruction renders alone — no pointer, no switch', () => {
-    const tree = unfunded({balances: {'solana:USDC': {displayText: '0.00 USDC', status: 'zero'}}});
+    const tree = unfunded({balances: {'solana:USDC': {displayText: '0.00 USDC', status: 'zero', failure: null}}});
     expect(hasTestID(tree, 'pay-fund')).toBe(true);
     expect(hasTestID(tree, 'fund-sibling-rail')).toBe(false);
     act(() => { tree.unmount(); });
@@ -1302,7 +1302,7 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
     const tree = unfunded({
       assetBalances: {1: '0'},
       withdrawCurrency: 1,
-      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}},
+      balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}},
       onSwitchRail,
     });
     expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
@@ -1312,7 +1312,7 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
   });
 
   test('no switch passed while locked (Wallet withholds it): the rail is named, the button is gone', () => {
-    const tree = unfunded({balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok'}}});
+    const tree = unfunded({balances: {'solana:USDC': {displayText: '2.50 USDC', status: 'ok', failure: null}}});
     expect(textByTestID(tree, 'fund-sibling-holds')).toBe('You hold 2.50 USDC on USDC · Solana');
     expect(hasTestID(tree, 'btn-fund-sibling-switch')).toBe(false);
     act(() => { tree.unmount(); });

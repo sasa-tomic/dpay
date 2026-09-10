@@ -36,7 +36,7 @@ jest.mock('../services/icp', () => ({
   INGRESS_AHEAD_S: 300,
 }));
 jest.mock('../services/relay', () => ({
-  fetchWithTimeout: jest.fn(),
+  relayFetch: jest.fn(), // R1: rail's relay seam moved from fetchWithTimeout(url) to relayFetch(relay, path)
   // The body-read bound is the REAL one. A stub returning undefined here would make a matching
   // history row read as "no confirmation", which is the shape of the bug this module exists to
   // avoid — the mock must not be able to invent that answer.
@@ -46,7 +46,7 @@ jest.mock('../services/relay', () => ({
 import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, prepareTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
 import {DpayCore} from '../services/native';
 import {icPollRequestStatus, icPollSignedRequestStatus, icStampExpiry, icSubmit} from '../services/icp';
-import {fetchWithTimeout} from '../services/relay';
+import {relayFetch} from '../services/relay';
 
 const PREPARED = {ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', requestIdHex: 'cd'.repeat(32)};
 
@@ -208,7 +208,7 @@ describe('receiver history confirmation', () => {
 
   test('requires recipient, currency, amount, and memo to match the open request', async () => {
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue('receiver-principal' as never);
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce({ok: true, json: async () => ({transactions: [{
         from: 'payer', to: 'receiver-principal', amount: '999', nonce: '', currency: 4,
         timestamp: 1, from_name: '', to_name: '', memo: 'aa'.repeat(16),
@@ -227,14 +227,14 @@ describe('receiver history confirmation', () => {
         timestamp: 2, from_name: '', to_name: '', memo: 'aa'.repeat(16),
       }]})} as never);
     await expect(confirmIncomingTransfer(expected, {attempts: 2, intervalMs: 0})).resolves.toBe(true);
-    expect(fetchWithTimeout).toHaveBeenCalledTimes(2);
-    expect(fetchWithTimeout).toHaveBeenCalledWith(expect.stringContaining(`limit=1&memo=${'aa'.repeat(16)}`), undefined, expect.any(Number));
+    expect(relayFetch).toHaveBeenCalledTimes(2);
+    expect(relayFetch).toHaveBeenCalledWith(expect.any(String), expect.stringContaining(`limit=1&memo=${'aa'.repeat(16)}`), undefined, expect.any(Number));
   });
 
   test('submits payer bytes verbatim before checking ledger history', async () => {
     jest.mocked(icSubmit).mockResolvedValue({kind: 'unknown'} as never);
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue('receiver-principal' as never);
-    jest.mocked(fetchWithTimeout).mockResolvedValue({ok: true, json: async () => ({transactions: []})} as never);
+    jest.mocked(relayFetch).mockResolvedValue({ok: true, json: async () => ({transactions: []})} as never);
     await expect(submitAndConfirmIncomingTransfer(PREPARED.ledger, 'cafe', expected, {attempts: 1, intervalMs: 0})).resolves.toBe(false);
     expect(icSubmit).toHaveBeenCalledWith(PREPARED.ledger, 'call', 'cafe', 8000);
   });

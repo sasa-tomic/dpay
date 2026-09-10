@@ -4,7 +4,7 @@ import {QrCode} from './QrCode';
 import {IconAlert} from './icons';
 import {S} from '../styles';
 import {C} from '../config/palette';
-import {QR_SIZE_SMALL, IS_SOLANA_DEVNET} from '../config/constants';
+import {QR_SIZE_SMALL, isSolanaDevnet} from '../config/constants';
 import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {buildSolanaPayUri, createSolanaPayReference} from '../solana/payUri';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -156,7 +156,7 @@ export function SolanaReceiveSheet({
       <View testID="sol-receive-instructions" style={S.instrCard}>
         <InstrLine runs={M.deposit.sol.sendToAddress(assetLabel, isSpl ? `Solana ${assetLabel}` : 'Solana')} />
         <Text style={S.instrCustody}>{M.deposit.sol.custody(assetLabel)}</Text>
-        {IS_SOLANA_DEVNET ? (
+        {isSolanaDevnet() ? (
           // P4 pattern — '⚠' text glyph is a leading IconAlert (mirrors SolanaAtaSetupCard's
           // converted twin; testID on the wrapper).
           <View testID="sol-devnet-warning" style={S.warnRow}>
@@ -209,7 +209,7 @@ export function SolanaReceiveSheet({
           asset id (copy/QR status quo). A token links its SPL asset id c501_t<mint> (send to
           this token account); the sheet only renders the address branch when the account exists
           ('ready'), so the button inherits the same can-receive gate. */}
-      {!IS_SOLANA_DEVNET ? (
+      {!isSolanaDevnet() ? (
         <TrustWalletFundButton asset={isSpl && mint != null ? (`SPL:${mint}` as const) : 'SOL'} address={address} assetName={assetLabel} />
       ) : null}
 

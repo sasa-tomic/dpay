@@ -18,7 +18,7 @@ import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus,
 import {hexToBytes, bytesToHex, base, short} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 import {sanitiseDisplayText} from '../lib/deepLink';
-import {fetchWithTimeout, readBodyWithin} from './relay';
+import {readBodyWithin, relayFetch} from './relay';
 import {HISTORY_TIMEOUT_MS} from '../config/constants';
 import type {PayIntent, Req, TransactionsRow} from '../lib/types';
 import {M} from '../i18n';
@@ -277,8 +277,9 @@ export async function confirmIncomingTransfer(
   const memo = expected.memoHex.toLowerCase();
   for (let attempt = 0; attempt < opts.attempts; attempt += 1) {
     try {
-      const r = await fetchWithTimeout(
-        `${base(expected.relayUrl)}/api/v1/transactions/${expected.receiverPublicHex}?currency=${expected.currency}&limit=1&memo=${memo}`,
+      const r = await relayFetch(
+        expected.relayUrl,
+        `/api/v1/transactions/${expected.receiverPublicHex}?currency=${expected.currency}&limit=1&memo=${memo}`,
         undefined,
         HISTORY_TIMEOUT_MS,
       );

@@ -27,11 +27,15 @@ import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 import {HomeTab} from '../components/HomeTab';
 import {AccountsTab} from '../components/AccountsTab';
+import {IconAlert} from '../components/icons';
 import {buildSelectableAssets} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {C} from '../config/palette';
 import {preferredRail} from '../config/currency';
+import {S} from '../styles';
 import {M} from '../i18n';
+import type {SolanaReadFailure} from '../solana';
 import {errorsDe} from '../i18n/domains/de/errors';
 import {errorsEs} from '../i18n/domains/es/errors';
 import {errorsFr} from '../i18n/domains/fr/errors';
@@ -114,6 +118,25 @@ function solanaDown() {
     primaryBalance: '12345',
     online: true,
     solState: {balance: null, status: 'error'},
+    tokenStates,
+  });
+}
+
+/** The measured X9 state WITH its classified cause (R3): every Solana account reports 'error' AND
+ *  carries the seam's failure value, the way a real poll does once the hook threads
+ *  `read.sol.failure` into the balance views. */
+function solanaDownWith(failure: SolanaReadFailure) {
+  const mints = ASSETS.flatMap(a => (a.protocol === 'solana' && a.mint != null ? [a.mint] : []));
+  const tokenStates = Object.fromEntries(
+    mints.map(m => [m, {amount: null, decimals: null, status: 'error' as const, failure}]),
+  );
+  return buildAssetBalances({
+    catalog: CATALOG,
+    assets: ASSETS,
+    icBalances: {7: '120000000'},
+    primaryBalance: '12345',
+    online: true,
+    solState: {balance: null, status: 'error', failure},
     tokenStates,
   });
 }
@@ -243,12 +266,138 @@ describe('A4 — a rail the wallet cannot read says so ONCE, for the network', (
   });
 
   test('all four locales carry the line, name the network, and promise no button', () => {
+    // R3 (spec 2026-09-09): four causes, four sentences. `unreachable` is allowed to run longer
+    // because the spec requires it to carry FIVE facts (names dpay's side of the path, money
+    // untouched, what still works, offline-pay unaffected, the Settings ▸ Advanced escape) — still
+    // ONE line per network (X9), never one per account.
+    const keys = ['refused', 'offline', 'unreachable', 'unreadable'] as const;
+    const bounds: Record<typeof keys[number], number> = {refused: 180, offline: 180, unreachable: 400, unreadable: 180};
     for (const [locale, e] of Object.entries({en: errorsEn, de: errorsDe, es: errorsEs, fr: errorsFr})) {
-      const line = e.rail.unreadable('Solana');
-      expect(`${locale}: ${line}`).toContain('Solana');
-      expect(`${locale}: ${line}`).not.toContain('undefined');
-      expect(line.length).toBeGreaterThan(40); // a sentence with instructions, not a shrug
-      expect(line.length).toBeLessThan(180);   // …and one line, not a paragraph per account (X9)
+      for (const key of keys) {
+        const line = e.rail[key]('Solana');
+        expect(`${locale}.${key}: ${line}`).toContain('Solana');
+        expect(`${locale}.${key}: ${line}`).not.toContain('undefined');
+        expect(line.length).toBeGreaterThan(40); // a sentence with instructions, not a shrug
+        expect(line.length).toBeLessThan(bounds[key]); // …and one line, not a paragraph per account (X9)
+      }
     }
+  });
+});
+
+describe('R3 — the sentence follows the classified cause', () => {
+  test('each of the four failures renders its OWN sentence, once, for the network', () => {
+    // Four causes, four sentences — the note must never collapse them, because the user's next
+    // move differs: a refused endpoint recovers on its own behind its cooldown, an offline phone
+    // is the payer's designed state (nothing to fix), an unreachable path names the Settings ▸
+    // Advanced escape, and unreadable bytes are the wallet saying "do not trust this read". The
+    // cause is classified at the transport seam and only CHOSEN here — if this mapping drifts, the
+    // user is told the wrong one of those four stories.
+    for (const failure of ['refused', 'offline', 'unreachable', 'unreadable'] as const) {
+      const tree = mountAccounts({balances: solanaDownWith(failure)});
+      expect(textOf(tree, 'rail-unreadable-solana')).toBe(M.errors.rail[failure]('Solana'));
+      expect(countOf(tree, 'rail-unreadable-solana')).toBe(1); // still ONE banner (X9), cause or not
+      act(() => { tree.unmount(); });
+    }
+  });
+
+  test('an error with NO classified cause renders the unreadable sentence (back-compat default)', () => {
+    // `failure` is optional end to end (a view built before R3, a hook state that predates the
+    // field): the note must fall back to a sentence — never an empty string, never a crash — and
+    // the honest default is the one that makes no claim about WHY.
+    const tree = mountAccounts({balances: solanaDown()}); // the pre-R3 fixture: 'error' with no failure
+    expect(textOf(tree, 'rail-unreadable-solana')).toBe(M.errors.rail.unreadable('Solana'));
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('R3 audit — token-cause banner, offline chrome, and the tappable escape', () => {
+  /** The note node (first render), host or composite — the OUTERMOST `rail-unreadable-solana`. */
+  const noteNode = (tree: renderer.ReactTestRenderer) =>
+    tree.root.findAll(n => n.props?.testID === 'rail-unreadable-solana')[0];
+
+  test("SOL fine but a token in error: the banner reads the TOKEN row's classified cause", () => {
+    // AccountsTab emits the banner above the FIRST affected row and feeds it THAT row's view — so
+    // when SOL polls ok while a token errs with 'offline', the banner's cause is the token's, not
+    // SOL's (which has none to give). This pins the selection rule the audit asked to be verified:
+    // a token-only error DOES get a banner, and it carries the token's failure verbatim.
+    const mints = ASSETS.flatMap(a => (a.protocol === 'solana' && a.mint != null ? [a.mint] : []));
+    expect(mints.length).toBeGreaterThanOrEqual(2); // SOL is not a mint row; USDC + EURC are
+    type TokState = {amount: string | null; decimals: number | null; status: 'absent' | 'error'; failure?: SolanaReadFailure};
+    const tokenStates: Record<string, TokState> = Object.fromEntries(
+      mints.map(m => [m, {amount: null, decimals: null, status: 'absent'}]),
+    );
+    const usdcAsset = ASSETS.flatMap(a => (a.protocol === 'solana' && a.symbol === 'USDC' ? [a] : []))[0];
+    const usdcMint = usdcAsset?.mint ?? '';
+    expect(usdcMint).not.toBe(''); // the registry pins the USDC mainnet mint on the row
+    expect(mints).toContain(usdcMint);
+    tokenStates[usdcMint] = {amount: null, decimals: null, status: 'error', failure: 'offline'};
+    const balances = buildAssetBalances({
+      catalog: CATALOG,
+      assets: ASSETS,
+      icBalances: {7: '120000000'},
+      primaryBalance: '12345',
+      online: true,
+      solState: {balance: '1500000000', status: 'ok'},
+      tokenStates,
+    });
+    const tree = mountAccounts({balances});
+    expect(textOf(tree, 'rail-unreadable-solana')).toBe(M.errors.rail.offline('Solana'));
+    expect(countOf(tree, 'rail-unreadable-solana')).toBe(1); // still ONE banner for the network
+    act(() => { tree.unmount(); });
+  });
+
+  test("offline renders in the NEUTRAL register — C.sub, never C.warn (no one's fault)", () => {
+    const tree = mountAccounts({balances: solanaDownWith('offline')});
+    const note = noteNode(tree);
+    const text = note.findAllByType(Text)[0];
+    // The style override array is the pin: the base rail style PLUS the neutral color.
+    expect(text.props.style).toEqual([S.railHealthText, {color: C.sub}]);
+    const icon = note.findAllByType(IconAlert)[0];
+    expect(icon.props.color).toBe(C.sub); // the icon follows the register (layout continuity kept)
+    act(() => { tree.unmount(); });
+  });
+
+  test('the other three causes keep the ALARM register (C.warn)', () => {
+    for (const failure of ['refused', 'unreachable', 'unreadable'] as const) {
+      const tree = mountAccounts({balances: solanaDownWith(failure)});
+      const note = noteNode(tree);
+      expect(note.findAllByType(Text)[0].props.style).toBe(S.railHealthText); // no override array
+      expect(note.findAllByType(IconAlert)[0].props.color).toBe(C.warn);
+      act(() => { tree.unmount(); });
+    }
+  });
+
+  test('unreachable + onOpenSettings renders the row as the tappable Settings escape — and ONLY then', () => {
+    // The founder UX directive: the unreachable copy names Settings ▸ Advanced, so that variant is
+    // actionable. The tap target is the OUTERMOST element (same testID), announced as a button
+    // with a hint; every OTHER cause stays a plain fact — and unreachable without the wiring does
+    // too, so existing callers/tests mount unchanged.
+    const wired = mountAccounts({balances: solanaDownWith('unreachable'), onOpenSettings: jest.fn()});
+    const wiredNote = noteNode(wired);
+    expect(wiredNote.props.accessibilityRole).toBe('button');
+    expect(wiredNote.props.accessibilityHint).toBe(M.errors.rail.unreachableHint('Solana'));
+    expect(typeof wiredNote.props.onPress).toBe('function');
+    expect(wiredNote.props.testID).toBe('rail-unreadable-solana');
+    act(() => { wired.unmount(); });
+
+    for (const failure of ['refused', 'offline', 'unreadable'] as const) {
+      const tree = mountAccounts({balances: solanaDownWith(failure), onOpenSettings: jest.fn()});
+      const note = noteNode(tree);
+      expect(note.props.accessibilityRole).toBeUndefined(); // a fact, not a button
+      expect(note.props.onPress).toBeUndefined();
+      act(() => { tree.unmount(); });
+    }
+    // …and unreachable WITHOUT the wiring stays plain (optional prop, back-compat).
+    const unwired = mountAccounts({balances: solanaDownWith('unreachable')});
+    expect(noteNode(unwired).props.onPress).toBeUndefined();
+    act(() => { unwired.unmount(); });
+  });
+
+  test('tapping the unreachable note fires onOpenSettings (the escape is wired, not decorative)', () => {
+    const onOpenSettings = jest.fn();
+    const tree = mountAccounts({balances: solanaDownWith('unreachable'), onOpenSettings});
+    act(() => { noteNode(tree).props.onPress(); });
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
   });
 });

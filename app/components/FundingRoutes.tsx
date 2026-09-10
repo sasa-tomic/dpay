@@ -101,7 +101,7 @@ export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
           {FUNDING_PROVIDERS.map(p => (
             <View key={p.key} testID={`funding-provider-${p.key}`} style={S.fundingProviderRow}>
               <Text style={S.fundingProviderName}>{p.name}</Text>
-              <Text style={S.fundingProviderCost}>{costLine(p.card, p.bank, p.minFee, p.spreadPct)}</Text>
+              <Text style={S.fundingProviderCost}>{costLine(p.card, p.bank, p.minFee, p.spread)}</Text>
               <Text style={S.fundingProviderSource} selectable={true}>{p.source}</Text>
             </View>
           ))}
@@ -119,12 +119,14 @@ export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
  *  A missing part is OMITTED rather than shown as zero or as "unknown": Transak publishes no single
  *  card percentage, and inventing one — or implying the card is free — is the failure mode this
  *  whole section exists to avoid. */
-function costLine(card: PublishedRate | null, bank: PublishedRate | null, minFee: string | null, spreadPct: number | null): string {
+function costLine(card: PublishedRate | null, bank: PublishedRate | null, minFee: string | null, spread: PublishedRate | null): string {
   const parts: string[] = [];
   if (card !== null) parts.push(M.deposit.funding.costCard(rate(card)));
   if (bank !== null) parts.push(M.deposit.funding.costBank(rate(bank)));
   if (minFee !== null) parts.push(M.deposit.funding.costMin(minFee));
-  if (spreadPct !== null) parts.push(M.deposit.funding.costSpread(pct(spreadPct)));
+  // The spread goes through the same `rate` shape-rendering as the fees, for the same reason:
+  // Transak publishes "0% to 2.5%", and "plus 2.5% margin" would state the ceiling as the margin.
+  if (spread !== null) parts.push(M.deposit.funding.costSpread(rate(spread)));
   return parts.join(' · ');
 }
 

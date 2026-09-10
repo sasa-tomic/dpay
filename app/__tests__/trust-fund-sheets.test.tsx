@@ -7,9 +7,9 @@
  *   SolanaReceiveSheet (SOL)   : SOL + USDC variants → button (jest runs mainnet RPC config).
  *   Platform                   : android renders; ios/web → absent (plan: android-only).
  *
- * jest.setup sets __DPAY_TEST_SOLANA_RPC_URL='' → IS_SOLANA_DEVNET=false → the SOL sheet runs
+ * jest.setup sets __DPAY_TEST_SOLANA_RPC_URL='' → isSolanaDevnet()=false → the SOL sheet runs
  * its mainnet branch here; the devnet branch (copy/QR status quo) is pinned at the call site
- * via the IS_SOLANA_DEVNET read in SolanaReceiveSheet. DepositSheet's async address fetch is
+ * via the isSolanaDevnet() read in SolanaReceiveSheet. DepositSheet's async address fetch is
  * mocked at the services/rail seam (the smallest boundary); deposit info is left to fail
  * best-effort (the sheet tolerates a null info by design).
  */

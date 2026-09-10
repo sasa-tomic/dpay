@@ -41,7 +41,7 @@ import type {BalanceView} from '../lib/assetBalances';
 // across unlike assets would be a claim.
 export function AccountsTab({
   assets, selectedId, balances, homeCurrency, demoFaucetAvailable, topUpBusy,
-  hasTestnet, showTestnet, onToggleTestnet, onBack, onSelect, onTopUp, onConvert,
+  hasTestnet, showTestnet, onToggleTestnet, onBack, onSelect, onTopUp, onConvert, onOpenSettings,
 }: {
   assets: SelectableAsset[];
   selectedId: AssetId | null;
@@ -56,6 +56,9 @@ export function AccountsTab({
   onSelect: (id: AssetId) => void;
   onTopUp: () => void;
   onConvert: () => void;
+  /** Opens Settings — the unreachable rail note's Settings ▸ Advanced escape (founder UX
+   *  directive). Optional: without it the note renders as the plain fact it always was. */
+  onOpenSettings?: () => void;
 }) {
   // The home currency's rail group, marked — never summed and never reordered within itself: each
   // rail keeps its own row and balance (the founder's honesty rule: same-currency rails on
@@ -159,7 +162,7 @@ export function AccountsTab({
           const netSlug = linkNetworkOf(asset);
           const outage = railUnreadable(view) && !bannered.has(netSlug);
           if (outage) bannered.add(netSlug);
-          const banner = outage ? <RailUnreadableNote key={`outage-${netSlug}`} asset={asset} /> : null;
+          const banner = outage ? <RailUnreadableNote key={`outage-${netSlug}`} asset={asset} failure={view?.failure ?? null} onOpenSettings={onOpenSettings} /> : null;
           // The MAIN badge — the account the wallet opens with, and the one a payment defaults to.
           const mainBadge = asset.id === mainId
             ? <Text testID={`asset-${asset.testKey}-main`} style={S.assetBadgeMain}>{M.wallet.homeCurrency.mainBadge}</Text>

@@ -340,8 +340,8 @@ export const receiveFr: ReceiveMessages = {
       `Le montant n’a PAS été annulé : « ${said} » Il peut rester payable — lisez cela avant de remettre quoi que ce soit.`,
     cancelFailedNoReason: status =>
       `Le montant n’a PAS été annulé (HTTP ${status}) et aucune raison n’a été donnée : considérez-le comme toujours payable. Réessayez, et ne remettez rien sur ce code tant qu’il n’est pas annulé ou expiré.`,
-    cancelUnreachable:
-      'La caisse était injoignable : ce montant n’a donc PAS été annulé — il reste payable jusqu’à son expiration. Réessayez dès que la connexion revient.',
+    cancelUnreachable: host =>
+      `dpay n’a pas pu joindre ${host} : ce montant n’a donc PAS été annulé — il reste payable jusqu’à son expiration. Réessayez dès que la connexion revient.`,
 
     endedTitle: reason =>
       reason === 'expired' ? 'Ce code a expiré'

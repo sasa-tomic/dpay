@@ -209,7 +209,7 @@ describe('chooseRail — which rail, and why', () => {
   const ckusdc = withSol.find(a => a.id === 'ic:2')!;
   const vchf = withSol.find(a => a.id === 'ic:7')!;
   const usdc = withSol.find(a => a.id === 'solana:USDC')!;
-  const bv = (status: BalanceView['status']): BalanceView => ({displayText: '1 X', status});
+  const bv = (status: BalanceView['status']): BalanceView => ({displayText: '1 X', status, failure: null});
   const bal = (...entries: [AssetId, BalanceView['status']][]): RailBalances =>
     Object.fromEntries(entries.map(([id, status]) => [id, bv(status)])) as RailBalances;
 
@@ -351,7 +351,7 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
 // ---------------------------------------------------------------------------------------------
 describe('fundedAlternative — the funded account a fund-blocked surface can name', () => {
   const withSol = build([DEMO, CKBTC, CKUSDC, VCHF, ICP], true);
-  const ok = (displayText: string): BalanceView => ({displayText, status: 'ok'});
+  const ok = (displayText: string): BalanceView => ({displayText, status: 'ok', failure: null});
 
   const ask = (over: Partial<Parameters<typeof fundedAlternative>[0]>) => fundedAlternative({
     homeCurrency: 'USD',
@@ -392,7 +392,7 @@ describe('fundedAlternative — the funded account a fund-blocked surface can na
   it('never names the selected account, and never an unfunded one', () => {
     expect(ask({balances: {'ic:2': ok('5.00 ckUSDC')}})).toBeNull();
     for (const status of ['zero', 'absent', 'unavailable', 'error', 'loading'] as const) {
-      expect(ask({balances: {'solana:USDC': {displayText: '0.00 USDC', status}}})).toBeNull();
+      expect(ask({balances: {'solana:USDC': {displayText: '0.00 USDC', status, failure: null}}})).toBeNull();
     }
   });
 

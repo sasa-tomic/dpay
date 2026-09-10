@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {POLL} from '../config/constants';
-import {readSolanaBalances} from '../solana';
+import {classifyTransportFailure, readSolanaBalances} from '../solana';
 import type {SolanaBalancesRead, SolanaReadFailure, SolanaTokenBalanceResult} from '../solana';
 import {loadSolTokenState, recordSolTokenFact} from '../services/solTokenStatePersist';
 import {usePollCadence} from './usePollCadence';
@@ -12,12 +12,16 @@ export type SolBalanceStatus = 'loading' | 'ok' | 'unavailable' | 'error';
  *  both distinct from "unavailable" (offline/incoherent) and "error" (RPC failure). */
 export type SolTokenStatus = 'loading' | 'absent' | 'balance' | 'unavailable' | 'error';
 
-export type SolBalanceState = {balance: string | null; status: SolBalanceStatus};
+/** Native-SOL rail state. `failure` says WHY an 'error' status has no fact (see
+ *  `SolanaReadFailure`); null on every other status — the same contract the token rows carry. */
+export type SolBalanceState = {balance: string | null; status: SolBalanceStatus; failure: SolanaReadFailure | null};
 /** `failure` says WHY an 'error' row has no fact — `refused` (the endpoint answered and did not
- *  serve us: the rail is down and this device is online), `unreachable` (nothing answered: this
- *  device may just be offline, the payer's normal state), `unreadable` (bytes we cannot trust).
- *  Null on every status that is not 'error'. The SPL sign gate reads it: what a wallet may tell a
- *  user about an unverified token account depends entirely on which of those three it is. */
+ *  serve us: the rail is down and this device is online), `offline` (nothing answered anywhere,
+ *  the IC boundary probe included: this phone has no connectivity — the payer's normal state),
+ *  `unreachable` (nothing answered on the rail's path while the phone IS online: the service
+ *  side), `unreadable` (bytes we cannot trust). Null on every status that is not 'error'. The
+ *  SPL sign gate reads it: what a wallet may tell a user about an unverified token account
+ *  depends entirely on which of those it is. */
 export type SolTokenBalanceState = {
   amount: string | null;
   decimals: number | null;
@@ -85,7 +89,7 @@ export function useSolanaBalances(
   refreshToken: (mint: string) => void;
   refreshTokens: () => void;
 } {
-  const [sol, setSol] = useState<SolBalanceState>({balance: null, status: 'loading'});
+  const [sol, setSol] = useState<SolBalanceState>({balance: null, status: 'loading', failure: null});
   const [tokens, setTokens] = useState<Record<string, SolTokenBalanceState>>({});
   const genRef = useRef(0);
   // The live poll, assigned by the effect below and driven by the cadence hook. Held in a ref so
@@ -98,7 +102,7 @@ export function useSolanaBalances(
 
   useEffect(() => {
     if (!enabled || secretHex === null) {
-      setSol({balance: null, status: 'loading'});
+      setSol({balance: null, status: 'loading', failure: null});
       setTokens({});
       pollRef.current = () => {};
       return;
@@ -188,20 +192,27 @@ export function useSolanaBalances(
       if (inFlight) return;
       inFlight = true;
       try {
-        const read: SolanaBalancesRead = await readSolanaBalances(secretHex, mintList, ctrl.signal);
+        const read: SolanaBalancesRead = await readSolanaBalances(
+          secretHex,
+          mintList,
+          ctrl.signal,
+        );
         if (!fresh()) return;
         switch (read.sol.kind) {
           case 'lamports':
-            setSol({balance: read.sol.lamports, status: 'ok'});
+            setSol({balance: read.sol.lamports, status: 'ok', failure: null});
             break;
           case 'offline':
             // The seam returns 'offline' only when `solanaRpcUrl()` is empty. Distinct from a failure.
-            setSol({balance: null, status: 'unavailable'});
+            setSol({balance: null, status: 'unavailable', failure: null});
             break;
-          case 'error':
-            // Preserve the prior balance (do NOT zero it). Only the status flips.
-            setSol((prev) => ({balance: prev.balance, status: 'error'}));
+          case 'error': {
+            // Preserve the prior balance (do NOT zero it). Only the status flips — WITH the cause
+            // (captured before the callback: the closure would re-widen the union).
+            const {failure} = read.sol;
+            setSol((prev) => ({balance: prev.balance, status: 'error', failure}));
             break;
+          }
         }
         for (const mint of mintList) {
           const r = read.tokens[mint];
@@ -215,11 +226,22 @@ export function useSolanaBalances(
           applyToken(mint, r);
         }
       } catch (e) {
-        // The seam classifies its own failures; reaching here is a defect in it or an abort.
+        // The seam classifies its own failures and RETHROWS caller aborts (audit F6): an aborted
+        // read is the cleanup path, not a poll failure — classify nothing, log nothing.
+        if (ctrl.signal.aborted || !fresh()) return;
+        // Reaching here with a live signal is a defect in the seam.
         console.warn(`useSolanaBalances poll threw for ${solAddress}:`, e instanceof Error ? e.message : String(e));
+        // The oracle decides the cause — never a hard-coded guess. Wrapped so a defect in the
+        // oracle can never turn a defect here into a crash: if it throws, 'unreachable' stands.
+        let failure: SolanaReadFailure = 'unreachable';
+        try {
+          failure = await classifyTransportFailure();
+        } catch {
+          failure = 'unreachable';
+        }
         if (!fresh()) return;
-        setSol((prev) => ({balance: prev.balance, status: 'error'}));
-        for (const mint of mintList) degrade(mint, 'error', 'unreachable');
+        setSol((prev) => ({balance: prev.balance, status: 'error', failure}));
+        for (const mint of mintList) degrade(mint, 'error', failure);
       } finally {
         inFlight = false;
       }

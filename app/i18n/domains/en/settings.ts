@@ -153,7 +153,8 @@ export type SettingsMessages = {
      * and applied at boot from storage, but reachable from NO screen — so on a phone a dead
      * provider key meant waiting for a store release, which is exactly what the 2026-09-08 outage
      * cost. Same shape as the server row above: a draft, an explicit Apply, and an empty value
-     * meaning "use the one baked into this build".
+     * meaning "follow the relay list again" (R2: the default endpoint is the relay’s proxy route;
+     * an operator-set provider removes dpay from the path).
      *
      * `solanaError` is not written here — `setSolanaRpcUrl` throws its own actionable refusals
      * (not https, a devnet host, unparseable) and the sheet renders those verbatim.
@@ -263,14 +264,14 @@ export const settingsEn: SettingsMessages = {
     show: 'Show advanced settings',
     hide: 'Hide advanced settings',
     hint: 'Server and network endpoints this wallet talks to',
-    serverNote: 'The server your wallet talks to. Changes apply when you tap Apply.',
+    serverNote: 'The servers your wallet talks to, one address per line in priority order. If the first is unreachable, the next one is used. Changes apply when you tap Apply.',
     serverLabel: 'Server',
     serverPlaceholder: 'http://<ip>:8787',
     serverHint: 'The server your wallet talks to',
     apply: 'Apply',
     applyA11y: 'Apply server URL',
     applyHint: 'Switch your wallet to the entered server URL',
-    solanaNote: 'The Solana endpoint this wallet reads balances from and sends payments through. Leave it empty to use the one built into this build.',
+    solanaNote: 'The Solana endpoint this wallet reads balances from and sends payments through. Leave it empty to follow the relay of your server list; set your own provider to take dpay out of the path.',
     solanaLabel: 'Solana endpoint',
     solanaPlaceholder: 'https://<provider>/?api-key=<key>',
     solanaHint: 'The Solana RPC endpoint this wallet uses',

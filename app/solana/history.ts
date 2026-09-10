@@ -313,7 +313,7 @@ function toHistoryRows(
  * ledger). Individual unreadable transactions are logged and counted in `dropped`.
  */
 export async function fetchSolanaHistory(
-  rpcUrl: string,
+  rpcUrl: string | readonly string[],
   ownerAddress: string,
   opts?: SolanaHistoryOpts,
 ): Promise<SolanaHistory> {

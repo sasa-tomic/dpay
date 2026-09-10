@@ -358,8 +358,9 @@ wasm-core:
 # This build ALSO emits the offline shell (sw.js + manifest + icon) and brotli-precompresses every
 # compressible output — see `dpayWebProdAssets` in e2e/vite.config.js; build.rs refuses a dist
 # where a compressible file arrived without its `.br`.
-# The bundle bakes in the Solana RPC endpoint, so check-prod-sol runs first — `--no-probe` because
-# this recipe is on the fully-offline inner loop (see that script's header for the two modes).
+# The bundle derives the Solana RPC endpoint from the relay (R2), so check-prod-sol first asserts
+# that invariant — `--no-probe` because this recipe is on the fully-offline inner loop, and the
+# live route check needs the network (see that script's header for the two modes).
 web:
     node scripts/check-prod-sol.mjs --no-probe
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)

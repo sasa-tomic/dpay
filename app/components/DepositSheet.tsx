@@ -104,7 +104,11 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, fu
   // renders "none"/"no minimum" for the fee/min fields (graceful, not an error).
   useEffect(() => {
     let alive = true;
-    const {signal, cancel} = withTimeout(DEPOSIT_TIMEOUT_MS);
+    // The caller timer sits 1 s STRICTLY AFTER the 20 s grant (DEPOSIT_TIMEOUT_MS — also the armed
+    // walk's attempt-0 deadline when a second relay exists): at a tied 20000/20000 the caller timer,
+    // armed first, wins and a hung primary reads as a CALLER decision — no cooldown, no failover.
+    // Same +1000 classification margin as useBalancePoll; the walk keeps the full 20 s grant.
+    const {signal, cancel} = withTimeout(DEPOSIT_TIMEOUT_MS + 1000);
     (async () => {
       try {
         const i = await depositInfo(relayUrl, currency, signal);

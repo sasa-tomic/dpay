@@ -208,7 +208,7 @@ describe('ringing up a charge', () => {
     // An unregistered route 404s with nothing to say (`DPAY_ENABLE_TILL` unset) — a first-class
     // state with its own instruction. A live till's 404 carries the envelope and a sentence.
     serve(404, null, {unreadable: true});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({kind: 'not-served'});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({kind: 'not-served', addr: RELAY});
 
     serve(404, {statusCode: 404, message: 'Payment link not found', error: 'Not Found'});
     expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({

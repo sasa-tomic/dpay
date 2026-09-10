@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {base, fmtAsset, fmtAssetCompact, usd} from '../lib/format';
+import {fmtAsset, fmtAssetCompact, usd} from '../lib/format';
 import {MAX_DECIMALS} from '../lib/amount';
 import {M} from '../i18n';
 import {BALANCE_TIMEOUT_MS} from './constants';
-import {fetchWithTimeout} from '../services/relay';
+import {relayFetch} from '../services/relay';
 import {SOL_DECIMALS} from '../solana/identity';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {EURC_DECIMALS, EURC_MINT_ADDRESS} from '../solana/tokens';
@@ -336,7 +336,7 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
 // cache, `NetworkSection[]` in memory.
 export async function fetchCurrencies(relayUrl: string, prior: NetworkSection[]): Promise<NetworkSection[]> {
   try {
-    const r = await fetchWithTimeout(`${base(relayUrl)}/api/v1/currencies`, undefined, BALANCE_TIMEOUT_MS);
+    const r = await relayFetch(relayUrl, '/api/v1/currencies', undefined, BALANCE_TIMEOUT_MS);
     if (!r.ok) return prior;
     const j = await r.json();
     const networks = parseNetworkCatalog(j);

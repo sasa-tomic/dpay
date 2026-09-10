@@ -21,12 +21,12 @@ jest.mock('../services/native', () => ({
   },
 }));
 jest.mock('../services/icp', () => ({icStampExpiry: jest.fn()}));
-jest.mock('../services/relay', () => ({fetchWithTimeout: jest.fn()}));
+jest.mock('../services/relay', () => ({relayFetch: jest.fn()}));
 jest.mock('../services/rail', () => ({submitTransfer: jest.fn()}));
 
 import {DpayCore} from '../services/native';
 import {icStampExpiry} from '../services/icp';
-import {fetchWithTimeout} from '../services/relay';
+import {relayFetch} from '../services/relay';
 import {submitTransfer} from '../services/rail';
 import {
   deriveConvertMath,
@@ -164,7 +164,7 @@ describe('fetchConvertQuote — the venue verbatim + a separate impact measureme
   const swapRes = (amountIn: string, amountOut: string, zeroForOne = true) =>
     fakeRes({pool: CONVERT_POOL_PRINCIPAL, token_in: 'a', token_out: 'b', amount_in: amountIn, amount_out: amountOut, zero_for_one: zeroForOne, fee_millionths: 3000, fetched_at: 1});
   test('echoes the venue quote and measures impact against the reference trade', async () => {
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce(swapRes('1000000', '1900000') as never)
       .mockResolvedValueOnce(swapRes('1000', '1901') as never);
     const q = await fetchConvertQuote('http://relay', 'in-ledger', 'out-ledger', '1000000');
@@ -196,8 +196,8 @@ describe('fetchConvertQuote — the venue verbatim + a separate impact measureme
     '10000000000000': '3726151260700', // 100 000 ICP
   };
   const liveCurve = () => {
-    jest.mocked(fetchWithTimeout).mockImplementation((async (url: string) => {
-      const amountIn = new URL(url).searchParams.get('amount_in') ?? '';
+    jest.mocked(relayFetch).mockImplementation((async (_relay: string, path: string) => {
+      const amountIn = new URL(path, 'http://relay.test').searchParams.get('amount_in') ?? '';
       const amountOut = LIVE_ICP_TO_VCHF[amountIn];
       if (amountOut == null) throw new Error(`test curve has no live measurement for amount_in=${amountIn}`);
       return swapRes(amountIn, amountOut);
@@ -232,7 +232,7 @@ describe('fetchConvertQuote — the venue verbatim + a separate impact measureme
     // The reference lost more to flooring than this trade did, so the raw gap is NEGATIVE. A
     // bigger trade cannot get a better unit price out of the same curve, so the honest reading of
     // sub-resolution noise is zero impact — the state the old `price <= refPrice` guard nulled.
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce(swapRes('50000000', '25829008') as never)
       .mockResolvedValueOnce(swapRes('1000000', '516580') as never);
     expect((await fetchConvertQuote('http://relay', 'in', 'out', '50000000')).impactBps).toBe(0);
@@ -240,7 +240,7 @@ describe('fetchConvertQuote — the venue verbatim + a separate impact measureme
 
   test('a pair whose output dwarfs its input is still measured (no rate ceiling)', async () => {
     // Decimals differ per ledger, so out/in carries no bound dpay may assume: 1 unit in ⇒ ~100 out.
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce(swapRes('100000000', '9990000000') as never)
       .mockResolvedValueOnce(swapRes('1000000', '100000000') as never);
     const q = await fetchConvertQuote('http://relay', 'in', 'out', '100000000');
@@ -248,20 +248,20 @@ describe('fetchConvertQuote — the venue verbatim + a separate impact measureme
   });
 
   test('impact is unmeasurable ONLY when the venue answers the reference with zero', async () => {
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce(swapRes('100000000', '40635577') as never)
       .mockResolvedValueOnce(swapRes('1000000', '0') as never);
     expect((await fetchConvertQuote('http://relay', 'in', 'out', '100000000')).impactBps).toBeNull();
   });
 
   test('unreachable relay → the localized quoteUnreachable error', async () => {
-    jest.mocked(fetchWithTimeout).mockRejectedValueOnce(new Error('boom') as never);
+    jest.mocked(relayFetch).mockRejectedValueOnce(new Error('boom') as never);
     await expect(fetchConvertQuote('http://relay', 'i', 'o', '1')).rejects.toThrow(convertEn.errors.quoteUnreachable());
   });
   test('pool refusal (422) and malformed (400) map to their own copy', async () => {
-    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(fakeRes({}, false, 422) as never);
+    jest.mocked(relayFetch).mockResolvedValueOnce(fakeRes({}, false, 422) as never);
     await expect(fetchConvertQuote('http://relay', 'i', 'o', '1')).rejects.toThrow(convertEn.errors.quoteRefused());
-    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(fakeRes({}, false, 400) as never);
+    jest.mocked(relayFetch).mockResolvedValueOnce(fakeRes({}, false, 400) as never);
     await expect(fetchConvertQuote('http://relay', 'i', 'o', '1')).rejects.toThrow(convertEn.errors.quoteUnavailable('400'));
   });
 });
@@ -335,8 +335,8 @@ describe('executeConvert — the §4 state machine', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never);
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    jest.mocked(fetchWithTimeout).mockImplementation(async (url: unknown) =>
-      (String(url).includes('currency=7') ? rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 77}]) : rowsRes([])) as never);
+    jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
+    (String(path).includes('currency=7') ? rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 77}]) : rowsRes([])) as never);
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('done');
     expect(final.outAmountNet).toBe('190000000');
@@ -357,7 +357,7 @@ describe('executeConvert — the §4 state machine', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never) // approve, attempt 2
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never); // swap
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    jest.mocked(fetchWithTimeout).mockResolvedValue(rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 9}]) as never);
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 9}]) as never);
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('done');
     const first = jest.mocked(submitTransfer).mock.calls[0]![0] as {envelopeHex: string; requestIdHex: string};
@@ -403,14 +403,14 @@ describe('executeConvert — the §4 state machine', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never);
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    jest.mocked(fetchWithTimeout).mockResolvedValue(rowsRes([]) as never);
+    jest.mocked(relayFetch).mockResolvedValue(rowsRes([]) as never);
     const pending = await executeConvert(record(), d, OPTS);
     expect(pending.step).toBe('pending_withdrawal');
     const submitsBefore = jest.mocked(submitTransfer).mock.calls.length;
 
     // the payout lands; a resumed run (screen open, executor re-armed) flips it to done
-    jest.mocked(fetchWithTimeout).mockImplementation(async (url: unknown) =>
-      (String(url).includes('currency=7') ? rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 55}]) : rowsRes([])) as never);
+    jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
+    (String(path).includes('currency=7') ? rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '190000000', currency: 7, timestamp: 55}]) : rowsRes([])) as never);
     const done = await executeConvert(pending, d, OPTS);
     expect(done.step).toBe('done');
     expect(done.outAmountNet).toBe('190000000');
@@ -423,8 +423,8 @@ describe('executeConvert — the §4 state machine', () => {
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '1'} as never)
       .mockResolvedValueOnce({kind: 'settled', blockIndex: '2'} as never);
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
-    jest.mocked(fetchWithTimeout).mockImplementation(async (url: unknown) =>
-      (String(url).includes('currency=8') ? rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '100000000', currency: 8, timestamp: 3}]) : rowsRes([])) as never);
+    jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
+    (String(path).includes('currency=8') ? rowsRes([{from: CONVERT_POOL_PRINCIPAL, to: myPrincipal, amount: '100000000', currency: 8, timestamp: 3}]) : rowsRes([])) as never);
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('failed_refunded');
     expect(final.failureCode).toBe('refunded');

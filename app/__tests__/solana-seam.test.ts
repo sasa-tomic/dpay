@@ -286,7 +286,13 @@ describe('solana seam — readSolanaBalances (one request, honest states)', () =
   });
 
   test('an endpoint that ANSWERS NOTHING is reported as unreachable — an offline payer, not a dead rail', async () => {
-    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => Promise.reject(new Error('Network request failed')));
+    // URL-aware mock (the oracle redesign probes the IC ORIGIN, not the relay): the RPC POST fails,
+    // but the probe answers — the phone IS online, so the rail's path is what is down. A mock that
+    // rejected everything would (correctly) classify 'offline' instead.
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn((url: unknown) =>
+      String(url).startsWith('https://unreachable.example')
+        ? Promise.reject(new Error('Network request failed'))
+        : Promise.resolve({ok: true, status: 200} as unknown as Response));
     const r = await readBalances([USDC_MINT], 'https://unreachable.example');
     expect(r.sol).toEqual({kind: 'error', failure: 'unreachable'});
     expect(r.tokens[USDC_MINT]).toEqual({kind: 'error', failure: 'unreachable'});
@@ -839,6 +845,76 @@ describe('solana seam — broadcastSolPayment (money-critical freshness state ma
     expect(txReads).toBe(1); // confirmed → exactly one settle re-read before SETTLED
   });
 
+  test('cross-home resubmit: A transport-dies after "accepting", B answers "already processed" → NOT REJECTED — confirmation decides', async () => {
+    // R2 receipt honesty: the broadcast walk resubmits IDENTICAL bytes when home A dies
+    // mid-broadcast. A may have accepted them; home B's "Transaction already processed/known"
+    // RPC error used to classify RECEIPT_REJECTED — a FALSE rejection for a transaction that
+    // may be on chain right now. The invariant: "already" ⇒ submitted-unknown at broadcast
+    // time; the confirm loop's signature status settles it. Here B confirms the signature and
+    // getTransaction verifies the canonical body → SETTLED, the strongest disproof of a
+    // broadcast-time rejection. Drives the REAL two-home walk through the production candidate
+    // derivation (relay bases + proxy path), fetch mocked per-origin.
+    const request = solReqV2();
+    const {payment, sig} = signAndExtractSig(request);
+    const DEAD = 'https://dead-relay.example';
+    const LIVE = 'https://live-relay.example';
+    const volleys: {home: string; method: string}[] = [];
+    (globalThis as {fetch: unknown}).fetch = async (url: unknown, init?: {body?: string}) => {
+      const u = String(url);
+      const method = (JSON.parse(String(init?.body)) as {method: string}).method;
+      const home = u.startsWith(DEAD) ? DEAD : u.startsWith(LIVE) ? LIVE : null;
+      if (home === null) throw new Error(`unexpected fetch to ${u}`);
+      volleys.push({home, method});
+      if (home === DEAD) throw new TypeError('fetch failed'); // transport-dead for EVERY call
+      const double = (payload: unknown): Response => ({
+        ok: true, status: 200,
+        headers: {get: () => null},
+        json: () => Promise.resolve(payload),
+        text: () => Promise.resolve(JSON.stringify(payload)),
+      } as unknown as Response);
+      if (method === 'sendTransaction') {
+        // The "already" answer as the walk surfaces it: 2xx + JSON-RPC error body →
+        // SolanaEndpointRefused('solana rpc: Transaction already processed').
+        return double({jsonrpc: '2.0', id: 1, error: {code: -32000, message: 'Transaction already processed'}});
+      }
+      const result = (() => {
+        switch (method) {
+          case 'isBlockhashValid': return {context: {slot: request.slot + 1}, value: true};
+          case 'getBlockHeight': return request.lvh - 10; // never past lvh → expiry gates never fire
+          case 'getSignatureStatuses': return {context: {slot: request.slot + 100}, value: [{confirmationStatus: 'confirmed'}]};
+          case 'getTransaction': return txDetailFromMessage(canonicalFor(request));
+          default: throw new Error(`unexpected rpc method ${method}`);
+        }
+      })();
+      return double({jsonrpc: '2.0', id: 1, result});
+    };
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL?: string};
+    const prev = g.__DPAY_TEST_SOLANA_RPC_URL;
+    let p: Promise<{status: number; rid: string; sig: string}> | undefined;
+    try {
+      delete g.__DPAY_TEST_SOLANA_RPC_URL; // undefined ⇒ constants falls through to the relay-derived list
+      jest.isolateModules(() => {
+        const constants = require('../config/constants');
+        constants.setRelayBaseForSolana([DEAD, LIVE]); // the production two-home derivation
+        const {broadcastSolPayment} = require('../solana');
+        p = broadcastSolPayment(request, buildUri(request), payment, new AbortController().signal);
+      });
+      const receipt = await p!;
+      expect(receipt.status).toBe(RECEIPT_SETTLED); // NOT REJECTED — "already" is never a broadcast-time rejection
+      expect(receipt.sig).toBe(sig);
+      // The walk DID resubmit the broadcast to B after A died — that resubmit is the whole
+      // scenario, and B's "already" answer came from a REAL 2xx JSON-RPC error body.
+      const sends = volleys.filter(v => v.method === 'sendTransaction');
+      expect(sends.map(v => v.home)).toEqual([DEAD, LIVE]);
+      // Every other volley (freshness + confirm) also walked DEAD → LIVE.
+      expect(volleys.every(v => v.home === DEAD || v.home === LIVE)).toBe(true);
+      expect(volleys.some(v => v.method === 'getSignatureStatuses' && v.home === LIVE)).toBe(true);
+    } finally {
+      if (prev === undefined) delete g.__DPAY_TEST_SOLANA_RPC_URL;
+      else g.__DPAY_TEST_SOLANA_RPC_URL = prev;
+    }
+  });
+
   test('settle gate: confirmed but getTransaction THROWS each poll → transient, keeps polling to deadline → UNREACHABLE (never a decline)', async () => {
     const request = solReqV2();
     const {payment, sig} = signAndExtractSig(request);
@@ -1232,5 +1308,91 @@ describe('solana seam — sendSolanaPay (a scanned Solana Pay transfer)', () => 
       );
     })).rejects.toThrow();
     expect(seen).toEqual(['SigSpayUnknown']);
+  });
+});
+
+describe('solana seam — getSolanaHistory (classified at the seam, never thrown raw)', () => {
+  // R3 (spec 2026-09-09 §"What the app says…"): a failing history read must not reach the UI as a
+  // raw throw the hook swallows. The seam classifies the cause at the transport boundary — the
+  // refusal BRAND first (the endpoint answered, did not serve us), then the offline/unreachable
+  // oracle (driven hermetically here through `__DPAY_TEST_SOLANA_CONNECTIVITY`, so no probe fetch
+  // ever runs) — and answers it as a value the hook can mark the list stale with. The ONE throw
+  // left is an ABORT, which must survive the seam untouched.
+  type Hist = {kind: string; rows?: unknown[]; dropped?: number; failure?: string};
+  const readHistory = (url: string, signal?: AbortSignal) => {
+    const g = globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_URL: string};
+    let p: Promise<Hist> | undefined;
+    jest.isolateModules(() => {
+      g.__DPAY_TEST_SOLANA_RPC_URL = url;
+      const {getSolanaHistory} = require('../solana');
+      p = (getSolanaHistory as (a: string, s?: AbortSignal) => Promise<Hist>)(MERCHANT_ADDRESS, signal);
+    });
+    g.__DPAY_TEST_SOLANA_RPC_URL = '';
+    return p!;
+  };
+  const setConnectivity = (v: 'offline' | 'online') => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'}).__DPAY_TEST_SOLANA_CONNECTIVITY = v;
+  };
+
+  afterEach(() => {
+    delete (globalThis as unknown as {__DPAY_TEST_SOLANA_CONNECTIVITY?: 'offline' | 'online'}).__DPAY_TEST_SOLANA_CONNECTIVITY;
+  });
+
+  test('offline (RPC URL empty) answers offline — no network, no dynamic import', async () => {
+    let called = false;
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() => { called = true; return Promise.resolve({}); });
+    const {getSolanaHistory} = require('../solana');
+    const r = await (getSolanaHistory as (a: string) => Promise<Hist>)(MERCHANT_ADDRESS);
+    expect(r).toEqual({kind: 'offline'});
+    expect(called).toBe(false); // the offline inner loop never reaches the network module
+  });
+
+  test('a clean read answers history with the reader\'s rows/dropped shape', async () => {
+    // Empty pages: the reader's PARSING has its own suite (solana-history.test.ts); here only the
+    // RESULT ENVELOPE is under test — a discriminated 'history' value, not a bare SolanaHistory.
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignaturesForAddress: () => [],
+    };
+    const r = await readHistory('https://hist-clean.example');
+    expect(r).toEqual({kind: 'history', rows: [], dropped: 0});
+  });
+
+  test('an endpoint that REFUSES is refused — the brand outranks the oracle, no probe needed', async () => {
+    // HTTP 429 is the exact answer the shipped key gives with its quota spent; the rpc client
+    // throws its branded refusal and the seam maps the brand to 'refused'.
+    (globalThis as unknown as {fetch: unknown}).fetch = jest.fn(() =>
+      Promise.resolve({ok: false, status: 429, headers: {get: () => null}, text: () => Promise.resolve('max usage reached')} as unknown as Response));
+    const r = await readHistory('https://hist-refusing.example');
+    expect(r).toEqual({kind: 'error', failure: 'refused'});
+  });
+
+  test('a plain transport failure while the phone is OFFLINE is offline', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignaturesForAddress: () => { throw new Error('Network request failed'); },
+    };
+    setConnectivity('offline');
+    const r = await readHistory('https://hist-offline.example');
+    expect(r).toEqual({kind: 'error', failure: 'offline'});
+  });
+
+  test('a plain transport failure while the phone is ONLINE is unreachable', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignaturesForAddress: () => { throw new Error('Network request failed'); },
+    };
+    setConnectivity('online');
+    const r = await readHistory('https://hist-unreachable.example');
+    expect(r).toEqual({kind: 'error', failure: 'unreachable'});
+  });
+
+  test('an ABORTED signal rethrows untouched — a cancellation is not a rail fact', async () => {
+    (globalThis as unknown as {__DPAY_TEST_SOLANA_RPC_STUB?: SolanaRpcStub}).__DPAY_TEST_SOLANA_RPC_STUB = {
+      getSignaturesForAddress: () => { throw new Error('aborted by test'); },
+    };
+    const ctrl = new AbortController();
+    ctrl.abort();
+    // NOT a classified value: the raw rejection itself must cross the seam (the override below
+    // proves classification was available and deliberately not taken).
+    setConnectivity('offline');
+    await expect(readHistory('https://hist-abort.example', ctrl.signal)).rejects.toThrow('aborted by test');
   });
 });

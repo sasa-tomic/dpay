@@ -3,9 +3,10 @@ import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
 import {assetTestKey, type CurrencyDescriptor} from '../config/catalog';
-import {chipLabel, type SelectableAsset} from '../config/assets';
+import {chipLabel, prettyNetwork, type SelectableAsset} from '../config/assets';
 import {HistoryRow} from './HistoryRow';
 import type {AssetId, Txn} from '../lib/types';
+import type {SolanaReadFailure} from '../solana';
 
 // The chip's stable testID key, dispatched on rail. An IC row keeps the CATALOG's `assetTestKey`
 // (the id the existing selectors are written against); a Solana row uses the SelectableAsset's own
@@ -31,7 +32,13 @@ function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): s
 // non-zero, the honesty note `M.wallet.ledger.dropped` renders in BOTH branches (empty list and
 // populated) — the unreadable transactions still exist on-chain, and a short (or empty) list must
 // never read as the whole truth. Nothing renders when it is 0.
-export function Ledger({history, catalog, assets, dropped = 0, onOpenReceipt}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number; onOpenReceipt: (t: Txn) => void}) {
+//
+// `staleFailure` (optional, default null): why the LAST Solana history poll produced no fact
+// (`SolanaReadFailure`, classified at the seam — `useSolanaHistory.failure`). When set, the rows
+// shown are the last known truth and the `sol-history-stale` line says so (R3, spec 2026-09-09
+// §"What the app says…": no cached value presented as current). Null (and the rail-off 'offline'
+// case, which never sets it) renders nothing — the note is purely conditional, like `dropped`.
+export function Ledger({history, catalog, assets, dropped = 0, staleFailure = null, onOpenReceipt}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number; staleFailure?: SolanaReadFailure | null; onOpenReceipt: (t: Txn) => void}) {
   const [filter, setFilter] = useState<AssetId | null>(null);
   if (history.length === 0) {
     return (
@@ -40,6 +47,9 @@ export function Ledger({history, catalog, assets, dropped = 0, onOpenReceipt}: {
         <Text style={S.dim2}>{M.wallet.ledger.emptyHint}</Text>
         {dropped > 0 ? (
           <Text style={S.dim2} testID="ledger-dropped-note">{M.wallet.ledger.dropped(dropped)}</Text>
+        ) : null}
+        {staleFailure != null ? (
+          <Text style={S.dim2} testID="sol-history-stale">{M.errors.rail.historyStale(prettyNetwork('solana'))}</Text>
         ) : null}
       </View>
     );
@@ -54,6 +64,9 @@ export function Ledger({history, catalog, assets, dropped = 0, onOpenReceipt}: {
       <Text style={S.histTitle}>{M.wallet.ledger.recent}</Text>
       {dropped > 0 ? (
         <Text style={S.dim2} testID="ledger-dropped-note">{M.wallet.ledger.dropped(dropped)}</Text>
+      ) : null}
+      {staleFailure != null ? (
+        <Text style={S.dim2} testID="sol-history-stale">{M.errors.rail.historyStale(prettyNetwork('solana'))}</Text>
       ) : null}
       {showFilter ? (
         <View style={S.filterRow}>

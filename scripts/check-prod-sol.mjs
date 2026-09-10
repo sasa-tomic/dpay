@@ -1,40 +1,40 @@
 #!/usr/bin/env node
-// check-prod-sol — release gate for the Solana RPC endpoint that every shipped bundle bakes in.
+// check-prod-sol — release gate for the Solana RPC path every shipped build talks to (R2, spec
+// 2026-09-09-relay-ha-and-solana-proxy §"Direction 1 — the proxy").
 //
-// `SOLANA_RPC_BAKED` in app/config/constants.ts is the endpoint a FRESH INSTALL talks to. An
-// operator can point their own device elsewhere at runtime (`setSolanaRpcUrl`, persisted under
-// `SOLANA_RPC_STORAGE_KEY`), but nobody else's device is configured, so the baked value is what a
-// user's phone — and every browser session at /wallet — will use. This gate reads that literal and
-// refuses to ship two failure modes:
+// Until R2 this gate read the provider URL + API key baked into app/config/constants.ts and
+// refused to ship a public/non-mainnet host or a dead endpoint. R2 removed that literal — the
+// client's DEFAULT endpoint is now the RELAY's proxy route (`${relayBase}/api/v1/solana/rpc`)
+// and the provider key lives in relay configuration, never in the bundle. So the gate's two
+// halves became:
 //
-//   STATIC    the endpoint's HOST is one no release may point at (public Solana cluster endpoints,
-//             or any non-mainnet cluster). Matched on the PARSED HOST against the rule set below,
-//             never as a substring of the whole URL: the URL carries an API key, and a key is not
-//             allowed to decide (or dodge) a build.
-//   LIVENESS  the endpoint is not answering RIGHT NOW. A string check is blind to an exhausted key:
-//             the 2026-09-08 outage ran for hours with this gate green while the endpoint returned
-//             HTTP 429. One `getHealth` POST closes that.
+//   STATIC   the R2 invariant itself: app/config/constants.ts must carry the proxy path and must
+//            NOT carry a provider URL/key literal (a re-baked key is exactly the regression this
+//            cutover exists to make impossible).
+//   LIVE     the relay that will serve the rail must answer: GET /api/v1/version (names the
+//            build — and proves reachability before we blame the route), then POST
+//            /api/v1/solana/rpc {jsonrpc:'2.0',id:1,method:'getHealth'} must return 2xx with a
+//            healthy JSON-RPC result. 404 on the route = the relay is NOT deployed with the R2
+//            proxy; any other non-2xx, an unreachable relay, or an RPC-level error is the same
+//            refusal: this build would ship a wallet whose default Solana path is dark.
 //
-// TWO MODES. The default is the strict one, so a ship path that forgets a flag fails loudly rather
-// than skipping the check in silence:
+// TWO MODES (contract unchanged):
 //
-//   node scripts/check-prod-sol.mjs              STRICT (default) — static + liveness. Used by every
-//                                                path that ships a bundle: scripts/build-apk.sh (the
-//                                                APK) and deploy/build.sh (the relay image, i.e. the
-//                                                WEB bundle served at /wallet).
+//   node scripts/check-prod-sol.mjs              STRICT (default) — static + live. Used by every
+//                                                path that ships a bundle: scripts/build-apk.sh
+//                                                (the APK) and deploy/build.sh (the relay image,
+//                                                i.e. the WEB bundle served at /wallet).
 //   node scripts/check-prod-sol.mjs --no-probe   STATIC ONLY, no network. Exactly one caller: the
 //                                                `web` recipe in justfile. That recipe is on the
-//                                                fully-offline inner loop (test-relay, test-live,
-//                                                web-smoke, web-scan → verify), where a network call
+//                                                fully-offline inner loop, where a network call
 //                                                would break the offline non-negotiable.
 //
-// There is no env-var skip, no "probe failed, continue anyway", no fallback endpoint. A probe that
-// cannot run is a failed build.
+// The relay base comes from DPAY_RELAY_BASE (default https://dpay.kalaj.org — the same origin
+// the shipped relay list defaults to). Every live request carries a hard timeout: a build box
+// that cannot reach the relay fails LOUDLY with the reason, never hangs.
 //
-// DPAY_SOL_RPC is an ASSERTION, not an injection. Setting it does NOT change the endpoint the build
-// bakes in and does NOT excuse a host the rule set refuses; it only requires the literal in
-// app/config/constants.ts to equal it exactly, so an operator who flipped the constant elsewhere
-// finds out here. The baked constant stays the single source of the default.
+// There is no env-var skip, no "probe failed, continue anyway", no fallback endpoint. A probe
+// that cannot run is a failed build.
 //
 // Exit 0 = safe to ship. Exit 1 = every reason, listed.
 import {readFileSync} from 'node:fs';
@@ -42,6 +42,7 @@ import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
 
 const PROBE_TIMEOUT_MS = 10_000;
+const RELAY_BASE = (process.env.DPAY_RELAY_BASE ?? 'https://dpay.kalaj.org').replace(/\/+$/, '');
 
 const probeEnabled = !process.argv.includes('--no-probe');
 const unknown = process.argv.slice(2).filter((a) => a !== '--no-probe');
@@ -50,144 +51,126 @@ if (unknown.length) {
   process.exit(1);
 }
 
+// Collect every reason before exiting (same idiom as scripts/check-web-prod-seams.mjs): an operator
+// deserves the whole verdict in one run, not one failure per build. `notes` carries the halves that
+// PASSED, so a failing run still says which half was fine.
+const findings = [];
+const notes = [];
+
+// ── STATIC: the R2 invariant ─────────────────────────────────────────────────────────────────
 const here = dirname(fileURLToPath(import.meta.url));
 const constantsPath = join(here, '..', 'app', 'config', 'constants.ts');
 const src = readFileSync(constantsPath, 'utf8');
 
-// Extract the baked default from: export const SOLANA_RPC_BAKED = ((...).__DPAY_TEST_SOLANA_RPC_URL ?? '<url>');
-const m = src.match(/export const SOLANA_RPC_BAKED\s*=[\s\S]*?\?\?\s*'([^']+)'/);
-if (!m) {
-  console.error('check-prod-sol: FAIL — could not find the SOLANA_RPC_BAKED default in app/config/constants.ts');
-  process.exit(1);
-}
-const baked = m[1];
-
-// The rule set. One list, one predicate shape, evaluated against the parsed HOST — so the devnet
-// refusal and the public-endpoint refusal are the same kind of statement about the same thing.
-const HOST_RULES = [
-  {
-    // Every public cluster endpoint Solana operates lives under solana.com — api.mainnet-beta,
-    // api.mainnet (the spelling their docs now use), api.devnet, api.testnet, and whatever they
-    // name the next one. They are rate-limited by design, below what this app's polling asks for
-    // (measured: docs/specs/2026-09-08-solana-rpc-plan.md). A paid provider is never on solana.com,
-    // so the whole domain is the honest expression of "this is the public endpoint" — and it is why
-    // this matches on the parsed host, not on one spelling of one name.
-    reason: 'a public Solana-operated cluster endpoint (anything under solana.com)',
-    hit: (host) => host === 'solana.com' || host.endsWith('.solana.com'),
-    fix: 'Point SOLANA_RPC_BAKED at a private mainnet provider (Helius / QuickNode / Triton).',
-  },
-  {
-    // Any provider's devnet or testnet host, not just Solana's own: mainnet SOL sent to a key the
-    // app is reading on devnet is invisible, and that is a fund-loss trap in a release build.
-    reason: 'a non-mainnet cluster (the host names devnet/testnet)',
-    hit: (host) => host.includes('devnet') || host.includes('testnet'),
-    fix: 'Point SOLANA_RPC_BAKED at the provider\'s MAINNET host before building a release.',
-  },
-];
-
-/** The endpoint's HOST, never its URL: the shipped RPC URL carries an API key, and a build log is
- *  exactly where a key must not appear. Same rule as `hostOf` in app/solana/rpc.ts. */
-const hostOf = (url) => new URL(url).host;
-
-/** An endpoint's own words with the URL's secrets taken out: the key rides in the query string
- *  (Helius) or a path segment (QuickNode), and a provider echoing the request must not put it in a
- *  build log. Collapsed to one short line — this is a diagnosis, not a body dump. */
-function scrub(text, url) {
-  const u = new URL(url);
-  let out = text;
-  for (const v of u.searchParams.values()) if (v) out = out.split(v).join('<redacted>');
-  for (const seg of u.pathname.split('/')) if (seg.length >= 8) out = out.split(seg).join('<redacted>');
-  return out.replace(/\s+/g, ' ').trim().slice(0, 200);
-}
-
-/** POST getHealth once — no retry loop: this is a build gate, and a provider that needs a second
- *  ask is already a provider this build should not ship. Returns null when healthy, else the
- *  reason, host-named. */
-async function probe(url) {
-  const host = hostOf(url);
-  let r;
-  try {
-    r = await fetch(url, {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'getHealth'}),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-  } catch (e) {
-    const why = e?.name === 'TimeoutError' ? `did not answer within ${PROBE_TIMEOUT_MS} ms` : `is unreachable: ${e?.message ?? e}`;
-    return `${host} ${why}`;
-  }
-  const body = scrub(await r.text().catch((e) => `<body unreadable: ${e?.message ?? e}>`), url);
-  if (r.status === 429) return `${host} answered HTTP 429 — the key is rate-limited or out of quota: ${body}`;
-  if (!r.ok) return `${host} answered HTTP ${r.status}: ${body}`;
-  let j;
-  try {
-    j = JSON.parse(body);
-  } catch {
-    return `${host} answered HTTP ${r.status} with a non-JSON body: ${body}`;
-  }
-  if (j.error) return `${host} returned an RPC error: ${j.error.message ?? JSON.stringify(j.error)}`;
-  if (j.result !== 'ok') return `${host} getHealth returned ${JSON.stringify(j.result)}, not "ok" — the node is not healthy`;
-  return null;
-}
-
-// Collect every reason before exiting (same idiom as scripts/check-web-prod-seams.mjs): an operator
-// deserves the whole verdict in one run, not one failure per build. `notes` carries the halves that
-// PASSED, so a failing run still says which half was fine — "wrong host, live endpoint" and "wrong
-// host, dead endpoint" are different problems and the operator should not have to guess which.
-const findings = [];
-const notes = [];
-
-const expected = process.env.DPAY_SOL_RPC;
-if (expected !== undefined && baked !== expected) {
-  // Neither value is printed: both carry an API key. The operator holds both already.
+if (/helius|api-key=/i.test(src)) {
   findings.push([
-    `the baked SOLANA_RPC_BAKED default (host ${URL.canParse(baked) ? hostOf(baked) : '<unparseable>'}) is not the value DPAY_SOL_RPC asserts`,
-    '    Edit app/config/constants.ts so the `??` default matches DPAY_SOL_RPC exactly, then re-run.',
+    'app/config/constants.ts carries a provider URL/API-key literal again',
+    '    R2 moved the provider key to relay configuration; it must never ship in a client bundle.',
+    '    The default derives from the relay base (setRelayBaseForSolana / SOLANA_RPC_PROXY_PATH).',
   ]);
 }
-
-if (!URL.canParse(baked)) {
+if (!src.includes("export const SOLANA_RPC_PROXY_PATH = '/api/v1/solana/rpc'")) {
   findings.push([
-    'the baked SOLANA_RPC_BAKED default is not a parseable URL, so no host can be checked and no endpoint can be probed',
-    '    Fix the `??` default in app/config/constants.ts.',
+    'the derived Solana proxy path is missing or changed in app/config/constants.ts',
+    "    Expected `export const SOLANA_RPC_PROXY_PATH = '/api/v1/solana/rpc'` — the fixed route the",
+    '    relay\u2019s R2 proxy serves. If the route moved, update this gate AND the relay together.',
   ]);
-} else {
-  const host = hostOf(baked);
-  for (const rule of HOST_RULES) {
-    if (rule.hit(host)) findings.push([`the baked Solana RPC host is ${host} — ${rule.reason}`, `    ${rule.fix}`]);
-  }
-  // Probed even when a rule already refused the host: two independent facts, and the operator
-  // should learn both in one run. Skipped only when there is no URL to probe (above).
-  if (probeEnabled) {
-    const dead = await probe(baked);
-    if (!dead) {
-      notes.push(`liveness: ${host} answered getHealth "ok"`);
+} else if (!/helius|api-key=/i.test(src)) {
+  notes.push('static: constants.ts derives the endpoint from the relay base — no provider key in the client');
+}
+
+// ── LIVE: the relay that serves the rail ─────────────────────────────────────────────────────
+/** One fetch under a hard deadline — the offline-safe contract: an unreachable or hung relay
+ *  fails LOUDLY with the reason, never stalls the build. */
+async function timedFetch(url, init) {
+  return fetch(url, {...init, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)});
+}
+
+/** The failure wording for a fetch that threw, timeout named as a timeout. */
+const why = (e) => (e?.name === 'TimeoutError'
+  ? `did not answer within ${PROBE_TIMEOUT_MS} ms`
+  : `is unreachable: ${e?.message ?? e}`);
+
+/** Collapse a body to one short diagnosis line — this is a verdict, not a body dump. */
+const oneline = (text) => text.replace(/\s+/g, ' ').trim().slice(0, 200);
+
+if (probeEnabled) {
+  // 1. Version — proves the relay is reachable at all and names the build that would serve the rail.
+  let relayAnswered = false;
+  try {
+    const r = await timedFetch(`${RELAY_BASE}/api/v1/version`);
+    const body = oneline(await r.text().catch((e) => `<body unreadable: ${e?.message ?? e}>`));
+    if (!r.ok) {
+      findings.push([`the relay at ${RELAY_BASE} answered HTTP ${r.status} on /api/v1/version: ${body}`]);
     } else {
-      findings.push([
-        `the baked Solana RPC endpoint is not serving: ${dead}`,
-        '    This build would ship a wallet that cannot read a Solana balance or send SOL/USDC.',
-        '    Rotate or renew the provider key (or switch provider), put the new URL in the `??`',
-        '    default of app/config/constants.ts, and re-run this build.',
-        '    Do NOT reach for --no-probe: it exists for the offline inner loop (`just web`) only.',
-      ]);
+      relayAnswered = true;
+      let v = null;
+      try { v = JSON.parse(body); } catch { /* non-JSON version body — noted without its fields */ }
+      notes.push(v?.commit
+        ? `relay: ${RELAY_BASE} (commit ${v.commit}${v.commit_date ? `, ${v.commit_date}` : ''})`
+        : `relay: ${RELAY_BASE} answered /api/v1/version (non-JSON body)`);
+    }
+  } catch (e) {
+    findings.push([
+      `the relay at ${RELAY_BASE} ${why(e)} — the Solana proxy cannot be probed`,
+      '    A build box that cannot reach the relay cannot ship the rail it serves. Fix connectivity',
+      '    or point DPAY_RELAY_BASE at the relay this build will talk to, then re-run.',
+    ]);
+  }
+
+  // 2. The proxy route itself. Only probed once the relay ANSWERED something — a dead relay would
+  //    404 everywhere, and one loud connectivity reason is enough.
+  if (relayAnswered) {
+    try {
+      const r = await timedFetch(`${RELAY_BASE}/api/v1/solana/rpc`, {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({jsonrpc: '2.0', id: 1, method: 'getHealth'}),
+      });
+      const body = oneline(await r.text().catch((e) => `<body unreadable: ${e?.message ?? e}>`));
+      if (r.status === 404) {
+        findings.push([
+          `${RELAY_BASE} answered HTTP 404 on /api/v1/solana/rpc — this relay is NOT deployed with the R2 proxy`,
+          '    Deploy the relay build that serves the Solana RPC proxy (spec 2026-09-09 §"Direction 1"),',
+          '    then re-run this build. For the FIRST cutover the live relay predates this route: deploy',
+          '    the new relay image to a staged instance and point DPAY_RELAY_BASE at it for this build',
+          '    (docs/OPS.md §3). A wallet pointing at a relay without the route ships a dark Solana rail.',
+        ]);
+      } else if (!r.ok) {
+        findings.push([`the Solana proxy at ${RELAY_BASE} answered HTTP ${r.status}: ${body}`]);
+      } else {
+        let j = null;
+        try { j = JSON.parse(body); } catch {
+          findings.push([`the Solana proxy at ${RELAY_BASE} answered HTTP ${r.status} with a non-JSON body: ${body}`]);
+        }
+        if (j !== null) {
+          if (j.error) {
+            findings.push([`the Solana proxy at ${RELAY_BASE} returned an RPC error: ${j.error.message ?? JSON.stringify(j.error)}`]);
+          } else if (j.result !== 'ok') {
+            findings.push([`the Solana proxy at ${RELAY_BASE}: getHealth returned ${JSON.stringify(j.result)}, not "ok" — the upstream node is not healthy`]);
+          } else {
+            notes.push('liveness: POST /api/v1/solana/rpc getHealth \u2192 "ok"');
+          }
+        }
+      }
+    } catch (e) {
+      findings.push([`the Solana proxy at ${RELAY_BASE} ${why(e)}`]);
     }
   }
 }
 
 if (findings.length) {
-  console.error('check-prod-sol: FAIL — this endpoint must not ship:');
+  console.error('check-prod-sol: FAIL — this Solana path must not ship:');
   for (const [head, ...rest] of findings) {
-    console.error(`  ✗ ${head}`);
+    console.error(`  \u2717 ${head}`);
     for (const line of rest) console.error(line);
   }
-  for (const n of notes) console.error(`  · ${n}`);
+  for (const n of notes) console.error(`  \u00b7 ${n}`);
   process.exit(1);
 }
 
-const host = hostOf(baked);
 console.log(
   probeEnabled
-    ? `check-prod-sol: PASS — ${host} is a private mainnet host and answered getHealth "ok"`
-    : `check-prod-sol: PASS (static only, --no-probe) — ${host} is a private mainnet host; liveness NOT checked`,
+    ? `check-prod-sol: PASS — ${RELAY_BASE} serves /api/v1/solana/rpc (getHealth "ok") and constants.ts carries no provider key`
+    : `check-prod-sol: PASS (static only, --no-probe) — constants.ts derives the relay proxy path and carries no provider key; the live route was NOT checked`,
 );

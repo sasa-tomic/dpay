@@ -330,7 +330,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
       <InstructionPanel
         testID="till-failed"
         title={M.receive.till.failedTitle}
-        body={failureBody(phase.outcome, relayHost(relayUrl), fmtAsset(rung ?? '0', 2, CHF))}
+        body={failureBody(phase.outcome, fmtAsset(rung ?? '0', 2, CHF))}
         primaryLabel={M.receive.till.tryAgain}
         onPrimary={reset}
       />
@@ -476,9 +476,11 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   );
 }
 
-/** The host a merchant would name when they ask why their till did not answer — the relay they are
- *  pointed at. A URL this app could not parse falls back to the setting's own text, because an
- *  unparseable relay URL is exactly the thing the message needs to show them. */
+/** The host a merchant would name when they ask why their till did not answer — the relay that was
+ *  actually ASKED (the outcome's own address(es): under a walk that need not be the preferred
+ *  URL, and once a session is pinned it never is). A URL this app could not parse falls back to
+ *  the setting's own text, because an unparseable relay URL is exactly the thing the message
+ *  needs to show them. */
 function relayHost(relayUrl: string): string {
   try {
     return new URL(relayUrl).host;
@@ -489,11 +491,14 @@ function relayHost(relayUrl: string): string {
 }
 
 /** Why the ring-up did not happen, in the merchant's terms. Each arm ends somewhere different: turn
- *  the till on, check the connection, fix what the till named, or stop trusting this code. */
-function failureBody(outcome: Exclude<TillOpenOutcome, {kind: 'open'}>, host: string, rung: string): string {
+ *  the till on, check the connection, fix what the till named, or stop trusting this code. The
+ *  addresses come from the OUTCOME (the relay that answered / did not answer), never from the
+ *  wallet's preferred URL — a walk or a pin may have made a different relay the one that owes the
+ *  merchant an explanation. */
+function failureBody(outcome: Exclude<TillOpenOutcome, {kind: 'open'}>, rung: string): string {
   switch (outcome.kind) {
-    case 'not-served': return M.receive.till.notServed(host);
-    case 'unreachable': return M.receive.till.unreachable(host);
+    case 'not-served': return M.receive.till.notServed(relayHost(outcome.addr));
+    case 'unreachable': return M.receive.till.unreachable(outcome.tried.map(relayHost).join(', '));
     case 'unsigned': return M.receive.till.unsigned;
     case 'mispriced': return M.receive.till.mispriced(rung, outcome.quoted);
     case 'refused':
@@ -508,7 +513,10 @@ function failureBody(outcome: Exclude<TillOpenOutcome, {kind: 'open'}>, host: st
  *  the relay's own sentence names the block that paid it. */
 function cancelRefusal(outcome: Exclude<TillVoidOutcome, {kind: 'cancelled'}>): string {
   switch (outcome.kind) {
-    case 'unreachable': return M.receive.till.cancelUnreachable;
+    // Wave-2: the SAME host attribution as the open path — the outcome carries the addresses
+    // actually tried (the pin alone, or the whole walk), so the cashier reads WHO did not
+    // answer instead of a generic "the till" that blames nobody and helps nobody.
+    case 'unreachable': return M.receive.till.cancelUnreachable(outcome.tried.map(relayHost).join(', '));
     case 'unsigned': return M.receive.till.unsigned;
     case 'refused':
       return outcome.said !== null

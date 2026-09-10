@@ -32,7 +32,7 @@ import {
   solanaAssetsOf,
   testnetDisplayName,
 } from './catalog';
-import {IS_SOLANA_DEVNET, PRACTICE_CURRENCY, solanaRpcUrl} from './constants';
+import {isSolanaDevnet, PRACTICE_CURRENCY, solanaRpcUrl} from './constants';
 import {parseDecimalToUnits} from '../lib/amount';
 import {normaliseNetwork, type PayLink} from '../lib/deepLink';
 import {type AssetId} from '../lib/types';
@@ -481,7 +481,7 @@ export function solanaTokenCoherent(rpcUrl: string, isDevnet: boolean, mint: str
 }
 
 export function solanaTokenAvailable(mint: string | null): boolean {
-  return solanaTokenCoherent(solanaRpcUrl(), IS_SOLANA_DEVNET, mint);
+  return solanaTokenCoherent(solanaRpcUrl(), isSolanaDevnet(), mint);
 }
 
 // The active-rail chip + header balance label. Returns the bare asset `symbol` UNLESS another
@@ -574,17 +574,21 @@ export function solPayGate(
 //      settle — and the payer who does hold the account is the common case. So the gate never
 //      blocks; it returns a state the surface is obliged to disclose, which is precisely why that
 //      state is not spelled 'allow'.
-//   3. NO fact AND the endpoint ANSWERED and did not serve us ('refused', or 'unreadable' bytes —
+//   3. NO fact AND the RAIL is why ('refused' — the endpoint ANSWERED and did not serve us;
+//      'unreadable' bytes it served that cannot be trusted; 'unreachable' — nothing answered on
+//      the rail's path while the phone IS online, proven by the IC-boundary probe answering —
 //      `SolanaReadFailure` in app/solana.ts) is its OWN state: this device is online and the RAIL
 //      is what is broken. That is the 2026-09-08 outage exactly, and it is the case where "we
 //      could not check" has to say WHY, because the user can neither wait it out nor fix it by
-//      finding signal.
+//      finding signal — telling a phone that IS online to "retry when you have signal" (the
+//      plain-'unverified' advice) would be wrong advice for exactly that cause.
 //
 // What the caller owes the user (the 2026-08-29 every-step-instruction rule): on either unverified
 // state, name the token, say the account could not be checked, say what happens if it does not
 // exist (the payment cannot settle), and say what to do — 'unverified' means try again when the
-// wallet has signal; 'unverified-rail-down' means the Solana endpoint itself is refusing this
-// wallet, so the account can only be confirmed or created (Receive ▸ My address) once it answers.
+// wallet has signal; 'unverified-rail-down' means the Solana rail itself is not answering this
+// online wallet, so the account can only be confirmed or created (Receive ▸ My address) once it
+// answers again.
 export type SolSplSignGate = 'allow' | 'absent' | 'unregistered' | 'unverified' | 'unverified-rail-down';
 /** What the gate needs to know about each mint's poll state — the read-only projection of
  *  `SolTokenBalanceState` (hooks/useSolanaBalances.ts). It is named here because it is ALSO the
@@ -600,9 +604,14 @@ export function solSplSignGate(mint: string | null, states: SolMintStates): SolS
   if (state.status === 'absent') return 'absent';
   if (state.status === 'balance') return 'allow';
   // No fact. WHY there is none decides which unverified state this is: an endpoint that answered
-  // and did not serve us, or bytes it served that cannot be trusted — both mean the rail is the
-  // problem. Anything else (loading, offline, a transport failure) is the payer's ordinary world.
-  return state.failure === 'refused' || state.failure === 'unreadable' ? 'unverified-rail-down' : 'unverified';
+  // and did not serve us ('refused'), bytes it served that cannot be trusted ('unreadable'), or a
+  // rail path that is down while the phone IS online ('unreachable' — the IC-boundary probe
+  // answered) — all three mean the rail is the problem and "find signal" would be wrong advice.
+  // Anything else (loading, offline, an offline-classified transport failure) is the payer's
+  // ordinary world.
+  return state.failure === 'refused' || state.failure === 'unreadable' || state.failure === 'unreachable'
+    ? 'unverified-rail-down'
+    : 'unverified';
 }
 
 /**

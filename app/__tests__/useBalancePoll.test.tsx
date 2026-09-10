@@ -26,10 +26,10 @@ import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 
 jest.mock('../services/relay', () => ({
-  fetchWithTimeout: jest.fn(),
+  relayFetch: jest.fn(), // R1: the hook's relay seam moved from fetchWithTimeout(url) to relayFetch(relay, path)
 }));
 
-import {fetchWithTimeout} from '../services/relay';
+import {relayFetch} from '../services/relay';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {POLL} from '../config/constants';
@@ -77,14 +77,14 @@ async function nextPoll() {
 
 beforeEach(() => {
   jest.useFakeTimers({doNotFake: ['Date']});
-  jest.mocked(fetchWithTimeout).mockReset();
+  jest.mocked(relayFetch).mockReset();
 });
 
 afterEach(() => { jest.useRealTimers(); });
 
 describe('useBalancePoll — an unknown balance is never reported as zero', () => {
   test('a currency the relay OMITS keeps its prior value; it is never written as 0', async () => {
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       // Everything answers.
       .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000', [String(CKBTC)]: '7'}) as never)
       // VCHF's ledger hiccups — the relay omits it (see the route's own doc comment).
@@ -104,7 +104,7 @@ describe('useBalancePoll — an unknown balance is never reported as zero', () =
   });
 
   test('a currency never answered for has NO ENTRY — the consumer reads "unknown", not "zero"', async () => {
-    jest.mocked(fetchWithTimeout).mockResolvedValue(answer({'0': '10000'}) as never);
+    jest.mocked(relayFetch).mockResolvedValue(answer({'0': '10000'}) as never);
     const {latest, tree} = await mountPoll();
     // `undefined`, so `assetBalances[c] ?? null` at the affordability gate is null and fails OPEN.
     expect(latest().assetBalances[VCHF]).toBeUndefined();
@@ -113,7 +113,7 @@ describe('useBalancePoll — an unknown balance is never reported as zero', () =
   });
 
   test('a batch with no primary goes offline and leaves the last known balance alone', async () => {
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never)
       .mockResolvedValueOnce(answer({[String(VCHF)]: '500000000'}) as never);
 
@@ -129,7 +129,7 @@ describe('useBalancePoll — an unknown balance is never reported as zero', () =
   });
 
   test('a non-2xx goes offline and writes no balance at all', async () => {
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never)
       .mockResolvedValueOnce(refuse(503, '{"error":"ledger unreachable"}') as never);
 
@@ -142,7 +142,7 @@ describe('useBalancePoll — an unknown balance is never reported as zero', () =
   });
 
   test('a transport failure goes offline without touching a single balance', async () => {
-    jest.mocked(fetchWithTimeout)
+    jest.mocked(relayFetch)
       .mockResolvedValueOnce(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never)
       .mockRejectedValueOnce(new Error('ECONNREFUSED') as never);
 
@@ -157,7 +157,7 @@ describe('useBalancePoll — an unknown balance is never reported as zero', () =
 
 describe('useBalancePoll — the offline deduction is currency-keyed and clamped', () => {
   test('a spend on one asset never touches another, and a refund cannot go negative', async () => {
-    jest.mocked(fetchWithTimeout).mockResolvedValue(answer({'0': '10000'}) as never);
+    jest.mocked(relayFetch).mockResolvedValue(answer({'0': '10000'}) as never);
     const {latest, tree} = await mountPoll();
 
     act(() => { latest().markOfflinePaid('2500', 0); });

@@ -174,7 +174,11 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   // Load the onramp params (helper address, ERC-20 address) once on open.
   useEffect(() => {
     let alive = true;
-    const {signal, cancel} = withTimeout(DEPOSIT_TIMEOUT_MS);
+    // The caller timer sits 1 s STRICTLY AFTER the 20 s grant (DEPOSIT_TIMEOUT_MS — also the armed
+    // walk's attempt-0 deadline when a second relay exists): at a tied 20000/20000 the caller timer,
+    // armed first, wins and a hung primary reads as a CALLER decision — no cooldown, no failover.
+    // Same +1000 classification margin as useBalancePoll; the walk keeps the full 20 s grant.
+    const {signal, cancel} = withTimeout(DEPOSIT_TIMEOUT_MS + 1000);
     (async () => {
       try {
         const p = await ckerc20OnrampParams(relayUrl, currency, signal);
@@ -184,7 +188,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
         // a relay config gap is debuggable; the user still sees the friendly fallback message.
         console.warn('ckerc20OnrampParams failed:', e instanceof Error ? e.message : String(e));
         if (alive) setErr(M.deposit.erc20.onrampParamsErr);
-      } finally { if (alive) cancel(); }
+      } finally { cancel(); } // UNCONDITIONAL: an unmounted sheet must not leave the 21 s timer pending as a no-op abort (alive guards the state updates, not the cancel — DepositSheet's contract)
     })();
     return () => { alive = false; };
   }, [relayUrl, currency]);
