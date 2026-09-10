@@ -63,9 +63,10 @@ import {IconAlert, IconCheck, IconClock, IconClose} from './icons';
 export const FIRST_RUN_PRACTICE = 'firstRunPractice';
 
 /** How long practice waits for its own transfer to reach a terminal state before calling the
- *  outcome unknown. Same shape as the pay rail's budget; shorter, because there is a person
- *  waiting on a setup screen rather than standing at a till. */
-const PRACTICE_POLL_BUDGET = {attempts: 8, intervalMs: 500} as const;
+ *  outcome unknown. Same shape as the pay rail's budget; the cadence is finer (250 ms), because
+ *  there is a person waiting on a setup screen rather than standing at a till — settlement is
+ *  detected the moment the subnet decides, not on the next half-second tick. */
+const PRACTICE_POLL_BUDGET = {attempts: 12, intervalMs: 250} as const;
 
 /**
  * THE GUARD. Returns null when `currency` may be practised with, and the reason it may not
@@ -216,16 +217,19 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
         // The flow was not described to this user, it was performed by them. That is the stamp.
         // `paymentTested` is deliberately NOT awarded: this payee is not a counterparty.
         void awardStamp(JOURNEY_STAMPS.flowUnderstood);
-        const after = await readBalance();
-        if (!alive.current) return;
-        if (after !== null) setSettledBalance(after);
         setOutcome({kind: 'settled'});
+        setPhase('outcome');
+        // The "what is left" line is still a MEASURED number read the moment settle was detected —
+        // but it never delays the confirmed mark: the outcome renders at once and the line pops in
+        // when the relay answers.
+        void readBalance().then(after => { if (after !== null && alive.current) setSettledBalance(after); });
       } else if (out.kind === 'rejected') {
         setOutcome({kind: 'rejected', reason: out.reason});
+        setPhase('outcome');
       } else {
         setOutcome({kind: 'unknown'});
+        setPhase('outcome');
       }
-      setPhase('outcome');
     } catch (e: unknown) {
       // prepareTransfer throws BEFORE anything is submitted (unsupported asset, unreachable or
       // skewed IC clock), so nothing moved and the reason is the user's to act on.
