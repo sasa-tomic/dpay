@@ -198,11 +198,14 @@ Re-measured 2026-09-09 after the founder's deploy ("everything deployed"), HEAD 
 - `just integrity-check` → **MATCH** on `e537056e…` (facade unchanged since the 2026-09-07 upgrade;
   pin recorded in `docs/UPGRADES.md`).
 - `node scripts/check-prod-sol.mjs` → **PASS** — the replacement key answers `getHealth` "ok" on
-  mainnet. (Note: this is a script, not a `just` recipe; `just apk` runs it as a pre-build gate.)
-  This was the PRE-R2 contract, measured 2026-09-09; R2 (2026-09-10) retargeted the script to the
-  static no-key invariant + a live probe of the relay's proxy route — until the relay is re-deployed
-  with R2, the live probe reports the route 404 BY DESIGN (see the R2 cutover note in
-  `docs/OPS.md` §3).
+  mainnet. (Note: this is a script, not a `just` recipe; `just apk`/`just image` run it as a
+  pre-build gate.) This was the PRE-R2 contract, measured 2026-09-09; R2 (2026-09-10) retargeted
+  the script to the static no-key invariant + a live probe, and the 2026-09-10 friction cleanup
+  moved the probe's target off prod entirely: the shipping builds now STAGE the tree's relay on
+  loopback (`scripts/stage-relay-probe.sh`) and probe that, so a build verdict never depends on
+  deploy state. Before the next ship, `DPAY_SOLANA_RPC_URL` (full Helius endpoint incl. key) must
+  land in `deploy/.env` — it is not there yet, and without it both the probe and the deployed
+  relay refuse (503 `solana-unconfigured`).
 - `just swap-venue-probe` → **PASS** — the live route still derives swap direction from the venue's
   own metadata (token1→token0 100000000 → 231342577, ratio 0.996998 vs the pool's implied price).
 - **The till is NOT yet served in production** — `curl -s

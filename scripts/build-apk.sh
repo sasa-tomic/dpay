@@ -43,8 +43,8 @@ if [ "$COMMITTED_RELAY" != "$RELAY_URL" ]; then
 fi
 echo "== default relay verified in app/relayConfig.ts: $RELAY_URL =="
 
-echo "== verify the baked Solana RPC endpoint (host rules + live getHealth) =="
-node scripts/check-prod-sol.mjs
+echo "== verify the baked Solana RPC endpoint (staged relay + live getHealth) =="
+bash scripts/stage-relay-probe.sh
 
 echo "== cross-compile dpay-ffi (.so per ABI) + sync into the app =="
 bash scripts/ndk-build-ffi.sh

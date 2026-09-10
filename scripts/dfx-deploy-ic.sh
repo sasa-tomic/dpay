@@ -16,10 +16,13 @@
 # the settlement kernel is covered going forward by PocketIC canister tests + e2e + `just
 # verify-deploy` (wasm-hash fidelity).
 #
-# On a real network this REQUIRES A CLEAN WORKING TREE (deploy/git-lib.sh): the wasm is built from
-# the tree and then recorded against a commit in docs/UPGRADES.md. It also LEAVES the tree dirty —
-# the pin it rewrites is tracked — so the steps it prints at the end are part of the deploy, not a
-# suggestion. Whole sequence: docs/OPS.md section 3.
+# On a real network this COMMITS THE TREE IT BUILDS (deploy/git-lib.sh `committed_tree_for` —
+# a dirty tree is auto-committed, so the wasm always corresponds to exactly one commit): the
+# wasm is built from the tree and then recorded against a commit in docs/UPGRADES.md. It also
+# LEAVES the tree dirty — the pin it rewrites is tracked, and that pin + its UPGRADES.md row
+# belong in a commit together (the next `committed_tree_for` will commit the pin alone if the
+# row is not written first — record the row yourself, it is the part with the words). Whole
+# sequence: docs/OPS.md section 3.
 #
 # Identity (DPAY_DFX_IDENTITY) is REQUIRED and load-bearing: `dfx deploy --network ic` spends the
 # identity's cycles AND makes it the CANISTER CONTROLLER (upgrade authority). Create one with
@@ -75,7 +78,7 @@ require_cmd candid-extractor "candid-extractor not found — cargo install candi
 # nothing and claims no commit, and it is rehearsed precisely while the change is still uncommitted.
 if [ "$NETWORK" != "local" ]; then
   require_cmd git "git not found — this upgrade must be attributable to a commit (docs/UPGRADES.md)"
-  require_clean_tree "the facade wasm this installs"
+  committed_tree_for "the facade wasm this installs"
   DEPLOY_COMMIT="$(git rev-parse HEAD)"
 fi
 

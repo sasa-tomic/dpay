@@ -18,6 +18,13 @@
 //            proxy; any other non-2xx, an unreachable relay, or an RPC-level error is the same
 //            refusal: this build would ship a wallet whose default Solana path is dark.
 //
+//            Since 2026-09-10 the shipping callers (scripts/build-apk.sh, deploy/build.sh) run
+//            this against a relay STAGED FROM THE TREE (scripts/stage-relay-probe.sh) via
+//            DPAY_RELAY_BASE — the verdict is about the build being shipped (its relay code +
+//            the deploy env's provider endpoint + the upstream), never about deploy state.
+//            Probing production instead coupled every build to whatever was last deployed and
+//            deadlocked the first R2 ship.
+//
 // TWO MODES (contract unchanged):
 //
 //   node scripts/check-prod-sol.mjs              STRICT (default) — static + live. Used by every
@@ -130,11 +137,18 @@ if (probeEnabled) {
       const body = oneline(await r.text().catch((e) => `<body unreadable: ${e?.message ?? e}>`));
       if (r.status === 404) {
         findings.push([
-          `${RELAY_BASE} answered HTTP 404 on /api/v1/solana/rpc — this relay is NOT deployed with the R2 proxy`,
-          '    Deploy the relay build that serves the Solana RPC proxy (spec 2026-09-09 §"Direction 1"),',
-          '    then re-run this build. For the FIRST cutover the live relay predates this route: deploy',
-          '    the new relay image to a staged instance and point DPAY_RELAY_BASE at it for this build',
-          '    (docs/OPS.md §3). A wallet pointing at a relay without the route ships a dark Solana rail.',
+          `${RELAY_BASE} answered HTTP 404 on /api/v1/solana/rpc — this relay does not serve the R2 proxy route`,
+          '    Against a STAGED relay (the shipping builds) that is a regression in this tree: the relay',
+          '    source lost /api/v1/solana/rpc (spec 2026-09-09 §"Direction 1"). Against a relay you named',
+          '    via DPAY_RELAY_BASE, that relay predates R2. A wallet pointing at a relay without the',
+          '    route ships a dark Solana rail.',
+        ]);
+      } else if (r.status === 503 && /solana-unconfigured/.test(body)) {
+        findings.push([
+          `the Solana proxy at ${RELAY_BASE} answered 503 solana-unconfigured`,
+          '    The relay has no DPAY_SOLANA_RPC_URL — its Solana rail is dark by configuration.',
+          '    stage-relay-probe.sh reads it from deploy/.env; add the FULL provider endpoint',
+          '    (incl. api key — deploy/.env.example) there and re-run.',
         ]);
       } else if (!r.ok) {
         findings.push([`the Solana proxy at ${RELAY_BASE} answered HTTP ${r.status}: ${body}`]);

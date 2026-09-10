@@ -13,7 +13,7 @@
 # then *prove* the pairing by running the binary inside the finished image — a broken pairing fails
 # here, loudly, instead of as a crash-looping container on a VPS.
 #
-# The tree this compiles must correspond to a commit — see the gate in deploy/git-lib.sh.
+# The tree this compiles is committed first — see the gate in deploy/git-lib.sh.
 #
 # Env:
 #   DPAY_RUNTIME_BASE   override the runtime base image (default: chosen from the host's glibc)
@@ -24,17 +24,19 @@ ROOT="$PWD"
 
 # shellcheck source=deploy/git-lib.sh
 source deploy/git-lib.sh
-# First, before the minutes of web + cargo build below: a dirty tree can only produce an image
-# nothing can identify, so there is nothing to spend that time on.
-require_clean_tree "this relay image"
+# First, before the minutes of web + cargo build below: a dirty tree is committed here
+# (deploy/git-lib.sh `committed_tree_for`) — whatever is in the tree is what ships, so it is
+# made a commit, and the image that follows is attributable to exactly that commit.
+committed_tree_for "this relay image"
 
 # Same reason, same place: the web bundle built below bakes app/config/constants.ts's Solana RPC
 # endpoint into the /wallet bytes this image serves, so an unsafe or dead endpoint is a property of
 # the image. The APK path has always been gated (scripts/build-apk.sh); this half — the one that
-# publishes the endpoint in plaintext to every browser — was not. Strict mode: host rules AND a live
-# getHealth. Header of the script explains the two modes.
-echo "== verify the baked Solana RPC endpoint (host rules + live getHealth) =="
-node scripts/check-prod-sol.mjs
+# publishes the endpoint in plaintext to every browser — was not. Strict mode: the relay THIS TREE
+# builds is staged on loopback with the deploy env's provider endpoint and probed end to end
+# (scripts/stage-relay-probe.sh) — code + key + upstream, never coupled to what is already live.
+echo "== verify the baked Solana RPC endpoint (staged relay + live getHealth) =="
+bash scripts/stage-relay-probe.sh
 
 export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
 export PATH="$ROOT/.dev/cargo/bin:$PATH"

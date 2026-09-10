@@ -126,13 +126,16 @@ just integrity-check
 **Nothing changed on the canister?** Skip 1–2 — `just apk && just up`, then 4. `up` swaps only
 the relay image, so relay- or app-side changes need no canister step.
 
-**Step 2 is enforced, not advised.** `deploy/build.sh` refuses to build an image from a dirty
-tree (`deploy/git-lib.sh`) and `just up` builds the image, so skipping the commit stops the
-deploy with the offending files named. There is no override: on 2026-09-08 the sequence was run
-without step 2 — which did not exist — and prod reported `20133499…-dirty` at
-`/api/v1/version`, meaning nothing could say what was running. `just deploy-ic` dirties the
-tree *by construction* (the pin it writes is tracked), so without step 2 every image is
-unattributable.
+**Step 2 is enforced by auto-commit, not by refusal.** `deploy/build.sh` (via
+`deploy/git-lib.sh` `committed_tree_for`) COMMITS a dirty tree before building — whatever is in
+the tree is what ships, so it is made a commit and the image corresponds to exactly that
+commit. On 2026-09-08, before any gate, the sequence shipped `20133499…-dirty` at
+`/api/v1/version` and nothing could say what was running; the refusal that fixed it became the
+friction the founder removed on 2026-09-10 — auto-commit buys the same guarantee (a commit
+describes what shipped) without a mandatory manual commit between steps. `just deploy-ic`
+still dirties the tree *by construction* (the pin it writes is tracked), so paste the
+`docs/UPGRADES.md` row as its own commit — the pin and the row belong together, and the
+auto-commit cannot write your changelog row for you.
 
 If `integrity-check` reports `MISMATCH`, someone upgraded outside this procedure — find out who
 and why before re-recording. If `verify-relay` reports `BEHIND`/`MISMATCH`, the running image
@@ -141,12 +144,16 @@ predates the source: re-run from step 3.
 **Solana RPC proxy env** (the one §-local env note): `DPAY_SOLANA_RPC_URL` in `deploy/.env` must
 be the FULL provider endpoint including its api key (e.g.
 `https://mainnet.helius-rpc.com/?api-key=…`) — SECRET, never logged/echoed/committed. Unset →
-`POST /api/v1/solana/rpc` answers 503 naming it. Optional `DPAY_SOLANA_TIMEOUT_MS` (default
-10000). See `deploy/.env.example` and `crates/dpay-relay/src/solana.rs`.
+`POST /api/v1/solana/rpc` answers 503 naming it, and the pre-build probe FAILS (it stages the
+tree's relay with exactly this env — a build whose rail is dark does not ship). Optional
+`DPAY_SOLANA_TIMEOUT_MS` (default 10000). See `deploy/.env.example` and
+`crates/dpay-relay/src/solana.rs`.
 
-**R2 cutover (first deploy only):** the strict `check-prod-sol` probe runs against the LIVE
-relay — which still predates the `/api/v1/solana/rpc` route — so its 404 fails the probe and
-the build refuses (deliberate: the straddle is unshippable). Break the deadlock by building
-with `DPAY_RELAY_BASE` pointed at a staged R2 instance (the script's failure message says
-exactly this), deploying the relay, then building again — every later build probes prod
-directly.
+**The Solana probe targets the tree, not prod (2026-09-10, founder friction call).** Every
+shipping build stages the relay THIS TREE builds on loopback, hands it `DPAY_SOLANA_RPC_URL`
+from `deploy/.env`, and runs the strict probe against that
+(`scripts/stage-relay-probe.sh`, called by `build-apk.sh` and `build.sh`). The verdict covers
+the relay code + the key + the upstream on every build — including the first R2 ship, which
+deadlocked the old prod-targeted probe (`just apk` needed the new relay live; `just up`
+embeds the apk). What is already LIVE is `just verify-relay`'s question, answered after the
+deploy.
