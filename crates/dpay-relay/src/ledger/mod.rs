@@ -20,7 +20,7 @@ pub mod types;
 // ---------------------------------------------------------------------------
 
 pub use api::Ledger;
-pub use ckerc20::{CkErc20OnrampParams, ckerc20_onramp_from_descriptor};
+pub use ckerc20::{ckerc20_onramp_from_descriptor, CkErc20OnrampParams};
 pub use fake::{FakeLedger, FAKE_FACADE_MODULE_HASH};
 pub use types::{
     CurrencyDescriptor, DepositInfo, LedgerError, MinterFamily, RampCapability, TxnRecord,

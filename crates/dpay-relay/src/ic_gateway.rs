@@ -33,16 +33,15 @@ use axum::response::{IntoResponse, Response};
 
 use dpay_icp::envelope::verify_envelope;
 use dpay_icp::icrc::{
-    ApproveArg,
     decode_account_arg, decode_approve_arg, decode_deposit_and_swap_arg,
     decode_legacy_transfer_arg, decode_minter_account_arg, decode_retrieve_btc_arg,
-    decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg,
-    encode_approve_ok, encode_eip1559_price,
-    encode_legacy_transfer_bad_fee, encode_legacy_transfer_insufficient_funds,
-    encode_legacy_transfer_ok, encode_minter_ok, encode_nat8_reply, encode_nat_reply,
-    encode_swap_result_err, encode_swap_result_ok, encode_text_reply,
-    encode_transfer_bad_fee, encode_transfer_insufficient_funds, encode_transfer_ok,
-    uleb_bytes, Eip1559Price, PoolSwapError, RetrieveBtcArg, WithdrawEthArg,
+    decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg, encode_approve_ok,
+    encode_eip1559_price, encode_legacy_transfer_bad_fee,
+    encode_legacy_transfer_insufficient_funds, encode_legacy_transfer_ok, encode_minter_ok,
+    encode_nat8_reply, encode_nat_reply, encode_swap_result_err, encode_swap_result_ok,
+    encode_text_reply, encode_transfer_bad_fee, encode_transfer_insufficient_funds,
+    encode_transfer_ok, uleb_bytes, ApproveArg, Eip1559Price, PoolSwapError, RetrieveBtcArg,
+    WithdrawEthArg,
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
@@ -151,9 +150,9 @@ impl FakePoolState {
         FakePoolState {
             token0_ledger: token0_ledger.to_string(),
             token1_ledger: token1_ledger.to_string(),
-            reserve0_e8s: 193_000_000_000_000,          // 1.93M VCHF (token0)
-            reserve1_e8s: 100_000_000_000_000,          // 1M ICP (token1)
-            fee_millionths: 3000,                       // the PoC pool's 0.30% tier
+            reserve0_e8s: 193_000_000_000_000, // 1.93M VCHF (token0)
+            reserve1_e8s: 100_000_000_000_000, // 1M ICP (token1)
+            fee_millionths: 3000,              // the PoC pool's 0.30% tier
             impact_bps: 0,
             fail_withdrawal: false,
             pending: Vec::new(),
@@ -170,8 +169,7 @@ impl FakePoolState {
         } else {
             (self.reserve1_e8s, self.reserve0_e8s)
         };
-        let in_eff = amount_in_e8s
-            .saturating_mul(1_000_000 - self.fee_millionths.min(1_000_000))
+        let in_eff = amount_in_e8s.saturating_mul(1_000_000 - self.fee_millionths.min(1_000_000))
             / 1_000_000;
         let out = in_eff.saturating_mul(r_out) / (r_in.saturating_add(in_eff));
         out.saturating_mul(10_000 - u128::from(self.impact_bps.min(10_000))) / 10_000
@@ -259,7 +257,11 @@ impl FakeIc {
             let fee = d.fee.as_ref().map(|f| u128::from(f.0));
             st.ledgers.insert(
                 d.ledger.clone(),
-                FakeLedgerState { currency: d.currency, fee, decimals: d.decimals.unwrap_or(0) as u8 },
+                FakeLedgerState {
+                    currency: d.currency,
+                    fee,
+                    decimals: d.decimals.unwrap_or(0) as u8,
+                },
             );
             if let Some(m) = d.minter.clone() {
                 st.minters.insert(m, d.ledger.clone());
@@ -317,7 +319,12 @@ impl FakeIc {
     /// or 0 when no ledger is registered for the currency.
     pub fn faucet_credit(&self, currency: Currency, owner: &Principal, amount: u128) -> u128 {
         let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(ledger_text) = s.ledgers.iter().find(|(_, l)| l.currency == currency).map(|(t, _)| t.clone()) else {
+        let Some(ledger_text) = s
+            .ledgers
+            .iter()
+            .find(|(_, l)| l.currency == currency)
+            .map(|(t, _)| t.clone())
+        else {
             return 0;
         };
         self.credit_and_log(&mut s, &ledger_text, currency, owner, amount)
@@ -340,7 +347,12 @@ impl FakeIc {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         for (text, st) in &s.ledgers {
             if st.currency == currency {
-                return s.balances.get(&bal_key(text, owner)).copied().unwrap_or(0).min(u64::MAX as u128) as u64;
+                return s
+                    .balances
+                    .get(&bal_key(text, owner))
+                    .copied()
+                    .unwrap_or(0)
+                    .min(u64::MAX as u128) as u64;
             }
         }
         0
@@ -402,7 +414,9 @@ impl FakeIc {
                 let currency = s.ledgers.get(&ledger).map(|l| l.currency).unwrap_or(0u32);
                 let block = s.next_block;
                 s.next_block += 1;
-                *s.balances.entry((ledger.clone(), (caller.clone(), [0u8; 32]))).or_insert(0) += amount;
+                *s.balances
+                    .entry((ledger.clone(), (caller.clone(), [0u8; 32])))
+                    .or_insert(0) += amount;
                 s.txns.push(FakeTxn {
                     kind: "transfer",
                     from: crate::catalog::SWAP_POOL_PRINCIPAL.to_string(),
@@ -425,18 +439,29 @@ impl FakeIc {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let mut map = std::collections::BTreeMap::new();
         for d in catalog {
-            let Some(l) = s.ledgers.get(&d.ledger) else { continue };
+            let Some(l) = s.ledgers.get(&d.ledger) else {
+                continue;
+            };
             if l.currency != d.currency {
                 continue;
             }
             let bal = *s.balances.get(&acct_key(&d.ledger, account)).unwrap_or(&0);
-            map.insert(d.currency.to_string(), crate::ledger::U64String(bal.min(u64::MAX as u128) as u64));
+            map.insert(
+                d.currency.to_string(),
+                crate::ledger::U64String(bal.min(u64::MAX as u128) as u64),
+            );
         }
         map
     }
 
     /// Newest-first transaction rows for an owner (relay `/transactions` test path).
-    pub fn transactions(&self, owner: &Principal, currency: Currency, limit: usize, memo: Option<&str>) -> Vec<crate::ledger::TxnRecord> {
+    pub fn transactions(
+        &self,
+        owner: &Principal,
+        currency: Currency,
+        limit: usize,
+        memo: Option<&str>,
+    ) -> Vec<crate::ledger::TxnRecord> {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         let me = owner.to_text();
         let mut rows: Vec<crate::ledger::TxnRecord> = s
@@ -464,13 +489,25 @@ impl FakeIc {
 
     /// Execute a `call` envelope against the fake ledgers. The caller MUST hold the state lock
     /// (single critical section with the dedup check + outcome insert — see [`submit`]).
-    fn execute_call(&self, s: &mut FakeIcState, env: &dpay_icp::envelope::VerifiedEnvelope) -> RequestState {
-        let (Some(canister_p), Some(method), Some(arg)) = (&env.canister, &env.method_name, &env.arg) else {
-            return RequestState::Rejected { code: 5, message: "call content missing canister/method/arg".into() };
+    fn execute_call(
+        &self,
+        s: &mut FakeIcState,
+        env: &dpay_icp::envelope::VerifiedEnvelope,
+    ) -> RequestState {
+        let (Some(canister_p), Some(method), Some(arg)) =
+            (&env.canister, &env.method_name, &env.arg)
+        else {
+            return RequestState::Rejected {
+                code: 5,
+                message: "call content missing canister/method/arg".into(),
+            };
         };
         let canister = canister_p.to_text();
         let arg: &[u8] = arg;
-        let sender = account_owner(&Account { owner: env.sender.clone(), subaccount: [0u8; 32] });
+        let sender = account_owner(&Account {
+            owner: env.sender.clone(),
+            subaccount: [0u8; 32],
+        });
         // All balance touches below are scoped to THIS ledger canister (per-ledger balances).
         let from_key = (canister.clone(), sender.clone());
         let block = s.next_block;
@@ -480,14 +517,26 @@ impl FakeIc {
             "icrc1_transfer" => Self::icrc1_transfer(s, &canister, &from_key, &sender, arg, block),
             "transfer" => Self::legacy_transfer(s, &canister, &from_key, &sender, arg, block),
             "icrc2_approve" => Self::icrc2_approve(s, &canister, &env.sender, arg, block),
-            "depositFromAndSwap" => Self::pool_deposit_from_and_swap(s, &canister, &env.sender, arg, block),
-            "retrieve_btc_with_approval" => {
-                Self::burn_via_minter(s, &canister, &env.sender, "retrieve_btc_with_approval", arg, block)
+            "depositFromAndSwap" => {
+                Self::pool_deposit_from_and_swap(s, &canister, &env.sender, arg, block)
             }
-            "withdraw_eth" => Self::burn_via_minter(s, &canister, &env.sender, "withdraw_eth", arg, block),
+            "retrieve_btc_with_approval" => Self::burn_via_minter(
+                s,
+                &canister,
+                &env.sender,
+                "retrieve_btc_with_approval",
+                arg,
+                block,
+            ),
+            "withdraw_eth" => {
+                Self::burn_via_minter(s, &canister, &env.sender, "withdraw_eth", arg, block)
+            }
             "withdraw_erc20" => Self::withdraw_erc20(s, &canister, &env.sender, arg, block),
             "get_btc_address" => Self::get_btc_address(s, &canister, arg),
-            other => RequestState::Rejected { code: 3, message: format!("method {other:?} not available on the gateway") },
+            other => RequestState::Rejected {
+                code: 3,
+                message: format!("method {other:?} not available on the gateway"),
+            },
         }
     }
 
@@ -501,10 +550,16 @@ impl FakeIc {
         block: u64,
     ) -> RequestState {
         let Some(cfg) = s.ledgers.get(canister).cloned() else {
-            return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} not found"),
+            };
         };
         let Ok(arg) = decode_transfer_arg(arg) else {
-            return RequestState::Rejected { code: 5, message: "malformed icrc1_transfer arg".into() };
+            return RequestState::Rejected {
+                code: 5,
+                message: "malformed icrc1_transfer arg".into(),
+            };
         };
         let to = (canister.to_string(), account_owner(&arg.to));
         if let Some(expected) = cfg.fee {
@@ -519,7 +574,11 @@ impl FakeIc {
         }
         *s.balances.entry(from_key.clone()).or_insert(0) -= spend;
         *s.balances.entry(to.clone()).or_insert(0) += arg.amount;
-        let memo_hex = arg.memo.clone().map(|m| m.iter().map(|b| format!("{b:02x}")).collect::<String>()).unwrap_or_default();
+        let memo_hex = arg
+            .memo
+            .clone()
+            .map(|m| m.iter().map(|b| format!("{b:02x}")).collect::<String>())
+            .unwrap_or_default();
         // `to` is the per-ledger balance key (canister, account); the txn row wants the
         // PAYEE PRINCIPAL TEXT (to.1.0), not the canister id (to.0).
         let ts = now_secs();
@@ -557,7 +616,10 @@ impl FakeIc {
         block: u64,
     ) -> RequestState {
         let Some(cfg) = s.ledgers.get(canister).cloned() else {
-            return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} not found"),
+            };
         };
         if canister != crate::catalog::ICP_LEDGER_PRINCIPAL {
             return RequestState::Rejected {
@@ -566,14 +628,19 @@ impl FakeIc {
             };
         }
         let Ok(arg) = decode_legacy_transfer_arg(arg) else {
-            return RequestState::Rejected { code: 5, message: "malformed transfer arg".into() };
+            return RequestState::Rejected {
+                code: 5,
+                message: "malformed transfer arg".into(),
+            };
         };
         if let Some(expected) = cfg.fee {
             if u128::from(arg.fee_e8s) != expected {
                 let Ok(expected_e8s) = u64::try_from(expected) else {
                     return RequestState::Rejected {
                         code: 5,
-                        message: format!("ledger {canister} fee {expected} does not fit Tokens{{e8s}}"),
+                        message: format!(
+                            "ledger {canister} fee {expected} does not fit Tokens{{e8s}}"
+                        ),
                     };
                 };
                 return RequestState::Replied(encode_legacy_transfer_bad_fee(expected_e8s));
@@ -598,12 +665,18 @@ impl FakeIc {
         }
         let to = resolve_account_identifier(s, &arg.to);
         *s.balances.entry(from).or_insert(0) -= spend;
-        *s.balances.entry((canister.to_string(), to.clone())).or_insert(0) += u128::from(arg.amount_e8s);
+        *s.balances
+            .entry((canister.to_string(), to.clone()))
+            .or_insert(0) += u128::from(arg.amount_e8s);
         // The legacy memo is a bare nat64, rendered big-endian hex — 16 chars, so it can never be
         // confused with (or matched against) a 16-BYTE dpay reconciliation memo, whose hex is 32
         // chars and is what `/api/v1/transactions?memo=` requires. `0` is the ledger's "no memo"
         // value (what dfx sends by default) and renders empty, like an absent icrc1 memo.
-        let memo_hex = if arg.memo == 0 { String::new() } else { hex::encode(arg.memo.to_be_bytes()) };
+        let memo_hex = if arg.memo == 0 {
+            String::new()
+        } else {
+            hex::encode(arg.memo.to_be_bytes())
+        };
         s.txns.push(FakeTxn {
             kind: "transfer",
             from: sender.0.clone(),
@@ -626,19 +699,27 @@ impl FakeIc {
         block: u64,
     ) -> RequestState {
         let Some(cfg) = s.ledgers.get(canister).cloned() else {
-            return RequestState::Rejected { code: 3, message: format!("canister {canister} not found") };
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} not found"),
+            };
         };
         let Ok(arg) = decode_approve_arg(arg) else {
-            return RequestState::Rejected { code: 5, message: "malformed icrc2_approve arg".into() };
+            return RequestState::Rejected {
+                code: 5,
+                message: "malformed icrc2_approve arg".into(),
+            };
         };
         let fee = arg.fee.unwrap_or(0);
-        let ApproveArg { from_subaccount, spender, amount, .. } = arg;
+        let ApproveArg {
+            from_subaccount,
+            spender,
+            amount,
+            ..
+        } = arg;
         let from = (
             canister.to_string(),
-            (
-                sender.to_text(),
-                from_subaccount.unwrap_or([0u8; 32]),
-            ),
+            (sender.to_text(), from_subaccount.unwrap_or([0u8; 32])),
         );
         if let Some(expected) = cfg.fee {
             if arg.fee != Some(expected) {
@@ -681,7 +762,10 @@ impl FakeIc {
             };
         }
         let Ok(arg) = decode_deposit_and_swap_arg(arg) else {
-            return RequestState::Rejected { code: 5, message: "malformed depositFromAndSwap arg".into() };
+            return RequestState::Rejected {
+                code: 5,
+                message: "malformed depositFromAndSwap arg".into(),
+            };
         };
         let (in_ledger, out_ledger) = if arg.zero_for_one {
             (s.pool.token0_ledger.clone(), s.pool.token1_ledger.clone())
@@ -698,10 +782,15 @@ impl FakeIc {
         // The user pre-approved THE POOL as spender on the input ledger (icrc2_approve);
         // transfer_from semantics: exact-amount, expiry-aware.
         let user = (sender.to_text(), [0u8; 32]);
-        let akey: AllowanceKey = ((in_ledger.clone(), user.clone()), (canister.to_string(), [0u8; 32]));
+        let akey: AllowanceKey = (
+            (in_ledger.clone(), user.clone()),
+            (canister.to_string(), [0u8; 32]),
+        );
         let (allowed, exp) = effective_allowance(s, &akey);
         if allowed < arg.amount_in {
-            return RequestState::Replied(encode_swap_result_err(&PoolSwapError::InsufficientFunds));
+            return RequestState::Replied(encode_swap_result_err(
+                &PoolSwapError::InsufficientFunds,
+            ));
         }
         let from_bal_key = (in_ledger.clone(), user.clone());
         let bal = *s.balances.get(&from_bal_key).unwrap_or(&0);
@@ -709,7 +798,9 @@ impl FakeIc {
         // is the caller's belief; the fake charges the ledger's truth).
         let in_fee = in_cfg.fee.unwrap_or(0);
         if bal < arg.amount_in.saturating_add(in_fee) {
-            return RequestState::Replied(encode_swap_result_err(&PoolSwapError::InsufficientFunds));
+            return RequestState::Replied(encode_swap_result_err(
+                &PoolSwapError::InsufficientFunds,
+            ));
         }
         let out = s.pool.quote(arg.amount_in, arg.zero_for_one);
         if out < arg.amount_out_minimum {
@@ -772,25 +863,45 @@ impl FakeIc {
         let (from_subaccount, amount) = match method {
             "retrieve_btc_with_approval" => {
                 let Ok(arg) = decode_retrieve_btc_arg(arg) else {
-                    return RequestState::Rejected { code: 5, message: "malformed retrieve arg".into() };
+                    return RequestState::Rejected {
+                        code: 5,
+                        message: "malformed retrieve arg".into(),
+                    };
                 };
-                let RetrieveBtcArg { from_subaccount, amount, .. } = arg;
+                let RetrieveBtcArg {
+                    from_subaccount,
+                    amount,
+                    ..
+                } = arg;
                 (from_subaccount, u128::from(amount))
             }
             _ => {
                 let Ok(arg) = decode_withdraw_eth_arg(arg) else {
-                    return RequestState::Rejected { code: 5, message: "malformed withdraw_eth arg".into() };
+                    return RequestState::Rejected {
+                        code: 5,
+                        message: "malformed withdraw_eth arg".into(),
+                    };
                 };
-                let WithdrawEthArg { from_subaccount, amount, .. } = arg;
+                let WithdrawEthArg {
+                    from_subaccount,
+                    amount,
+                    ..
+                } = arg;
                 (from_subaccount, u128::from(amount))
             }
         };
         let Some(home) = s.minters.get(canister).cloned() else {
-            return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} is not a minter"),
+            };
         };
         match burn_approved(s, &home, canister, sender, from_subaccount, amount, block) {
             Ok(()) => RequestState::Replied(encode_minter_ok(block)),
-            Err(msg) => RequestState::Rejected { code: 5, message: msg },
+            Err(msg) => RequestState::Rejected {
+                code: 5,
+                message: msg,
+            },
         }
     }
 
@@ -804,24 +915,56 @@ impl FakeIc {
         block: u64,
     ) -> RequestState {
         let Ok(arg) = decode_withdraw_erc20_arg(arg) else {
-            return RequestState::Rejected { code: 5, message: "malformed withdraw_erc20 arg".into() };
+            return RequestState::Rejected {
+                code: 5,
+                message: "malformed withdraw_erc20 arg".into(),
+            };
         };
         let home = s.minters.get(canister).cloned().unwrap_or_default();
         if home.is_empty() {
-            return RequestState::Rejected { code: 3, message: format!("canister {canister} is not a minter") };
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} is not a minter"),
+            };
         }
         let amount_ledger = arg.ckerc20_ledger_id.to_text();
         // Amount leg: the ckERC20 ledger itself, spent by the minter. Both legs of ONE user
         // operation carry the same block number: they land on DIFFERENT ledgers, and a block
         // index only ever identifies a row within the ledger it was read from.
-        match burn_approved(s, &amount_ledger, canister, sender, arg.from_ckerc20_subaccount, arg.amount, block) {
+        match burn_approved(
+            s,
+            &amount_ledger,
+            canister,
+            sender,
+            arg.from_ckerc20_subaccount,
+            arg.amount,
+            block,
+        ) {
             Ok(()) => {}
-            Err(msg) => return RequestState::Rejected { code: 5, message: msg },
+            Err(msg) => {
+                return RequestState::Rejected {
+                    code: 5,
+                    message: msg,
+                }
+            }
         }
         // Gas leg: the minter's home (ckETH) ledger, spent by the minter.
-        match burn_approved(s, &home, canister, sender, arg.from_cketh_subaccount, GAS_FEE_WEI, block) {
+        match burn_approved(
+            s,
+            &home,
+            canister,
+            sender,
+            arg.from_cketh_subaccount,
+            GAS_FEE_WEI,
+            block,
+        ) {
             Ok(()) => {}
-            Err(msg) => return RequestState::Rejected { code: 5, message: msg },
+            Err(msg) => {
+                return RequestState::Rejected {
+                    code: 5,
+                    message: msg,
+                }
+            }
         }
         RequestState::Replied(encode_minter_ok(block))
     }
@@ -842,21 +985,32 @@ impl FakeIc {
             };
         }
         let Ok(a) = decode_minter_account_arg(arg) else {
-            return RequestState::Rejected { code: 5, message: "malformed get_btc_address arg".into() };
+            return RequestState::Rejected {
+                code: 5,
+                message: "malformed get_btc_address arg".into(),
+            };
         };
         let owner = a.owner.unwrap_or_else(Principal::anonymous);
         // Slice defensively: a decoded principal shorter than 8 bytes (e.g. the anonymous one
         // this fallback can substitute) used to panic on `&slice[..8]` — a hostile
         // `get_btc_address` arg must be a typed reject, not a crash.
         let Some(owner_prefix) = owner.as_slice().get(..8) else {
-            return RequestState::Rejected { code: 5, message: "owner principal too short for the fake btc address".into() };
+            return RequestState::Rejected {
+                code: 5,
+                message: "owner principal too short for the fake btc address".into(),
+            };
         };
         let addr = format!("bc1qdpay{}", hex::encode(owner_prefix));
         RequestState::Replied(encode_text_reply(&addr))
     }
 
-    fn execute_query(&self, env: &dpay_icp::envelope::VerifiedEnvelope) -> Result<Vec<u8>, (u64, String)> {
-        let (Some(canister_p), Some(method), Some(arg)) = (&env.canister, &env.method_name, &env.arg) else {
+    fn execute_query(
+        &self,
+        env: &dpay_icp::envelope::VerifiedEnvelope,
+    ) -> Result<Vec<u8>, (u64, String)> {
+        let (Some(canister_p), Some(method), Some(arg)) =
+            (&env.canister, &env.method_name, &env.arg)
+        else {
             return Err((5, "query content missing canister/method/arg".into()));
         };
         let canister = canister_p.to_text();
@@ -867,7 +1021,9 @@ impl FakeIc {
                 let Ok(a) = decode_account_arg(&arg) else {
                     return Err((5, "malformed icrc1_balance_of arg".into()));
                 };
-                Ok(encode_nat_reply(*s.balances.get(&acct_key(&canister, &a)).unwrap_or(&0)))
+                Ok(encode_nat_reply(
+                    *s.balances.get(&acct_key(&canister, &a)).unwrap_or(&0),
+                ))
             }
             "icrc1_decimals" => {
                 let d = s.ledgers.get(&canister).map(|l| l.decimals).unwrap_or(2);
@@ -885,15 +1041,13 @@ impl FakeIc {
                 // offline suite again.
                 Err((5, "Canister has no query method 'get_btc_address'".into()))
             }
-            "eip_1559_transaction_price" => {
-                Ok(encode_eip1559_price(&Eip1559Price {
-                    gas_limit: EIP1559_GAS_LIMIT,
-                    max_fee_per_gas: EIP1559_MAX_FEE_PER_GAS,
-                    max_priority_fee_per_gas: EIP1559_MAX_PRIORITY_FEE_PER_GAS,
-                    max_transaction_fee: GAS_FEE_WEI,
-                    timestamp: Some(now_secs()),
-                }))
-            }
+            "eip_1559_transaction_price" => Ok(encode_eip1559_price(&Eip1559Price {
+                gas_limit: EIP1559_GAS_LIMIT,
+                max_fee_per_gas: EIP1559_MAX_FEE_PER_GAS,
+                max_priority_fee_per_gas: EIP1559_MAX_PRIORITY_FEE_PER_GAS,
+                max_transaction_fee: GAS_FEE_WEI,
+                timestamp: Some(now_secs()),
+            })),
             other => Err((3, format!("query {other:?} not available on the gateway"))),
         }
     }
@@ -935,7 +1089,10 @@ fn resolve_account_identifier(s: &FakeIcState, to: &[u8; 32]) -> (String, [u8; 3
         let owner = match Principal::from_text(&account.0) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("dpay-relay: fake-IC: balance key {:?} is not principal text: {e}", account.0);
+                eprintln!(
+                    "dpay-relay: fake-IC: balance key {:?} is not principal text: {e}",
+                    account.0
+                );
                 continue;
             }
         };
@@ -943,7 +1100,10 @@ fn resolve_account_identifier(s: &FakeIcState, to: &[u8; 32]) -> (String, [u8; 3
             return account.clone();
         }
     }
-    (format!("{EXTERNAL_ACCOUNT_ID_PREFIX}{}", hex::encode(to)), [0u8; 32])
+    (
+        format!("{EXTERNAL_ACCOUNT_ID_PREFIX}{}", hex::encode(to)),
+        [0u8; 32],
+    )
 }
 
 /// Burn `amount` of the user's pre-approved funds on `ledger_text`, spent by `spender_text`
@@ -963,9 +1123,14 @@ fn burn_approved(
     // Resolved before anything moves: a burn on a ledger this gateway does not know would
     // otherwise be filed under currency 0 (DEMO) — a row in the wrong asset's history.
     let Some(cfg) = s.ledgers.get(ledger_text).cloned() else {
-        return Err(format!("ledger {ledger_text} is not registered on this gateway"));
+        return Err(format!(
+            "ledger {ledger_text} is not registered on this gateway"
+        ));
     };
-    let from = (ledger_text.to_string(), (sender.to_text(), from_subaccount.unwrap_or([0u8; 32])));
+    let from = (
+        ledger_text.to_string(),
+        (sender.to_text(), from_subaccount.unwrap_or([0u8; 32])),
+    );
     let spender = (spender_text.to_string(), [0u8; 32]);
     let (allowed, exp) = effective_allowance(s, &(from.clone(), spender.clone()));
     if allowed < amount {
@@ -975,7 +1140,8 @@ fn burn_approved(
     if bal < amount {
         return Err(format!("insufficient funds: {bal} < {amount}"));
     }
-    s.allowances.insert((from.clone(), spender), (allowed - amount, exp));
+    s.allowances
+        .insert((from.clone(), spender), (allowed - amount, exp));
     *s.balances.entry(from.clone()).or_insert(0) -= amount;
     s.txns.push(FakeTxn {
         kind: "burn",
@@ -996,7 +1162,10 @@ fn burn_approved(
 
 fn cbor_response(status: StatusCode, body: Vec<u8>) -> Response {
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/cbor"));
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/cbor"),
+    );
     (status, headers, body).into_response()
 }
 
@@ -1013,10 +1182,16 @@ pub async fn submit(
     body: axum::body::Bytes,
 ) -> Response {
     let Some(fake) = state.fake_ic.clone() else {
-        return err_text(StatusCode::NOT_FOUND, "fake-IC gateway not enabled on this relay");
+        return err_text(
+            StatusCode::NOT_FOUND,
+            "fake-IC gateway not enabled on this relay",
+        );
     };
     let Ok(env) = verify_envelope(&body) else {
-        return err_text(StatusCode::BAD_REQUEST, "invalid envelope: signature verification failed");
+        return err_text(
+            StatusCode::BAD_REQUEST,
+            "invalid envelope: signature verification failed",
+        );
     };
     // The envelope names its canister; a mismatched path segment is a client bug (the real
     // boundary node would 404 the canister) — reject as a bad request. read_state content
@@ -1024,18 +1199,27 @@ pub async fn submit(
     if kind != "read_state"
         && env.canister.as_ref().map(|c| c.to_text()).as_deref() != Some(canister.as_str())
     {
-        return err_text(StatusCode::NOT_FOUND, "canister id in path does not match envelope");
+        return err_text(
+            StatusCode::NOT_FOUND,
+            "canister id in path does not match envelope",
+        );
     }
     let now = now_ns();
     if env.ingress_expiry_ns <= now {
-        return err_text(StatusCode::BAD_REQUEST, "request expired: ingress_expiry is in the past");
+        return err_text(
+            StatusCode::BAD_REQUEST,
+            "request expired: ingress_expiry is in the past",
+        );
     }
 
     match kind.as_str() {
         "call" => submit_call(&fake, &env),
         "query" => submit_query(&fake, &env),
         "read_state" => submit_read_state(&fake),
-        other => err_text(StatusCode::NOT_FOUND, &format!("unknown /api/v2 kind {other:?}")),
+        other => err_text(
+            StatusCode::NOT_FOUND,
+            &format!("unknown /api/v2 kind {other:?}"),
+        ),
     }
 }
 
@@ -1069,7 +1253,11 @@ fn submit_query(fake: &Arc<FakeIc>, env: &dpay_icp::envelope::VerifiedEnvelope) 
                     Cbor::Map(vec![(Cbor::Text("arg".into()), Cbor::Bytes(arg))]),
                 ),
             ]);
-            cbor_response(StatusCode::OK, { let mut b = Vec::new(); cbor_encode(&reply, &mut b); b })
+            cbor_response(StatusCode::OK, {
+                let mut b = Vec::new();
+                cbor_encode(&reply, &mut b);
+                b
+            })
         }
         Err((code, message)) => {
             let reply = Cbor::Map(vec![
@@ -1077,7 +1265,11 @@ fn submit_query(fake: &Arc<FakeIc>, env: &dpay_icp::envelope::VerifiedEnvelope) 
                 (Cbor::Text("reject_code".into()), Cbor::Uint(code)),
                 (Cbor::Text("reject_message".into()), Cbor::Text(message)),
             ]);
-            cbor_response(StatusCode::OK, { let mut b = Vec::new(); cbor_encode(&reply, &mut b); b })
+            cbor_response(StatusCode::OK, {
+                let mut b = Vec::new();
+                cbor_encode(&reply, &mut b);
+                b
+            })
         }
     }
 }
@@ -1091,7 +1283,10 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
     let tree = {
         let s = fake.state.lock().unwrap_or_else(|p| p.into_inner());
         let now = now_ns();
-        let mut hidden = fake.hidden_outcomes.lock().unwrap_or_else(|p| p.into_inner());
+        let mut hidden = fake
+            .hidden_outcomes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         // Test seam (see FakeIc::hidden_outcomes): a hidden rid's entry is OMITTED from the
         // cert and its counter decremented — the client-side lookup finds nothing, exactly
         // like a real boundary node before the outcome has landed in state certification.
@@ -1100,14 +1295,12 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
         let entries: Vec<([u8; 32], RequestState)> = s
             .requests
             .iter()
-            .filter(|(rid, _)| {
-                match hidden.get_mut(*rid) {
-                    Some(left) => {
-                        *left -= 1;
-                        false
-                    }
-                    None => true,
+            .filter(|(rid, _)| match hidden.get_mut(*rid) {
+                Some(left) => {
+                    *left -= 1;
+                    false
                 }
+                None => true,
             })
             .map(|(k, v)| (*k, v.clone()))
             .collect();
@@ -1120,12 +1313,18 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
                     let mut enc = Vec::new();
                     cbor_encode(&reply_leaf, &mut enc);
                     Tree::Fork(
-                        Box::new(Tree::Labeled(b"status".to_vec(), Box::new(Tree::Leaf(b"replied".to_vec())))),
+                        Box::new(Tree::Labeled(
+                            b"status".to_vec(),
+                            Box::new(Tree::Leaf(b"replied".to_vec())),
+                        )),
                         Box::new(Tree::Labeled(b"reply".to_vec(), Box::new(Tree::Leaf(enc)))),
                     )
                 }
                 RequestState::Rejected { code, message } => Tree::Fork(
-                    Box::new(Tree::Labeled(b"status".to_vec(), Box::new(Tree::Leaf(b"rejected".to_vec())))),
+                    Box::new(Tree::Labeled(
+                        b"status".to_vec(),
+                        Box::new(Tree::Leaf(b"rejected".to_vec())),
+                    )),
                     Box::new(Tree::Fork(
                         Box::new(Tree::Labeled(
                             b"reject_code".to_vec(),
@@ -1145,7 +1344,10 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
             status_branch = Tree::Fork(Box::new(t), Box::new(status_branch));
         }
         let rs = Tree::Labeled(b"request_status".to_vec(), Box::new(status_branch));
-        let time_leaf = Tree::Labeled(b"time".to_vec(), Box::new(Tree::Leaf(uleb_bytes(u128::from(now)))));
+        let time_leaf = Tree::Labeled(
+            b"time".to_vec(),
+            Box::new(Tree::Leaf(uleb_bytes(u128::from(now)))),
+        );
         Tree::Fork(Box::new(rs), Box::new(time_leaf))
     };
     let tree_cbor = tree_to_cbor(&tree);

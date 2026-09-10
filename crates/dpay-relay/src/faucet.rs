@@ -47,7 +47,10 @@ impl FaucetCooldown {
     /// A cooldown with a custom window (tests shrink it; production uses
     /// [`FAUCET_COOLDOWN_SECS`]).
     pub(crate) fn with_window(window_secs: u64) -> Self {
-        Self { window_secs, last: HashMap::new() }
+        Self {
+            window_secs,
+            last: HashMap::new(),
+        }
     }
 
     /// Check-and-mark, atomically from the caller's perspective: if the key is still cooling
@@ -105,7 +108,10 @@ mod tests {
         assert!(cd.check_and_mark(&PK_A, 0, 1_000).is_ok());
         // Marked: an immediate second call is refused, ~full window remaining.
         let err = cd.check_and_mark(&PK_A, 0, 1_001).unwrap_err();
-        assert_eq!(err, "faucet cooldown: try again in ~59 min", "verbatim old-faucet text");
+        assert_eq!(
+            err, "faucet cooldown: try again in ~59 min",
+            "verbatim old-faucet text"
+        );
     }
 
     #[test]
@@ -136,7 +142,10 @@ mod tests {
     /// fixture serves those as harness credits and rate-limits exactly what production accepts.
     #[test]
     fn only_the_canonical_amount_is_a_self_service_top_up() {
-        assert!(is_self_service_top_up(FAUCET_AMOUNT), "$100.00 is the self-service top-up");
+        assert!(
+            is_self_service_top_up(FAUCET_AMOUNT),
+            "$100.00 is the self-service top-up"
+        );
         assert!(!is_self_service_top_up(FAUCET_AMOUNT - 1));
         assert!(!is_self_service_top_up(FAUCET_AMOUNT + 1));
         assert!(!is_self_service_top_up(0), "a zero credit is not a top-up");
@@ -149,15 +158,27 @@ mod tests {
         let mut cd = FaucetCooldown::new();
         assert!(cd.check_and_mark(&PK_A, 0, 0).is_ok());
         // 3599s remaining → "~59 min"; 3600s → "~1 h"; 7_200s → "~2 h"; sub-minute → "~N s".
-        assert_eq!(cd.check_and_mark(&PK_A, 0, 1).unwrap_err(), "faucet cooldown: try again in ~59 min");
+        assert_eq!(
+            cd.check_and_mark(&PK_A, 0, 1).unwrap_err(),
+            "faucet cooldown: try again in ~59 min"
+        );
         let mut cd = FaucetCooldown::with_window(7_200);
         assert!(cd.check_and_mark(&PK_A, 0, 0).is_ok());
-        assert_eq!(cd.check_and_mark(&PK_A, 0, 1).unwrap_err(), "faucet cooldown: try again in ~1 h");
+        assert_eq!(
+            cd.check_and_mark(&PK_A, 0, 1).unwrap_err(),
+            "faucet cooldown: try again in ~1 h"
+        );
         let mut cd = FaucetCooldown::with_window(14_400);
         assert!(cd.check_and_mark(&PK_A, 0, 0).is_ok());
-        assert_eq!(cd.check_and_mark(&PK_A, 0, 1).unwrap_err(), "faucet cooldown: try again in ~3 h");
+        assert_eq!(
+            cd.check_and_mark(&PK_A, 0, 1).unwrap_err(),
+            "faucet cooldown: try again in ~3 h"
+        );
         let mut cd = FaucetCooldown::with_window(5);
         assert!(cd.check_and_mark(&PK_A, 0, 0).is_ok());
-        assert_eq!(cd.check_and_mark(&PK_A, 0, 1).unwrap_err(), "faucet cooldown: try again in ~4 s");
+        assert_eq!(
+            cd.check_and_mark(&PK_A, 0, 1).unwrap_err(),
+            "faucet cooldown: try again in ~4 s"
+        );
     }
 }

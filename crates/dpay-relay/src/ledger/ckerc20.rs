@@ -33,8 +33,7 @@ pub(crate) const CKERC20_HELPER_ADDRESS_MAINNET: &str =
     "0x18901044688D3756C35Ed2b36D93e6a5B8e00E68";
 pub(crate) const CKERC20_HELPER_ADDRESS_SEPOLIA: &str =
     "0x2D39863d30716aaf2B7fFFd85Dd03Dda2BFC2E38";
-pub(crate) const CKUSDC_ERC20_ADDRESS: &str =
-    "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
+pub(crate) const CKUSDC_ERC20_ADDRESS: &str = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 
 /// The ckETH LEDGER principal (mainnet) — the gas ledger a ckERC20 `withdraw_erc20` burns ckETH gas
 /// fees from (the amount comes from the ckERC20 amount ledger). Verified against the IC mainnet
@@ -81,9 +80,9 @@ pub(crate) const CKUSDC_LEDGER_PRINCIPAL: &str = "xevnm-gaaaa-aaaar-qafnq-cai";
 ///    descriptor's `token_contract`, surfaced here so the app need not re-derive it.
 #[derive(Serialize)]
 pub struct CkErc20OnrampParams {
-    pub helper_address: String,             // the CkDeposit helper contract (0x…) — shared by both kinds
-    pub erc20_address: Option<String>,      // Some(addr) for erc20; None for native_eth
-    pub kind: String,                       // "erc20" | "native_eth"
+    pub helper_address: String, // the CkDeposit helper contract (0x…) — shared by both kinds
+    pub erc20_address: Option<String>, // Some(addr) for erc20; None for native_eth
+    pub kind: String,           // "erc20" | "native_eth"
 }
 
 /// Resolve ckERC-20 / native-ETH onramp params from a catalog descriptor (MC8 U2). PURE +
@@ -120,7 +119,9 @@ pub fn ckerc20_onramp_from_descriptor(
 ) -> Result<CkErc20OnrampParams, LedgerError> {
     let d = desc.ok_or_else(|| LedgerError::Transient("no ckERC-20 onramp for currency".into()))?;
     if d.minter_family != Some(MinterFamily::CkEthErc20) {
-        return Err(LedgerError::Transient("no ckERC-20 onramp for currency".into()));
+        return Err(LedgerError::Transient(
+            "no ckERC-20 onramp for currency".into(),
+        ));
     }
     // Network-scoped helper, EXPLICIT + fail-closed: known chain_ids resolve to their verified
     // FALLBACK helper; an UNKNOWN chain_id returns Err (Transient → HTTP 503) instead of silently

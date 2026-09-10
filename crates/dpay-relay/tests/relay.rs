@@ -102,7 +102,9 @@ fn state_from(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>) {
 async fn state_with_fake(ledger: FakeLedger) -> (AppState, Arc<FakeLedger>, Arc<FakeIc>) {
     let arc = Arc::new(ledger);
     let fake = FakeIc::from_catalog();
-    let state = AppState::new(arc.clone()).with_fake_ic(fake.clone()).with_faucet(true);
+    let state = AppState::new(arc.clone())
+        .with_fake_ic(fake.clone())
+        .with_faucet(true);
     (state, arc, fake)
 }
 
@@ -196,7 +198,10 @@ async fn capabilities_report_default_state() {
 
     let (status, body) = call(&state, get_req("/api/v1/capabilities")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body, serde_json::json!({"till": false, "demo_faucet": false}));
+    assert_eq!(
+        body,
+        serde_json::json!({"till": false, "demo_faucet": false})
+    );
 }
 
 /// The reported till capability reads the same immutable state flag that registers its routes.
@@ -207,7 +212,10 @@ async fn capabilities_report_enabled_till() {
 
     let (status, body) = call(&state, get_req("/api/v1/capabilities")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body, serde_json::json!({"till": true, "demo_faucet": false}));
+    assert_eq!(
+        body,
+        serde_json::json!({"till": true, "demo_faucet": false})
+    );
 }
 
 /// Drive `POST /api/v1/faucet` on the SAME router the capability is read from, and report whether
@@ -361,7 +369,10 @@ async fn integrity_route_reports_match_by_default() {
     assert_eq!(body["live_module_hash"], FAKE_FACADE_MODULE_HASH);
     assert_eq!(body["pinned_module_hash"], FAKE_FACADE_MODULE_HASH);
     let commit = body["relay_commit"].as_str().expect("relay_commit present");
-    assert!(is_baked_commit(commit), "relay_commit mirrors /version: {body}");
+    assert!(
+        is_baked_commit(commit),
+        "relay_commit mirrors /version: {body}"
+    );
 }
 
 /// A live hash that differs from the pin (an unrecorded upgrade, or any drift between the two
@@ -454,7 +465,10 @@ async fn faucet_disabled_mints_nothing() {
 
     let (cs, cb) = call(&state, get_req("/api/v1/capabilities")).await;
     assert_eq!(cs, StatusCode::OK, "{cb}");
-    assert_eq!(cb["demo_faucet"], false, "a refused faucet is not advertised: {cb}");
+    assert_eq!(
+        cb["demo_faucet"], false,
+        "a refused faucet is not advertised: {cb}"
+    );
 }
 
 /// …and enabled (the demo default) it credits the USER PRINCIPAL on the fake-IC gateway — exactly
@@ -2641,7 +2655,9 @@ async fn hashed_assets_are_served_brotli_only_when_the_client_asks() {
     // Find the entry bundle's hashed name off the page that references it (no hardcoded hash).
     let (_s, _h, html) = call_raw(&state, get_req("/wallet")).await;
     let html = String::from_utf8(html).unwrap();
-    let start = html.find("/assets/wallet-").expect("entry bundle referenced");
+    let start = html
+        .find("/assets/wallet-")
+        .expect("entry bundle referenced");
     let end = start + html[start..].find(".js").expect("entry bundle is .js") + 3;
     let bundle = &html[start..end];
 
@@ -2666,11 +2682,15 @@ async fn hashed_assets_are_served_brotli_only_when_the_client_asks() {
     let (status, headers, compressed) = call_raw(&state, req).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        headers.get(header::CONTENT_ENCODING).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CONTENT_ENCODING)
+            .map(|v| v.to_str().unwrap()),
         Some("br")
     );
     assert_eq!(
-        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CACHE_CONTROL)
+            .map(|v| v.to_str().unwrap()),
         Some("public, max-age=31536000, immutable"),
         "the encoding must not change the caching contract — the filename is still the version"
     );
@@ -2693,7 +2713,11 @@ async fn hashed_assets_are_served_brotli_only_when_the_client_asks() {
         headers.get(header::CONTENT_ENCODING).is_none(),
         "br;q=0 refuses brotli"
     );
-    assert_eq!(body.len(), identity.len(), "a refusal gets the identity body");
+    assert_eq!(
+        body.len(),
+        identity.len(),
+        "a refusal gets the identity body"
+    );
 }
 
 /// WOFF2 is brotli inside the container: re-encoding it would grow the response and force a
@@ -2704,7 +2728,9 @@ async fn fonts_are_never_encoded_twice() {
 
     let (_s, _h, html) = call_raw(&state, get_req("/wallet")).await;
     let html = String::from_utf8(html).unwrap();
-    let start = html.find("/assets/plex_mono_500-").expect("mono font referenced");
+    let start = html
+        .find("/assets/plex_mono_500-")
+        .expect("mono font referenced");
     let end = start + html[start..].find(".woff2").expect("font is .woff2") + 6;
     let font = &html[start..end];
 
@@ -2717,12 +2743,18 @@ async fn fonts_are_never_encoded_twice() {
     let (status, headers, bytes) = call_raw(&state, req).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap()),
         Some("font/woff2")
     );
     assert!(headers.get(header::CONTENT_ENCODING).is_none());
     assert!(headers.get(header::VARY).is_none());
-    assert_eq!(&bytes[..4], b"wOF2", "the wOF2 signature must reach the browser intact");
+    assert_eq!(
+        &bytes[..4],
+        b"wOF2",
+        "the wOF2 signature must reach the browser intact"
+    );
 }
 
 /// The offline shell (X10): the worker at the ROOT scope, `no-cache` so a deploy reaches it on the
@@ -2733,13 +2765,21 @@ async fn service_worker_manifest_and_icon_are_served_from_the_root() {
     let (state, _led) = state_from(ledger());
 
     let (status, headers, bytes) = call_raw(&state, get_req("/sw.js")).await;
-    assert_eq!(status, StatusCode::OK, "/sw.js must serve from the root (its scope is /)");
     assert_eq!(
-        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        status,
+        StatusCode::OK,
+        "/sw.js must serve from the root (its scope is /)"
+    );
+    assert_eq!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap()),
         Some("text/javascript; charset=utf-8")
     );
     assert_eq!(
-        headers.get(header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CACHE_CONTROL)
+            .map(|v| v.to_str().unwrap()),
         Some("no-cache"),
         "a cached service worker pins an old bundle past a deploy — it must revalidate every time"
     );
@@ -2756,7 +2796,9 @@ async fn service_worker_manifest_and_icon_are_served_from_the_root() {
     let (status, headers, bytes) = call_raw(&state, get_req("/manifest.webmanifest")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap()),
         Some("application/manifest+json")
     );
     let manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -2766,10 +2808,16 @@ async fn service_worker_manifest_and_icon_are_served_from_the_root() {
     let (status, headers, bytes) = call_raw(&state, get_req("/icon-192.png")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        headers.get(header::CONTENT_TYPE).map(|v| v.to_str().unwrap()),
+        headers
+            .get(header::CONTENT_TYPE)
+            .map(|v| v.to_str().unwrap()),
         Some("image/png")
     );
-    assert_eq!(&bytes[1..4], b"PNG", "the manifest's icon must be a real PNG");
+    assert_eq!(
+        &bytes[1..4],
+        b"PNG",
+        "the manifest's icon must be a real PNG"
+    );
 }
 
 // --- Shared wasm core (GET /dpay-core.wasm) -----------------------------------------------------
@@ -4407,7 +4455,11 @@ async fn signed_call_outcome(
         .body(Body::from(read))
         .unwrap();
     let (status, _h, body) = call_raw(state, req).await;
-    assert_eq!(status, StatusCode::OK, "read_state must serve a certificate");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "read_state must serve a certificate"
+    );
     let tree = decode_read_state_tree(&body).expect("certificate decodes");
     request_status(&tree, &rid).expect("request_status decodes")
 }
@@ -4415,9 +4467,7 @@ async fn signed_call_outcome(
 /// The swap Result carried by a replied depositFromAndSwap outcome.
 fn swap_result(outcome: RequestStatus) -> dpay_icp::icrc::PoolSwapResult {
     match outcome {
-        RequestStatus::Replied(arg) => {
-            decode_swap_result(&arg).expect("pool swap reply decodes")
-        }
+        RequestStatus::Replied(arg) => decode_swap_result(&arg).expect("pool swap reply decodes"),
         other => panic!("expected a replied outcome, got {other:?}"),
     }
 }
@@ -4451,7 +4501,12 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     let (state, _led, fake) = state_with_fake(ledger()).await;
     let meta = fake.swap_pool_metadata();
 
-    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        SWAP_POOL,
+        ICP_LEDGER,
+        VCHF_LEDGER,
+        100_000_000,
+    ));
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["pool"], SWAP_POOL);
@@ -4478,11 +4533,18 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     );
     // …and on the MEASURED live pair (token0 = VCHF, token1 = ICP) that means ICP in is
     // token1 in, i.e. FALSE — the exact bit production was serving inverted.
-    assert_eq!(body["zero_for_one"], false, "ICP is the venue's token1, not its token0");
+    assert_eq!(
+        body["zero_for_one"], false,
+        "ICP is the venue's token1, not its token0"
+    );
 
     let amount_out = body["amount_out"].as_str().expect("amount_out is a string");
     let pool_quote = fake.swap_pool_quote(false, 100_000_000);
-    assert_eq!(amount_out, pool_quote.to_string(), "the route's number IS the pool's number");
+    assert_eq!(
+        amount_out,
+        pool_quote.to_string(),
+        "the route's number IS the pool's number"
+    );
     // The exact figure, pinned: the 2026-09-08 reseed moved token0/token1 into the venue's
     // measured order AND moved each reserve with its own token, so every quoted AMOUNT is
     // byte-identical to the pre-reseed suite and only the direction flag flipped. A future
@@ -4490,7 +4552,12 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     assert_eq!(amount_out, "192420808", "1 ICP → VCHF on the stub curve");
 
     // Determinism: an identical quote is an identical number (no clock blending).
-    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        SWAP_POOL,
+        ICP_LEDGER,
+        VCHF_LEDGER,
+        100_000_000,
+    ));
     let (status, again) = call(&state, req).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(again["amount_out"], body["amount_out"]);
@@ -4498,7 +4565,12 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     // The REVERSE direction quotes the other curve side (VCHF → ICP: VCHF IS token0 ⇒ true),
     // and the two directions are genuinely different numbers — a route that ignored direction
     // would return the same one twice.
-    let req = get_req(&swap_quote_uri(SWAP_POOL, VCHF_LEDGER, ICP_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        SWAP_POOL,
+        VCHF_LEDGER,
+        ICP_LEDGER,
+        100_000_000,
+    ));
     let (status, rev) = call(&state, req).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
@@ -4506,7 +4578,10 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
         Some(VCHF_LEDGER == meta.token0_ledger),
     );
     assert_eq!(rev["zero_for_one"], true);
-    assert_eq!(rev["amount_out"], "51658004", "1 VCHF → ICP on the stub curve");
+    assert_eq!(
+        rev["amount_out"], "51658004",
+        "1 VCHF → ICP on the stub curve"
+    );
     assert_ne!(
         rev["amount_out"], body["amount_out"],
         "the same amount_in through opposite directions cannot quote the same amount_out"
@@ -4523,18 +4598,33 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
 async fn swap_quote_refuses_unknown_pools_and_pairs() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;
 
-    let req = get_req(&swap_quote_uri(NOT_A_VENUE, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        NOT_A_VENUE,
+        ICP_LEDGER,
+        VCHF_LEDGER,
+        100_000_000,
+    ));
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"], "unknown_pool", "the named refusal");
 
-    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, ICP_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        SWAP_POOL,
+        ICP_LEDGER,
+        ICP_LEDGER,
+        100_000_000,
+    ));
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"], "unsupported_pair");
 
     // A KNOWN venue but a pair the pool doesn't serve (DEMO is not in the ICP/VCHF pool).
-    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, DEMO_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        SWAP_POOL,
+        ICP_LEDGER,
+        DEMO_LEDGER,
+        100_000_000,
+    ));
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["error"], "unsupported_pair");
@@ -4558,12 +4648,26 @@ async fn swap_quote_refuses_unknown_pools_and_pairs() {
 async fn swap_quote_agent_refuses_an_unknown_pool_before_reaching_the_venue() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;
 
-    let req = get_req(&swap_quote_uri(NOT_A_VENUE, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        NOT_A_VENUE,
+        ICP_LEDGER,
+        VCHF_LEDGER,
+        100_000_000,
+    ));
     let (status, body) = call(&state, req).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "the venue must never be asked: {body}");
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "the venue must never be asked: {body}"
+    );
     assert_eq!(body["error"], "unknown_pool", "the named refusal");
 
-    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let req = get_req(&swap_quote_uri(
+        SWAP_POOL,
+        ICP_LEDGER,
+        VCHF_LEDGER,
+        100_000_000,
+    ));
     let (status, body) = call(&state, req).await;
     assert_eq!(
         status,
@@ -4605,7 +4709,10 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
     assert!(quoted > 0);
 
     // icrc2_approve: exact swap amount, approve fee, 5-min expiry — spec §3's bounds.
-    let spender = Account { owner: Principal::from_text(SWAP_POOL).unwrap(), subaccount: [0; 32] };
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
     let approve = approve_arg(
         None,
         &spender,
@@ -4625,10 +4732,17 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
     // depositFromAndSwap on the pool canister: 1 ICP in, no minimum, fees declared.
     let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
-    assert_eq!(swap_result(outcome), Ok(quoted), "the swap pays the quoted output, verbatim");
+    assert_eq!(
+        swap_result(outcome),
+        Ok(quoted),
+        "the swap pays the quoted output, verbatim"
+    );
 
     // Balances: ICP −(amount + approve fee + transfer_from fee); VCHF +quoted (gross).
-    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 100_000_000 - 10_000 - 10_000);
+    assert_eq!(
+        fake.balance_for(ICP, &owner),
+        10_000_000_000 - 100_000_000 - 10_000 - 10_000
+    );
     assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), quoted);
 
     // The approval was EXACT-amount: a second identical swap is refused by the pool (#err,
@@ -4636,7 +4750,10 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
     let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
     assert_eq!(swap_result(outcome), Err(PoolSwapError::InsufficientFunds));
-    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 100_000_000 - 20_000);
+    assert_eq!(
+        fake.balance_for(ICP, &owner),
+        10_000_000_000 - 100_000_000 - 20_000
+    );
     assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), quoted);
 }
 
@@ -4646,10 +4763,12 @@ enum ApproveCheck {
 }
 fn swap_result_or_approve(outcome: &RequestStatus) -> ApproveCheck {
     match outcome {
-        RequestStatus::Replied(arg) => match decode_approve_result(arg).expect("approve reply decodes") {
-            ApproveResult::Ok(_) => ApproveCheck::Approved,
-            ApproveResult::Err(e) => panic!("approve refused: {e:?}"),
-        },
+        RequestStatus::Replied(arg) => {
+            match decode_approve_result(arg).expect("approve reply decodes") {
+                ApproveResult::Ok(_) => ApproveCheck::Approved,
+                ApproveResult::Err(e) => panic!("approve refused: {e:?}"),
+            }
+        }
         other => panic!("expected a replied outcome, got {other:?}"),
     }
 }
@@ -4667,7 +4786,10 @@ async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
 
     set_swap_pool_knobs(&state, r#"{"fail_withdrawal": true}"#).await;
 
-    let spender = Account { owner: Principal::from_text(SWAP_POOL).unwrap(), subaccount: [0; 32] };
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
     let approve = approve_arg(
         None,
         &spender,
@@ -4679,7 +4801,10 @@ async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
         Some(10_000),
     );
     let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
-    assert!(matches!(swap_result_or_approve(&outcome), ApproveCheck::Approved));
+    assert!(matches!(
+        swap_result_or_approve(&outcome),
+        ApproveCheck::Approved
+    ));
 
     let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
@@ -4687,8 +4812,15 @@ async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
         panic!("the swap itself succeeds; only the withdrawal 'fails'")
     };
     // Input consumed, output NOT paid: the pool's unused-balance state (spec §4).
-    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 100_000_000 - 10_000 - 10_000);
-    assert_eq!(fake.balance_for(VCHF, &owner), 0, "pending_withdrawal: nothing on the output ledger yet");
+    assert_eq!(
+        fake.balance_for(ICP, &owner),
+        10_000_000_000 - 100_000_000 - 10_000 - 10_000
+    );
+    assert_eq!(
+        fake.balance_for(VCHF, &owner),
+        0,
+        "pending_withdrawal: nothing on the output ledger yet"
+    );
 
     // The resolution: the async withdrawal eventually lands.
     set_swap_pool_knobs(&state, r#"{"settle_pending": true}"#).await;
@@ -4705,7 +4837,10 @@ async fn expired_allowance_blocks_the_swap() {
     let owner = user_principal(&pubkey(&payer));
     fake.faucet_credit(ICP, &owner, 10_000_000_000);
 
-    let spender = Account { owner: Principal::from_text(SWAP_POOL).unwrap(), subaccount: [0; 32] };
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
     let approve = approve_arg(
         None,
         &spender,
@@ -4717,7 +4852,10 @@ async fn expired_allowance_blocks_the_swap() {
         Some(10_000),
     );
     let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
-    assert!(matches!(swap_result_or_approve(&outcome), ApproveCheck::Approved));
+    assert!(matches!(
+        swap_result_or_approve(&outcome),
+        ApproveCheck::Approved
+    ));
 
     let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
@@ -4746,10 +4884,16 @@ async fn swap_pool_knobs_shape_the_quote_curve() {
     let (status, zero_fee) = call(&state, get_req(&uri)).await;
     assert_eq!(status, StatusCode::OK);
     let zero_fee: u128 = zero_fee["amount_out"].as_str().unwrap().parse().unwrap();
-    assert!(zero_fee > base, "no fee tier quotes strictly above the 0.30% tier");
+    assert!(
+        zero_fee > base,
+        "no fee tier quotes strictly above the 0.30% tier"
+    );
 
     set_swap_pool_knobs(&state, r#"{"impact_bps": 10000}"#).await;
     let (status, floored) = call(&state, get_req(&uri)).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(floored["amount_out"], "0", "a 100% impact haircut floors the quote");
+    assert_eq!(
+        floored["amount_out"], "0",
+        "a 100% impact haircut floors the quote"
+    );
 }

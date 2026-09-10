@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use dpay_core::{Currency, PUBKEY_LEN};
 
 use super::api::Ledger;
-use super::ckerc20::{CkErc20OnrampParams, ckerc20_onramp_from_descriptor};
+use super::ckerc20::{ckerc20_onramp_from_descriptor, CkErc20OnrampParams};
 use super::types::{DepositInfo, LedgerError, TxnRecord, U64String};
 
 /// The facade module hash [`FakeLedger`] reports — a fixed sha256-shaped literal, chosen so it
@@ -137,7 +137,10 @@ impl Ledger for FakeLedger {
         })
     }
 
-    async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
+    async fn ckerc20_onramp_params(
+        &self,
+        currency: Currency,
+    ) -> Result<CkErc20OnrampParams, LedgerError> {
         // MC8 U2: resolve the onramp from the CATALOG descriptor, not a hardcoded `currency == 2`
         // guard. Reads [`crate::catalog::ic_rows`] (the same compiled catalog the wallet sees) so
         // the descriptor is the single source of truth, then delegates to the shared pure resolver.

@@ -94,8 +94,8 @@ async fn route_quote(state: &AppState, pool: &str, token_in: &str, token_out: &s
 }
 
 fn swap_venue_truth() -> Value {
-    serde_json::from_str::<Value>(CATALOG_TRUTH)
-        .expect("dfx/catalog_truth.json must be valid JSON")["swap_venue"]
+    serde_json::from_str::<Value>(CATALOG_TRUTH).expect("dfx/catalog_truth.json must be valid JSON")
+        ["swap_venue"]
         .clone()
 }
 
@@ -107,9 +107,15 @@ fn swap_venue_mainnet_pair_and_fee_still_match_the_measured_truth() {
     }
     let truth = swap_venue_truth();
     let pool_text = truth["pool"].as_str().expect("swap_venue.pool");
-    let want0 = truth["token0_ledger"].as_str().expect("swap_venue.token0_ledger");
-    let want1 = truth["token1_ledger"].as_str().expect("swap_venue.token1_ledger");
-    let want_fee = truth["fee_millionths"].as_u64().expect("swap_venue.fee_millionths");
+    let want0 = truth["token0_ledger"]
+        .as_str()
+        .expect("swap_venue.token0_ledger");
+    let want1 = truth["token1_ledger"]
+        .as_str()
+        .expect("swap_venue.token1_ledger");
+    let want_fee = truth["fee_millionths"]
+        .as_u64()
+        .expect("swap_venue.fee_millionths");
     let pool = Principal::from_text(pool_text).expect("the pinned pool principal parses");
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -137,7 +143,10 @@ fn swap_venue_mainnet_pair_and_fee_still_match_the_measured_truth() {
              offline fake is seeded from that block, so re-measure it (and check what else at \
              this pool changed) before shipping another quote"
         );
-        assert_eq!(meta.token1_ledger, want1, "the LIVE venue's token1 drifted from the truth block");
+        assert_eq!(
+            meta.token1_ledger, want1,
+            "the LIVE venue's token1 drifted from the truth block"
+        );
         assert_eq!(
             meta.fee_millionths,
             u128::from(want_fee),
@@ -177,8 +186,7 @@ fn swap_venue_mainnet_pair_and_fee_still_match_the_measured_truth() {
         // The pool publishes its own price in the same reply: token1-per-token0 =
         // (sqrtPriceX96 / 2^96)^2. Both sides of this pair are 8-decimal, so that ratio is
         // directly a unit rate — assert that, rather than assume it.
-        let truth_all: Value =
-            serde_json::from_str(CATALOG_TRUTH).expect("catalog_truth is JSON");
+        let truth_all: Value = serde_json::from_str(CATALOG_TRUTH).expect("catalog_truth is JSON");
         assert_eq!(truth_all["decimals"]["vchf"], truth_all["decimals"]["icp"]);
         let sqrt = k.sqrt_price_x96.0.to_f64().expect("sqrtPriceX96 fits f64") / Q96;
         let price_t1_per_t0 = sqrt * sqrt;

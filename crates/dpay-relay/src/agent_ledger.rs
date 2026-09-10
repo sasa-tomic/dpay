@@ -30,7 +30,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use candid::{decode_one, encode_args, encode_one, CandidType, Principal, Nat};
+use candid::{decode_one, encode_args, encode_one, CandidType, Nat, Principal};
 use ic_agent::identity::BasicIdentity;
 use ic_agent::Agent;
 use icrc_ledger_types::icrc1::account::Account;
@@ -43,8 +43,8 @@ use dpay_core::{Currency, PUBKEY_LEN};
 
 use crate::ledger::api::SwapPoolMetadata;
 use crate::ledger::{
-    CkErc20OnrampParams, DepositInfo, Ledger, LedgerError, TxnRecord, U64String,
-    ckerc20_onramp_from_descriptor,
+    ckerc20_onramp_from_descriptor, CkErc20OnrampParams, DepositInfo, Ledger, LedgerError,
+    TxnRecord, U64String,
 };
 
 /// Per-call I/O budget for every query this ledger makes (balance polls, catalog reads, each
@@ -139,7 +139,8 @@ const ICP_INDEX_PAGE_SIZE: u64 = 100;
 /// other ledger (the icrc3 walk). Pure so the dispatch is unit-pinnable.
 pub fn icp_index_for_ledger(ledger: &Principal) -> Option<Principal> {
     let canonical = Principal::from_text(ICP_LEDGER).expect("hardcoded canister id parses");
-    (ledger == &canonical).then(|| Principal::from_text(ICP_INDEX).expect("hardcoded canister id parses"))
+    (ledger == &canonical)
+        .then(|| Principal::from_text(ICP_INDEX).expect("hardcoded canister id parses"))
 }
 
 // Locally mirrored index Candid surface — only the fields history reads (candid record
@@ -458,7 +459,6 @@ impl AgentLedger {
             swap_pool_metadata_cache: Mutex::new(HashMap::new()),
         })
     }
-
 }
 
 /// The USER's ICRC-1 account on a ledger — the rail's addressing shape since the 2026-08-19
@@ -499,7 +499,10 @@ impl Ledger for AgentLedger {
             .map_err(|e| LedgerError::Transient(format!("encode icrc1_balance_of arg: {e}")))?;
         let reply = tokio::time::timeout(
             Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent.query(&ledger, "icrc1_balance_of").with_arg(arg).call(),
+            self.agent
+                .query(&ledger, "icrc1_balance_of")
+                .with_arg(arg)
+                .call(),
         )
         .await
         .map_err(|_| {
@@ -604,8 +607,11 @@ impl Ledger for AgentLedger {
         // surface), so the log is the only place the cause can live. Without it, an unreachable
         // gateway and a replica that answered with a rejection were the same reasonless 503, and
         // this is the first thing anyone reads when prod goes red.
-        match tokio::time::timeout(Duration::from_secs(STATUS_TIMEOUT_SECS), self.agent.status())
-            .await
+        match tokio::time::timeout(
+            Duration::from_secs(STATUS_TIMEOUT_SECS),
+            self.agent.status(),
+        )
+        .await
         {
             Ok(Ok(_)) => true,
             Ok(Err(e)) => {
@@ -665,7 +671,12 @@ impl Ledger for AgentLedger {
         // UPGRADES, not per call), so 60s staleness is safe while cutting steady-state cost to
         // one update per TTL. A failed fetch does NOT poison the cache: the entry is only
         // inserted on success, so the next caller retries immediately.
-        if let Some(entry) = self.deposit_info_cache.lock().unwrap_or_else(|p| p.into_inner()).get(&currency) {
+        if let Some(entry) = self
+            .deposit_info_cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&currency)
+        {
             if entry.fetched_at.elapsed() < Duration::from_secs(DEPOSIT_INFO_CACHE_TTL_SECS) {
                 return Ok(entry.info.clone());
             }
@@ -694,14 +705,23 @@ impl Ledger for AgentLedger {
             deposit_fee: U64String(m.deposit_fee),
             deposit_min_amount: m.deposit_min_amount.map(U64String),
         };
-        self.deposit_info_cache.lock().unwrap_or_else(|p| p.into_inner()).insert(
-            currency,
-            DepositInfoCacheEntry { fetched_at: std::time::Instant::now(), info: info.clone() },
-        );
+        self.deposit_info_cache
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(
+                currency,
+                DepositInfoCacheEntry {
+                    fetched_at: std::time::Instant::now(),
+                    info: info.clone(),
+                },
+            );
         Ok(info)
     }
 
-    async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError> {
+    async fn ckerc20_onramp_params(
+        &self,
+        currency: Currency,
+    ) -> Result<CkErc20OnrampParams, LedgerError> {
         // MC8 U2: resolve the onramp from the CATALOG descriptor (the relay's compiled catalog,
         // [`crate::catalog::ic_rows`] — sole authority since 2026-08-28), not a hardcoded
         // `currency == 2` guard. The descriptor's per-token `token_contract` is the
@@ -743,9 +763,7 @@ impl Ledger for AgentLedger {
             .unwrap_or_else(|p| p.into_inner())
             .get(pool)
         {
-            if entry.fetched_at.elapsed()
-                < Duration::from_secs(SWAP_POOL_METADATA_CACHE_TTL_SECS)
-            {
+            if entry.fetched_at.elapsed() < Duration::from_secs(SWAP_POOL_METADATA_CACHE_TTL_SECS) {
                 return Ok(entry.meta.clone());
             }
         }
@@ -828,15 +846,18 @@ impl Ledger for AgentLedger {
         )
         .await
         .map_err(|_| {
-            LedgerError::Transient(format!("quote timed out after {CANISTER_CALL_TIMEOUT_SECS}s"))
+            LedgerError::Transient(format!(
+                "quote timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+            ))
         })?
         .map_err(|e| LedgerError::Transient(format!("quote query: {e}")))?;
         match decode_one::<IcpSwapResult>(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode quote reply: {e}")))?
         {
-            IcpSwapResult::ok(nat) => nat.0.to_u128().ok_or_else(|| {
-                LedgerError::Transient("quote amountOut exceeds u128".to_string())
-            }),
+            IcpSwapResult::ok(nat) => nat
+                .0
+                .to_u128()
+                .ok_or_else(|| LedgerError::Transient("quote amountOut exceeds u128".to_string())),
             // The pool's own refusal, named verbatim (variant name + its text payload when the
             // variant carries one) — the route's `pool_error` body forwards this string as-is.
             IcpSwapResult::err(e) => Err(LedgerError::Rejected(match e {
@@ -1010,9 +1031,7 @@ impl AgentLedger {
                     "get_account_transactions timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
                 ))
             })?
-            .map_err(|e| {
-                LedgerError::Transient(format!("get_account_transactions query: {e}"))
-            })?;
+            .map_err(|e| LedgerError::Transient(format!("get_account_transactions query: {e}")))?;
             decode_one::<IcpIndexAccountTransactionsResult>(&reply)
                 .map_err(|e| {
                     LedgerError::Transient(format!("decode get_account_transactions reply: {e}"))
@@ -1024,7 +1043,16 @@ impl AgentLedger {
                 })
         };
         let my_account_id = icp_legacy_account_identifier(&me.owner);
-        Self::icp_index_walk(fetch, &me.owner, &my_account_id, currency, limit, memo, deadline).await
+        Self::icp_index_walk(
+            fetch,
+            &me.owner,
+            &my_account_id,
+            currency,
+            limit,
+            memo,
+            deadline,
+        )
+        .await
     }
 
     /// The index walk's control flow, generic over the page fetch so the unit tests can drive
@@ -1096,24 +1124,30 @@ impl AgentLedger {
     /// transport/decode failure is the CALLER's fallback signal (logged there), never a user-facing
     /// 503: a momentarily unreachable minter must not break the onramp sheet when the verified
     /// constants are still correct.
-    async fn minter_helper_address(&self, minter_text: &str) -> Result<Option<String>, LedgerError> {
+    async fn minter_helper_address(
+        &self,
+        minter_text: &str,
+    ) -> Result<Option<String>, LedgerError> {
         let minter = Principal::from_text(minter_text).map_err(|e| {
             LedgerError::Transient(format!("parse minter principal '{minter_text}': {e}"))
         })?;
-        let reply = tokio::time::timeout(
-            Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
-            self.agent
-                .query(&minter, "get_minter_info")
-                .with_arg(encode_args(()).map_err(|e| LedgerError::Transient(format!("encode get_minter_info: {e}")))?)
-                .call(),
-        )
-        .await
-        .map_err(|_| {
-            LedgerError::Transient(format!(
-                "get_minter_info timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
-            ))
-        })?
-        .map_err(|e| LedgerError::Transient(format!("get_minter_info query: {e}")))?;
+        let reply =
+            tokio::time::timeout(
+                Duration::from_secs(CANISTER_CALL_TIMEOUT_SECS),
+                self.agent
+                    .query(&minter, "get_minter_info")
+                    .with_arg(encode_args(()).map_err(|e| {
+                        LedgerError::Transient(format!("encode get_minter_info: {e}"))
+                    })?)
+                    .call(),
+            )
+            .await
+            .map_err(|_| {
+                LedgerError::Transient(format!(
+                    "get_minter_info timed out after {CANISTER_CALL_TIMEOUT_SECS}s"
+                ))
+            })?
+            .map_err(|e| LedgerError::Transient(format!("get_minter_info query: {e}")))?;
         let info: CkEthMinterInfoMirror = decode_one(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode get_minter_info reply: {e}")))?;
         Ok(info.deposit_with_subaccount_helper_contract_address)
@@ -1150,10 +1184,9 @@ impl AgentLedger {
             LedgerError::Transient(format!("mint timed out after {MINTER_CALL_TIMEOUT_SECS}s"))
         })?
         .map_err(|e| LedgerError::Transient(format!("mint update: {e}")))?;
-        decode_one::<Result<u64, String>>(&reply).map_err(|e| {
-            LedgerError::Transient(format!("decode mint reply: {e}"))
-        })?
-        .map_err(|text| LedgerError::Rejected(text))
+        decode_one::<Result<u64, String>>(&reply)
+            .map_err(|e| LedgerError::Transient(format!("decode mint reply: {e}")))?
+            .map_err(|text| LedgerError::Rejected(text))
     }
 }
 
@@ -1191,10 +1224,17 @@ fn nat_to_u64(n: &Nat, field: &str) -> Result<u64, LedgerError> {
 /// `first_index` — it is a PARAMETER rather than something read off the transaction because an
 /// icrc3 transaction does not carry its own position, and a row built without one would be a row
 /// no reader could tell apart from its twin (see [`TxnRecord::block`]).
-fn map_icrc_txn(txn: &Transaction, me: &Account, currency: Currency, block: u64) -> Option<TxnRecord> {
+fn map_icrc_txn(
+    txn: &Transaction,
+    me: &Account,
+    currency: Currency,
+    block: u64,
+) -> Option<TxnRecord> {
     let account_text = |a: &Account| a.owner.to_text();
     let memo_hex = |m: &Option<icrc_ledger_types::icrc1::transfer::Memo>| {
-        m.as_ref().map(|b| hex::encode(b.0.as_slice())).unwrap_or_default()
+        m.as_ref()
+            .map(|b| hex::encode(b.0.as_slice()))
+            .unwrap_or_default()
     };
     let ts = txn.timestamp / 1_000_000_000; // ICRC-3 timestamps are NANOSECONDS; rows contract is unix SECONDS
 
@@ -1315,7 +1355,11 @@ fn map_icp_index_txn(
     };
     let is_me = |acct: &str| acct.eq_ignore_ascii_case(my_account_id);
     let ts_secs = |created_at_ns: Option<u64>| {
-        let ns = if txn.timestamp > 0 { txn.timestamp } else { created_at_ns.unwrap_or(0) };
+        let ns = if txn.timestamp > 0 {
+            txn.timestamp
+        } else {
+            created_at_ns.unwrap_or(0)
+        };
         ns / 1_000_000_000
     };
     let memo_hex = |m: &Option<Vec<u8>>| m.as_deref().map(hex::encode).unwrap_or_default();
@@ -1392,7 +1436,8 @@ mod icp_index_tests {
     /// identity) — an implementation INDEPENDENT of this hand-rolled derivation. If the
     /// construction above ever drifts (domain separator, digest, checksum placement), this pin
     /// fails. The pair is public dfx-default-identity output on this dev machine, not a secret.
-    const GOLDEN_PRINCIPAL: &str = "hhwti-hb7f7-4ojco-uvazw-vcwr7-fqd6o-3oljb-aezpo-iheay-3gxmx-rqe";
+    const GOLDEN_PRINCIPAL: &str =
+        "hhwti-hb7f7-4ojco-uvazw-vcwr7-fqd6o-3oljb-aezpo-iheay-3gxmx-rqe";
     const GOLDEN_ACCOUNT_ID: &str =
         "7839b276bbf13961134746b623507d6baeef510873615f683ee93050c5de1a42";
 
@@ -1518,7 +1563,10 @@ mod icp_index_tests {
                 "{text} must keep the icrc3 walk"
             );
         }
-        assert_eq!(icp_index_for_ledger(&Principal::management_canister()), None);
+        assert_eq!(
+            icp_index_for_ledger(&Principal::management_canister()),
+            None
+        );
         assert_ne!(icp, index, "the pinned pair is two different canisters");
     }
 
@@ -1545,7 +1593,14 @@ mod icp_index_tests {
         // Transfer IN: the index says to = MY account identifier → the app needs MY PRINCIPAL
         // TEXT there; the counterparty identifier passes through UNCHANGED.
         let tin = map_icp_index_txn(
-            &transfer_txn(COUNTER_ACCOUNT, &me_id, 100, Some(b"change".to_vec()), None, TS_NS),
+            &transfer_txn(
+                COUNTER_ACCOUNT,
+                &me_id,
+                100,
+                Some(b"change".to_vec()),
+                None,
+                TS_NS,
+            ),
             &me,
             &me_id,
             cur,
@@ -1553,24 +1608,40 @@ mod icp_index_tests {
         )
         .unwrap();
         assert_eq!(tin.from, COUNTER_ACCOUNT);
-        assert_eq!(tin.to, me.to_text(), "my account-identifier side → my principal text");
+        assert_eq!(
+            tin.to,
+            me.to_text(),
+            "my account-identifier side → my principal text"
+        );
         assert_eq!(tin.amount.0, 100);
         assert_eq!(tin.currency, cur);
 
         // Transfer OUT: mirrored.
         let tout = map_icp_index_txn(
-            &transfer_txn(&me_id, COUNTER_ACCOUNT, 250, Some(vec![0u8; 16]), None, TS_NS),
+            &transfer_txn(
+                &me_id,
+                COUNTER_ACCOUNT,
+                250,
+                Some(vec![0u8; 16]),
+                None,
+                TS_NS,
+            ),
             &me,
             &me_id,
             cur,
             BLOCK,
         )
         .unwrap();
-        assert_eq!(tout.from, me.to_text(), "my account-identifier side → my principal text");
+        assert_eq!(
+            tout.from,
+            me.to_text(),
+            "my account-identifier side → my principal text"
+        );
         assert_eq!(tout.to, COUNTER_ACCOUNT);
 
         // Mint TO me: empty `from` (the app's mint sentinel), `to` = my principal text.
-        let m = map_icp_index_txn(&mint_txn(&me_id, 10_000, TS_NS), &me, &me_id, cur, BLOCK).unwrap();
+        let m =
+            map_icp_index_txn(&mint_txn(&me_id, 10_000, TS_NS), &me, &me_id, cur, BLOCK).unwrap();
         assert_eq!(m.from, "");
         assert_eq!(m.to, me.to_text());
         assert_eq!(m.amount.0, 10_000);
@@ -1584,7 +1655,9 @@ mod icp_index_tests {
         let approve = IcpIndexTransaction {
             burn: None,
             mint: None,
-            approve: Some(IcpIndexApprove { from: me_id.clone() }),
+            approve: Some(IcpIndexApprove {
+                from: me_id.clone(),
+            }),
             transfer: None,
             timestamp: TS_NS,
         };
@@ -1594,7 +1667,10 @@ mod icp_index_tests {
         let other = "2222222222222222222222222222222222222222222222222222222222222222";
         assert!(map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, other, 1, None, None, TS_NS),
-            &me, &me_id, cur, BLOCK
+            &me,
+            &me_id,
+            cur,
+            BLOCK
         )
         .is_none());
         assert!(map_icp_index_txn(&mint_txn(other, 1, TS_NS), &me, &me_id, cur, BLOCK).is_none());
@@ -1611,19 +1687,32 @@ mod icp_index_tests {
         let bytes = vec![0x00, 0x01, 0xfe, 0xff, 0x7f, 0x80, 0xaa, 0x55];
         let row = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, Some(bytes.clone()), None, TS_NS),
-            &me, &me_id, cur, BLOCK,
+            &me,
+            &me_id,
+            cur,
+            BLOCK,
         )
         .unwrap();
-        assert_eq!(row.memo, hex::encode(&bytes), "memo is the exact bytes, hex-encoded");
+        assert_eq!(
+            row.memo,
+            hex::encode(&bytes),
+            "memo is the exact bytes, hex-encoded"
+        );
 
         // A LEGACY nat64 memo alone renders EMPTY — it can never satisfy the 16-byte dpay
         // reconciliation exact-memo match (the walk filter compares against row.memo).
         let legacy = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, Some(42), TS_NS),
-            &me, &me_id, cur, BLOCK,
+            &me,
+            &me_id,
+            cur,
+            BLOCK,
         )
         .unwrap();
-        assert_eq!(legacy.memo, "", "legacy nat64 memo is dropped, not rendered");
+        assert_eq!(
+            legacy.memo, "",
+            "legacy nat64 memo is dropped, not rendered"
+        );
         let settlement_hex = hex::encode([7u8; 16]);
         assert!(
             !legacy.memo.eq_ignore_ascii_case(&settlement_hex),
@@ -1635,7 +1724,10 @@ mod icp_index_tests {
         // …created_at_time as the fallback when the transaction timestamp is 0/absent.
         let fallback = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, None, 0),
-            &me, &me_id, cur, BLOCK,
+            &me,
+            &me_id,
+            cur,
+            BLOCK,
         )
         .unwrap();
         assert_eq!(
@@ -1653,10 +1745,17 @@ mod icp_index_tests {
         let me_id = icp_legacy_account_identifier(&me);
         let row = map_icp_index_txn(
             &transfer_txn(COUNTER_ACCOUNT, &me_id, u64::MAX, None, None, TS_NS),
-            &me, &me_id, 7, BLOCK,
+            &me,
+            &me_id,
+            7,
+            BLOCK,
         )
         .unwrap();
-        assert_eq!(row.amount.0, u64::MAX, "u64::MAX e8s survives untouched (no f64)");
+        assert_eq!(
+            row.amount.0,
+            u64::MAX,
+            "u64::MAX e8s survives untouched (no f64)"
+        );
         // And it crosses the JSON boundary as the exact DECIMAL STRING (the U64String contract).
         let json = serde_json::to_value(&row).unwrap();
         assert_eq!(
@@ -1672,8 +1771,28 @@ mod icp_index_tests {
         let me_id = icp_legacy_account_identifier(&me);
         let p1 = page(
             vec![
-                (1002, transfer_txn(COUNTER_ACCOUNT, &me_id, 100, Some(b"change".to_vec()), None, TS_NS)),
-                (1001, transfer_txn(&me_id, COUNTER_ACCOUNT, 250, Some([0u8; 16].to_vec()), None, TS_NS)),
+                (
+                    1002,
+                    transfer_txn(
+                        COUNTER_ACCOUNT,
+                        &me_id,
+                        100,
+                        Some(b"change".to_vec()),
+                        None,
+                        TS_NS,
+                    ),
+                ),
+                (
+                    1001,
+                    transfer_txn(
+                        &me_id,
+                        COUNTER_ACCOUNT,
+                        250,
+                        Some([0u8; 16].to_vec()),
+                        None,
+                        TS_NS,
+                    ),
+                ),
             ],
             Some(1000),
         );
@@ -1694,10 +1813,17 @@ mod icp_index_tests {
             }
         };
 
-        let rows = rt().block_on(AgentLedger::icp_index_walk(
-            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
-        ))
-        .unwrap();
+        let rows = rt()
+            .block_on(AgentLedger::icp_index_walk(
+                fetch,
+                &me,
+                &me_id,
+                7,
+                30,
+                None,
+                deadline_ahead(),
+            ))
+            .unwrap();
 
         assert_eq!(
             rows.iter().map(|r| r.amount.0).collect::<Vec<_>>(),
@@ -1725,8 +1851,28 @@ mod icp_index_tests {
         let settlement = [3u8; 16];
         let p1 = page(
             vec![
-                (1002, transfer_txn(COUNTER_ACCOUNT, &me_id, 5, Some(b"change".to_vec()), None, TS_NS)),
-                (1001, transfer_txn(&me_id, COUNTER_ACCOUNT, 250, Some(settlement.to_vec()), None, TS_NS)),
+                (
+                    1002,
+                    transfer_txn(
+                        COUNTER_ACCOUNT,
+                        &me_id,
+                        5,
+                        Some(b"change".to_vec()),
+                        None,
+                        TS_NS,
+                    ),
+                ),
+                (
+                    1001,
+                    transfer_txn(
+                        &me_id,
+                        COUNTER_ACCOUNT,
+                        250,
+                        Some(settlement.to_vec()),
+                        None,
+                        TS_NS,
+                    ),
+                ),
             ],
             Some(1000),
         );
@@ -1741,17 +1887,28 @@ mod icp_index_tests {
             }
         };
 
-        let rows = rt().block_on(AgentLedger::icp_index_walk(
-            fetch, &me, &me_id, 7, 1, Some(hex::encode(settlement).as_str()), deadline_ahead(),
-        ))
-        .unwrap();
+        let rows = rt()
+            .block_on(AgentLedger::icp_index_walk(
+                fetch,
+                &me,
+                &me_id,
+                7,
+                1,
+                Some(hex::encode(settlement).as_str()),
+                deadline_ahead(),
+            ))
+            .unwrap();
 
         assert_eq!(
             rows.iter().map(|r| r.amount.0).collect::<Vec<_>>(),
             vec![250],
             "the memo filter applies BEFORE limit truncation — the older matching row survives limit=1"
         );
-        assert_eq!(calls.get(), 1, "limit reached mid-page: no further round trips");
+        assert_eq!(
+            calls.get(),
+            1,
+            "limit reached mid-page: no further round trips"
+        );
     }
 
     #[test]
@@ -1770,15 +1927,32 @@ mod icp_index_tests {
                 let id = 10_000u64 - 100 * n as u64; // strictly advancing oldest_tx_id
                 let _ = start;
                 Ok(page(
-                    vec![(id, transfer_txn(COUNTER_ACCOUNT, "3333333333333333333333333333333333333333333333333333333333333333", 1, None, None, TS_NS))],
+                    vec![(
+                        id,
+                        transfer_txn(
+                            COUNTER_ACCOUNT,
+                            "3333333333333333333333333333333333333333333333333333333333333333",
+                            1,
+                            None,
+                            None,
+                            TS_NS,
+                        ),
+                    )],
                     Some(id - 1),
                 ))
             }
         };
-        let rows = rt().block_on(AgentLedger::icp_index_walk(
-            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
-        ))
-        .unwrap();
+        let rows = rt()
+            .block_on(AgentLedger::icp_index_walk(
+                fetch,
+                &me,
+                &me_id,
+                7,
+                30,
+                None,
+                deadline_ahead(),
+            ))
+            .unwrap();
         assert!(rows.is_empty(), "no matching rows ever");
         assert_eq!(
             calls.get(),
@@ -1803,10 +1977,17 @@ mod icp_index_tests {
                 Ok(page(vec![], Some(5)))
             }
         };
-        let rows = rt().block_on(AgentLedger::icp_index_walk(
-            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
-        ))
-        .unwrap();
+        let rows = rt()
+            .block_on(AgentLedger::icp_index_walk(
+                fetch,
+                &me,
+                &me_id,
+                7,
+                30,
+                None,
+                deadline_ahead(),
+            ))
+            .unwrap();
         assert!(rows.is_empty());
         assert_eq!(calls.get(), 1, "empty page terminates immediately");
 
@@ -1819,22 +2000,37 @@ mod icp_index_tests {
             let me_id = row_owner.clone();
             async move {
                 calls.set(calls.get() + 1);
-                let cursor = start
-                    .as_ref()
-                    .and_then(|n| n.0.to_u64())
-                    .unwrap_or(7);
+                let cursor = start.as_ref().and_then(|n| n.0.to_u64()).unwrap_or(7);
                 Ok(page(
-                    vec![(cursor, transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, None, TS_NS))],
+                    vec![(
+                        cursor,
+                        transfer_txn(COUNTER_ACCOUNT, &me_id, 1, None, None, TS_NS),
+                    )],
                     Some(7),
                 ))
             }
         };
-        let rows = rt().block_on(AgentLedger::icp_index_walk(
-            fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
-        ))
-        .unwrap();
-        assert_eq!(rows.len(), 2, "the repeated page is absorbed exactly once before the non-advance is detected");
-        assert_eq!(calls.get(), 2, "a non-advancing cursor ends the walk on round trip 2");
+        let rows = rt()
+            .block_on(AgentLedger::icp_index_walk(
+                fetch,
+                &me,
+                &me_id,
+                7,
+                30,
+                None,
+                deadline_ahead(),
+            ))
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            2,
+            "the repeated page is absorbed exactly once before the non-advance is detected"
+        );
+        assert_eq!(
+            calls.get(),
+            2,
+            "a non-advancing cursor ends the walk on round trip 2"
+        );
     }
 
     #[test]
@@ -1853,10 +2049,17 @@ mod icp_index_tests {
                 Ok(page(vec![], None))
             }
         };
-        let rows = rt().block_on(AgentLedger::icp_index_walk(
-            fetch, &me, &me_id, 7, 30, None, std::time::Instant::now(),
-        ))
-        .unwrap();
+        let rows = rt()
+            .block_on(AgentLedger::icp_index_walk(
+                fetch,
+                &me,
+                &me_id,
+                7,
+                30,
+                None,
+                std::time::Instant::now(),
+            ))
+            .unwrap();
         assert!(rows.is_empty());
         assert!(!called.get(), "an expired deadline prevents ANY round trip");
 
@@ -1870,7 +2073,13 @@ mod icp_index_tests {
         };
         let err = rt()
             .block_on(AgentLedger::icp_index_walk(
-                fetch, &me, &me_id, 7, 30, None, deadline_ahead(),
+                fetch,
+                &me,
+                &me_id,
+                7,
+                30,
+                None,
+                deadline_ahead(),
             ))
             .unwrap_err();
         match err {

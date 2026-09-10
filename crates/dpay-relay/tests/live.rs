@@ -1051,7 +1051,11 @@ fn live_faucet_refuses_non_controller_identities() {
     ));
     rt.block_on(async {
         let (s, b) = call(&anonymous, faucet_req()).await;
-        assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE, "anonymous: faucet body={b}");
+        assert_eq!(
+            s,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "anonymous: faucet body={b}"
+        );
         let reason = b["error"]
             .as_str()
             .unwrap_or_else(|| panic!("error must be a string (body={b})"));
@@ -1076,7 +1080,11 @@ fn live_faucet_refuses_non_controller_identities() {
     .with_faucet(true);
     rt.block_on(async {
         let (s, b) = call(&wrong_seed, faucet_req()).await;
-        assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "wrong seed: faucet body={b}");
+        assert_eq!(
+            s,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "wrong seed: faucet body={b}"
+        );
         assert_eq!(
             b["error"].as_str(),
             Some("unauthorized: admin ops require the controller principal"),
@@ -1143,7 +1151,11 @@ fn live_capability_demo_faucet_equals_what_the_faucet_route_does() {
                 ledger,
                 Principal::anonymous(),
                 "icrc1_balance_of",
-                encode_one(Account { owner, subaccount: None }).unwrap(),
+                encode_one(Account {
+                    owner,
+                    subaccount: None,
+                })
+                .unwrap(),
             )
             .expect("icrc1_balance_of query must succeed");
         decode_one::<Nat>(&res)
@@ -1170,9 +1182,14 @@ fn live_capability_demo_faucet_equals_what_the_faucet_route_does() {
         // the route and the capability then agree, whichever way the flag went.
         .with_faucet(true)
     });
-    let (adv, credited, s, b) =
-        rt.block_on(faucet_capability_and_route(&controller, &hex::encode(funded_pk)));
-    assert!(credited, "a controller-identity relay must actually mint (answered {s}: {b})");
+    let (adv, credited, s, b) = rt.block_on(faucet_capability_and_route(
+        &controller,
+        &hex::encode(funded_pk),
+    ));
+    assert!(
+        credited,
+        "a controller-identity relay must actually mint (answered {s}: {b})"
+    );
     assert_eq!(
         adv, credited,
         "advertised demo_faucet must equal what POST /api/v1/faucet did (answered {s}: {b})"
@@ -1193,9 +1210,14 @@ fn live_capability_demo_faucet_equals_what_the_faucet_route_does() {
                 .expect("anonymous agent connects"),
         ))
     });
-    let (adv2, credited2, s2, b2) =
-        rt.block_on(faucet_capability_and_route(&anonymous, &hex::encode(unfunded_pk)));
-    assert!(!credited2, "an anonymous relay cannot mint (answered {s2}: {b2})");
+    let (adv2, credited2, s2, b2) = rt.block_on(faucet_capability_and_route(
+        &anonymous,
+        &hex::encode(unfunded_pk),
+    ));
+    assert!(
+        !credited2,
+        "an anonymous relay cannot mint (answered {s2}: {b2})"
+    );
     assert_eq!(
         adv2, credited2,
         "an anonymous relay must not advertise a faucet (answered {s2}: {b2})"

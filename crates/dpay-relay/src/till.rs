@@ -523,7 +523,10 @@ impl TillStore {
     /// keep it honest. A scan is affordable because it happens once per ring-up, which costs the
     /// caller an Ed25519 signature.
     fn charges_of(&self, merchant: &str) -> usize {
-        self.by_id.values().filter(|c| c.merchant == merchant).count()
+        self.by_id
+            .values()
+            .filter(|c| c.merchant == merchant)
+            .count()
     }
 
     /// Stop this merchant's current charge being payable, for the stated reason, and return it as
@@ -571,10 +574,17 @@ impl TillStore {
     /// The expiry is CLAMPED to the charge's own death, so this till never states a deadline it
     /// will not honour: a quote minted with five minutes left on a charge that has thirty seconds
     /// to live is good for thirty seconds, and says so.
-    pub fn quote(&mut self, id: &str, quote_id: String, now_secs: u64) -> Result<(String, u64), TillError> {
+    pub fn quote(
+        &mut self,
+        id: &str,
+        quote_id: String,
+        now_secs: u64,
+    ) -> Result<(String, u64), TillError> {
         let charge = self.by_id.get_mut(id).ok_or(TillError::UnknownCharge)?;
         charge.payable(now_secs)?;
-        let expires = now_secs.saturating_add(QUOTE_TTL_SECS).min(charge.expires_at());
+        let expires = now_secs
+            .saturating_add(QUOTE_TTL_SECS)
+            .min(charge.expires_at());
         charge.quotes.retain(|(_, exp)| *exp > now_secs);
         if charge.quotes.len() >= MAX_LIVE_QUOTES {
             charge.quotes.remove(0);
@@ -646,7 +656,10 @@ impl TillStore {
     /// because [`SETTLED_TTL_SECS`] outlives [`LEDGER_CLOCK_SKEW_SECS`] by a day: by the time a
     /// block is forgotten, no charge this store could hold is allowed to look that far back.
     fn consumed_blocks(&self) -> HashSet<u64> {
-        self.by_id.values().filter_map(|c| c.paid.as_ref().map(|p| p.block)).collect()
+        self.by_id
+            .values()
+            .filter_map(|c| c.paid.as_ref().map(|p| p.block))
+            .collect()
     }
 
     /// Drop charges past their life, and nonces past their replay window. Called opportunistically;
@@ -973,16 +986,39 @@ mod tests {
 
     /// Ring up a charge, or fail the test with the refusal. The store's `Result` is about the
     /// per-merchant bound, which only its own test provokes.
-    fn ring_up(s: &mut TillStore, id: &str, merchant: &str, pk: [u8; 32], cents: u64, at: u64) -> Charge {
-        s.open(id.into(), REF.into(), merchant.into(), pk, "Shop".into(), cents, at)
-            .unwrap_or_else(|e| panic!("ringing up {id}: {e:?}"))
+    fn ring_up(
+        s: &mut TillStore,
+        id: &str,
+        merchant: &str,
+        pk: [u8; 32],
+        cents: u64,
+        at: u64,
+    ) -> Charge {
+        s.open(
+            id.into(),
+            REF.into(),
+            merchant.into(),
+            pk,
+            "Shop".into(),
+            cents,
+            at,
+        )
+        .unwrap_or_else(|e| panic!("ringing up {id}: {e:?}"))
     }
 
     /// A store holding one charge, and that charge.
     fn charge(cents: u64, created: u64) -> Charge {
         let mut s = TillStore::default();
-        s.open("pl_test".into(), REF.into(), MERCHANT.into(), [7u8; 32], "Test Shop".into(), cents, created)
-            .expect("an empty store rings one up")
+        s.open(
+            "pl_test".into(),
+            REF.into(),
+            MERCHANT.into(),
+            [7u8; 32],
+            "Test Shop".into(),
+            cents,
+            created,
+        )
+        .expect("an empty store rings one up")
     }
 
     /// One incoming ledger row carrying the charge's own reference — i.e. a payment somebody was
@@ -1022,7 +1058,10 @@ mod tests {
         assert_eq!(charge(1, 0).amount_raw(), 1_000_000);
         // …and never through a float: a price that visits f64 can be wrong in the last digit, which
         // is the digit a customer notices.
-        assert_eq!(charge(u64::from(u32::MAX), 0).amount_raw(), 4_294_967_295 * RAW_PER_CENT);
+        assert_eq!(
+            charge(u64::from(u32::MAX), 0).amount_raw(),
+            4_294_967_295 * RAW_PER_CENT
+        );
         // The largest charge the door admits still multiplies exactly — which is what the door's
         // bound is for: past it the arithmetic would saturate and the till would quote a lie.
         assert_eq!(charge(MAX_CENTS, 0).amount_raw(), MAX_CENTS * RAW_PER_CENT);
@@ -1048,7 +1087,10 @@ mod tests {
         // Cents survive, in the two-digit shape money is written in (never `10.5`).
         assert_eq!(charge(1_050, 0).price_text(), "10.50");
         assert_eq!(charge(1_005, 0).price_text(), "10.05");
-        assert_ne!(charge(1_000, 0).price_text(), charge(1_000, 0).amount_text());
+        assert_ne!(
+            charge(1_000, 0).price_text(),
+            charge(1_000, 0).amount_text()
+        );
     }
 
     #[test]
@@ -1072,10 +1114,19 @@ mod tests {
     fn a_transfer_that_is_not_this_sale_never_settles_it() {
         let c = charge(100, 1_000);
         // Wrong amount — an underpayment is not a payment, and an overpayment is not this charge.
-        assert_eq!(match_payment(&c, &[row(MERCHANT, 99_999_999, 1_050, 1)], &unspent()), None);
-        assert_eq!(match_payment(&c, &[row(MERCHANT, 100_000_001, 1_050, 2)], &unspent()), None);
+        assert_eq!(
+            match_payment(&c, &[row(MERCHANT, 99_999_999, 1_050, 1)], &unspent()),
+            None
+        );
+        assert_eq!(
+            match_payment(&c, &[row(MERCHANT, 100_000_001, 1_050, 2)], &unspent()),
+            None
+        );
         // Someone else's account: reading a history does not mean everything in it is ours.
-        assert_eq!(match_payment(&c, &[row(PAYER, 100_000_000, 1_050, 3)], &unspent()), None);
+        assert_eq!(
+            match_payment(&c, &[row(PAYER, 100_000_000, 1_050, 3)], &unspent()),
+            None
+        );
     }
 
     #[test]
@@ -1096,7 +1147,11 @@ mod tests {
         let rows = [row(MERCHANT, 450_000_000, 1_010, 12)];
 
         let first = s.settle_from_history("pl_a", &rows).expect("a live charge");
-        assert_eq!(first.map(|p| p.block), Some(12), "the first charge polled takes the transfer");
+        assert_eq!(
+            first.map(|p| p.block),
+            Some(12),
+            "the first charge polled takes the transfer"
+        );
         let second = s.settle_from_history("pl_b", &rows).expect("a live charge");
         assert_eq!(second, None, "the SAME row must not credit a second sale");
         assert!(s.get("pl_b").expect("still open").paid.is_none());
@@ -1104,7 +1159,11 @@ mod tests {
         // A second, distinct transfer pays the second charge — consumption spends rows, not sales.
         let more = [row(MERCHANT, 450_000_000, 1_011, 13), rows[0].clone()];
         let third = s.settle_from_history("pl_b", &more).expect("a live charge");
-        assert_eq!(third.map(|p| p.block), Some(13), "a different block pays the other charge");
+        assert_eq!(
+            third.map(|p| p.block),
+            Some(13),
+            "a different block pays the other charge"
+        );
     }
 
     #[test]
@@ -1132,21 +1191,41 @@ mod tests {
         // second candidate.
         let mut s = TillStore::default();
         let (first, second) = ("ab".repeat(16), "cd".repeat(16));
-        s.open("pl_a".into(), first.clone(), MERCHANT.into(), [7u8; 32], "Shop".into(), 450, 1_000)
-            .expect("a fresh store rings one up");
-        s.open("pl_b".into(), second.clone(), MERCHANT.into(), [7u8; 32], "Shop".into(), 450, 1_001)
-            .expect("many charges per merchant is the store's shape");
+        s.open(
+            "pl_a".into(),
+            first.clone(),
+            MERCHANT.into(),
+            [7u8; 32],
+            "Shop".into(),
+            450,
+            1_000,
+        )
+        .expect("a fresh store rings one up");
+        s.open(
+            "pl_b".into(),
+            second.clone(),
+            MERCHANT.into(),
+            [7u8; 32],
+            "Shop".into(),
+            450,
+            1_001,
+        )
+        .expect("many charges per merchant is the store's shape");
         let rows = [
             row_memo(MERCHANT, 450_000_000, 1_010, 12, &second),
             row_memo(MERCHANT, 450_000_000, 1_011, 13, &first),
         ];
         assert_eq!(
-            s.settle_from_history("pl_a", &rows).expect("a live charge").map(|p| p.block),
+            s.settle_from_history("pl_a", &rows)
+                .expect("a live charge")
+                .map(|p| p.block),
             Some(13),
             "the charge takes the transfer that names it, not the one that arrived first"
         );
         assert_eq!(
-            s.settle_from_history("pl_b", &rows).expect("a live charge").map(|p| p.block),
+            s.settle_from_history("pl_b", &rows)
+                .expect("a live charge")
+                .map(|p| p.block),
             Some(12),
         );
 
@@ -1154,13 +1233,35 @@ mod tests {
         // or none at all, which is what a wallet that ignored the instruction would send — is not
         // this sale and is not credited.
         let c = charge(100, 1_000);
-        assert_eq!(match_payment(&c, &[row_memo(MERCHANT, 100_000_000, 1_050, 8, &first)], &unspent()), None);
-        assert_eq!(match_payment(&c, &[row_memo(MERCHANT, 100_000_000, 1_050, 9, "")], &unspent()), None);
-        // Casing is not identity: a ledger that renders the memo's hex in capitals still pays.
-        assert!(
-            match_payment(&c, &[row_memo(MERCHANT, 100_000_000, 1_050, 10, &REF.to_uppercase())], &unspent())
-                .is_some()
+        assert_eq!(
+            match_payment(
+                &c,
+                &[row_memo(MERCHANT, 100_000_000, 1_050, 8, &first)],
+                &unspent()
+            ),
+            None
         );
+        assert_eq!(
+            match_payment(
+                &c,
+                &[row_memo(MERCHANT, 100_000_000, 1_050, 9, "")],
+                &unspent()
+            ),
+            None
+        );
+        // Casing is not identity: a ledger that renders the memo's hex in capitals still pays.
+        assert!(match_payment(
+            &c,
+            &[row_memo(
+                MERCHANT,
+                100_000_000,
+                1_050,
+                10,
+                &REF.to_uppercase()
+            )],
+            &unspent()
+        )
+        .is_some());
     }
 
     #[test]
@@ -1169,14 +1270,19 @@ mod tests {
         // to change who paid. Re-reporting is a RETRY here, not a second chance to lose the money.
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
-        let first = s.settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 10, 1)]).unwrap();
+        let first = s
+            .settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 10, 1)])
+            .unwrap();
         assert!(first.is_some());
         // A later history that no longer carries that row (a walk that scrolled past it), plus a
         // different transfer of the same size: neither may rewrite the settlement.
         let again = s
             .settle_from_history("pl_a", &[row(OTHER_MERCHANT, 100_000_000, 99, 2)])
             .unwrap();
-        assert_eq!(again, first, "the first observation is the settlement, forever");
+        assert_eq!(
+            again, first,
+            "the first observation is the settlement, forever"
+        );
         assert_eq!(s.get("pl_a").unwrap().paid, first);
     }
 
@@ -1185,10 +1291,22 @@ mod tests {
         // Every one of these used to be (or could quietly become) a silent no-op. A caller acting
         // on an id that is gone must be told, not answered with a shrug.
         let mut s = TillStore::default();
-        assert_eq!(s.settle_from_history("pl_gone", &[]), Err(TillError::UnknownCharge));
-        assert_eq!(s.quote("pl_gone", "plq_1".into(), 0), Err(TillError::UnknownCharge));
-        assert_eq!(s.quote_expiry("pl_gone", "plq_1", 0), Err(TillError::UnknownCharge));
-        assert!(matches!(s.observe("pl_gone", 0), Err(TillError::UnknownCharge)));
+        assert_eq!(
+            s.settle_from_history("pl_gone", &[]),
+            Err(TillError::UnknownCharge)
+        );
+        assert_eq!(
+            s.quote("pl_gone", "plq_1".into(), 0),
+            Err(TillError::UnknownCharge)
+        );
+        assert_eq!(
+            s.quote_expiry("pl_gone", "plq_1", 0),
+            Err(TillError::UnknownCharge)
+        );
+        assert!(matches!(
+            s.observe("pl_gone", 0),
+            Err(TillError::UnknownCharge)
+        ));
     }
 
     #[test]
@@ -1200,10 +1318,19 @@ mod tests {
         // The expiry comes BACK, because step 3 states the quote's own deadline rather than
         // inventing a second one.
         assert_eq!(s.quote_expiry("pl_a", "plq_1", 0), Ok(QUOTE_TTL_SECS));
-        assert_eq!(s.quote_expiry("pl_a", "plq_1", QUOTE_TTL_SECS - 1), Ok(QUOTE_TTL_SECS));
+        assert_eq!(
+            s.quote_expiry("pl_a", "plq_1", QUOTE_TTL_SECS - 1),
+            Ok(QUOTE_TTL_SECS)
+        );
         // Past its life, and one we never issued: both dead, neither payable.
-        assert_eq!(s.quote_expiry("pl_a", "plq_1", QUOTE_TTL_SECS), Err(TillError::DeadQuote));
-        assert_eq!(s.quote_expiry("pl_a", "plq_invented", 0), Err(TillError::DeadQuote));
+        assert_eq!(
+            s.quote_expiry("pl_a", "plq_1", QUOTE_TTL_SECS),
+            Err(TillError::DeadQuote)
+        );
+        assert_eq!(
+            s.quote_expiry("pl_a", "plq_invented", 0),
+            Err(TillError::DeadQuote)
+        );
     }
 
     #[test]
@@ -1219,7 +1346,10 @@ mod tests {
         assert!(s.quote_expiry("pl_a", "plq_0", 0).is_ok());
         s.quote("pl_a", "plq_overflow".into(), 0).unwrap();
         assert_eq!(s.get("pl_a").unwrap().quotes.len(), MAX_LIVE_QUOTES);
-        assert_eq!(s.quote_expiry("pl_a", "plq_0", 0), Err(TillError::DeadQuote));
+        assert_eq!(
+            s.quote_expiry("pl_a", "plq_0", 0),
+            Err(TillError::DeadQuote)
+        );
         assert!(s.quote_expiry("pl_a", "plq_overflow", 0).is_ok());
     }
 
@@ -1228,8 +1358,14 @@ mod tests {
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         assert!(s.quote("pl_a", "plq_1".into(), CHARGE_TTL_SECS - 1).is_ok());
-        assert_eq!(s.quote("pl_a", "plq_2".into(), CHARGE_TTL_SECS), Err(TillError::NoPendingCharge));
-        assert_eq!(s.get("pl_a").unwrap().state(CHARGE_TTL_SECS), ChargeState::Expired);
+        assert_eq!(
+            s.quote("pl_a", "plq_2".into(), CHARGE_TTL_SECS),
+            Err(TillError::NoPendingCharge)
+        );
+        assert_eq!(
+            s.get("pl_a").unwrap().state(CHARGE_TTL_SECS),
+            ChargeState::Expired
+        );
     }
 
     #[test]
@@ -1241,10 +1377,16 @@ mod tests {
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         let late = CHARGE_TTL_SECS - 10;
         let (_, expires) = s.quote("pl_a", "plq_late".into(), late).unwrap();
-        assert_eq!(expires, CHARGE_TTL_SECS, "clamped to the charge's own death");
+        assert_eq!(
+            expires, CHARGE_TTL_SECS,
+            "clamped to the charge's own death"
+        );
         assert!(expires < late + QUOTE_TTL_SECS);
         // …and it really is dead then, so nothing outlives the sweep that clears the charge.
-        assert_eq!(s.quote_expiry("pl_a", "plq_late", CHARGE_TTL_SECS), Err(TillError::DeadQuote));
+        assert_eq!(
+            s.quote_expiry("pl_a", "plq_late", CHARGE_TTL_SECS),
+            Err(TillError::DeadQuote)
+        );
     }
 
     #[test]
@@ -1255,9 +1397,18 @@ mod tests {
         ring_up(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
         ring_up(&mut s, "pl_second", MERCHANT, [7u8; 32], 900, 200);
 
-        assert_eq!(s.get("pl_first").unwrap().state(200), ChargeState::Superseded);
-        assert_eq!(s.get("pl_first").unwrap().voided, Some(VoidCause::Superseded));
-        assert_eq!(s.quote("pl_first", "plq_1".into(), 200), Err(TillError::Superseded));
+        assert_eq!(
+            s.get("pl_first").unwrap().state(200),
+            ChargeState::Superseded
+        );
+        assert_eq!(
+            s.get("pl_first").unwrap().voided,
+            Some(VoidCause::Superseded)
+        );
+        assert_eq!(
+            s.quote("pl_first", "plq_1".into(), 200),
+            Err(TillError::Superseded)
+        );
         assert_eq!(s.get("pl_second").unwrap().state(200), ChargeState::Open);
         assert!(s.quote("pl_second", "plq_2".into(), 200).is_ok());
 
@@ -1279,7 +1430,11 @@ mod tests {
         let rows = [row(MERCHANT, 450_000_000, 150, 21)];
 
         let paid = s.settle_from_history("pl_first", &rows).unwrap();
-        assert_eq!(paid.map(|p| p.block), Some(21), "a voided charge still sees its own payment");
+        assert_eq!(
+            paid.map(|p| p.block),
+            Some(21),
+            "a voided charge still sees its own payment"
+        );
         assert_eq!(s.get("pl_first").unwrap().state(300), ChargeState::Paid);
         // …and that transfer is spent: the new charge is NOT paid by the old one's money.
         assert_eq!(s.settle_from_history("pl_second", &rows).unwrap(), None);
@@ -1291,10 +1446,17 @@ mod tests {
         // ever credit — the payer's money would simply sit on the ledger unclaimed.
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
-        s.settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 10, 31)]).unwrap();
-        assert_eq!(s.quote("pl_a", "plq_1".into(), 20), Err(TillError::AlreadyPaid));
+        s.settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 10, 31)])
+            .unwrap();
+        assert_eq!(
+            s.quote("pl_a", "plq_1".into(), 20),
+            Err(TillError::AlreadyPaid)
+        );
         // Being paid also outranks having been superseded or having gone stale.
-        assert_eq!(s.get("pl_a").unwrap().state(CHARGE_TTL_SECS + 1), ChargeState::Paid);
+        assert_eq!(
+            s.get("pl_a").unwrap().state(CHARGE_TTL_SECS + 1),
+            ChargeState::Paid
+        );
     }
 
     #[test]
@@ -1305,17 +1467,27 @@ mod tests {
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
         assert!(matches!(s.observe("pl_a", 1_000), Ok(Observation::Walk(_))));
-        assert!(matches!(s.observe("pl_a", 1_000), Ok(Observation::Recent(_))));
+        assert!(matches!(
+            s.observe("pl_a", 1_000),
+            Ok(Observation::Recent(_))
+        ));
         assert!(matches!(
             s.observe("pl_a", 1_000 + OBSERVE_TTL_SECS - 1),
             Ok(Observation::Recent(_))
         ));
         // The window ENDS — a cache that never expired would be a till that never sees the money.
-        assert!(matches!(s.observe("pl_a", 1_000 + OBSERVE_TTL_SECS), Ok(Observation::Walk(_))));
+        assert!(matches!(
+            s.observe("pl_a", 1_000 + OBSERVE_TTL_SECS),
+            Ok(Observation::Walk(_))
+        ));
 
         // A settled charge is never re-walked at all: settlement is not re-decided.
-        s.settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 1_010, 41)]).unwrap();
-        assert!(matches!(s.observe("pl_a", 9_999), Ok(Observation::Recent(_))));
+        s.settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 1_010, 41)])
+            .unwrap();
+        assert!(matches!(
+            s.observe("pl_a", 9_999),
+            Ok(Observation::Recent(_))
+        ));
     }
 
     #[test]
@@ -1324,8 +1496,16 @@ mod tests {
         // relay's memory a megabyte per ring-up.
         let mut s = TillStore::default();
         let named = |s: &mut TillStore, id: &str, name: String| {
-            s.open(id.into(), REF.into(), MERCHANT.into(), [7u8; 32], name, 100, 0)
-                .expect("a fresh store rings one up")
+            s.open(
+                id.into(),
+                REF.into(),
+                MERCHANT.into(),
+                [7u8; 32],
+                name,
+                100,
+                0,
+            )
+            .expect("a fresh store rings one up")
         };
         let c = named(&mut s, "pl_a", "A".repeat(1_000_000));
         assert_eq!(c.merchant_name.len(), MERCHANT_NAME_BYTES);
@@ -1346,11 +1526,18 @@ mod tests {
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_paid", MERCHANT, [7u8; 32], 100, 0);
         ring_up(&mut s, "pl_stale", OTHER_MERCHANT, [8u8; 32], 100, 0);
-        s.settle_from_history("pl_paid", &[row(MERCHANT, 100_000_000, 5, 51)]).unwrap();
+        s.settle_from_history("pl_paid", &[row(MERCHANT, 100_000_000, 5, 51)])
+            .unwrap();
 
         s.sweep(CHARGE_TTL_SECS + 1);
-        assert!(s.get("pl_paid").is_some(), "a credited sale survives the payable hour");
-        assert!(s.get("pl_stale").is_none(), "an unpaid stale charge is litter");
+        assert!(
+            s.get("pl_paid").is_some(),
+            "a credited sale survives the payable hour"
+        );
+        assert!(
+            s.get("pl_stale").is_none(),
+            "an unpaid stale charge is litter"
+        );
 
         s.sweep(SETTLED_TTL_SECS);
         assert!(s.get("pl_paid").is_none(), "and is not kept forever");
@@ -1363,11 +1550,20 @@ mod tests {
         // A charge id is a bearer read-token over the merchant's name and price. Sixteen lowercase
         // hex characters of OS randomness, and never the same twice.
         let ids: HashSet<String> = (0..256).map(|_| fresh_id("pl_")).collect();
-        assert_eq!(ids.len(), 256, "a repeated id would mean the generator is not random");
+        assert_eq!(
+            ids.len(),
+            256,
+            "a repeated id would mean the generator is not random"
+        );
         for id in &ids {
-            let tail = id.strip_prefix("pl_").expect("the standard's shape: pl_<hex>");
+            let tail = id
+                .strip_prefix("pl_")
+                .expect("the standard's shape: pl_<hex>");
             assert_eq!(tail.len(), 16);
-            assert!(tail.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')), "{id}");
+            assert!(
+                tail.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+                "{id}"
+            );
         }
     }
 
@@ -1380,7 +1576,14 @@ mod tests {
     #[test]
     fn the_unauthenticated_status_body_is_exactly_these_fields() {
         let mut s = TillStore::default();
-        let charge = ring_up(&mut s, "pl_0123456789abcdef", MERCHANT, [7u8; 32], 450, 1_000);
+        let charge = ring_up(
+            &mut s,
+            "pl_0123456789abcdef",
+            MERCHANT,
+            [7u8; 32],
+            450,
+            1_000,
+        );
         let json = serde_json::to_value(ChargeStatus::of(&charge, 1_000))
             .expect("a status body serialises");
         let mut keys: Vec<&str> = json
@@ -1408,8 +1611,14 @@ mod tests {
         // The two the argument names explicitly, so their absence is asserted rather than implied:
         // the reference (the merchant holds it from the ring-up they signed) and the destination
         // principal (retired 2026-09-08 — its only reader was printing it as the shop's name).
-        assert!(json.get("reference").is_none(), "the reference stays off the bearer body");
-        assert!(json.get("merchant").is_none(), "the destination principal has no reader here");
+        assert!(
+            json.get("reference").is_none(),
+            "the reference stays off the bearer body"
+        );
+        assert!(
+            json.get("merchant").is_none(),
+            "the destination principal has no reader here"
+        );
         // …and what IS there is the claimed name, which step 2 already serves as `displayName`.
         assert_eq!(json["merchant_name"], serde_json::json!("Shop"));
     }
@@ -1434,13 +1643,19 @@ mod tests {
         assert_eq!(encoded, encoded.to_uppercase());
         // A one-character difference in the URL must change the code, or the checksum is not being
         // computed over the payload at all.
-        assert_ne!(encoded, lnurl_of("https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9f"));
+        assert_ne!(
+            encoded,
+            lnurl_of("https://api.dfx.swiss/v1/lnurlp/pl_beeddb41cd4b6d9f")
+        );
         // The padding branch: URL lengths mod 5 exercise both "the last group is whole" and "the
         // last group is zero-padded", and every one of them must still carry a six-symbol checksum
         // after the `lnurl1` prefix.
         for n in 1..=10usize {
             let code = lnurl_of(&"a".repeat(n));
-            assert_eq!(code.len(), LNURL_HRP.len() + 1 + n.saturating_mul(8).div_ceil(5) + BECH32_CHECKSUM_LEN);
+            assert_eq!(
+                code.len(),
+                LNURL_HRP.len() + 1 + n.saturating_mul(8).div_ceil(5) + BECH32_CHECKSUM_LEN
+            );
         }
     }
 
@@ -1452,11 +1667,17 @@ mod tests {
         let c = charge(100, 1_000);
         assert_eq!(c.expires_at(), 1_000 + CHARGE_TTL_SECS);
         assert_eq!(c.state(c.expires_at() - 1), ChargeState::Open);
-        assert_eq!(c.state(c.expires_at()), ChargeState::Expired, "the stated second is the last one");
+        assert_eq!(
+            c.state(c.expires_at()),
+            ChargeState::Expired,
+            "the stated second is the last one"
+        );
         // And a quote is clamped to exactly that instant rather than to a second derivation of it.
         let mut s = TillStore::default();
         let opened = ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 1_000);
-        let (_, quote_expires) = s.quote("pl_a", "plq_1".into(), 1_000 + CHARGE_TTL_SECS - 5).unwrap();
+        let (_, quote_expires) = s
+            .quote("pl_a", "plq_1".into(), 1_000 + CHARGE_TTL_SECS - 5)
+            .unwrap();
         assert_eq!(quote_expires, opened.expires_at());
     }
 
@@ -1470,31 +1691,76 @@ mod tests {
             ring_up(&mut s, &format!("pl_{i}"), MERCHANT, [7u8; 32], 100, 0);
         }
         assert_eq!(
-            s.open("pl_over".into(), REF.into(), MERCHANT.into(), [7u8; 32], "Shop".into(), 100, 0).err(),
+            s.open(
+                "pl_over".into(),
+                REF.into(),
+                MERCHANT.into(),
+                [7u8; 32],
+                "Shop".into(),
+                100,
+                0
+            )
+            .err(),
             Some(TillError::TillFull)
         );
         // REFUSED BEFORE THE VOID: the charge the merchant already had is still the payable one, so
         // a bounded refusal never costs them the sale in front of them.
-        let live = s.current.get(MERCHANT).cloned().expect("the merchant still has a current charge");
+        let live = s
+            .current
+            .get(MERCHANT)
+            .cloned()
+            .expect("the merchant still has a current charge");
         assert_eq!(s.get(&live).expect("held").state(0), ChargeState::Open);
-        assert!(s.get("pl_over").is_none(), "a refused ring-up stores nothing");
+        assert!(
+            s.get("pl_over").is_none(),
+            "a refused ring-up stores nothing"
+        );
 
         // Per MERCHANT, not per store.
-        assert!(s.open("pl_other".into(), REF.into(), OTHER_MERCHANT.into(), [8u8; 32], "Kiosk".into(), 100, 0).is_ok());
+        assert!(s
+            .open(
+                "pl_other".into(),
+                REF.into(),
+                OTHER_MERCHANT.into(),
+                [8u8; 32],
+                "Kiosk".into(),
+                100,
+                0
+            )
+            .is_ok());
         // And it frees itself with time: the sweep drops the stale charges, and the next ring-up
         // is accepted — which is exactly what the refusal tells the merchant to wait for.
         s.sweep(CHARGE_TTL_SECS);
-        assert!(s.open("pl_after".into(), REF.into(), MERCHANT.into(), [7u8; 32], "Shop".into(), 100, CHARGE_TTL_SECS).is_ok());
+        assert!(s
+            .open(
+                "pl_after".into(),
+                REF.into(),
+                MERCHANT.into(),
+                [7u8; 32],
+                "Shop".into(),
+                100,
+                CHARGE_TTL_SECS
+            )
+            .is_ok());
     }
 
     #[test]
     fn only_the_one_pair_v1_serves_is_accepted() {
         assert_eq!(supported("InternetComputer", "VCHF"), Ok(()));
         assert_eq!(supported("InternetComputer", "vchf"), Ok(())); // casing is not identity
-        // Everything else is refused rather than quoted: quoting it would mean holding a rate.
-        assert_eq!(supported("InternetComputer", "ICP"), Err(TillError::UnsupportedAsset));
-        assert_eq!(supported("InternetComputer", "ckBTC"), Err(TillError::UnsupportedAsset));
-        assert_eq!(supported("Solana", "VCHF"), Err(TillError::UnsupportedAsset));
+                                                                   // Everything else is refused rather than quoted: quoting it would mean holding a rate.
+        assert_eq!(
+            supported("InternetComputer", "ICP"),
+            Err(TillError::UnsupportedAsset)
+        );
+        assert_eq!(
+            supported("InternetComputer", "ckBTC"),
+            Err(TillError::UnsupportedAsset)
+        );
+        assert_eq!(
+            supported("Solana", "VCHF"),
+            Err(TillError::UnsupportedAsset)
+        );
     }
 
     /// A merchant key and a ring-up genuinely signed by it. The key IS the claim, so a fixture that
@@ -1528,15 +1794,23 @@ mod tests {
         // merchant who pasted a placeholder must hear about the KEY, not about their signing.
         let deadbeef = TillOpen {
             merchant_pubkey: <[u8; PUBKEY_LEN]>::try_from(
-                hex::decode("deadbeef".repeat(8)).expect("a hex fixture").as_slice(),
+                hex::decode("deadbeef".repeat(8))
+                    .expect("a hex fixture")
+                    .as_slice(),
             )
             .expect("32 bytes"),
             ..open.clone()
         };
-        assert_eq!(s.authorize(&deadbeef, &sig, now), Err(TillOpenError::MalformedKey));
+        assert_eq!(
+            s.authorize(&deadbeef, &sig, now),
+            Err(TillOpenError::MalformedKey)
+        );
         // A real key, someone else's signature.
         let (_, other_sig) = signed(6, 450, 0xa1, now);
-        assert_eq!(s.authorize(&open, &other_sig, now), Err(TillOpenError::BadSignature));
+        assert_eq!(
+            s.authorize(&open, &other_sig, now),
+            Err(TillOpenError::BadSignature)
+        );
         // The right signature, an hour late — a captured request replayed long after the fact.
         assert_eq!(
             s.authorize(&open, &sig, now + TILL_OPEN_MAX_SKEW_SECS + 1),
@@ -1548,7 +1822,10 @@ mod tests {
         // very nonce is still able to use it.
         assert_eq!(s.authorize(&open, &sig, now), Ok(()));
         // …and exactly once. The same request again is the replay a nonce exists to refuse.
-        assert_eq!(s.authorize(&open, &sig, now), Err(TillOpenError::NonceReused));
+        assert_eq!(
+            s.authorize(&open, &sig, now),
+            Err(TillOpenError::NonceReused)
+        );
         // A fresh nonce from the same merchant is a new request, not a blocked one.
         let (again, again_sig) = signed(5, 450, 0xa2, now);
         assert_eq!(s.authorize(&again, &again_sig, now), Ok(()));
@@ -1563,7 +1840,11 @@ mod tests {
         let mut s = TillStore::default();
         let t = 1_000_000;
         let (open, sig) = signed(7, 100, 0xb1, t + TILL_OPEN_MAX_SKEW_SECS);
-        assert_eq!(s.authorize(&open, &sig, t), Ok(()), "a device a skew-window fast is accepted");
+        assert_eq!(
+            s.authorize(&open, &sig, t),
+            Ok(()),
+            "a device a skew-window fast is accepted"
+        );
 
         let last = t + 2 * TILL_OPEN_MAX_SKEW_SECS;
         s.sweep(last);
@@ -1575,8 +1856,14 @@ mod tests {
         );
         // One second later the clock refuses it on its own, so the memory is released.
         s.sweep(last + 1);
-        assert!(s.seen_nonces.is_empty(), "nothing is kept past the window that justifies it");
-        assert_eq!(s.authorize(&open, &sig, last + 1), Err(TillOpenError::Stale));
+        assert!(
+            s.seen_nonces.is_empty(),
+            "nothing is kept past the window that justifies it"
+        );
+        assert_eq!(
+            s.authorize(&open, &sig, last + 1),
+            Err(TillOpenError::Stale)
+        );
     }
 
     #[test]
@@ -1586,27 +1873,40 @@ mod tests {
         // leave THAT payable instead.
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_oops", MERCHANT, [7u8; 32], 10_000, 100);
-        let cancelled = s.void(MERCHANT, VoidCause::Cancelled).expect("a live charge is cancellable");
+        let cancelled = s
+            .void(MERCHANT, VoidCause::Cancelled)
+            .expect("a live charge is cancellable");
         assert_eq!(cancelled.state(100), ChargeState::Cancelled);
         // TOLD APART from a superseded code, because the payer's next move is the opposite one:
         // "scan the new code" versus "nothing is owed".
-        assert_eq!(s.quote("pl_oops", "plq_1".into(), 100), Err(TillError::Cancelled));
+        assert_eq!(
+            s.quote("pl_oops", "plq_1".into(), 100),
+            Err(TillError::Cancelled)
+        );
 
         // Idempotent — a cashier pressing the button twice has not failed at anything — and the
         // FIRST cause survives a later ring-up, so a cancelled charge is never described as merely
         // replaced.
         assert!(s.void(MERCHANT, VoidCause::Cancelled).is_ok());
         ring_up(&mut s, "pl_next", MERCHANT, [7u8; 32], 100, 200);
-        assert_eq!(s.get("pl_oops").expect("still readable").state(200), ChargeState::Cancelled);
+        assert_eq!(
+            s.get("pl_oops").expect("still readable").state(200),
+            ChargeState::Cancelled
+        );
 
         // A CREDITED charge is not cancellable, and the refusal carries the block that paid — a
         // merchant told "cancelled" here would hand over goods they have already been paid for.
-        s.settle_from_history("pl_next", &[row(MERCHANT, 100_000_000, 210, 61)]).unwrap();
+        s.settle_from_history("pl_next", &[row(MERCHANT, 100_000_000, 210, 61)])
+            .unwrap();
         assert!(matches!(
             s.void(MERCHANT, VoidCause::Cancelled),
             Err(VoidRefusal::AlreadyPaid(p)) if p.block == 61
         ));
-        assert_eq!(s.get("pl_next").unwrap().state(220), ChargeState::Paid, "still paid, not voided");
+        assert_eq!(
+            s.get("pl_next").unwrap().state(220),
+            ChargeState::Paid,
+            "still paid, not voided"
+        );
 
         // A till nobody has rung anything up on has nothing to clear, and says so rather than
         // reporting a success that describes no charge.
@@ -1625,7 +1925,10 @@ mod tests {
             .into_iter()
             .find(|d| d.currency == 7)
             .expect("the compiled catalog must carry VCHF as currency 7");
-        assert_eq!(row.decimals, Some(u8::try_from(VCHF_DECIMALS).expect("decimals fit a u8")));
+        assert_eq!(
+            row.decimals,
+            Some(u8::try_from(VCHF_DECIMALS).expect("decimals fit a u8"))
+        );
         assert_eq!(10u64.pow(VCHF_DECIMALS) / 100, RAW_PER_CENT);
     }
 }
@@ -1653,7 +1956,11 @@ use crate::app::AppState;
 /// expect and what the ecosystem does NOT actually send.
 fn provider_error(status: StatusCode, message: &str) -> Response {
     let error = status.canonical_reason().unwrap_or("Error");
-    (status, Json(json!({"statusCode": status.as_u16(), "message": message, "error": error}))).into_response()
+    (
+        status,
+        Json(json!({"statusCode": status.as_u16(), "message": message, "error": error})),
+    )
+        .into_response()
 }
 
 impl TillError {
@@ -1770,7 +2077,13 @@ pub fn iso8601_utc(secs: u64) -> String {
 // one format two different kinds of thing.
 
 const BECH32_CHARSET: &[u8; 32] = b"qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-const BECH32_GENERATORS: [u32; 5] = [0x3b6a_57b2, 0x2650_8e6d, 0x1ea1_19fa, 0x3d42_33dd, 0x2a14_62b3];
+const BECH32_GENERATORS: [u32; 5] = [
+    0x3b6a_57b2,
+    0x2650_8e6d,
+    0x1ea1_19fa,
+    0x3d42_33dd,
+    0x2a14_62b3,
+];
 const LNURL_HRP: &str = "lnurl";
 /// The bech32 checksum is six 5-bit symbols.
 const BECH32_CHECKSUM_LEN: usize = 6;
@@ -1831,7 +2144,9 @@ pub fn lnurl_of(url: &str) -> String {
     let symbol = |w: u8| char::from(BECH32_CHARSET[usize::from(w)]);
     out.extend(words.iter().map(|w| symbol(*w)));
     for i in 0..BECH32_CHECKSUM_LEN {
-        out.push(symbol(((checksum >> (5 * (BECH32_CHECKSUM_LEN - 1 - i))) & 31) as u8));
+        out.push(symbol(
+            ((checksum >> (5 * (BECH32_CHECKSUM_LEN - 1 - i))) & 31) as u8,
+        ));
     }
     out.to_ascii_uppercase()
 }
@@ -1858,7 +2173,9 @@ fn fresh_hex<const N: usize>() -> String {
     match getrandom::getrandom(&mut bytes) {
         Ok(()) => {}
         // No fallback, deliberately — see above.
-        Err(e) => panic!("dpay-relay: till: the OS CSPRNG is unavailable ({e}) — cannot mint {N} random bytes"),
+        Err(e) => panic!(
+            "dpay-relay: till: the OS CSPRNG is unavailable ({e}) — cannot mint {N} random bytes"
+        ),
     }
     hex::encode(bytes)
 }
@@ -1917,7 +2234,10 @@ const PUBLIC_ORIGIN_ENV: &str = "DPAY_PUBLIC_ORIGIN";
 /// wire means (bytes) — "must be 32-byte hex" reads, to somebody holding a 128-character string,
 /// like their signature is the wrong length.
 fn hex_field<const N: usize>(value: &str, field: &str) -> Result<[u8; N], Response> {
-    match hex::decode(value.trim()).ok().and_then(|b| <[u8; N]>::try_from(b).ok()) {
+    match hex::decode(value.trim())
+        .ok()
+        .and_then(|b| <[u8; N]>::try_from(b).ok())
+    {
         Some(bytes) => Ok(bytes),
         None => Err(provider_error(
             StatusCode::BAD_REQUEST,
@@ -2046,7 +2366,8 @@ pub(crate) async fn open_charge(
     // up on an account they could not spend from. dpay still holds nothing: this is a public
     // derivation, not a key.
     let account =
-        dpay_icp::principal::Principal::self_authenticating_ed25519(&open.merchant_pubkey).to_text();
+        dpay_icp::principal::Principal::self_authenticating_ed25519(&open.merchant_pubkey)
+            .to_text();
 
     let id = fresh_id("pl_");
     let now = now_secs();
@@ -2193,7 +2514,8 @@ pub(crate) async fn void_charge(
         Err(refusal) => return refusal,
     };
     let account =
-        dpay_icp::principal::Principal::self_authenticating_ed25519(&open.merchant_pubkey).to_text();
+        dpay_icp::principal::Principal::self_authenticating_ed25519(&open.merchant_pubkey)
+            .to_text();
 
     let now = now_secs();
     let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
@@ -2226,7 +2548,10 @@ pub(crate) async fn void_charge(
 ///
 /// Settlement is re-derived from the LEDGER on every poll, not read out of memory, so the answer
 /// survives a relay restart and cannot drift from what actually happened on chain.
-pub(crate) async fn charge_status(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+pub(crate) async fn charge_status(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
     let charge = {
         let tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
         tills.get(&id).cloned()
@@ -2268,13 +2593,19 @@ async fn observe_payment(state: &AppState, charge: Charge) -> Charge {
         Ok(rows) => rows,
         Err(e) => {
             // Never downgrade a read failure into "not paid" — the caller keeps polling.
-            eprintln!("dpay-relay: till {}: could not read merchant history: {e}", charge.id);
+            eprintln!(
+                "dpay-relay: till {}: could not read merchant history: {e}",
+                charge.id
+            );
             return charge;
         }
     };
     let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
     match tills.settle_from_history(&charge.id, &rows) {
-        Ok(Some(settled)) => Charge { paid: Some(settled), ..charge },
+        Ok(Some(settled)) => Charge {
+            paid: Some(settled),
+            ..charge
+        },
         Ok(None) => charge,
         Err(e) => {
             eprintln!(
@@ -2300,10 +2631,14 @@ async fn merchant_history(
 ) -> Result<Vec<TxnRecord>, crate::ledger::LedgerError> {
     #[cfg(feature = "test-helpers")]
     if let Some(fake) = state.fake_ic.clone() {
-        let owner = dpay_icp::principal::Principal::self_authenticating_ed25519(&charge.merchant_pubkey);
+        let owner =
+            dpay_icp::principal::Principal::self_authenticating_ed25519(&charge.merchant_pubkey);
         return Ok(fake.transactions(&owner, VCHF_CURRENCY, HISTORY_LIMIT as usize, None));
     }
-    let Some(row) = crate::catalog::ic_rows().into_iter().find(|d| d.currency == VCHF_CURRENCY) else {
+    let Some(row) = crate::catalog::ic_rows()
+        .into_iter()
+        .find(|d| d.currency == VCHF_CURRENCY)
+    else {
         // The compiled catalog is this relay's own code, so a missing VCHF row is a build that
         // cannot serve this till at all — loud, not a silent "not seen yet".
         return Err(crate::ledger::LedgerError::Rejected(
@@ -2312,7 +2647,13 @@ async fn merchant_history(
     };
     state
         .ledger
-        .transactions_on_ledger(&row.ledger, charge.merchant_pubkey, VCHF_CURRENCY, HISTORY_LIMIT, None)
+        .transactions_on_ledger(
+            &row.ledger,
+            charge.merchant_pubkey,
+            VCHF_CURRENCY,
+            HISTORY_LIMIT,
+            None,
+        )
         .await
 }
 
@@ -2371,13 +2712,22 @@ pub(crate) async fn lnurlp_details(
         standard: "OpenCryptoPay",
         possible_standards: vec!["OpenCryptoPay"],
         display_qr: true,
-        quote: QuoteBody { id: quote_id, expiration: iso8601_utc(expires) },
-        requested_amount: RequestedAmount { asset: "CHF", amount: charge.cents as f64 / 100.0 },
+        quote: QuoteBody {
+            id: quote_id,
+            expiration: iso8601_utc(expires),
+        },
+        requested_amount: RequestedAmount {
+            asset: "CHF",
+            amount: charge.cents as f64 / 100.0,
+        },
         transfer_amounts: vec![TransferAmount {
             method: METHOD,
             min_fee: 0,
             available: true,
-            assets: vec![AssetAmount { asset: ASSET, amount: charge.amount_text() }],
+            assets: vec![AssetAmount {
+                asset: ASSET,
+                amount: charge.amount_text(),
+            }],
         }],
     };
     (StatusCode::OK, Json(body)).into_response()
@@ -2421,8 +2771,14 @@ pub(crate) async fn lnurlp_callback(
             Err(e) => return e.to_response(),
         }
     };
-    let Some(row) = crate::catalog::ic_rows().into_iter().find(|d| d.currency == VCHF_CURRENCY) else {
-        return provider_error(StatusCode::INTERNAL_SERVER_ERROR, "VCHF is not in this relay's catalog");
+    let Some(row) = crate::catalog::ic_rows()
+        .into_iter()
+        .find(|d| d.currency == VCHF_CURRENCY)
+    else {
+        return provider_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "VCHF is not in this relay's catalog",
+        );
     };
     let body = TransferBody {
         expiry_date: iso8601_utc(expires),
@@ -2488,7 +2844,11 @@ pub(crate) async fn lnurlp_submit(
     }
     let charge = observe_payment(&state, charge).await;
     match charge.paid {
-        Some(settled) => (StatusCode::OK, Json(json!({"status": "OK", "paid": settled}))).into_response(),
+        Some(settled) => (
+            StatusCode::OK,
+            Json(json!({"status": "OK", "paid": settled})),
+        )
+            .into_response(),
         // NOT an error the payer must act on, and deliberately not a refusal: the transfer may
         // simply not have landed yet. Retrying is correct and free.
         //

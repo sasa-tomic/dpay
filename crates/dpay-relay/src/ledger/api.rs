@@ -67,7 +67,10 @@ pub trait Ledger: Send + Sync {
     /// display/config metadata for the app's own two Ethereum transactions (the user deposits at
     /// their OWN principal). Only meaningful for CkEthErc20-family currencies. Returns
     /// Transient(503) if the currency has no ckERC-20 onramp configured.
-    async fn ckerc20_onramp_params(&self, currency: Currency) -> Result<CkErc20OnrampParams, LedgerError>;
+    async fn ckerc20_onramp_params(
+        &self,
+        currency: Currency,
+    ) -> Result<CkErc20OnrampParams, LedgerError>;
 
     /// Liveness for `/health` (the wallet's connectivity pre-flight).
     async fn healthy(&self) -> bool;
@@ -88,7 +91,9 @@ pub trait Ledger: Send + Sync {
         amount: u64,
     ) -> Result<u64, LedgerError> {
         let _ = (pubkey, currency, amount);
-        Err(LedgerError::Transient("faucet unavailable: this ledger cannot mint".to_string()))
+        Err(LedgerError::Transient(
+            "faucet unavailable: this ledger cannot mint".to_string(),
+        ))
     }
 
     /// The facade canister's LIVE module hash — the sha256 of the wasm the IC currently reports

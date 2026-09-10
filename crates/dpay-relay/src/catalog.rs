@@ -26,8 +26,8 @@ use dpay_core::DEMO_USD;
 use serde::Serialize;
 
 use crate::ledger::ckerc20::{
-    CKBTC_MINTER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL, CKETH_MINTER_PRINCIPAL,
-    CKUSDC_ERC20_ADDRESS, CKUSDC_LEDGER_PRINCIPAL,
+    CKBTC_MINTER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL, CKETH_MINTER_PRINCIPAL, CKUSDC_ERC20_ADDRESS,
+    CKUSDC_LEDGER_PRINCIPAL,
 };
 use crate::ledger::types::{
     CurrencyDescriptor, LiquidityTier, MinterFamily, RampCapability, U64String,
@@ -174,7 +174,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             gas_ledger: None,
             onramp: RampCapability::Direct, // self-service faucet (fixed amount, rate-limited)
             offramp: RampCapability::Unavailable, // play money — no cash-out
-            liquidity: None,    // pre-EUR row — optional field unset, wire bytes unchanged
+            liquidity: None, // pre-EUR row — optional field unset, wire bytes unchanged
             ramp_partner: None, // no Partner off-ramp to name
         },
         CurrencyDescriptor {
@@ -192,9 +192,9 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             min_fraction_digits: None,
             fee: None, // ckBTC ledger fee read live at runtime (MC2 validates)
             cap: Some(U64String(100_000)),
-            chain_id: None,   // not EVM
+            chain_id: None, // not EVM
             token_contract: None,
-            gas_ledger: None, // BTC family — no ckETH gas ledger
+            gas_ledger: None,                // BTC family — no ckETH gas ledger
             onramp: RampCapability::Direct,  // chain-key Bitcoin ramp
             offramp: RampCapability::Direct, // retrieve_btc_with_approval
             liquidity: None,
@@ -222,7 +222,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             // hold ckETH for gas (Fork-C — dpay never converts ckUSDC→ckETH, no-swap); the app
             // surfaces an honest "You need ckETH for gas" note.
             gas_ledger: Some(CKETH_LEDGER_PRINCIPAL.to_string()),
-            onramp: RampCapability::Direct,  // ckETH helper-contract onramp (client-side)
+            onramp: RampCapability::Direct, // ckETH helper-contract onramp (client-side)
             offramp: RampCapability::Direct, // dual-ledger withdraw_erc20 cash-out (ckETH gas + USDC amount)
             liquidity: None,
             ramp_partner: None,
@@ -251,10 +251,10 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             min_fraction_digits: None,
             fee: Some(U64String(2_000_000_000_000)), // the live ckETH ledger icrc1_fee (0.000002 ETH)
             cap: Some(U64String(100_000)),
-            chain_id: Some(1),       // Ethereum mainnet
-            token_contract: None,    // None ⇒ native ETH (NOT an ERC-20) — the family discriminator
-            gas_ledger: None,        // native ETH — its own ledger IS the gas ledger (withdraw_eth single-ledger path)
-            onramp: RampCapability::Direct,  // ckETH helper `depositEth` (client-side, single payable tx)
+            chain_id: Some(1),               // Ethereum mainnet
+            token_contract: None, // None ⇒ native ETH (NOT an ERC-20) — the family discriminator
+            gas_ledger: None, // native ETH — its own ledger IS the gas ledger (withdraw_eth single-ledger path)
+            onramp: RampCapability::Direct, // ckETH helper `depositEth` (client-side, single payable tx)
             offramp: RampCapability::Direct, // withdraw_eth: burn ckETH → send native ETH
             liquidity: None,
             ramp_partner: None,
@@ -305,12 +305,12 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             network: Some("Sepolia".into()),
             display_decimals: None,
             min_fraction_digits: Some(2), // ckSepoliaUSDC: unit-denominated — keep 2 decimals ('1.50', '0.00')
-            fee: Some(U64String(4_000)), // the live testnet ckUSDC ledger fee
+            fee: Some(U64String(4_000)),  // the live testnet ckUSDC ledger fee
             cap: Some(U64String(100_000)),
             chain_id: Some(11155111), // Sepolia
             token_contract: Some("0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238".into()), // testnet USDC ERC-20
             gas_ledger: None,
-            onramp: RampCapability::Direct,   // Sepolia CkDeposit helper (chain_id-scoped)
+            onramp: RampCapability::Direct, // Sepolia CkDeposit helper (chain_id-scoped)
             offramp: RampCapability::Unavailable, // testnet ckUSDC cash-out not wired
             liquidity: None,
             ramp_partner: None,
@@ -337,7 +337,7 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             chain_id: Some(11155111), // Sepolia
             token_contract: None,     // None ⇒ native ETH — the family discriminator
             gas_ledger: None,
-            onramp: RampCapability::Direct,  // Sepolia CkDeposit `depositEth`
+            onramp: RampCapability::Direct, // Sepolia CkDeposit `depositEth`
             offramp: RampCapability::Direct, // testnet withdraw_eth
             liquidity: None,
             ramp_partner: None,
@@ -368,9 +368,9 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             min_fraction_digits: Some(2), // VCHF: unit-denominated — keep 2 decimals ('1.50', '0.00')
             fee: Some(U64String(10_000)), // 0.0001 VCHF
             cap: Some(U64String(1_000_000_000_000)), // initial payment-policy cap: 10,000 VCHF
-            chain_id: None,       // not EVM
-            token_contract: None, // not an ERC-20
-            gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
+            chain_id: None,               // not EVM
+            token_contract: None,         // not an ERC-20
+            gas_ledger: None,             // no gas ledger — direct ICRC transfer pays its own fee
             onramp: RampCapability::Unavailable, // no compliant fiat rail yet — honest absence
             offramp: RampCapability::Unavailable,
             liquidity: None,
@@ -398,11 +398,11 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             network: Some("Internet Computer".into()), // mainnet label — U3 classification
             display_decimals: Some(8),
             min_fraction_digits: None,
-            fee: Some(U64String(10_000)), // 0.0001 ICP
+            fee: Some(U64String(10_000)),          // 0.0001 ICP
             cap: Some(U64String(100_000_000_000)), // initial payment-policy cap: 1,000 ICP
-            chain_id: None,       // not EVM
-            token_contract: None, // not an ERC-20
-            gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
+            chain_id: None,                        // not EVM
+            token_contract: None,                  // not an ERC-20
+            gas_ledger: None, // no gas ledger — direct ICRC transfer pays its own fee
             onramp: RampCapability::Unavailable, // no compliant fiat rail yet — honest absence
             offramp: RampCapability::Unavailable,
             liquidity: None,
@@ -437,11 +437,11 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             min_fraction_digits: Some(2), // unit-denominated — keep 2 decimals ('1.50', '0.00'), like VCHF
             fee: Some(U64String(10_000)), // 0.0001 VEUR
             cap: Some(U64String(1_000_000_000_000)), // initial payment-policy cap: 10,000 VEUR (mirrors VCHF's shape — founder to confirm)
-            chain_id: None,       // not EVM
-            token_contract: None, // not an ERC-20
-            gas_ledger: None,     // no gas ledger — direct ICRC transfer pays its own fee
+            chain_id: None,                          // not EVM
+            token_contract: None,                    // not an ERC-20
+            gas_ledger: None, // no gas ledger — direct ICRC transfer pays its own fee
             onramp: RampCapability::Unavailable, // no compliant fiat on-ramp — honest absence
-            offramp: RampCapability::Partner,    // DFX fiat off-ramp — the first Partner row
+            offramp: RampCapability::Partner, // DFX fiat off-ramp — the first Partner row
             liquidity: Some(LiquidityTier::Thin),
             ramp_partner: Some("DFX"),
         },
@@ -505,9 +505,9 @@ fn solana_network_section() -> NetworkBody {
             SolanaAsset {
                 token: "SOL",
                 symbol: "SOL",
-                decimals: 9, // SOL_DECIMALS (app/solana/identity.ts)
+                decimals: 9,               // SOL_DECIMALS (app/solana/identity.ts)
                 min_fraction_digits: None, // SOL is written trimmed ('1.5 SOL')
-                mint: None,  // native L1 asset — no SPL mint
+                mint: None,                // native L1 asset — no SPL mint
                 // Fiat-ramp semantics (2026-09-06): was Direct/Direct, which described
                 // structural self-custody (true of every row on this device-key rail) — no
                 // solana fiat on/off-ramp is wired, so the honest FIAT answer is Unavailable.
@@ -518,7 +518,7 @@ fn solana_network_section() -> NetworkBody {
             SolanaAsset {
                 token: "USDC",
                 symbol: "USDC",
-                decimals: 6, // USDC_DECIMALS (app/solana/spl.ts)
+                decimals: 6,                  // USDC_DECIMALS (app/solana/spl.ts)
                 min_fraction_digits: Some(2), // unit-denominated, exactly like the IC ckUSDC row
                 mint: Some(SOLANA_USDC_MINT),
                 // Fiat-ramp semantics (2026-09-06): see the SOL row note above.
@@ -552,7 +552,8 @@ fn solana_network_section() -> NetworkBody {
 /// e2e depend on the byte-shape).
 pub(crate) fn currencies_body() -> CurrenciesBody {
     // Partition preserves each side's catalog order; mainnet keeps DEMO (network None).
-    let (mainnet, testnet): (Vec<_>, Vec<_>) = ic_rows().into_iter().partition(|d| !is_testnet_row(d));
+    let (mainnet, testnet): (Vec<_>, Vec<_>) =
+        ic_rows().into_iter().partition(|d| !is_testnet_row(d));
     CurrenciesBody {
         networks: vec![
             NetworkBody {
@@ -662,12 +663,30 @@ mod environment_partition_tests {
         // the 2026-08-28 fix: before "Internet Computer" joined the mainnet set, both rows
         // were mis-filed testnet-side and hidden behind the wallet's testnet toggle. VEUR
         // (currency 9, EUR dual-rail Stage 1 2026-09-06) rides the same label.
-        let vchf = CurrencyDescriptor { currency: 7, ..row_with_network(Some("Internet Computer")) };
-        let icp = CurrencyDescriptor { currency: 8, ..row_with_network(Some("Internet Computer")) };
-        let veur = CurrencyDescriptor { currency: 9, ..row_with_network(Some("Internet Computer")) };
-        assert!(!is_testnet_row(&vchf), "VCHF (network \"Internet Computer\") is ICP MAINNET");
-        assert!(!is_testnet_row(&icp), "ICP (network \"Internet Computer\") is ICP MAINNET");
-        assert!(!is_testnet_row(&veur), "VEUR (network \"Internet Computer\") is ICP MAINNET");
+        let vchf = CurrencyDescriptor {
+            currency: 7,
+            ..row_with_network(Some("Internet Computer"))
+        };
+        let icp = CurrencyDescriptor {
+            currency: 8,
+            ..row_with_network(Some("Internet Computer"))
+        };
+        let veur = CurrencyDescriptor {
+            currency: 9,
+            ..row_with_network(Some("Internet Computer"))
+        };
+        assert!(
+            !is_testnet_row(&vchf),
+            "VCHF (network \"Internet Computer\") is ICP MAINNET"
+        );
+        assert!(
+            !is_testnet_row(&icp),
+            "ICP (network \"Internet Computer\") is ICP MAINNET"
+        );
+        assert!(
+            !is_testnet_row(&veur),
+            "VEUR (network \"Internet Computer\") is ICP MAINNET"
+        );
     }
 
     #[test]
@@ -753,10 +772,16 @@ mod catalog_truth_tests {
         assert_eq!(CKBTC_MINTER_PRINCIPAL, p["ckbtc_minter"].as_str().unwrap());
         assert_eq!(CKBTC_LEDGER_PRINCIPAL, p["ckbtc_ledger"].as_str().unwrap());
         assert_eq!(CKETH_MINTER_PRINCIPAL, p["cketh_minter"].as_str().unwrap());
-        assert_eq!(CKUSDC_LEDGER_PRINCIPAL, p["ckusdc_ledger"].as_str().unwrap());
+        assert_eq!(
+            CKUSDC_LEDGER_PRINCIPAL,
+            p["ckusdc_ledger"].as_str().unwrap()
+        );
         // The ckETH ledger IS the ckERC20 gas ledger — one canister, two truth-file names.
         assert_eq!(CKETH_LEDGER_PRINCIPAL, p["cketh_ledger"].as_str().unwrap());
-        assert_eq!(CKETH_LEDGER_PRINCIPAL, p["cketh_gas_ledger"].as_str().unwrap());
+        assert_eq!(
+            CKETH_LEDGER_PRINCIPAL,
+            p["cketh_gas_ledger"].as_str().unwrap()
+        );
         assert_eq!(
             TESTNET_CKBTC_LEDGER_PRINCIPAL,
             p["testnet_ckbtc_ledger"].as_str().unwrap()
@@ -791,7 +816,10 @@ mod catalog_truth_tests {
         // second ledger needs one) — the CODE pin lives in agent_ledger.rs's history adapter.
         // This literal check keeps the JSON's icp_index entry honest against the spec-locked
         // value so the agent-side pin can't be fed a typo'd principal from the truth file.
-        assert_eq!(p["icp_index"].as_str().unwrap(), "qhbym-qaaaa-aaaaa-aaafq-cai");
+        assert_eq!(
+            p["icp_index"].as_str().unwrap(),
+            "qhbym-qaaaa-aaaaa-aaafq-cai"
+        );
     }
 
     #[test]
@@ -855,7 +883,11 @@ mod catalog_truth_tests {
                 NetworkAssets::Solana(_) => panic!("section {sec} must be an IC section"),
             }
         };
-        assert_eq!(section_ids(0), vec![0, 1, 2, 6, 7, 8, 9], "icp MAINNET section order");
+        assert_eq!(
+            section_ids(0),
+            vec![0, 1, 2, 6, 7, 8, 9],
+            "icp MAINNET section order"
+        );
         assert_eq!(section_ids(1), vec![3, 4, 5], "icp TESTNET section order");
         assert!(matches!(body.networks[2].assets, NetworkAssets::Solana(_)));
     }
@@ -879,13 +911,20 @@ mod catalog_truth_tests {
         assert_eq!(demo.network, None);
         assert_eq!(demo.display_decimals, None);
         assert_eq!(demo.fee, None);
-        assert_eq!(demo.cap, Some(U64String(100_000)), "the $1,000.00 per-tx cap");
+        assert_eq!(
+            demo.cap,
+            Some(U64String(100_000)),
+            "the $1,000.00 per-tx cap"
+        );
         assert_eq!(demo.chain_id, None);
         assert_eq!(demo.token_contract, None);
         assert_eq!(demo.gas_ledger, None);
         assert_eq!(demo.onramp, RampCapability::Direct);
         assert_eq!(demo.offramp, RampCapability::Unavailable);
-        assert_eq!(demo.liquidity, None, "pre-EUR row — no tier (wire bytes pinned below)");
+        assert_eq!(
+            demo.liquidity, None,
+            "pre-EUR row — no tier (wire bytes pinned below)"
+        );
         assert_eq!(demo.ramp_partner, None);
 
         // --- ckBTC (currency 1) ---
@@ -940,7 +979,11 @@ mod catalog_truth_tests {
         assert_eq!(cketh.wrapper_name.as_deref(), Some("ckETH"));
         assert_eq!(cketh.backing_symbol.as_deref(), Some("ETH"));
         assert_eq!(cketh.network.as_deref(), Some("Ethereum"));
-        assert_eq!(cketh.display_decimals.unwrap(), 6, "prod ckETH: display 6 ≠ decimals 18");
+        assert_eq!(
+            cketh.display_decimals.unwrap(),
+            6,
+            "prod ckETH: display 6 ≠ decimals 18"
+        );
         assert_eq!(
             cketh.fee,
             Some(U64String(2_000_000_000_000)),
@@ -948,8 +991,14 @@ mod catalog_truth_tests {
         );
         assert_eq!(cketh.cap, Some(U64String(100_000)));
         assert_eq!(cketh.chain_id, Some(1));
-        assert_eq!(cketh.token_contract, None, "None ⇒ native ETH — the family discriminator");
-        assert_eq!(cketh.gas_ledger, None, "withdraw_eth approves on ckETH's OWN ledger");
+        assert_eq!(
+            cketh.token_contract, None,
+            "None ⇒ native ETH — the family discriminator"
+        );
+        assert_eq!(
+            cketh.gas_ledger, None,
+            "withdraw_eth approves on ckETH's OWN ledger"
+        );
         assert_eq!(cketh.onramp, RampCapability::Direct);
         assert_eq!(cketh.offramp, RampCapability::Direct);
 
@@ -983,7 +1032,11 @@ mod catalog_truth_tests {
         assert_eq!(sep_usdc.display_decimals, None);
         assert_eq!(sep_usdc.fee, Some(U64String(4_000)));
         assert_eq!(sep_usdc.cap, Some(U64String(100_000)));
-        assert_eq!(sep_usdc.chain_id, Some(11155111), "Sepolia — selects the Sepolia CkDeposit helper");
+        assert_eq!(
+            sep_usdc.chain_id,
+            Some(11155111),
+            "Sepolia — selects the Sepolia CkDeposit helper"
+        );
         assert_eq!(
             sep_usdc.token_contract.as_deref().unwrap(),
             "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
@@ -991,7 +1044,11 @@ mod catalog_truth_tests {
         );
         assert_eq!(sep_usdc.gas_ledger, None);
         assert_eq!(sep_usdc.onramp, RampCapability::Direct);
-        assert_eq!(sep_usdc.offramp, RampCapability::Unavailable, "testnet USDC cash-out not wired");
+        assert_eq!(
+            sep_usdc.offramp,
+            RampCapability::Unavailable,
+            "testnet USDC cash-out not wired"
+        );
 
         // --- ckSepoliaETH (currency 5, testnet) ---
         let sep_eth = catalog_currency(&cat, 5);
@@ -1006,7 +1063,10 @@ mod catalog_truth_tests {
         assert_eq!(sep_eth.fee, Some(U64String(10_000_000_000)));
         assert_eq!(sep_eth.cap, Some(U64String(100_000)));
         assert_eq!(sep_eth.chain_id, Some(11155111));
-        assert_eq!(sep_eth.token_contract, None, "None ⇒ native ETH on Sepolia too");
+        assert_eq!(
+            sep_eth.token_contract, None,
+            "None ⇒ native ETH on Sepolia too"
+        );
         assert_eq!(sep_eth.gas_ledger, None);
         assert_eq!(sep_eth.onramp, RampCapability::Direct);
         assert_eq!(sep_eth.offramp, RampCapability::Direct);
@@ -1030,8 +1090,16 @@ mod catalog_truth_tests {
         // --- ORDER + currency ID: VCHF is id 7, ICP is id 8, appended LAST (after the real
         // mainnet 0,1,2,6 and real testnet 3,4,5), VCHF before ICP. The spec locks 7/8 in BOTH
         // compiled catalogs (this module + the app's BUNDLED_NETWORKS).
-        assert_eq!(cat.len(), 10, "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR");
-        assert_eq!(cat[7].symbol.as_deref(), Some("VCHF"), "id 7 IS the VCHF row");
+        assert_eq!(
+            cat.len(),
+            10,
+            "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR"
+        );
+        assert_eq!(
+            cat[7].symbol.as_deref(),
+            Some("VCHF"),
+            "id 7 IS the VCHF row"
+        );
         assert_eq!(cat[8].symbol.as_deref(), Some("ICP"), "id 8 IS the ICP row");
         assert_eq!(
             cat[9].symbol.as_deref(),
@@ -1056,7 +1124,11 @@ mod catalog_truth_tests {
             vchf.display_decimals.unwrap(),
             t["decimals"]["vchf"].as_u64().unwrap() as u8
         );
-        assert_eq!(vchf.fee, Some(U64String(10_000)), "locked: 0.0001 VCHF raw fee");
+        assert_eq!(
+            vchf.fee,
+            Some(U64String(10_000)),
+            "locked: 0.0001 VCHF raw fee"
+        );
         assert_eq!(
             vchf.cap,
             Some(U64String(1_000_000_000_000)),
@@ -1108,7 +1180,11 @@ mod catalog_truth_tests {
             icp.display_decimals.unwrap(),
             t["decimals"]["icp"].as_u64().unwrap() as u8
         );
-        assert_eq!(icp.fee, Some(U64String(10_000)), "locked: 0.0001 ICP raw fee");
+        assert_eq!(
+            icp.fee,
+            Some(U64String(10_000)),
+            "locked: 0.0001 ICP raw fee"
+        );
         assert_eq!(
             icp.cap,
             Some(U64String(100_000_000_000)),
@@ -1147,8 +1223,16 @@ mod catalog_truth_tests {
 
         // --- ORDER + currency ID: VEUR is id 9, appended LAST (after VCHF/ICP). The spec
         // locks 9 in BOTH compiled catalogs (this module + the app's BUNDLED_NETWORKS).
-        assert_eq!(cat.len(), 10, "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR");
-        assert_eq!(cat[9].symbol.as_deref(), Some("VEUR"), "id 9 IS the VEUR row");
+        assert_eq!(
+            cat.len(),
+            10,
+            "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR"
+        );
+        assert_eq!(
+            cat[9].symbol.as_deref(),
+            Some("VEUR"),
+            "id 9 IS the VEUR row"
+        );
 
         // --- VEUR (currency 9): every locked facet.
         let veur = catalog_currency(&cat, 9);
@@ -1167,7 +1251,11 @@ mod catalog_truth_tests {
             veur.display_decimals.unwrap(),
             t["decimals"]["veur"].as_u64().unwrap() as u8
         );
-        assert_eq!(veur.fee, Some(U64String(10_000)), "locked: 0.0001 VEUR raw fee");
+        assert_eq!(
+            veur.fee,
+            Some(U64String(10_000)),
+            "locked: 0.0001 VEUR raw fee"
+        );
         assert_eq!(
             veur.cap,
             Some(U64String(1_000_000_000_000)),
@@ -1256,7 +1344,10 @@ mod catalog_truth_tests {
             .iter()
             .map(|r| (r.token, r.min_fraction_digits))
             .collect();
-        assert_eq!(got, vec![("SOL", None), ("USDC", Some(2)), ("EURC", Some(2))]);
+        assert_eq!(
+            got,
+            vec![("SOL", None), ("USDC", Some(2)), ("EURC", Some(2))]
+        );
     }
 
     /// The solana section's EUR row (EUR dual-rail Stage 1, 2026-09-06) — the DEEP-liquidity
@@ -1281,7 +1372,11 @@ mod catalog_truth_tests {
             "EURC decimals == catalog_truth decimals.eurc"
         );
         assert_eq!(eurc.symbol, "EURC");
-        assert_eq!(eurc.min_fraction_digits, Some(2), "unit-denominated: '1.50'");
+        assert_eq!(
+            eurc.min_fraction_digits,
+            Some(2),
+            "unit-denominated: '1.50'"
+        );
         assert_eq!(eurc.liquidity, Some(LiquidityTier::Deep));
         assert_eq!(eurc.onramp, RampCapability::Unavailable);
         assert_eq!(eurc.offramp, RampCapability::Unavailable);
@@ -1302,7 +1397,12 @@ mod catalog_truth_tests {
         };
         for r in &rows {
             assert_eq!(r.onramp, RampCapability::Unavailable, "{} onramp", r.token);
-            assert_eq!(r.offramp, RampCapability::Unavailable, "{} offramp", r.token);
+            assert_eq!(
+                r.offramp,
+                RampCapability::Unavailable,
+                "{} offramp",
+                r.token
+            );
         }
     }
 }
@@ -1321,8 +1421,7 @@ mod wire_byte_shape_tests {
     use super::*;
 
     fn row_json(currency: u32) -> String {
-        serde_json::to_string(ic_rows().iter().find(|d| d.currency == currency).unwrap())
-            .unwrap()
+        serde_json::to_string(ic_rows().iter().find(|d| d.currency == currency).unwrap()).unwrap()
     }
 
     #[test]
@@ -1343,7 +1442,10 @@ mod wire_byte_shape_tests {
         // Belt-and-suspenders: EVERY pre-EUR IC row (0,1,2,6,3,4,5,7,8) omits both keys.
         for cid in [0, 1, 2, 6, 3, 4, 5, 7, 8] {
             let j = row_json(cid);
-            assert!(!j.contains("\"liquidity\""), "currency {cid} must not carry liquidity");
+            assert!(
+                !j.contains("\"liquidity\""),
+                "currency {cid} must not carry liquidity"
+            );
             assert!(
                 !j.contains("\"ramp_partner\""),
                 "currency {cid} must not carry ramp_partner"
@@ -1437,18 +1539,26 @@ mod swap_venue_truth_tests {
         let meta = crate::ic_gateway::FakeIc::from_catalog().swap_pool_metadata();
         assert_eq!(
             meta.token0_ledger,
-            v["token0_ledger"].as_str().expect("swap_venue.token0_ledger"),
+            v["token0_ledger"]
+                .as_str()
+                .expect("swap_venue.token0_ledger"),
             "the offline stub's token0 must be the venue's OWN token0 (measured 2026-09-08) — \
              seeding it backwards is what let a 5.9x-wrong live rate pass a green suite"
         );
         assert_eq!(
             meta.token1_ledger,
-            v["token1_ledger"].as_str().expect("swap_venue.token1_ledger"),
+            v["token1_ledger"]
+                .as_str()
+                .expect("swap_venue.token1_ledger"),
             "the offline stub's token1 must be the venue's OWN token1 (measured 2026-09-08)"
         );
         assert_eq!(
             meta.fee_millionths,
-            u128::from(v["fee_millionths"].as_u64().expect("swap_venue.fee_millionths")),
+            u128::from(
+                v["fee_millionths"]
+                    .as_u64()
+                    .expect("swap_venue.fee_millionths")
+            ),
             "the offline stub's fee tier must be the venue's OWN tier (measured 2026-09-08)"
         );
         // And the measured order is the REVERSE of the pin the 2026-09-07 build carried: token0
@@ -1457,5 +1567,4 @@ mod swap_venue_truth_tests {
         assert_eq!(meta.token0_ledger, VCHF_LEDGER_PRINCIPAL);
         assert_eq!(meta.token1_ledger, ICP_LEDGER_PRINCIPAL);
     }
-
 }
