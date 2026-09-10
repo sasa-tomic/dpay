@@ -187,32 +187,27 @@ DO-NOT-NAG set.
   is the operator opt-out). What remains of it is the two-handset tap (below). The cashier page
   (`8805027`), the OCP tx-id fix and the bearer-token revisit are done and recorded below/inline.
 
-## PROD STATE (checked, never asserted — floor `1adc94f`)
+## PROD STATE (checked, never asserted — floor `4727a57`)
 
-Re-measured 2026-09-09 after the founder's deploy ("everything deployed"), HEAD `1adc94f`:
+Re-measured 2026-09-10, HEAD `4727a57`:
 
-- `just verify-relay` → **MATCH at HEAD** (`1adc94f59c…`, clean — no `-dirty`). Everything that was
-  unshipped is shipped: the replacement Helius key, the funding-mechanism fix, and the 2026-09-08
-  quote-contract change (`fee_millionths` on both sides — the app-and-relay ship-together coupling
-  from the old DEPLOY ORDER section is satisfied and that section is removed).
+- `just verify-relay` → **MATCH at HEAD** (`4727a57a40…`, clean — no `-dirty`; commit_date
+  2026-09-10T17:43:36+02:00). Everything is shipped, incl. the R2 Solana-relay cutover and the
+  till default flip.
 - `just integrity-check` → **MATCH** on `e537056e…` (facade unchanged since the 2026-09-07 upgrade;
   pin recorded in `docs/UPGRADES.md`).
-- `node scripts/check-prod-sol.mjs` → **PASS** — the replacement key answers `getHealth` "ok" on
-  mainnet. (Note: this is a script, not a `just` recipe; `just apk`/`just image` run it as a
-  pre-build gate.) This was the PRE-R2 contract, measured 2026-09-09; R2 (2026-09-10) retargeted
-  the script to the static no-key invariant + a live probe, and the 2026-09-10 friction cleanup
-  moved the probe's target off prod entirely: the shipping builds now STAGE the tree's relay on
-  loopback (`scripts/stage-relay-probe.sh`) and probe that, so a build verdict never depends on
-  deploy state. Before the next ship, `DPAY_SOLANA_RPC_URL` (full Helius endpoint incl. key) must
-  land in `deploy/.env` — it is not there yet, and without it both the probe and the deployed
-  relay refuse (503 `solana-unconfigured`).
+- **Solana rail is configured in prod** — `POST https://dpay.kalaj.org/api/v1/solana/rpc` with
+  `getHealth` → `{"result":"ok"}` (measured 2026-09-10): the deployed relay has the key and serves
+  the R2 proxy (no 503 `solana-unconfigured`). The earlier note that
+  `DPAY_SOLANA_RPC_URL` "must land in `deploy/.env` — it is not there yet" is now stale: it IS
+  there (`deploy/.env`, full Helius endpoint incl. key), and the loopback-staged build probe
+  (`scripts/stage-relay-probe.sh`) plus `node scripts/check-prod-sol.mjs` sit in front of every
+  `just apk`/`just image` as before.
 - `just swap-venue-probe` → **PASS** — the live route still derives swap direction from the venue's
   own metadata (token1→token0 100000000 → 231342577, ratio 0.996998 vs the pool's implied price).
-- **The till is NOT yet served in production** — `curl -s
-  https://dpay.kalaj.org/api/v1/capabilities` → `{"till":false}` (measured 2026-09-10): the live
-  image predates `d15b596`, so the default flip rides the next founder relay deploy. Re-check the
-  capabilities route after that deploy lands; until then every "the till is served" claim about
-  PROD is false (the code claim — served by default — is true and lives in `CLAUDE.md`).
+- **The till IS served in production** — `curl -s https://dpay.kalaj.org/api/v1/capabilities` →
+  `{"till":true,"demo_faucet":true}` (measured 2026-09-10): the 2026-09-10 relay deploy carried
+  `d15b596` and the default flip is live. (The pre-deploy "till NOT yet served" note is retired.)
 
 **Verified-clean floor for the next session's review: `ddfea4a`** — jest 111 suites / 2269, e2e
 **153/153 GREEN** (`just e2e`, EXIT=0), and every Rust suite green in the same pass (core 61+5,
