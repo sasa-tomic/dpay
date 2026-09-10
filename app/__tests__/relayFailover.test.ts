@@ -767,4 +767,56 @@ describe('attempt-0 arming + the address cooldown (R1 wave-2 — the hung-prefer
       warn.mockRestore();
     }
   });
+
+  test('useBalancePoll overlap: a STALE poll\'s late timeout cannot flip the dot offline after a NEWER poll succeeded (the green→gray flicker)', async () => {
+    // The reported glitch: the dot shows green "every now and then, then switches to gray
+    // immediately after". Cause: POLL.balance (2.5 s) fires polls faster than a slow walk ends
+    // (the outer cap aborts at 5 s), so when a HUNG poll A is overtaken by a FAST poll B, A's
+    // own late abort landed after B's success and setOnline(false) — same effect generation, so
+    // the `fresh()` gate alone never stopped it. The overlap guard retires A's write: a failure
+    // is stale when a success completed after the failing poll started. Pin: single address, prod
+    // cadence, A 'hang' for poll 1 then a fast 200.
+    const HEX = 'aabb';
+    serve({[A]: {[`/api/v1/balances/${HEX}`]: 'hang'}});
+    setRelayAddresses([A]);
+    const prodBalance = POLL.balance;
+    POLL.balance = 2500;
+    let latest: ReturnType<typeof useBalancePoll> | null = null;
+    function Probe() {
+      latest = useBalancePoll({relayUrl: A, publicHex: HEX, displayAssets: [], displayCurrencyIds: ''});
+      return null;
+    }
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    let tree!: renderer.ReactTestRenderer;
+    try {
+      await act(async () => { tree = renderer.create(React.createElement(Probe)); }); // poll 1 @ t=0: hangs
+      // Re-serve BEFORE the interval fires so poll 2 (t=2500) meets a fast 200. Poll 1 is already
+      // in flight on the old handler — its hang promise still only ends when ITS signal aborts.
+      serve({[A]: {[`/api/v1/balances/${HEX}`]: {ok: true, status: 200, body: {'0': '123'}}}});
+      await act(async () => { await jest.advanceTimersByTimeAsync(2500); }); // poll 2 succeeds fast
+      expect(latest!.online).toBe(true); // green — the newer poll answered
+      expect(latest!.balance).toBe('123');
+      // Re-hang for poll 3 (fires at t=5000, the same tick poll 1's outer cap aborts it) so it
+      // writes nothing during the test; poll 1's late abort is the ONLY writer that could land.
+      serve({[A]: {[`/api/v1/balances/${HEX}`]: 'hang'}});
+      // Poll 1's outer 5 s cap now aborts it — the OLD code wrote setOnline(false) HERE (the
+      // flicker); the overlap guard must drop the stale failure instead.
+      await act(async () => { await jest.advanceTimersByTimeAsync(2600); }); // → t=5100
+      expect(latest!.online).toBe(true); // still green — the stale abort never landed
+      expect(latest!.balance).toBe('123');
+      const logged = warn.mock.calls.map(c => c.map(a => String(a)).join(' ')).join('\n');
+      expect(logged).toMatch(/balance poll failed: aborted/); // the hang is still logged, just not WRITTEN
+      expect(requests.filter((u) => u.includes('/api/v1/balances/'))).toEqual([
+        `${A}/api/v1/balances/${HEX}`, // poll 1: the hung one (stale-dropped)
+        `${A}/api/v1/balances/${HEX}`, // poll 2: the fast 200 that owns the dot
+        `${A}/api/v1/balances/${HEX}`, // poll 3: re-hung at t=5000, still in flight at test end
+      ]);
+      act(() => { tree.unmount(); });
+      await act(async () => { await jest.advanceTimersByTimeAsync(0); });
+      expect(jest.getTimerCount()).toBe(0); // interval cleared, outer timers stopped, no orphans
+    } finally {
+      POLL.balance = prodBalance;
+      warn.mockRestore();
+    }
+  });
 });

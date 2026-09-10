@@ -94,8 +94,25 @@ export function useBalancePoll(args: Args): {
     // `fresh` is the write gate: true only while THIS effect is current (alive) AND no newer
     // generation has started. Checked immediately before every setState below.
     const fresh = () => alive && gen === genRef.current;
+    // Overlap guard: the interval fires every POLL.balance (2.5 s) while a walk may legitimately
+    // still be in flight (BALANCE_TIMEOUT_MS 4 s attempt budget; a multi-address walk ≈ 2×), so
+    // two polls of the SAME generation routinely overlap — and `fresh()` (generation-only) lets a
+    // sibling's write through. The glitch this guards: the OLDER poll's late timeout abort lands
+    // AFTER a newer poll's success and setOnline(false) — the "green for a moment, then gray
+    // again" flicker. Rule (deliberately ASYMMETRIC):
+    //   • a SUCCESS always writes — an older poll's failover answer is real, current connectivity
+    //     information (the wave-2 "online from B within the FIRST poll" behavior relies on it;
+    //     worst case a slower stale answer lands for one interval, the next poll re-verifies);
+    //   • a FAILURE writes only when no success completed AFTER this failing poll STARTED — i.e.
+    //     a success that arrived on top of a still-hanging older attempt retires that attempt's
+    //     eventual timeout. Newest OBSERVATION wins; a stale abort is not an observation.
+    let successCount = 0;
 
     const poll = async () => {
+      const startSuccesses = successCount;
+      // A failure whose poll was overtaken by a sibling SUCCESS (completed after this poll
+      // started) is retired, not observed — every failure write below gates on !staleFailure().
+      const staleFailure = () => !fresh() || successCount !== startSuccesses;
       // SINGLE batch fetch — the relay returns EVERY catalog currency's balance in one response
       // (a flat map {currency: minor-units-string}), replacing the old N+1 loop (1 primary + 1 per
       // asset, each a relay→IC round trip). The relay fans the per-currency queries out concurrently
@@ -118,16 +135,17 @@ export function useBalancePoll(args: Args): {
             // failure / non-object body is treated like an offline blip (no state change to balances).
             const j: unknown = await r.json().catch(() => null);
             const map = (j && typeof j === 'object' && !Array.isArray(j)) ? j as Record<string, string> : null;
-            if (!map) { if (fresh()) setOnline(false); return; }
+            if (!map) { if (!staleFailure()) setOnline(false); return; }
             // Primary (currency 0): a successful read sets the balance + flips online + resets the
             // DEMO offline deduction (the authoritative balance replaces the optimistic local view).
             // A missing/non-string primary in an otherwise-200 batch → offline (primary ledger hiccup).
             const primary = map['0'];
             if (fresh() && typeof primary === 'string') {
+              successCount++; // completed success — retires every still-in-flight sibling timeout
               setBalance(primary);
               setOnline(true);
               setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev);
-            } else if (fresh()) {
+            } else if (!staleFailure()) {
               setOnline(false);
             }
             if (!fresh()) return;
@@ -158,10 +176,10 @@ export function useBalancePoll(args: Args): {
             // flip offline (the next poll retries). The body is tiny JSON; read best-effort.
             const bodyText = await r.text().catch(() => '<unreadable>');
             console.warn(`balances ${r.status}: ${bodyText}`);
-            if (fresh()) setOnline(false);
+            if (!staleFailure()) setOnline(false);
           }
         } finally { t.stop(); }
-      } catch (e) { console.warn('balance poll failed:', e instanceof Error ? e.message : String(e)); if (fresh()) setOnline(false); }
+      } catch (e) { console.warn('balance poll failed:', e instanceof Error ? e.message : String(e)); if (!staleFailure()) setOnline(false); }
     };
     poll(); const id = setInterval(poll, POLL.balance);
     // Manual-refresh handle (2026-08-16 zero-funds UX): the fund-first panel's "Check again" re-fires
