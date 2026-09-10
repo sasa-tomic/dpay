@@ -137,3 +137,16 @@ unattributable.
 If `integrity-check` reports `MISMATCH`, someone upgraded outside this procedure — find out who
 and why before re-recording. If `verify-relay` reports `BEHIND`/`MISMATCH`, the running image
 predates the source: re-run from step 3.
+
+**Solana RPC proxy env** (the one §-local env note): `DPAY_SOLANA_RPC_URL` in `deploy/.env` must
+be the FULL provider endpoint including its api key (e.g.
+`https://mainnet.helius-rpc.com/?api-key=…`) — SECRET, never logged/echoed/committed. Unset →
+`POST /api/v1/solana/rpc` answers 503 naming it. Optional `DPAY_SOLANA_TIMEOUT_MS` (default
+10000). See `deploy/.env.example` and `crates/dpay-relay/src/solana.rs`.
+
+**R2 cutover (first deploy only):** the strict `check-prod-sol` probe runs against the LIVE
+relay — which still predates the `/api/v1/solana/rpc` route — so its 404 fails the probe and
+the build refuses (deliberate: the straddle is unshippable). Break the deadlock by building
+with `DPAY_RELAY_BASE` pointed at a staged R2 instance (the script's failure message says
+exactly this), deploying the relay, then building again — every later build probes prod
+directly.

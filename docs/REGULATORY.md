@@ -344,6 +344,11 @@ Architecture is no defence to that prong.
 3. **Let the user's own device submit the signed transaction.** Do not relay or broadcast through
    dpay infrastructure. MiCA transfer services has no control limiter (§2.2), and this is the limb
    most arguable against dpay today (§1.9).
+   *Annotation (2026-09-10): the broadcast half of this constraint was EXPLICITLY OVERRULEN by
+   the founder on 2026-09-09 — Solana reads AND broadcast go through the dpay relay. The
+   recorded objection and the decision live in
+   `docs/specs/2026-09-09-relay-ha-and-solana-proxy.md` §Direction 1, and the counsel question
+   §7 Q1 below carries the second fact pattern.*
 4. **Never label a route "best".** Charged against Consensys; expressly barred by the 2026 SEC staff
    conditions (§3.1, §3.2).
 5. **Let the user choose the venue. Do not exercise routing discretion.**

@@ -186,29 +186,24 @@ DO-NOT-NAG set.
   what remains of it is the two-handset tap (below). The cashier page (`8805027`), the OCP tx-id
   fix and the bearer-token revisit are done and recorded below/inline.
 
-## PROD STATE (checked, never asserted — floor `cf119bb`)
+## PROD STATE (checked, never asserted — floor `1adc94f`)
 
-Re-measured 2026-09-08 at the END of the session, HEAD `1b3603d`:
+Re-measured 2026-09-09 after the founder's deploy ("everything deployed"), HEAD `1adc94f`:
 
-- `just integrity-check` → **MATCH** on `e537056e…`. The founder ran the full
-  `just deploy-ic && just apk && just up` mid-session, so the facade WASM changed at `90f5930` IS
-  shipped and the pin is recorded (`docs/UPGRADES.md`).
-- The inverted-quote fix is **live and correct**: `/api/v1/swap_quote` returns 1 ICP →
-  2.41771929 VCHF with `zero_for_one: false` and the venue's own `fee_millionths: 3000` echoed.
-  `/api/v1/capabilities` → `{"till":false,"demo_faucet":true}`, so production funds new wallets
-  again.
-- `just verify-relay` → **DIRTY**. The live image reports `2013349…-dirty`: it was built from a tree
-  that still held the re-baked module-hash pin, which `just deploy-ic` writes and `just up` then
-  compiled. **That hole is now closed** — the image build refuses a dirty tree
-  (`deploy/git-lib.sh`), `deploy-ic` prints the paste-ready UPGRADES row and the exact commit
-  command, and the sequence lives in `docs/OPS.md` §3. The DIRTY state can only be an image built
-  before that gate.
-
-**Unshipped: everything since `2013349`**, which now includes the replacement Helius key and the
-funding-mechanism fix. One operation — `just apk && just up` (no canister change since the deploy,
-so `deploy-ic` is skippable). Afterwards `just verify-relay` should say MATCH at HEAD, and
-`just swap-venue-probe` re-checks that the live route still derives swap direction from the venue
-rather than a pin.
+- `just verify-relay` → **MATCH at HEAD** (`1adc94f59c…`, clean — no `-dirty`). Everything that was
+  unshipped is shipped: the replacement Helius key, the funding-mechanism fix, and the 2026-09-08
+  quote-contract change (`fee_millionths` on both sides — the app-and-relay ship-together coupling
+  from the old DEPLOY ORDER section is satisfied and that section is removed).
+- `just integrity-check` → **MATCH** on `e537056e…` (facade unchanged since the 2026-09-07 upgrade;
+  pin recorded in `docs/UPGRADES.md`).
+- `node scripts/check-prod-sol.mjs` → **PASS** — the replacement key answers `getHealth` "ok" on
+  mainnet. (Note: this is a script, not a `just` recipe; `just apk` runs it as a pre-build gate.)
+  This was the PRE-R2 contract, measured 2026-09-09; R2 (2026-09-10) retargeted the script to the
+  static no-key invariant + a live probe of the relay's proxy route — until the relay is re-deployed
+  with R2, the live probe reports the route 404 BY DESIGN (see the R2 cutover note in
+  `docs/OPS.md` §3).
+- `just swap-venue-probe` → **PASS** — the live route still derives swap direction from the venue's
+  own metadata (token1→token0 100000000 → 231342577, ratio 0.996998 vs the pool's implied price).
 
 **Verified-clean floor for the next session's review: `ddfea4a`** — jest 111 suites / 2269, e2e
 **153/153 GREEN** (`just e2e`, EXIT=0), and every Rust suite green in the same pass (core 61+5,
@@ -286,21 +281,14 @@ single RED alone before believing it.
   decision. Also open: the two forks in
   [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md) §1.
 
-## DEPLOY ORDER — the app and the relay must ship TOGETHER after 2026-09-08
-
-The quote contract changed on both sides in the same session: `SwapQuoteBody` now carries
-`fee_millionths` (the venue's own tier, echoed instead of claimed) and the app hard-requires it.
-So **an APK from HEAD against the deployed relay fails every Convert quote**, and the deployed relay
-still answers `zero_for_one: true` for ICP→VCHF where the corrected tree derives `false`. Ship
-`just deploy-ic && just apk && just up` as one operation; do not ship the app alone. After the
-deploy, `just swap-venue-probe` is the check that the live route derives direction from the venue.
-
-## Solana rails — the dead key is REPLACED (2026-09-09)
+## Solana rails — the dead key is REPLACED and SHIPPED (2026-09-09)
 
 The baked key had gone from `429 max usage reached` (2026-09-08) to **`HTTP 401 Unauthorized`**
-(measured 2026-09-09) — dead, not throttled. The founder supplied a replacement the same day; it is
-in `app/config/constants.ts`, `just check-prod-sol` PASSES against it, and the old key still answers
-401. **Unshipped** until the next `just apk && just up`.
+(measured 2026-09-09) — dead, not throttled. The founder supplied a replacement the same day; the
+old key was still answering 401 until the founder deleted it from the Helius dashboard
+(**R0 resolved, 2026-09-10** — the key list is now clean, nothing unexplained remains), and the
+replacement is **live** (shipped with the 2026-09-09 deploy;
+`node scripts/check-prod-sol.mjs` → PASS).
 
 **Why 401 and not 429, what the free tier actually holds, and what a usage alarm would take** — all
 of it measured against Helius's own published docs, with the one check only the founder can run:
@@ -310,10 +298,51 @@ was raised and overruled, the order they must ship in, and the failure-state con
 
 | # | Item | value | effort |
 |---|------|------:|:------:|
-| R0 | **FOUNDER, one look:** does the OLD Helius key still appear in the dashboard's API-key list? Gone ⇒ making the replacement rotated it and there is nothing unexplained. Still listed and disabled ⇒ something else killed it and can kill the new one, so ask Helius. Nothing else in this section can be sequenced honestly until this is known. | 8 | S |
-| R3 | **Three distinguishable failure states, before R2 ships.** After the proxy, a relay outage renders the app's existing "Solana isn't answering" — which would blame the chain for dpay being down. `BalanceView.status: 'error'` is one bucket and must carry a cause; the relay-down state names dpay, says the money is untouched, names the Settings ▸ Advanced escape, and names what still works (the IC rail never touches the relay). | 8 | M |
-| R1 | **Multi-relay client** — one relay is a single point of failure, and R2 makes that failure total for the Solana rail. Ordered health-based failover over a list; build drift between replicas is a hard error. **Ships before or with R2.** | 8 | M |
-| R2 | **Solana RPC through the relay, reads AND broadcast** (founder decision 2026-09-09, taken with the `docs/REGULATORY.md` §4.3 objection stated). Key leaves the client; reads share a cache — which is the only thing that makes the free tier's 1M credits/month survive more than ~3 wallets. | 7 | M |
+| R4 | **Receive-flow copy needs the R3 classification treatment:** `M.deposit.sol.ataUnverifiedDetail` (SolanaReceiveSheet) is a pre-existing unclassified connectivity sentence naming Solana and the user's connection — post-R2, a relay outage renders it blaming the wrong party. Small copy+classification follow-up, filed with R2's landing (2026-09-10). | 5 | S |
+
+**R1 is DONE (2026-09-10, removed from the table above).** One relay client over an ordered
+address list (`relayFetch` in `app/services/relay.ts`): transport failure or ≥ 500 → next
+address, a 4xx is the answer and never fails over; build drift between replicas is a hard
+sticky error (`/version` + `/integrity` fingerprint match required before a non-primary
+serves data; mismatch named with both addresses + commits, cleared by re-pointing or the
+re-probe Apply); a hung relay fails over via armed per-attempt deadlines + a 30 s order-only
+cooldown; the till stays session-pinned and the faucet single-address; all shared walk state
+is revision-guarded against mid-flight list edits. Three adversary waves + an experimental
+stress wave, all findings fixed and re-verified; jest 117 suites / 2372 tests; flow 164
+(dead primary walked past, 4xx no-failover) GREEN. Full record:
+`docs/specs/2026-09-09-relay-ha-and-solana-proxy.md` §"What landed".
+
+**R2 is DONE (2026-09-10, removed from the table above).** Solana RPC — reads AND broadcast —
+goes through the relay: `POST /api/v1/solana/rpc` (`crates/dpay-relay/src/solana.rs`) with an
+honest marker contract (key unset → 503 `solana-unconfigured`; upstream statuses verbatim;
+upstream transport death → 504 `solana-upstream-unreachable`, URL/key never leaked), a shared
+read cache (13-method TTL allowlist, canonical-params keys, OnceCell single-flight,
+expired-first 4096-cap eviction, failures never cached) and a byte-faithful pure pipe for
+`sendTransaction` + unknown methods (no inspect/rewrite/hold/queue/reorder, redirects refused).
+The key left the client: the Helius key/url literal is deleted from `app/config/constants.ts`
+and the endpoint list is derived + walked with R1 semantics (operator override ⇒ relay bases +
+proxy path; transport/≥ 500/marker → next, 4xx is the answer; armed per-candidate deadlines;
+marker→status→all-gated→transport precedence; `SolanaRelayPathDown` → R3 `unreachable`, copy
+flip included — the unreachable sentence now names dpay's relay). Verified by three adversarial
+waves, all findings fixed and re-verified: jest 118 suites / 2403 tests, relay 144 tests, all
+parity guards green; flow 165 (solana-via-relay, incl. dead-home failover) is WRITTEN — the
+batched e2e run is the one gate still pending. Full record + accepted residuals:
+`docs/specs/2026-09-09-relay-ha-and-solana-proxy.md` §"What landed". One follow-up filed as R4
+above: the receive-flow `ataUnverifiedDetail` sentence predates the classification work and can
+blame the wrong party post-proxy.
+
+**R3 is DONE (2026-09-09, removed from the table above).** Four failure states classified at the
+ONE transport seam (`SolanaReadFailure` = refused/offline/unreachable/unreadable, `app/solana.ts`);
+`BalanceView.failure` is a required field so the cause reaches every row and the outage note picks
+its sentence from it (never guessed at the component). The unreachable state names the service
+side, says money is untouched, names what still works (IC **payments** — IC *balances* go through
+the relay and are honestly not claimed), and its note is TAPPABLE → Settings opens with the
+Advanced disclosure expanded. History failures render a stale marker instead of a silently stale
+list. Verified by four adversary waves (spec/UX/wiring/test audits, findings fixed and re-verified);
+flow 147 drives all three user-visible states + the escape tap (GREEN); jest 112 suites / 2304
+tests. One residual for the R2 cutover: pre-proxy, "the service side is down" names the provider,
+not dpay — flip the copy to name dpay when R2 makes it true. Full record:
+`docs/specs/2026-09-09-relay-ha-and-solana-proxy.md` §"What landed".
 
 **S2 and S3 were already DONE and were stale here (removed 2026-09-09).** S2 — the balance poll is
 ONE `getMultipleAccounts` per tick reading the wallet account, every mint's token account and every
@@ -404,8 +433,11 @@ Nothing from the swarm's defect inventory remains open.
   `spl-token` mints refused by name). Same spec.
 - **(medium) Withdrawal approve→retrieve front-running residual** — includes the inherent
   dual-approve partial-failure class; documented mitigation in place.
-- **Helius API key baked as a literal** — rate-limit key, not a fund key (non-custodial, device
-  key signs). Rotate if the repo ever goes public.
+- ~~**Helius API key baked as a literal** — rate-limit key, not a fund key (non-custodial, device
+  key signs). Rotate if the repo ever goes public.~~ **RESOLVED by R2 (2026-09-10):** the key/url
+  literal is deleted from the client — the provider endpoint lives in relay deploy config only
+  (`DPAY_SOLANA_RPC_URL`), never in the app bundle. Pre-R2 commits keep the old literals in git
+  history, so rotation before any repo publication stays the founder's call.
 - **History names stay PRINCIPAL-prefix by design** post-cutover (ledger memo is the frozen
   16-byte nonce reconciliation key — extending it was REJECTED); a signed name registry is a
   founder follow-up, NOT in-tree.

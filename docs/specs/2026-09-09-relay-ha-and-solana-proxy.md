@@ -229,5 +229,122 @@ single point of failure in the middle. Build the multi-relay client first, or sh
 
 ## What landed
 
-Nothing from either direction. The key swap that ended the outage is separate and is recorded in
-`OPEN_ISSUES.md`.
+**R3 — the failure-state contract (2026-09-09), LANDED.** All five requirements, verified by four
+adversary waves (spec audit, UX audit, wiring audit, test audit — each wave's findings fixed and
+re-verified by fresh agents):
+
+1. **Three states, never collapsed.** `SolanaReadFailure` (`app/solana.ts`) is now
+   `'refused' | 'offline' | 'unreachable' | 'unreadable'`, classified at the ONE transport seam
+   every Solana read passes through — never guessed at a component. A branded refusal
+   (`SolanaEndpointRefused`, the `dpayEndpointRefused` field — not `instanceof`, two module
+   instances) beats everything. Transport failures ask an oracle: `classifyTransportFailure()`
+   probes the **IC boundary origin** (`icp-api.io`, or the per-call `__DPAY_TEST_IC_GATEWAY`
+   override) — deliberately OFF the Solana path, so after the R2 proxy a relay outage still
+   classifies as `unreachable` (phone online, rail's path down), never as `offline`. Order:
+   `__DPAY_TEST_SOLANA_CONNECTIVITY` override → `navigator.onLine === false` → memo (10s TTL) →
+   HEAD probe (2.5s timeout). Aborted polls rethrow — an unmount is never classified.
+2. **Relay-down state names the service side.** `unreachable` copy: names the service side, says
+   the money is untouched, names what still works (IC **payments** submit straight to icp-api.io —
+   IC *balances* go through the relay and are NOT claimed), notes payments can still be **signed**
+   offline, and the note is TAPPABLE: it opens Settings with the Advanced disclosure expanded
+   (`openSettingsFromOutage`, `openAdvanced` prop) — the escape is actionable, not a direction.
+   Navigation is zero-RPC so the no-button rule (retry worsens a rate limit) is not violated.
+3. **`offline` names no one.** Calmer chrome (`C.sub`, not `C.warn`): no cause, no escape, promises
+   the update on reconnection, keeps offline QR payments.
+4. **No cached value presented as current.** `BalanceView.failure` (required field — forgetting
+   the cause is a compile error) carries the cause into every row; the SOL state in
+   `useSolanaBalances` carries it (previously discarded); history failures render a
+   `sol-history-stale` marker (`historyStale` copy) instead of a silently stale list.
+5. **The offline-payment claim is not widened.** Signing is untouched; copy says "sign", never
+   "settle", offline.
+
+`RailUnreadableNote` picks its sentence from the classified cause (X9 held: one line per network);
+flow 147 drives all three failure states + the escape tap + the home=EUR landing (GREEN, 62s);
+jest 112 suites / 2304 tests; the sign gate maps `unreachable` to the rail-down caveat bucket.
+One honest residual: pre-proxy, "the service side is down" names the provider, not dpay — at the
+R2 cutover the copy should say dpay (it will then be true).
+
+**R1 is DONE (2026-09-10).** One client, an ordered list of addresses, never a "fallback".
+The wallet stores an ordered relay list (`dpay.relays.v1`, Settings ▸ Advanced, one per line,
+priority = order; the legacy single-URL slot migrates read-once; an empty draft restores the
+baked default). Every read-only relay surface walks the list through ONE primitive,
+`relayFetch` (`app/services/relay.ts`): transport failure or HTTP ≥ 500 → next address; any
+answer < 500 is THE answer — a 4xx never fails over. `App.tsx` threads `relayUrls` with `[0]`
+active exactly as it threaded the single URL, so a one-entry list is byte-for-byte the old
+behavior. Build drift between replicas is a hard, sticky error: before a non-primary address
+may serve data, its `/api/v1/version` + `/api/v1/integrity` fingerprint (commit, commit_date,
+facade_canister, pinned_module_hash — `live_module_hash` excluded, it flaps during facade
+upgrades) must match the reference (the preferred's, live-then-cached, or the first-seen
+baseline when the preferred is dead); a mismatch throws `RelayBuildDriftError` — English,
+verbatim in Settings, naming both addresses and commits — and the latch persists until the
+list is re-pointed (revision-guarded: a stale walk can never latch, cool, or pin against a
+list that changed under it; Apply while drift shows re-probes even a clean draft, so a
+same-URL redeploy recovers). Two carve-outs, both spec'd: the till stays session-pinned (2xx
+pins; a mid-session failover would ask a replica that never heard of the charge; failures
+name the addresses actually tried) and the demo-faucet POSTs stay single-address (a ledger
+effect lands on exactly one relay). A hung relay fails over too: with ≥ 2 addresses every
+attempt carries its own armed deadline (attempt 0 the full `timeoutMs`, then geometric
+falloff to a 1 s floor — a walk is bounded ≈ 2× `timeoutMs`), an internal-deadline expiry
+puts the address on a 30 s ORDER-only cooldown (never availability: all-cooled walks the
+original order; any answer clears it), and `useBalancePoll` gives its caller timer the
++1 s margin so the internal deadline classifies a hang before the caller's abort. Accepted
+residuals, all deliberate: a single-address walk is unarmed (the pre-R1 caller-owns-deadline
+contract — this is what keeps DepositSheet's 20 s grant honest; with ≥ 2 addresses
+`depositInfo`/`onramp` thread `DEPOSIT_TIMEOUT_MS` so the grant survives arming); 5xx at
+exhaustion is RETURNED (the relay's own error body is a fact); the drift error is English
+operator data (the `setSolanaRpcUrl` precedent); the till pin has no in-app unpin (restart
+starts a new session) and waits up to 15 s on a hung pin (session-affinity beats
+availability); an operator who arms a caller timer ≤ `timeoutMs` would re-create the
+hung-first-address shape — the +1 s convention lives at the `useBalancePoll` call site.
+Verified by three adversary waves (spec / wiring / test-integrity) + a stress wave that
+re-proved the hang blocker dead by experiment, all findings fixed and re-verified: jest
+117 suites / 2372 tests; e2e flow 164 (dead primary walked past, 4xx does not fail over —
+run GREEN by an independent auditor) and flow 12 extended (list persistence +
+normalization). `docs/OPS.md` gains the operator topology section when a second replica
+actually deploys.
+
+**R2 is DONE (2026-09-10).** Solana RPC — reads AND broadcast — goes through the relay, and the
+key left the client. The proxy: `POST /api/v1/solana/rpc` (`crates/dpay-relay/src/solana.rs`),
+registered always; `DPAY_SOLANA_RPC_URL` unset → an honest 503 marker
+`{"dpayRelayError":"solana-unconfigured"}`; upstream statuses relayed VERBATIM; upstream
+transport failure → a 504 marker `solana-upstream-unreachable` (URL and key never leaked).
+Reads are cached and shared — the quantified win above: a 13-method TTL allowlist (2 s
+balances/blockheight/statuses/health, 4 s blockhash, 5 s history, 60 s fees, 3600 s genesis),
+keys canonicalized from params, `OnceCell` single-flight so N same-second askers cost ONE
+upstream request, eviction expired-first at a 4096-entry cap; failures, garbage and error
+envelopes are never cached, and a hit re-serializes only the envelope id. `sendTransaction` and
+every unknown method are a byte-faithful pure pipe — no inspect, rewrite, hold, queue or
+reorder; redirects refused; batch arrays a 400 by contract. The client: the Helius key/url
+literal is DELETED from `app/config/constants.ts`; `solanaRpcUrls()` derives the candidate list
+(operator override ⇒ `[override]` : relay bases + `/api/v1/solana/rpc`, deduped, in list order)
+with `solanaRpcUrl()` its head for the gates, and `App.tsx` re-points the bases synchronously at
+every relay-list mutation site so the derivation can never lag a re-point. `rpcFetch` walks the
+candidates with the R1 semantics — transport / ≥ 500 / relay-marker → next address, a 4xx is
+the answer — and with the R1 hang lesson applied: per-candidate armed deadlines (attempt 0 the
+full `timeoutMs`, then `>>i` falloff to a 1 s floor; a single-candidate walk stays unarmed,
+keeping the caller-owns-deadline contract). One JSON-RPC id per logical request, so a failover
+resubmits byte-identical bytes — safe: Solana dedups by signature — and an "already…"
+broadcast answer goes to the confirm loop, never REJECTED (no false failure on a broadcast that
+landed). Exhaustion precedence: relay-marker → status → all-gated → transport.
+`SolanaRelayPathDown` feeds R3's `unreachable` with no probe — and the R3 copy flip landed with
+this: the unreachable sentence now names dpay's relay, closing that record's one residual. The
+marker body is capped at 64 KiB and a hostile 2xx carrying a marker is walked past. The key
+lives in deploy config only (`deploy/.env`, `docs/OPS.md` §3). `scripts/check-prod-sol.mjs` is
+retargeted — static no-key invariant (a provider literal re-baked into
+`app/config/constants.ts` fails the build) + live probe (relay `/version`, then proxied
+`getHealth`; a loud 404 says the relay is NOT
+deployed with the R2 proxy); strict at `just apk`/image builds, `--no-probe` for the offline
+`just web`. Flow 165 (solana-via-relay: real RPC through the harness relay's proxy, including
+dead-home failover); `FLOWS.md` at 156 flows. Verified by three adversarial waves, each wave's
+findings fixed and re-verified by fresh agents: jest 118 suites / 2403 tests; relay 144; core
+61 + 5; canister 61; every parity guard green.
+
+Residuals, accepted and adjacent-documented: (a) a pre-R2 relay answers 404 on the proxy route,
+which classifies as `refused` — the check-prod-sol cutover gate makes that straddle unshippable,
+and the adjacent copy is documented where the classification lives; (b)
+`M.deposit.sol.ataUnverifiedDetail` (receive flow) is a pre-existing unclassified connectivity
+sentence that can blame the wrong party after the proxy — filed as a follow-up in
+`OPEN_ISSUES.md`, not fixed here; (c) a 2xx whose body-read dies during armed-expiry in
+`rpc.ts` is not caught as transport-dead (pre-existing class, the file's header notes it); (d)
+the FIRST cutover needs the staged-instance procedure (`docs/OPS.md` §3) — the strict probe
+runs against the live relay, which predates the route.
