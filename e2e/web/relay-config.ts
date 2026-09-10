@@ -10,6 +10,13 @@
 //          SAME-ORIGIN (window.location.origin) — the wallet talks to the relay that served it.
 //        - the e2e build: 'http://127.0.0.1:8787' — matches the relay spawner's bind when
 //          DPAY_RELAY_ADDR is unset.
+//
+// R1 MULTI-ADDRESS FORMAT: `?relay=` may carry a COMMA-SEPARATED ordered list —
+// `?relay=http://a:1,http://b:2` (URL-encode the commas; URLSearchParams decodes them back). It
+// flows through VERBATIM as `RELAY_DEFAULT`; App.tsx splits it (`splitRelayListParam`) and treats
+// it as the exact list (first entry = preferred), not a merge. A single address remains a
+// one-entry list — no behavior change. `e2e/web/shims.ts` takes the FIRST entry for the IC
+// gateway seam bootstrap.
 function readRelay(): string {
   if (typeof window !== 'undefined') {
     try {

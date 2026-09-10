@@ -229,6 +229,21 @@ export class Driver {
       // flow declares balances and not SPL byte layouts (harness/solaccounts.mjs).
       await page.evaluateOnNewDocument(installSolAccountsHelper);
     }
+    // REAL Solana-over-relay (flow 165): re-enable the SOL rail's REAL RPC path instead of
+    // the suite default (disabled) or the in-page stub ('stub'). Runs after injectTestGlobals
+    // (evaluateOnNewDocument scripts run in registration order), and the app captures the
+    // value at module load, so it lands before the bundle evaluates on every navigation:
+    //   • 'derive' — DELETE the global entirely: `constants.ts` treats an unset override as
+    //     "no test override" and derives the candidate list from the App-installed relay
+    //     bases — the exact production path, App.tsx wiring included.
+    //   • any other string — that URL IS the whole candidate list (e.g. a harness relay's
+    //     proxy route pinned explicitly).
+    if (o.solRpcUrl) {
+      await page.evaluateOnNewDocument((u) => {
+        if (u === 'derive') delete globalThis.__DPAY_TEST_SOLANA_RPC_URL;
+        else globalThis.__DPAY_TEST_SOLANA_RPC_URL = u;
+      }, o.solRpcUrl);
+    }
     const driver = new Driver(browser, context, page, ownsBrowser);
     driver.attachPageListeners();
     return driver;

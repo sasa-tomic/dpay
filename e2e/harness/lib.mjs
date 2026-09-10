@@ -204,13 +204,27 @@ export async function stopSession() {
  * cross-test global state is the spent-nonce set (random 16-byte nonces → collision-free) and the
  * faucet (funds each test's own distinct account) — no account-state leakage between tests.
  *
- * @param {{noRelay?: boolean, noWeb?: boolean, rebuildWeb?: boolean}} [opts]
+ * @param {{noRelay?: boolean, noWeb?: boolean, rebuildWeb?: boolean, solStub?: boolean,
+ *           solRpcUrl?: 'relay' | string, dark?: boolean, locale?: string}} [opts]
+ *   `solRpcUrl`: re-enable the REAL Solana RPC path (suite default is rail-off). `'relay'`
+ *   deletes the test override so the candidate list DERIVES from the App-installed relay
+ *   list — the exact production path, harness relay's proxy route included (flow 165); any
+ *   other string is injected as the whole candidate list. Mutually exclusive with `solStub`
+ *   in intent: `solStub` answers in-page before fetch; `solRpcUrl` drives the real wire.
  */
 export async function setup(opts = {}) {
   const { mode, relayBaseURL, webBaseURL, browser } = await getSession(opts);
 
   // Fresh incognito context per test → fresh localStorage → fresh identity (the isolation gate).
-  const driver = await Driver.create(browser, { solStub: opts.solStub, dark: opts.dark, locale: opts.locale });
+  const driver = await Driver.create(browser, {
+    solStub: opts.solStub,
+    // `'relay'` resolves to the driver's 'derive' mode: no pinned URL — the app derives its
+    // SOL candidates from the relay list it was booted with (the harness relay's base is
+    // known only after getSession started it, and the derivation needs no base from us).
+    solRpcUrl: opts.solRpcUrl === 'relay' ? 'derive' : opts.solRpcUrl,
+    dark: opts.dark,
+    locale: opts.locale,
+  });
 
   // Register this driver for diagnostics-on-RED lookup, keyed by the active test file (propagated
   // through `_testCtx` by `runOne`). When run under the orchestrator this lets `runPool`'s catch

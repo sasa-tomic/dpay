@@ -78,25 +78,48 @@ export async function run() {
     // 4. Editing the relay input updates it (component state; the polls retarget to the new URL).
     // Keep the relay reachable: this flow proves edit/persistence, not offline handling. The trailing
     // slash is a real edit while the app's request URL normalizer still targets the same relay.
+    // R1 (2026-09-10): the field is now a LIST editor (one address per line) that NORMALIZES each
+    // line on Apply — a trailing slash is accepted, and the applied list comes back stripped, which
+    // is what the post-apply read below now pins (pre-R1 it echoed the raw draft verbatim).
     const edited = `${relayBaseURL}/`;
     await driver.type('settings-relay', edited, { timeoutMs: 4_000 });
     await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
     const after = await driver.readInputValue('settings-relay');
-    assertEq(after, edited, 'settings-relay should reflect the edited URL');
+    assertEq(after, relayBaseURL, 'settings-relay should reflect the edited URL, normalized (no trailing slash)');
     console.log(`[12-settings] ✓ relay input editable → ${after}`);
 
-    // 4b. The relay URL PERSISTS across reload (AsyncStorage, like identity) — NIT 1a-iv. Reload with
-    // NO ?relay= query so the only source of the URL is persisted state; the identity also persists,
+    // 4b. The relay LIST PERSISTS across reload (AsyncStorage, like identity) — NIT 1a-iv. Reload with
+    // NO ?relay= query so the only source of the list is persisted state; the identity also persists,
     // so we land back on the wallet (not onboarding). RED before the fix: the URL is component state
     // only → lost on reload → the input falls back to the default.
-    console.log('[12-settings] reloading (no ?relay=) to verify the relay URL persists…');
+    console.log('[12-settings] reloading (no ?relay=) to verify the relay list persists…');
     await driver.navigate(webBaseURL, '/', { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 8_000 });
     await driver.click('btn-settings', { timeoutMs: 6_000 });
     await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 }); // expand the disclosure again
     const persistedRelay = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
-    assertEq(persistedRelay, edited, 'settings-relay must persist across reload (AsyncStorage)');
-    console.log(`[12-settings] ✓ relay URL persisted across reload → ${persistedRelay}`);
+    assertEq(persistedRelay, relayBaseURL, 'settings-relay must persist across reload (AsyncStorage, normalized)');
+    console.log(`[12-settings] ✓ relay list persisted across reload → ${persistedRelay}`);
+
+    // 4b2. R1 (2026-09-10): the relay field is a LIST editor — one address per line, order =
+    // priority. A two-line edit must APPLY as a two-entry list and PERSIST as two lines. Both
+    // lines name the same live relay (this flow proves list mechanics, not failover — flow 164
+    // owns the dead-first-address case), so every poll keeps answering while the list is wide.
+    console.log('[12-settings] two-line list edit (same relay twice — mechanics only)…');
+    await driver.type('settings-relay', `${relayBaseURL}\n${relayBaseURL}`, { timeoutMs: 4_000 });
+    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
+    const twoLines = await driver.readInputValue('settings-relay');
+    assertEq(twoLines, `${relayBaseURL}\n${relayBaseURL}`, 'the applied list renders one address per line');
+    await driver.navigate(webBaseURL, '/', { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    await driver.waitReady({ timeoutMs: 8_000 });
+    await driver.click('btn-settings', { timeoutMs: 6_000 });
+    await driver.click('btn-advanced-toggle', { timeoutMs: 4_000 });
+    const persistedTwo = await driver.readInputValue('settings-relay', { timeoutMs: 4_000 });
+    assertEq(persistedTwo, `${relayBaseURL}\n${relayBaseURL}`, 'the two-line list must persist across reload');
+    console.log('[12-settings] ✓ relay list of two lines applied + persisted');
+    // Back to the single-address list for the steps below (deterministic field state).
+    await driver.type('settings-relay', relayBaseURL, { timeoutMs: 4_000 });
+    await driver.click('btn-relay-apply', { timeoutMs: 4_000 });
 
     // 4c. The SOLANA ENDPOINT row (M4) — the relay row's twin, one section down: a draft, an
     // explicit Apply, nothing on keystroke. Two things separate it from the relay row and both are

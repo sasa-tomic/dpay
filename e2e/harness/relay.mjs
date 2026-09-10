@@ -232,6 +232,12 @@ async function spawnOnce(opts = {}) {
     DPAY_ENABLE_TILL: opts.till === false ? 'false' : 'true',
     // Marker so a future relay feature can detect the e2e harness (no behavior change today).
     DPAY_E2E: '1',
+    // R2 (flow 165): the Solana RPC proxy's UPSTREAM — the relay's own test-helpers JSON-RPC
+    // stub on this same server. Named EXPLICITLY (never inherited) so a shell-exported
+    // DPAY_SOLANA_RPC_URL can never leak into the harness relay: the spread of process.env
+    // above carries toolchain vars (PATH/CARGO_*), while every DPAY_* knob is set HERE,
+    // deliberately, per spawn.
+    DPAY_SOLANA_RPC_URL: `http://127.0.0.1:${port}/api/v1/test/solana-upstream`,
     // Clamp noisy logs (the binary's banner is enough).
     RUST_LOG: process.env.RUST_LOG ?? 'warn',
   };

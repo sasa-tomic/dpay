@@ -152,7 +152,10 @@ if (typeof window !== 'undefined') {
 if (import.meta.env.MODE !== 'web-prod') {
   try {
     const relay = new URLSearchParams(window.location.search).get('relay');
+    // R1: `?relay=` may be a COMMA-SEPARATED list (first entry = preferred relay); the gateway
+    // seam is ONE origin, so take the FIRST entry (a bare comma list would be a broken origin).
+    const first = relay != null ? (relay.split(',')[0].trim() || null) : null;
     (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY =
-      relay ?? window.location.origin;
+      first ?? window.location.origin;
   } catch { /* no window (SSR guard) */ }
 }
