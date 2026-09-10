@@ -182,13 +182,10 @@ DO-NOT-NAG set.
   133–136).
 - **OpenCryptoPay is one interop rail among several, not the strategy** (founder, 2026-09-04). The
   till v1 build is complete (`702c359`; plan
-  [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md));
-  what remains of it is the two-handset tap (below). The cashier page (`8805027`), the OCP tx-id
-  fix and the bearer-token revisit are done and recorded below/inline. **The till is served by
-  DEFAULT since 2026-09-10 (founder, same session): `DPAY_ENABLE_TILL` unset → true at every
-  layer — binary, compose, `.env.example` — with `false` as the operator opt-out. Production
-  serves it from the next founder relay deploy (the live image still runs the opt-in era's
-  default); check with `curl -s https://dpay.kalaj.org/api/v1/capabilities` → `till:true`.**
+  [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md))
+  and **served by default at every layer since 2026-09-10** (`d15b596`; `DPAY_ENABLE_TILL=false`
+  is the operator opt-out). What remains of it is the two-handset tap (below). The cashier page
+  (`8805027`), the OCP tx-id fix and the bearer-token revisit are done and recorded below/inline.
 
 ## PROD STATE (checked, never asserted — floor `1adc94f`)
 
@@ -208,6 +205,11 @@ Re-measured 2026-09-09 after the founder's deploy ("everything deployed"), HEAD 
   `docs/OPS.md` §3).
 - `just swap-venue-probe` → **PASS** — the live route still derives swap direction from the venue's
   own metadata (token1→token0 100000000 → 231342577, ratio 0.996998 vs the pool's implied price).
+- **The till is NOT yet served in production** — `curl -s
+  https://dpay.kalaj.org/api/v1/capabilities` → `{"till":false}` (measured 2026-09-10): the live
+  image predates `d15b596`, so the default flip rides the next founder relay deploy. Re-check the
+  capabilities route after that deploy lands; until then every "the till is served" claim about
+  PROD is false (the code claim — served by default — is true and lives in `CLAUDE.md`).
 
 **Verified-clean floor for the next session's review: `ddfea4a`** — jest 111 suites / 2269, e2e
 **153/153 GREEN** (`just e2e`, EXIT=0), and every Rust suite green in the same pass (core 61+5,
