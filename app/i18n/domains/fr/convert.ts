@@ -29,10 +29,17 @@ export const convertFr: ConvertMessages = {
   inputFeeLine: fee => `Frais d'entrée : ${fee}`,
   outputFeeLine: fee => `Frais de sortie : ${fee}`,
   dpayFeeLine: 'dpay ne prend rien et ne reçoit rien pour cela.',
-  impactLine: pct => `Impact sur le prix : ${pct}`,
-  impactWarnLine: pct => `Impact élevé sur le prix : ${pct} — la quote ci-dessus l'inclut déjà.`,
-  impactUnavailable: venue =>
-    `Impact sur le prix : non mesurable pour l'instant — ${venue} n'a rien coté pour l'échange de référence, il n'y a donc aucun prix auquel comparer celui-ci. Le minimum garanti ci-dessous borne quand même ce que cet échange peut te coûter.`,
+  disclosures: {
+    byKey: {
+      // disclosure_key 'icpswap' (la clé du registre pour les pools ICPSwap) : le fait propre à
+      // la venue est OÙ tourne l'échange — son propre contrat de pool, signé par l'utilisateur,
+      // dpay n'est pas partie.
+      icpswap: venue =>
+        `L'échange s'exécute sur le propre contrat de pool de ${venue}. Chaque appel est signé par toi et envoyé directement — ${venue} exécute l'échange, et dpay n'en est pas partie.`,
+    },
+    generic: venue =>
+      `Cette conversion est exécutée par ${venue}. Chaque appel est signé par toi et envoyé directement — dpay n'en est pas partie.`,
+  },
   slippageLabel: 'Slippage',
   minReceiveLine: (amount, pct) => `Minimum garanti : ${amount} (${pct} de slippage)`,
   refusalLine: sym =>

@@ -29,10 +29,17 @@ export const convertDe: ConvertMessages = {
   inputFeeLine: fee => `Eingangsgebühr: ${fee}`,
   outputFeeLine: fee => `Ausgangsgebühr: ${fee}`,
   dpayFeeLine: 'dpay verlangt nichts und bekommt nichts dafür.',
-  impactLine: pct => `Preiseffekt: ${pct}`,
-  impactWarnLine: pct => `Hoher Preiseffekt: ${pct} — die Quote oben enthält ihn bereits.`,
-  impactUnavailable: venue =>
-    `Preiseffekt: gerade nicht messbar — ${venue} hat für den Referenz-Tausch nichts angeboten, es gibt also keinen Kurs zum Vergleich. Der Mindestbetrag unten begrenzt trotzdem, was dich dieser Tausch kosten kann.`,
+  disclosures: {
+    byKey: {
+      // disclosure_key 'icpswap' (der Key der Registry für die ICPSwap-Pools): der
+      // venue-spezifische Fakt ist, WO der Tausch läuft — der eigene Pool-Vertrag der Venue,
+      // vom Nutzer signiert, dpay nicht Partei.
+      icpswap: venue =>
+        `Der Tausch läuft auf dem eigenen Pool-Vertrag von ${venue} ab. Jeder Aufruf wird von dir signiert und direkt übermittelt — ${venue} führt den Tausch aus, und dpay ist nicht daran beteiligt.`,
+    },
+    generic: venue =>
+      `Diese Umwandlung wird von ${venue} ausgeführt. Jeder Aufruf wird von dir signiert und direkt übermittelt — dpay ist nicht daran beteiligt.`,
+  },
   slippageLabel: 'Slippage',
   minReceiveLine: (amount, pct) => `Mindestens erhältst du: ${amount} (${pct} Slippage)`,
   refusalLine: sym =>

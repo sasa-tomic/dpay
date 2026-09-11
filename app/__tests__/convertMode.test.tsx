@@ -10,9 +10,9 @@
  *     already suffixes the unit, so the i18n templates must never re-append it. Pinned twice:
  *     once on the rendered screen, once directly on all four locale catalogs (a locale that
  *     re-appends is a bug that only shows up in that locale).
- *   * C2 — "Price impact: —" never resolved. A permanent placeholder is a bug; an impact that
- *     genuinely cannot be measured must say so IN WORDS and say what it means for the user
- *     (founder rule 2026-08-29: useful practical instructions on every step).
+ *   * C2 — "Price impact: —" never resolved, then (2026-09-11, spec V8) the line itself was
+ *     removed: the venues publish no impact figure, so none is displayed. The pin now asserts
+ *     NO impact line renders at all — a re-introduced placeholder or number is RED.
  *   * C3 — "Re-quote and confirm" was enabled on a wallet holding nothing: a confirm that can
  *     only fail. It now fails closed with the fund-gate shape the Pay tab already uses, and the
  *     neighbouring case (an amount above the balance, fees included) fails closed too.
@@ -33,6 +33,7 @@ jest.mock('../convert', () => ({
   isQuoteStale: () => false,
   isTerminalConvertStep: (step: string) =>
     ['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded'].includes(step),
+  TERMINAL_CONVERT_STEPS: new Set(['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded']),
   convertRecordMinOut: jest.fn(async () => null),
   loadVenueRegistry: jest.fn(async () => []),
   fetchConvertQuote: jest.fn(),
@@ -86,7 +87,6 @@ const QUOTE: ConvertQuote = {
   zeroForOne: true,
   feeMillionths: 3000, // the venue's own 0.30% tier, echoed by the relay off the pool's metadata
   fetchedAtMs: 1_700_000_000_000,
-  impactBps: 37,
 };
 const MATH: ConvertMath = {
   amountIn: '100000000',
@@ -96,8 +96,6 @@ const MATH: ConvertMath = {
   inFee: '10000',
   outFee: '10000',
   slippageBps: 100,
-  impactBps: 37,
-  impactWarn: false,
 };
 
 /** Flatten every string this subtree renders (children can be arrays or nested Text). */
@@ -213,23 +211,21 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
   });
 });
 
-describe('C2 — price impact never renders a bare placeholder', () => {
-  test('a measured impact renders as a percentage', async () => {
+describe('C2 — the venue publishes no price impact, and none is invented', () => {
+  test('NO impact line renders: not a number, not a placeholder, nothing', async () => {
+    // 2026-09-11 (spec V8: display what the venue publishes): the impact line was REMOVED —
+    // it was dpay's own curve-slope estimate from a second reference quote, presented beside
+    // venue facts. The execution protection (minimum received + slippage) stays; impact does
+    // not. A re-introduced line — placeholder, number, or "unmeasurable" sentence — is RED.
     const tree = await mountConvert('250000000', '1');
-    expect(textOf(tree, 'convert-impact')).toContain('0.37%');
-  });
-
-  test('an unmeasurable impact says so in words and what it means — never "—"', async () => {
-    jest.mocked(fetchConvertQuote).mockResolvedValue({...QUOTE, impactBps: null});
-    jest.mocked(deriveConvertMath).mockResolvedValue({...MATH, impactBps: null, impactWarn: false});
-    const tree = await mountConvert('250000000', '1');
-    const line = textOf(tree, 'convert-impact');
-    // The shipped defect verbatim: the value slot filled with a placeholder and nothing else.
-    expect(line).not.toBe(convertEn.impactLine('—'));
-    expect(line).not.toMatch(/[-–—]\s*$/); // never ENDS on a dash either
-    expect(line.length).toBeGreaterThan(60); // a sentence, not a dash
-    // it must point at the number that DOES bound the outcome
-    expect(line.toLowerCase()).toContain('minimum');
+    expect(present(tree, 'convert-impact')).toBe(false);
+    expect(present(tree, 'convert-impact-warn')).toBe(false);
+    // …and no Text anywhere on the screen claims an impact at all.
+    const flat = (c: unknown): string =>
+      Array.isArray(c) ? c.map(flat).join('') : typeof c === 'string' || typeof c === 'number' ? String(c) : '';
+    const allText = tree.root.findAllByType(Text).map(n => flat(n.props.children)).join(' ');
+    expect(allText).not.toContain('Price impact');
+    expect(allText).not.toContain('impact');
   });
 });
 
@@ -351,17 +347,41 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     const tree = await mountConvert('250000000', '1');
     for (const id of [
       'convert-counterparty', 'convert-quote-source', 'convert-rate', 'convert-pool-fee',
-      'convert-in-fee', 'convert-out-fee', 'convert-dpay-fee', 'convert-impact',
+      'convert-in-fee', 'convert-out-fee', 'convert-dpay-fee', 'convert-venue-disclosure',
       'convert-min-out', 'convert-refusal', 'convert-net',
     ]) {
       expect(`${id}: ${present(tree, id)}`).toBe(`${id}: true`);
     }
+    // impact is the ONE §5-era line that is deliberately gone (V8, 2026-09-11): the venue
+    // publishes no such figure, so the checklist must not render one.
+    expect(present(tree, 'convert-impact')).toBe(false);
     // the counterparty disclosure still names the venue, what it is not, and who signs
     const cp = textOf(tree, 'convert-counterparty');
     expect(cp).toContain('ICPSwap');
     expect(cp).toContain('65mrh-fqaaa-aaaar-qapoa-cai');
     expect(cp).toContain('not a licensed provider and not dpay');
     expect(cp).toContain('Your phone signs');
+  });
+
+  test('the displayed rate is EXACTLY the derivation of the venue\'s own reply digits', async () => {
+    // scaledRate (ConvertMode) = out×1e8÷in, floored — recomputed here independently so the
+    // rendered string is pinned to the pure derivation, never to a hand-copied literal.
+    const tree = await mountConvert('250000000', '1');
+    const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 8n) / BigInt(QUOTE.amountIn);
+    const expected = fmtAsset(scaled.toString(), 8, 'VCHF');
+    expect(expected).toBe('0.41194138 VCHF'); // 41194138e8 / 100000000 — the derivation itself
+    expect(textOf(tree, 'convert-rate')).toContain(expected);
+    expect(textOf(tree, 'convert-rate')).toContain(convertEn.rateLabel('ICP', 'VCHF'));
+  });
+
+  test('the single-venue disclosure renders from the registry key, exactly once', async () => {
+    const tree = await mountConvert('250000000', '1');
+    // The bundled venue's disclosure_key is 'icpswap' (dfx/catalog_truth.json venues[]) — the
+    // known sentence, not the generic fallback, and only ONE Text carries it (counted by type:
+    // RN mirrors testID onto the host layer under a Text, so raw findAll double-counts).
+    const expected = convertEn.disclosures.byKey.icpswap('ICPSwap');
+    expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(expected);
+    expect(tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-venue-disclosure')).toHaveLength(1);
   });
 
   test('the pool principal is its own line, so it can never wrap mid-token', async () => {
@@ -474,13 +494,14 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     // NOTHING is selected: both rows radio-off, the none-selected line shows, and the decision
     // surfaces (headline, checklist, confirm) that follow a pick are all absent/disabled.
     for (const id of [VENUE_A.venue_id, VENUE_B.venue_id]) {
-      expect(node(tree, `convert-venue-${id}`)!.props.accessibilityState).toEqual({selected: false});
+      expect(node(tree, `convert-venue-${id}`)!.props.accessibilityState).toEqual({checked: false});
     }
     expect(present(tree, 'convert-venue-none')).toBe(true);
     expect(textOf(tree, 'convert-venue-none')).toContain(convertEn.venueNoneSelected);
     expect(present(tree, 'convert-headline')).toBe(false);
     // The checklist card carries no testID of its own — its absence is proven by its lines.
     expect(present(tree, 'convert-counterparty')).toBe(false);
+    expect(present(tree, 'convert-venue-disclosure')).toBe(false); // no pick → no disclosure
     expect(present(tree, 'convert-min-out')).toBe(false);
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
   });
@@ -500,7 +521,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_A.venue_id}`, `convert-venue-${VENUE_B.venue_id}`]);
     // Still nothing selected: no last-used default appears just because rates diverged.
     for (const id of [VENUE_A.venue_id, VENUE_B.venue_id]) {
-      expect(node(tree, `convert-venue-${id}`)!.props.accessibilityState).toEqual({selected: false});
+      expect(node(tree, `convert-venue-${id}`)!.props.accessibilityState).toEqual({checked: false});
     }
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
   });
@@ -512,8 +533,8 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     });
     // The decision surfaces appear under the pick and quote venue B's OWN numbers.
     expect(present(tree, 'convert-venue-none')).toBe(false);
-    expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({selected: true});
-    expect(node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.accessibilityState).toEqual({selected: false});
+    expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({checked: true});
+    expect(node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.accessibilityState).toEqual({checked: false});
     expect(textOf(tree, 'convert-headline')).toContain('0.89990000 VCHF');
     expect(textOf(tree, 'convert-pool-principal').trim()).toBe(FIXTURE_POOL); // B's pool, not A's
     // Confirm re-quotes the PICKED venue only and executes through it.
@@ -528,6 +549,33 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     expect(jest.mocked(adoptConvertRecord).mock.calls[0][0]).toBe(REC_B); // the record it prepared
     // The screen moved to the state panel for a record whose venue is B (looked-up facts follow it).
     expect(present(tree, 'convert-approving')).toBe(true);
+  });
+
+  test('the PICKED venue\'s disclosure renders once, from its own registry disclosure_key', async () => {
+    const tree = await mountConvert('250000000', '1');
+    // Before a pick the checklist is withheld, so the disclosure is too (pinned above); under
+    // the pick it is B's OWN key ('icpswap' — the fixture carries the same key as the real
+    // venue, so the sentence must name B, proving it followed the pick and not a default).
+    await act(async () => {
+      node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
+    });
+    const expected = convertEn.disclosures.byKey.icpswap(VENUE_B.display_name);
+    expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(expected);
+    expect(tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-venue-disclosure')).toHaveLength(1);
+    // The disclosure is CHECKLIST-ONLY (V8): the chooser rows never repeat it — two rows would
+    // otherwise render the same sentence twice on one screen.
+    expect(textOf(tree, 'convert-venues')).not.toContain(expected);
+  });
+
+  test('the two-venue rate follows the PICKED venue\'s own reply digits', async () => {
+    const tree = await mountConvert('250000000', '1');
+    await act(async () => {
+      node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
+    });
+    // B's own quote: 90000000 out for 100000000 in ⇒ scaled 90000000 ⇒ exactly this string.
+    const scaled = (BigInt(QUOTE_B.amountOutGross) * 10n ** 8n) / BigInt(QUOTE_B.amountIn);
+    expect(textOf(tree, 'convert-rate')).toContain(fmtAsset(scaled.toString(), 8, 'VCHF'));
+    expect(textOf(tree, 'convert-rate')).toContain('0.90000000 VCHF');
   });
 });
 
@@ -648,7 +696,7 @@ describe('V9 — chooser invariants parametric over arbitrary venue sets', () =>
     test('nothing is preselected for ANY set: every radio off, confirm withheld, no headline', async () => {
       const tree = await mountConvert('250000000', '1');
       for (const v of venues) {
-        expect(node(tree, `convert-venue-${v.venue_id}`)!.props.accessibilityState).toEqual({selected: false});
+        expect(node(tree, `convert-venue-${v.venue_id}`)!.props.accessibilityState).toEqual({checked: false});
       }
       expect(present(tree, 'convert-venue-none')).toBe(true);
       expect(present(tree, 'convert-headline')).toBe(false);
@@ -673,6 +721,34 @@ describe('V9 — chooser invariants parametric over arbitrary venue sets', () =>
         expect(occurrences(textOf(tree, 'convert-dpay-fee'), convertEn.dpayFeeLine)).toBe(1);
       }
     });
+  });
+
+  // The registry's disclosure_key is DATA: a venue this catalog has no sentence for (a newer
+  // relay serving a key this build never shipped) must still get an HONEST generic disclosure —
+  // fail closed, never blank, never a guess at the unknown venue's nature.
+  test('unknown disclosure_key falls back to the generic sentence, naming the venue', async () => {
+    const POOL_D = 'b7d2z-qzdqb-aaaaa-qbzkq-cai'; // invented — carries a key no locale knows
+    const VENUE_D: VenueEntry = {
+      venue_id: 'venue-unknown-key',
+      display_name: 'Mystery Venue',
+      kind: 'ic_amm',
+      endpoint: POOL_D,
+      pair_ledgers: [QUOTE.tokenInLedger, QUOTE.tokenOutLedger],
+      testnet: false,
+      disclosure_key: 'no-such-key',
+    };
+    setRuntimeVenues([VENUE_A, VENUE_D]); // overrides the describe.each overlay for this test
+    jest.mocked(fetchConvertQuote).mockImplementation((async (_r: string, _in: string, _out: string, _amt: string, opts?: {venue?: VenueEntry}) =>
+      Promise.resolve(opts?.venue?.venue_id === VENUE_D.venue_id
+        ? {...QUOTE, venueId: VENUE_D.venue_id, pool: POOL_D}
+        : QUOTE) as never));
+    jest.mocked(deriveConvertMath).mockImplementation((async () => MATH as never));
+    const tree = await mountConvert('250000000', '1');
+    await act(async () => {
+      node(tree, `convert-venue-${VENUE_D.venue_id}`)!.props.onPress();
+    });
+    expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(convertEn.disclosures.generic(VENUE_D.display_name));
+    expect(textOf(tree, 'convert-venue-disclosure')).not.toContain(convertEn.disclosures.byKey.icpswap(VENUE_D.display_name));
   });
 });
 

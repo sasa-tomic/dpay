@@ -14,7 +14,9 @@
  *
  * The §4 state machine (persisted in AsyncStorage under the identity-scoped key
  * `convertStoreKey(publicHex)` — `dpay.convert.v2.<pub>`, V6; one record per conversion id;
- * v1 and pre-scoping v2 records are MIGRATED on load, never discarded):
+ * v1 and pre-scoping v2 records are MIGRATED on load — per-record salvage: a corrupt record
+ * is dropped, never the whole store, and a legacy key is retired only after a fully
+ * successful adoption):
  *
  *   quote → confirming → approving → approved → swapping → settling
  *         ├→ done {outAmountNet, outTx}            (output-ledger credit SEEN — never from #ok alone)
@@ -56,9 +58,6 @@ import {randNonceHex} from './lib/format';
 import type {CurrencyDescriptor} from './config/catalog';
 import {
   CONVERT_APPROVE_LIFETIME_S,
-  CONVERT_IMPACT_PRICE_SCALE,
-  CONVERT_IMPACT_REF_AMOUNT_IN,
-  CONVERT_IMPACT_WARN_BPS,
   CONVERT_LEGACY_STORAGE_KEY,
   CONVERT_PROBE_WINDOW_ROWS,
   CONVERT_STALE_MS,
@@ -110,9 +109,6 @@ export type ConvertQuote = {
    *  every timestamp and staleness decision shows when the VENUE answered, not when this
    *  phone happened to receive it (V8 provenance: display what the venue publishes). */
   fetchedAtMs: number;
-  /** Measured (IC-AMM curve venues only) as this trade vs the venue's own near-zero reference
-   *  through the same curve; null = unmeasured or the venue kind has no curve to measure. */
-  impactBps: number | null;
 };
 
 async function getSwapQuote(
@@ -146,13 +142,13 @@ async function getSwapQuote(
 }
 
 /** Fetch the quote for `amountIn` from ONE named venue (default: the bundled registry's
- *  single venue for the pair). The venue's own numbers are displayed verbatim; the only
- *  app-derived figure is price impact, and only for a venue whose model supports the
- *  measurement: an IC-AMM curve, quoted as this trade vs a near-zero reference trade through
- *  the same curve (spec §5). Any other venue kind gets NO impact (absent, never faked) and
- *  no reference quote is fetched for it — one venue, one call per keystroke (V8). The
- *  relay's impact_bps test knob multiplies both quotes equally and cancels in the ratio, so
- *  the measurement is curve-true. */
+ *  single venue for the pair). The venue's own numbers are displayed verbatim — dpay derives
+ *  NOTHING here (V8 "display what the venue publishes, derive only what it does not"): the
+ *  venue does not publish a price-impact figure, so none is fetched, computed, or shown.
+ *  One venue, ONE call per keystroke, for every venue kind — the second reference quote the
+ *  2026-09-07 build fired per ic_amm venue (doubling chooser traffic and presenting a
+ *  curve-slope estimate as venue fact) was removed 2026-09-11. The venue's own amounts and
+ *  the signed minimum-you'll-receive remain the execution protection. */
 export async function fetchConvertQuote(
   relayUrl: string,
   tokenInLedger: string,
@@ -165,31 +161,7 @@ export async function fetchConvertQuote(
   // user's pick, V5); the bundled single-venue fallback keeps honest the pre-chooser path.
   const venue = opts.venue ?? icAmmVenueForPair(tokenInLedger, tokenOutLedger);
   if (!venue) throw new Error(M.convert.errors.quoteUnavailable('venue'));
-  // Both relayFetch calls fire before any await, so call ORDER (trade, then reference) is
-  // deterministic — the same order jest's sequential mocks pin.
-  const tradePromise = getSwapQuote(venue, relayUrl, tokenInLedger, tokenOutLedger, amountIn, timeoutMs);
-  const refPromise = venue.kind === 'ic_amm'
-    ? getSwapQuote(venue, relayUrl, tokenInLedger, tokenOutLedger, CONVERT_IMPACT_REF_AMOUNT_IN, timeoutMs)
-    : null;
-  const trade = await tradePromise;
-  const ref = refPromise == null ? null : await refPromise;
-  const inN = BigInt(trade.amount_in);
-  const refInN = ref == null ? 0n : BigInt(ref.amount_in);
-  let impactBps: number | null = null;
-  if (ref != null && inN > 0n && refInN > 0n) {
-    // price(this trade) vs price(near-zero trade), both as out-units per in-unit ×1e12.
-    const price = (BigInt(trade.amount_out) * CONVERT_IMPACT_PRICE_SCALE) / inN;
-    const refPrice = (BigInt(ref.amount_out) * CONVERT_IMPACT_PRICE_SCALE) / refInN;
-    if (refPrice > 0n) {
-      // A larger trade can never get a BETTER unit price out of the same curve in the same
-      // direction, so a negative gap is not a discount — it is the pool's own flooring, bounded at
-      // 0.025 bps by the reference size (config/convert.ts). Reporting 0 states what that
-      // measurement supports; nulling here would have parked the line on "unmeasurable" for every
-      // trade small enough that the noise outweighs an impact of, honestly, zero.
-      const drop = refPrice - price;
-      impactBps = drop <= 0n ? 0 : Number((drop * 10_000n) / refPrice);
-    }
-  }
+  const trade = await getSwapQuote(venue, relayUrl, tokenInLedger, tokenOutLedger, amountIn, timeoutMs);
   return {
     venueId: trade.venue_id,
     pool: trade.pool,
@@ -200,7 +172,6 @@ export async function fetchConvertQuote(
     zeroForOne: trade.zero_for_one ?? null,
     feeMillionths: trade.fee_millionths,
     fetchedAtMs: trade.fetched_at * 1000,
-    impactBps,
   };
 }
 
@@ -261,8 +232,6 @@ export type ConvertMath = {
   inFee: string;
   outFee: string;
   slippageBps: number;
-  impactBps: number | null;
-  impactWarn: boolean;
 };
 
 /** Everything the screen shows derives from (quote, both ledger fees, slippage). The fees come from
@@ -284,8 +253,6 @@ export async function deriveConvertMath(
     inFee,
     outFee,
     slippageBps,
-    impactBps: quote.impactBps,
-    impactWarn: quote.impactBps != null && quote.impactBps > CONVERT_IMPACT_WARN_BPS,
   };
 }
 
@@ -316,7 +283,7 @@ export type SignedLeg = {
   argHex: string; // '' only on legs migrated from a pre-legs record (its envelope froze the args)
   envelopeHex: string; // the SIGNED envelope bytes — the only thing retries re-submit
   requestIdHex: string; // the request id — the on-chain dedup key
-  expiresAtMs: number; // device-clock death of this leg's authority (the failure-screen countdown)
+  expiresAtMs: number; // ms form of this leg envelope's OWN ingress expiry — the certified-clock submit-death (the failure-screen countdown)
 };
 
 /** A CeFi provider's handle on an order it issued (the empty-legs record shape). */
@@ -346,6 +313,10 @@ export type ConvertRecord = {
   providerRef?: ProviderRef; // required when legs is empty; ignored otherwise
   outAmountNet?: string; // actually-received amount (from the ledger row) when done
   outTx?: string; // durable identifier of the incoming output-ledger row when done
+  /** Durable identity of the input-ledger refund row a `failed_refunded` resolution consumed —
+   *  the record's CLAIM on that row, so a sibling record's probe can never match the same
+   *  refund twice (the refund-side twin of `outTx`). */
+  refundTx?: string;
   /** Set by the USER's acknowledge tap on a `stuck` record (V6): the outcome is unknown, the
    *  user has read the instructions, and the background watch may stop. Until it is set, an
    *  expired-unconfirmed stuck record keeps being probed at the engine's slow cadence. */
@@ -360,6 +331,23 @@ const CONVERT_STEPS: ConvertStep[] = [
   'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
   'quote_expired', 'provider_refunded',
 ];
+
+/** The steps a legs==0 (CeFi-shaped) record may sit at: the provider driver's own vocabulary,
+ *  start to terminal. Every OTHER step is an IC-legs step — a legless record there is
+ *  malformed-by-construction (the IC executor has no legs to submit and the provider driver's
+ *  transition matrix can never move it), so hydration refuses it rather than arm the resume
+ *  engine's eternal no-op poll. */
+const PROVIDER_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
+  'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
+  'done', 'quote_expired', 'provider_refunded',
+]);
+
+/** The provider vocabulary WITHOUT `done` (the one terminal shared by both drivers). A
+ *  legs-bearing record parked here is malformed-by-construction — see hydrateOneRecord. */
+const PROVIDER_ONLY_STEPS: ReadonlySet<ConvertStep> = new Set([
+  'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
+  'quote_expired', 'provider_refunded',
+]);
 
 /** The min-out a record's swap leg signed, re-derived from the record's OWN frozen quote and
  *  slippage through the compiled core — deterministic, so this is the same figure
@@ -428,6 +416,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     outFee: str('outFee') ?? undefined,
     outAmountNet: str('outAmountNet') ?? undefined,
     outTx: str('outTx') ?? undefined,
+    refundTx: str('refundTx') ?? undefined,
     failureDetail: str('failureDetail') ?? undefined,
   };
   if (typeof r.createdAtMs !== 'number') return null;
@@ -471,6 +460,11 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // quadrant — prepare lands at `approving` with legs already signed). Refuse the record like
   // any other malformed one rather than wedge the watcher.
   if (legs.length > 0 && (rec.step === 'quote' || rec.step === 'confirming')) return null;
+  // The mirror quadrant: a legs-bearing record at a PROVIDER-only step (every step of the
+  // provider vocabulary except the shared terminal `done`) is equally driverless — the IC
+  // executor's transition set never visits those steps and the provider driver never picks a
+  // record with legs — so the same eternal no-op poll would arm. Refuse it the same way.
+  if (legs.length > 0 && PROVIDER_ONLY_STEPS.has(rec.step)) return null;
   if (legs.length === 0) {
     const pr = r.providerRef;
     if (!pr || typeof pr !== 'object' || typeof (pr as Record<string, unknown>).orderId !== 'string') return null;
@@ -478,6 +472,13 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     rec.providerRef = statusUrl == null
       ? {orderId: (pr as Record<string, unknown>).orderId as string}
       : {orderId: (pr as Record<string, unknown>).orderId as string, statusUrl: String(statusUrl)};
+    // A legless record lives ONLY in the provider vocabulary (the driver's transition matrix
+    // starts at awaiting_* and ends at done/quote_expired/provider_refunded). At any IC-driver
+    // step (approving/swapping/settling/…) it is malformed-by-construction: the IC executor
+    // has no legs to submit and the provider driver can never transition those steps, so the
+    // resume engine would arm an eternal no-op poll. Refuse it like any other malformed
+    // record — salvage drops it, it does not brick the store.
+    if (!PROVIDER_CONVERT_STEPS.has(rec.step)) return null;
   }
   for (const k of ['id', 'venueId', 'inSymbol', 'outSymbol', 'inLedger', 'outLedger', 'amountIn',
     'expectedGross', 'expectedNet', 'inFee', 'outFee'] as const) {
@@ -489,21 +490,46 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   return full;
 }
 
-/** Validate an unknown storage value into the record map (pure; jest-pinned; never throws).
- *  Accepts BOTH store generations: current-shape records pass through; pre-legs (v1) records
- *  are migrated — never discarded. */
-export function hydrateConvertStore(state: unknown): Record<string, ConvertRecord> | null {
-  if (!state || typeof state !== 'object' || Array.isArray(state)) return null;
-  const out: Record<string, ConvertRecord> = {};
+/** One store's salvage outcome: the records that survived, and how many were dropped. */
+export type SalvagedStore = {records: Record<string, ConvertRecord>; dropped: number};
+
+/** Validate an unknown storage value RECORD BY RECORD (pure; jest-pinned; never throws).
+ *  Accepts BOTH store generations in any mix: current-shape records pass through, pre-legs
+ *  (v1) records are migrated. A record that fails validation (corrupt bytes, unknown shape,
+ *  or a shape no driver can ever advance) is DROPPED and its siblings SURVIVE — one bad
+ *  record must not take a whole money-adjacent store with it. Top-level garbage (not an
+ *  object) salvages nothing and drops nothing: there were no records to lose. */
+export function salvageConvertStore(state: unknown): SalvagedStore {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return {records: {}, dropped: 0};
+  const records: Record<string, ConvertRecord> = {};
+  let dropped = 0;
   for (const [id, v] of Object.entries(state as Record<string, unknown>)) {
-    if (!v || typeof v !== 'object') return null;
+    if (!v || typeof v !== 'object') {dropped += 1; continue;}
     const r = v as Record<string, unknown>;
     const record = r.legs == null && typeof r.approveEnvelopeHex === 'string'
-      ? migrateLegacyRecord(r, out, id)
-      : hydrateOneRecord(r, out, id);
-    if (record == null) return null;
+      ? migrateLegacyRecord(r, records, id)
+      : hydrateOneRecord(r, records, id);
+    if (record == null) dropped += 1;
   }
-  return out;
+  return {records, dropped};
+}
+
+/** The salvaged records alone (the long-standing read shape of a store). */
+export function hydrateConvertStore(state: unknown): Record<string, ConvertRecord> {
+  return salvageConvertStore(state).records;
+}
+
+/** Parse + salvage ONE raw store string. Unparseable bytes salvage nothing and report
+ *  dropped=1 — the whole source is unreadable, which the caller treats as a NOT-fully-
+ *  successful adoption (a legacy key in that state is never removed from disk). */
+function salvageRawStore(raw: string): SalvagedStore {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {records: {}, dropped: 1};
+  }
+  return salvageConvertStore(parsed);
 }
 
 /** The step a driver never touches again: done, failed_refunded, stuck, quote_expired,
@@ -529,27 +555,49 @@ export async function loadConvertRecords(publicHex: string): Promise<Record<stri
   const scopedKey = convertStoreKey(publicHex);
   try {
     const raw = await AsyncStorage.getItem(scopedKey);
-    if (raw != null) return hydrateConvertStore(JSON.parse(raw)) ?? {};
-    // Pre-scoping v2 store (founder device): the identity adopting it is the one that wrote it
-    // (single-active-identity deployment) — copy into THIS identity's scoped key, then retire
-    // the unscoped key, the same one-time-migration shape the v1 key uses below. A record must
-    // survive an app upgrade, byte-frozen.
-    const unscopedRaw = await AsyncStorage.getItem(CONVERT_UNSCOPED_STORAGE_KEY);
-    if (unscopedRaw != null) {
-      const adopted = hydrateConvertStore(JSON.parse(unscopedRaw)) ?? {};
-      await AsyncStorage.setItem(scopedKey, JSON.stringify(adopted));
-      await AsyncStorage.removeItem(CONVERT_UNSCOPED_STORAGE_KEY);
-      if (Object.keys(adopted).length > 0) return adopted;
-      // An empty adopted store is not an answer — fall through and check v1 too.
+    // Scoped-first short-circuit: THIS identity's own store is the answer, healthy or not —
+    // legacy keys are never consulted once a scoped store exists. Salvage is PER-RECORD: valid
+    // records load, corrupt ones are dropped from the working set; the bytes stay on disk
+    // untouched (nothing is rewritten on a load) and the next saveConvertRecord rebuilds the
+    // store clean around the survivors.
+    if (raw != null) {
+      const salvaged = salvageRawStore(raw);
+      if (salvaged.dropped > 0) {
+        console.warn(`convert store ${scopedKey}: ${salvaged.dropped} record(s) unreadable — dropped from the working set (bytes left on disk until the next save)`);
+      }
+      return salvaged.records;
     }
-    // The pre-legs store: migrate whatever is there into the v2 shape (scoped key) and retire
-    // the old key.
-    const legacyRaw = await AsyncStorage.getItem(CONVERT_LEGACY_STORAGE_KEY);
-    if (legacyRaw == null) return {};
-    const migrated = hydrateConvertStore(JSON.parse(legacyRaw)) ?? {};
-    await AsyncStorage.setItem(scopedKey, JSON.stringify(migrated));
-    await AsyncStorage.removeItem(CONVERT_LEGACY_STORAGE_KEY);
-    return migrated;
+    // No scoped store yet: fold BOTH legacy sources into ONE pass — the pre-legs v1 store
+    // first (the older generation), the pre-scoping unscoped v2 store OVERLAYING it on id
+    // collision (the newer generation wins; the unscoped branch used to return early and
+    // orphan v1 records whenever a non-empty unscoped v2 store existed). One scoped write,
+    // then each legacy key is retired ONLY if its own salvage was total: a key that lost
+    // records to corruption STAYS on disk (source preserved for manual recovery) while its
+    // valid records still land in the scoped store. The adopting identity is the one that
+    // wrote the unscoped stores (single-active-identity deployment) and a record must
+    // survive an app upgrade, byte-frozen.
+    const legacy: Array<{key: string; raw: string | null}> = [
+      {key: CONVERT_LEGACY_STORAGE_KEY, raw: await AsyncStorage.getItem(CONVERT_LEGACY_STORAGE_KEY)},
+      {key: CONVERT_UNSCOPED_STORAGE_KEY, raw: await AsyncStorage.getItem(CONVERT_UNSCOPED_STORAGE_KEY)},
+    ];
+    if (legacy.every(s => s.raw == null)) return {};
+    const merged: Record<string, ConvertRecord> = {};
+    const adopted: Array<{key: string; dropped: number}> = [];
+    for (const s of legacy) {
+      if (s.raw == null) continue;
+      const salvaged = salvageRawStore(s.raw);
+      Object.assign(merged, salvaged.records);
+      adopted.push({key: s.key, dropped: salvaged.dropped});
+    }
+    await AsyncStorage.setItem(scopedKey, JSON.stringify(merged));
+    for (const s of adopted) {
+      if (s.dropped === 0) {
+        await AsyncStorage.removeItem(s.key); // fully copied — retire the legacy key
+      } else {
+        console.warn(`convert legacy store ${s.key}: ${s.dropped} record(s) unreadable — valid records were copied to ${scopedKey}; the legacy key is KEPT on disk (source preserved)`);
+      }
+    }
+    return merged;
   } catch (e) {
     console.warn('convert records load failed:', e instanceof Error ? e.message : String(e));
     return {};
@@ -625,7 +673,13 @@ export async function prepareConvertRecord(args: {
   if (inSymbol == null || outSymbol == null) {
     throw new Error(M.convert.errors.quoteUnavailable('symbol'));
   }
-  const expiresAtMs = Date.now() + CONVERT_APPROVE_LIFETIME_S * 1000;
+  // The legs' death is the ENVELOPES' OWN ingress expiry — the exact stamp `envExpiry` just
+  // signed into both envelopes (certified IC now + INGRESS_AHEAD_S), ns → ms. NOT the 10-min
+  // approve-allowance lifetime (that is the ALLOWANCE's death — a different event): recording
+  // `now + CONVERT_APPROVE_LIFETIME_S` here used to run the never-resubmit boundary ~5 min
+  // past the envelopes' true submit-death. The recorded value is exactly the real death —
+  // never later, never a device-clock guess.
+  const expiresAtMs = Number(BigInt(envExpiry) / 1_000_000n);
   return {
     id: randNonceHex(),
     createdAtMs: Date.now(),
@@ -674,17 +728,34 @@ export type ConvertExecutorDeps = {
   /** Row identities other records already claim as their payout — the engine supplies this so
    *  two records expecting the same amount can never both match one ledger row (V6). */
   claimedOutTx?: ReadonlySet<string>;
+  /** Row identities other records already claim as THEIR refund — the refund-side twin of
+   *  `claimedOutTx`: a refund row one record already consumed as its failed_refunded evidence
+   *  never resolves a second record the same way. */
+  claimedRefundTx?: ReadonlySet<string>;
 };
 
-export type SettleWatch = {kind: 'output'; amount: string; tx: string} | {kind: 'refund'} | null;
+export type SettleWatch = {kind: 'output'; amount: string; tx: string} | {kind: 'refund'; tx: string} | null;
 
 type TransactionsRowLike = {from?: string; to?: string; amount?: string; currency?: number; timestamp?: number; nonce?: string; block?: number};
 
-/** A ledger row's durable identity (dedupe + outTx): the BLOCK INDEX when the row carries one
- *  (every IC-rail row does), else the timestamp, else the nonce — the same fallback ladder the
- *  history list uses. */
+/** A ledger row's durable identity (dedupe + outTx/refundTx): the BLOCK INDEX when the row
+ *  carries one (every IC-rail row does), else the timestamp, else the nonce — the same
+ *  fallback ladder the history list uses. */
 function rowIdentity(row: TransactionsRowLike): string {
   return String(row.block ?? row.timestamp ?? row.nonce ?? '');
+}
+
+/** A row amount as a positive BigInt, or null (missing / unparseable / non-positive) — a
+ *  refund of zero-or-fewer units, or a figure this build cannot read, is nobody's refund. */
+function positiveRowAmount(amount: string | undefined): bigint | null {
+  if (amount == null) return null;
+  let n: bigint;
+  try {
+    n = BigInt(amount);
+  } catch {
+    return null;
+  }
+  return n > 0n ? n : null;
 }
 
 /**
@@ -698,9 +769,13 @@ function rowIdentity(row: TransactionsRowLike): string {
  *   the gross; a production pool may send gross-minus-fee), or any amount BETWEEN net and gross
  *   inclusive (V6: a payout anywhere inside the quote the user confirmed is the venue's payout
  *   arriving; the amount SEEN is recorded, never the expected one).
- * - `refund` match: incoming row on the INPUT ledger from the venue — the failed-swap refund path.
- * - DEDUPE (V6): a row whose identity another record already claims as ITS payout (`excludeOutTx`)
- *   is skipped — one ledger row can settle exactly one conversion; the older claim wins.
+ * - `refund` match: incoming row on the INPUT ledger from the venue, for a POSITIVE amount
+ *   ≤ amountIn + inFee (a refund returns the user's OWN input asset — the venue cannot refund
+ *   more than it took) — the failed-swap refund path; the matched row's identity becomes the
+ *   record's `refundTx` claim.
+ * - DEDUPE (V6): a row whose identity another record already claims as ITS payout
+ *   (`excludeOutTx`) or as ITS refund (`excludeRefundTx`) is skipped — one ledger row can
+ *   settle exactly one conversion; the older claim wins.
  * - No match → null. Still unknown, never optimistic done.
  */
 export async function probeConvertSettlement(args: {
@@ -710,9 +785,13 @@ export async function probeConvertSettlement(args: {
   record: ConvertRecord;
   /** Row identities other records already claimed as their payout (engine-supplied). */
   excludeOutTx?: ReadonlySet<string>;
+  /** Row identities other records already claimed as THEIR refund (engine-supplied) — the
+   *  refund-side twin of `excludeOutTx`: one refund row settles exactly one record. */
+  excludeRefundTx?: ReadonlySet<string>;
 }): Promise<SettleWatch> {
   const {relayUrl, publicHex, myPrincipalLower, record} = args;
   const exclude = args.excludeOutTx ?? new Set<string>();
+  const excludeRefund = args.excludeRefundTx ?? new Set<string>();
   try {
     const window = `limit=${CONVERT_PROBE_WINDOW_ROWS}`;
     const r = await relayFetch(
@@ -754,11 +833,22 @@ export async function probeConvertSettlement(args: {
       }
     }
     const inRows = await parse(refundR);
+    // A refund gives the user back THEIR OWN input asset, so the row must carry a POSITIVE
+    // amount no larger than what the venue could have taken (amountIn + the input fee the
+    // approve covered): a bigger inbound from the venue is some other transfer, never this
+    // record's refund, and must not flip a probing record to failed_refunded. DEDUPE: a row
+    // another record already claimed as ITS refund (`excludeRefundTx`) is skipped — the mirror
+    // of the output-row dedupe above (one ledger row settles exactly one conversion).
+    const refundCeiling = BigInt(record.amountIn) + BigInt(record.inFee);
     for (const row of inRows) {
+      const tx = rowIdentity(row);
+      const amount = positiveRowAmount(row.amount);
       if (row.currency === record.inCurrency
         && row.to?.toLowerCase() === myPrincipalLower
-        && row.from?.toLowerCase() === pool) {
-        return {kind: 'refund'};
+        && row.from?.toLowerCase() === pool
+        && amount != null && amount <= refundCeiling
+        && !excludeRefund.has(tx)) {
+        return {kind: 'refund', tx};
       }
     }
   } catch (e) {
@@ -821,12 +911,15 @@ export async function executeConvert(
       const seen = await probeConvertSettlement({
         relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower: myPrincipal, record: rec,
         excludeOutTx: deps.claimedOutTx,
+        excludeRefundTx: deps.claimedRefundTx,
       });
       if (seen?.kind === 'output') {
         return advance({...rec, step: 'done', outAmountNet: seen.amount, outTx: seen.tx});
       }
       if (seen?.kind === 'refund') {
-        return advance({...rec, step: 'failed_refunded', failureCode: 'refunded'});
+        // The matched row's identity is CLAIMED on the record (`refundTx`) so a sibling
+        // record's probe can never consume the same refund row (cross-record refund dedupe).
+        return advance({...rec, step: 'failed_refunded', failureCode: 'refunded', refundTx: seen.tx});
       }
       if (i < attempts - 1 && intervalMs > 0) {
         await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));

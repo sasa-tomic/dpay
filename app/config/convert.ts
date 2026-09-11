@@ -1,12 +1,18 @@
 /**
  * Delegated-conversion — dpay's OWN conversion choices (spec 2026-09-07 §1/§2, multi-venue
  * readiness V1/V4). What this file may hold is dpay's policy: slippage options, staleness,
- * approve lifetime, impact thresholds, the storage key. What it must NEVER hold is a venue
+ * approve lifetime, the storage key. What it must NEVER hold is a venue
  * FACT — the pool principal, its pair and its fee tier live in the venue registry
  * (`./venues`, drift-alarmed against `dfx/catalog_truth.json` `venues[]`) and the pair ORDER
  * belongs to the venue itself, read live per quote (`zero_for_one` echo). The 2026-09-07 build
  * kept an ordered pair as constants here and in the relay; both were backwards, and the app's
  * copy could not have detected that because nothing app-side ever talks to the venue directly.
+ *
+ * There is deliberately NO price-impact policy here anymore (removed 2026-09-11): the venues
+ * dpay quotes publish no impact figure, so dpay displays none (spec 2026-09-08 V8 — "display
+ * what the venue publishes, derive only what it does not"). The old CONVERT_IMPACT_* knobs
+ * fed a second per-venue reference quote whose curve-slope estimate was presented as venue
+ * fact; the execution protection is the venue's own amounts plus the signed minimum-out.
  */
 import {BUNDLED_VENUES} from './venues';
 
@@ -21,37 +27,6 @@ export const CONVERT_STALE_MS = 30_000;
 /** Allowance lifetime (spec §3): approve expires at now + 10 min; a stuck-but-unspent approval
  *  dies worthless within this window (the failure screen shows that countdown). */
 export const CONVERT_APPROVE_LIFETIME_S = 600;
-
-/** Price-impact warning threshold (spec §5: warn above 5%). Impact is MEASURED app-side by
- *  comparing the venue's quote for this amount against a near-zero reference quote through the
- *  same curve — never blended into the displayed rate. */
-export const CONVERT_IMPACT_WARN_BPS = 500;
-
-/**
- * The near-zero reference trade used to measure impact, in RAW units of whichever ledger is the
- * input leg (both PoC legs are 8-decimal, so this is 0.01 ICP / 0.01 VCHF).
- *
- * The size is a resolution decision, and it was measured, not guessed. The pool FLOORS every
- * quote, so the reference carries a quantization error of one output unit; the reference's own
- * impact biases the measurement the other way. Against the live pool on 2026-09-08 (see
- * `__tests__/convert.test.ts` for the eight measured points):
- *   * 0.00001 ICP (the 2026-09-07 value, `'1000'`) quoted 406 against a true 406.36 — a 0.23%
- *     quantization error, i.e. 23 bps of noise on top of a signal that is 0.006 bps at 1 ICP and
- *     9 bps at 1 000 ICP. It could not resolve ANY real trade, and did not: impact came back
- *     unmeasurable at every size.
- *   * 0.01 ICP quotes 406356 — one floored unit is 0.025 bps of noise, and the reference's own
- *     impact is ~0.0001 bps. Both are 40× finer than the 1 bp the screen displays.
- */
-export const CONVERT_IMPACT_REF_AMOUNT_IN = '1000000';
-
-/**
- * Fixed-point scale for the two per-unit prices impact is measured from (out-units per in-unit,
- * ×1e12). It is NOT the bps scale: dividing by the trade size first and expressing the result in
- * bps floored the price to four significant digits, which threw away three orders of magnitude
- * more precision than the impact being measured (a 1 ICP trade and a near-zero one landed on the
- * same 4063, and the gap the measurement needs vanished). 1e12 keeps every digit the ledgers have.
- */
-export const CONVERT_IMPACT_PRICE_SCALE = 10n ** 12n;
 
 /**
  * AsyncStorage key for ONE IDENTITY's persisted conversion records (multi-venue readiness V6):

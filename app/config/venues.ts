@@ -83,10 +83,6 @@ export function venueOfId(venueId: string): VenueEntry | null {
   return registeredVenues().find(v => v.venue_id === venueId) ?? null;
 }
 
-export function venueOfEndpoint(endpoint: string): VenueEntry | null {
-  return registeredVenues().find(v => v.endpoint === endpoint) ?? null;
-}
-
 // Every ic_amm venue serving this pair, as an UNORDERED ledger set, in REGISTRY ORDER
 // (multi-venue readiness V5). This is the chooser's candidate list — what COULD execute the
 // pair — so it does NOT apply the enabled-gate's testnet filter: the offline two-venue test

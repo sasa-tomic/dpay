@@ -9,8 +9,10 @@
 //     the same button every asset gets (uniform-IA hard rule); ICP simply has a venue behind it.
 //   * EVERY §5 transparency checklist item is a rendered line on the ONE pre-signing surface, each
 //     asserted by testID: counterparty (pool principal, autonomous contract, not licensed/not
-//     dpay, phone-signs), attributed+timestamped rate, pool fee tier 0.30%, input fee, output fee,
-//     dpay-paid-nothing, price impact, minimum-you'll-receive + refusal outcome, net end state.
+//     dpay, phone-signs), the venue disclosure sentence, attributed+timestamped rate, pool fee
+//     tier 0.30%, input fee, output fee, dpay-paid-nothing, minimum-you'll-receive + refusal
+//     outcome, net end state. NO price-impact line (removed 2026-09-11, spec V8: the venue
+//     publishes no such figure and none is invented).
 //     Amounts are cross-checked against the relay's OWN quote response fetched flow-side (single
 //     source of truth — the app must render the venue's numbers, never its own math).
 //   * Confirm re-quotes (spec §5), then the §4 state machine runs on-device-signed envelopes:
@@ -54,8 +56,8 @@ export const meta = {
   id: '140',
   name: 'convert-happy-path',
   journey: 'convert',
-  covers: ['convert', 'icp', 'vchf', 'uniform-ia', 'transparency-checklist', 'counterparty', 'quote-attribution', 'fees-itemised', 'price-impact', 'min-out', 'slippage', 'icrc2-approve', 'deposit-from-and-swap', 'state-machine', 'ledger-watch', 'settle', 'balance-refresh', 'ledger-row', 'no-mid-payment-conversion'],
-  verifies: 'The delegated-conversion happy path: a payment review carries no Convert anywhere (§0.6); Accounts ▸ ICP ▸ Convert opens the one pre-signing surface where every §5 line renders (counterparty/pool principal, attributed+timestamped quote, itemised fees, dpay-paid-nothing, impact, minimum+refusal, net end state — all matching the relay\'s own quote); confirm re-quotes then signs approve+swap on-device; settle is exact (ICP −amount−2 fees, VCHF +gross) with done derived from the SEEN ledger row and the Ledger showing the incoming VCHF row from the pool.',
+  covers: ['convert', 'icp', 'vchf', 'uniform-ia', 'transparency-checklist', 'counterparty', 'venue-disclosure', 'quote-attribution', 'fees-itemised', 'no-impact-line', 'min-out', 'slippage', 'icrc2-approve', 'deposit-from-and-swap', 'state-machine', 'ledger-watch', 'settle', 'balance-refresh', 'ledger-row', 'no-mid-payment-conversion'],
+  verifies: 'The delegated-conversion happy path: a payment review carries no Convert anywhere (§0.6); Accounts ▸ ICP ▸ Convert opens the one pre-signing surface where every §5 line renders (counterparty/pool principal, the venue disclosure sentence, attributed+timestamped quote, itemised fees, dpay-paid-nothing, NO impact line, minimum+refusal, net end state — all matching the relay\'s own quote); confirm re-quotes then signs approve+swap on-device; settle is exact (ICP −amount−2 fees, VCHF +gross) with done derived from the SEEN ledger row and the Ledger showing the incoming VCHF row from the pool.',
   timeoutMs: 180000, // onboard + review-navigation + quote + approve/swap submit+poll + settle watch (120 s inner wait) + ledger polls
 };
 
@@ -137,14 +139,13 @@ export async function run() {
     assertIncludes(await driver.readText('convert-out-fee'), `${fmt8(VCHF_FEE)} VCHF`, `output fee line is the catalog fee (${fmt8(VCHF_FEE)} VCHF)`);
     assertIncludes(await driver.readText('convert-dpay-fee'), 'dpay charges nothing and is paid nothing', 'dpay-paid-nothing line');
 
-    // A NUMBER, not the unavailable sentence. "Price impact" alone matched both, which is how
-    // "not measurable at this size" shipped as the permanent state of this line: the reference
-    // trade was three significant digits wide, so its own quantization error (0.23%) swamped the
-    // impact being measured and the comparison was discarded at EVERY trade size (fixed
-    // 2026-09-08 — config/convert.ts CONVERT_IMPACT_REF_AMOUNT_IN + CONVERT_IMPACT_PRICE_SCALE).
-    const impact = await driver.readText('convert-impact');
-    assertIncludes(impact, 'Price impact', 'price impact renders from the quote');
-    assert(/Price impact: \d+(\.\d+)?%/.test(impact), `price impact is a measured percentage, not the unavailable line (${impact})`);
+    // NO price-impact line renders (removed 2026-09-11, spec V8 "display what the venue
+    // publishes, derive only what it does not"): it was dpay's own curve-slope estimate from a
+    // SECOND reference quote — a second relay call per keystroke presented as venue fact. The
+    // venue publishes no impact, so the checklist renders none; minimum-received + slippage are
+    // the execution protection and stay.
+    assert(await driver.findByTestID('convert-impact', {timeoutMs: 1_000}).catch(() => null) == null,
+      'no price-impact line renders (the venue publishes none)');
 
     const minOutLine = await driver.readText('convert-min-out');
     assertIncludes(minOutLine, `${fmt8(minOut)} VCHF`, `minimum-you'll-receive is the core's min-out at 1% (${fmt8(minOut)} VCHF)`);

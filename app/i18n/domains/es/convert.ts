@@ -29,10 +29,17 @@ export const convertEs: ConvertMessages = {
   inputFeeLine: fee => `Comisión de entrada: ${fee}`,
   outputFeeLine: fee => `Comisión de salida: ${fee}`,
   dpayFeeLine: 'dpay no cobra nada ni recibe nada por esto.',
-  impactLine: pct => `Impacto en el precio: ${pct}`,
-  impactWarnLine: pct => `Impacto alto en el precio: ${pct} — la cotización de arriba ya lo incluye.`,
-  impactUnavailable: venue =>
-    `Impacto en el precio: ahora mismo no es medible — ${venue} no cotizó nada para el intercambio de referencia, así que no hay ningún precio con el que comparar este. El mínimo que recibirás, abajo, sigue acotando lo que este intercambio puede costarte.`,
+  disclosures: {
+    byKey: {
+      // disclosure_key 'icpswap' (la clave del registro para los pools de ICPSwap): el hecho
+      // propio de la venue es DÓNDE se ejecuta el intercambio — su propio contrato de pool,
+      // firmado por el usuario, dpay no es parte.
+      icpswap: venue =>
+        `El intercambio se ejecuta en el contrato de pool propio de ${venue}. Cada llamada la firmas tú y se envía directamente — ${venue} ejecuta el intercambio, y dpay no es parte de él.`,
+    },
+    generic: venue =>
+      `Esta conversión la ejecuta ${venue}. Cada llamada la firmas tú y se envía directamente — dpay no es parte de ella.`,
+  },
   slippageLabel: 'Deslizamiento',
   minReceiveLine: (amount, pct) => `Mínimo que recibirás: ${amount} (${pct} de deslizamiento)`,
   refusalLine: sym =>

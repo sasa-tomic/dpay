@@ -127,8 +127,6 @@ const MATH: ConvertMath = {
   inFee: '10000',
   outFee: '10000',
   slippageBps: 100,
-  impactBps: 37,
-  impactWarn: false,
 };
 
 const quoteFor = (v: VenueEntry, over: Partial<ConvertQuote> = {}): ConvertQuote => ({
@@ -141,7 +139,6 @@ const quoteFor = (v: VenueEntry, over: Partial<ConvertQuote> = {}): ConvertQuote
   zeroForOne: true,
   feeMillionths: 3000,
   fetchedAtMs: 1_000,
-  impactBps: null,
   ...over,
 });
 
@@ -400,10 +397,14 @@ describe('INV-7 — the approve leg is bounded: exact amount + fee, expected_all
       expect(fee).toBe(MATH.inFee); // the ledger's own fee, not a venue tier
       // The allowance lifetime comes from the certified clock + CONVERT_APPROVE_LIFETIME_S…
       expect(icStampExpiry).toHaveBeenCalledWith('sec', CONVERT_APPROVE_LIFETIME_S);
-      // …and the persisted legs die inside the same window (≤ 10 min from now).
-      const tillExpiry = rec.legs[0]!.expiresAtMs - Date.now();
-      expect(tillExpiry).toBeGreaterThan((CONVERT_APPROVE_LIFETIME_S - 5) * 1000);
-      expect(tillExpiry).toBeLessThanOrEqual(CONVERT_APPROVE_LIFETIME_S * 1000 + 5_000);
+      // …and the persisted legs die at the ENVELOPES' OWN ingress expiry — the exact stamp
+      // icStampExpiry returned for signing (the beforeEach mock pins it at
+      // 1_800_000_000_000_000_000 ns), converted ns → ms. The old pin here (legs outliving
+      // the envelopes by up to 10 min) conflated the ALLOWANCE's death with the envelopes'
+      // ~5-min ingress death — two different deaths; the never-resubmit boundary now ends
+      // exactly at the real submit-death, never later.
+      expect(rec.legs[0]!.expiresAtMs).toBe(1_800_000_000_000);
+      expect(rec.legs[1]!.expiresAtMs).toBe(rec.legs[0]!.expiresAtMs);
     });
   });
 });

@@ -134,13 +134,21 @@ All ten buildable gaps (V1–V10) of
 are closed: a real venue type (registry in `dfx/catalog_truth.json` `venues[]`, drift-alarmed into
 the relay's query-only `GET /api/v1/venues` and the bundled app copy), the `legs: SignedLeg[]` +
 `providerRef` record (DeFi and CeFi are ONE shape; `dpay.convert.v1` and the unscoped v2 store
-migrate into the identity-scoped `dpay.convert.v2.<publicHex>` — never discarded), a multi-pool
+migrate into the identity-scoped `dpay.convert.v2.<publicHex>` record-by-record — per-record
+salvage: one corrupt or driverless-shape record drops ALONE, its siblings and the store's bytes
+survive; hydration refuses every malformed-by-construction quadrant both ways: legless at an IC
+step, leg-bearing at `quote`/`confirming` or in the provider vocabulary), a multi-pool
 fake-IC gateway with a knob-gated second fixture venue (never served by the agent build), the
 N-venue chooser (stable quote-independent order, NONE preselected, per-venue attribution + the
-relay's `fetched_at`), the expiry-honest recovery engine mounted app-wide (resubmit-never-after-
-expiry, range-tolerant settlement probe with out-tx dedupe, provider-status driver), and the nine
-V9 invariants as standing tests on both sides (Rust + jest + e2e flows 166–170). Full `just
-verify` GREEN (160/160 e2e incl. the agent-feature live suite) and `just app` device self-check
+relay's `fetched_at`, radio affordance, registry `disclosure_key` rendered fail-closed), the
+expiry-honest recovery engine mounted app-wide (resubmit-never-after-expiry, range-tolerant
+settlement probe with out-tx dedupe and REFUND-tx claims, provider-status driver), and the nine
+V9 invariants as standing tests on both sides (Rust + jest + the e2e surfaces: the chooser and
+order-stability in BOTH directions are flows 166–167, pool-B end-to-end is 168, the pay-journey
+convert-absence census is 170, the NFC-sub-surface half of the same invariant is 171 — while
+flow 169 is the V6 recovery pin, not one of the nine). Full `just verify` GREEN (161/161 e2e
+incl. the agent-feature live suite, dark convert chooser+checklist baselines) and `just app`
+device self-check
 GREEN on the same tree. V11 stays a documented BOUNDARY, not a gap: the `kind` enum can carry a
 Solana venue but none is registered, and the Convert screen stays IC-gated until one is.
 Registering a REAL second venue (a CeFi provider, or Jupiter) is venue onboarding with its own

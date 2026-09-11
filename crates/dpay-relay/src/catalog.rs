@@ -107,7 +107,7 @@ pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 /// variant (or a string on the wire), never a schema break — `cefi` is already reserved and is
 /// deliberately NOT an IC-pool shape (the `Ledger` trait takes no CeFi method; CeFi lives
 /// device-side, `app/services/opencryptopay.ts` shape).
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VenueKind {
     /// An on-chain IC AMM pool the user's device signs against (ICPSwap today).
@@ -126,10 +126,10 @@ pub(crate) enum VenueKind {
 /// `just swap-venue-probe`), for fixture-only venues declared as fixture-truth. Reserves are the
 /// curve simulation (code's own choice, deliberately NOT truth-file facts).
 ///
-/// Read only by the fake-IC seeding (`test-helpers`); the agent build compiles the registry
-/// wholesale so both builds share ONE `venues()` literal — the seed rides along unread there,
-/// which this cfg_attr says out loud instead of letting the compiler warn per config.
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
+/// Read only by the fake-IC seeding (`test-helpers`); every build compiles the registry
+/// wholesale (see `venues()` — the plain-`#[cfg(test)]` drift alarm reads it under any
+/// feature set), so the seed rides along unread in the others, which this cfg_attr says out
+/// loud instead of letting the compiler warn per config.
 #[cfg_attr(not(feature = "test-helpers"), allow(dead_code))]
 pub(crate) struct FixtureSeed {
     pub token0_ledger: &'static str,
@@ -148,7 +148,7 @@ pub(crate) struct FixtureSeed {
 /// quote; `pair_ledgers` here is an UNORDERED set — pinning an order is exactly the 2026-09-07
 /// defect that shipped each direction's rate under the other's label. Drift-alarmed against
 /// `dfx/catalog_truth.json` `venues[]` (Rust half here, jest half `app/__tests__/catalog.test.ts`).
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
 pub(crate) struct VenueEntry {
     /// Stable machine id (records, quote attribution, allowlist keys).
     pub venue_id: &'static str,
@@ -175,7 +175,14 @@ pub(crate) struct VenueEntry {
 }
 
 /// The compiled venue registry (mirrors `dfx/catalog_truth.json` `venues[]`, drift-alarmed).
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
+///
+/// Compiled in EVERY build, not just the feature-carrying ones: the drift alarm in
+/// `venue_truth_tests` is plain `#[cfg(test)]`, so it reads the registry under any feature
+/// set (a bare no-features `cargo test -p dpay-relay` included) and the data it checks cannot
+/// be feature-gated — gating it would compile the alarm to nothing. Pure data (no feature
+/// pulls a dependency); the lean no-features build has no other reader, hence the cfg_attr —
+/// the agent and test-helpers builds call it from the `/venues` route.
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
 pub(crate) fn venues() -> Vec<VenueEntry> {
     vec![
         VenueEntry {
@@ -233,7 +240,7 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
 /// `/api/v1/swap_quote` `venue_id` echo. Test-fixture venues resolve ONLY where they exist —
 /// the offline fake (test-helpers without agent); the agent/prod build allowlists real
 /// contracts only, so an invented principal can never be asked of a live replica.
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
 pub(crate) fn venue_of_endpoint(pool: &str) -> Option<VenueEntry> {
     venues()
         .into_iter()
@@ -247,7 +254,7 @@ pub(crate) fn venue_of_endpoint(pool: &str) -> Option<VenueEntry> {
 /// the `FakeIc` state behind it, and the `test-helpers` branch here are all cfg'd away), so it
 /// always computes this with `knob_armed == false`, which is `false` for every fixture venue.
 /// That agent-build truth is exactly what the alarm in `venue_truth_tests` pins.
-#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
 pub(crate) fn venue_servable(v: &VenueEntry, knob_armed: bool) -> bool {
     !v.test_helpers_served
         || (cfg!(all(feature = "test-helpers", not(feature = "agent"))) && knob_armed)
@@ -1627,8 +1634,17 @@ mod wire_byte_shape_tests {
 // is `just swap-venue-probe` (`crates/dpay-relay/tests/swap_venue_mainnet.rs`) — the only thing
 // that can see a REAL venue change, since `just test-live` is PocketIC and has no ICPSwap pool
 // in it. Fixture-only venues are pinned as fixture-truth and never probed.
+//
+// The compiled-vs-truth half is plain `#[cfg(test)]` (2026-09-11): it reads only the registry
+// (compiled in every build — see `venues()`), so the alarm runs under every feature
+// combination, a bare no-features `cargo test -p dpay-relay` included. It used to sit inside
+// `cfg(all(test, feature = "test-helpers"))` alongside the seeding tests, tying its existence
+// to a feature it never reads; nothing was skipped in practice only because the crate's self
+// dev-dependency unifies `test-helpers` onto every test target — an accident of the dev-dep
+// graph, not a guarantee. Only the genuinely FakeIc-dependent seeding half stays gated
+// (`venue_fixture_seed_tests`).
 // ---------------------------------------------------------------------------
-#[cfg(all(test, feature = "test-helpers"))]
+#[cfg(test)]
 mod venue_truth_tests {
     use super::*;
 
@@ -1696,8 +1712,8 @@ mod venue_truth_tests {
                 v.venue_id
             );
             // Fixture seeds pin pair order + fee only (reserves are the curve simulation, a
-            // code choice). For the REAL venue this is the MEASURED block; see the per-pool
-            // seeding test below for the fake-gateway half.
+            // code choice). For the REAL venue this is the MEASURED block; see
+            // `venue_fixture_seed_tests` below for the fake-gateway half.
             if let Some(f) = &v.fixture {
                 let tf = &t["fixture"];
                 assert_eq!(f.token0_ledger, tf["token0_ledger"].as_str().unwrap());
@@ -1789,6 +1805,44 @@ mod venue_truth_tests {
         );
     }
 
+    /// V9 INVARIANT 1 (catalog half, hostile-principal fixtures): a dpay-OWNED canister
+    /// principal may never resolve as a conversion venue — neither through the allowlist
+    /// ([`venue_of_endpoint`]) nor by sitting in the registry as some future venue's endpoint.
+    /// The route-half twin is `swap_quote_refuses_dpay_owned_principals_as_pools`
+    /// (tests/relay.rs); the phone-side signing-boundary twin is `app/config/venues.ts`
+    /// `DPAY_CANISTER_PRINCIPALS` (checked by `app/__tests__/venueInvariants.test.ts`). All
+    /// three lists mirror `canister_ids.json`.
+    #[test]
+    fn dpay_owned_principals_never_resolve_as_venues() {
+        // `canister_ids.json` `dpay_canister.ic` — the facade (dormant for the value rail, but
+        // dpay-owned all the same). Pinned as a literal so a redeployed facade id moves THIS
+        // alarm, not a silent allowlist hole.
+        const DPAY_FACADE_PRINCIPAL: &str = "ssqti-wiaaa-aaaab-qhdia-cai";
+        let hostile: [&str; 2] = [DPAY_FACADE_PRINCIPAL, DEMO_LEDGER_PRINCIPAL];
+        for p in hostile {
+            assert!(
+                venue_of_endpoint(p).is_none(),
+                "a dpay-owned principal ({p}) must never resolve as a venue endpoint"
+            );
+        }
+        for v in venues() {
+            assert!(
+                !hostile.contains(&v.endpoint),
+                "{}: the registry itself must never name a dpay-owned principal as an endpoint",
+                v.venue_id
+            );
+        }
+    }
+}
+
+/// The fake-IC half of the venue-registry alarm: what the offline gateway is ACTUALLY seeded
+/// with, vs the pins `venue_truth_tests` above checks against the truth file. This is the only
+/// genuinely `test-helpers`-dependent half (it constructs `FakeIc`), so it alone stays
+/// feature-gated — the compiled-vs-truth alarm must run under every feature combination.
+#[cfg(all(test, feature = "test-helpers"))]
+mod venue_fixture_seed_tests {
+    use super::*;
+
     #[test]
     fn every_ic_amm_fixture_pool_is_seeded_exactly_as_pinned() {
         // The fake-IC gateway must hold a pool for EVERY ic_amm venue with a fixture seed, in
@@ -1836,34 +1890,5 @@ mod venue_truth_tests {
             meta.fee_millionths,
             "the second fixture pool must differ from the PoC stub (fee tier)"
         );
-    }
-
-    /// V9 INVARIANT 1 (catalog half, hostile-principal fixtures): a dpay-OWNED canister
-    /// principal may never resolve as a conversion venue — neither through the allowlist
-    /// ([`venue_of_endpoint`]) nor by sitting in the registry as some future venue's endpoint.
-    /// The route-half twin is `swap_quote_refuses_dpay_owned_principals_as_pools`
-    /// (tests/relay.rs); the phone-side signing-boundary twin is `app/config/venues.ts`
-    /// `DPAY_CANISTER_PRINCIPALS` (checked by `app/__tests__/venueInvariants.test.ts`). All
-    /// three lists mirror `canister_ids.json`.
-    #[test]
-    fn dpay_owned_principals_never_resolve_as_venues() {
-        // `canister_ids.json` `dpay_canister.ic` — the facade (dormant for the value rail, but
-        // dpay-owned all the same). Pinned as a literal so a redeployed facade id moves THIS
-        // alarm, not a silent allowlist hole.
-        const DPAY_FACADE_PRINCIPAL: &str = "ssqti-wiaaa-aaaab-qhdia-cai";
-        let hostile: [&str; 2] = [DPAY_FACADE_PRINCIPAL, DEMO_LEDGER_PRINCIPAL];
-        for p in hostile {
-            assert!(
-                venue_of_endpoint(p).is_none(),
-                "a dpay-owned principal ({p}) must never resolve as a venue endpoint"
-            );
-        }
-        for v in venues() {
-            assert!(
-                !hostile.contains(&v.endpoint),
-                "{}: the registry itself must never name a dpay-owned principal as an endpoint",
-                v.venue_id
-            );
-        }
     }
 }

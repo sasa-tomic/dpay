@@ -241,6 +241,44 @@ describe('the engine — every live record driven from wallet load, mounted scre
     }
   });
 
+  test('the executor also receives the CROSS-RECORD refund dedupe: other records\' refundTx claims', async () => {
+    // The refund-side twin of the test above: a refund row one record already consumed as its
+    // failed_refunded evidence is never a second record's refund (one ledger row, one record).
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'leg-1': legRecord(),
+      'failed-1': legRecord({id: 'failed-1', step: 'failed_refunded', failureCode: 'refunded', refundTx: '77'}),
+    });
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      const deps = jest.mocked(executeConvert).mock.calls[0]![1] as {claimedRefundTx?: ReadonlySet<string>};
+      expect(deps.claimedRefundTx).toEqual(new Set(['77']));
+    } finally {
+      stop();
+    }
+  });
+
+  test('the stuck watch probe honors BOTH cross-record dedupes (payout rows and refund rows)', async () => {
+    jest.mocked(loadConvertRecords).mockResolvedValue({
+      'leg-1': legRecord({step: 'stuck', failureCode: 'unknown'}),
+      'done-1': legRecord({id: 'done-1', step: 'done', outAmountNet: '1', outTx: '555'}),
+      'failed-1': legRecord({id: 'failed-1', step: 'failed_refunded', failureCode: 'refunded', refundTx: '77'}),
+    });
+    const stop = startConvertResumeEngine(CTX, FAST);
+    try {
+      await sleep(30);
+      const call = jest.mocked(probeConvertSettlement).mock.calls
+        .find((c: unknown[]) => (c[0] as {record: ConvertRecord}).record.id === 'leg-1');
+      expect(call).toBeDefined();
+      expect(call![0]).toEqual(expect.objectContaining({
+        excludeOutTx: new Set(['555']),
+        excludeRefundTx: new Set(['77']),
+      }));
+    } finally {
+      stop();
+    }
+  });
+
   test('a pending_withdrawal record re-arms: the executor is called again at the cadence', async () => {
     let calls = 0;
     jest.mocked(loadConvertRecords).mockResolvedValue({'leg-1': legRecord({step: 'pending_withdrawal'})});

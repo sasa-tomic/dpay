@@ -322,9 +322,18 @@ function buildStyles(p: Palette) {
   // The venue chooser (multi-venue readiness V5): one row per venue, registry order. Row = a
   // small lifted card (the headline card's grammar) so N venues read as N parallel offers, the
   // picked one inked by the brand border. Nothing about the row encodes rank — same shape,
-  // same order, every render; rows are never sorted by what they quote.
-  convertVenueRow: {backgroundColor: p.card, borderWidth: 1, borderColor: p.line2, borderRadius: 14, padding: 14, marginTop: 8, alignSelf: 'stretch', ...LIFT},
+  // same order, every render; rows are never sorted by what they quote. The row lays out
+  // HORIZONTALLY (radio circle + the text column) — the flexDirection lives here, not at the
+  // call site, so every venue row shares one geometry.
+  convertVenueRow: {backgroundColor: p.card, borderWidth: 1, borderColor: p.line2, borderRadius: 14, padding: 14, marginTop: 8, alignSelf: 'stretch', flexDirection: 'row', alignItems: 'flex-start', ...LIFT},
   convertVenueRowOn: {borderColor: p.brand},
+  // The selection affordance (2026-09-11): an unchecked/checked radio circle — border colour
+  // alone did not read as tappable or as chosen. Unchecked = a quiet outlined ring; checked =
+  // brand-inked ring + solid dot. Decorative geometry only; the row's Pressable carries the
+  // accessibility role/state, so nothing here needs testIDs of its own.
+  convertVenueRadio: {width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: p.line2, marginTop: 1, marginRight: 10, alignItems: 'center', justifyContent: 'center'},
+  convertVenueRadioOn: {borderColor: p.brand},
+  convertVenueRadioDot: {width: 10, height: 10, borderRadius: 5, backgroundColor: p.brand},
   convertVenueRowText: {flex: 1},
   convertVenueName: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium},
   convertVenueNameOn: {fontFamily: FONT.sansBold},

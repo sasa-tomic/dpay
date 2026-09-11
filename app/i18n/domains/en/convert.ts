@@ -1,7 +1,7 @@
 /**
  * i18n/domains/en/convert.ts — the copy for the delegated-conversion surface (app/convert.ts +
  * components/ConvertMode.tsx, spec 2026-09-07 §5). The transparency checklist is RENDERED COPY: every
- * counterparty/rate/fee/impact/minimum/end-state line below is a line on the one pre-signing
+ * counterparty/rate/fee/disclosure/minimum/end-state line below is a line on the one pre-signing
  * surface, and the e2e flows assert each one.
  *
  * Shape rules inherited from ../keys.ts: interpolation is a typed FUNCTION (never
@@ -61,13 +61,15 @@ export type ConvertMessages = {
   inputFeeLine: (fee: string) => string;
   outputFeeLine: (fee: string) => string;
   dpayFeeLine: string;
-  impactLine: (pct: string) => string;
-  impactWarnLine: (pct: string) => string;
-  /** The venue answered the reference trade with zero, so there is no rate to compare this quote
-   *  against — the ONLY state that leaves impact unmeasured (see `fetchConvertQuote`). Never a
-   *  bare "—": the line says what is missing AND which number still bounds the trade (founder rule
-   *  2026-08-29). */
-  impactUnavailable: (venue: string) => string;
+  /** The per-venue disclosure sentence for the pre-sign checklist, keyed by the venue
+   *  registry's OWN `disclosure_key` (dfx/catalog_truth.json venues[] → app/config/venues).
+   *  A key with no entry here renders `generic` — fail closed: a disclosure always renders,
+   *  never a blank, never copy that guesses a venue fact. There is deliberately NO
+   *  price-impact copy: the venues publish no impact figure, so none is displayed (V8). */
+  disclosures: {
+    byKey: Record<string, (venue: string) => string>;
+    generic: (venue: string) => string;
+  };
   slippageLabel: string;
   /** "Minimum you'll receive: 1.91 CHF (1% slippage)" + the refusal outcome on the next line. */
   minReceiveLine: (amount: string, pct: string) => string;
@@ -181,10 +183,16 @@ export const convertEn: ConvertMessages = {
   inputFeeLine: fee => `Input fee: ${fee}`,
   outputFeeLine: fee => `Output fee: ${fee}`,
   dpayFeeLine: 'dpay charges nothing and is paid nothing for this.',
-  impactLine: pct => `Price impact: ${pct}`,
-  impactWarnLine: pct => `High price impact: ${pct} — the quote above already includes it.`,
-  impactUnavailable: venue =>
-    `Price impact: not measurable right now — ${venue} quoted nothing for the reference trade, so there is no rate to compare this quote against. The minimum you'll receive below still bounds what this trade can cost you.`,
+  disclosures: {
+    byKey: {
+      // disclosure_key 'icpswap' (the registry's key for the ICPSwap pools): the venue-specific
+      // fact is WHERE the swap runs — the venue's own pool contract, user-signed, dpay not a party.
+      icpswap: venue =>
+        `The swap runs on ${venue}'s own pool contract. Every call is signed by you and sent directly — ${venue} executes the trade, and dpay is not a party to it.`,
+    },
+    generic: venue =>
+      `This conversion is executed by ${venue}. Every call is signed by you and sent directly — dpay is not a party to it.`,
+  },
   slippageLabel: 'Slippage',
   minReceiveLine: (amount, pct) => `Minimum you'll receive: ${amount} (${pct} slippage)`,
   refusalLine: sym =>

@@ -239,6 +239,17 @@ function claimedOutTxFor(id: string): Set<string> {
   return s;
 }
 
+/** Row identities other records already claim as their REFUND — the refund-side twin of
+ *  `claimedOutTxFor`: a refund row one record already consumed as its failed_refunded evidence
+ *  is never another record's refund too (one ledger row settles exactly one record). */
+function claimedRefundTxFor(id: string): Set<string> {
+  const s = new Set<string>();
+  for (const [rid, r] of state.records) {
+    if (rid !== id && r.refundTx != null) s.add(r.refundTx);
+  }
+  return s;
+}
+
 async function saveConvertRecordFor(record: ConvertRecord): Promise<void> {
   const pub = state.ctx?.publicHex;
   if (pub == null) return;
@@ -266,13 +277,14 @@ async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<Conve
     myPrincipalLower: myPrincipal,
     record: rec,
     excludeOutTx: claimedOutTxFor(rec.id),
+    excludeRefundTx: claimedRefundTxFor(rec.id),
   });
   if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
   if (seen?.kind === 'output') {
     return commit({...rec, step: 'done', outAmountNet: seen.amount, outTx: seen.tx});
   }
   if (seen?.kind === 'refund') {
-    return commit({...rec, step: 'failed_refunded', failureCode: 'refunded'});
+    return commit({...rec, step: 'failed_refunded', failureCode: 'refunded', refundTx: seen.tx});
   }
   return rec;
 }
@@ -315,6 +327,7 @@ async function driveOne(id: string): Promise<void> {
             notify();
           },
           claimedOutTx: claimedOutTxFor(id),
+          claimedRefundTx: claimedRefundTxFor(id),
         }, state.opts.executorOpts);
         if (!mine()) return; // stale drive — no post-run write, no re-arm
         const before = state.records.get(id)?.step;

@@ -148,9 +148,8 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
 }
 
 /// `call` for method-probe responses (404/405 carry an EMPTY body — nothing to parse).
-/// Offline test build only — every caller is a `not(agent)` test (the venue-surface probes),
-/// which are compiled out under `agent` for the same reason `faucet_json` above is.
-#[cfg(not(feature = "agent"))]
+/// Ungated: both builds probe the route table — the offline venue-surface matrix and the
+/// agent-build twin (the 405s plus the /test/venue 404s there), which is the one that ships.
 async fn call_status(state: &AppState, req: Request<Body>) -> StatusCode {
     app(state.clone()).oneshot(req).await.unwrap().status()
 }
@@ -4711,6 +4710,129 @@ async fn swap_quote_agent_refuses_an_unknown_pool_before_reaching_the_venue() {
     );
 }
 
+/// V9 INVARIANT 3 in the build that SHIPS (multi-venue readiness): the agent route table's
+/// venue surface is QUERY-ONLY. [`venue_surface_is_query_only`] pins the same matrix on the
+/// offline build only — it is compiled out under `agent`, where a mutating handler added
+/// behind `#[cfg(feature = "agent")]` would have sailed through every gate. Same probes, this
+/// build's router: POST/PUT/DELETE on /venues and POST/DELETE on the quote route answer 405,
+/// the read is pure (identical bodies across calls), and exactly the ONE real venue is served
+/// (the agent build's `fixture_venue_armed` is the constant `false` — the fixture venue can
+/// never leak into a shipped list). The offline test's quote-both-pools leg has no agent twin
+/// here: a quote against this state dies at the unreachable ledger (the 503 control in the
+/// tests around this one), and the /venues purity that leg was checking is pinned directly.
+///
+/// The knob routes: `/api/v1/test/venue` is 404 under ANY method here — its registration is
+/// `cfg(all(test-helpers, not(agent)))`, and since this file cannot build without
+/// test-helpers (the dev-dep self-reference — see the header), that 404 is the AGENT axis
+/// speaking. `/api/v1/test/swap_pool` is deliberately not probed for absence: its
+/// registration is plain `cfg(feature = "test-helpers")`, so it exists in this
+/// agent+test-helpers test build (the ungated withdrawal-failure knob tests ride it under
+/// `just test-live`); the PROD agent build (no test-helpers — the deploy contract) compiles
+/// it out with the rest of the feature. What INV-3 pins here is the shipped surface:
+/// /venues and /swap_quote stay GET-only.
+#[cfg(feature = "agent")]
+#[tokio::test]
+async fn venue_surface_is_query_only_in_the_agent_build() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+
+    for (method, uri) in [
+        ("POST", "/api/v1/venues"),
+        ("PUT", "/api/v1/venues"),
+        ("DELETE", "/api/v1/venues"),
+        ("POST", "/api/v1/swap_quote"),
+        ("DELETE", "/api/v1/swap_quote"),
+    ] {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap();
+        let status = call_status(&state, req).await;
+        assert_eq!(
+            status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method} {uri} must not exist as a handler in the agent build (query-only surface)"
+        );
+    }
+
+    // The venue-serving knob does not exist in this build at all — not a 405 (no handler on a
+    // REGISTERED path) but a 404 (no path, any method).
+    for method in ["GET", "POST", "DELETE"] {
+        let req = Request::builder()
+            .method(method)
+            .uri("/api/v1/test/venue")
+            .body(Body::empty())
+            .unwrap();
+        let status = call_status(&state, req).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{method} /api/v1/test/venue must not exist in the agent build"
+        );
+    }
+
+    // The read half, on the route table that ships: a pure read serving exactly the REAL
+    // registry — the fixture venue is structurally un-servable here (no knob exists to arm).
+    let (s1, v1) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(s1, StatusCode::OK);
+    let (s2, v2) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(s2, StatusCode::OK);
+    assert_eq!(v1, v2, "GET /venues is a pure read in the agent build");
+    assert_eq!(
+        v1["venues"].as_array().map(Vec::len),
+        Some(1),
+        "exactly the one real venue is served in the agent build"
+    );
+    assert_eq!(v1["venues"][0]["venue_id"], "icpswap");
+    assert!(
+        !v1.to_string().contains(FIXTURE_POOL),
+        "an invented venue can never leak into the agent build's served list"
+    );
+}
+
+/// V9 INVARIANT 1 (route half) in the build that SHIPS: dpay-OWNED canister principals are
+/// refused by the quote route as unknown pools BEFORE any venue is asked — the agent twin of
+/// [`swap_quote_refuses_dpay_owned_principals_as_pools`], which pins the same refusal on the
+/// offline build only (the same hole the NOT_A_VENUE test above once had: the shipped copy of
+/// the check was covered by nothing at all). Same shape as that test: this state's
+/// `FakeLedger` inherits "cannot query swap pools", so each 400 is itself the proof nothing
+/// was asked of any venue, and the 503 control proves the 400s came from the allowlist
+/// rather than a parse failure refusing every pool alike. The principals are the two owned
+/// ids in `canister_ids.json` (`ssqti-…` dpay_canister/facade, `td2nx-…` icrc_ledger/DUSD —
+/// `DEMO_LEDGER` here); the catalog-level twin is
+/// `dpay_owned_principals_never_resolve_as_venues`, the phone-side twin is
+/// `app/config/venues.ts` DPAY_CANISTER_PRINCIPALS.
+#[cfg(feature = "agent")]
+#[tokio::test]
+async fn swap_quote_agent_refuses_dpay_owned_principals_before_reaching_the_venue() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+
+    for pool in ["ssqti-wiaaa-aaaab-qhdia-cai", DEMO_LEDGER] {
+        let req = get_req(&swap_quote_uri(pool, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+        let (status, body) = call(&state, req).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{pool}: a dpay canister is not a venue — and the venue was never asked: {body}"
+        );
+        assert_eq!(
+            body["error"], "unknown_pool",
+            "{pool}: the same named refusal as any unknown pool"
+        );
+    }
+
+    // The control (mirrors the NOT_A_VENUE test above): an ALLOWED venue gets past the name
+    // check and dies at the ledger this state cannot query — which is what makes the 400s
+    // above allowlist refusals.
+    let req = get_req(&swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+    let (status, _body) = call(&state, req).await;
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "the allowed venue gets past the name check and dies at the ledger this state cannot query"
+    );
+}
+
 /// The full happy path through the SAME signed /api/v2 rail the app uses: icrc2_approve of the
 /// POOL on the ICP ledger (exact amount + fee + expiry) → depositFromAndSwap pulls the input
 /// (charging the input ledger's fee) and pays the QUOTED output to the caller's principal on
@@ -5196,7 +5318,9 @@ async fn knobs_target_the_named_pool_only() {
 /// test-helpers-only /test/venue and /test/swap_pool knobs, and the knob route itself refuses
 /// GET (POST-only). Axum answers a REGISTERED path with the wrong method as 405 — so these
 /// assertions enumerate the route table's venue/swap surface: no POST/PUT/DELETE handler
-/// exists on /venues or /swap_quote in any build.
+/// exists on /venues or /swap_quote in any build. The agent-build twin — the route table that
+/// actually ships — is [`venue_surface_is_query_only_in_the_agent_build`]; this offline copy
+/// is compiled out under `agent`.
 #[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn venue_surface_is_query_only() {
@@ -5244,7 +5368,9 @@ async fn venue_surface_is_query_only() {
 /// resolves through it. Pinned against the two owned principals in `canister_ids.json`
 /// (`ssqti-…` dpay_canister/facade, `td2nx-…` icrc_ledger/DUSD); the catalog-level twin is
 /// `dpay_owned_principals_never_resolve_as_venues`, the phone-side signing-boundary twin is
-/// `app/config/venues.ts` DPAY_CANISTER_PRINCIPALS (checked by venueInvariants.test.ts).
+/// `app/config/venues.ts` DPAY_CANISTER_PRINCIPALS (checked by venueInvariants.test.ts), and
+/// the AGENT-build twin — the route copy that ships — is
+/// [`swap_quote_agent_refuses_dpay_owned_principals_before_reaching_the_venue`].
 #[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn swap_quote_refuses_dpay_owned_principals_as_pools() {

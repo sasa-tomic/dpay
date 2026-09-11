@@ -7,10 +7,14 @@
 //   * the venue's own quote, attributed + timestamped, auto-refreshed when stale (>30 s) and
 //     re-quoted at confirm (a changed quote demands a fresh review, never a silent submit);
 //   * every fee on its own line (pool tier, input fee, output fee, dpay = nothing either way);
-//   * price impact ONLY when the venue's model supports measuring it (the IC-AMM curve) — other
-//     venue kinds get no impact line at all, never a faked number (V8);
+//   * a per-venue disclosure sentence chosen by the venue registry's own `disclosure_key`
+//     (unknown keys fall back to honest generic copy — fail closed, never blank);
 //   * minimum-you'll-receive + the refusal outcome; the exact net end-state amount; and every
 //     failure branch names which asset the user is left holding and that dpay cannot reverse it.
+// There is deliberately NO price-impact line (V8, removed 2026-09-11): the venues dpay quotes
+// publish no impact figure, so none is fetched, computed, or displayed — the second per-venue
+// reference quote that used to feed it doubled quote traffic per keystroke and presented a
+// curve-slope estimate as venue fact.
 // When the pair has TWO+ venues (multi-venue readiness V5) a venue chooser renders above the
 // headline: N rows in REGISTRY order (never ranked by output), NONE preselected, each row
 // showing its OWN quote, attributed + timestamped; the checklist + confirm appear only under an
@@ -41,6 +45,7 @@ import {
   isTerminalConvertStep,
   loadVenueRegistry,
   prepareConvertRecord,
+  TERMINAL_CONVERT_STEPS,
   type ConvertMath,
   type ConvertQuote,
   type ConvertRecord,
@@ -99,9 +104,9 @@ type Props = {
   onSwitchAsset?: (id: AssetId) => void;
 };
 
-const TERMINAL_STEPS = new Set<ConvertRecord['step']>(['done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded']);
 /** A record past 'quote'/'confirming' means signed bytes or a provider order exist — the screen
- *  must show state, not a form. */
+ *  must show state, not a form. The terminal set is app/convert.ts's OWN export — never a
+ *  hand-mirrored copy here (the mirror drifted by construction risk; one source of truth). */
 const isLiveRecord = (r: ConvertRecord | null): boolean =>
   r !== null && !isTerminalConvertStep(r.step) && r.step !== 'quote' && r.step !== 'confirming';
 
@@ -110,6 +115,24 @@ const isLiveRecord = (r: ConvertRecord | null): boolean =>
  *  whatever `venuesForPair` serves, V5). */
 const REGISTERED_VENUE_ID = BUNDLED_VENUES.find(v => v.kind === 'ic_amm' && !v.testnet)?.venue_id ?? '';
 const REGISTERED_VENUE_NAME = venueDisplayName(REGISTERED_VENUE_ID);
+
+/** The per-venue disclosure sentence for the pre-sign checklist: the venue registry's OWN
+ *  `disclosure_key` picks the copy, and a key the catalog does not carry falls back to the
+ *  generic sentence — fail closed: a disclosure always renders, never a blank, never copy that
+ *  guesses a venue fact the registry never made. `venueId` is the QUOTE's own attribution (or
+ *  the standing registered venue before one arrives). */
+const venueDisclosure = (venueId: string): string => {
+  const venue = venueOfId(venueId);
+  const name = venueDisplayName(venueId);
+  const line = venue != null ? M.convert.disclosures.byKey[venue.disclosure_key] : undefined;
+  return (line ?? M.convert.disclosures.generic)(name);
+};
+
+/** A clock string that must never wrap inside itself: attribution lines end "…fetched 2:59 PM",
+ *  and a line break between the time and its meridiem orphans the "PM" onto its own row (the
+ *  2026-09-11 chooser screenshot). Every space inside the formatted time becomes a
+ *  non-breaking one — the words around it may still wrap, the time never does. */
+const nonBreakingClock = (d: Date): string => formatClock(d).replace(/ /g, '\u00A0');
 
 export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onShowDepositAddress, onSwitchAsset}: Props) {
   const [amountText, setAmountText] = useState('');
@@ -418,7 +441,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   };
 
   if (legs == null) return <UnavailablePanel selectedAsset={selectedAsset} onBack={onBack} />;
-  if (record != null && (isLiveRecord(record) || TERMINAL_STEPS.has(record.step))) {
+  if (record != null && (isLiveRecord(record) || TERMINAL_CONVERT_STEPS.has(record.step))) {
     return <StatePanel record={record} onBack={onBack} />;
   }
 
@@ -547,8 +570,14 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
                   setQuoteChanged(null);
                 }}
                 accessibilityRole="radio"
-                accessibilityState={{selected: on}}
+                accessibilityState={{checked: on}}
                 accessibilityLabel={v.display_name}>
+                {/* The selection affordance: an unchecked/checked radio circle, so a row READS
+                    as tappable and as chosen (border colour alone did not — a11y + scan-ability,
+                    2026-09-11). Decorative: the Pressable above carries the role/state/label. */}
+                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
+                  {on ? <View style={S.convertVenueRadioDot} /> : null}
+                </View>
                 <View style={S.convertVenueRowText}>
                   <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{v.display_name}</Text>
                   {vq != null ? (
@@ -564,7 +593,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
                   )}
                   {vq != null ? (
                     <Text testID={`convert-venue-${v.venue_id}-source`} style={S.convertMetaLine}>
-                      {M.convert.quoteSource(formatClock(new Date(vq.fetchedAtMs)), venueDisplayName(v.venue_id))}
+                      {M.convert.quoteSource(nonBreakingClock(new Date(vq.fetchedAtMs)), venueDisplayName(v.venue_id))}
                     </Text>
                   ) : null}
                 </View>
@@ -590,7 +619,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             <Text style={S.convertRateValue}>{fmtAsset(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn), outDecimals, outSym)}</Text>
           </View>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
-            {M.convert.quoteSource(formatClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
+            {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
           </Text>
         </View>
       ) : null}
@@ -608,6 +637,13 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
           <Text style={S.convertChecklistLine}>{M.convert.counterpartySigns}</Text>
         </View>
+        {/* The per-venue disclosure sentence (the registry's own `disclosure_key` picks the
+            copy; an unknown key falls back to honest generic copy — fail closed). Checklist
+            ONLY: the chooser rows never carry it, and in chooser mode it follows the PICKED
+            venue (the counterVenueId the quote's own attribution resolves to). */}
+        <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
+          {venueDisclosure(counterVenueId)}
+        </Text>
         {math != null ? (
           <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
             {M.convert.poolFeeTier(formatMillionthsPct(activeQuote!.feeMillionths), venueDisplayName(activeQuote!.venueId))}
@@ -628,21 +664,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             {M.convert.dpayFeeLine}
           </Text>
         ) : null}
-        {/* Impact is a MEASUREMENT the venue model must support (V8): only an IC-AMM curve gets
-            the line (measured against the venue's own near-zero reference — never a second
-            fetched reference beyond it); any other venue kind gets NO line, not a faked one.
-            Unknown venue kind → no line (fail closed, never a guess). */}
-        {math != null && venueOfId(activeQuote?.venueId ?? '')?.kind === 'ic_amm' ? (
-          <Text
-            testID={math.impactBps != null && math.impactWarn ? 'convert-impact-warn' : 'convert-impact'}
-            style={math.impactBps != null && math.impactWarn ? S.convertChecklistWarn : S.convertChecklistLine}>
-            {math.impactBps == null
-              ? M.convert.impactUnavailable(venueDisplayName(activeQuote!.venueId))
-              : math.impactWarn
-                ? M.convert.impactWarnLine(formatBps(math.impactBps))
-                : M.convert.impactLine(formatBps(math.impactBps))}
-          </Text>
-        ) : null}
+        {/* There is deliberately NO price-impact line here (V8, 2026-09-11): the venue
+            publishes no impact figure, so nothing renders — the minimum-you'll-receive and
+            slippage chips below are the execution protection. */}
         {math != null ? (
           <View testID="convert-slippage">
             <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>

@@ -1,17 +1,27 @@
 // Flow 84 — Visual regression, DARK THEME (Wave 4 dual theme).
 //
-// Same five-surface walkthrough as flow 40 (the light visual-regression gate), but the driver
+// Same six-surface walkthrough as flow 40 (the light visual-regression gate), but the driver
 // emulates an OS dark scheme (page.emulateMediaFeatures prefers-color-scheme: dark) BEFORE any
 // page script runs — RNW's Appearance resolves dark at bundle init, so the app boots straight
 // into the DARK palette with no light flash. This is the gate that dark mode actually RENDERS
-// everywhere the light flow walks: wallet/Pay, Receive request-QR, Balances, Settings, Ledger.
+// everywhere the light flow walks: wallet/Pay, Receive request-QR, Balances, Settings, Ledger —
+// plus TWO convert surfaces light flow 40 does not carry: the venue CHOOSER (two venues, quotes
+// settled, nothing picked) and the pre-sign CHECKLIST under a pick. Convert is the newest money
+// surface (V1–V11), so its dark palette is pinned here, not assumed.
+//
+// The convert surfaces need determinism the shared relay cannot give (a second venue + a funded
+// ICP row), so the flow runs on its OWN relay (startRelay, the flow-166/167 pattern): the
+// fixture-B venue knob arms the second venue, the faucet funds 3 ICP AFTER the ledger capture
+// (a new ledger row would break the ledger baseline). Quote values are deterministic on a fresh
+// private pool; the quote TIMESTAMP lines are masked (per-run clock).
 //
 // Baselines live in their OWN dir (shots/baselines-dark/) — the light baselines stay the
 // authority for "light is visually unchanged" (flow 40). Seed with:
 //   cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=84 node run.mjs
 // (same seeding policy as flow 40: REGEN only overwrites baselines that drifted past tolerance,
 // so a seed commit shows only genuinely-moved surfaces).
-import { setup, onboardWallet, assert } from '../harness/lib.mjs';
+import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount } from '../harness/lib.mjs';
+import { startRelay } from '../harness/relay.mjs';
 import { comparePng } from '../harness/pixel.mjs';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir } from 'node:fs/promises';
@@ -22,18 +32,35 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
 const BASELINES_DIR = join(SHOTS_DIR, 'baselines-dark');
 
-// Same 6 primary surfaces, in the same capture order as flow 40 (mirrors its tour = flow 35).
-// Baseline names are identical so the two dirs diff key-for-key; capture filenames carry the
-// 84-vr-dark- prefix so the two flows never collide in e2e/shots/.
+const SEED = 300000000; // 3 ICP (plain Number — the faucet body is JSON)
+const FIXTURE_VENUE = 'icpswap-fixture-b';
+
+// Same 6 primary surfaces, in the same capture order as flow 40 (mirrors its tour = flow 35),
+// then the 2 convert surfaces. Baseline names are identical across flows so the dirs diff
+// key-for-key; capture filenames carry the 84-vr-dark- prefix so the flows never collide in
+// e2e/shots/.
+//
+// `masksFromTestIDs` (ARRAY — a flow-84 extension): non-deterministic regions (QR bitmaps, clock
+// lines) named by testID; each rect is collected post-capture and passed to comparePng as a mask
+// (device px, padded ±4). The chooser masks BOTH quote-attribution timestamps (one per row); the
+// checklist masks the active quote's timestamp.
 const SURFACES = [
   { capture: '84-vr-dark-wallet-pay', baseline: 'wallet-pay' },
   // request-qr is masked in BOTH flows: the QR encodes a per-run signed request (fresh key +
   // timestamp), so its module pixels can never be deterministic.
-  { capture: '84-vr-dark-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
+  { capture: '84-vr-dark-receive-request', baseline: 'receive-request', masksFromTestIDs: ['request-qr'] },
   { capture: '84-vr-dark-home', baseline: 'home' },
   { capture: '84-vr-dark-accounts', baseline: 'accounts' },
   { capture: '84-vr-dark-settings', baseline: 'settings' },
-  { capture: '84-vr-dark-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
+  { capture: '84-vr-dark-ledger', baseline: 'ledger', masksFromTestIDs: ['hist-time-0'] },
+  // The convert venue chooser: two rows, each with its own quote, NOTHING picked (V5). Both
+  // per-row quote-attribution clock lines are masked.
+  { capture: '84-vr-dark-convert-chooser', baseline: 'convert-chooser',
+    masksFromTestIDs: ['convert-venue-icpswap-source', 'convert-venue-icpswap-fixture-b-source'] },
+  // The convert pre-sign checklist under a pick (the real venue): fees, counterparty, refusal —
+  // the active quote's timestamp is masked.
+  { capture: '84-vr-dark-convert-checklist', baseline: 'convert-checklist',
+    masksFromTestIDs: ['convert-quote-source'] },
 ];
 
 const REGEN = process.env.DPAY_E2E_REGEN_BASELINES === '1';
@@ -48,18 +75,21 @@ export const meta = {
   id: '84',
   name: 'visual-dark',
   journey: 'tour',
-  covers: ['visual-regression', 'pixel-diff', 'dark-theme'],
+  covers: ['visual-regression', 'pixel-diff', 'dark-theme', 'convert', 'venue-chooser'],
   verifies:
-    'Pixel-diff the 6 primary surfaces under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks.',
-  timeoutMs: 25_000,
+    'Pixel-diff the 8 surfaces (6 primary + the convert venue-chooser and pre-sign checklist, on a private two-venue relay) under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks, plus the convert surfaces the light flow does not carry.',
+  timeoutMs: 90_000,
 };
 
 export async function run() {
   const start = Date.now();
-  console.log('[84-visual-dark] setup (relay + web + browser, dark scheme)…');
+  console.log('[84-visual-dark] setup (own relay + web + browser, dark scheme)…');
   const env = await setup({ dark: true });
+  const r2 = await startRelay(); // own relay: the venue knob + ICP funding cannot touch a sibling flow
   try {
-    const { driver } = env;
+    const { driver, webBaseURL } = env;
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(r2.baseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await driver.waitReady({timeoutMs: 8_000});
 
     // The page must report the emulated dark scheme — asserts the harness opt reached the page
     // (an emulation regression would otherwise silently pixel-test LIGHT against dark baselines).
@@ -77,6 +107,15 @@ export async function run() {
     );
 
     const masks = {};
+
+    // Arm the second venue BEFORE the wallet mounts (the convert surface loads /api/v1/venues on
+    // mount) — the chooser baseline shows TWO rows.
+    const arm = await fetch(`${r2.baseURL}/api/v1/test/venue`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({venue_id: FIXTURE_VENUE, served: true}),
+    });
+    assert(arm.ok, `venue knob armed (status ${arm.status})`);
 
     // 1. Onboard a funded wallet ($100 demo). The harness preamble leaves the app on the Pay tab.
     console.log('[84-visual-dark] onboarding…');
@@ -130,13 +169,53 @@ export async function run() {
     }
     await driver.screenshot(SURFACES[5].capture);
 
+    // 6c. CONVERT surfaces (this flow's own; flow 40 does not carry them). Fund ICP only NOW —
+    //     after the ledger capture — so the faucet row cannot perturb the ledger baseline; then
+    //     open Convert from the ICP row (the V11-gated entry), key 1 ICP, and wait for BOTH venue
+    //     quotes to settle (a spinner mid-fetch is nondeterministic pixels).
+    console.log('[84-visual-dark] convert surfaces (chooser + checklist)…');
+    const account = await accountOf(driver);
+    const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED, {currency: 8});
+    assert(fund.ok, `faucet credit ok (status ${fund.status})`);
+
+    await openBalances(driver);
+    await selectCurrency(driver, 'icp');
+    await openBalances(driver);
+    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await driver.type('convert-amount', '1');
+    await driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000});
+    await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});
+    await driver.eval(() => window.scrollTo(0, 0));
+    for (const tid of SURFACES[6].masksFromTestIDs) {
+      masks[tid] = await getTestIDRectDevicePx(driver, tid);
+    }
+    await driver.screenshot(SURFACES[6].capture);
+
+    // The checklist under a pick: click the REAL venue row, wait for the math to derive (net is
+    // the last derived line) and the quote attribution to render, then capture — anchored at the
+    // CHECKLIST card (scrollIntoView block:'start'), not the page top: the fee lines
+    // (counterparty → net) are the surface under contract, and they render below the headline +
+    // venue rows. Everything above the anchor is fully off-frame, so no clock text can leak in;
+    // the quote-source mask stays as a safety net (it self-skips when off-frame).
+    await driver.click('convert-venue-icpswap', {timeoutMs: 5_000});
+    await driver.findByTestID('convert-net', {timeoutMs: 10_000});
+    await driver.findByTestID('convert-quote-source', {timeoutMs: 5_000});
+    await driver.eval(() => {
+      document.querySelector('[data-testid="convert-counterparty"]').scrollIntoView({block: 'start'});
+    });
+    await driver.settleFrames(3);
+    for (const tid of SURFACES[7].masksFromTestIDs) {
+      masks[tid] = await getTestIDRectDevicePx(driver, tid);
+    }
+    await driver.screenshot(SURFACES[7].capture);
+
     // 7. Diff each capture against its dark baseline (or seed if missing + REGEN).
     await mkdir(BASELINES_DIR, { recursive: true });
     const summary = [];
     for (const s of SURFACES) {
       const capturePath = join(SHOTS_DIR, `${s.capture}.png`);
       const baselinePath = join(BASELINES_DIR, `${s.baseline}.png`);
-      const surfaceMasks = s.masksFromTestID ? (masks[s.masksFromTestID] ? [masks[s.masksFromTestID]] : []) : [];
+      const surfaceMasks = (s.masksFromTestIDs ?? []).map(k => masks[k]).filter(Boolean);
       const line = await diffOrSeed(baselinePath, capturePath, s.baseline, surfaceMasks);
       summary.push(line);
     }
@@ -155,6 +234,7 @@ export async function run() {
     console.log(`[84-visual-dark] GREEN in ${elapsed}s (0 diffs > ${TOLERANCE_PCT}%)`);
     assert(true, 'dark visual regression passed');
   } finally {
+    await r2.stop();
     await env.stop();
   }
 }

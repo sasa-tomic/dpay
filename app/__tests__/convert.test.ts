@@ -3,7 +3,7 @@
  * fail-closed venue resolution (spec 2026-09-07 §6). The swap-arg/min-out BYTES and the pool
  * reply decode belong to the compiled core (`crates/dpay-icp`, reached through wasm/FFI) and are
  * pinned by its own goldens; this suite pins the module's own logic with the FFI mocked:
- *   * derivations: net-out, impact warn threshold, staleness (incl. the test seam);
+ *   * derivations: net-out, staleness (incl. the test seam);
  *   * the state machine happy path, identical-envelope retry, every failure branch, resume;
  *   * the persisted-record round-trip (dpay.convert.v1) and corrupt-storage fail-safe;
  *   * resolveConvertDirection fail-closed behavior + all four locales carrying the copy.
@@ -37,13 +37,12 @@ import {
   loadConvertRecords,
   loadVenueRegistry,
   prepareConvertRecord,
+  probeConvertSettlement,
+  salvageConvertStore,
   type ConvertQuote,
   type ConvertRecord,
 } from '../convert';
-import {
-  CONVERT_APPROVE_LIFETIME_S,
-  resolveConvertDirection,
-} from '../config/convert';
+import {resolveConvertDirection} from '../config/convert';
 import {BUNDLED_VENUES, setRuntimeVenues, venuesForPair, type VenueEntry} from '../config/venues';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {convertEn} from '../i18n/domains/en/convert';
@@ -72,7 +71,6 @@ const quote = (over: Partial<ConvertQuote> = {}): ConvertQuote => ({
   zeroForOne: true,
   feeMillionths: 3000,
   fetchedAtMs: 1_000,
-  impactBps: null,
   ...over,
 });
 
@@ -121,6 +119,33 @@ const rowsRes = (rows: unknown[]) => fakeRes({transactions: rows});
 const myPrincipal = 'myprincipal123';
 const OPTS = {submitAttempts: 2, poll: {attempts: 1, intervalMs: 0}, settleAttempts: 2, settleIntervalMs: 0};
 
+/** A pre-legs (v1 store) record as it was persisted — the migrateLegacyRecord input shape. */
+const legacyRecord = (over: Record<string, unknown> = {}) => ({
+  id: 'abc123',
+  createdAtMs: 1,
+  step: 'swapping',
+  inCurrency: 8,
+  outCurrency: 7,
+  inLedger: ICP_LEDGER,
+  outLedger: VCHF_LEDGER,
+  inSymbol: 'ICP',
+  outSymbol: 'CHF',
+  amountIn: '100000000',
+  amountOutMin: '188000000',
+  expectedGross: '190000000',
+  expectedNet: '189990000',
+  inFee: '10000',
+  outFee: '10000',
+  slippageBps: 100,
+  zeroForOne: true,
+  approveEnvelopeHex: 'aacc',
+  approveRequestIdHex: 'bbdd',
+  approveExpiresAtMs: 601_000,
+  swapEnvelopeHex: 'ccaa',
+  swapRequestIdHex: 'ddbb',
+  ...over,
+});
+
 beforeEach(async () => {
   await AsyncStorage.clear();
   jest.clearAllMocks();
@@ -149,15 +174,11 @@ describe('deriveConvertMath — every number the screen shows', () => {
     expect(m.minOut).toBe('188000000');
     expect(m.netOut).toBe('189990000');
     expect(DpayCore.icpSwapMinOut).toHaveBeenCalledWith('190000000', 100);
-    expect(m.impactWarn).toBe(false);
   });
-  test('net floors at zero; impact warns above 500 bps', async () => {
+  test('net floors at zero when the output fee exceeds the gross', async () => {
     jest.mocked(DpayCore.icpSwapMinOut).mockResolvedValue('0' as never);
-    const m = await deriveConvertMath(quote({amountOutGross: '5000', impactBps: 600}), '10000', '10000', 300);
+    const m = await deriveConvertMath(quote({amountOutGross: '5000'}), '10000', '10000', 300);
     expect(m.netOut).toBe('0');
-    expect(m.impactWarn).toBe(true);
-    const edge = await deriveConvertMath(quote({impactBps: 500}), '10000', '10000', 300);
-    expect(edge.impactWarn).toBe(false); // warn strictly above 5%
   });
 });
 
@@ -177,100 +198,24 @@ describe('isQuoteStale — 30 s threshold, test-shrinkable', () => {
   });
 });
 
-describe('fetchConvertQuote — the venue verbatim + a separate impact measurement', () => {
+describe('fetchConvertQuote — the venue verbatim, ONE call, nothing derived', () => {
   const swapRes = (amountIn: string, amountOut: string, zeroForOne = true) =>
     fakeRes({venue_id: VENUE.venue_id, pool: POOL, token_in: 'a', token_out: 'b', amount_in: amountIn, amount_out: amountOut, zero_for_one: zeroForOne, fee_millionths: 3000, fetched_at: 1});
-  test('echoes the venue quote (attribution included) and measures impact against the reference trade', async () => {
-    jest.mocked(relayFetch)
-      .mockResolvedValueOnce(swapRes('1000000', '1900000') as never)
-      .mockResolvedValueOnce(swapRes('1000', '1901') as never);
+  // V8 red line (2026-09-11): dpay displays what the venue publishes and derives ONLY what it
+  // does not. The venue publishes no price-impact figure, so there is no impact to measure, no
+  // second reference quote to fetch, and no impact field on the quote — one venue, ONE call per
+  // keystroke for EVERY venue kind. This pin replaces the eight-point live-curve table that used
+  // to live here: a re-introduced reference fetch (which would double per-venue quote traffic in
+  // the chooser and present a curve-slope estimate as venue fact) is RED on the call count.
+  test('echoes the venue quote (attribution included) with exactly ONE relay call — no reference trade', async () => {
+    jest.mocked(relayFetch).mockResolvedValueOnce(swapRes('1000000', '1900000') as never);
     const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1000000');
     expect(q.venueId).toBe(VENUE.venue_id);
     expect(q.pool).toBe(POOL);
     expect(q.amountIn).toBe('1000000');
     expect(q.amountOutGross).toBe('1900000');
     expect(q.zeroForOne).toBe(true);
-    expect(q.impactBps).toBe(5); // price 19000 vs ref 19010, floored bps
-  });
-  // The venue's OWN curve, measured read-only against
-  // https://dpay.kalaj.org/api/v1/swap_quote?pool=65mrh-fqaaa-aaaar-qapoa-cai
-  // &token_in=ryjl3-tyaaa-aaaaa-aaaba-cai&token_out=ly36x-wiaaa-aaaai-aqj7q-cai on 2026-09-08.
-  // Eight sizes, the pool's replies verbatim — so the arithmetic below is pinned to a REAL curve
-  // (including its floor quantization), not to a hand-picked pair of numbers that happens to work.
-  // These are the answers the DEPLOYED relay gave (it echoed `zero_for_one: true` for this request,
-  // where the corrected pair in the working tree derives `false`), so the table is "the curve the
-  // relay served", not a claim about which leg of the pool served it. That distinction cannot reach
-  // this arithmetic: both quotes ride the same curve in the same direction, and impact is their
-  // ratio.
-  // The stub answers by the amount the CODE asks for, which is what makes the reference-trade
-  // constant part of the test: a reference too narrow to resolve the gap is a RED here.
-  const LIVE_ICP_TO_VCHF: Record<string, string> = {
-    '1000': '406', // 0.00001 ICP — 3 significant digits: 0.23% below the true rate
-    '1000000': '406356', // 0.01 ICP — the reference trade
-    '100000000': '40635577', // 1 ICP
-    '1000000000': '406352466', // 10 ICP
-    '10000000000': '4063193580', // 100 ICP
-    '100000000000': '40598856927', // 1 000 ICP
-    '1000000000000': '402710065564', // 10 000 ICP
-    '10000000000000': '3726151260700', // 100 000 ICP
-  };
-  const liveCurve = () => {
-    jest.mocked(relayFetch).mockImplementation((async (_relay: string, path: string) => {
-      const amountIn = new URL(path, 'http://relay.test').searchParams.get('amount_in') ?? '';
-      const amountOut = LIVE_ICP_TO_VCHF[amountIn];
-      if (amountOut == null) throw new Error(`test curve has no live measurement for amount_in=${amountIn}`);
-      return swapRes(amountIn, amountOut);
-    }) as never);
-  };
-
-  test('a 1 ICP trade through the live curve measures 0 bps — a number, never the unavailable line', async () => {
-    liveCurve();
-    const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000');
-    // 0.40635577 vs the reference's 0.406356 ⇒ 0.0057 bps of impact: real, and below 1 bp.
-    expect(q.impactBps).toBe(0);
-  });
-
-  test('impact is resolution-true at the sizes where it matters (9 bps / 830 bps, both measured)', async () => {
-    liveCurve();
-    // 1 000 ICP: (0.406356 − 0.4059885693) / 0.406356 = 9.04 bps.
-    expect((await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000000')).impactBps).toBe(9);
-    // 100 000 ICP: (0.406356 − 0.37261512607) / 0.406356 = 830.3 bps — past the 5% warn threshold.
-    const deep = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '10000000000000');
-    expect(deep.impactBps).toBe(830);
-    expect((await deriveConvertMath(quote({impactBps: deep.impactBps}), '10000', '10000', 100)).impactWarn).toBe(true);
-  });
-
-  test('a dust trade reports the pool\'s own flooring, because the user really pays it', async () => {
-    liveCurve();
-    // 0.00001 ICP quotes 406 where the reference rate says 406.36: 8.7 bps the user genuinely
-    // does not receive. The line measures the gap to the near-zero rate, whatever causes it.
-    expect((await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '1000')).impactBps).toBe(8);
-  });
-
-  test('a quote that floors in the user\'s favour reads 0 bps — never "unmeasurable"', async () => {
-    // The reference lost more to flooring than this trade did, so the raw gap is NEGATIVE. A
-    // bigger trade cannot get a better unit price out of the same curve, so the honest reading of
-    // sub-resolution noise is zero impact — the state the old `price <= refPrice` guard nulled.
-    jest.mocked(relayFetch)
-      .mockResolvedValueOnce(swapRes('50000000', '25829008') as never)
-      .mockResolvedValueOnce(swapRes('1000000', '516580') as never);
-    expect((await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '50000000')).impactBps).toBe(0);
-  });
-
-  test('a pair whose output dwarfs its input is still measured (no rate ceiling)', async () => {
-    // Decimals differ per ledger, so out/in carries no bound dpay may assume: 1 unit in ⇒ ~100 out.
-    jest.mocked(relayFetch)
-      .mockResolvedValueOnce(swapRes('100000000', '9990000000') as never)
-      .mockResolvedValueOnce(swapRes('1000000', '100000000') as never);
-    const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000');
-    expect(q.impactBps).toBe(10); // 99.9 vs 100.0 per unit ⇒ 10 bps
-  });
-
-  test('impact is unmeasurable ONLY when the venue answers the reference with zero', async () => {
-    jest.mocked(relayFetch)
-      .mockResolvedValueOnce(swapRes('100000000', '40635577') as never)
-      .mockResolvedValueOnce(swapRes('1000000', '0') as never);
-    expect((await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000')).impactBps).toBeNull();
+    expect(jest.mocked(relayFetch).mock.calls.length).toBe(1); // never a second quote — not for ic_amm either
   });
 
   test('unreachable relay → the localized quoteUnreachable error (venue named from the registry)', async () => {
@@ -289,7 +234,7 @@ describe('fetchConvertQuote — the venue verbatim + a separate impact measureme
   });
 
   // --- V8 provenance rules: direction is optional on the wire, the timestamp is the venue-read
-  //     instant, and a non-curve venue never pays for a second (meaningless) reference quote.
+  //     instant, and no venue kind ever pays for a second (derived-figure) quote.
   test('V8: a reply without zero_for_one is valid (null, not malformed); fetchedAtMs is the relay fetched_at, not the device clock', async () => {
     const noDirection = fakeRes({venue_id: VENUE.venue_id, pool: POOL, token_in: 'a', token_out: 'b', amount_in: '100000000', amount_out: '190000000', fee_millionths: 3000, fetched_at: 1});
     jest.mocked(relayFetch).mockResolvedValueOnce(noDirection as never);
@@ -298,16 +243,15 @@ describe('fetchConvertQuote — the venue verbatim + a separate impact measureme
     expect(q.fetchedAtMs).toBe(1_000); // fetched_at seconds → ms, the venue-read instant
   });
 
-  test('V8: a cefi venue gets NO reference quote — one call per keystroke, impact unmeasured (not faked)', async () => {
+  test('V8: a cefi venue gets one call — the same one-call rule as every other kind', async () => {
     const cefi: VenueEntry = {venue_id: 'cefi-x', display_name: 'CeFi X', kind: 'cefi', endpoint: 'https://api.cefi.example', pair_ledgers: [ICP_LEDGER, VCHF_LEDGER], testnet: false, disclosure_key: 'cefix'};
     jest.mocked(relayFetch).mockResolvedValueOnce(swapRes('100000000', '190000000') as never);
-    const q = await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000', {venue: cefi});
-    expect(q.impactBps).toBeNull(); // no curve to measure against — the UI shows no impact line
-    expect(jest.mocked(relayFetch).mock.calls.length).toBe(1); // never a second quote for impact
+    await fetchConvertQuote('http://relay', ICP_LEDGER, VCHF_LEDGER, '100000000', {venue: cefi});
+    expect(jest.mocked(relayFetch).mock.calls.length).toBe(1); // never a second quote for a derived figure
   });
 
   test('V8: executing without a published direction fails closed (no guessed zero_for_one)', async () => {
-    const math = {amountIn: '100000000', grossOut: '190000000', minOut: '188000000', netOut: '189990000', inFee: '10000', outFee: '10000', slippageBps: 100, impactBps: null, impactWarn: false};
+    const math = {amountIn: '100000000', grossOut: '190000000', minOut: '188000000', netOut: '189990000', inFee: '10000', outFee: '10000', slippageBps: 100};
     await expect(prepareConvertRecord({
       secretHex: '00'.repeat(32),
       relayUrl: 'http://relay',
@@ -372,23 +316,36 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     const out = hydrateConvertStore(JSON.parse(JSON.stringify({abc123: rec})));
     expect(out).toEqual({abc123: rec});
   });
-  test('corrupt storage yields null — never a thrown error, never a half-record', () => {
+  test('corrupt RECORDS are dropped per-record — never a thrown error, never a half-record, never a bricked store', () => {
+    // 2026-09-11 honesty fix: this used to pin all-or-nothing hydration — one bad record nulled
+    // the WHOLE store (and, on a legacy key, destroyed the source). Salvage is per-record now:
+    // each corrupt record below is dropped and nothing else is lost.
     const rec = record();
-    for (const bad of [
-      null,
-      [],
-      'x',
-      {a: 'nope'},
+    for (const bad of [null, [], 'x', {a: 'nope'}]) {
+      expect(hydrateConvertStore(bad)).toEqual({}); // nothing salvageable — an empty working set
+    }
+    const oneBad = [
       {abc123: {...rec, legs: undefined}},
       {abc123: {...rec, legs: rec.legs.slice(0, 1)}}, // two-leg trade minus one leg is not a record
       {abc123: {...rec, step: 'weird'}},
       {abc123: {...rec, failureCode: 'nope'}},
       {otherId: rec}, // record id must match its key
       {abc123: {...rec, createdAtMs: '1'}},
-      {abc123: {...rec, legs: [], }}, // empty legs = CeFi shape, which requires providerRef
-    ]) {
-      expect(hydrateConvertStore(bad)).toBeNull();
+      {abc123: {...rec, legs: []}}, // empty legs = CeFi shape, which requires providerRef
+    ];
+    for (const bad of oneBad) {
+      expect(hydrateConvertStore(bad)).toEqual({}); // the corrupt record alone is dropped
+      expect(salvageConvertStore(bad).dropped).toBe(1);
     }
+    // The money-adjacent core of the fix: one corrupt record among several kills ONLY itself.
+    const mixed = {
+      good1: record({id: 'good1'}),
+      abc123: {...rec, step: 'weird'},
+      good2: record({id: 'good2'}),
+    };
+    const out = salvageConvertStore(mixed);
+    expect(Object.keys(out.records).sort()).toEqual(['good1', 'good2']);
+    expect(out.dropped).toBe(1);
   });
   test('a record naming a venue this registry does not know is KEPT, not discarded', () => {
     // A downgrade can read a v2 store written by a newer build that knew more venues. Dropping the
@@ -406,7 +363,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     // re-arm. The refusal is read-level only — the persisted store is never nuked: a load
     // reads the store as empty and leaves the bytes on disk untouched.
     for (const step of ['quote', 'confirming'] as const) {
-      expect(hydrateConvertStore({abc123: record({step})})).toBeNull();
+      expect(hydrateConvertStore({abc123: record({step})})).toEqual({}); // dropped by salvage
     }
     // Every step a legs>0 record may legitimately sit at still round-trips…
     for (const step of ['approving', 'approved', 'swapping', 'settling', 'pending_withdrawal', 'done', 'failed_refunded', 'stuck'] as const) {
@@ -420,6 +377,48 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     await AsyncStorage.setItem(`dpay.convert.v2.${PUB}`, poisoned);
     expect(await loadConvertRecords(PUB)).toEqual({});
     expect(await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`)).toBe(poisoned);
+  });
+  test('a legs==0 record at an IC-driver step is REJECTED — the provider driver can never advance it', () => {
+    // The mirror hole of the quadrant above: a legless record parked at approving/swapping/
+    // settling (…) carries only a providerRef, but the provider driver's transition matrix
+    // never touches IC steps and the IC executor has no legs to submit — the resume engine
+    // would arm an eternal 10 s no-op poll. Malformed-by-construction → dropped by salvage,
+    // same as any other corrupt record.
+    for (const step of ['quote', 'confirming', 'approving', 'approved', 'swapping', 'settling', 'pending_withdrawal', 'failed_refunded', 'stuck'] as const) {
+      expect(hydrateConvertStore({abc123: record({step, legs: [], providerRef: {orderId: 'ocp-7'}})})).toEqual({});
+    }
+  });
+  test('a legs>0 record at a PROVIDER-only step is REJECTED — the IC executor can never advance it', () => {
+    // The closing mirror: a legs-bearing record parked in the provider vocabulary (every step
+    // except the shared terminal `done`) is driverless from the other side — the provider
+    // driver only picks legless records and the IC executor's transition set never visits
+    // those steps. Same eternal no-op poll, same refusal. `done` stays legal: it is the one
+    // terminal BOTH drivers share (a settled legs>0 record lives there).
+    for (const step of ['awaiting_user_authorization', 'awaiting_deposit', 'provider_processing', 'quote_expired', 'provider_refunded'] as const) {
+      expect(hydrateConvertStore({abc123: record({step})})).toEqual({}); // legs intact (2) → dropped
+    }
+    const settled = record({step: 'done'});
+    expect(hydrateConvertStore(JSON.parse(JSON.stringify({abc123: settled})))).toEqual({abc123: settled});
+  });
+  test('a poisoned SCOPED store is salvaged per-record: valid records load, bytes stay until the next save rewrites clean', async () => {
+    // The pre-fix behavior this replaces: poisoned scoped bytes bricked the store (load read
+    // {} forever) and the first saveConvertRecord then OVERWROTE the siblings with the one new
+    // record — their bytes died with the corruption. Salvage keeps every sibling in the working
+    // set; a load rewrites nothing (the bytes stay recoverable on disk); the next save rebuilds
+    // the store clean around the survivors — the corrupt record's bytes are the only casualty.
+    const PUB = 'ee'.repeat(32);
+    const good = record({id: 'good1'});
+    const poisoned = JSON.stringify({good1: good, abc123: record({step: 'quote'})});
+    await AsyncStorage.setItem(`dpay.convert.v2.${PUB}`, poisoned);
+    expect(await loadConvertRecords(PUB)).toEqual({good1: good}); // the sibling survives the poison
+    expect(await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`)).toBe(poisoned); // load rewrites nothing
+    const {saveConvertRecord} = await import('../convert');
+    await saveConvertRecord(PUB, record({id: 'fresh'}));
+    const after = await loadConvertRecords(PUB);
+    expect(Object.keys(after).sort()).toEqual(['fresh', 'good1']);
+    // Clean bytes now: the store on disk is exactly the salvaged working set + the new record —
+    // the corrupt record's bytes are gone (structural equality; hydration rebuilds field order).
+    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).toEqual(after);
   });
   test('a CeFi-shaped record — empty legs + providerRef — round-trips', () => {
     const rec = record({
@@ -548,10 +547,56 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     expect(await loadConvertRecords('dd'.repeat(32))).toEqual({});
     expect(await AsyncStorage.getItem('dpay.convert.v2')).toBeNull();
   });
+  test('a PARTIALLY corrupt legacy v1 store: valid records migrate, the v1 KEY SURVIVES on disk', async () => {
+    // One unreadable record must not destroy its siblings NOR delete the source. The valid
+    // records are copied into the scoped store; because salvage was not total, the legacy key
+    // STAYS on disk (data preserved for manual recovery) — never removed after a partial copy.
+    const PUB = 'aa'.repeat(32);
+    await AsyncStorage.setItem('dpay.convert.v1', JSON.stringify({
+      good1: legacyRecord({id: 'good1'}),
+      bad1: legacyRecord({id: 'bad1', inLedger: undefined}),
+    }));
+    const loaded = await loadConvertRecords(PUB);
+    expect(Object.keys(loaded)).toEqual(['good1']);
+    expect(loaded.good1?.legs).toHaveLength(2);
+    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).toEqual(loaded); // valid records copied
+    expect(await AsyncStorage.getItem('dpay.convert.v1')).not.toBeNull(); // source preserved — salvage was not total
+  });
+  test('a PARTIALLY corrupt unscoped v2 store: valid records adopt, the unscoped KEY SURVIVES on disk', async () => {
+    const PUB = 'aa'.repeat(32);
+    const good = record({id: 'good1'});
+    await AsyncStorage.setItem('dpay.convert.v2', JSON.stringify({good1: good, abc123: {...record(), step: 'weird'}}));
+    expect(await loadConvertRecords(PUB)).toEqual({good1: good});
+    expect(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).toEqual({good1: good});
+    expect(await AsyncStorage.getItem('dpay.convert.v2')).not.toBeNull(); // kept — salvage was not total
+  });
+  test('BOTH legacy sources fold in ONE pass: v1 migrated first, unscoped v2 overlays on id collision', async () => {
+    // The pre-fix hole: a non-empty unscoped v2 store returned early and orphaned the v1 key —
+    // its records were never migrated and never would be (a scoped store now existed). One
+    // hydration pass folds both sources: v1 (the older generation) first, unscoped v2
+    // OVERLAYING it where ids collide (the newer generation wins), one scoped write, both keys
+    // retired — a second identity still inherits nothing.
+    const PUB = 'aa'.repeat(32);
+    await AsyncStorage.setItem('dpay.convert.v1', JSON.stringify({
+      old1: legacyRecord({id: 'old1'}),
+      shared: legacyRecord({id: 'shared', approveEnvelopeHex: 'v1env'}),
+    }));
+    const sharedV2 = record({id: 'shared', step: 'settling'});
+    await AsyncStorage.setItem('dpay.convert.v2', JSON.stringify({shared: sharedV2, unscoped1: record({id: 'unscoped1'})}));
+    const loaded = await loadConvertRecords(PUB);
+    expect(Object.keys(loaded).sort()).toEqual(['old1', 'shared', 'unscoped1']);
+    expect(loaded.shared).toEqual(sharedV2); // unscoped v2 wins the collision…
+    expect(loaded.shared?.legs[0]?.envelopeHex).toBe('aacc'); // …not v1's 'v1env' bytes
+    expect(await AsyncStorage.getItem('dpay.convert.v1')).toBeNull();
+    expect(await AsyncStorage.getItem('dpay.convert.v2')).toBeNull();
+    expect(Object.keys(JSON.parse((await AsyncStorage.getItem(`dpay.convert.v2.${PUB}`))!)).sort())
+      .toEqual(['old1', 'shared', 'unscoped1']);
+    expect(await loadConvertRecords('cc'.repeat(32))).toEqual({}); // nobody else inherits them
+  });
 });
 
 describe('prepareConvertRecord — both envelopes built + signed exactly once, up front', () => {
-  test('approve amount = amountIn + input fee, expected_allowance present, 10-min expiry', async () => {
+  test('approve amount = amountIn + input fee, expected_allowance present; legs die at the envelopes\' OWN ingress expiry', async () => {
     jest.mocked(icStampExpiry).mockResolvedValue('1700000000000000000' as never);
     jest.mocked(DpayCore.icpApproveArg).mockResolvedValue('approve-arg-hex' as never);
     jest.mocked(DpayCore.icpDepositAndSwapArg).mockResolvedValue('swap-arg-hex' as never);
@@ -591,7 +636,13 @@ describe('prepareConvertRecord — both envelopes built + signed exactly once, u
     // backing_symbol to 'VCHF' intentionally (issuer token, same rule as VEUR), so the record
     // carries the catalog's own words, never a hardcoded CHF/ledger id.
     expect(rec.outSymbol).toBe(VCHF_DESC.backing_symbol ?? VCHF_DESC.symbol);
-    expect(rec.legs[0]!.expiresAtMs).toBeGreaterThan(Date.now() + (CONVERT_APPROVE_LIFETIME_S - 5) * 1000);
+    // The legs' death is the ENVELOPES' own ingress expiry — the exact stamp icStampExpiry
+    // returned for signing (the mock pins it at 1_700_000_000_000_000_000 ns), ns → ms. The
+    // old pin (now + CONVERT_APPROVE_LIFETIME_S) conflated the 10-min APPROVE-ALLOWANCE death
+    // (pinned above on the approve arg) with the envelopes' ~5-min ingress death — two
+    // different deaths; the never-resubmit boundary now ends exactly at the real submit-death.
+    expect(rec.legs[0]!.expiresAtMs).toBe(1_700_000_000_000);
+    expect(rec.legs[1]!.expiresAtMs).toBe(1_700_000_000_000);
   });
 });
 
@@ -697,6 +748,7 @@ describe('executeConvert — the §4 state machine', () => {
     const final = await executeConvert(record(), d, OPTS);
     expect(final.step).toBe('failed_refunded');
     expect(final.failureCode).toBe('refunded');
+    expect(final.refundTx).toBe('3'); // the row identity — the record's CLAIM on that refund row
   });
 });
 
@@ -747,6 +799,7 @@ describe('executeConvert — expiry-honest recovery (V6 trichotomy arm b)', () =
     const final = await executeConvert(record({step: 'approving', legs: expiredLegs()}), d, OPTS);
     expect(final.step).toBe('failed_refunded');
     expect(final.failureCode).toBe('refunded');
+    expect(final.refundTx).toBe('5'); // the claim — a sibling record's probe will refuse this row
     expect(submitTransfer).not.toHaveBeenCalled();
   });
 
@@ -783,6 +836,67 @@ describe('executeConvert — expiry-honest recovery (V6 trichotomy arm b)', () =
   });
 });
 
+// --- 2026-09-11: the refund match is CONSTRAINED ---------------------------------------------------
+// A refund returns the user's OWN input asset, so an inbound row from the venue proves nothing
+// by itself: the amount must be positive and ≤ amountIn + inFee (the venue cannot refund more
+// than it took), and a row another record already claimed as ITS refund settles exactly one
+// record — one ledger row, one conversion, on both sides of the venue's ledger traffic.
+describe('the constrained refund match', () => {
+  const refundProbe = async (rows: unknown[], excludeRefundTx?: ReadonlySet<string>) => {
+    jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
+      (String(path).includes('currency=8') ? rowsRes(rows) : rowsRes([])) as never);
+    return probeConvertSettlement({
+      relayUrl: 'http://r', publicHex: 'pub', myPrincipalLower: myPrincipal,
+      record: record({step: 'settling'}), excludeRefundTx,
+    });
+  };
+
+  test('a plausible refund matches: positive and ≤ amountIn + inFee (the ceiling itself matches)', async () => {
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100010000', currency: 8, block: 5}]))
+      .toEqual({kind: 'refund', tx: '5'}); // exactly amountIn + inFee — the most the venue took
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: 6}]))
+      .toEqual({kind: 'refund', tx: '6'}); // the plain full refund
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '1', currency: 8, block: 7}]))
+      .toEqual({kind: 'refund', tx: '7'}); // a partial refund is still a refund
+  });
+
+  test('an over-amount / zero / unparseable / amountless inbound from the venue is NOT this record\'s refund', async () => {
+    // amountIn + inFee = 100_010_000; one unit over that ceiling is some other transfer.
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '100010001', currency: 8, block: 8}])).toBeNull();
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: '0', currency: 8, block: 9}])).toBeNull();
+    expect(await refundProbe([{from: POOL, to: myPrincipal, amount: 'NaN', currency: 8, block: 10}])).toBeNull();
+    expect(await refundProbe([{from: POOL, to: myPrincipal, currency: 8, block: 11}])).toBeNull(); // no amount at all
+  });
+
+  test('a refund row another record already claimed as ITS refund is skipped — one row, one record', async () => {
+    const rows = [
+      {from: POOL, to: myPrincipal, amount: '100000000', currency: 8, block: 5},
+      {from: POOL, to: myPrincipal, amount: '99999999', currency: 8, block: 6},
+    ];
+    expect(await refundProbe(rows)).toEqual({kind: 'refund', tx: '5'}); // unclaimed: the row matches
+    expect(await refundProbe(rows, new Set(['5']))).toEqual({kind: 'refund', tx: '6'}); // claimed → the free sibling row
+    expect(await refundProbe([rows[0]], new Set(['5']))).toBeNull(); // ONLY the claimed row exists → stays unknown
+  });
+
+  test('executor level: an over-amount inbound does NOT flip a probing record to refunded — it stays the honest unknown', async () => {
+    const d = {secretHex: 'sec', publicHex: 'pub', relayUrl: 'http://r', onUpdate: jest.fn()};
+    jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
+    jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
+      (String(path).includes('currency=8')
+        ? rowsRes([{from: POOL, to: myPrincipal, amount: '200000000', currency: 8, timestamp: 3}])
+        : rowsRes([])) as never);
+    const final = await executeConvert(record({
+      step: 'swapping',
+      legs: [
+        {...record().legs[0]!, expiresAtMs: Date.now() - 60_000},
+        {...record().legs[1]!, expiresAtMs: Date.now() - 60_000},
+      ],
+    }), d, OPTS);
+    expect(final.step).toBe('stuck'); // NOT failed_refunded — the venue cannot refund more than it took
+    expect(final.failureCode).toBe('unknown');
+  });
+});
+
 describe('fail-closed copy — all four locales carry it', () => {
   const domains = {en: convertEn, de: convertDe, es: convertEs, fr: convertFr};
   test.each(Object.entries(domains))('%s: counterparty names the venue that was passed in; venue-less copy is honest', (_locale: string, d: typeof convertEn) => {
@@ -807,7 +921,8 @@ describe('fail-closed copy — all four locales carry it', () => {
         d.unavailableBody('pair', 'V'),
         d.quoteSource('now', 'V'),
         d.poolFeeTier('0.30%', 'V'),
-        d.impactUnavailable('V'),
+        d.disclosures.byKey.icpswap('V'),
+        d.disclosures.generic('V'),
         d.swappingBody('V'),
         d.failedSwapBody('why', 'SYM', 'V'),
         d.stuckSigned('1', '2', 'V'),
