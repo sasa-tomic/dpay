@@ -229,12 +229,16 @@ Re-measured 2026-09-10, HEAD `4727a57`:
   `{"till":true,"demo_faucet":true}` (measured 2026-09-10): the 2026-09-10 relay deploy carried
   `d15b596` and the default flip is live. (The pre-deploy "till NOT yet served" note is retired.)
 
-**Verified-clean floor for the next session's review: `eaaa60e`** — full `just verify` GREEN
-(jest 121 suites / 2546, e2e **160/160 GREEN** in one pass, relay 154/154 + the new lean-build
-gate, the agent-feature live suite 163/163), **`just apk` END-TO-END EXIT 0** (signed APK+AAB
-staged, staged-relay probe + check-prod-sol PASS), and `just app` device self-check GREEN
-(DPAY_SELFCHECK PASS, emulator) — the multi-venue build (item 3) plus the default-features
-relay-build gate. Start the next sweep from there.
+**Verified-clean floor for the next session's review: `157b6ea`** — full `just verify` GREEN
+(e2e **162/162 GREEN** in one pass at load ×1.20, check phase incl. typecheck + bridge/aid parity
++ wasm + relay lean-build gate), **`just app` device self-check GREEN on REAL hardware**
+(DPAY_SELFCHECK + DPAY_SOL_SELFCHECK + DPAY_INTL_SELFCHECK PASS, locale=de-DE, Xiaomi M2102J20SG),
+and **`just ondevice` instrumented suite GREEN** on the emulator (launched ad-hoc; note the
+physical Xiaomi refuses test-APK installs with MIUI `INSTALL_FAILED_USER_RESTRICTED`, so
+instrumented runs need the AVD). This floor carries the multi-venue gap-closure (`63f966d`),
+the transaction-log names/messages feature (`52fde41` + flow flips `157b6ea`), and the flow-40
+light baselines (`a431f46`). `just apk` was NOT re-run this session — the last apk-proven floor
+remains `eaaa60e`. Start the next sweep from `157b6ea`.
 
 **One thing to know before running the suite:** `DPAY_E2E_NO_FAILFAST=1` is a trap on this box. It
 keeps launching flows past the first RED, oversubscribes the host, and turns one flake into sixteen
