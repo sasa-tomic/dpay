@@ -31,7 +31,7 @@ export const meta = {
   name: 'names-memo',
   journey: 'pay',
   covers: ['names', 'memo', 'history', 'wire-v2', 'friendly-counterparties', 'review-short-payee'],
-  verifies: 'Alice pays Bob with memo \'coffee\' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex).',
+  verifies: 'Alice pays Bob with memo \'coffee\' → review shows the name + short pubkey + memo (U-F5); Alice\'s history names the row "to Bob" + "coffee" from the DEVICE-SAVED note (rail rows stay name-less; the payee reconciles by nonce).',
   timeoutMs: 20000,
 };
 
@@ -86,21 +86,24 @@ export async function run() {
     const aliceDown = await driver.waitForText('∂75.00', { timeoutMs: 10_000 });
     assert(aliceDown, `payer A balance should be ∂75.00 (∂100 − ∂25) after the settle`);
 
-    // --- A's Recent history: short principal + the memo NONCE (the reconciliation key). ------
-    // IC rail: names died with facade settlement — the history row carries no name, only the
-    // payee's short PRINCIPAL text. The merchant's "coffee" note never rides the rail either: the
-    // memo slot IS the request nonce (the reconciliation key binding this payment to B's request).
-    // Flow 61 pins the same convention from the receive side.
+    // --- A's Recent history: the DEVICE-SAVED NOTE names the row (txNotes, 2026-09-11). ------
+    // The rail itself still carries no name and no human memo (the IC memo slot IS the request
+    // nonce), but A's app saved {k: nonce, who: "Bob", msg: "coffee"} at the moment it signed, so
+    // the payer-side row reads "to Bob" + "coffee" — the memo LINE is the human text, the hex
+    // nonce it replaced stays reachable on the receipt (flow 172). The full principal and the raw
+    // pubkey stay OFF the row, exactly as before. Flow 61 pins the receive side; the rail rows
+    // themselves remain name-less (asserted below via the direct relay query).
     const bobPrincipal = await railPrincipalText(bob.publicHex);
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();
-    assertIncludes(histBody, bobPrincipal.slice(0, 8), 'A history row should show the payee short principal text');
-    assertIncludes(histBody, nonce.slice(0, 8), 'A history row should show the memo nonce prefix (reconciliation key)');
+    assertIncludes(histBody, `to ${PAYEE_NAME}`, 'A history row should show the payee NAME (the device-saved note)');
+    assertIncludes(histBody, MEMO, 'A history row should show the human memo (the device-saved note)');
+    assert(!histBody.includes(nonce.slice(0, 8)), 'the hex nonce prefix must NOT sit on the row any more — the note\'s message replaced it');
     assert(!histBody.includes(bobPrincipal), 'A history must NOT dump the full principal');
     assert(!histBody.includes(bob.publicHex), 'A history must NOT dump the raw 64-char payee pubkey');
-    console.log(`[26-names-memo] ✓ A history: short principal + memo nonce (names died with the facade; the nonce reconciles)`);
+    console.log(`[26-names-memo] ✓ A history: "to Bob" + "coffee" from the device-saved note (rail rows stay name-less; the nonce reconciles on the receipt)`);
 
     // --- B was credited. ---------------------------------------------------------------------
     const bobAfter = await getBalance(relayBaseURL, bob.publicHex, 0);

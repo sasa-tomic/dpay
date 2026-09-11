@@ -10,6 +10,7 @@ import {
   type RailPrepared,
 } from '../services/rail';
 import {DpayNfc} from '../services/native';
+import {saveTxNote} from '../services/txNotes';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
 import {M} from '../i18n';
@@ -263,6 +264,10 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       return;
     }
     advance('exchanging');
+    // Payer-side annotation (services/txNotes), same seam as PayMode.approve: the tap's request
+    // carries the payee's claimed name + human memo, recorded before signing so a crash after
+    // provideWire still leaves the note. Join key = nonceHex = the on-chain memo.
+    void saveTxNote(identity.publicHex, {k: req.nonceHex, who: req.toName || undefined, msg: req.memo || undefined}, Date.now());
     try {
       const prepared = await prepareNfcTransfer(identity.secretHex, {currencies: catalog}, req);
       if (!ctx.isCurrent()) return;

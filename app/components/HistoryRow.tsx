@@ -10,6 +10,7 @@ import {useEscapeToClose} from '../hooks/useHotkeys';
 import {AppModal} from './AppModal';
 import {IconArrowDownLeft, IconArrowUpRight, IconCopy} from './icons';
 import type {Txn} from '../lib/types';
+import type {TxAnnotation} from '../services/txNotes';
 
 // One row's amount in the row's OWN units, dispatched on rail. History is a glanceable surface, so
 // both rails use the COMPACT formatter (trailing zeros trimmed to the asset's floor; "≈"/"<" when a
@@ -54,8 +55,19 @@ function fmtReceiptAmount(t: Txn, catalog: CurrencyDescriptor[], asset: Selectab
 // X6 — the row is PRESSABLE and opens its receipt. `onPress` is required, not optional: a row that
 // only some surfaces can open is the defect this closes (the merchant-reconciliation and dispute
 // path did not exist). Both list surfaces get the opener from `useTxnReceipt` below.
-export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress}: {t: Txn; i: number; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; testPrefix?: string; onPress: (t: Txn) => void}) {
+//
+// `note` is the row's DEVICE-SAVED annotation (services/txNotes + the address book, resolved by
+// the Wallet root): a peer name and/or human message known at payment time, which the rail itself
+// does not carry. Precedence is note-first and the ledger truth is never hidden: a named peer
+// replaces the truncated principal PREFIX in `who`, an annotated message replaces the memo LINE —
+// and the receipt still shows the full principal and the hex reference whatever the note says. A
+// note-less row renders exactly as before this prop existed.
+export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress, note}: {t: Txn; i: number; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; testPrefix?: string; onPress: (t: Txn) => void; note?: TxAnnotation}) {
   const amtTxt = fmtRowAmount(t, catalog, assets);
+  // `''`/absent never override: the store never saves an empty who/msg, but the fallback chain
+  // stays total for any caller-assembled annotation.
+  const whoTxt = note?.who || t.who || '—';
+  const memoTxt = note?.msg || t.memo;
   return (
     <Pressable
       testID={`${testPrefix}-row-${i}`}
@@ -74,14 +86,14 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress}
         {t.dir === 'out' ? <IconArrowUpRight size={16} color={C.sub} /> : <IconArrowDownLeft size={16} color={C.ok} />}
       </View>
       <View style={S.histWhoCol}>
-        <Text style={S.histWho}>{t.dir === 'out' ? M.wallet.ledger.to(t.who || '—') : M.wallet.ledger.from(t.who || '—')}</Text>
+        <Text style={S.histWho}>{t.dir === 'out' ? M.wallet.ledger.to(whoTxt) : M.wallet.ledger.from(whoTxt)}</Text>
         {/* Second line: WHEN, then the memo. The time used to sit to the right of the amount, where
             its own width changes (the hour's 1↔2 digits) pushed the amount sideways — the rule and
             the measurement are on `S.histAmt`. Here its width is absorbed by the flexible column.
             The visual flows (40/84) still MASK it on the Ledger: the digits differ every run. */}
         <View style={S.histSubRow}>
           <Text style={S.histTime} testID={`${testPrefix}-time-${i}`}>{t.time}</Text>
-          {t.memo ? <Text style={S.histMemo} testID={`${testPrefix}-memo-${i}`}>{t.memo}</Text> : null}
+          {memoTxt ? <Text style={S.histMemo} testID={`${testPrefix}-memo-${i}`}>{memoTxt}</Text> : null}
         </View>
       </View>
       <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]} testID={`${testPrefix}-amt-${i}`}>{amtTxt}</Text>
@@ -105,8 +117,11 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress}
 // over an empty value, which in a dispute reads as a value that failed to load.
 
 /** Everything the receipt shows, resolved once so the rendered sheet and the copied text cannot
- *  disagree. Pure. `assets`/`catalog` supply the unit and the asset line, exactly as the row does. */
-function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[]) {
+ *  disagree. Pure. `assets`/`catalog` supply the unit and the asset line, exactly as the row does.
+ *  `note` (optional) is the device-saved annotation; its peer name and message become the Peer and
+ *  Note lines, ADDITIVE to the ledger fields — the account stays the FULL principal and the
+ *  reference stays the hex key, so a dispute never loses the checkable truth to the display name. */
+function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[], note?: TxAnnotation) {
   const asset = assets.find(a => a.id === t.assetId);
   const solana = asset?.protocol === 'solana';
   return {
@@ -118,6 +133,11 @@ function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: Selectable
     // nothing. '' means the ledger recorded no account on that side (an IC mint has no payer, a
     // burn no payee, a Solana batch no unique counterparty), which is said rather than left blank.
     account: t.counterparty || M.receipt.noAccount,
+    // The peer name the DEVICE knew at payment time (request to_name, link label, spay label, or
+    // a saved address-book label — resolved by the caller). '' = none: the line does not render.
+    peer: note?.who || '',
+    // The device-saved message, same rule.
+    noteText: note?.msg || '',
     // The reference is the IC rail's memo. Solana has none, and says which rail fact replaces it.
     reference: solana ? M.receipt.noReferenceSolana : (t.memo || M.receipt.noReferenceIc),
     referenceIsValue: !solana && t.memo.length > 0,
@@ -133,17 +153,18 @@ function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: Selectable
 /** The receipt as PLAIN TEXT — what the copy button puts on the clipboard, and what a merchant
  *  pastes into a dispute. Every line the sheet renders, in the same order; no label is ever emitted
  *  without a value, because the honest-absence sentences ARE the values. */
-export function receiptText(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[]): string {
-  const f = receiptFields(t, catalog, assets);
+export function receiptText(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[], note?: TxAnnotation): string {
+  const f = receiptFields(t, catalog, assets, note);
   const lines = [
     M.receipt.title,
     `${M.receipt.amountLabel}: ${f.amount}`,
     `${M.receipt.assetLabel}: ${f.assetLine}`,
     `${f.partyLabel}: ${f.account}`,
-    `${M.receipt.whenLabel}: ${t.time}`,
-    `${M.receipt.referenceLabel}: ${f.reference}`,
-    `${f.proofLabel}: ${f.proof}`,
   ];
+  // Annotated lines only when the device actually knows them — the same render rule as the sheet.
+  if (f.peer) lines.push(`${M.receipt.peer}: ${f.peer}`);
+  if (f.noteText) lines.push(`${M.receipt.note}: ${f.noteText}`);
+  lines.push(`${M.receipt.whenLabel}: ${t.time}`, `${M.receipt.referenceLabel}: ${f.reference}`, `${f.proofLabel}: ${f.proof}`);
   if (f.status) lines.splice(1, 0, f.status);
   return lines.join('\n');
 }
@@ -168,8 +189,8 @@ function Field({label, value, testID, note = false}: {label: string; value: stri
  * the asset line and the payer's account were all off-surface). One owner, one instance: Wallet
  * holds the selected `Txn` and both lists hand rows to it.
  */
-export function TxnReceipt({t, catalog, assets, onClose}: {t: Txn; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; onClose: () => void}) {
-  const f = receiptFields(t, catalog, assets);
+export function TxnReceipt({t, catalog, assets, onClose, note}: {t: Txn; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; onClose: () => void; note?: TxAnnotation}) {
+  const f = receiptFields(t, catalog, assets, note);
   const {copied, copy} = useCopyFeedback();
   useEscapeToClose(onClose);
   return (
@@ -184,15 +205,23 @@ export function TxnReceipt({t, catalog, assets, onClose}: {t: Txn; catalog: Curr
           {f.status ? <Text testID="txn-receipt-status" style={S.receiptNote}>{f.status}</Text> : null}
           <ScrollView style={S.pickScroll}>
             <Field label={f.partyLabel} value={f.account} testID="txn-receipt-account" note={!t.counterparty} />
+            {/* Peer/Note render ONLY when the device-saved annotation exists (the receipt's own
+                rule: no label over an absent value). The Note renders in the note style — it is
+                display text, not a checkable value; Peer stays selectable like the account. */}
+            {f.peer ? <Field label={M.receipt.peer} value={f.peer} testID="txn-receipt-peer" /> : null}
+            {f.noteText ? <Field label={M.receipt.note} value={f.noteText} testID="txn-receipt-note" note /> : null}
             <Field label={M.receipt.whenLabel} value={t.time} testID="txn-receipt-when" />
             <Field label={M.receipt.referenceLabel} value={f.reference} testID="txn-receipt-ref" note={!f.referenceIsValue} />
             <Field label={f.proofLabel} value={f.proof} testID="txn-receipt-proof" />
-            <Text style={S.receiptSource}>{M.receipt.source}</Text>
+            {/* The source line is CONDITIONAL now that annotations exist: it claims every value
+                came from the ledger, which is only true when nothing above was device-saved. An
+                annotated receipt says so instead — the same honesty rule, extended. */}
+            <Text style={S.receiptSource}>{f.peer || f.noteText ? M.receipt.sourceAnnotated : M.receipt.source}</Text>
           </ScrollView>
           <Pressable
             testID="btn-txn-receipt-copy"
             style={[S.primaryWide, S.depositCopy]}
-            onPress={() => { void copy(receiptText(t, catalog, assets)); }}
+            onPress={() => { void copy(receiptText(t, catalog, assets, note)); }}
             accessibilityRole="button"
             accessibilityLabel={M.receipt.copy}
             accessibilityHint={M.receipt.copyHint}

@@ -16,6 +16,8 @@ export const receiptDe: ReceiptMessages = {
   whenLabel: 'Wann',
   assetLabel: 'Asset',
   referenceLabel: 'Referenz',
+  peer: 'Gegenstelle',
+  note: 'Notiz',
   blockLabel: 'Ledger-Block',
   signatureLabel: 'Transaktionssignatur',
 
@@ -27,4 +29,5 @@ export const receiptDe: ReceiptMessages = {
   copied: 'Kopiert ✓',
   copyHint: 'Kopiert alle Zeilen oben als Text zum Einfügen oder Versenden',
   source: 'Jeder Wert oben wurde aus dem Ledger gelesen.',
+  sourceAnnotated: 'Werte aus dem Ledger gelesen · Name und Notiz wurden beim Tätigen der Zahlung auf diesem Gerät gespeichert.',
 };

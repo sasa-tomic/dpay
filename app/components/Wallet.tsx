@@ -16,11 +16,14 @@ import type {AssetId, Identity, NfcStatus, PayIntent, Txn} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
+import {loadAddressBook} from '../services/addressBook';
+import {annotateTxn} from '../services/txNotes';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
+import {useTxNotes} from '../hooks/useTxNotes';
 import {useConvertResumeEngine} from '../hooks/useConvertResumeEngine';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
@@ -340,6 +343,51 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
   // last known rows stay, marked stale (`sol-history-stale`) instead of rendering as current.
   const {history: solHistory, dropped: solDropped, failure: solHistoryFailure, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(history, solHistory), [history, solHistory]);
+
+  // ── Device-side row annotations (names + messages in the log) ───────────────────────────────
+  // The ledger stays TRUTH and stays untouched: a row's principal, memo hex and signature are what
+  // the rails actually said. The NAME the payer knew and the MESSAGE they sent exist only on this
+  // device — services/txNotes, written at each payment's sign/send seam (PayMode/NfcTap/SolPayMode/
+  // ReceiveMode). Here they resolve ON TOP of the merged history and ride down to Ledger, HomeTab
+  // and the receipt as an optional annotation; a row with none renders exactly as before.
+  const txNotes = useTxNotes(identity.publicHex);
+  // The saved-address book's labels are the OTHER name source: an address the user saved while
+  // sending (SendSheet/SolanaWithdrawSheet) names future rows to that counterparty. The book is
+  // per-asset AsyncStorage, so a reverse address→label map is loaded for exactly the assets the
+  // history shows. Best-effort: an unreadable book reads as no labels (addressBook contract).
+  const [addrLabels, setAddrLabels] = useState<ReadonlyMap<string, ReadonlyMap<string, string>>>(() => new Map());
+  const histAssetIds = ledgerHistory.length === 0 ? '' : Array.from(new Set(ledgerHistory.map(t => t.assetId))).sort().join('\u0000');
+  useEffect(() => {
+    let alive = true;
+    const ids = histAssetIds === '' ? [] : histAssetIds.split('\u0000');
+    void (async () => {
+      const next = new Map<string, ReadonlyMap<string, string>>();
+      for (const id of ids) {
+        const book = await loadAddressBook(id);
+        if (book.length === 0) continue;
+        const byAddr = new Map<string, string>();
+        for (const entry of book) if (!byAddr.has(entry.address)) byAddr.set(entry.address, entry.label);
+        next.set(id, byAddr);
+      }
+      if (!alive) return;
+      // Content-compare before setting: the effect also re-runs when a fresh history array arrives
+      // (so a label saved moments ago is picked up), and an unchanged book must not re-render.
+      setAddrLabels(prev => {
+        const same = prev.size === next.size
+          && [...next].every(([id, m]) => {
+            const p = prev.get(id);
+            return p != null && p.size === m.size && [...m].every(([a, l]) => p.get(a) === l);
+          });
+        return same ? prev : next;
+      });
+    })();
+    return () => { alive = false; };
+  }, [histAssetIds, ledgerHistory]);
+  // The ONE resolver both history surfaces and the receipt share (the pure precedence lives in
+  // services/txNotes.ts#annotateTxn — unit-tested there). Name precedence: the payment-time note
+  // first (what the user SAW when they paid), then the saved-address label; a row with neither
+  // keeps its principal — the honest thing a rail with no names can say.
+  const noteFor = useCallback((t: Txn) => annotateTxn(t, txNotes, addrLabels), [txNotes, addrLabels]);
 
   // One-time token-account (ATA) setup — Wallet-owned so BOTH entry surfaces (Receive "My address"
   // gate + Pay "Send to address"/scan gates) share one busy/err state + one handler. The handler is
@@ -1144,6 +1192,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
               homeAsset={homeAsset}
               online={online}
               history={ledgerHistory}
+              noteFor={noteFor}
               // Scan pins the sub-mode, so the camera is live in ONE tap from a cold start whatever
               // the Pay tab was last left showing (a `send` sub-mode left over from a previous
               // session would otherwise make the till gesture two taps — the exact regression the
@@ -1292,7 +1341,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
               // alone. Withheld while locked, exactly as the Pay pointer's button is.
               onSwitchAsset={payRailSwitch}
             />
-          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} onOpenReceipt={setReceiptTxn} />}
+          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row
@@ -1347,7 +1396,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
       {/* X6 — the receipt for one transaction row. Mounted at the ROOT (see `receiptTxn` above),
           so the overlay covers the whole app column whichever list opened it. */}
       {receiptTxn ? (
-        <TxnReceipt t={receiptTxn} catalog={catalog} assets={assets} onClose={() => setReceiptTxn(null)} />
+        <TxnReceipt t={receiptTxn} catalog={catalog} assets={assets} note={noteFor(receiptTxn)} onClose={() => setReceiptTxn(null)} />
       ) : null}
       {/* An incoming payment link that cannot be paid. It states WHICH asset/chain the link asked
           for and the one action the payer can take (founder hard rule: every dead end gives a

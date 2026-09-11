@@ -465,9 +465,19 @@ Nothing from the swarm's defect inventory remains open.
   literal is deleted from the client — the provider endpoint lives in relay deploy config only
   (`DPAY_SOLANA_RPC_URL`), never in the app bundle. Pre-R2 commits keep the old literals in git
   history, so rotation before any repo publication stays the founder's call.
-- **History names stay PRINCIPAL-prefix by design** post-cutover (ledger memo is the frozen
+- ~~**History names stay PRINCIPAL-prefix by design** post-cutover (ledger memo is the frozen
   16-byte nonce reconciliation key — extending it was REJECTED); a signed name registry is a
-  founder follow-up, NOT in-tree.
+  founder follow-up, NOT in-tree.~~ **SUPERSEDED for the payer/request side (2026-09-11):** the
+  wire stays frozen — the IC memo remains the 16-byte nonce reconciliation key and SOL on-chain
+  memos are never read back — but history rows are now named from DEVICE-SAVED annotations
+  (`app/services/txNotes.ts` + `app/hooks/useTxNotes.ts` in `Wallet`, written at the six payment
+  seams: PayMode wire/link + OCP till, NfcTap payer, ReceiveMode payee request, SolPayMode spay
+  + SOL OCP; keyed by IC nonce hex / SOL signature, cap 500, per-identity AsyncStorage). The
+  payer's log shows the request's `to_name`/human memo, the payee's log shows the typed request
+  message, and receipts keep the full principal + hex reference while adding honest Peer/Note
+  lines (jest suites + flow 172). **Payee-side payer names stay impossible by design** (the name
+  lives on the payer's device, never on the rail; incoming rows keep the payer's principal
+  prefix) and a signed name registry remains a founder follow-up, not in-tree.
 - ~~**Default-tab/first-impression** — landing on the Pay scanner is the intended default.~~
   **REVERSED by the founder 2026-09-08**: the app opens on Home, Home is a real overview, Pay is one
   tap away. Reasoning: [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md)

@@ -16,6 +16,8 @@ export const receiptEs: ReceiptMessages = {
   whenLabel: 'Cuándo',
   assetLabel: 'Activo',
   referenceLabel: 'Referencia',
+  peer: 'Contraparte',
+  note: 'Nota',
   blockLabel: 'Bloque de la red',
   signatureLabel: 'Firma de la transacción',
 
@@ -27,4 +29,5 @@ export const receiptEs: ReceiptMessages = {
   copied: 'Copiado ✓',
   copyHint: 'Copia todas las líneas de arriba como texto para pegar o enviar',
   source: 'Cada valor de arriba se leyó de la red.',
+  sourceAnnotated: 'Valores leídos de la red · el nombre y la nota se guardaron en este dispositivo al hacer el pago.',
 };

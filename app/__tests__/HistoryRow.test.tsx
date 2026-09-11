@@ -57,9 +57,16 @@ function mount(t: Txn, i = 0, testPrefix?: string, onPress: (t: Txn) => void = (
   return tree;
 }
 
-function mountReceipt(t: Txn): renderer.ReactTestRenderer {
+function mountReceipt(t: Txn, note?: {who?: string; msg?: string}): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
-  act(() => { tree = renderer.create(<TxnReceipt t={t} catalog={CATALOG} assets={ASSETS} onClose={() => {}} />); });
+  act(() => { tree = renderer.create(<TxnReceipt t={t} catalog={CATALOG} assets={ASSETS} note={note} onClose={() => {}} />); });
+  return tree;
+}
+
+/** Mount a ROW with a device-saved annotation (the Wallet root resolves it; the row only renders). */
+function mountNoted(t: Txn, note: {who?: string; msg?: string}, i = 0): renderer.ReactTestRenderer {
+  let tree!: renderer.ReactTestRenderer;
+  act(() => { tree = renderer.create(<HistoryRow t={t} i={i} catalog={CATALOG} assets={ASSETS} note={note} onPress={() => {}} />); });
   return tree;
 }
 
@@ -188,5 +195,106 @@ describe('TxnReceipt — the merchant-reconciliation surface', () => {
     // No label may be emitted with nothing after it — that is the "blank labelled row" this
     // surface exists to avoid, in the text a merchant pastes into a dispute.
     for (const line of ic.split('\n')) expect(line).not.toMatch(/:\s*$/);
+  });
+});
+
+// ── Device-saved annotations (txNotes) ────────────────────────────────────────────────────────
+// The rail carries no name and no human message (the IC memo is the frozen nonce hex), so both can
+// only come from the device's own record of the moment it paid. The precedence under test:
+// the note beats the row's principal prefix / hex memo, and a note-less row is UNCHANGED.
+const NONCE_HEX = '9f2c00112233445566778899aabbccdd';
+const FULL_PRINCIPAL = 'nsjm5-jybxu-3hbey-npic6-nbmjf-3ub7i-6zwzc-wibfz-y6dbd-yhqly-xae';
+const PRINCIPAL_PREFIX = 'nsjm5-jy';
+
+describe('HistoryRow — the device-saved annotation replaces display text, never ledger truth', () => {
+  test('note.who replaces the truncated principal PREFIX in the who line', () => {
+    const tree = mountNoted(txn('ic:0', '2500', TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX}), {who: 'Bob'});
+    const all = texts(tree);
+    expect(all).toContain(M.wallet.ledger.to('Bob'));
+    expect(all).not.toContain(M.wallet.ledger.to(PRINCIPAL_PREFIX));
+    act(() => { tree.unmount(); });
+  });
+
+  test('note.msg replaces the hex nonce as the memo LINE (the hex stays on the receipt)', () => {
+    const tree = mountNoted(txn('ic:0', '2500', TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX}), {msg: 'coffee'});
+    const all = texts(tree);
+    expect(all).toContain('coffee');
+    expect(all).not.toContain(NONCE_HEX);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a note with only a message keeps the row\'s own counterparty line', () => {
+    const tree = mountNoted(txn('ic:0', '2500', TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX}), {msg: 'coffee'});
+    expect(texts(tree)).toContain(M.wallet.ledger.to(PRINCIPAL_PREFIX));
+    act(() => { tree.unmount(); });
+  });
+
+  test('without a note the row renders exactly its ledger truth (fallbacks intact)', () => {
+    const tree = mount(txn('ic:0', '2500', TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX}));
+    const all = texts(tree);
+    expect(all).toContain(M.wallet.ledger.to(PRINCIPAL_PREFIX));
+    expect(all).toContain(NONCE_HEX); // the reconciliation reference, visible in the log
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('TxnReceipt — Peer and Note lines are ADDITIVE to the checkable ledger fields', () => {
+  const noted = () => txn('ic:0', '2500', TS_NEW, {
+    dir: 'out', who: PRINCIPAL_PREFIX, memo: NONCE_HEX, counterparty: FULL_PRINCIPAL, ledgerRef: '81062',
+  });
+
+  test('a note renders Peer + Note; the account stays the FULL principal and the reference stays hex', () => {
+    const tree = mountReceipt(noted(), {who: 'Bob', msg: 'coffee'});
+    const all = texts(tree);
+    // Under jest the RN Modal mock renders its subtree more than once, so presence is asserted
+    // on the DE-DUPLICATED testID set (the house style: `texts`-contains everywhere else).
+    const ids = [...new Set(
+      tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)),
+    )];
+    expect(ids).toContain('txn-receipt-peer');
+    expect(ids).toContain('txn-receipt-note');
+    // Peer/Note carry the device-saved context under their own anchors.
+    expect(all).toContain('Bob');
+    expect(all).toContain('coffee');
+    // The ledger truth they sit beside is untouched — this is the dispute surface.
+    expect(all).toContain(FULL_PRINCIPAL);
+    expect(all).toContain(NONCE_HEX);
+    expect(all).toContain('81062');
+    // An annotated receipt must not claim the ledger said the name — the conditional footer.
+    expect(all).toContain(M.receipt.sourceAnnotated);
+    expect(all).not.toContain(M.receipt.source);
+    act(() => { tree.unmount(); });
+  });
+
+  test('without a note there is no Peer line, no Note line, and the plain source footer stands', () => {
+    const tree = mountReceipt(noted());
+    const ids = [...new Set(
+      tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)),
+    )];
+    expect(ids).not.toContain('txn-receipt-peer');
+    expect(ids).not.toContain('txn-receipt-note');
+    expect(texts(tree)).toContain(M.receipt.source);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a name-only note renders Peer but not Note (no label over an absent value)', () => {
+    const tree = mountReceipt(noted(), {who: 'Bob'});
+    const ids = [...new Set(
+      tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)),
+    )];
+    expect(ids).toContain('txn-receipt-peer');
+    expect(ids).not.toContain('txn-receipt-note');
+    expect(tree.root.findAllByProps({testID: 'txn-receipt-note'})).toHaveLength(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('receiptText carries the same Peer/Note lines — what a merchant pastes matches the sheet', () => {
+    const text = receiptText(noted(), CATALOG, ASSETS, {who: 'Bob', msg: 'coffee'});
+    expect(text).toContain(`${M.receipt.peer}: Bob`);
+    expect(text).toContain(`${M.receipt.note}: coffee`);
+    // And the checkable truth is still in the copied text, not just on the screen.
+    expect(text).toContain(FULL_PRINCIPAL);
+    expect(text).toContain(NONCE_HEX);
+    for (const line of text.split('\n')) expect(line).not.toMatch(/:\s*$/);
   });
 });

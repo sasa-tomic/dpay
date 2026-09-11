@@ -18,6 +18,7 @@ import {classifyScan, coinDisplayOfScheme} from '../lib/scan';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
 import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+import {saveTxNote} from '../services/txNotes';
 import type {SelectableAsset} from '../config/assets';
 import {type HomeCurrency, type RailBalances} from '../config/currency';
 import {FundedSiblingRail} from './FundedSiblingRail';
@@ -486,6 +487,13 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     setErr(null);
     try {
       const sig = await sendSolanaPay(identity.secretHex, {recipient: request.recipient, splToken: request.splToken, amount: rawAmount, references: request.references, memo: request.memo}, signal, s => { broadcast.sig = s; });
+      // Payer-side annotation (services/txNotes): the signature IS the row's join key (a SOL row's
+      // identity), so record the URI's label/message the moment the send hands it back — the ONLY
+      // place the association exists. Never re-derived on read: parsing on-chain memos for
+      // incoming rows would re-fetch every transaction per history tick (flow 160's forbidden
+      // path). `message` is the human text the payer saw; `memo` is the same text when the URI
+      // carried only the on-chain memo — one message is saved, never both.
+      void saveTxNote(identity.publicHex, {k: sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined}, Date.now());
       // Refresh the account that actually moved — the REQUEST's mint, not the selection's.
       if (isSol) onSent(); else onSentToken(request.splToken);
       setSpayDone({amount, who, signature: sig, note: null});
@@ -496,6 +504,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       if (broadcast.sig !== null) {
         // The network accepted the transaction; only the confirmation is missing. Definitively
         // NOT-sent is off the table, so this is the honest pending screen with the signature.
+        void saveTxNote(identity.publicHex, {k: broadcast.sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined}, Date.now());
         if (isSol) onSent(); else onSentToken(request.splToken);
         setSpayDone({amount, who, signature: broadcast.sig, note: M.pay.spay.pendingNote});
         setPhase('spay-done');
@@ -606,6 +615,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     try {
       const sig = await sendSol(identity.secretHex, target.to, BigInt(target.rawAmount), signal, s => { broadcast.sig = s; });
+      // Same payer-side annotation as approveSpay, keyed by the signature: a till's claimed name
+      // is the only context this rail-side send still has at hand.
+      void saveTxNote(identity.publicHex, {k: sig, who: target.details.claimedMerchantName || undefined}, Date.now());
       return {kind: 'settled', txId: sig, reference: M.pay.ocp.ref.solTransaction(sig)};
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

@@ -16,6 +16,8 @@ export const receiptFr: ReceiptMessages = {
   whenLabel: 'Quand',
   assetLabel: 'Actif',
   referenceLabel: 'Référence',
+  peer: 'Correspondant',
+  note: 'Note',
   blockLabel: 'Bloc du registre',
   signatureLabel: 'Signature de la transaction',
 
@@ -27,4 +29,5 @@ export const receiptFr: ReceiptMessages = {
   copied: 'Copié ✓',
   copyHint: 'Copie toutes les lignes ci-dessus sous forme de texte à coller ou à envoyer',
   source: 'Chaque valeur ci-dessus a été lue dans le registre.',
+  sourceAnnotated: 'Valeurs lues dans le registre · le nom et la note ont été enregistrés sur cet appareil lors du paiement.',
 };

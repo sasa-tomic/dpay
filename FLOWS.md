@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **162 flows**
-> (161 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **163 flows**
+> (162 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (9) · nfc (12) · system (32) · tour (6)
+wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (9) · nfc (12) · system (33) · tour (6)
 
 ---
 
@@ -93,7 +93,7 @@ wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw
 | 170 | pay-no-convert-cta | The payment surfaces (IC PayMode and the SOL PayMode twin) expose zero conversion entry points — no convert testID and no Convert CTA — conversion stays a standalone wallet action (Accounts tab only). | pay, scan, solana, convert, separation |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
-| 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
+| 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5); Alice's history names the row "to Bob" + "coffee" from the DEVICE-SAVED note (rail rows stay name-less; the payee reconciles by nonce). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
 | 27 | asset-pay | ckBTC pay (faucet-funded at principal): review '0.00050000 BTC' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units. | asset-pay, ckbtc, per-asset-balance, locked-asset-display, ledger-units, review-short-payee |
 | 28 | ckusdc-request | ckUSDC chip + 0.05 amount → request QR encodes currency 2 + 50000 raw (6-dec); readout '0.050000 USDC' (no $0.05). | ckusdc-merchant-create, request-asset-picker, multi-currency, 6-decimal, byte-exact |
 | 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/signed-envelope/ledger-settle on the IC rail (BigInt codec, uleb128 + u128 ledger, decimal strings). | exact-amount, decimal-transport, u64, bigint-codec |
@@ -210,6 +210,7 @@ wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw
 | 164 | relay-failover | R1 ordered relay list: a dead first address is walked past (balance arrives from the second, and the dead origin was really tried), and a 4xx from the first address NEVER fails over (offline eyebrow while the second relay is alive). | relay-multi-address, relay-failover, relay-4xx-no-failover, settings-relay-list |
 | 165 | solana-via-relay | R2 Solana-through-relay: SOL/USDC balances render from the harness relay's proxy (stub upstream hit recorded) with the candidate list DERIVED from the App-installed relay list, and a mid-session re-point to a dead-first list still serves SOL from the second home after a recorded transport failure at the dead one's proxy route. | solana-rpc-proxy, solana-relay-derivation, solana-walk-transport, relay-solana-wire |
 | 17 | scan-cleanup | Pay tab starts gated (0 listeners until "Pay Now"); armed → 1; Pay→Receive→Pay tears down cleanly (no leak; re-mount re-gates then re-arms). | qr-scanner, teardown, unmount, listener-leak, pay-intent-gate |
+| 172 | log-names-messages | Device-saved notes name the transaction log: a paid request shows to_name + human memo on the row and Peer/Note on the receipt beside the full principal and hex reference; a payee-side request shows the typed message but never invents a payer name; a labelled Solana-Pay names its row by signature; an un-annotated transfer keeps principal + hex with no Peer/Note lines. | history, names, memo, txnotes, receipt, activity-feed, solana-pay, honest-copy |
 | 24 | wallet-cleanup | Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties. | asset-cards, labels, symbols |
 | 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's faucet-funded ∂500.00 (B's fresh per-process gateway). | relay-retarget, settings-relay-switch, live-poll |
 | 41 | a11y-census | Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface. | a11y, accessibility, aria |

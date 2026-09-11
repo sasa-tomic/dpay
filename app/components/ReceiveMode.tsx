@@ -12,6 +12,7 @@ import {type HomeCurrency, currencyRails} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId, NfcStatus} from '../lib/types';
 import {qrPayloadToEnvelopeHex, submitAndConfirmIncomingTransfer, confirmIncomingTransfer} from '../services/rail';
+import {saveTxNote} from '../services/txNotes';
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {NfcTap} from './NfcTap';
@@ -201,6 +202,11 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         }
       }
       setReqQr({value: reqB64, rawAmount, currency: selectedCurrency, nonce, nfcHex, nfcExpiry, expiry});
+      // Payee-side annotation (services/txNotes): when the payee typed a memo for this request,
+      // save it keyed by the request nonce (= the on-chain memo) so the INCOMING row can show the
+      // message the moment it settles. Deliberately NO `who` — the counterparty is the payer, and
+      // the IC rail carries no payer name; the row keeps the payer's principal prefix (honest).
+      if (memoVal) void saveTxNote(identity.publicHex, {k: nonce, msg: memoVal}, Date.now());
       setResult(null); setErr(null);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
   }

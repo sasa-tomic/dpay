@@ -29,6 +29,13 @@ export type ReceiptMessages = {
   assetLabel: string;
   /** The payee's reconciliation key — the memo that rode the transfer (IC rail). */
   referenceLabel: string;
+  /** The peer's NAME as this device knew it at payment time (request to_name, link/spay label,
+   *  saved-address label). Rendered only when one exists — the account line above stays the full
+   *  ledger principal whatever this says. */
+  peer: string;
+  /** The human MESSAGE this device saved when the payment was made (the on-chain memo is the
+   *  nonce — this is the request/link/spay text, device-side only). Rendered only when one exists. */
+  note: string;
   /** The IC ledger's own index for this transfer. */
   blockLabel: string;
   /** The Solana transaction's own id. */
@@ -45,6 +52,9 @@ export type ReceiptMessages = {
   copyHint: string;
   /** One line at the foot: where these values came from. */
   source: string;
+  /** The same line for an ANNOTATED receipt — the peer/note lines above were saved on this device
+   *  when the payment was made, and the copy must not claim the ledger said them. */
+  sourceAnnotated: string;
 };
 
 export const receiptEn: ReceiptMessages = {
@@ -59,6 +69,8 @@ export const receiptEn: ReceiptMessages = {
   whenLabel: 'When',
   assetLabel: 'Asset',
   referenceLabel: 'Reference',
+  peer: 'Peer',
+  note: 'Note',
   blockLabel: 'Ledger block',
   signatureLabel: 'Transaction signature',
 
@@ -70,4 +82,5 @@ export const receiptEn: ReceiptMessages = {
   copied: 'Copied ✓',
   copyHint: 'Copies every line above as text you can paste or send',
   source: 'Every value above was read from the ledger.',
+  sourceAnnotated: 'Values read from the ledger · the name and note were saved on this device when the payment was made.',
 };

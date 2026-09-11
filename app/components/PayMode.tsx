@@ -17,6 +17,7 @@ import {cmpRaw} from '../lib/amount';
 import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {AssetId, Identity, PayIntent, NfcStatus} from '../lib/types';
 import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, type RailOutcome, type RailPrepared} from '../services/rail';
+import {saveTxNote} from '../services/txNotes';
 import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
@@ -508,6 +509,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // That is exactly the case in which the provider has NOT been told, so the one submission is
     // still unspent and the claim is worth keeping.
     const hold: {claim: RailPrepared | null} = {claim: null};
+    // Same annotation as the wire/link path in `approve`, at the same last-point-before-signing
+    // seam: for a till the name is the provider's claimedMerchantName (intent.toName), and the
+    // join key is the reference the till will reconcile by (intent.nonceHex = on-chain memo).
+    void saveTxNote(identity.publicHex, {k: r.nonceHex, who: r.toName || undefined, msg: r.memo || undefined}, Date.now());
     setBusy(true);
     setErr(null);
     try {
@@ -633,6 +638,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       setPhase('qr');
       return;
     }
+    // Device-saved annotation (services/txNotes): record the request's name + human memo HERE —
+    // the last point before signing — so a crash between submit and settle still leaves the note
+    // for the row that will land. Join key = nonceHex = the on-chain memo the relay echoes back.
+    // No-op when the intent carries neither (a bare wire request with empty toName/memo).
+    void saveTxNote(identity.publicHex, {k: r.nonceHex, who: r.toName || undefined, msg: r.memo || undefined}, Date.now());
     setBusy(true);
     try {
       // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (the intent

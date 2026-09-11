@@ -5,6 +5,7 @@ import {M} from '../i18n';
 import {assetTestKey, type CurrencyDescriptor} from '../config/catalog';
 import {chipLabel, prettyNetwork, type SelectableAsset} from '../config/assets';
 import {HistoryRow} from './HistoryRow';
+import type {TxAnnotation} from '../services/txNotes';
 import type {AssetId, Txn} from '../lib/types';
 import type {SolanaReadFailure} from '../solana';
 
@@ -38,7 +39,7 @@ function filterTestKey(asset: SelectableAsset, catalog: CurrencyDescriptor[]): s
 // shown are the last known truth and the `sol-history-stale` line says so (R3, spec 2026-09-09
 // §"What the app says…": no cached value presented as current). Null (and the rail-off 'offline'
 // case, which never sets it) renders nothing — the note is purely conditional, like `dropped`.
-export function Ledger({history, catalog, assets, dropped = 0, staleFailure = null, onOpenReceipt}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number; staleFailure?: SolanaReadFailure | null; onOpenReceipt: (t: Txn) => void}) {
+export function Ledger({history, catalog, assets, dropped = 0, staleFailure = null, noteFor, onOpenReceipt}: {history: Txn[]; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; dropped?: number; staleFailure?: SolanaReadFailure | null; /** Resolve a row's device-saved annotation (txNotes name/message + saved-address label). Optional and purely additive — without it rows render exactly as the ledger said them. */ noteFor?: (t: Txn) => TxAnnotation | undefined; onOpenReceipt: (t: Txn) => void}) {
   const [filter, setFilter] = useState<AssetId | null>(null);
   if (history.length === 0) {
     return (
@@ -111,7 +112,7 @@ export function Ledger({history, catalog, assets, dropped = 0, staleFailure = nu
         // alone is no longer unique (mint + transfer rows collide). Composite key: index pins
         // positional identity; the nonce keeps facade-era rows (which had unique nonces) stable
         // across refreshes when the list head shifts.
-        <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} onPress={onOpenReceipt} />
+        <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} note={noteFor?.(t)} onPress={onOpenReceipt} />
       ))}
     </View>
   );

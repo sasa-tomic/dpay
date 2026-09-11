@@ -6,6 +6,7 @@ import {type CurrencyDescriptor} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
 import {currencyName, type HomeCurrency} from '../config/currency';
 import {HistoryRow} from './HistoryRow';
+import type {TxAnnotation} from '../services/txNotes';
 import {HotkeyHint} from './HotkeyHint';
 import {IconArrowDownLeft, IconChevronDown, IconPlus, IconScan} from './icons';
 import {RailUnreadableNote, railUnreadable} from './RailUnreadableNote';
@@ -51,7 +52,7 @@ import type {BalanceView} from '../lib/assetBalances';
  *  Activity is the body of the screen rather than a footer under it. */
 export const ACTIVITY_ROWS = 5;
 
-export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings}: {
+export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, noteFor, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings}: {
   assets: SelectableAsset[];
   homeCurrency: HomeCurrency;
   /** The home currency's preferred rail — the account this screen IS. Null only when the catalog
@@ -61,6 +62,10 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
   catalog: CurrencyDescriptor[];
   online: boolean;
   history: Txn[];
+  /** Resolve a row's device-saved annotation (txNotes name/message + saved-address label) — the
+   *  same resolver the Transactions tab uses, so the feed never disagrees with the full list.
+   *  Optional: without it rows render exactly as the ledger said them. */
+  noteFor?: (t: Txn) => TxAnnotation | undefined;
   /** The demo faucet's last failure, if any. The faucet BUTTON lives on the practice row in the
    *  accounts route, but the `T` hotkey fires it from anywhere — so its failure has to be visible
    *  on the screen the user is actually looking at, or the hotkey fails silently. */
@@ -148,7 +153,7 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
         {rows.length === 0
           ? <Text style={S.dim2}>{M.wallet.home.activity.empty}</Text>
           : rows.map((t, i) => (
-            <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} testPrefix="home-hist" onPress={onOpenReceipt} />
+            <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} testPrefix="home-hist" note={noteFor?.(t)} onPress={onOpenReceipt} />
           ))}
         <Pressable testID="btn-home-activity-all" style={S.homeSeeAll} onPress={onSeeAll} accessibilityRole="button" accessibilityLabel={M.wallet.home.activity.seeAll} accessibilityHint={M.wallet.home.activity.seeAllHint}>
           <Text style={S.linkText}>{M.wallet.home.activity.seeAll}</Text>
