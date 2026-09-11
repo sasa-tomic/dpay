@@ -148,6 +148,9 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
 }
 
 /// `call` for method-probe responses (404/405 carry an EMPTY body — nothing to parse).
+/// Offline test build only — every caller is a `not(agent)` test (the venue-surface probes),
+/// which are compiled out under `agent` for the same reason `faucet_json` above is.
+#[cfg(not(feature = "agent"))]
 async fn call_status(state: &AppState, req: Request<Body>) -> StatusCode {
     app(state.clone()).oneshot(req).await.unwrap().status()
 }

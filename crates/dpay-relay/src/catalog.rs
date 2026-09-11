@@ -125,7 +125,12 @@ pub(crate) enum VenueKind {
 /// a remote system must be pinned by something that actually talks to that system —
 /// `just swap-venue-probe`), for fixture-only venues declared as fixture-truth. Reserves are the
 /// curve simulation (code's own choice, deliberately NOT truth-file facts).
+///
+/// Read only by the fake-IC seeding (`test-helpers`); the agent build compiles the registry
+/// wholesale so both builds share ONE `venues()` literal — the seed rides along unread there,
+/// which this cfg_attr says out loud instead of letting the compiler warn per config.
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[cfg_attr(not(feature = "test-helpers"), allow(dead_code))]
 pub(crate) struct FixtureSeed {
     pub token0_ledger: &'static str,
     pub token1_ledger: &'static str,
@@ -163,7 +168,9 @@ pub(crate) struct VenueEntry {
     /// [`venue_servable`]. Never served by the agent (prod) build, never allowlisted there,
     /// never probed on mainnet.
     pub test_helpers_served: bool,
-    /// The fake-IC stub seed (ic_amm venues only; `None` for cefi).
+    /// The fake-IC stub seed (ic_amm venues only; `None` for cefi). Read only under
+    /// `test-helpers` (the seeding); agent builds compile it unread — see `FixtureSeed`.
+    #[cfg_attr(not(feature = "test-helpers"), allow(dead_code))]
     pub fixture: Option<FixtureSeed>,
 }
 

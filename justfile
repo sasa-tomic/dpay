@@ -51,6 +51,20 @@ test-icp: build-mock-minter
     cargo nextest run -p dpay-wasm
     cargo nextest run -p dpay-icp-tests
 
+# relay DEFAULT-features compile gate: `cargo check -p dpay-relay` with no features. Every other
+# recipe compiles the relay WITH a feature (test-relay: test-helpers; test-live: agent+test-helpers),
+# and `--all-targets` is no substitute — the crate's dev-dependency on itself enables test-helpers
+# for test units, so feature unification hides the lean build even under `--all-targets` with no
+# `--features`. The lean build is REAL (scripts/stage-relay-probe.sh — the `just apk` probe —
+# builds exactly this config), and a cfg hole in it sailed through every existing gate until
+# 2026-09-11 (multi-venue fallback `fixture_venue_armed` referenced `catalog::VenueEntry` under
+# default features → E0425; `just apk` was the only surface that found it). Depends on `web` for
+# the same reason test-relay does: dpay-relay's build.rs embeds e2e/dist-prod and fails loud
+# without it (just runs a recipe once per invocation, so `check` still builds it once).
+# Warm cost ~1s: deps are shared with test-relay; only the relay crate's lean fingerprint is new.
+relay-default-check: web
+    cargo check -p dpay-relay
+
 # relay tests (native, in-memory — no network). `test-helpers` also compiles the fake-IC /api/v2
 # gateway the e2e web harness points the app at (the seam is e2e-build-only — see shims.ts).
 # Depends on `web`: dpay-relay's build.rs embeds e2e/dist-prod (the /wallet route serves the real
@@ -329,7 +343,7 @@ aid-parity:
 # (merchant-wire is GONE 2026-08-16: the hand-rolled /merchant page was merged into /wallet — the
 #  real app builds requests through its own wasm core, so the hand-rolled-encoder drift class it
 #  guarded against no longer has a surface to live on.)
-check: test-core test-canister test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core flows-md
+check: test-core test-canister relay-default-check test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core flows-md
     @echo "rust inner loop green"
 
 # FLOWS.md is GENERATED from each flow's own `meta` (e2e/harness/meta.mjs is the single reader), so

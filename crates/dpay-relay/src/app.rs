@@ -1306,9 +1306,19 @@ async fn venues(State(state): State<AppState>) -> Response {
 }
 
 /// Is this fixture venue's serving knob armed? In the OFFLINE test build: ask the attached
-/// gateway. In every other build (agent prod; agent+test-helpers live tests): constant
-/// `false` — the knob route and the `FakeIc` state behind it are compiled away there, so an
-/// armed knob can never leak a fixture venue into a served list.
+/// gateway. In the AGENT builds (prod `--features agent`; also the agent+test-helpers live
+/// tests): constant `false` — the knob route and the `FakeIc` state behind it are compiled
+/// away there, so an armed knob can never leak a fixture venue into a served list.
+///
+/// The fallback below is gated `agent` — deliberately NOT as the complement of the primary
+/// variant's cfg. A fallback's cfg is "everywhere the caller exists minus everywhere the
+/// primary does": the caller (`venues`) is `any(agent, test-helpers)`, the primary is
+/// `all(test-helpers, not(agent))`, and the difference is exactly `agent`. The complement
+/// (`not(all(test-helpers, not(agent)))`) wrongly included the DEFAULT no-features build,
+/// where neither the caller, the route, this fn, nor `catalog::VenueEntry` itself is compiled
+/// — that dangling type reference broke the lean build (`scripts/stage-relay-probe.sh` under
+/// `just apk`, the only default-features consumer) on 2026-09-11 while every feature-carrying
+/// gate stayed green.
 #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 fn fixture_venue_armed(state: &AppState, v: &crate::catalog::VenueEntry) -> bool {
     state
@@ -1316,7 +1326,7 @@ fn fixture_venue_armed(state: &AppState, v: &crate::catalog::VenueEntry) -> bool
         .as_ref()
         .is_some_and(|f| f.venue_served(v.venue_id))
 }
-#[cfg(not(all(feature = "test-helpers", not(feature = "agent"))))]
+#[cfg(feature = "agent")]
 fn fixture_venue_armed(_state: &AppState, _v: &crate::catalog::VenueEntry) -> bool {
     false
 }
