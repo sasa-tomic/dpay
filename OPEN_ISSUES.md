@@ -221,10 +221,12 @@ Re-measured 2026-09-10, HEAD `4727a57`:
   `{"till":true,"demo_faucet":true}` (measured 2026-09-10): the 2026-09-10 relay deploy carried
   `d15b596` and the default flip is live. (The pre-deploy "till NOT yet served" note is retired.)
 
-**Verified-clean floor for the next session's review: `409264e`** — full `just verify` GREEN
-(jest 121 suites / 2546, e2e **160/160 GREEN** in one pass, relay 154/154, the agent-feature
-live suite 163/163) plus `just app` device self-check GREEN (DPAY_SELFCHECK PASS, emulator) on
-the same tree — the multi-venue build (item 3). Start the next sweep from there.
+**Verified-clean floor for the next session's review: `eaaa60e`** — full `just verify` GREEN
+(jest 121 suites / 2546, e2e **160/160 GREEN** in one pass, relay 154/154 + the new lean-build
+gate, the agent-feature live suite 163/163), **`just apk` END-TO-END EXIT 0** (signed APK+AAB
+staged, staged-relay probe + check-prod-sol PASS), and `just app` device self-check GREEN
+(DPAY_SELFCHECK PASS, emulator) — the multi-venue build (item 3) plus the default-features
+relay-build gate. Start the next sweep from there.
 
 **One thing to know before running the suite:** `DPAY_E2E_NO_FAILFAST=1` is a trap on this box. It
 keeps launching flows past the first RED, oversubscribes the host, and turns one flake into sixteen
