@@ -1,9 +1,10 @@
 /**
  * i18n/domains/de/convert.ts — German values for the delegated-conversion surface.
  * Types, key documentation and the reference copy: ../en/convert.ts. Glossary: ../../de.ts.
- * Stilmuster:Du-Form (wie der Rest der App). „Quote" bleibt als Fachbegriff erhalten; der
- * Venue-Name kommt als Argument herein (Anzeigename aus der Venue-Registry, nie hier fest
- * verdrahtet). Geldbeträge und Principals werden als fertige Anzeige-Strings übergeben.
+ * Stilmuster: Du-Form (wie der Rest der App). Glossar: „venue" → Handelsplatz; „quote" → Kurs
+ * (beim CeFi-Anbieter als befristetes Angebot: Angebot); der Venue-Name kommt als Argument
+ * herein (Anzeigename aus der Venue-Registry, nie hier fest verdrahtet). Geldbeträge und
+ * Principals werden als fertige Anzeige-Strings übergeben.
  */
 import type {ConvertMessages} from '../../keys';
 
@@ -23,8 +24,8 @@ export const convertDe: ConvertMessages = {
   counterparty: venue =>
     `Ausgeführt vom ${venue}-Pool — ein autonomer On-Chain-Vertrag, kein lizenzierter Anbieter und nicht dpay.`,
   counterpartySigns: 'Dein Handy signiert; der Pool zieht genau den freigegebenen Betrag ab.',
-  quoteSource: (at, venue) => `Quote von ${venue}, abgerufen ${at}`,
-  rateLabel: (inSym, outSym) => `Kurs dieser Quote (${inSym} → ${outSym})`,
+  quoteSource: (at, venue) => `Kurs von ${venue}, abgerufen ${at}`,
+  rateLabel: (inSym, outSym) => `Kurs für diesen Umtausch (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Pool-Gebühr: ${tier} (${venue}-Gebührenstufe)`,
   inputFeeLine: fee => `Eingangsgebühr: ${fee}`,
   outputFeeLine: fee => `Ausgangsgebühr: ${fee}`,
@@ -45,12 +46,12 @@ export const convertDe: ConvertMessages = {
   refusalLine: sym =>
     `Wenn der Pool-Preis bei der Bestätigung über dein Minimum hinaus wandert, scheitert der Tausch: Dein ${sym} bleibt in deiner Wallet, und die Freigabe läuft ungenutzt ab.`,
   netEndStateLine: amount => `Endergebnis: ${amount} erwartet in deiner Wallet, nach allen Gebühren.`,
-  confirmButton: 'Neu quoten und bestätigen',
-  staleRefreshing: 'Quote veraltet — wird neu geladen…',
-  quoteChanged: (oldAmt, newAmt) => `Quote geändert: ${oldAmt} → ${newAmt}. Prüfe und bestätige erneut.`,
-  venueChooserLabel: 'Venue',
-  venueNoneSelected: 'Wähle eine Venue, um ihre vollständige Quote zu sehen und fortzufahren.',
-  venueRowQuote: amount => `Quote: ${amount}`,
+  confirmButton: 'Neuen Kurs holen und bestätigen',
+  staleRefreshing: 'Kurs veraltet — wird neu geladen…',
+  quoteChanged: (oldAmt, newAmt) => `Kurs geändert: ${oldAmt} → ${newAmt}. Prüfe und bestätige erneut.`,
+  venueChooserLabel: 'Handelsplatz',
+  venueNoneSelected: 'Wähle einen Handelsplatz, um seinen vollständigen Kurs zu sehen und fortzufahren.',
+  venueRowQuote: amount => `Kurs: ${amount}`,
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Diese Wallet hat kein ${sym}. Um ${sym} umzutauschen, empfange zuerst ${sym} an deiner Adresse: öffne unten „${receiveTab}“ und wähle „${myAddress}“.`,
@@ -92,13 +93,13 @@ export const convertDe: ConvertMessages = {
     `Diese Order liegt bei ${venue} und wartet auf deine Freigabe. Es hat sich nichts bewegt und wird sich nichts bewegen, bis du sie freigibst — dpay beobachtet derweil den Status des Anbieters.`,
   awaitingDepositTitle: 'Warten auf die Einzahlung',
   awaitingDepositBody: (sym, venue) =>
-    `${venue} hat diese Order ausgestellt und wartet auf die ${sym}-Einzahlung. Der Swap läuft, sobald der Anbieter die Einzahlung sieht; dpay beobachtet weiterhin seinen Status. Kommt rechtzeitig keine Einzahlung, läuft die Quote ab und es bewegt sich nichts.`,
+    `${venue} hat diese Order ausgestellt und wartet auf die ${sym}-Einzahlung. Der Swap läuft, sobald der Anbieter die Einzahlung sieht; dpay beobachtet weiterhin seinen Status. Kommt rechtzeitig keine Einzahlung, läuft das Angebot ab und es bewegt sich nichts.`,
   providerProcessingTitle: 'Wird beim Anbieter verarbeitet',
   providerProcessingBody: (sym, venue) =>
     `${venue} hält die Einzahlung und führt die Order aus. Dein ${sym} kommt an, sobald der Anbieter sie abschließt — dpay kann das weder rückgängig machen noch beschleunigen und beobachtet weiter, bis es sich auflöst.`,
-  quoteExpiredTitle: 'Quote abgelaufen',
+  quoteExpiredTitle: 'Angebot abgelaufen',
   quoteExpiredBody: (sym, venue) =>
-    `Die Quote ist abgelaufen, bevor ein Wert bewegt wurde: ${venue} hat die Einzahlung nie erhalten, also wurde nichts getauscht und nichts muss rückgängig gemacht werden. Dein ${sym} ist geblieben, wo es war — starte eine neue Umwandlung, wenn du weiterhin eine möchtest.`,
+    `Das Angebot ist abgelaufen, bevor ein Wert bewegt wurde: ${venue} hat die Einzahlung nie erhalten, also wurde nichts getauscht und nichts muss rückgängig gemacht werden. Dein ${sym} ist geblieben, wo es war — starte eine neue Umwandlung, wenn du weiterhin eine möchtest.`,
   providerRefundedTitle: 'Vom Anbieter erstattet',
   providerRefundedBody: (sym, venue) =>
     `${venue} hat diese Order storniert und die Einzahlung zurückgezahlt. Beobachte, wann dein ${sym} zurückkommt — dpay kann die Erstattung des Anbieters weder rückgängig machen noch beschleunigen.`,
@@ -107,8 +108,8 @@ export const convertDe: ConvertMessages = {
   stuckAcknowledged: 'Du hast dies zur Kenntnis genommen und die Hintergrundbeobachtung ist gestoppt. Wenn sich später Mittel bewegen, landen sie weiterhin an der Adresse dieser Wallet.',
 
   errors: {
-    quoteUnreachable: venue => `Die ${venue}-Quote war nicht erreichbar — das Relay antwortet nicht. Prüfe deine Verbindung und versuche es erneut.`,
-    quoteRefused: venue => `${venue} hat abgelehnt, dieses Paar gerade zu quoten.`,
-    quoteUnavailable: code => `Quote nicht verfügbar (${code}).`,
+    quoteUnreachable: venue => `Der Kurs von ${venue} war nicht abrufbar — das Relay antwortet nicht. Prüfe deine Verbindung und versuche es erneut.`,
+    quoteRefused: venue => `${venue} hat abgelehnt, für dieses Paar gerade einen Kurs zu liefern.`,
+    quoteUnavailable: code => `Kurs nicht verfügbar (${code}).`,
   },
 };

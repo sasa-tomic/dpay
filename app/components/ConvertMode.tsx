@@ -1,5 +1,6 @@
-// ConvertMode — the delegated-conversion surface (spec 2026-09-07 §5), opened from the Balances
-// action row for EVERY selected asset (uniform-IA hard rule). One screen carries the whole
+// ConvertMode — the delegated-conversion surface (spec 2026-09-07 §5), opened from the Accounts
+// route's SELECTED-row action (`btn-accounts-convert`) for EVERY asset — the SAME gesture for all
+// of them (uniform-IA hard rule; venue-less rows fail closed INSIDE this surface). One screen carries the whole
 // transparency checklist BEFORE anything is signed — no tap-to-reveal, no second surface:
 //   * counterparty: the venue's pool canister, named by its registry display name (autonomous
 //     contract, not a licensed provider, not dpay) + "your phone signs; the pool pulls exactly
@@ -180,8 +181,11 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     ? selectedVenue != null ? venueQuotes[selectedVenue.venue_id] ?? null : null
     : quote;
   // The counterparty disclosure is a standing fact about today's venue; once a quote arrives its
-  // OWN attribution (venue_id) takes over (V1).
-  const counterVenueId = activeQuote?.venueId ?? REGISTERED_VENUE_ID;
+  // OWN attribution (venue_id) takes over (V1). Under a chooser PICK with no live quote — fetch
+  // in flight, errored into venueQuoteErrs, or cleared by a re-key — the PICKED venue is the
+  // honest attribution: falling back to the registered default here used to name venue A (and
+  // its pool) under a venue B pick, misattributing the pre-sign disclosure.
+  const counterVenueId = activeQuote?.venueId ?? selectedVenue?.venue_id ?? REGISTERED_VENUE_ID;
 
   // --- the engine view (V6): pick the record to render, then follow it. The resume engine
   //     (hooks/useConvertResumeEngine, mounted from Wallet) drives EVERY live record from wallet
@@ -616,7 +620,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           <Text style={S.convertHeadlineAmount}>{netStr}</Text>
           <View testID="convert-rate" style={S.convertRateRow}>
             <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, outSym)}</Text>
-            <Text style={S.convertRateValue}>{fmtAsset(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn), outDecimals, outSym)}</Text>
+            <Text style={S.convertRateValue}>{fmtAsset(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, outDecimals), outDecimals, outSym)}</Text>
           </View>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
@@ -631,10 +635,18 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       {/* Counterparty disclosure: the venue the QUOTE is attributed to names itself — display
             name and pool principal are registry lookups on the quote's own venueId, so a second
             venue cannot render under the first one's identity (V1). Before a quote arrives the
-            standing disclosure names the one registered venue; attribution follows the quote. */}
+            standing disclosure names the one registered venue; attribution follows the quote —
+            or, under a chooser pick, the PICKED venue (counterVenueId above). */}
         <View testID="convert-counterparty">
           <Text style={S.convertChecklistLine}>{M.convert.counterparty(venueDisplayName(counterVenueId))}</Text>
-          <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
+          {/* The pool principal renders only when THIS venue's own number stands behind it: the
+              quote's pool echo once one arrives, or the standing single-venue disclosure. Under a
+              chooser pick whose quote has not settled (or errored) NO principal renders — the
+              picked venue is still named above, but an execution fact is never asserted without
+              its quote, and another venue's principal is never borrowed. */}
+          {activeQuote != null || !chooserMode ? (
+            <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
+          ) : null}
           <Text style={S.convertChecklistLine}>{M.convert.counterpartySigns}</Text>
         </View>
         {/* The per-venue disclosure sentence (the registry's own `disclosure_key` picks the
@@ -819,6 +831,10 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
     return () => clearInterval(id);
   }, [record.step]);
   const {inSymbol, outSymbol} = record;
+  // Each leg's decimals were frozen at prepare; records older than the field (and every
+  // legacy-migrated v1 record) carry none — 8 is the e8s world those were signed in.
+  const inDecimals = record.inDecimals ?? 8;
+  const outDecimals = record.outDecimals ?? 8;
   // The record's own venue, looked up per V1 — display name and pool principal follow the
   // record, never a module constant.
   const venueName = venueDisplayName(record.venueId);
@@ -834,7 +850,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.approvingTitle}</Text>
           <Text style={S.convertStateBody}>
-            {M.convert.approvingBody(fmtAsset(record.amountIn, 8, inSymbol), formatClock(new Date(legExpiryMs)))}
+            {M.convert.approvingBody(fmtAsset(record.amountIn, inDecimals, inSymbol), formatClock(new Date(legExpiryMs)))}
           </Text>
         </View>
       ) : null}
@@ -855,7 +871,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
       {record.step === 'done' ? (
         <View testID="convert-done">
           <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAsset(record.outAmountNet ?? '0', 8, outSymbol))}</Text>
+          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAsset(record.outAmountNet ?? '0', outDecimals, outSymbol))}</Text>
           {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
       ) : null}
@@ -889,7 +905,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
           {minOut != null ? (
             <Text style={S.convertStateMeta}>
-              {M.convert.stuckSigned(fmtAsset(record.amountIn, 8, inSymbol), fmtAsset(minOut, 8, outSymbol), venueName)}
+              {M.convert.stuckSigned(fmtAsset(record.amountIn, inDecimals, inSymbol), fmtAsset(minOut, outDecimals, outSymbol), venueName)}
             </Text>
           ) : null}
           <Text testID="convert-expiry" style={S.convertStateMeta}>
@@ -990,12 +1006,13 @@ function resolveLegs(catalog: CurrencyDescriptor[], asset: Extract<SelectableAss
   };
 }
 
-/** price(out) per 1 unit of in, scaled to the output ledger's decimals via BigInt (exact, floor). */
-function scaledRate(outGross: string, amountIn: string): string {
+/** price(out) per 1 unit of in, scaled to the OUTPUT ledger's own decimals via BigInt (exact,
+ *  floor) — the scale is threaded in from the catalog row, never a hardcoded 8. */
+function scaledRate(outGross: string, amountIn: string, outDecimals: number): string {
   const out = BigInt(outGross);
   const inn = BigInt(amountIn);
   if (inn <= 0n) return '0';
-  return ((out * 10n ** 8n) / inn).toString();
+  return ((out * 10n ** BigInt(outDecimals)) / inn).toString();
 }
 
 /** The venue's own fee tier, in ITS unit (millionths of the trade: 3000 = 0.30%), rendered as a

@@ -77,7 +77,7 @@ export const meta = {
   journey: 'tour',
   covers: ['visual-regression', 'pixel-diff', 'dark-theme', 'convert', 'venue-chooser'],
   verifies:
-    'Pixel-diff the 8 surfaces (6 primary + the convert venue-chooser and pre-sign checklist, on a private two-venue relay) under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks, plus the convert surfaces the light flow does not carry.',
+    'Pixel-diff the 8 surfaces (6 primary + the convert venue-chooser and pre-sign checklist, on a private two-venue relay) under an emulated OS dark scheme (prefers-color-scheme: dark) vs the dark-theme baselines in shots/baselines-dark/; the gate that the DARK palette renders on every surface the light flow walks.',
   timeoutMs: 90_000,
 };
 

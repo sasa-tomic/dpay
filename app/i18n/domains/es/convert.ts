@@ -1,9 +1,9 @@
 /**
  * i18n/domains/es/convert.ts — valores en español para la superficie de conversión delegada.
  * Tipos, documentación de claves y copia de referencia: ../en/convert.ts. Glosario: ../../es.ts.
- * «Quote» se mantiene como término técnico; el nombre de la venue llega como argumento (nombre
- * de presentación del registro de venues, nunca codificado aquí). Los importes y principals
- * llegan ya formateados como cadenas de presentación.
+ * Glosario: «venue» → sede; «quote» → cotización. El nombre de la sede llega como argumento
+ * (nombre de presentación del registro de venues, nunca codificado aquí). Los importes y
+ * principals llegan ya formateados como cadenas de presentación.
  */
 import type {ConvertMessages} from '../../keys';
 
@@ -48,8 +48,8 @@ export const convertEs: ConvertMessages = {
   confirmButton: 'Recotizar y confirmar',
   staleRefreshing: 'Cotización caducada — actualizando…',
   quoteChanged: (oldAmt, newAmt) => `La cotización cambió: ${oldAmt} → ${newAmt}. Revisa y confirma de nuevo.`,
-  venueChooserLabel: 'Venue',
-  venueNoneSelected: 'Elige una venue para ver su cotización completa y continuar.',
+  venueChooserLabel: 'Sede',
+  venueNoneSelected: 'Elige una sede para ver su cotización completa y continuar.',
   venueRowQuote: amount => `Cotización: ${amount}`,
 
   fundBody: (sym, receiveTab, myAddress) =>

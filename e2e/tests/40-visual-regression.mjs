@@ -1,4 +1,5 @@
-// Flow 40 — Visual regression: pixel-diff the 6 primary surfaces against committed baselines.
+// Flow 40 — Visual regression: pixel-diff the primary surfaces + the convert surfaces against
+// committed LIGHT baselines.
 //
 // Flow 35 (ux-tour) CAPTURES screenshots of every major surface but never compares them — a
 // style/layout regression (the documented styles.ts single-block blind spot, a dropped import, an
@@ -7,6 +8,15 @@
 // the pure pixel comparator in harness/pixel.mjs. Fails on pixel drift beyond a tolerance
 // (default 0.5% — well above the residual font-AA variance under the FREEZE_CSS + srgb stabilization).
 //
+// 2026-09-11: the surface set grew from 6 to 8 — the convert venue-CHOOSER (two venues, quotes
+// settled, nothing picked) and the pre-sign CHECKLIST under a pick are now pinned in LIGHT too
+// (they were dark-only, flow 84). The convert surfaces need determinism the shared relay cannot
+// give (a second venue + a funded ICP row), so the flow runs on its OWN relay (startRelay, the
+// flow-84/166/167 pattern): the fixture-B venue knob arms the second venue BEFORE onboarding, the
+// faucet funds 3 ICP only AFTER the ledger capture (a new ledger row would break the ledger
+// baseline), and the quote TIMESTAMP lines are masked (per-run clock) — all mirroring flow 84,
+// which owns the dark twins of the same two surfaces.
+//
 // The baselines ARE the contract — a future PR that intentionally changes a surface regenerates them
 // (DPAY_E2E_REGEN_BASELINES=1) and the diff is reviewable in the commit. Mirrors the
 // DPAY_E2E_REGEN_LAYOUT pattern (lib.mjs) for the wire-layout golden.
@@ -14,7 +24,8 @@
 // Navigation mirrors flow 35 EXACTLY (already tuned — `tab-home` for the Home surface, the header
 // `balance` chip for the Accounts route, `btn-settings-close` to dismiss the Settings sheet). Capture filenames are DISTINCT from flow 35
 // (40-vr-<surface> vs 35-tour-<surface>) so the two flows never collide on disk.
-import { setup, onboardWallet, assert } from '../harness/lib.mjs';
+import { setup, onboardWallet, assert, openBalances, selectCurrency, accountOf, faucetAccount } from '../harness/lib.mjs';
+import { startRelay } from '../harness/relay.mjs';
 import { comparePng } from '../harness/pixel.mjs';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir } from 'node:fs/promises';
@@ -25,25 +36,37 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SHOTS_DIR = join(__dirname, '..', 'shots');
 const BASELINES_DIR = join(SHOTS_DIR, 'baselines');
 
-// The 6 primary surfaces, in capture order. Each entry pairs the per-run capture filename (what
+// The surfaces, in capture order. Each entry pairs the per-run capture filename (what
 // driver.screenshot writes) with the baseline name (the contract under e2e/shots/baselines/).
 // Mirrors flow 35's tour order so the two flows exercise the identical navigation.
 //
-// `masksFromTestID` (optional): for surfaces with a non-deterministic region (a QR bitmap that
-// encodes a per-run random nonce + a fresh per-onboarding pubkey), name a testID whose bounding
-// rect is queried post-capture and passed to comparePng as a mask (in device pixels, padded ±4 to
-// absorb sub-pixel render shifts at the boundary). The surrounding layout is still diffed.
+// `masksFromTestIDs` (ARRAY — the flow-84 form): for surfaces with non-deterministic regions (a
+// QR bitmap that encodes a per-run random nonce + a fresh per-onboarding pubkey, clock lines),
+// name the testIDs whose bounding rects are queried post-capture and passed to comparePng as
+// masks (in device pixels, padded ±4 to absorb sub-pixel render shifts at the boundary). The
+// surrounding layout is still diffed.
 const SURFACES = [
   { capture: '40-vr-wallet-pay', baseline: 'wallet-pay' },
-  { capture: '40-vr-receive-request', baseline: 'receive-request', masksFromTestID: 'request-qr' },
+  { capture: '40-vr-receive-request', baseline: 'receive-request', masksFromTestIDs: ['request-qr'] },
   { capture: '40-vr-home', baseline: 'home' },
   // The accounts list became its own surface on 2026-09-08 (it was ~80% of the Home screen). It
   // carries the per-rail rows, the MAIN badge, the practice divider and the Convert action, so it
   // needs its own pixel contract — none of that is visible on Home any more.
   { capture: '40-vr-accounts', baseline: 'accounts' },
   { capture: '40-vr-settings', baseline: 'settings' },
-  { capture: '40-vr-ledger', baseline: 'ledger', masksFromTestID: 'hist-time-0' },
+  { capture: '40-vr-ledger', baseline: 'ledger', masksFromTestIDs: ['hist-time-0'] },
+  // The convert venue chooser (light twin of flow 84's): two rows, each with its own quote,
+  // NOTHING picked (V5). Both per-row quote-attribution clock lines are masked.
+  { capture: '40-vr-convert-chooser', baseline: 'convert-chooser',
+    masksFromTestIDs: ['convert-venue-icpswap-source', 'convert-venue-icpswap-fixture-b-source'] },
+  // The convert pre-sign checklist (light twin) under a pick (the real venue): fees,
+  // counterparty, refusal — the active quote's timestamp is masked.
+  { capture: '40-vr-convert-checklist', baseline: 'convert-checklist',
+    masksFromTestIDs: ['convert-quote-source'] },
 ];
+
+const SEED = 300000000; // 3 ICP (plain Number — the faucet body is JSON)
+const FIXTURE_VENUE = 'icpswap-fixture-b';
 
 const REGEN = process.env.DPAY_E2E_REGEN_BASELINES === '1';
 const TOLERANCE_PCT = 0.5;
@@ -57,17 +80,33 @@ export const meta = {
   id: '40',
   name: 'visual-regression',
   journey: 'tour',
-  covers: ['visual-regression', 'pixel-diff', 'row-layout'],
-  verifies: 'Pixel-diff the 6 primary surfaces (Pay, Receive+QR, Home, Accounts, Settings, Ledger) vs committed baselines, failing on drift >0.5%; and prove the ledger amount cannot be moved by a wider timestamp, so a baseline can only go red for a code change.',
-  timeoutMs: 25_000,
+  covers: ['visual-regression', 'pixel-diff', 'row-layout', 'convert', 'venue-chooser'],
+  verifies: 'Pixel-diff the 8 surfaces (6 primary — Pay, Receive+QR, Home, Accounts, Settings, Ledger — plus the convert venue-chooser and pre-sign checklist, on a private two-venue relay) vs committed light baselines, failing on drift >0.5%; and prove the ledger amount cannot be moved by a wider timestamp, so a baseline can only go red for a code change.',
+  timeoutMs: 90_000,
 };
 
 export async function run() {
   const start = Date.now();
-  console.log('[40-visual-regression] setup (relay + web + browser)…');
+  console.log('[40-visual-regression] setup (own relay + web + browser)…');
   const env = await setup();
+  // Own relay for the WHOLE run (flow-84 pattern): the convert surfaces need the fixture-B venue
+  // knob + ICP funding, which must not touch a sibling flow's shared relay. The 6 primary surfaces
+  // are deterministic on a private relay exactly as they are on the shared one (flow 84 baselines
+  // the same six from a private relay for dark).
+  const r2 = await startRelay();
   try {
-    const { driver } = env;
+    const { driver, webBaseURL } = env;
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(r2.baseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await driver.waitReady({timeoutMs: 8_000});
+
+    // Arm the second venue BEFORE the wallet mounts (the convert surface loads /api/v1/venues on
+    // mount) — the chooser baseline shows TWO rows.
+    const arm = await fetch(`${r2.baseURL}/api/v1/test/venue`, {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({venue_id: FIXTURE_VENUE, served: true}),
+    });
+    assert(arm.ok, `venue knob armed (status ${arm.status})`);
 
     // masks[testID] = {x,y,w,h} in DEVICE pixels (collected post-capture via getBoundingClientRect).
     const masks = {};
@@ -181,13 +220,53 @@ export async function run() {
       console.log(`[40-visual-regression] ✓ ledger amount pinned at x=${amt0.x.toFixed(2)} across a ${(time1.w - time0.w).toFixed(1)}px timestamp change`);
     }
 
+    // 6c. CONVERT surfaces (the light twins of flow 84's; dark had them alone until now). Fund
+    //     ICP only NOW — after the ledger capture — so the faucet row cannot perturb the ledger
+    //     baseline; then open Convert from the ICP row (the V11-gated entry), key 1 ICP, and wait
+    //     for BOTH venue quotes to settle (a spinner mid-fetch is nondeterministic pixels).
+    console.log('[40-visual-regression] convert surfaces (chooser + checklist)…');
+    const account = await accountOf(driver);
+    const fund = await faucetAccount(r2.baseURL, account.publicHex, SEED, {currency: 8});
+    assert(fund.ok, `faucet credit ok (status ${fund.status})`);
+
+    await openBalances(driver);
+    await selectCurrency(driver, 'icp');
+    await openBalances(driver);
+    await driver.click('btn-accounts-convert', {timeoutMs: 6_000});
+    await driver.type('convert-amount', '1');
+    await driver.findByTestID('convert-venue-icpswap-quote', {timeoutMs: 10_000});
+    await driver.findByTestID(`convert-venue-${FIXTURE_VENUE}-quote`, {timeoutMs: 10_000});
+    await driver.eval(() => window.scrollTo(0, 0));
+    for (const tid of SURFACES[6].masksFromTestIDs) {
+      masks[tid] = await getTestIDRectDevicePx(driver, tid);
+    }
+    await driver.screenshot(SURFACES[6].capture);
+
+    // The checklist under a pick: click the REAL venue row, wait for the math to derive (net is
+    // the last derived line) and the quote attribution to render, then capture — anchored at the
+    // CHECKLIST card (scrollIntoView block:'start'), not the page top: the fee lines
+    // (counterparty → net) are the surface under contract, and they render below the headline +
+    // venue rows. Everything above the anchor is fully off-frame, so no clock text can leak in;
+    // the quote-source mask stays as a safety net (it self-skips when off-frame).
+    await driver.click('convert-venue-icpswap', {timeoutMs: 5_000});
+    await driver.findByTestID('convert-net', {timeoutMs: 10_000});
+    await driver.findByTestID('convert-quote-source', {timeoutMs: 5_000});
+    await driver.eval(() => {
+      document.querySelector('[data-testid="convert-counterparty"]').scrollIntoView({block: 'start'});
+    });
+    await driver.settleFrames(3);
+    for (const tid of SURFACES[7].masksFromTestIDs) {
+      masks[tid] = await getTestIDRectDevicePx(driver, tid);
+    }
+    await driver.screenshot(SURFACES[7].capture);
+
     // 7. Diff each capture against its baseline (or seed if missing + REGEN).
     await mkdir(BASELINES_DIR, { recursive: true });
     const summary = [];
     for (const s of SURFACES) {
       const capturePath = join(SHOTS_DIR, `${s.capture}.png`);
       const baselinePath = join(BASELINES_DIR, `${s.baseline}.png`);
-      const surfaceMasks = s.masksFromTestID ? (masks[s.masksFromTestID] ? [masks[s.masksFromTestID]] : []) : [];
+      const surfaceMasks = (s.masksFromTestIDs ?? []).map(k => masks[k]).filter(Boolean);
       const line = await diffOrSeed(baselinePath, capturePath, s.baseline, surfaceMasks);
       summary.push(line);
     }
@@ -206,6 +285,7 @@ export async function run() {
     console.log(`[40-visual-regression] GREEN in ${elapsed}s (0 diffs > ${TOLERANCE_PCT}%)`);
     assert(true, 'visual regression passed');
   } finally {
+    await r2.stop();
     await env.stop();
   }
 }

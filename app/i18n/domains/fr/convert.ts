@@ -1,9 +1,9 @@
 /**
  * i18n/domains/fr/convert.ts — valeurs françaises pour la surface de conversion déléguée.
  * Types, documentation des clés et copie de référence : ../en/convert.ts. Glossaire : ../../fr.ts.
- * « Quote » reste un terme technique ; le nom de la venue arrive en argument (nom d'affichage du
- * registre des venues, jamais codé en dur ici). Les montants et principals arrivent déjà formatés
- * en chaînes d'affichage.
+ * Glossaire : « venue » → plateforme ; « quote » → devis. Le nom de la plateforme arrive en
+ * argument (nom d'affichage du registre des venues, jamais codé en dur ici). Les montants et
+ * principals arrivent déjà formatés en chaînes d'affichage.
  */
 import type {ConvertMessages} from '../../keys';
 
@@ -15,7 +15,7 @@ export const convertFr: ConvertMessages = {
   unavailableTitle: sym => `La conversion n'est pas encore disponible pour ${sym}`,
   unavailableBody: (pair, venue) => `Aujourd'hui, dpay convertit ${pair} via ${venue} — et rien d'autre.`,
   unavailableCkusdc: venue =>
-    `Un pool direct VCHF ↔ USDC existe chez ${venue}, mais sa profondeur est saturée (environ CHF 315) : dpay le refuse plutôt que de vous afficher un prix périmé.`,
+    `Un pool direct VCHF ↔ USDC existe chez ${venue}, mais sa profondeur est saturée (environ CHF 315) : dpay le refuse plutôt que de t'afficher un prix périmé.`,
 
   amountLabel: sym => `Montant (${sym})`,
   balanceLine: balance => `Solde : ${balance}`,
@@ -23,8 +23,8 @@ export const convertFr: ConvertMessages = {
   counterparty: venue =>
     `Exécuté par le pool ${venue} — un contrat autonome on-chain, pas un prestataire agréé et pas dpay.`,
   counterpartySigns: 'Ton téléphone signe ; le pool prélève exactement le montant approuvé.',
-  quoteSource: (at, venue) => `Quote ${venue}, récupérée ${at}`,
-  rateLabel: (inSym, outSym) => `Taux de cette quote (${inSym} → ${outSym})`,
+  quoteSource: (at, venue) => `Devis ${venue}, récupéré ${at}`,
+  rateLabel: (inSym, outSym) => `Taux de ce devis (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Frais du pool : ${tier} (palier ${venue})`,
   inputFeeLine: fee => `Frais d'entrée : ${fee}`,
   outputFeeLine: fee => `Frais de sortie : ${fee}`,
@@ -45,16 +45,16 @@ export const convertFr: ConvertMessages = {
   refusalLine: sym =>
     `Si le prix du pool dépasse ton minimum, l'échange échoue : ton ${sym} reste dans ton portefeuille et l'autorisation expire sans être utilisée.`,
   netEndStateLine: amount => `Résultat final : ${amount} attendus dans ton portefeuille, nets de tous les frais.`,
-  confirmButton: 'Requoter et confirmer',
-  staleRefreshing: 'Quote périmée — actualisation…',
-  quoteChanged: (oldAmt, newAmt) => `La quote a changé : ${oldAmt} → ${newAmt}. Vérifie et confirme à nouveau.`,
-  venueChooserLabel: 'Venue',
-  venueNoneSelected: 'Choisis une venue pour voir sa quote complète et continuer.',
-  venueRowQuote: amount => `Quote : ${amount}`,
+  confirmButton: 'Actualiser le devis et confirmer',
+  staleRefreshing: 'Devis périmé — actualisation…',
+  quoteChanged: (oldAmt, newAmt) => `Le devis a changé : ${oldAmt} → ${newAmt}. Vérifie et confirme à nouveau.`,
+  venueChooserLabel: 'Plateforme',
+  venueNoneSelected: 'Choisis une plateforme pour voir son devis complet et continuer.',
+  venueRowQuote: amount => `Devis : ${amount}`,
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Ce portefeuille n'a pas de ${sym}. Pour convertir des ${sym}, reçois d'abord des ${sym} à ton adresse : ouvre « ${receiveTab} » en bas et choisis « ${myAddress} ».`,
-  fundOtherHolds: (held, toSym) => `Vous avez ${held} — vous pouvez plutôt le convertir en ${toSym}.`,
+  fundOtherHolds: (held, toSym) => `Tu as ${held} — tu peux plutôt le convertir en ${toSym}.`,
   fundOtherSwitch: sym => `Convertir depuis ${sym} à la place`,
   insufficientLine: (needed, balance) =>
     `Cette conversion demande ${needed} — le montant plus deux frais de ledger — et ce portefeuille détient ${balance}. Baisse le montant, ou reçois-en d'abord davantage.`,
@@ -92,13 +92,13 @@ export const convertFr: ConvertMessages = {
     `Cette commande est ouverte chez ${venue} et attend ton autorisation. Rien n'a bougé et rien ne bougera tant que tu ne l'approuves pas — dpay surveille en attendant le statut du prestataire.`,
   awaitingDepositTitle: 'En attente du dépôt',
   awaitingDepositBody: (sym, venue) =>
-    `${venue} a émis cette commande et attend son dépôt en ${sym}. L'échange s'exécute quand le prestataire voit le dépôt ; dpay continue de surveiller son statut. Si aucun dépôt n'arrive à temps, la quote expire et rien ne bouge.`,
+    `${venue} a émis cette commande et attend son dépôt en ${sym}. L'échange s'exécute quand le prestataire voit le dépôt ; dpay continue de surveiller son statut. Si aucun dépôt n'arrive à temps, le devis expire et rien ne bouge.`,
   providerProcessingTitle: 'Traitement chez le prestataire',
   providerProcessingBody: (sym, venue) =>
     `${venue} détient le dépôt et exécute la commande. Ton ${sym} arrive quand le prestataire la termine — dpay ne peut ni l'annuler ni l'accélérer, et continue de surveiller jusqu'à sa résolution.`,
-  quoteExpiredTitle: 'Quote expirée',
+  quoteExpiredTitle: 'Devis expiré',
   quoteExpiredBody: (sym, venue) =>
-    `La quote est morte avant qu'une valeur ne bouge : ${venue} n'a jamais reçu le dépôt, donc rien n'a été échangé et rien n'est à annuler. Ton ${sym} est resté là où il était — lance une nouvelle conversion si tu en veux toujours une.`,
+    `Le devis a expiré avant qu'une valeur ne bouge : ${venue} n'a jamais reçu le dépôt, donc rien n'a été échangé et rien n'est à annuler. Ton ${sym} est resté là où il était — lance une nouvelle conversion si tu en veux toujours une.`,
   providerRefundedTitle: 'Remboursé par le prestataire',
   providerRefundedBody: (sym, venue) =>
     `${venue} a annulé cette commande et retourné le dépôt. Surveille le retour de ton ${sym} — dpay ne peut ni annuler ni accélérer le remboursement du prestataire.`,
@@ -107,8 +107,8 @@ export const convertFr: ConvertMessages = {
   stuckAcknowledged: 'Tu en as pris note et la surveillance en arrière-plan est arrêtée. Si des fonds bougent plus tard, ils arriveront toujours à l\u2019adresse de ce portefeuille.',
 
   errors: {
-    quoteUnreachable: venue => `Impossible d'atteindre la quote ${venue} — le relay ne répond pas. Vérifie ta connexion et réessaie.`,
-    quoteRefused: venue => `${venue} a refusé de quoter cette paire pour le moment.`,
-    quoteUnavailable: code => `Quote indisponible (${code}).`,
+    quoteUnreachable: venue => `Impossible d'obtenir le devis de ${venue} — le relay ne répond pas. Vérifie ta connexion et réessaie.`,
+    quoteRefused: venue => `${venue} a refusé d'établir un devis pour cette paire pour l'instant.`,
+    quoteUnavailable: code => `Devis indisponible (${code}).`,
   },
 };

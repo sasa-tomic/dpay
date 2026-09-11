@@ -65,6 +65,7 @@ import {
   convertStoreKey,
 } from './config/convert';
 import {
+  BUNDLED_VENUES,
   DPAY_CANISTER_PRINCIPALS,
   icAmmVenueForPair,
   registeredVenues,
@@ -74,6 +75,11 @@ import {
   type VenueEntry,
 } from './config/venues';
 import {M} from './i18n';
+
+/** The bundled registry's mainnet IC-AMM venue id — DERIVED, never a literal, so this module
+ *  carries no venue id outside the registry (the v1-record migration fallback). Same derivation
+ *  ConvertMode uses for its standing single-venue disclosure. */
+const BUNDLED_MAINNET_VENUE_ID = BUNDLED_VENUES.find(v => v.kind === 'ic_amm' && !v.testnet)?.venue_id ?? '';
 
 // --- quote (relay-proxied, read-only; the venue's own number) -------------------------------------
 
@@ -303,6 +309,13 @@ export type ConvertRecord = {
   outLedger: string;
   inSymbol: string; // backing native symbol for copy ("which asset the user holds")
   outSymbol: string;
+  /** Each leg's ledger decimals, frozen at prepare (ADDITIVE, 2026-09-11): the state screens
+   *  format `amountIn`/payouts/min-out through THEM, never a hardcoded 8. Records prepared
+   *  before the field existed (and every legacy-migrated v1 record) carry none — renderers
+   *  fall back to 8, the e8s world those records were signed in (every ledger the venue
+   *  registry serves today is 8-decimal anyway). */
+  inDecimals?: number;
+  outDecimals?: number;
   amountIn: string; // raw e8s the venue pulls
   expectedGross: string; // venue quote at confirm (gross)
   expectedNet: string; // gross − output fee (the end-state line)
@@ -365,8 +378,10 @@ function migrateLegacyRecord(r: Record<string, unknown>, out: Record<string, Con
   const outLedger = str('outLedger');
   if (!inLedger || !outLedger) return null;
   // v1 records were all ICPSwap trades — resolve the venue from the record's OWN pair, with
-  // the id as an honest fallback if the registry no longer lists it.
-  const venueId = icAmmVenueForPair(inLedger, outLedger)?.venue_id ?? 'icpswap';
+  // the bundled registry's mainnet IC-AMM id as the honest fallback if the registry no longer
+  // lists it (derived the same way ConvertMode derives REGISTERED_VENUE_ID — the literal
+  // 'icpswap' this line used to carry was the one hardcoded venue id outside the registry).
+  const venueId = icAmmVenueForPair(inLedger, outLedger)?.venue_id ?? BUNDLED_MAINNET_VENUE_ID;
   const expiresAtMs = typeof r.approveExpiresAtMs === 'number' ? r.approveExpiresAtMs : 0;
   const legs: SignedLeg[] = [
     {
@@ -429,6 +444,8 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   if (!CONVERT_STEPS.includes(r.step as ConvertStep)) return null;
   rec.step = r.step as ConvertStep;
   if (typeof r.acknowledgedStuckAtMs === 'number') rec.acknowledgedStuckAtMs = r.acknowledgedStuckAtMs;
+  if (typeof r.inDecimals === 'number') rec.inDecimals = r.inDecimals;
+  if (typeof r.outDecimals === 'number') rec.outDecimals = r.outDecimals;
   if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'unknown'].includes(r.failureCode as string)) return null;
   if (r.failureCode != null) rec.failureCode = r.failureCode as ConvertRecord['failureCode'];
   // The legs: every signed update must be complete. An EMPTY legs list is the CeFi shape and
@@ -691,6 +708,8 @@ export async function prepareConvertRecord(args: {
     outLedger: outDesc.ledger,
     inSymbol,
     outSymbol,
+    inDecimals: inDesc.decimals ?? undefined,
+    outDecimals: outDesc.decimals ?? undefined,
     amountIn,
     expectedGross: quote.amountOutGross,
     expectedNet: math.netOut,

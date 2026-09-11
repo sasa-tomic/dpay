@@ -59,7 +59,7 @@ jest.mock('../convertResume', () => ({
 }));
 
 import {ConvertMode} from '../components/ConvertMode';
-import {deriveConvertMath, fetchConvertQuote, prepareConvertRecord} from '../convert';
+import {convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord} from '../convert';
 import {acknowledgeStuckRecord, adoptConvertRecord, convertResumeSnapshot} from '../convertResume';
 import type {ConvertMath, ConvertQuote, ConvertRecord} from '../convert';
 import {buildSelectableAssets} from '../config/assets';
@@ -577,6 +577,38 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     expect(textOf(tree, 'convert-rate')).toContain(fmtAsset(scaled.toString(), 8, 'VCHF'));
     expect(textOf(tree, 'convert-rate')).toContain('0.90000000 VCHF');
   });
+
+  test('a picked-but-unquoted venue is attributed HONESTLY — never another venue\'s name or pool', async () => {
+    // The gap this pins (audit 2026-09-11): venue B's quote ERRORED while the user has B picked
+    // (the same shape as a quote still in flight or cleared by a re-key). Nothing can sign
+    // (canConfirm needs a live quote) — but the PRE-SIGN disclosure used to fall back to the
+    // registered default, naming venue A + A's pool under a B pick. The honest shape: B's own
+    // name on the counterparty and disclosure lines, and NO pool principal at all until B's own
+    // number stands behind it — never another venue's principal.
+    jest.mocked(fetchConvertQuote).mockImplementation((async (_r: string, _in: string, _out: string, _amt: string, opts?: {venue?: VenueEntry}) =>
+      opts?.venue?.venue_id === VENUE_B.venue_id
+        ? Promise.reject(new Error('venue B unreachable'))
+        : Promise.resolve({...QUOTE_A, amountOutGross: quoteForA}) as never));
+    const tree = await mountConvert('250000000', '1');
+    // B's row carries its OWN error line; the pick still lands (a pick is a user decision).
+    expect(present(tree, `convert-venue-${VENUE_B.venue_id}-err`)).toBe(true);
+    await act(async () => {
+      node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
+    });
+    expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({checked: true});
+    // The counterparty + disclosure name the PICKED venue — B, not the registered default A.
+    expect(textOf(tree, 'convert-counterparty')).toContain(VENUE_B.display_name);
+    expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(convertEn.disclosures.byKey.icpswap(VENUE_B.display_name));
+    // No pool principal renders, and venue A's pool appears NOWHERE on the screen — the old
+    // fallback printed it inside the counterparty card. Full-text dump proves the absence.
+    expect(present(tree, 'convert-pool-principal')).toBe(false);
+    const flat = (c: unknown): string =>
+      Array.isArray(c) ? c.map(flat).join('') : typeof c === 'string' || typeof c === 'number' ? String(c) : '';
+    const allText = tree.root.findAllByType(Text).map(n => flat(n.props.children)).join('\n');
+    expect(allText).not.toContain(QUOTE_A.pool);
+    // And nothing can sign on another venue's behalf: the confirm stays disabled.
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
+  });
 });
 
 // --- V9 — venue-agnostic chooser invariants: arbitrary venue sets through the overlay seam ----------
@@ -837,5 +869,81 @@ describe('V6 — engine view', () => {
     });
     expect(textOf(tree, 'convert-stuck')).toContain(convertEn.stuckAcknowledged);
     expect(present(tree, 'btn-convert-stuck-ack')).toBe(false);
+  });
+});
+
+// --- decimals threading (audit 2026-09-11) ---------------------------------------------------------
+// The record freezes each leg's ledger decimals at prepare; the state screens and the rate line
+// read THEM, falling back to 8 only for records that predate the field (the e8s world every IC
+// ledger lives in today). These pins hold the threading: a 6-decimal output ledger renders
+// 6-decimal money and a 6-decimal-scaled rate, a legacy record still renders 8 — and no literal
+// 8 survives anywhere a ledger fact is available.
+describe('decimals threading — money lines read the ledger, never a literal 8', () => {
+  // A 6-decimal output ledger (the shape of a future non-e8s pair): the same flat descriptor
+  // list with the VCHF row's decimals overridden — legs, fmtAsset and scaledRate must follow.
+  const CATALOG6 = CATALOG.map(c => (c.ledger === QUOTE.tokenOutLedger ? {...c, decimals: 6} : c));
+
+  const stateRecord: ConvertRecord = {
+    id: 'dec-rec',
+    createdAtMs: 5,
+    step: 'approving',
+    venueId: 'icpswap',
+    inCurrency: 8,
+    outCurrency: 7,
+    inLedger: QUOTE.tokenInLedger,
+    outLedger: QUOTE.tokenOutLedger,
+    inSymbol: 'ICP',
+    outSymbol: 'VCHF',
+    amountIn: '100000000',
+    expectedGross: '41194138',
+    expectedNet: '41184138',
+    inFee: '10000',
+    outFee: '10000',
+    slippageBps: 100,
+    legs: [],
+  };
+
+  afterEach(() => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({});
+    jest.mocked(convertRecordMinOut).mockResolvedValue(null as never);
+  });
+
+  test('the rate line scales to the OUTPUT ledger\'s own decimals — 6 here, not a hardcoded 8', async () => {
+    const tree = await mountConvert('250000000', '1', {catalog: CATALOG6});
+    // 41194138 gross for 100000000 in, scaled at the output ledger's SIX decimals:
+    // (41194138 × 10^6) / 10^8 = 411941 raw ⇒ "0.411941 VCHF". A literal-8 scaling instead
+    // yields 41194138 raw, which at this catalog's 6 decimals renders "41.194138 VCHF".
+    const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 6n) / BigInt(QUOTE.amountIn);
+    expect(textOf(tree, 'convert-rate')).toContain(fmtAsset(scaled.toString(), 6, 'VCHF'));
+    expect(textOf(tree, 'convert-rate')).toContain('0.411941 VCHF');
+  });
+
+  test('a record with frozen decimals renders its state money at THEM (approving, input side)', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({dec6: {...stateRecord, inDecimals: 6, outDecimals: 6}});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-approving')).toBe(true);
+    // amountIn 100000000 raw at SIX decimals = 100.000000 ICP; a literal-8 regression prints
+    // 1.00000000 ICP — a 100× lie about what was approved.
+    expect(textOf(tree, 'convert-approving')).toContain('100.000000 ICP');
+  });
+
+  test('the stuck panel carries BOTH legs\' frozen decimals (signed amount in, minimum out)', async () => {
+    jest.mocked(convertRecordMinOut).mockResolvedValue('40782196' as never);
+    jest.mocked(convertResumeSnapshot).mockReturnValue({stuck6: {...stateRecord, step: 'stuck', failureCode: 'unknown', inDecimals: 6, outDecimals: 6}});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-stuck')).toBe(true);
+    // minOut 40782196 raw at SIX decimals = 40.782196 VCHF (literal-8 regression: 0.40782196).
+    expect(textOf(tree, 'convert-stuck')).toContain('100.000000 ICP');
+    expect(textOf(tree, 'convert-stuck')).toContain('40.782196 VCHF');
+  });
+
+  test('a record that predates the fields (the legacy e8s world) falls back to 8 — the renderer owns it', async () => {
+    jest.mocked(convertRecordMinOut).mockResolvedValue('40782196' as never);
+    jest.mocked(convertResumeSnapshot).mockReturnValue({legacy: {...stateRecord, step: 'stuck', failureCode: 'unknown'}});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-stuck')).toBe(true);
+    // No decimals on the record ⇒ 8 (today's IC reality), never a crash or a blank line.
+    expect(textOf(tree, 'convert-stuck')).toContain('1.00000000 ICP');
+    expect(textOf(tree, 'convert-stuck')).toContain('0.40782196 VCHF');
   });
 });

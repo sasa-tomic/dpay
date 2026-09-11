@@ -43,7 +43,7 @@ import {
   type ConvertRecord,
 } from '../convert';
 import {resolveConvertDirection} from '../config/convert';
-import {BUNDLED_VENUES, setRuntimeVenues, venuesForPair, type VenueEntry} from '../config/venues';
+import {BUNDLED_VENUES, setRuntimeVenues, venueEndpointOf, venuesForPair, type VenueEntry} from '../config/venues';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {convertEn} from '../i18n/domains/en/convert';
 import {convertDe} from '../i18n/domains/de/convert';
@@ -479,6 +479,45 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
     expect('zeroForOne' in rec).toBe(false);
     expect('approveEnvelopeHex' in rec).toBe(false);
   });
+  test('the v1 fallback venue id DERIVES from the bundled registry — never the literal it used to be', () => {
+    // A pair the registry no longer resolves (a ledger retired since v1) hits the migration
+    // fallback. It must derive the bundled MAINNET IC-AMM id — a real registry key, resolved the
+    // same way ConvertMode derives its standing disclosure — so the swap leg targets that
+    // venue's own endpoint. The literal 'icpswap' this replaces was the only venue id outside
+    // the registry in non-test app code: a registry rename would have left it dangling.
+    const legacy = {
+      id: 'orphan',
+      createdAtMs: 1,
+      step: 'swapping',
+      inCurrency: 8,
+      outCurrency: 7,
+      inLedger: 'xh3np-hyaaa-aaaaa-aaaqq-cai', // invented — resolves to NO registry venue
+      outLedger: 'xh3np-hyaaa-aaaaa-aaarq-cai',
+      inSymbol: 'ICP',
+      outSymbol: 'CHF',
+      amountIn: '100000000',
+      amountOutMin: '188000000',
+      expectedGross: '190000000',
+      expectedNet: '189990000',
+      inFee: '10000',
+      outFee: '10000',
+      slippageBps: 100,
+      zeroForOne: true,
+      approveEnvelopeHex: 'aacc',
+      approveRequestIdHex: 'bbdd',
+      approveExpiresAtMs: 601_000,
+      swapEnvelopeHex: 'ccaa',
+      swapRequestIdHex: 'ddbb',
+    };
+    const out = hydrateConvertStore({orphan: legacy});
+    expect(out).not.toBeNull();
+    const rec = out!.orphan!;
+    const bundledMainnet = BUNDLED_VENUES.find(v => v.kind === 'ic_amm' && !v.testnet)!;
+    expect(rec.venueId).toBe(bundledMainnet.venue_id);
+    // The derived id is a REAL registry key: its own endpoint is where the swap leg lands.
+    expect(rec.legs[1]!.canister).toBe(venueEndpointOf(bundledMainnet.venue_id));
+    expect(venueEndpointOf(bundledMainnet.venue_id)).not.toBe('');
+  });
   test('saveConvertRecord → loadConvertRecords round-trip via the IDENTITY-SCOPED key', async () => {
     const PUB = 'aa'.repeat(32);
     await AsyncStorage.setItem(`dpay.convert.v2.${PUB}`, 'not json at all');
@@ -643,6 +682,32 @@ describe('prepareConvertRecord — both envelopes built + signed exactly once, u
     // different deaths; the never-resubmit boundary now ends exactly at the real submit-death.
     expect(rec.legs[0]!.expiresAtMs).toBe(1_700_000_000_000);
     expect(rec.legs[1]!.expiresAtMs).toBe(1_700_000_000_000);
+  });
+  test('each leg\'s ledger decimals are FROZEN on the record — the state screens never guess a literal', async () => {
+    jest.mocked(icStampExpiry).mockResolvedValue('1700000000000000000' as never);
+    jest.mocked(DpayCore.icpApproveArg).mockResolvedValue('approve-arg-hex' as never);
+    jest.mocked(DpayCore.icpDepositAndSwapArg).mockResolvedValue('swap-arg-hex' as never);
+    jest.mocked(DpayCore.icpSignUpdate).mockImplementation(async (_s, _ledger, method) =>
+      ({envelopeHex: `env-${method}`, requestIdHex: `req-${method}`}) as never);
+    jest.mocked(DpayCore.icpSwapMinOut).mockResolvedValue('188000000' as never);
+    const math = await deriveConvertMath(quote(), '10000', '10000', 100);
+    // Today's IC reality — both legs 8 decimals:
+    const rec8 = await prepareConvertRecord({secretHex: 'sec', relayUrl: 'http://r', quote: quote(), math, inDesc: ICP_DESC, outDesc: VCHF_DESC});
+    expect(rec8.inDecimals).toBe(8);
+    expect(rec8.outDecimals).toBe(8);
+    // A future non-e8s output ledger freezes ITS own decimals…
+    const rec6 = await prepareConvertRecord({secretHex: 'sec', relayUrl: 'http://r', quote: quote(), math, inDesc: ICP_DESC, outDesc: {...VCHF_DESC, decimals: 6}});
+    expect(rec6.inDecimals).toBe(8);
+    expect(rec6.outDecimals).toBe(6);
+    // …survives the store's per-record salvage untouched…
+    const salvaged = salvageConvertStore({[rec6.id]: rec6});
+    expect(salvaged.dropped).toBe(0);
+    expect(salvaged.records[rec6.id]!.outDecimals).toBe(6);
+    // …and a record that predates the field (every legacy/old record — the e8s world) hydrates
+    // WITHOUT it: the renderer's 8 fallback owns that, never a smuggled store default.
+    const hydrated = hydrateConvertStore({abc123: record()});
+    expect(hydrated.abc123!.inDecimals).toBeUndefined();
+    expect(hydrated.abc123!.outDecimals).toBeUndefined();
   });
 });
 
