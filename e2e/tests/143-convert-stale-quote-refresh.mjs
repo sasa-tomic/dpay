@@ -96,7 +96,7 @@ export async function run() {
     const knob = await fetch(`${relayBaseURL}/api/v1/test/swap_pool`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fee_millionths: 4000 }),
+      body: JSON.stringify({ pool: '65mrh-fqaaa-aaaar-qapoa-cai', fee_millionths: 4000 }),
     });
     assert(knob.ok, `swap_pool knob ok (status ${knob.status})`);
     const changedLine = await driver.findByTestID('convert-quote-changed', { timeoutMs: 15_000 });
@@ -117,7 +117,7 @@ export async function run() {
     await fetch(`${relayBaseURL}/api/v1/test/swap_pool`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fee_millionths: 3000 }),
+      body: JSON.stringify({ pool: '65mrh-fqaaa-aaaar-qapoa-cai', fee_millionths: 3000 }),
     });
     await driver.screenshot('143-convert-refreshed');
 

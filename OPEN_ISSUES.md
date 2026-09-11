@@ -125,15 +125,27 @@ echoed from the venue — direction derived from the pool's own metadata, not fr
 Remaining before any LIVE ship are founder-run (the relay deploy decision; officials/counsel,
 `docs/REGULATORY.md` §7) — do not nag before the PoC exists. The "catalog migration of venue
 consts" that used to sit here is GONE as a gate: the pair and the fee tier are no longer app-side
-constants at all (they are read off the venue), and what remains of that idea is the multi-venue
-`/api/v1/venues` shape, tracked as V4 in item 3.
+constants at all (they are read off the venue), and what remains of that idea — the multi-venue
+`/api/v1/venues` shape — landed as V4 (item 3, DONE 2026-09-11).
 
-**3. Multi-venue readiness — the founder wants swaps delegated to SEVERAL third-party exchanges
-(2026-09-08).** The answer today is no: there is no venue type at all, the persisted record schema
-rejects every CeFi record that will ever exist, and the offline fake holds exactly one pool. The
-signing/submission half generalises unchanged, and `app/services/opencryptopay.ts` is already a
-working device-to-provider CeFi shape to copy. Gaps V1–V11 with value/effort, and the three to do
-first: [`docs/specs/2026-09-08-multi-venue-readiness.md`](docs/specs/2026-09-08-multi-venue-readiness.md).
+**3. Multi-venue readiness — DONE (2026-09-11): the architecture is ready for several venues.**
+All ten buildable gaps (V1–V10) of
+[`docs/specs/2026-09-08-multi-venue-readiness.md`](docs/specs/2026-09-08-multi-venue-readiness.md)
+are closed: a real venue type (registry in `dfx/catalog_truth.json` `venues[]`, drift-alarmed into
+the relay's query-only `GET /api/v1/venues` and the bundled app copy), the `legs: SignedLeg[]` +
+`providerRef` record (DeFi and CeFi are ONE shape; `dpay.convert.v1` and the unscoped v2 store
+migrate into the identity-scoped `dpay.convert.v2.<publicHex>` — never discarded), a multi-pool
+fake-IC gateway with a knob-gated second fixture venue (never served by the agent build), the
+N-venue chooser (stable quote-independent order, NONE preselected, per-venue attribution + the
+relay's `fetched_at`), the expiry-honest recovery engine mounted app-wide (resubmit-never-after-
+expiry, range-tolerant settlement probe with out-tx dedupe, provider-status driver), and the nine
+V9 invariants as standing tests on both sides (Rust + jest + e2e flows 166–170). Full `just
+verify` GREEN (160/160 e2e incl. the agent-feature live suite) and `just app` device self-check
+GREEN on the same tree. V11 stays a documented BOUNDARY, not a gap: the `kind` enum can carry a
+Solana venue but none is registered, and the Convert screen stays IC-gated until one is.
+Registering a REAL second venue (a CeFi provider, or Jupiter) is venue onboarding with its own
+provider surface — not an architecture gap; `app/services/opencryptopay.ts` remains the
+device-to-provider shape to copy.
 
 **5. Funding — DONE on all six deposit surfaces, and the note that said it was nearly done was
 wrong.** Founder direction 2026-09-09: name several providers unranked with their own published

@@ -147,6 +147,11 @@ async fn call(state: &AppState, req: Request<Body>) -> (StatusCode, Value) {
     (status, json)
 }
 
+/// `call` for method-probe responses (404/405 carry an EMPTY body — nothing to parse).
+async fn call_status(state: &AppState, req: Request<Body>) -> StatusCode {
+    app(state.clone()).oneshot(req).await.unwrap().status()
+}
+
 /// A bare GET request — for the non-JSON pages (landing, privacy, wallet, APK).
 fn get_req(uri: &str) -> Request<Body> {
     Request::builder()
@@ -4392,16 +4397,25 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
     assert_eq!(paid["paid"]["amount_raw"], field(&["amount_raw"]));
 }
 
-// --- delegated-conversion PoC: /api/v1/swap_quote + the fake-IC stub ICPSwap pool ----------
+// --- delegated-conversion: /api/v1/swap_quote + /api/v1/venues + the fake-IC stub pools -----
 //
-// Spec 2026-09-07 §2/§6: the relay's quote route is a READ PROXY (the pool's own quote
-// VERBATIM + fetched_at, never a relay-computed rate) and the fake-IC gateway carries a stub
-// ICPSwap pool (deterministic curve, icrc2-approved `depositFromAndSwap`, a pending_withdrawal
-// knob). These tests pin the route contract, the venue refusals, and the full approve→swap
-// happy path through the SAME signed /api/v2 rail the app uses.
+// Spec 2026-09-07 §2/§6 (multi-venue readiness V3/V4/V7): the relay's quote route is a READ
+// PROXY (the pool's own quote VERBATIM, attributed with its `venue_id`, + fetched_at, never a
+// relay-computed rate) and the fake-IC gateway carries stub ICPSwap pools — PLURAL, keyed by
+// principal, one per venue fixture seed (deterministic curve, icrc2-approved
+// `depositFromAndSwap`, a pending_withdrawal knob each). These tests pin the route contracts,
+// the venue refusals, the multi-pool seeding, and the full approve→swap happy path through
+// the SAME signed /api/v2 rail the app uses.
 
-/// The PoC venue (catalog::SWAP_POOL_PRINCIPAL's twin — pub(crate), pinned by catalog_truth).
+/// The PoC venue's endpoint (the catalog venue registry's twin — pub(crate), pinned by
+/// catalog_truth).
 const SWAP_POOL: &str = "65mrh-fqaaa-aaaar-qapoa-cai";
+/// The SECOND stub pool's invented principal (venue `icpswap-fixture-b` in the truth file,
+/// `test_helpers_served: true`, `testnet: true`). NOT a real venue — it exists so the offline
+/// loop can hold TWO venues on one pair with genuinely different curves/orders, served behind
+/// the `POST /api/v1/test/venue` knob. Never probe it on mainnet; the agent build's allowlist
+/// refuses it.
+const FIXTURE_POOL: &str = "6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7";
 const VCHF_LEDGER: &str = "ly36x-wiaaa-aaaai-aqj7q-cai";
 const VCHF: Currency = 7;
 /// A principal that is NOT a known venue (the ICPSwap factory — must be refused by name). BOTH
@@ -4411,8 +4425,8 @@ const VCHF: Currency = 7;
 /// the offline build alone, which left the agent build's copy of the allowlist check — the one that
 /// ships — covered by nothing at all.
 const NOT_A_VENUE: &str = "4mmnk-kiaaa-aaaag-qbllq-cai";
-/// `zeroForOne` for an ICP-in / VCHF-out trade at this venue. FALSE, because the pool's own
-/// `metadata` (MEASURED 2026-09-08, `dfx/catalog_truth.json` `swap_venue`) reports
+/// `zeroForOne` for an ICP-in / VCHF-out trade at the PoC venue. FALSE, because the pool's own
+/// `metadata` (MEASURED 2026-09-08, `dfx/catalog_truth.json` `venues[].fixture`) reports
 /// `token0 = VCHF`, `token1 = ICP` — the REVERSE of what the 2026-09-07 build pinned. Every
 /// signed-arg test below reads this rather than a bare `true`, and
 /// [`approve_then_deposit_from_and_swap_pays_the_quoted_output`] asserts it against the stub's
@@ -4474,13 +4488,21 @@ fn swap_result(outcome: RequestStatus) -> dpay_icp::icrc::PoolSwapResult {
     }
 }
 
-/// POST /api/v1/test/swap_pool — the stub pool's knobs.
-async fn set_swap_pool_knobs(state: &AppState, body: &str) {
+/// POST /api/v1/test/swap_pool — the knobs of ONE named stub pool (V3: the gateway hosts
+/// many; a knob that didn't name its target could land on the wrong venue's curve).
+async fn set_swap_pool_knobs(state: &AppState, pool: &str, knobs: serde_json::Value) {
+    let mut body = serde_json::Map::new();
+    body.insert("pool".to_string(), serde_json::json!(pool));
+    if let serde_json::Value::Object(map) = knobs {
+        for (k, v) in map {
+            body.insert(k, v);
+        }
+    }
     let req = Request::builder()
         .method("POST")
         .uri("/api/v1/test/swap_pool")
         .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(body.to_string()))
+        .body(Body::from(serde_json::Value::Object(body).to_string()))
         .unwrap();
     let (status, json) = call(state, req).await;
     assert_eq!(status, StatusCode::OK);
@@ -4491,17 +4513,20 @@ fn swap_quote_uri(pool: &str, token_in: &str, token_out: &str, amount_in: u64) -
     format!("/api/v1/swap_quote?pool={pool}&token_in={token_in}&token_out={token_out}&amount_in={amount_in}")
 }
 
-/// The route serves the pool's OWN quote verbatim: `amount_out` equals the stub pool's curve
-/// (read directly through the same `FakeIc` the gateway serves), `fee_millionths` is the
-/// venue's own tier echoed, and the response carries the echo fields + a wall-clock
-/// `fetched_at`. Deterministic: identical inputs ⇒ identical outputs.
+/// The route serves the pool's OWN quote verbatim and ATTRIBUTED (V4/V7): `venue_id` names the
+/// venue the pool resolves to, `amount_out` equals the stub pool's curve (read directly through
+/// the same `FakeIc` the gateway serves), `fee_millionths` is the venue's own tier echoed, and
+/// the response carries the echo fields + a `fetched_at` stamp. Deterministic: identical inputs
+/// ⇒ identical outputs.
 /// (Offline-build only — under `agent` the route is the LIVE pool query, exactly like the
 /// faucet tests.)
 #[cfg(not(feature = "agent"))]
 #[tokio::test]
 async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     let (state, _led, fake) = state_with_fake(ledger()).await;
-    let meta = fake.swap_pool_metadata();
+    let meta = fake
+        .swap_pool_metadata(SWAP_POOL)
+        .expect("the PoC venue's stub pool is seeded");
 
     let req = get_req(&swap_quote_uri(
         SWAP_POOL,
@@ -4511,6 +4536,7 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     ));
     let (status, body) = call(&state, req).await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["venue_id"], "icpswap", "the quote is attributable to its venue");
     assert_eq!(body["pool"], SWAP_POOL);
     assert_eq!(body["token_in"], ICP_LEDGER);
     assert_eq!(body["token_out"], VCHF_LEDGER);
@@ -4541,10 +4567,12 @@ async fn swap_quote_serves_the_pools_own_quote_verbatim() {
     );
 
     let amount_out = body["amount_out"].as_str().expect("amount_out is a string");
-    let pool_quote = fake.swap_pool_quote(false, 100_000_000);
+    let pool_quote = fake
+        .swap_pool_quote(SWAP_POOL, false, 100_000_000)
+        .expect("the PoC venue's stub pool is seeded");
     assert_eq!(
         amount_out,
-        pool_quote.to_string(),
+        pool_quote.amount_out.to_string(),
         "the route's number IS the pool's number"
     );
     // The exact figure, pinned: the 2026-09-08 reseed moved token0/token1 into the venue's
@@ -4632,9 +4660,10 @@ async fn swap_quote_refuses_unknown_pools_and_pairs() {
     assert_eq!(body["error"], "unsupported_pair");
 }
 
-/// The SAME name refusal, in the build that SHIPS. `swap_quote_agent` is a different function with
-/// its own copy of the `is_known_swap_pool` check, and until now only the offline twin's copy was
-/// ever exercised — the agent build compiled the test above out and put nothing in its place.
+/// The SAME name refusal, in the build that SHIPS. `swap_quote_agent` is a different function
+/// with its own copy of the `venue_of_endpoint` allowlist check, and until now only the
+/// offline twin's copy was ever exercised — the agent build compiled the test above out and
+/// put nothing in its place.
 ///
 /// The property is not cosmetic: `pool` is a caller-supplied canister id that the route turns into
 /// a query, so a relay that skipped the allowlist would be an open query proxy for any canister on
@@ -4696,7 +4725,9 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
     // above; this oracle keeps the approve→swap path runnable under the `agent` build too,
     // where the route serves the live pool query by design.) The direction is read off the
     // stub's OWN metadata, exactly as the app reads it off the quote's `zero_for_one` echo.
-    let meta = fake.swap_pool_metadata();
+    let meta = fake
+        .swap_pool_metadata(SWAP_POOL)
+        .expect("the PoC venue's stub pool is seeded");
     assert_eq!(
         (meta.token0_ledger.as_str(), meta.token1_ledger.as_str()),
         (VCHF_LEDGER, ICP_LEDGER),
@@ -4707,7 +4738,10 @@ async fn approve_then_deposit_from_and_swap_pays_the_quoted_output() {
         ICP_LEDGER == meta.token0_ledger,
         "the signed-arg literal below must track the stub pool's OWN pair order"
     );
-    let quoted = fake.swap_pool_quote(ICP_IN_ZERO_FOR_ONE, 100_000_000);
+    let quoted = fake
+        .swap_pool_quote(SWAP_POOL, ICP_IN_ZERO_FOR_ONE, 100_000_000)
+        .expect("the PoC venue's stub pool is seeded")
+        .amount_out;
     assert!(quoted > 0);
 
     // icrc2_approve: exact swap amount, approve fee, 5-min expiry — spec §3's bounds.
@@ -4786,7 +4820,7 @@ async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
     let owner = user_principal(&pubkey(&payer));
     fake.faucet_credit(ICP, &owner, 10_000_000_000);
 
-    set_swap_pool_knobs(&state, r#"{"fail_withdrawal": true}"#).await;
+    set_swap_pool_knobs(&state, SWAP_POOL, serde_json::json!({"fail_withdrawal": true})).await;
 
     let spender = Account {
         owner: Principal::from_text(SWAP_POOL).unwrap(),
@@ -4825,7 +4859,7 @@ async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
     );
 
     // The resolution: the async withdrawal eventually lands.
-    set_swap_pool_knobs(&state, r#"{"settle_pending": true}"#).await;
+    set_swap_pool_knobs(&state, SWAP_POOL, serde_json::json!({"settle_pending": true})).await;
     assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), queued_out);
 }
 
@@ -4882,7 +4916,7 @@ async fn swap_pool_knobs_shape_the_quote_curve() {
     assert_eq!(status, StatusCode::OK);
     let base: u128 = base["amount_out"].as_str().unwrap().parse().unwrap();
 
-    set_swap_pool_knobs(&state, r#"{"fee_millionths": 0}"#).await;
+    set_swap_pool_knobs(&state, SWAP_POOL, serde_json::json!({"fee_millionths": 0})).await;
     let (status, zero_fee) = call(&state, get_req(&uri)).await;
     assert_eq!(status, StatusCode::OK);
     let zero_fee: u128 = zero_fee["amount_out"].as_str().unwrap().parse().unwrap();
@@ -4891,11 +4925,373 @@ async fn swap_pool_knobs_shape_the_quote_curve() {
         "no fee tier quotes strictly above the 0.30% tier"
     );
 
-    set_swap_pool_knobs(&state, r#"{"impact_bps": 10000}"#).await;
+    set_swap_pool_knobs(&state, SWAP_POOL, serde_json::json!({"impact_bps": 10000})).await;
     let (status, floored) = call(&state, get_req(&uri)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         floored["amount_out"], "0",
         "a 100% impact haircut floors the quote"
     );
+}
+
+/// `GET /api/v1/venues` serves the compiled registry — the REAL venues only (V4): the
+/// fixture-only entry is pinned into the truth file and seeded into the fake, but it must
+/// never render in a served list; an invented venue id appearing here would put a phantom
+/// counterparty in real wallets. The pair arrives as an UNORDERED pair (which side a pool
+/// calls token0 is the venue's own fact, read live per quote) and carries NO fee tier — the
+/// venue's quote echoes its own.
+#[tokio::test]
+async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+    let req = get_req("/api/v1/venues");
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let served = body["venues"].as_array().expect("venues is an array");
+    assert_eq!(served.len(), 1, "exactly one real venue is served today");
+    let v = &served[0];
+    assert_eq!(v["venue_id"], "icpswap");
+    assert_eq!(v["display_name"], "ICPSwap");
+    assert_eq!(v["kind"], "ic_amm");
+    assert_eq!(v["endpoint"], SWAP_POOL);
+    assert_eq!(v["testnet"], false);
+    assert_eq!(v["disclosure_key"], "icpswap");
+    let mut pair: Vec<&str> = v["pair_ledgers"]
+        .as_array()
+        .expect("pair_ledgers is an array")
+        .iter()
+        .map(|p| p.as_str().expect("ledger principal"))
+        .collect();
+    pair.sort_unstable();
+    let mut want = [VCHF_LEDGER, ICP_LEDGER];
+    want.sort_unstable();
+    assert_eq!(pair, want, "the pair as an unordered ledger set");
+    assert!(
+        v.get("fee_millionths").is_none(),
+        "the fee tier is NOT registry data — the venue's own quote echoes it"
+    );
+    assert!(
+        !body.to_string().contains(FIXTURE_POOL),
+        "an invented fixture venue must never appear in a served list un-asked-for"
+    );
+}
+
+/// `POST /api/v1/test/venue` — the multi-venue V5 knob: `/api/v1/venues` serves the fixture
+/// venue ONLY while the knob is armed, and ONLY in this offline test build (the route this
+/// test drives does not exist under `agent`). The default — and the state after a disarm — is
+/// exactly the production experience: one venue, no invented principal in the list. The
+/// agent-build half of the guarantee is pinned structurally in
+/// `catalog::venue_truth_tests::fixture_venue_is_never_servable_in_the_agent_build_or_without_the_knob`.
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+
+    // Default (nothing armed): exactly the one real venue.
+    let (status, body) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["venues"].as_array().map(Vec::len),
+        Some(1),
+        "the default experience is ONE venue per pair, like prod"
+    );
+
+    let post_venue = |served: bool, venue_id: &str| {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/test/venue")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({"venue_id": venue_id, "served": served}).to_string(),
+            ))
+            .unwrap()
+    };
+
+    // Arm: the fixture venue appears AFTER the real one — compiled registry order, the stable
+    // quote-independent row order the app's chooser renders verbatim and never ranks.
+    let (status, body) = call(&state, post_venue(true, "icpswap-fixture-b")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["served"], true);
+    let (status, body) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(status, StatusCode::OK);
+    let venues = body["venues"].as_array().expect("venues is an array");
+    assert_eq!(venues.len(), 2, "two venues on the pair with the knob armed");
+    assert_eq!(venues[0]["venue_id"], "icpswap", "the real venue stays first");
+    assert_eq!(venues[1]["venue_id"], "icpswap-fixture-b");
+    assert_eq!(venues[1]["endpoint"], FIXTURE_POOL);
+    assert_eq!(venues[1]["display_name"], "ICPSwap (offline fixture)");
+    assert_eq!(
+        venues[1]["testnet"], true,
+        "the fixture venue is labelled the invented stand-in it is"
+    );
+
+    // Disarm: back to the one-venue default (teardown parity — e2e flows share one relay).
+    let (status, body) = call(&state, post_venue(false, "icpswap-fixture-b")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["served"], false);
+    let (status, body) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["venues"].as_array().map(Vec::len), Some(1));
+    assert!(!body.to_string().contains(FIXTURE_POOL));
+
+    // The knob can neither gate a REAL venue nor invent an unknown one — routing is a
+    // user/registry decision, never test state.
+    let (status, body) = call(&state, post_venue(false, "icpswap")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "not_a_test_venue");
+    let (status, body) = call(&state, post_venue(true, "no-such-venue")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "unknown_venue");
+}
+
+/// The SECOND stub pool (multi-venue readiness V3): two venues on ONE pair, offline — the
+/// invented fixture venue quotes its OWN curve, order and fee through the same route. Its
+/// seed order is deliberately REVERSED (token0 = ICP), so an ICP-in trade there derives the
+/// OPPOSITE `zero_for_one` from the PoC pool's — a route or gateway that resolved direction
+/// against any single pool's order (or any constant) cannot pass both this and the PoC test
+/// above. Its fee tier (1000) and curve differ, so the two venues' numbers differ too.
+/// (Offline-build only: the fixture pool exists nowhere else — the agent allowlist refuses it.)
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn second_fixture_pool_quotes_its_own_curve_on_the_same_pair() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let meta_b = fake
+        .swap_pool_metadata(FIXTURE_POOL)
+        .expect("the fixture-B stub pool is seeded");
+    assert_eq!(
+        (meta_b.token0_ledger.as_str(), meta_b.token1_ledger.as_str()),
+        (ICP_LEDGER, VCHF_LEDGER),
+        "fixture B deliberately REVERSES the PoC pool's measured order"
+    );
+
+    let req = get_req(&swap_quote_uri(
+        FIXTURE_POOL,
+        ICP_LEDGER,
+        VCHF_LEDGER,
+        100_000_000,
+    ));
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::OK, "the fixture pool quotes offline: {body}");
+    assert_eq!(body["venue_id"], "icpswap-fixture-b");
+    assert_eq!(body["pool"], FIXTURE_POOL);
+    assert_eq!(
+        body["zero_for_one"].as_bool(),
+        Some(ICP_LEDGER == meta_b.token0_ledger),
+        "direction derived from THIS pool's own token order"
+    );
+    assert_eq!(body["zero_for_one"], true, "ICP is fixture B's own token0");
+    assert_eq!(
+        body["fee_millionths"].as_u64(),
+        Some(1000),
+        "fixture B's own fee tier, echoed"
+    );
+
+    let amount_out = body["amount_out"].as_str().expect("amount_out is a string");
+    let pool_b_quote = fake
+        .swap_pool_quote(FIXTURE_POOL, true, 100_000_000)
+        .expect("the fixture-B stub pool is seeded");
+    assert_eq!(amount_out, pool_b_quote.amount_out.to_string());
+    let poc_quote = fake
+        .swap_pool_quote(SWAP_POOL, ICP_IN_ZERO_FOR_ONE, 100_000_000)
+        .expect("the PoC venue's stub pool is seeded");
+    assert!(
+        pool_b_quote.amount_out > 0 && pool_b_quote.amount_out != poc_quote.amount_out,
+        "two venues on one pair are two genuinely different curves ({} vs {})",
+        pool_b_quote.amount_out,
+        poc_quote.amount_out
+    );
+
+    // The payout path works on the fixture pool too — same signed rail, pool keyed by the
+    // envelope's own canister, direction per that pool's order: fixture B's ICP-in is TRUE.
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+    let spender = Account {
+        owner: Principal::from_text(FIXTURE_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert!(matches!(
+        swap_result_or_approve(&outcome),
+        ApproveCheck::Approved
+    ));
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, true);
+    let outcome = signed_call_outcome(&state, &payer, FIXTURE_POOL, "depositFromAndSwap", args).await;
+    assert_eq!(
+        swap_result(outcome),
+        Ok(pool_b_quote.amount_out),
+        "the fixture pool pays its own quoted output"
+    );
+    assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), pool_b_quote.amount_out);
+}
+
+/// The knobs are PER POOL (V3): a knob names its target and touches nothing else — a haircut
+/// armed on fixture B must leave the PoC venue's quote alone, and a knob with no pool, or for
+/// an unknown pool, is a NAMED refusal.
+/// (Offline-build only — under `agent` the knob route is test-helpers-gated off with the
+/// gateway itself.)
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn knobs_target_the_named_pool_only() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+    let poc_uri = swap_quote_uri(SWAP_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000);
+    let b_uri = swap_quote_uri(FIXTURE_POOL, ICP_LEDGER, VCHF_LEDGER, 100_000_000);
+
+    let (status, base) = call(&state, get_req(&poc_uri)).await;
+    assert_eq!(status, StatusCode::OK);
+    let base = base["amount_out"].as_str().unwrap().to_string();
+
+    // A 100% haircut on fixture B floors B's quote and leaves the PoC venue untouched.
+    set_swap_pool_knobs(&state, FIXTURE_POOL, serde_json::json!({"impact_bps": 10000})).await;
+    let (status, floored_b) = call(&state, get_req(&b_uri)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(floored_b["amount_out"], "0");
+    let (status, unchanged) = call(&state, get_req(&poc_uri)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        unchanged["amount_out"], base,
+        "a knob on one pool must not touch another venue's curve"
+    );
+
+    // No pool named: a named refusal (a knob must never default onto some pool).
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/test/swap_pool")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"impact_bps": 5000}"#.to_string()))
+        .unwrap();
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "pool is required");
+
+    // An unknown pool: the same refusal the quote route makes.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/test/swap_pool")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::json!({"pool": NOT_A_VENUE, "impact_bps": 5000}).to_string(),
+        ))
+        .unwrap();
+    let (status, body) = call(&state, req).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "unknown_pool");
+}
+
+/// V9 INVARIANT 3: the relay's venue surface is QUERY-ONLY. Every /api/v1 route mentioning a
+/// venue or a swap quote is a GET read; the only mutating routes on that surface are the
+/// test-helpers-only /test/venue and /test/swap_pool knobs, and the knob route itself refuses
+/// GET (POST-only). Axum answers a REGISTERED path with the wrong method as 405 — so these
+/// assertions enumerate the route table's venue/swap surface: no POST/PUT/DELETE handler
+/// exists on /venues or /swap_quote in any build.
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn venue_surface_is_query_only() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+
+    for (method, uri) in [
+        ("POST", "/api/v1/venues"),
+        ("PUT", "/api/v1/venues"),
+        ("DELETE", "/api/v1/venues"),
+        ("POST", "/api/v1/swap_quote"),
+        ("DELETE", "/api/v1/swap_quote"),
+        ("GET", "/api/v1/test/venue"),
+    ] {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .body(Body::empty())
+            .unwrap();
+        let status = call_status(&state, req).await;
+        assert_eq!(
+            status,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "{method} {uri} must not exist as a handler (query-only surface)"
+        );
+    }
+
+    // Reads are idempotent and leave no trace: the served list is identical across reads, and
+    // quoting EVERY registered pool changes nothing about what /venues serves.
+    let (s1, v1) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(s1, StatusCode::OK);
+    let (s2, v2) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(s2, StatusCode::OK);
+    assert_eq!(v1, v2, "GET /venues is a pure read");
+    for pool in [SWAP_POOL, FIXTURE_POOL] {
+        let (s, _) = call(&state, get_req(&swap_quote_uri(pool, ICP_LEDGER, VCHF_LEDGER, 100_000_000))).await;
+        assert_eq!(s, StatusCode::OK, "{pool}: quotes offline");
+    }
+    let (s3, v3) = call(&state, get_req("/api/v1/venues")).await;
+    assert_eq!(s3, StatusCode::OK);
+    assert_eq!(v1, v3, "quoting both pools leaked nothing into the served venue list");
+}
+
+/// V9 INVARIANT 1 (route half): dpay-OWNED canister principals are refused by the quote route
+/// as unknown pools — `catalog::venue_of_endpoint` IS the allowlist and no dpay canister
+/// resolves through it. Pinned against the two owned principals in `canister_ids.json`
+/// (`ssqti-…` dpay_canister/facade, `td2nx-…` icrc_ledger/DUSD); the catalog-level twin is
+/// `dpay_owned_principals_never_resolve_as_venues`, the phone-side signing-boundary twin is
+/// `app/config/venues.ts` DPAY_CANISTER_PRINCIPALS (checked by venueInvariants.test.ts).
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn swap_quote_refuses_dpay_owned_principals_as_pools() {
+    let (state, _led, _fake) = state_with_fake(ledger()).await;
+    for pool in ["ssqti-wiaaa-aaaab-qhdia-cai", "td2nx-oaaaa-aaaab-qhdnq-cai"] {
+        let req = get_req(&swap_quote_uri(pool, ICP_LEDGER, VCHF_LEDGER, 100_000_000));
+        let (status, body) = call(&state, req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{pool}: a dpay canister is not a venue");
+        assert_eq!(body["error"], "unknown_pool", "{pool}: the same named refusal as any unknown pool");
+    }
+}
+
+/// V9 INVARIANT 4 (relay half): the served number is THE POOL'S OWN REPLY, byte-equal — for
+/// EVERY registered pool (the real venue and the fixture venue alike) — and it moves
+/// identically when the pool's own output is mutated through the existing knob. The render
+/// halves live in `app/__tests__/venueInvariants.test.ts` (relay echo → ConvertQuote) and
+/// `app/__tests__/convertMode.test.tsx` (ConvertQuote → rendered string, parametric per
+/// venue); e2e flow 167 covers the full chain through the real relay + browser.
+#[cfg(not(feature = "agent"))]
+#[tokio::test]
+async fn every_pool_quote_is_its_own_reply_verbatim_and_moves_with_the_knob() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    // (pool, zero_for_one for ICP→VCHF per THAT pool's own token order, a distinct knob fee)
+    let cases: [(&str, bool, u64); 2] = [
+        (SWAP_POOL, ICP_IN_ZERO_FOR_ONE, 777),
+        (FIXTURE_POOL, true, 1234),
+    ];
+    let mut seen: Vec<String> = Vec::new();
+    for (pool, zero_for_one, fee) in cases {
+        let uri = swap_quote_uri(pool, ICP_LEDGER, VCHF_LEDGER, 100_000_000);
+        let (status, base) = call(&state, get_req(&uri)).await;
+        assert_eq!(status, StatusCode::OK, "{pool}: quotes before the knob");
+        let base = base["amount_out"].as_str().unwrap().to_string();
+
+        // Mutate THIS pool's own output (the fee tier shapes the curve): the served number
+        // must move, and land byte-equal on the pool's own post-knob reply.
+        set_swap_pool_knobs(&state, pool, serde_json::json!({"fee_millionths": fee})).await;
+        let (status, body) = call(&state, get_req(&uri)).await;
+        assert_eq!(status, StatusCode::OK, "{pool}: quotes after the knob");
+        let amount_out = body["amount_out"].as_str().unwrap().to_string();
+        let own = fake
+            .swap_pool_quote(pool, zero_for_one, 100_000_000)
+            .unwrap_or_else(|| panic!("{pool}: the stub pool is seeded"));
+        assert_eq!(
+            amount_out,
+            own.amount_out.to_string(),
+            "{pool}: byte-equal to the pool's own reply"
+        );
+        assert_ne!(amount_out, base, "{pool}: the knob really moved the pool's output");
+        seen.push(amount_out);
+    }
+    assert_ne!(seen[0], seen[1], "the two pools remain two genuinely different curves");
 }

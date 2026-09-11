@@ -41,7 +41,7 @@ use serde::Deserialize;
 
 use dpay_core::{Currency, PUBKEY_LEN};
 
-use crate::ledger::api::SwapPoolMetadata;
+use crate::ledger::api::{SwapPoolMetadata, VenueQuote};
 use crate::ledger::{
     ckerc20_onramp_from_descriptor, CkErc20OnrampParams, DepositInfo, Ledger, LedgerError,
     TxnRecord, U64String,
@@ -815,21 +815,24 @@ impl Ledger for AgentLedger {
         Ok(meta)
     }
 
-    /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2): the
-    /// pool's OWN `quote` query, returned VERBATIM — the relay never computes or blends a rate.
-    /// `pool` is the known-pool principal text (the route already validated it against
-    /// [`crate::catalog::is_known_swap_pool`]) and `zero_for_one` was derived from
-    /// [`Ledger::swap_pool_metadata`]; the reply's `ok(nat)` is the pool's own
-    /// amountOut estimate, GROSS of the output ledger's transfer fee (the app computes net). A
-    /// pool `#err` comes back as `Rejected` with the variant name (+ its text payload) so the
-    /// route surfaces the pool's own refusal verbatim; transport/decode failures as `Transient`
-    /// (503 at the route).
+    /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2,
+    /// widened for multi-venue readiness V7): the pool's OWN `quote` query, returned VERBATIM and
+    /// ATTRIBUTED inside a [`VenueQuote`] — the relay never computes or blends a rate. `pool` is
+    /// the known-venue endpoint text (the route already resolved it via
+    /// [`crate::catalog::venue_of_endpoint`]) and `zero_for_one` was derived from
+    /// [`Ledger::swap_pool_metadata`]; the reply's `ok(nat)` is the pool's own amountOut
+    /// estimate, GROSS of the output ledger's transfer fee (the app computes net). The fee tier
+    /// in the returned quote is the venue's OWN, read via the metadata cache (TTL-bounded like
+    /// every other read) — never a registry constant; `fetched_at` stamps the moment the venue
+    /// answered. A pool `#err` comes back as `Rejected` with the variant name (+ its text
+    /// payload) so the route surfaces the pool's own refusal verbatim; transport/decode failures
+    /// as `Transient` (503 at the route).
     async fn swap_pool_quote(
         &self,
         pool: &str,
         zero_for_one: bool,
         amount_in_e8s: u128,
-    ) -> Result<u128, LedgerError> {
+    ) -> Result<VenueQuote, LedgerError> {
         let pool_id = Principal::from_text(pool)
             .map_err(|e| LedgerError::Transient(format!("parse pool principal '{pool}': {e}")))?;
         // amountOutMinimum carries no slippage floor for a QUOTE (0) — the app applies its own
@@ -851,22 +854,34 @@ impl Ledger for AgentLedger {
             ))
         })?
         .map_err(|e| LedgerError::Transient(format!("quote query: {e}")))?;
-        match decode_one::<IcpSwapResult>(&reply)
+        let amount_out = match decode_one::<IcpSwapResult>(&reply)
             .map_err(|e| LedgerError::Transient(format!("decode quote reply: {e}")))?
         {
             IcpSwapResult::ok(nat) => nat
                 .0
                 .to_u128()
-                .ok_or_else(|| LedgerError::Transient("quote amountOut exceeds u128".to_string())),
+                .ok_or_else(|| LedgerError::Transient("quote amountOut exceeds u128".to_string()))?,
             // The pool's own refusal, named verbatim (variant name + its text payload when the
             // variant carries one) — the route's `pool_error` body forwards this string as-is.
-            IcpSwapResult::err(e) => Err(LedgerError::Rejected(match e {
-                IcpSwapError::CommonError => "CommonError".to_string(),
-                IcpSwapError::InsufficientFunds => "InsufficientFunds".to_string(),
-                IcpSwapError::InternalError(t) => format!("InternalError: {t}"),
-                IcpSwapError::UnsupportedToken(t) => format!("UnsupportedToken: {t}"),
-            })),
-        }
+            IcpSwapResult::err(e) => {
+                return Err(LedgerError::Rejected(match e {
+                    IcpSwapError::CommonError => "CommonError".to_string(),
+                    IcpSwapError::InsufficientFunds => "InsufficientFunds".to_string(),
+                    IcpSwapError::InternalError(t) => format!("InternalError: {t}"),
+                    IcpSwapError::UnsupportedToken(t) => format!("UnsupportedToken: {t}"),
+                }))
+            }
+        };
+        Ok(VenueQuote {
+            pool: pool.to_string(),
+            amount_out,
+            fee_millionths: self.swap_pool_metadata(pool).await?.fee_millionths,
+            zero_for_one,
+            fetched_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default(),
+        })
     }
 }
 
@@ -2114,8 +2129,15 @@ mod swap_pool_metadata_tests {
     const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
 
     fn swap_venue_truth() -> Value {
+        // Wave 1 folded the old top-level `swap_venue` block into the venue registry as the PoC
+        // venue's `fixture` — same measured data, new path: venues[venue_id=icpswap].fixture.
         serde_json::from_str::<Value>(CATALOG_TRUTH)
-            .expect("dfx/catalog_truth.json must be valid JSON")["swap_venue"]
+            .expect("dfx/catalog_truth.json must be valid JSON")["venues"]
+            .as_array()
+            .expect("catalog_truth.venues is an array")
+            .into_iter()
+            .find(|v| v["venue_id"].as_str() == Some("icpswap"))
+            .expect("the PoC venue is pinned in the truth file")["fixture"]
             .clone()
     }
 

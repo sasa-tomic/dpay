@@ -21,6 +21,7 @@ import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
+import {useConvertResumeEngine} from '../hooks/useConvertResumeEngine';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
 import {TripStrip} from './TripStrip';
@@ -740,6 +741,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
   // writer to `history` (fetched eagerly inside the hook — no optimistic in-memory state). Stable
   // across renders.
   const onActivity = useCallback(() => { refreshHistory(); }, [refreshHistory]);
+  // The conversion record-advancement engine (V6): every live convert record is driven from
+  // wallet load — mounted screen or not. A record landing in a terminal state IS account
+  // activity (a payout arrived), so the engine's terminal callback is the same ledger refresh.
+  useConvertResumeEngine({identity, relayUrl, onTerminal: onActivity});
   // The SOL rail's twin of `onActivity`: a confirmed send moves the balance AND adds a ledger row,
   // so both are re-read rather than waiting out the poll. The two token callbacks stay separate
   // because the BALANCES are independent (a SOL send must not perturb the USDC status); the

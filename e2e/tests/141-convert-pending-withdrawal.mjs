@@ -76,7 +76,7 @@ export async function run() {
     // against the same shared pool, and the confirm re-quote must match the screen's number —
     // narrowing the window to sub-second keeps the interrupt loop below a rarity.
     console.log('[141-convert-pending-withdrawal] arming fail_withdrawal and confirming…');
-    await swapPoolKnob(relayBaseURL, { fail_withdrawal: true });
+    await swapPoolKnob(relayBaseURL, { pool: POOL, fail_withdrawal: true });
     let executedGross = await relayQuoteOut(relayBaseURL);
     let pending = null;
     for (let round = 0; round < 5 && pending == null; round++) {
@@ -111,7 +111,7 @@ export async function run() {
 
     // --- Resolution: drain the venue's queue → the screen flips to done on its own --------------
     console.log('[141-convert-pending-withdrawal] draining the venue queue (settle_pending)…');
-    await swapPoolKnob(relayBaseURL, { fail_withdrawal: false, settle_pending: true });
+    await swapPoolKnob(relayBaseURL, { pool: POOL, fail_withdrawal: false, settle_pending: true });
     assert(
       await driver.waitForText('Converted', { timeoutMs: 90_000 }),
       'resolution flips the SAME screen to done (re-arm re-watches within seconds)',

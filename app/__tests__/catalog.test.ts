@@ -28,7 +28,7 @@ import {SOL_DECIMALS} from '../solana/identity';
 import {ICP_LEDGER_PRINCIPAL} from '../config/constants';
 import {USDC_DECIMALS, USDC_MINT_ADDRESS} from '../solana/spl';
 import {MINT_HEX} from '../lib/format';
-import {CONVERT_POOL_PRINCIPAL, CONVERT_VENUE_LEDGERS} from '../config/convert';
+import {BUNDLED_VENUES} from '../config/venues';
 
 // Catalog v2: the bundled fallback is the network-first `BUNDLED_NETWORKS`; the flat IC catalog the
 // metadata/drift-alarm describes below assert against is DERIVED through the same `icpCatalogOf`
@@ -757,7 +757,21 @@ const TRUTH = JSON.parse(
   erc20_contracts: {ckusdc: string};
   decimals: {demo: number; ckbtc: number; ckusdc: number; eth: number; vchf: number; icp: number; veur: number; eurc: number};
   wire_consts: {retrieve_btc_min_amount: number; mint_account: string};
-  swap_venue: {pool: string; token0_ledger: string; token1_ledger: string; fee_millionths: number};
+  venues: VenueTruth[];
+};
+
+type VenueTruth = {
+  venue_id: string;
+  display_name: string;
+  kind: string;
+  endpoint: string;
+  pair_ledgers: string[];
+  testnet: boolean;
+  disclosure_key: string;
+  fixture_only?: boolean;
+  /** Wave-2 rename of the relay-side marker: the entry is served ONLY by test-helpers builds,
+   *  behind the POST /api/v1/test/venue knob (never bundled, never agent-served, never probed). */
+  test_helpers_served?: boolean;
 };
 
 describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
@@ -941,24 +955,59 @@ describe('BUNDLED_CATALOG vs dfx/catalog_truth.json (drift alarm)', () => {
   });
 });
 
-// --- swap_venue drift alarm (app half) --------------------------------------------------------
-// The relay's Rust half pins the OFFLINE fake pool's seed order against this block, and
-// `just swap-venue-probe` pins the LIVE pool against it. This is the third side: the app's own
-// venue constants. Note what is deliberately NOT asserted — an ORDER. The app holds the pair as an
-// unordered set precisely because the 2026-09-07 build pinned the order, got it backwards, and
-// seeded the offline fake from the same pin, so nothing offline could contradict it while
-// production quoted each direction under the other's label
-// (docs/specs/2026-09-08-conversion-hardening-plan.md). Direction now comes from the venue's own
-// metadata, echoed by the relay; the app asserts only WHICH two ledgers, and which pool.
-describe('convert venue vs dfx/catalog_truth.json (app-half drift alarm)', () => {
-  it('the pool the app signs against is the measured venue', () => {
-    expect(CONVERT_POOL_PRINCIPAL).toBe(TRUTH.swap_venue.pool);
+// --- venues drift alarm (app half) ------------------------------------------------------------
+// The relay's Rust half pins the compiled venue registry against this block, and
+// `just swap-venue-probe` pins every LIVE pool against it. This is the third side: the app's own
+// bundled venue registry (config/venues.ts). Note what is deliberately NOT asserted — an ORDER.
+// The app holds each pair as an unordered set precisely because the 2026-09-07 build pinned the
+// order, got it backwards, and seeded the offline fake from the same pin, so nothing offline could
+// contradict it while production quoted each direction under the other's label. Direction now
+// comes from the venue's own metadata, echoed by the relay; the app asserts only WHICH two
+// ledgers, which pool, and which names. Fixture entries (invented offline pools) are pinned as
+// fixture-truth and must NEVER be bundled into the app — they reach a wallet only knob-gated
+// through the relay's served list (V5), never through the bundled registry.
+describe('bundled venue registry vs dfx/catalog_truth.json venues[] (app-half drift alarm)', () => {
+  const isFixture = (v: VenueTruth) => v.test_helpers_served === true || v.fixture_only === true;
+  const realVenues = TRUTH.venues.filter((v: VenueTruth) => !isFixture(v));
+
+  it('every REAL truth venue is bundled, field for field; nothing else is', () => {
+    expect(BUNDLED_VENUES.map(v => v.venue_id).sort()).toEqual(realVenues.map((v: VenueTruth) => v.venue_id).sort());
+    for (const truth of realVenues) {
+      const v = BUNDLED_VENUES.find(b => b.venue_id === truth.venue_id)!;
+      expect(v.display_name).toBe(truth.display_name);
+      expect(v.kind).toBe(truth.kind);
+      expect(v.endpoint).toBe(truth.endpoint);
+      expect(v.testnet).toBe(truth.testnet);
+      expect(v.disclosure_key).toBe(truth.disclosure_key);
+      // The pair is an UNORDERED set on both sides (see the block doc — order is the venue's).
+      expect([...v.pair_ledgers].sort()).toEqual([...truth.pair_ledgers].sort());
+    }
   });
 
-  it('the venue pair is the measured pair, as an unordered set', () => {
-    expect([...CONVERT_VENUE_LEDGERS].sort()).toEqual(
-      [TRUTH.swap_venue.token0_ledger, TRUTH.swap_venue.token1_ledger].sort(),
-    );
+  it('no fixture venue is ever bundled into the app (invented pools stay relay-side, knob-gated)', () => {
+    const fixtureEndpoints = TRUTH.venues.filter(isFixture).map((v: VenueTruth) => v.endpoint);
+    for (const v of BUNDLED_VENUES) expect(fixtureEndpoints).not.toContain(v.endpoint);
+  });
+
+  it('every fixture entry is pinned as testnet + test-helpers-served (the knob-gating facts, V5)', () => {
+    // An invented pool must be LABELLED the stand-in it is: testnet-true (so no mainnet surface
+    // can treat it as real) and test_helpers_served-true (so the relay serves it only in offline
+    // test builds, behind the /test/venue knob — never the agent build). If either fact drifts,
+    // the relay-side alarms in catalog.rs lose their meaning, so this pins the truth-file half.
+    for (const truth of TRUTH.venues.filter(isFixture)) {
+      expect(truth.testnet).toBe(true);
+      expect(truth.test_helpers_served).toBe(true);
+    }
+  });
+
+  it('the PoC pair resolves through the catalog rows the app actually serves', () => {
+    // The registry's pair must be the SAME ledgers the catalog rows carry (the ids come from the
+    // bundled catalog at build time — this pins that derivation against the truth file).
+    const icp = BUNDLED_CATALOG.find(c => c.currency === 8);
+    const vchf = BUNDLED_CATALOG.find(c => c.currency === 7);
+    const venue = BUNDLED_VENUES.find(v => v.venue_id === 'icpswap')!;
+    expect(venue.pair_ledgers).toContain(icp!.ledger);
+    expect(venue.pair_ledgers).toContain(vchf!.ledger);
   });
 });
 

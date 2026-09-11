@@ -319,6 +319,16 @@ function buildStyles(p: Palette) {
   convertSlippageChipOn: {borderColor: p.brand, backgroundColor: p.brand},
   convertSlippageChipText: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   convertSlippageChipTextOn: {color: p.brandInk},
+  // The venue chooser (multi-venue readiness V5): one row per venue, registry order. Row = a
+  // small lifted card (the headline card's grammar) so N venues read as N parallel offers, the
+  // picked one inked by the brand border. Nothing about the row encodes rank — same shape,
+  // same order, every render; rows are never sorted by what they quote.
+  convertVenueRow: {backgroundColor: p.card, borderWidth: 1, borderColor: p.line2, borderRadius: 14, padding: 14, marginTop: 8, alignSelf: 'stretch', ...LIFT},
+  convertVenueRowOn: {borderColor: p.brand},
+  convertVenueRowText: {flex: 1},
+  convertVenueName: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium},
+  convertVenueNameOn: {fontFamily: FONT.sansBold},
+  convertVenueAmount: {fontSize: 14, color: p.sub, lineHeight: 20, marginTop: 4, fontFamily: FONT.sans},
   convertBtnBusyRow: {flexDirection: 'row', alignItems: 'center', gap: 10},
   convertUnavailableTitle: {fontSize: 18, color: p.ink, fontFamily: FONT.sansBold, marginBottom: 8},
   convertUnavailableBody: {fontSize: 14, color: p.sub, lineHeight: 20, marginBottom: 8, fontFamily: FONT.sans},

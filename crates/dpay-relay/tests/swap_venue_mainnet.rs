@@ -1,6 +1,6 @@
-//! OPT-IN mainnet read-only tripwire for the delegated-conversion VENUE — NOT part of
+//! OPT-IN mainnet read-only tripwire for the delegated-conversion VENUES — NOT part of
 //! check/verify. Network required (https://icp-api.io). Read-only: one anonymous `metadata`
-//! QUERY on the PoC pool — no cycles, no state change, no funds, no identity. Run via
+//! QUERY per REAL venue pool — no cycles, no state change, no funds, no identity. Run via
 //! `just swap-venue-probe` (the sibling of `ic-index-probe` / `ocp-ledger-probe`; without
 //! `DPAY_IC_MAINNET=1` the test prints "skipped" and returns, so the offline hot path never
 //! touches the network).
@@ -13,22 +13,29 @@
 //! pin. Live production therefore answered every ICP→VCHF quote with the VCHF→ICP rate —
 //! 0.41194138 where the truth was 2.41297899, wrong by ~5.9x AGAINST THE USER — behind a fully
 //! green suite. Production no longer pins the pair (it reads the pool's own `metadata` on every
-//! quote, `AgentLedger::swap_pool_metadata`); this probe is what notices if the VENUE itself
-//! changes underneath the measured block in `dfx/catalog_truth.json` that the offline fake is
-//! seeded from.
+//! quote, `AgentLedger::swap_pool_metadata`); this probe is what notices if a VENUE itself
+//! changes underneath the measured `dfx/catalog_truth.json` `venues[].fixture` block that the
+//! offline fake is seeded from.
 //!
-//! What it asserts, all against the pool's OWN reply:
+//! MULTI-VENUE (2026-09-10 Wave 1, updated Wave 2): the probe walks EVERY registry entry —
+//! but only the REAL ones. A `test_helpers_served` venue is pinned fixture-truth with an
+//! explicit NOT-A-REAL-VENUE marker precisely so this loop can skip it: an invented principal
+//! must never be probed on mainnet (and the agent-build allowlist would refuse it anyway).
+//!
+//! What it asserts, per real venue, all against the pool's OWN reply:
 //!   1. the venue still answers `metadata` at all, through the production decoder;
-//!   2. `token0` / `token1` / `fee` are still exactly `swap_venue` in `dfx/catalog_truth.json`;
+//!   2. `token0` / `token1` / `fee` are still exactly the `venues[].fixture` block in
+//!      `dfx/catalog_truth.json`;
 //!   3. the pool's own `key` (`<token0>_<token1>_<fee>`) agrees with those three — the venue's
 //!      internal cross-check, so a pool that renamed its pair without changing the fields is
 //!      caught too;
 //!   4. **the live rate comes out the right way up.** The REAL `/api/v1/swap_quote` route is
 //!      driven (the production axum handler over an `AgentLedger` pointed at mainnet) in BOTH
-//!      directions, and each quoted amount is checked against the price the pool itself
-//!      publishes in the SAME reply (`sqrtPriceX96`). That comparison is market-independent —
-//!      it uses the venue's own current price, not a number anyone pinned — and an inverted
-//!      direction misses it by the square of the price (the 2026-09-07 build was off by ~5.9x).
+//!      directions, each reply carries its `venue_id` attribution, and each quoted amount is
+//!      checked against the price the pool itself publishes in the SAME reply
+//!      (`sqrtPriceX96`). That comparison is market-independent — it uses the venue's own
+//!      current price, not a number anyone pinned — and an inverted direction misses it by the
+//!      square of the price (the 2026-09-07 build was off by ~5.9x).
 
 #![cfg(feature = "agent")]
 
@@ -93,29 +100,55 @@ async fn route_quote(state: &AppState, pool: &str, token_in: &str, token_out: &s
     body
 }
 
-fn swap_venue_truth() -> Value {
+fn venues_truth() -> Vec<Value> {
     serde_json::from_str::<Value>(CATALOG_TRUTH).expect("dfx/catalog_truth.json must be valid JSON")
-        ["swap_venue"]
+        ["venues"]
+        .as_array()
+        .expect("truth venues is an array")
         .clone()
 }
 
+/// Every REAL venue, one at a time. `test_helpers_served` entries are pinned fixture-truth
+/// with an explicit NOT-A-REAL-VENUE marker precisely so this loop can skip them: an invented
+/// principal must never be probed on mainnet (and the agent-build allowlist would refuse it
+/// anyway — the knob that serves it offline does not exist in this build).
 #[test]
-fn swap_venue_mainnet_pair_and_fee_still_match_the_measured_truth() {
+fn venues_mainnet_pair_and_fee_still_match_the_measured_truth() {
     if std::env::var("DPAY_IC_MAINNET").is_err() {
         eprintln!("skipped: set DPAY_IC_MAINNET=1 (opt-in mainnet probe, needs network)");
         return;
     }
-    let truth = swap_venue_truth();
-    let pool_text = truth["pool"].as_str().expect("swap_venue.pool");
-    let want0 = truth["token0_ledger"]
+    // The unit-rate math in the probe needs the pair's decimals — asserted equal here for the
+    // one pair dpay trades today. A second REAL pair must extend this guard with its decimals.
+    let truth_all: Value = serde_json::from_str(CATALOG_TRUTH).expect("catalog_truth is JSON");
+    assert_eq!(truth_all["decimals"]["vchf"], truth_all["decimals"]["icp"]);
+    let mut probed = 0;
+    for venue in &venues_truth() {
+        if venue
+            .get("test_helpers_served")
+            .is_some_and(|f| f.as_bool().unwrap())
+        {
+            continue;
+        }
+        probe_real_venue(venue);
+        probed += 1;
+    }
+    assert!(probed > 0, "the registry must hold at least one real venue");
+}
+
+fn probe_real_venue(venue: &Value) {
+    let venue_id = venue["venue_id"].as_str().expect("venue_id");
+    let fixture = &venue["fixture"];
+    let pool_text = venue["endpoint"].as_str().expect("venue.endpoint");
+    let want0 = fixture["token0_ledger"]
         .as_str()
-        .expect("swap_venue.token0_ledger");
-    let want1 = truth["token1_ledger"]
+        .expect("fixture.token0_ledger");
+    let want1 = fixture["token1_ledger"]
         .as_str()
-        .expect("swap_venue.token1_ledger");
-    let want_fee = truth["fee_millionths"]
+        .expect("fixture.token1_ledger");
+    let want_fee = fixture["fee_millionths"]
         .as_u64()
-        .expect("swap_venue.fee_millionths");
+        .expect("fixture.fee_millionths");
     let pool = Principal::from_text(pool_text).expect("the pinned pool principal parses");
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -134,23 +167,24 @@ fn swap_venue_mainnet_pair_and_fee_still_match_the_measured_truth() {
             .await
             .expect("the venue answers metadata through the production read path");
         eprintln!(
-            "swap-venue mainnet probe: pool {pool_text} reports token0={} token1={} fee={}",
+            "swap-venue mainnet probe [{venue_id}]: pool {pool_text} reports token0={} token1={} fee={}",
             meta.token0_ledger, meta.token1_ledger, meta.fee_millionths
         );
         assert_eq!(
             meta.token0_ledger, want0,
-            "the LIVE venue's token0 no longer matches dfx/catalog_truth.json swap_venue — the \
-             offline fake is seeded from that block, so re-measure it (and check what else at \
-             this pool changed) before shipping another quote"
+            "the LIVE venue's token0 no longer matches dfx/catalog_truth.json \
+             venues[{venue_id}].fixture — the offline fake is seeded from that block, so \
+             re-measure it (and check what else at this pool changed) before shipping another \
+             quote"
         );
         assert_eq!(
             meta.token1_ledger, want1,
-            "the LIVE venue's token1 drifted from the truth block"
+            "the LIVE venue's token1 drifted from the truth fixture block"
         );
         assert_eq!(
             meta.fee_millionths,
             u128::from(want_fee),
-            "the LIVE venue's fee tier drifted from the truth block (the app shows this number)"
+            "the LIVE venue's fee tier drifted from the truth fixture block (the app shows this number)"
         );
 
         // 3. The venue's OWN cross-check: `key` is `<token0>_<token1>_<fee>`.
@@ -205,6 +239,10 @@ fn swap_venue_mainnet_pair_and_fee_still_match_the_measured_truth() {
             ("token1→token0", want1, want0, amount_in / price_t1_per_t0),
         ] {
             let body = route_quote(&state, pool_text, token_in, token_out).await;
+            assert_eq!(
+                body["venue_id"], venue_id,
+                "the route's reply must be attributable to this venue"
+            );
             assert_eq!(
                 body["zero_for_one"].as_bool(),
                 Some(token_in == meta.token0_ledger),

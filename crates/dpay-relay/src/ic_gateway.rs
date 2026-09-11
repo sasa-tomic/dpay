@@ -46,7 +46,7 @@ use dpay_icp::icrc::{
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{cbor_encode, tree_to_cbor, Cbor, Tree};
 
-use crate::ledger::api::SwapPoolMetadata;
+use crate::ledger::api::{SwapPoolMetadata, VenueQuote};
 use crate::AppState;
 use dpay_core::Currency;
 
@@ -96,10 +96,19 @@ struct FakeIcState {
     balances: HashMap<(String, (String, [u8; 32])), u128>,
     /// Allowances, likewise scoped to the ledger they were granted on (see [`AllowanceValue`]).
     allowances: HashMap<AllowanceKey, AllowanceValue>,
-    /// The stub ICPSwap pool (delegated-conversion PoC) — `quote`/`metadata` queries and the
-    /// `depositFromAndSwap` update, over a deterministic curve. Registered by
-    /// [`FakeIc::from_catalog`] at [`crate::catalog::SWAP_POOL_PRINCIPAL`].
-    pool: FakePoolState,
+    /// The stub AMM pools (multi-venue readiness V3): canister text → pool, keyed by PRINCIPAL
+    /// so one gateway can host many venues on the same pair. Registered by
+    /// [`FakeIc::from_catalog`] from the catalog venue registry's fixture seeds — for the real
+    /// venue the MEASURED live order, for fixture-only venues the declared fixture-truth (both
+    /// pinned by the drift alarm in `catalog.rs`).
+    pools: HashMap<String, FakePoolState>,
+    /// TEST KNOB (multi-venue readiness V5): fixture venues the `/api/v1/venues` route is
+    /// currently SERVING (`POST /api/v1/test/venue`), by venue_id. Empty by default — the
+    /// offline default experience is ONE venue per pair, exactly like prod; a test opts in to
+    /// the two-venue world by arming the knob. Only `test_helpers_served` venues can land here
+    /// (the knob handler refuses everything else), and the whole knob exists only in the
+    /// offline test build.
+    served_fixture_venues: std::collections::HashSet<String>,
     requests: HashMap<[u8; 32], RequestState>,
     txns: Vec<FakeTxn>,
     next_block: u64,
@@ -108,22 +117,20 @@ struct FakeIcState {
 /// The stub ICPSwap V3 pool (delegated-conversion PoC, spec 2026-09-07 §6): a DETERMINISTIC
 /// constant-product curve over its own reserves — deliberately not a real AMM. Determinism
 /// beats realism: same reserves + same amount_in ⇒ same amount_out, forever. The knobs
-/// (`fee_millionths`, `impact_bps`, `fail_withdrawal`) are the test surface
-/// (`POST /api/v1/test/swap_pool`).
+/// (`fee_millionths`, `impact_bps`, `fail_withdrawal`) are the per-pool test surface
+/// (`POST /api/v1/test/swap_pool` with a `pool`).
 struct FakePoolState {
     /// The pool's OWN metadata pair — what [`FakeIc::swap_pool_metadata`] reports and the route
-    /// derives `zero_for_one` from. Seeded in the order MEASURED off the live venue
-    /// (`dfx/catalog_truth.json` `swap_venue`), pinned by the drift alarm in `catalog.rs`.
+    /// derives `zero_for_one` from. Seeded per venue from `dfx/catalog_truth.json`
+    /// `venues[].fixture`, pinned by the drift alarm in `catalog.rs`.
     token0_ledger: String,
     token1_ledger: String,
-    /// Genesis reserves, EACH FOLLOWING ITS OWN TOKEN: reserve0 = 1.93M VCHF, reserve1 = 1M ICP
-    /// e8s — deep enough that PoC-size swaps barely move the price (stable, deterministic
-    /// quotes; matching the live band is NOT a goal). They travelled with the pair when the
-    /// 2026-09-08 reseed put token0/token1 in the measured order, so every quoted AMOUNT is
-    /// unchanged and only the direction flag moved.
+    /// Genesis reserves, EACH FOLLOWING ITS OWN TOKEN (reserve0 tracks token0). Per pool, from
+    /// the catalog fixture seed — deep enough that PoC-size swaps barely move the price
+    /// (stable, deterministic quotes; matching the live band is NOT a goal).
     reserve0_e8s: u128,
     reserve1_e8s: u128,
-    /// Swap fee in millionths (default 3000 = the PoC pool's 0.30% tier), applied to amount_in.
+    /// Swap fee in millionths applied to amount_in (per pool; the real PoC venue's 0.30% tier).
     fee_millionths: u128,
     /// Extra price-impact haircut in basis points on the quoted output (default 0 = pure curve).
     impact_bps: u16,
@@ -137,22 +144,27 @@ struct FakePoolState {
 }
 
 impl Default for FakePoolState {
-    /// Pre-`from_catalog` placeholder (empty pair): every pool method gates on the canister
-    /// being [`crate::catalog::SWAP_POOL_PRINCIPAL`] first, so an unregistered pool can only
-    /// reject, never swap.
+    /// Pre-`from_catalog` placeholder (empty pair, empty curve): every pool method resolves the
+    /// pool by CANISTER first, so an unregistered pool can only reject, never swap.
     fn default() -> Self {
-        Self::new("", "")
+        Self::new("", "", 0, 0, 0)
     }
 }
 
 impl FakePoolState {
-    fn new(token0_ledger: &str, token1_ledger: &str) -> Self {
+    fn new(
+        token0_ledger: &str,
+        token1_ledger: &str,
+        fee_millionths: u128,
+        reserve0_e8s: u128,
+        reserve1_e8s: u128,
+    ) -> Self {
         FakePoolState {
             token0_ledger: token0_ledger.to_string(),
             token1_ledger: token1_ledger.to_string(),
-            reserve0_e8s: 193_000_000_000_000, // 1.93M VCHF (token0)
-            reserve1_e8s: 100_000_000_000_000, // 1M ICP (token1)
-            fee_millionths: 3000,              // the PoC pool's 0.30% tier
+            reserve0_e8s,
+            reserve1_e8s,
+            fee_millionths,
             impact_bps: 0,
             fail_withdrawal: false,
             pending: Vec::new(),
@@ -267,15 +279,29 @@ impl FakeIc {
                 st.minters.insert(m, d.ledger.clone());
             }
         }
-        // The stub ICPSwap pool at the PoC venue principal, in the pair order MEASURED off the
-        // LIVE pool on 2026-09-08 — token0 = VCHF, token1 = ICP (`dfx/catalog_truth.json`
-        // `swap_venue`, held to it by the drift alarm in `catalog.rs`). Seeding this from a
-        // guess is precisely what hid a ~5.9x-wrong production rate behind a green suite: the
-        // fake and the code agreed with each other and neither agreed with the venue.
-        st.pool = FakePoolState::new(
-            crate::catalog::VCHF_LEDGER_PRINCIPAL,
-            crate::catalog::ICP_LEDGER_PRINCIPAL,
-        );
+        // Every ic_amm venue with a fixture seed gets a stub pool at its endpoint, in exactly
+        // the pinned pair order + fee tier (multi-venue readiness V3). For the REAL venue that
+        // seed order was MEASURED off the live pool on 2026-09-08 (`dfx/catalog_truth.json`
+        // `venues[].fixture`, held to it by the drift alarm in `catalog.rs`): seeding it from a
+        // guess is precisely what hid a ~5.9x-wrong production rate behind a green suite — the
+        // fake and the code agreed with each other and neither agreed with the venue. The
+        // fixture-only second pool is declared fixture-truth (invented principal, deliberately
+        // REVERSED order + different curve/fee) so a later wave can test two venues on one pair
+        // offline.
+        for v in crate::catalog::venues() {
+            if let Some(seed) = v.fixture {
+                st.pools.insert(
+                    v.endpoint.to_string(),
+                    FakePoolState::new(
+                        seed.token0_ledger,
+                        seed.token1_ledger,
+                        seed.fee_millionths,
+                        seed.reserve0_e8s,
+                        seed.reserve1_e8s,
+                    ),
+                );
+            }
+        }
         Arc::new(FakeIc {
             state: Mutex::new(st),
             hidden_outcomes: Mutex::new(std::collections::HashMap::new()),
@@ -358,58 +384,75 @@ impl FakeIc {
         0
     }
 
-    /// What the gateway's one stub pool says about ITSELF — the offline twin of
+    /// What the gateway's stub pool at `pool` says about ITSELF — the offline twin of
     /// [`Ledger::swap_pool_metadata`](crate::Ledger::swap_pool_metadata). The relay's
     /// test-helpers `/api/v1/swap_quote` branch derives `zero_for_one` from THIS, through the
     /// exact same pure rule the agent branch applies to the live pool's reply, so the offline
     /// loop exercises the direction logic rather than agreeing with a pin.
     ///
-    /// No `pool` argument: the allowlist is the ROUTE's gate
-    /// ([`crate::catalog::is_known_swap_pool`], the same gate the agent build applies), and this
-    /// gateway holds exactly one stub pool. Re-checking here would only add a branch no caller
-    /// can reach. The signed-envelope path is different and DOES check its canister
+    /// `None` when `pool` is not a seeded stub — the route's allowlist (the same
+    /// [`crate::catalog::venue_of_endpoint`] gate the agent build applies) normally refuses
+    /// those first; the signed-envelope path additionally re-resolves the canister
     /// ([`FakeIc::pool_deposit_from_and_swap`]) — there the principal is untrusted input.
-    pub fn swap_pool_metadata(&self) -> SwapPoolMetadata {
+    pub fn swap_pool_metadata(&self, pool: &str) -> Option<SwapPoolMetadata> {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        SwapPoolMetadata {
-            token0_ledger: s.pool.token0_ledger.clone(),
-            token1_ledger: s.pool.token1_ledger.clone(),
-            fee_millionths: s.pool.fee_millionths,
-        }
+        s.pools.get(pool).map(|p| SwapPoolMetadata {
+            token0_ledger: p.token0_ledger.clone(),
+            token1_ledger: p.token1_ledger.clone(),
+            fee_millionths: p.fee_millionths,
+        })
     }
 
-    /// The stub pool's quote for the relay's `/api/v1/swap_quote` (test-helpers) — the offline
-    /// twin of [`Ledger::swap_pool_quote`](crate::Ledger::swap_pool_quote): the CALLER derived
-    /// `zero_for_one` from [`FakeIc::swap_pool_metadata`], so this serves the deterministic
-    /// curve and nothing else. The amount_out is the POOL's quote verbatim — the relay blends
-    /// nothing.
-    pub fn swap_pool_quote(&self, zero_for_one: bool, amount_in_e8s: u128) -> u128 {
+    /// The stub pool at `pool`'s quote for the relay's `/api/v1/swap_quote` (test-helpers) —
+    /// the offline twin of [`Ledger::swap_pool_quote`](crate::Ledger::swap_pool_quote): the
+    /// CALLER derived `zero_for_one` from [`FakeIc::swap_pool_metadata`], so this serves the
+    /// deterministic curve and nothing else. The returned [`VenueQuote`] mirrors the trait
+    /// shape — amount_out VERBATIM off the pool's curve, the pool's OWN fee tier, and a
+    /// `fetched_at` stamp — so the offline loop exercises the same attribution the live path
+    /// echoes. `None` when `pool` is not a seeded stub.
+    pub fn swap_pool_quote(
+        &self,
+        pool: &str,
+        zero_for_one: bool,
+        amount_in_e8s: u128,
+    ) -> Option<VenueQuote> {
         let s = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        s.pool.quote(amount_in_e8s, zero_for_one)
+        s.pools.get(pool).map(|p| VenueQuote {
+            pool: pool.to_string(),
+            amount_out: p.quote(amount_in_e8s, zero_for_one),
+            fee_millionths: p.fee_millionths,
+            zero_for_one,
+            fetched_at: now_secs(),
+        })
     }
 
-    /// The test knobs for the stub pool (`POST /api/v1/test/swap_pool`): fee tier / impact
+    /// The per-pool test knobs (`POST /api/v1/test/swap_pool` with a `pool`): fee tier / impact
     /// overrides, the `fail_withdrawal` arm (pending_withdrawal), and the `settle_pending`
-    /// resolution — queued outputs land on their caller's principal on the output ledger.
+    /// resolution — that pool's queued outputs land on their caller's principal on the output
+    /// ledger. `false` when `pool` is not a seeded stub (the route refuses unknown pools).
     pub fn set_swap_pool_knobs(
         &self,
+        pool: &str,
         fee_millionths: Option<u128>,
         impact_bps: Option<u16>,
         fail_withdrawal: Option<bool>,
         settle_pending: bool,
-    ) {
+    ) -> bool {
         let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(p) = s.pools.get_mut(pool) else {
+            return false;
+        };
         if let Some(f) = fee_millionths {
-            s.pool.fee_millionths = f;
+            p.fee_millionths = f;
         }
         if let Some(i) = impact_bps {
-            s.pool.impact_bps = i;
+            p.impact_bps = i;
         }
         if let Some(fw) = fail_withdrawal {
-            s.pool.fail_withdrawal = fw;
+            p.fail_withdrawal = fw;
         }
         if settle_pending {
-            let pending = std::mem::take(&mut s.pool.pending);
+            let pending = std::mem::take(&mut p.pending);
             for (caller, ledger, amount) in pending {
                 let currency = s.ledgers.get(&ledger).map(|l| l.currency).unwrap_or(0u32);
                 let block = s.next_block;
@@ -419,7 +462,7 @@ impl FakeIc {
                     .or_insert(0) += amount;
                 s.txns.push(FakeTxn {
                     kind: "transfer",
-                    from: crate::catalog::SWAP_POOL_PRINCIPAL.to_string(),
+                    from: pool.to_string(),
                     to: caller,
                     amount,
                     currency,
@@ -429,6 +472,37 @@ impl FakeIc {
                 });
             }
         }
+        true
+    }
+
+    /// TEST KNOB (multi-venue readiness V5, `POST /api/v1/test/venue`): arm/disarm SERVING a
+    /// `test_helpers_served` fixture venue from `GET /api/v1/venues`. `false` (→ the route's
+    /// named refusals) when the venue_id is unknown OR names a REAL venue — real venues are
+    /// always served and must never be knob-gated, and the knob must never invent a venue the
+    /// registry does not pin. Offline test build only; nothing else consults this set.
+    pub fn set_venue_served(&self, venue_id: &str, served: bool) -> bool {
+        let Some(v) = crate::catalog::venues().into_iter().find(|v| v.venue_id == venue_id) else {
+            return false;
+        };
+        if !v.test_helpers_served {
+            return false;
+        }
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if served {
+            s.served_fixture_venues.insert(venue_id.to_string());
+        } else {
+            s.served_fixture_venues.remove(venue_id);
+        }
+        true
+    }
+
+    /// Is this fixture venue currently knob-armed for serving? (See [`FakeIc::set_venue_served`].)
+    pub fn venue_served(&self, venue_id: &str) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .served_fixture_venues
+            .contains(venue_id)
     }
 
     pub fn balances_of(
@@ -755,22 +829,31 @@ impl FakeIc {
         arg: &[u8],
         block: u64,
     ) -> RequestState {
-        if canister != crate::catalog::SWAP_POOL_PRINCIPAL {
+        // The pool is resolved by CANISTER: any principal that is not a seeded stub pool rejects
+        // here (the allowlist never vouches for signed input — the envelope names its target).
+        let Some((token0_ledger, token1_ledger)) = s
+            .pools
+            .get(canister)
+            .map(|p| (p.token0_ledger.clone(), p.token1_ledger.clone()))
+        else {
             return RequestState::Rejected {
                 code: 3,
                 message: format!("canister {canister} is not a swap pool"),
             };
-        }
+        };
         let Ok(arg) = decode_deposit_and_swap_arg(arg) else {
             return RequestState::Rejected {
                 code: 5,
                 message: "malformed depositFromAndSwap arg".into(),
             };
         };
+        // The direction is resolved against THIS pool's own token order — two stub pools on one
+        // pair may legitimately disagree about which side is token0 (the fixture-B pool does,
+        // deliberately).
         let (in_ledger, out_ledger) = if arg.zero_for_one {
-            (s.pool.token0_ledger.clone(), s.pool.token1_ledger.clone())
+            (token0_ledger, token1_ledger)
         } else {
-            (s.pool.token1_ledger.clone(), s.pool.token0_ledger.clone())
+            (token1_ledger, token0_ledger)
         };
         let Some(in_cfg) = s.ledgers.get(&in_ledger).cloned() else {
             return RequestState::Rejected {
@@ -802,7 +885,15 @@ impl FakeIc {
                 &PoolSwapError::InsufficientFunds,
             ));
         }
-        let out = s.pool.quote(arg.amount_in, arg.zero_for_one);
+        // From here the pool is taken mutably once — quote, reserve update and payout all act
+        // on the SAME pool the direction was resolved against.
+        let Some(pool) = s.pools.get_mut(canister) else {
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} is not a swap pool"),
+            };
+        };
+        let out = pool.quote(arg.amount_in, arg.zero_for_one);
         if out < arg.amount_out_minimum {
             return RequestState::Replied(encode_swap_result_err(&PoolSwapError::InternalError(
                 "amountOutMinimum not met".into(),
@@ -812,13 +903,13 @@ impl FakeIc {
         s.allowances.insert(akey, (allowed - arg.amount_in, exp));
         *s.balances.entry(from_bal_key).or_insert(0) -= arg.amount_in + in_fee;
         if arg.zero_for_one {
-            s.pool.reserve0_e8s += arg.amount_in;
-            s.pool.reserve1_e8s -= out;
+            pool.reserve0_e8s += arg.amount_in;
+            pool.reserve1_e8s -= out;
         } else {
-            s.pool.reserve1_e8s += arg.amount_in;
-            s.pool.reserve0_e8s -= out;
+            pool.reserve1_e8s += arg.amount_in;
+            pool.reserve0_e8s -= out;
         }
-        s.pool.swaps += 1;
+        pool.swaps += 1;
         s.txns.push(FakeTxn {
             kind: "burn",
             from: user.0.clone(),
@@ -831,8 +922,8 @@ impl FakeIc {
         });
         // Output leg: pay the caller GROSS on the output ledger — the pool's quote semantics
         // (the app computes net by subtracting the output ledger's fee) — or queue it.
-        if s.pool.fail_withdrawal {
-            s.pool.pending.push((user.0.clone(), out_ledger, out));
+        if pool.fail_withdrawal {
+            pool.pending.push((user.0.clone(), out_ledger, out));
         } else {
             let out_currency = out_currency.unwrap_or(in_cfg.currency);
             *s.balances.entry((out_ledger, user.clone())).or_insert(0) += out;

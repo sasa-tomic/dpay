@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **156 flows**
-> (155 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **161 flows**
+> (160 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (42) · offline (12) · deposit (13) · withdraw (11) · convert (5) · nfc (11) · system (32) · tour (6)
+wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (9) · nfc (11) · system (32) · tour (6)
 
 ---
 
@@ -90,6 +90,7 @@ wire (1) · onboard (23) · pay (42) · offline (12) · deposit (13) · withdraw
 | 146 | money-forms-fit | The two forms a user types money into — the cashier ring-up and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the CHF prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll. | till, merchant-till, send-to-address, layout, viewport-fit, receive, vchf, i18n, regression |
 | 148 | pay-camera-and-funded-account | A zero balance on the SELECTED asset no longer hides the scanner: with VCHF selected and empty, the Pay tab still opens the camera and a DEMO request scanned there settles — while the fund instruction survives beside it and names the ∂100.00 practice balance, one tap away. | fund-gate, scan, sign, settle, demo, honest-copy, zero-funds |
 | 159 | lowbal-recovers | A payment refused on a low balance becomes payable — with a deliberate Approve, never a silent re-sign — as soon as the poll reads enough. | low-balance, insufficient, no-sign-gate, scan, sign, settle |
+| 170 | pay-no-convert-cta | The payment surfaces (IC PayMode and the SOL PayMode twin) expose zero conversion entry points — no convert testID and no Convert CTA — conversion stays a standalone wallet action (Accounts tab only). | pay, scan, solana, convert, separation |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5), both histories show friendly names + memo (wire-format v2, no raw hex). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
@@ -168,6 +169,10 @@ wire (1) · onboard (23) · pay (42) · offline (12) · deposit (13) · withdraw
 | 142 | convert-venue-less-fail-closed | Every asset gets the same Convert button; assets without a venue fail closed INSIDE the surface: ckUSDC shows the honest what-exists-today copy plus the saturated-direct-pool refusal line (spec §1), DEMO shows the generic copy without it, and neither offers an amount field or a quote. | convert, uniform-ia, venue-less, fail-closed, ckusdc, saturated-pool, honest-copy, demo |
 | 143 | convert-stale-quote-refresh | A fresh Convert quote shows the attributed+timestamped line with no staleness notice; forcing staleness via the app's test seam makes the surface flag + refresh it (re-fetch proven by a request counter, stale notice clears); a real venue-price move via the relay's fee knob raises the quote-changed review interrupt while confirm stays armed (the on-confirm re-quote is the signing gate). | convert, icp, vchf, quote-staleness, auto-refresh, quote-attribution, quote-changed-interrupt, test-seam |
 | 145 | convert-fund-gate | Convert refuses a swap that could only fail: a zero balance replaces the form with the fund gate that names the asset and the Receive ▸ My address route; an amount above the balance disables the confirm (aria-disabled) and states what the conversion needs (amount plus both input-ledger fees) against the balance; an affordable amount re-arms the confirm and the screen leads with the amount the user will receive. | convert, icp, vchf, fail-closed, fund-gate, insufficient-balance, ledger-fees, a11y-disabled, hierarchy, honest-copy, no-horizontal-overflow |
+| 166 | convert-venue-chooser | With two venues served on one pair (test-helpers knob on a private relay), the chooser renders both rows in registry order, each with its OWN quote attributed + timestamped; no row is preselected, and the headline/checklist/confirm stay withheld until the user picks one. | convert, venues, venue-chooser, no-preselection, quote-attribution, registry-order |
+| 167 | convert-venue-order-stable | Mutating each venue's output mid-test (the relay's pool knobs floor the real pool to zero, then re-price fixture B) does NOT move the chooser rows: registry order survives every re-fetch, nothing is ever preselected, and each row's displayed number follows its own venue's re-priced reply. | convert, venues, venue-chooser, registry-order, no-ranking, no-preselection, pool-knob |
+| 168 | convert-fixture-venue-payout | Picking the served fixture venue B in the chooser executes through pool B end-to-end: the checklist quotes B (its reversed token order → zero_for_one true, its own 0.10% tier), confirm settles on pool B, and the output ledger pays B's quoted amount verbatim. | convert, venues, venue-chooser, pool-keyed-execution, venue-attribution, fixture-venue-b |
+| 169 | convert-resume-reload | A conversion parked on pending_withdrawal survives a full app reload under the identity-scoped store key, and the wallet-load resume engine (no Convert screen open) drives it to done when the venue settles — nothing re-signed, outTx recorded, VCHF credited exactly; a terminal record is not resurrected onto the reopened screen. | convert, icp, vchf, pending-withdrawal, reload, identity-scoped-store, resume-engine, unmounted-driving, no-resubmit, resolution |
 
 ### NFC (tap-to-pay)
 

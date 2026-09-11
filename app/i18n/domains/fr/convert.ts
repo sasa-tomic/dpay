@@ -1,8 +1,9 @@
 /**
  * i18n/domains/fr/convert.ts — valeurs françaises pour la surface de conversion déléguée.
  * Types, documentation des clés et copie de référence : ../en/convert.ts. Glossaire : ../../fr.ts.
- * « Quote » reste un terme technique ; la venue s'appelle toujours « ICPSwap ». Les montants et
- * principals arrivent déjà formatés en chaînes d'affichage.
+ * « Quote » reste un terme technique ; le nom de la venue arrive en argument (nom d'affichage du
+ * registre des venues, jamais codé en dur ici). Les montants et principals arrivent déjà formatés
+ * en chaînes d'affichage.
  */
 import type {ConvertMessages} from '../../keys';
 
@@ -12,26 +13,26 @@ export const convertFr: ConvertMessages = {
   backToWallet: 'Retour au portefeuille',
 
   unavailableTitle: sym => `La conversion n'est pas encore disponible pour ${sym}`,
-  unavailableBody: pair => `Aujourd'hui, dpay convertit ${pair} via ICPSwap — et rien d'autre.`,
-  unavailableCkusdc:
-    'Un pool direct VCHF ↔ USDC existe, mais sa profondeur est saturée (environ CHF 315) : dpay le refuse plutôt que de vous afficher un prix périmé.',
+  unavailableBody: (pair, venue) => `Aujourd'hui, dpay convertit ${pair} via ${venue} — et rien d'autre.`,
+  unavailableCkusdc: venue =>
+    `Un pool direct VCHF ↔ USDC existe chez ${venue}, mais sa profondeur est saturée (environ CHF 315) : dpay le refuse plutôt que de vous afficher un prix périmé.`,
 
   amountLabel: sym => `Montant (${sym})`,
   balanceLine: balance => `Solde : ${balance}`,
   receiveHeadline: 'Tu recevras',
-  counterparty:
-    'Exécuté par le pool ICPSwap — un contrat autonome on-chain, pas un prestataire agréé et pas dpay.',
+  counterparty: venue =>
+    `Exécuté par le pool ${venue} — un contrat autonome on-chain, pas un prestataire agréé et pas dpay.`,
   counterpartySigns: 'Ton téléphone signe ; le pool prélève exactement le montant approuvé.',
-  quoteSource: at => `Quote ICPSwap, récupérée ${at}`,
-  rateLabel: (inSym, outSym) => `Taux (${inSym} → ${outSym})`,
-  poolFeeTier: tier => `Frais du pool : ${tier} (palier ICPSwap)`,
+  quoteSource: (at, venue) => `Quote ${venue}, récupérée ${at}`,
+  rateLabel: (inSym, outSym) => `Taux de cette quote (${inSym} → ${outSym})`,
+  poolFeeTier: (tier, venue) => `Frais du pool : ${tier} (palier ${venue})`,
   inputFeeLine: fee => `Frais d'entrée : ${fee}`,
   outputFeeLine: fee => `Frais de sortie : ${fee}`,
   dpayFeeLine: 'dpay ne prend rien et ne reçoit rien pour cela.',
   impactLine: pct => `Impact sur le prix : ${pct}`,
   impactWarnLine: pct => `Impact élevé sur le prix : ${pct} — la quote ci-dessus l'inclut déjà.`,
-  impactUnavailable:
-    "Impact sur le prix : non mesurable pour l’instant — ICPSwap n’a rien coté pour l’échange de référence, il n’y a donc aucun prix auquel comparer celui-ci. Le minimum garanti ci-dessous borne quand même ce que cet échange peut te coûter.",
+  impactUnavailable: venue =>
+    `Impact sur le prix : non mesurable pour l'instant — ${venue} n'a rien coté pour l'échange de référence, il n'y a donc aucun prix auquel comparer celui-ci. Le minimum garanti ci-dessous borne quand même ce que cet échange peut te coûter.`,
   slippageLabel: 'Slippage',
   minReceiveLine: (amount, pct) => `Minimum garanti : ${amount} (${pct} de slippage)`,
   refusalLine: sym =>
@@ -40,6 +41,9 @@ export const convertFr: ConvertMessages = {
   confirmButton: 'Requoter et confirmer',
   staleRefreshing: 'Quote périmée — actualisation…',
   quoteChanged: (oldAmt, newAmt) => `La quote a changé : ${oldAmt} → ${newAmt}. Vérifie et confirme à nouveau.`,
+  venueChooserLabel: 'Venue',
+  venueNoneSelected: 'Choisis une venue pour voir sa quote complète et continuer.',
+  venueRowQuote: amount => `Quote : ${amount}`,
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Ce portefeuille n'a pas de ${sym}. Pour convertir des ${sym}, reçois d'abord des ${sym} à ton adresse : ouvre « ${receiveTab} » en bas et choisis « ${myAddress} ».`,
@@ -52,7 +56,7 @@ export const convertFr: ConvertMessages = {
   approvingBody: (amount, at) =>
     `Ton téléphone approuve le prélèvement exact de ${amount} par le pool. L'autorisation expire à ${at} si elle ne sert pas.`,
   swappingTitle: 'Échange en cours',
-  swappingBody: 'Envoi de l’échange au pool ICPSwap. Il ne peut prélever que le montant approuvé.',
+  swappingBody: venue => `Envoi de l'échange au pool ${venue}. Il ne peut prélever que le montant approuvé.`,
   settlingTitle: 'Règlement',
   settlingBody: sym => `Le pool a accepté l'échange. En attente de ton ${sym} dans ton portefeuille…`,
   doneTitle: 'Converti ✓',
@@ -65,20 +69,39 @@ export const convertFr: ConvertMessages = {
   failedTitle: 'Échange non exécuté',
   failedApproveBody: sym =>
     `Le ledger ${sym} a refusé l'approbation, donc rien n'a bougé — tu possèdes toujours chaque unité de ton ${sym}. Aucune autorisation n'a été créée ; rien à rembourser ni à annuler.`,
-  failedSwapBody: (reason, sym) =>
-    `Le pool ICPSwap a refusé l'échange (${reason}). Ton ${sym} n'a jamais quitté ton portefeuille. dpay ne peut ni l'annuler ni le retenter pour toi ; rien d'autre n'est nécessaire.`,
+  failedSwapBody: (reason, sym, venue) =>
+    `Le pool ${venue} a refusé l'échange (${reason}). Ton ${sym} n'a jamais quitté ton portefeuille. dpay ne peut ni l'annuler ni le retenter pour toi ; rien d'autre n'est nécessaire.`,
   refundedBody: sym =>
     `L'échange a échoué et le pool t'a rendu ton ${sym} — ton solde est de nouveau intact. dpay ne peut rien annuler ici.`,
   stuckTitle: 'Issue inconnue',
   stuckBody:
     'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
-  stuckSigned: (amount, minAmount) =>
-    `Ce qui a été signé : approuver ${amount} au pool ICPSwap ; échanger pour un minimum de ${minAmount}.`,
+  stuckSigned: (amount, minAmount, venue) =>
+    `Ce qui a été signé : approuver ${amount} au pool ${venue} ; échanger pour un minimum de ${minAmount}.`,
   expiryLine: at => `L'autorisation inutilisée expire au plus tard à ${at} — après, le pool ne peut plus rien prélever.`,
 
+  awaitingAuthTitle: 'Autorisation requise',
+  awaitingAuthBody: venue =>
+    `Cette commande est ouverte chez ${venue} et attend ton autorisation. Rien n'a bougé et rien ne bougera tant que tu ne l'approuves pas — dpay surveille en attendant le statut du prestataire.`,
+  awaitingDepositTitle: 'En attente du dépôt',
+  awaitingDepositBody: (sym, venue) =>
+    `${venue} a émis cette commande et attend son dépôt en ${sym}. L'échange s'exécute quand le prestataire voit le dépôt ; dpay continue de surveiller son statut. Si aucun dépôt n'arrive à temps, la quote expire et rien ne bouge.`,
+  providerProcessingTitle: 'Traitement chez le prestataire',
+  providerProcessingBody: (sym, venue) =>
+    `${venue} détient le dépôt et exécute la commande. Ton ${sym} arrive quand le prestataire la termine — dpay ne peut ni l'annuler ni l'accélérer, et continue de surveiller jusqu'à sa résolution.`,
+  quoteExpiredTitle: 'Quote expirée',
+  quoteExpiredBody: (sym, venue) =>
+    `La quote est morte avant qu'une valeur ne bouge : ${venue} n'a jamais reçu le dépôt, donc rien n'a été échangé et rien n'est à annuler. Ton ${sym} est resté là où il était — lance une nouvelle conversion si tu en veux toujours une.`,
+  providerRefundedTitle: 'Remboursé par le prestataire',
+  providerRefundedBody: (sym, venue) =>
+    `${venue} a annulé cette commande et retourné le dépôt. Surveille le retour de ton ${sym} — dpay ne peut ni annuler ni accélérer le remboursement du prestataire.`,
+  stuckWatching: 'dpay continue de surveiller ceci en arrière-plan. Si le paiement ou le remboursement arrive, cet écran bascule tout seul.',
+  stuckAcknowledge: 'Compris — arrêter la surveillance',
+  stuckAcknowledged: 'Tu en as pris note et la surveillance en arrière-plan est arrêtée. Si des fonds bougent plus tard, ils arriveront toujours à l\u2019adresse de ce portefeuille.',
+
   errors: {
-    quoteUnreachable: () => 'Impossible d’atteindre la quote ICPSwap — le relay ne répond pas. Vérifie ta connexion et réessaie.',
-    quoteRefused: () => 'ICPSwap a refusé de quoter cette paire pour le moment.',
+    quoteUnreachable: venue => `Impossible d'atteindre la quote ${venue} — le relay ne répond pas. Vérifie ta connexion et réessaie.`,
+    quoteRefused: venue => `${venue} a refusé de quoter cette paire pour le moment.`,
     quoteUnavailable: code => `Quote indisponible (${code}).`,
   },
 };

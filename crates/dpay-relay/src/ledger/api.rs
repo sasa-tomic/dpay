@@ -128,26 +128,47 @@ pub trait Ledger: Send + Sync {
         ))
     }
 
-    /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2):
-    /// query `pool`'s OWN ICPSwap `quote` and return its `ok(amountOut)` VERBATIM — the relay
-    /// NEVER computes or blends a rate, it is a read proxy exactly like `balance_on_ledger`.
-    /// `pool` is the pool principal as canonical TEXT (the route validated it against
-    /// [`crate::catalog::is_known_swap_pool`]); `zero_for_one` names the direction (true =
-    /// token0 in, token1 out) and is DERIVED from [`Ledger::swap_pool_metadata`], never assumed;
-    /// the returned amount is GROSS of the output ledger's transfer fee (the app computes net).
-    /// A pool `#err` comes back as `Rejected(text)` with the variant name verbatim; transport
+    /// The delegated-conversion quote read (spec 2026-09-07-delegated-conversion-spec.md §2,
+    /// widened for multi-venue readiness Wave 1 / V7): query `pool`'s OWN ICPSwap `quote` and
+    /// return its `ok(amountOut)` VERBATIM inside a [`VenueQuote`] — the relay NEVER computes or
+    /// blends a rate, it is a read proxy exactly like `balance_on_ledger`. `pool` is the pool
+    /// principal as canonical TEXT (the route validated it against
+    /// [`crate::catalog::venue_of_endpoint`]); `zero_for_one` names the direction (true = token0
+    /// in, token1 out) and is DERIVED from [`Ledger::swap_pool_metadata`], never assumed; the
+    /// returned amount is GROSS of the output ledger's transfer fee (the app computes net). The
+    /// quote type carries the attribution the record layer needs: the venue's OWN fee tier (read
+    /// live, never a registry constant), the direction as derived, and a `fetched_at` stamp. A
+    /// pool `#err` comes back as `Rejected(text)` with the variant name verbatim; transport
     /// failures as `Transient`. The default impl is "not supported" — the test-helpers route
-    /// serves the fake-IC gateway's pool instead; `AgentLedger`
-    /// overrides it with the real query.
+    /// serves the fake-IC gateway's pools instead; `AgentLedger` overrides it with the real
+    /// query. This trait stays an IC-LEDGER abstraction: CeFi has no method here (it lives
+    /// device-side, the `app/services/opencryptopay.ts` shape).
     async fn swap_pool_quote(
         &self,
         pool: &str,
         zero_for_one: bool,
         amount_in_e8s: u128,
-    ) -> Result<u128, LedgerError> {
+    ) -> Result<VenueQuote, LedgerError> {
         let _ = (pool, zero_for_one, amount_in_e8s);
         Err(LedgerError::Transient(
             "swap quote unavailable: this ledger cannot query swap pools".to_string(),
         ))
     }
+}
+
+/// A venue's own quote, verbatim and attributed (V7). Every field is either the venue's number
+/// echoed (`amount_out`, `fee_millionths`) or bookkeeping the record layer needs to reason
+/// about staleness and direction (`zero_for_one`, `fetched_at`, `pool`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VenueQuote {
+    /// The pool principal the quote was read from (canonical TEXT).
+    pub pool: String,
+    /// The venue's `amountOut`, verbatim, GROSS of the output ledger's transfer fee.
+    pub amount_out: u128,
+    /// The venue's OWN fee tier at quote time (read live off the pool, cached like `deposit_info`).
+    pub fee_millionths: u128,
+    /// The direction, as derived from the venue's own token order (true = token0 in, token1 out).
+    pub zero_for_one: bool,
+    /// Unix seconds at the moment the venue answered.
+    pub fetched_at: u64,
 }

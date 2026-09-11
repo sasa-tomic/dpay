@@ -37,11 +37,41 @@
     "retrieve_btc_min_amount": 50000,
     "mint_account": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
   },
-  "swap_venue": {
-    "_doc": "MEASURED 2026-09-08 off the LIVE pool's own `metadata` query (anonymous, read-only, https://icp-api.io). NOT a production input: production reads token0/token1/fee off the pool at request time (crates/dpay-relay/src/agent_ledger.rs swap_pool_metadata), because a remote system's pair order is a fact to read, never a constant to assume. This block exists for exactly two jobs: (1) it is the order the OFFLINE fake-IC stub pool is seeded in (crates/dpay-relay/src/ic_gateway.rs FakeIc::from_catalog), pinned by the Rust drift alarm in catalog.rs so the fake can never again agree with a stale pin instead of with the venue; (2) `just swap-venue-probe` asserts the LIVE pool still reports exactly these values. The 2026-09-07 build pinned the REVERSE order as a constant and seeded the fake from the same pin, so the closed loop proved only its own consistency while live production quoted each direction under the other direction's label — see docs/specs/2026-09-08-conversion-hardening-plan.md.",
-    "pool": "65mrh-fqaaa-aaaar-qapoa-cai",
-    "token0_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
-    "token1_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
-    "fee_millionths": 3000
-  }
+  "venues": [
+    {
+      "_doc": "The VENUE REGISTRY (multi-venue readiness Wave 1, 2026-09-10): per venue — identity (venue_id, display_name), kind, the dpay-chosen endpoint contract, the pair as an UNORDERED set of ledger principals, environment, and the disclosure copy key. The fee tier is deliberately NOT here: production reads it off the venue at quote time and echoes it (the relay never claims a number the venue did not say). `pair_ledgers` order carries NO meaning — which side a pool calls token0 is the venue's own fact, read live per quote; pinning an order here is exactly the 2026-09-07 defect (docs/specs/2026-09-08-conversion-hardening-plan.md). `kind` is an extensible string enum: ic_amm today, cefi next, a future solana kind is a new value — not a schema break. Compiled into the relay catalog (crates/dpay-relay/src/catalog.rs venues) and served at GET /api/v1/venues; bundled app-side (app/config/venues.ts); both sides drift-alarmed against this file.",
+      "venue_id": "icpswap",
+      "display_name": "ICPSwap",
+      "kind": "ic_amm",
+      "endpoint": "65mrh-fqaaa-aaaar-qapoa-cai",
+      "pair_ledgers": ["ly36x-wiaaa-aaaai-aqj7q-cai", "ryjl3-tyaaa-aaaaa-aaaba-cai"],
+      "testnet": false,
+      "disclosure_key": "icpswap",
+      "fixture": {
+        "_doc": "MEASURED 2026-09-08 off the LIVE pool's own `metadata` query (anonymous, read-only, https://icp-api.io). NOT a production input: production reads token0/token1/fee off the pool at request time (crates/dpay-relay/src/agent_ledger.rs swap_pool_metadata), because a remote system's pair order is a fact to read, never a constant to assume. This block exists for exactly two jobs: (1) it is the order the OFFLINE fake-IC stub pool is seeded in (crates/dpay-relay/src/ic_gateway.rs FakeIc::from_catalog), pinned by the Rust drift alarm in catalog.rs so the fake can never again agree with a stale pin instead of with the venue; (2) `just swap-venue-probe` asserts the LIVE pool still reports exactly these values.",
+        "token0_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
+        "token1_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "fee_millionths": 3000
+      }
+    },
+ {
+  "_doc": "OFFLINE TEST FIXTURE \u2014 NOT A REAL VENUE, never probe it on mainnet. An invented canister id (no such canister exists on any network) that exists so the offline loop can hold TWO venues on the same pair through the fake-IC gateway: same VCHF/ICP pair, deliberately REVERSED seed order (token0 = ICP \u2014 the direction logic must not assume one order across pools) and a different fee tier (1000 = 0.10%). `testnet: true` labels it what it is \u2014 an invented test stand-in, not a mainnet venue. The `test_helpers_served` marker (multi-venue readiness V5, 2026-09-11) keeps it out of the mainnet tripwire and out of the AGENT (prod) build entirely (never in GET /api/v1/venues, never in the quote allowlist); the OFFLINE test-helpers relay may serve it behind the POST /api/v1/test/venue knob, so the default experience stays one venue until a test opts in.",
+  "venue_id": "icpswap-fixture-b",
+  "display_name": "ICPSwap (offline fixture)",
+  "kind": "ic_amm",
+  "endpoint": "6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7",
+  "pair_ledgers": [
+   "ly36x-wiaaa-aaaai-aqj7q-cai",
+   "ryjl3-tyaaa-aaaaa-aaaba-cai"
+  ],
+  "testnet": true,
+  "disclosure_key": "icpswap",
+  "test_helpers_served": true,
+      "fixture": {
+        "token0_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "token1_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
+        "fee_millionths": 1000
+      }
+    }
+  ]
 }

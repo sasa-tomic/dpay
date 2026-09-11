@@ -1,30 +1,14 @@
 /**
- * Delegated-conversion venue constants (spec 2026-09-07 §1/§2) — the ONLY place the ICPSwap pool
- * identity lives app-side. Currency ids and ledger fees are NEVER hardcoded here: callers resolve
- * them from the catalog descriptors at runtime so the swap targets the same ledgers the deposit
- * sheets show (and a catalog fee change propagates into the approval arithmetic automatically).
- *
- * What this file may hold is dpay's OWN choices: which pool to talk to, and which pair of assets
- * the Convert action is offered for. What it must NEVER hold is a claim about the venue —
- * the pool's token0/token1 ORDER and its FEE TIER belong to the pool, are read off it by the
- * relay on every quote (`crates/dpay-relay/src/agent_ledger.rs swap_pool_metadata`) and reach the
- * app only as the quote's own `zero_for_one` / `fee_millionths` echo. The 2026-09-07 build kept
- * an ORDERED pair here and in the relay; both were backwards, and the app's copy could not have
- * detected that because nothing app-side ever talks to the venue directly.
+ * Delegated-conversion — dpay's OWN conversion choices (spec 2026-09-07 §1/§2, multi-venue
+ * readiness V1/V4). What this file may hold is dpay's policy: slippage options, staleness,
+ * approve lifetime, impact thresholds, the storage key. What it must NEVER hold is a venue
+ * FACT — the pool principal, its pair and its fee tier live in the venue registry
+ * (`./venues`, drift-alarmed against `dfx/catalog_truth.json` `venues[]`) and the pair ORDER
+ * belongs to the venue itself, read live per quote (`zero_for_one` echo). The 2026-09-07 build
+ * kept an ordered pair as constants here and in the relay; both were backwards, and the app's
+ * copy could not have detected that because nothing app-side ever talks to the venue directly.
  */
-
-/** The ICPSwap V3 pool canister that executes the swap. `depositFromAndSwap` is called ON this
- *  principal; the user's icrc2_approve names exactly this principal as spender. */
-export const CONVERT_POOL_PRINCIPAL = '65mrh-fqaaa-aaaar-qapoa-cai';
-
-/** The two assets this venue trades, as an UNORDERED pair of LEDGER principals (a catalog row's
- *  currency id is never duplicated here). Deliberately not `{token0, token1}`: which one the pool
- *  calls token0 is the pool's fact, not the app's, and holding an order the app cannot verify is
- *  exactly the bug this replaced. */
-export const CONVERT_VENUE_LEDGERS = [
-  'ly36x-wiaaa-aaaai-aqj7q-cai', // VCHF ledger
-  'ryjl3-tyaaa-aaaaa-aaaba-cai', // ICP ledger
-] as const;
+import {BUNDLED_VENUES} from './venues';
 
 /** Slippage choices on the Convert screen (spec §5): 0.5% / 1% / 3%, default 1%. */
 export const CONVERT_SLIPPAGE_BPS_OPTIONS = [50, 100, 300] as const;
@@ -69,8 +53,52 @@ export const CONVERT_IMPACT_REF_AMOUNT_IN = '1000000';
  */
 export const CONVERT_IMPACT_PRICE_SCALE = 10n ** 12n;
 
-/** AsyncStorage key for the persisted swap records (spec §4): one record per swap id. */
-export const CONVERT_STORAGE_KEY = 'dpay.convert.v1';
+/**
+ * AsyncStorage key for ONE IDENTITY's persisted conversion records (multi-venue readiness V6):
+ * the convert store is a per-wallet store like every other one (offramp `dpay.offramp.<pub>`,
+ * sol merchant `dpay.sol.merchant.v1.<pub>`) and now scopes the same way — records whose legs
+ * were signed by THIS device key. One record per swap id; v2 = the legs schema (V2).
+ */
+export function convertStoreKey(publicHex: string): string {
+  return `dpay.convert.v2.${publicHex}`;
+}
+
+/** The pre-scoping v2 store key (every record under one key, whichever identity was active).
+ *  Read ONCE per identity: an identity with no scoped store ADOPTS whatever is here into its
+ *  scoped key, then the unscoped key is retired — the same one-time-migration shape the v1 key
+ *  below uses. (Single-active-identity is the real deployment: the founder device.) */
+export const CONVERT_UNSCOPED_STORAGE_KEY = 'dpay.convert.v2';
+
+/** The pre-legs store key — read once during migration, then removed. */
+export const CONVERT_LEGACY_STORAGE_KEY = 'dpay.convert.v1';
+
+// --- the app-level resume engine (V6): cadence bounds ---------------------------------------------
+// One engine drives every live record while the wallet is open (mounted screen or not). The
+// bounds below are what keeps it idle-safe: every re-arm is a SINGLE bounded network round
+// after a sleep — never a spin loop — and terminal states stop their record's timer for good.
+
+/** A pending_withdrawal / settling record re-probes the ledgers at this cadence (the mounted
+ *  screen's own 2 s re-arm is gone; the engine owns the watch for everyone). */
+export const CONVERT_ENGINE_REARM_MS = 10_000;
+
+/** An expired-unconfirmed record parked on `stuck` (outcome unknown, resubmission forbidden)
+ *  is still probed at this SLOW cadence until it resolves or the user acknowledges the stuck
+ *  state — a record that cannot be advanced any faster must not be polled any faster. */
+export const CONVERT_ENGINE_STUCK_WATCH_MS = 60_000;
+
+/** A live providerRef record (CeFi shape) polls its statusUrl at this cadence — one request
+ *  per interval per record, forever bounded by that rate, stopping at the first terminal
+ *  provider state. A venue that holds funds for hours is watched, not hammered. */
+export const CONVERT_ENGINE_PROVIDER_POLL_MS = 10_000;
+
+/** One provider status read's transport budget. */
+export const CONVERT_PROVIDER_TIMEOUT_MS = 8_000;
+
+/** The settlement probe's indexed window: how many newest rows of each ledger it scans
+ *  (V6; the relay caps `limit` at 100). 10 was the PoC window; 50 tolerates a busy wallet
+ *  between submit and payout without paying for the relay's full page. Fail-closed posture
+ *  unchanged: a row OUTSIDE the window is still unknown, never optimistically done. */
+export const CONVERT_PROBE_WINDOW_ROWS = 50;
 
 /** What the venue serves for a selected asset: the OTHER side of the pair, and nothing else.
  *  There is deliberately no `zeroForOne` here — the direction flag the swap arg carries comes
@@ -81,15 +109,19 @@ export type ConvertDirection = {
 };
 
 /** Fail-closed venue resolution: given the selected asset's ledger principal (+ its testnet flag),
- *  return the counter-asset iff the PoC venue serves it. Every asset gets the SAME Convert entry
- *  point (uniform-IA hard rule); this function decides enablement honestly. Testnet rows never
- *  have a venue — the PoC pool is a mainnet contract. */
+ *  return the counter-asset iff a registered venue serves the pair (`./venues` — looked up, never
+ *  a module constant). Every asset gets the SAME Convert entry point (uniform-IA hard rule); this
+ *  function decides enablement honestly. Testnet rows never have a venue — the registered IC
+ *  pools are mainnet contracts. */
 export function resolveConvertDirection(
   ledger: string | undefined,
   isTestnet: boolean,
 ): ConvertDirection | null {
   if (!ledger || isTestnet) return null;
-  const i = CONVERT_VENUE_LEDGERS.indexOf(ledger as (typeof CONVERT_VENUE_LEDGERS)[number]);
-  if (i < 0) return null;
-  return {otherLedger: CONVERT_VENUE_LEDGERS[i === 0 ? 1 : 0]};
+  for (const venue of BUNDLED_VENUES) {
+    if (venue.kind !== 'ic_amm' || venue.testnet) continue;
+    const i = venue.pair_ledgers.indexOf(ledger);
+    if (i >= 0) return {otherLedger: venue.pair_ledgers[i === 0 ? 1 : 0]};
+  }
+  return null;
 }

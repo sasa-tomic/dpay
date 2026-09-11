@@ -31,11 +31,15 @@
 //! - `GET /api/v1/transactions/{hex}?currency=N&limit=30` — the wallet's durable transaction list,
 //!   newest-first, read off the ICRC ledger's own transaction log at the user's principal.
 //! - `GET /api/v1/swap_quote?pool=&token_in=&token_out=&amount_in=` — the delegated-conversion
-//!   PoC's venue quote (spec 2026-09-07 §2): the pool's OWN quote VERBATIM + its OWN
-//!   `fee_millionths` + `fetched_at`; the relay never computes a rate, and since 2026-09-08 it
-//!   never assumes the pool's pair either — the direction is read off the pool's own `metadata`
-//!   (see `swap_quote_direction`). Served under `agent` (real ICPSwap pool) or `test-helpers`
-//!   (the fake-IC stub pool); absent from the no-feature build.
+//!   venue quote (spec 2026-09-07 §2): the pool's OWN quote VERBATIM + its `venue_id`
+//!   attribution + its OWN `fee_millionths` + `fetched_at`; the relay never computes a rate,
+//!   and since 2026-09-08 it never assumes the pool's pair either — the direction is read off
+//!   the pool's own `metadata` (see `swap_quote_direction`). Served under `agent` (real
+//!   ICPSwap pool) or `test-helpers` (the fake-IC stub pools); absent from the no-feature
+//!   build.
+//! - `GET /api/v1/venues` — the query-only venue registry (multi-venue readiness V4): identity,
+//!   kind, endpoint and the UNORDERED pair for every REAL conversion venue. Pair-scoped, hence
+//!   separate from `/currencies` (asset-scoped).
 //! - `GET  /api/v1/deposit/info?currency=N` — static deposit instructions (min confirmations, fee,
 //!   min amount) so the "Add money" sheet can render them.
 //! - `GET  /api/v1/currencies` — the wallet's runtime asset catalog (closes issue #7), served
@@ -330,6 +334,13 @@ pub fn app(state: AppState) -> Router {
     // its resolution (`settle_pending`). See `FakeIc::set_swap_pool_knobs`.
     #[cfg(feature = "test-helpers")]
     let api = api.route("/test/swap_pool", axum::routing::post(test_swap_pool));
+    // Test seam for the two-venue chooser world (multi-venue readiness V5): arm/disarm SERVING
+    // a `test_helpers_served` fixture venue from GET /api/v1/venues. OFFLINE test build only —
+    // the agent (prod) build has no knob at all, so it structurally can never serve an
+    // invented venue (see catalog::venue_servable and its alarm). The default is un-served:
+    // existing flows keep seeing exactly one venue per pair.
+    #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+    let api = api.route("/test/venue", axum::routing::post(test_venue_serve));
     // Test-only Solana JSON-Rpc UPSTREAM (flow 165 `e2e/tests/165-solana-via-relay.mjs`): the
     // harness points the RPC proxy (src/solana.rs, `DPAY_SOLANA_RPC_URL` set explicitly in
     // harness/relay.mjs) at this route ON THE SAME SERVER, so the flow drives the REAL client
@@ -349,16 +360,22 @@ pub fn app(state: AppState) -> Router {
 
     // `GET /api/v1/swap_quote` — the delegated-conversion PoC's venue quote (spec 2026-09-07
     // §2, the FIXED contract): the relay is a READ PROXY (same class as the balance fan-out) —
-    // it checks the pool against the ALLOWLIST, asks that pool what pair it trades, derives the
-    // direction from the answer, and returns the pool's own `quote` amountOut VERBATIM plus the
-    // venue's own fee tier and the relay wall-clock `fetched_at`. It NEVER computes or blends a
-    // rate, and it holds no belief about the venue's pair. Two builds, one route shape
-    // (mirroring the faucet split): the offline image (test-helpers, without agent) reads the
-    // fake-IC stub pool; the agent build queries the real ICPSwap pool anonymously.
+    // it resolves the pool against the VENUE REGISTRY (the allowlist, now table-driven), asks
+    // that pool what pair it trades, derives the direction from the answer, and returns the
+    // pool's own `quote` amountOut VERBATIM plus its `venue_id`, the venue's own fee tier and
+    // the `fetched_at` stamp. It NEVER computes or blends a rate, and it holds no belief about
+    // the venue's pair. Two builds, one route shape (mirroring the faucet split): the offline
+    // image (test-helpers, without agent) reads the fake-IC stub pools; the agent build queries
+    // the real ICPSwap pool anonymously.
     #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
     let api = api.route("/swap_quote", axum::routing::get(swap_quote_fake));
     #[cfg(feature = "agent")]
     let api = api.route("/swap_quote", axum::routing::get(swap_quote_agent));
+
+    // `GET /api/v1/venues` — the query-only venue registry (multi-venue readiness V4), separate
+    // from /currencies because venues are PAIR-scoped, not asset-scoped.
+    #[cfg(any(feature = "agent", feature = "test-helpers"))]
+    let api = api.route("/venues", axum::routing::get(venues));
 
     // The PRODUCTION faucet (agent build — also the owner when test-helpers is co-enabled for
     // the live tests; the offline e2e image above keeps the fake-IC branch): the relay enforces
@@ -633,12 +650,15 @@ async fn hide_outcome(
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
-/// `POST /api/v1/test/swap_pool` JSON `{fee_millionths?, impact_bps?, fail_withdrawal?,
-/// settle_pending?}` → `{ok: true}` (test-helpers only) — the fake-IC stub ICPSwap pool's
-/// knobs. `fail_withdrawal: true` arms spec §4's pending_withdrawal path (swaps consume the
-/// input, queue the output, never pay it); `settle_pending: true` drains the queue — the
-/// eventual resolution the pending_withdrawal e2e flow needs. `fee_millionths` (default 3000 =
-/// the PoC pool's 0.30% tier) and `impact_bps` (default 0) shape the deterministic quote curve.
+/// `POST /api/v1/test/swap_pool` JSON `{pool, fee_millionths?, impact_bps?, fail_withdrawal?,
+/// settle_pending?}` → `{ok: true}` (test-helpers only) — the knobs of ONE fake-IC stub pool,
+/// named by its principal (multi-venue readiness V3: the gateway hosts many pools, so every
+/// knob names its target; `pool` is required — a silent default would let a knob meant for one
+/// pool land on another). `fail_withdrawal: true` arms spec §4's pending_withdrawal path (swaps
+/// consume the input, queue the output, never pay it); `settle_pending: true` drains that
+/// pool's queue — the eventual resolution the pending_withdrawal e2e flow needs.
+/// `fee_millionths` and `impact_bps` (default 0) shape that pool's deterministic quote curve.
+/// An unknown `pool` is 400 `unknown_pool`, same refusal the quote route makes.
 #[cfg(feature = "test-helpers")]
 async fn test_swap_pool(State(state): State<AppState>, Json(req): Json<SwapPoolKnobs>) -> Response {
     let Some(fake) = state.fake_ic.clone() else {
@@ -647,13 +667,53 @@ async fn test_swap_pool(State(state): State<AppState>, Json(req): Json<SwapPoolK
             "fake-IC gateway not attached",
         );
     };
-    fake.set_swap_pool_knobs(
+    let Some(pool) = req.pool.as_deref() else {
+        return err(StatusCode::BAD_REQUEST, "pool is required");
+    };
+    if !fake.set_swap_pool_knobs(
+        pool,
         req.fee_millionths,
         req.impact_bps,
         req.fail_withdrawal,
         req.settle_pending,
-    );
+    ) {
+        return err(StatusCode::BAD_REQUEST, "unknown_pool");
+    }
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/test/venue` JSON `{venue_id, served}` → `{ok: true, served}` (offline test
+/// build only) — the venue-chooser test knob (multi-venue readiness V5): arm/disarm SERVING a
+/// `test_helpers_served` fixture venue from `GET /api/v1/venues`. The DEFAULT is un-served
+/// (one venue per pair, exactly the production experience); a two-venue test opts in here and
+/// disarms on teardown. A REAL venue is never knob-gated (`not_a_test_venue`) and an unknown
+/// id is refused by name (`unknown_venue`) — the knob can neither silence a real venue nor
+/// invent one the registry does not pin.
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+async fn test_venue_serve(State(state): State<AppState>, Json(req): Json<VenueServeKnob>) -> Response {
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fake-IC gateway not attached",
+        );
+    };
+    match crate::catalog::venues()
+        .into_iter()
+        .find(|v| v.venue_id == req.venue_id)
+        .map(|v| v.test_helpers_served)
+    {
+        None => return err(StatusCode::BAD_REQUEST, "unknown_venue"),
+        Some(false) => return err(StatusCode::BAD_REQUEST, "not_a_test_venue"),
+        Some(true) => {}
+    }
+    if !fake.set_venue_served(&req.venue_id, req.served) {
+        return err(StatusCode::BAD_REQUEST, "unknown_venue");
+    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "ok": true, "served": fake.venue_served(&req.venue_id) })),
+    )
+        .into_response()
 }
 
 // ── Test-only Solana JSON-RPC upstream (test-helpers) ─────────────────────────────────────────
@@ -923,38 +983,48 @@ fn swap_quote_direction(
 /// see the route comment above for the fixed contract. This build reads the fake-IC stub pool
 /// (the offline e2e image): it asks the STUB for its own metadata and runs the same
 /// [`swap_quote_direction`] rule the agent build runs on the live pool's reply, so the offline
-/// loop exercises the direction logic instead of agreeing with a constant.
+/// loop exercises the direction logic instead of agreeing with a constant. The reply echoes the
+/// attributed [`VenueQuote`] (multi-venue readiness V7) — amount_out off that pool's curve, the
+/// pool's OWN fee tier, `fetched_at` — plus the `venue_id` the pool resolves to.
 #[cfg(all(feature = "test-helpers", not(feature = "agent")))]
 async fn swap_quote_fake(
     State(state): State<AppState>,
     Query(qs): Query<SwapQuoteQuery>,
 ) -> Response {
-    if !crate::catalog::is_known_swap_pool(&qs.pool) {
+    // The allowlist IS the venue resolution: one lookup both refuses unknown pools and gives
+    // the quote its `venue_id` attribution.
+    let Some(venue) = crate::catalog::venue_of_endpoint(&qs.pool) else {
         return err(StatusCode::BAD_REQUEST, "unknown_pool");
-    }
+    };
     let Some(fake) = state.fake_ic.clone() else {
         return err(
             StatusCode::SERVICE_UNAVAILABLE,
             "fake-IC gateway not attached",
         );
     };
-    let meta = fake.swap_pool_metadata();
+    let Some(meta) = fake.swap_pool_metadata(&qs.pool) else {
+        return err(StatusCode::BAD_REQUEST, "unknown_pool");
+    };
     let zero_for_one = match swap_quote_direction(&meta, &qs.token_in, &qs.token_out) {
         Ok(v) => v,
         Err(resp) => return resp,
     };
-    let amount_out = fake.swap_pool_quote(zero_for_one, u128::from(qs.amount_in.0));
+    let Some(quote) = fake.swap_pool_quote(&qs.pool, zero_for_one, u128::from(qs.amount_in.0))
+    else {
+        return err(StatusCode::BAD_REQUEST, "unknown_pool");
+    };
     (
         StatusCode::OK,
         Json(SwapQuoteBody {
-            pool: qs.pool,
+            venue_id: venue.venue_id.to_string(),
+            pool: quote.pool,
             token_in: qs.token_in,
             token_out: qs.token_out,
             amount_in: qs.amount_in,
-            amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
-            zero_for_one,
-            fee_millionths: meta.fee_millionths,
-            fetched_at: crate::now_secs(),
+            amount_out: U64String(u64::try_from(quote.amount_out).unwrap_or(u64::MAX)),
+            zero_for_one: quote.zero_for_one,
+            fee_millionths: quote.fee_millionths,
+            fetched_at: quote.fetched_at,
         }),
     )
         .into_response()
@@ -970,9 +1040,11 @@ async fn swap_quote_agent(
     State(state): State<AppState>,
     Query(qs): Query<SwapQuoteQuery>,
 ) -> Response {
-    if !crate::catalog::is_known_swap_pool(&qs.pool) {
+    // The allowlist IS the venue resolution: one lookup both refuses unknown pools and gives
+    // the quote its `venue_id` attribution.
+    let Some(venue) = crate::catalog::venue_of_endpoint(&qs.pool) else {
         return err(StatusCode::BAD_REQUEST, "unknown_pool");
-    }
+    };
     let meta = match state.ledger.swap_pool_metadata(&qs.pool).await {
         Ok(m) => m,
         Err(LedgerError::Rejected(msg)) => return err(StatusCode::UNPROCESSABLE_ENTITY, msg),
@@ -992,17 +1064,18 @@ async fn swap_quote_agent(
         .swap_pool_quote(&qs.pool, zero_for_one, u128::from(qs.amount_in.0))
         .await
     {
-        Ok(amount_out) => (
+        Ok(quote) => (
             StatusCode::OK,
             Json(SwapQuoteBody {
-                pool: qs.pool,
+                venue_id: venue.venue_id.to_string(),
+                pool: quote.pool,
                 token_in: qs.token_in,
                 token_out: qs.token_out,
                 amount_in: qs.amount_in,
-                amount_out: U64String(u64::try_from(amount_out).unwrap_or(u64::MAX)),
-                zero_for_one,
-                fee_millionths: meta.fee_millionths,
-                fetched_at: crate::now_secs(),
+                amount_out: U64String(u64::try_from(quote.amount_out).unwrap_or(u64::MAX)),
+                zero_for_one: quote.zero_for_one,
+                fee_millionths: quote.fee_millionths,
+                fetched_at: quote.fetched_at,
             }),
         )
             .into_response(),
@@ -1197,6 +1270,55 @@ async fn deposit_info(State(state): State<AppState>, Query(qs): Query<BalanceQue
 /// No query params; unauthenticated (catalog only — no balances).
 async fn currencies() -> Response {
     (StatusCode::OK, Json(currencies_body())).into_response()
+}
+
+/// `GET /api/v1/venues` → `200 {"venues": [...]}` — the QUERY-ONLY venue registry
+/// (multi-venue readiness V4/V5): identity, kind, endpoint and pair for every REAL conversion
+/// venue, plus — ONLY in the offline test build — any `test_helpers_served` fixture venue
+/// whose `/test/venue` knob is armed (the two-venue chooser tests; the agent/prod build has
+/// no knob and structurally serves the real registry alone — `catalog::venue_servable`).
+/// Query-only in both directions: the relay serves venue FACTS here, but never reads them as
+/// inputs — the pair ORDER and fee tier are always read off the venue itself at quote time,
+/// never out of this table. The fee tier is deliberately absent: the venue's own quote echoes
+/// it. ROW ORDER is the compiled registry's own order — stable and quote-independent; the
+/// app's chooser renders it verbatim and never ranks.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+async fn venues(State(state): State<AppState>) -> Response {
+    let body = VenuesBody {
+        venues: crate::catalog::venues()
+            .into_iter()
+            .filter(|v| crate::catalog::venue_servable(v, fixture_venue_armed(&state, v)))
+            .map(|v| VenueBody {
+                venue_id: v.venue_id.to_string(),
+                display_name: v.display_name.to_string(),
+                kind: match v.kind {
+                    crate::catalog::VenueKind::IcAmm => "ic_amm".to_string(),
+                    crate::catalog::VenueKind::Cefi => "cefi".to_string(),
+                },
+                endpoint: v.endpoint.to_string(),
+                pair_ledgers: v.pair_ledgers.iter().map(|p| p.to_string()).collect(),
+                testnet: v.testnet,
+                disclosure_key: v.disclosure_key.to_string(),
+            })
+            .collect(),
+    };
+    (StatusCode::OK, Json(body)).into_response()
+}
+
+/// Is this fixture venue's serving knob armed? In the OFFLINE test build: ask the attached
+/// gateway. In every other build (agent prod; agent+test-helpers live tests): constant
+/// `false` — the knob route and the `FakeIc` state behind it are compiled away there, so an
+/// armed knob can never leak a fixture venue into a served list.
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+fn fixture_venue_armed(state: &AppState, v: &crate::catalog::VenueEntry) -> bool {
+    state
+        .fake_ic
+        .as_ref()
+        .is_some_and(|f| f.venue_served(v.venue_id))
+}
+#[cfg(not(all(feature = "test-helpers", not(feature = "agent"))))]
+fn fixture_venue_armed(_state: &AppState, _v: &crate::catalog::VenueEntry) -> bool {
+    false
 }
 
 /// `GET /api/v1/onramp/ckerc20?currency=N` → `200 {"helper_address","erc20_address","kind"}`.
@@ -1582,7 +1704,10 @@ struct HideOutcomeRequest {
 #[cfg(feature = "test-helpers")]
 #[derive(Deserialize)]
 struct SwapPoolKnobs {
-    /// Swap fee in millionths of the input (default 3000 = 0.30%).
+    /// WHICH stub pool the knobs target (multi-venue readiness V3): the pool principal,
+    /// required — the gateway hosts many pools and a knob must name its target.
+    pool: Option<String>,
+    /// Swap fee in millionths of the input (per-pool; the PoC venue's tier is 0.30%).
     #[serde(default)]
     fee_millionths: Option<u128>,
     /// Extra price-impact haircut on the quoted output, basis points (default 0).
@@ -1596,6 +1721,16 @@ struct SwapPoolKnobs {
     settle_pending: bool,
 }
 
+/// Body for `POST /api/v1/test/venue` (offline test build only) — the venue-serving knob of
+/// multi-venue readiness V5. `venue_id` names the fixture venue; `served: true` arms it into
+/// `GET /api/v1/venues`, `false` removes it (the default state).
+#[cfg(all(feature = "test-helpers", not(feature = "agent")))]
+#[derive(Deserialize)]
+struct VenueServeKnob {
+    venue_id: String,
+    served: bool,
+}
+
 /// `?pool=&token_in=&token_out=&amount_in=` for `GET /api/v1/swap_quote` — all required.
 /// `amount_in` is e8s (U64String: decimal string or bare number in query position).
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
@@ -1607,24 +1742,56 @@ struct SwapQuoteQuery {
     amount_in: U64String,
 }
 
-/// `GET /api/v1/swap_quote` response — the pool's own quote VERBATIM (amount_out is the
-/// pool's `quote` reply, GROSS — the app computes net by subtracting the output ledger's
-/// fee; the relay adds/blends NOTHING) plus `fetched_at` (relay wall-clock seconds, for the
-/// app's staleness line). The echo fields let the app key the quote without re-deriving
-/// direction; `zero_for_one` and `fee_millionths` are read off the venue's OWN metadata on
-/// this request — `fee_millionths` is the venue's fee tier ECHOED (3000 = 0.30%), never a
-/// number dpay claims, and it is the app's only source for that figure.
+/// `GET /api/v1/swap_quote` response — the pool's own quote VERBATIM and ATTRIBUTED
+/// (multi-venue readiness V4/V7): `venue_id` names which venue answered (the pool principal
+/// resolved against the compiled venue registry), `amount_out` is the pool's `quote` reply,
+/// GROSS — the app computes net by subtracting the output ledger's fee; the relay adds/blends
+/// NOTHING — plus `fetched_at` (the moment the venue answered, for the app's staleness line).
+/// The echo fields let the app key the quote without re-deriving direction; `zero_for_one`
+/// and `fee_millionths` come back inside the venue's own quote — `fee_millionths` is the
+/// venue's fee tier ECHOED (3000 = 0.30%), never a number dpay claims, and it is the app's
+/// only source for that figure.
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
 #[derive(Serialize)]
 struct SwapQuoteBody {
+    venue_id: String,
     pool: String,
     token_in: String,
     token_out: String,
     amount_in: U64String,
     amount_out: U64String,
+    /// Serialized as a plain bool here BY DESIGN while the app parses it as OPTIONAL: absence on
+    /// the app side deliberately means "venue published no direction" — neither side is wrong,
+    /// do not "fix" one to match the other.
     zero_for_one: bool,
     fee_millionths: u128,
     fetched_at: u64,
+}
+
+/// One served venue in `GET /api/v1/venues` — the registry entry in wire shape (snake_case
+/// like every route). `pair_ledgers` is an UNORDERED set: which side a pool calls token0 is
+/// the venue's own fact, read live per quote — the route must never suggest an order.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[derive(Serialize)]
+struct VenueBody {
+    venue_id: String,
+    display_name: String,
+    /// Extensible string enum: `ic_amm` today, `cefi` next, a future Solana kind is a new
+    /// value — never a schema break.
+    kind: String,
+    endpoint: String,
+    pair_ledgers: Vec<String>,
+    testnet: bool,
+    disclosure_key: String,
+}
+
+/// `GET /api/v1/venues` response. Kept SEPARATE from `/api/v1/currencies` on purpose:
+/// currencies are asset-scoped (one row per asset, network sections), venues are PAIR-scoped
+/// (one row per venue, spanning two assets) — a different axis, not a sub-list.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+#[derive(Serialize)]
+struct VenuesBody {
+    venues: Vec<VenueBody>,
 }
 
 /// `?currency=N` for `GET /api/v1/deposit/info`. Absent → `DEMO_USD`.

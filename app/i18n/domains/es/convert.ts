@@ -1,8 +1,9 @@
 /**
  * i18n/domains/es/convert.ts — valores en español para la superficie de conversión delegada.
  * Tipos, documentación de claves y copia de referencia: ../en/convert.ts. Glosario: ../../es.ts.
- * «Quote» se mantiene como término técnico; la sala siempre se nombra «ICPSwap». Los importes y
- * principals llegan ya formateados como cadenas de presentación.
+ * «Quote» se mantiene como término técnico; el nombre de la venue llega como argumento (nombre
+ * de presentación del registro de venues, nunca codificado aquí). Los importes y principals
+ * llegan ya formateados como cadenas de presentación.
  */
 import type {ConvertMessages} from '../../keys';
 
@@ -12,26 +13,26 @@ export const convertEs: ConvertMessages = {
   backToWallet: 'Volver al monedero',
 
   unavailableTitle: sym => `Convertir aún no está disponible para ${sym}`,
-  unavailableBody: pair => `Hoy dpay convierte ${pair} a través de ICPSwap — y nada más.`,
-  unavailableCkusdc:
-    'Existe un pool directo VCHF ↔ USDC, pero su profundidad está saturada (unos CHF 315): dpay lo rechaza antes que darte un precio caducado.',
+  unavailableBody: (pair, venue) => `Hoy dpay convierte ${pair} a través de ${venue} — y nada más.`,
+  unavailableCkusdc: venue =>
+    `Existe un pool directo VCHF ↔ USDC en ${venue}, pero su profundidad está saturada (unos CHF 315): dpay lo rechaza antes que darte un precio caducado.`,
 
   amountLabel: sym => `Importe (${sym})`,
   balanceLine: balance => `Saldo: ${balance}`,
   receiveHeadline: 'Recibirás',
-  counterparty:
-    'Ejecutado por el pool de ICPSwap — un contrato autónomo on-chain, no un proveedor con licencia y no dpay.',
+  counterparty: venue =>
+    `Ejecutado por el pool de ${venue} — un contrato autónomo on-chain, no un proveedor con licencia y no dpay.`,
   counterpartySigns: 'Tu teléfono firma; el pool retira exactamente el importe aprobado.',
-  quoteSource: at => `Cotización de ICPSwap, obtenida ${at}`,
-  rateLabel: (inSym, outSym) => `Tipo (${inSym} → ${outSym})`,
-  poolFeeTier: tier => `Comisión del pool: ${tier} (nivel de ICPSwap)`,
+  quoteSource: (at, venue) => `Cotización de ${venue}, obtenida ${at}`,
+  rateLabel: (inSym, outSym) => `Tipo de esta cotización (${inSym} → ${outSym})`,
+  poolFeeTier: (tier, venue) => `Comisión del pool: ${tier} (nivel de ${venue})`,
   inputFeeLine: fee => `Comisión de entrada: ${fee}`,
   outputFeeLine: fee => `Comisión de salida: ${fee}`,
   dpayFeeLine: 'dpay no cobra nada ni recibe nada por esto.',
   impactLine: pct => `Impacto en el precio: ${pct}`,
   impactWarnLine: pct => `Impacto alto en el precio: ${pct} — la cotización de arriba ya lo incluye.`,
-  impactUnavailable:
-    'Impacto en el precio: ahora mismo no es medible — ICPSwap no cotizó nada para el intercambio de referencia, así que no hay ningún precio con el que comparar este. El mínimo que recibirás, abajo, sigue acotando lo que este intercambio puede costarte.',
+  impactUnavailable: venue =>
+    `Impacto en el precio: ahora mismo no es medible — ${venue} no cotizó nada para el intercambio de referencia, así que no hay ningún precio con el que comparar este. El mínimo que recibirás, abajo, sigue acotando lo que este intercambio puede costarte.`,
   slippageLabel: 'Deslizamiento',
   minReceiveLine: (amount, pct) => `Mínimo que recibirás: ${amount} (${pct} de deslizamiento)`,
   refusalLine: sym =>
@@ -40,6 +41,9 @@ export const convertEs: ConvertMessages = {
   confirmButton: 'Recotizar y confirmar',
   staleRefreshing: 'Cotización caducada — actualizando…',
   quoteChanged: (oldAmt, newAmt) => `La cotización cambió: ${oldAmt} → ${newAmt}. Revisa y confirma de nuevo.`,
+  venueChooserLabel: 'Venue',
+  venueNoneSelected: 'Elige una venue para ver su cotización completa y continuar.',
+  venueRowQuote: amount => `Cotización: ${amount}`,
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Este monedero no tiene ${sym}. Para convertir ${sym}, recibe primero ${sym} en tu dirección: abre «${receiveTab}» abajo y elige «${myAddress}».`,
@@ -52,7 +56,7 @@ export const convertEs: ConvertMessages = {
   approvingBody: (amount, at) =>
     `Tu teléfono autoriza al pool a retirar exactamente ${amount}. La autorización caduca a las ${at} si no se usa.`,
   swappingTitle: 'Intercambiando',
-  swappingBody: 'Enviando el intercambio al pool de ICPSwap. Solo puede retirar el importe aprobado.',
+  swappingBody: venue => `Enviando el intercambio al pool de ${venue}. Solo puede retirar el importe aprobado.`,
   settlingTitle: 'Liquidando',
   settlingBody: sym => `El pool aceptó el intercambio. Esperando que tu ${sym} aparezca en tu monedero…`,
   doneTitle: 'Convertido ✓',
@@ -65,20 +69,39 @@ export const convertEs: ConvertMessages = {
   failedTitle: 'Intercambio no ejecutado',
   failedApproveBody: sym =>
     `El ledger de ${sym} rechazó la autorización, así que no se movió nada — sigues teniendo cada unidad de tu ${sym}. No se creó ninguna autorización; no hay nada que reembolsar ni revertir.`,
-  failedSwapBody: (reason, sym) =>
-    `El pool de ICPSwap rechazó el intercambio (${reason}). Tu ${sym} nunca salió de tu monedero. dpay no puede revertirlo ni reintentarlo por ti; no hace falta nada más.`,
+  failedSwapBody: (reason, sym, venue) =>
+    `El pool de ${venue} rechazó el intercambio (${reason}). Tu ${sym} nunca salió de tu monedero. dpay no puede revertirlo ni reintentarlo por ti; no hace falta nada más.`,
   refundedBody: sym =>
     `El intercambio falló y el pool te devolvió tu ${sym} — tu saldo vuelve a estar completo. dpay no puede revertir nada aquí.`,
   stuckTitle: 'Desenlace desconocido',
   stuckBody:
     'El intercambio se envió, pero la respuesta del pool no llegó. No inicies un segundo intercambio con los mismos fondos. Si el pago llega, esta pantalla pasará a «Convertido» por sí sola.',
-  stuckSigned: (amount, minAmount) =>
-    `Lo firmado: autorizar ${amount} al pool de ICPSwap; intercambiar por un mínimo de ${minAmount}.`,
+  stuckSigned: (amount, minAmount, venue) =>
+    `Lo firmado: autorizar ${amount} al pool de ${venue}; intercambiar por un mínimo de ${minAmount}.`,
   expiryLine: at => `La autorización sin usar caduca a más tardar a las ${at} — después, el pool no puede retirar nada.`,
 
+  awaitingAuthTitle: 'Falta tu autorización',
+  awaitingAuthBody: venue =>
+    `Esta orden está abierta en ${venue} y espera tu autorización. Nada se ha movido y nada se moverá hasta que la apruebes — dpay vigila mientras tanto el estado del proveedor.`,
+  awaitingDepositTitle: 'Esperando el depósito',
+  awaitingDepositBody: (sym, venue) =>
+    `${venue} emitió esta orden y espera su depósito en ${sym}. El intercambio se ejecuta cuando el proveedor ve el depósito; dpay sigue vigilando su estado. Si no llega ningún depósito a tiempo, la cotización caduca y nada se mueve.`,
+  providerProcessingTitle: 'Procesando en el proveedor',
+  providerProcessingBody: (sym, venue) =>
+    `${venue} retiene el depósito y está ejecutando la orden. Tu ${sym} llega cuando el proveedor la complete — dpay no puede revertirla ni acelerarla, y sigue vigilando hasta que se resuelva.`,
+  quoteExpiredTitle: 'Cotización caducada',
+  quoteExpiredBody: (sym, venue) =>
+    `La cotización murió antes de que se moviera algún valor: ${venue} nunca recibió el depósito, así que no se intercambió nada y no hay nada que revertir. Tu ${sym} se quedó donde estaba — inicia una nueva conversión si aún quieres una.`,
+  providerRefundedTitle: 'Reembolsado por el proveedor',
+  providerRefundedBody: (sym, venue) =>
+    `${venue} canceló esta orden y devolvió el depósito. Vigila la llegada de tu ${sym} — dpay no puede revertir ni acelerar el reembolso del proveedor.`,
+  stuckWatching: 'dpay sigue vigilando esto en segundo plano. Si llega el pago o el reembolso, esta pantalla cambia sola.',
+  stuckAcknowledge: 'Entendido — dejar de vigilar',
+  stuckAcknowledged: 'Has tomado nota y la vigilancia en segundo plano se ha detenido. Si los fondos se mueven más tarde, seguirán llegando a la dirección de esta cartera.',
+
   errors: {
-    quoteUnreachable: () => 'No se pudo alcanzar la cotización de ICPSwap — el relay no responde. Revisa tu conexión y vuelve a intentarlo.',
-    quoteRefused: () => 'ICPSwap se negó a cotizar este par ahora mismo.',
+    quoteUnreachable: venue => `No se pudo alcanzar la cotización de ${venue} — el relay no responde. Revisa tu conexión y vuelve a intentarlo.`,
+    quoteRefused: venue => `${venue} se negó a cotizar este par ahora mismo.`,
     quoteUnavailable: code => `Cotización no disponible (${code}).`,
   },
 };

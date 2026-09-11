@@ -199,15 +199,16 @@ ic-mainnet-probe:
 ic-index-probe:
     bash scripts/icp-index-probe.sh
 
-# OPT-IN mainnet read-only TRIPWIRE for the delegated-conversion venue (NEEDS NETWORK, never in
-# check/verify): one anonymous `metadata` query on the ICPSwap PoC pool, asserting its OWN
-# token0/token1/fee still equal `swap_venue` in dfx/catalog_truth.json — the block the offline
-# fake pool is seeded from. Free: a query costs nothing, moves nothing, signs nothing.
-# `just test-live` is PocketIC and has NO ICPSwap pool in it, so it is structurally unable to
-# see a venue fact; on 2026-09-07 that gap let a compiled pair pin sit BACKWARDS behind a fully
-# green suite while live production quoted every ICP→VCHF trade at the VCHF→ICP rate (~5.9x
-# against the user). Run it after any change to the conversion quote path, and whenever the
-# venue itself may have changed.
+# OPT-IN mainnet read-only TRIPWIRE for the delegated-conversion venues (NEEDS NETWORK, never in
+# check/verify): walks EVERY real registry entry, one anonymous `metadata` query per pool,
+# asserting its OWN token0/token1/fee still equal `venues[].fixture` in dfx/catalog_truth.json —
+# the block the offline fake pools are seeded from (fixture-only entries are skipped: invented
+# principals are never probed on mainnet). Free: a query costs nothing, moves nothing, signs
+# nothing. `just test-live` is PocketIC and has NO ICPSwap pool in it, so it is structurally
+# unable to see a venue fact; on 2026-09-07 that gap let a compiled pair pin sit BACKWARDS
+# behind a fully green suite while live production quoted every ICP→VCHF trade at the
+# VCHF→ICP rate (~5.9x against the user). Run it after any change to the conversion quote path,
+# and whenever the venue itself may have changed.
 swap-venue-probe:
     DPAY_IC_MAINNET=1 cargo nextest run -p dpay-relay --features agent -E 'binary(swap_venue_mainnet)' --no-capture
 

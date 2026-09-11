@@ -112,6 +112,7 @@ export async function run() {
     // every ICP→VCHF quote came back at the VCHF→ICP rate (~5.9x against the user).
     assertEq(oracle.zero_for_one, false, 'relay derives zero_for_one from the pool\'s own pair (ICP is token1)');
     assertEq(oracle.fee_millionths, 3000, 'the venue\'s OWN fee tier is echoed by the relay, not claimed by dpay');
+    assertEq(oracle.venue_id, 'icpswap', 'the quote is ATTRIBUTED to its venue (registry venue_id echo)');
     const gross = BigInt(oracle.amount_out);
     const minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // the core's exact floor math
     const net = gross - VCHF_FEE;

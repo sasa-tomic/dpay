@@ -103,27 +103,147 @@ pub(crate) const ICP_LEDGER_PRINCIPAL: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 /// `catalog_truth_tests` module below.
 pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 
-/// The ICPSwap V3 pool the delegated-conversion PoC quotes (spec
-/// docs/specs/2026-09-07-delegated-conversion-spec.md §1): `65mrh-fqaaa-aaaar-qapoa-cai`, the
-/// VCHF/ICP 0.3% pool (factory `4mmnk-kiaaa-aaaag-qbllq-cai`). NOT a catalog row — this is the
-/// relay's ALLOWLIST for `/api/v1/swap_quote`. Compiled only where the quote surfaces exist
-/// (agent = the live read, test-helpers = the fake-IC pool stub).
-///
-/// A pool PRINCIPAL is the only venue fact the relay may hold as a constant: it is dpay's own
-/// choice of which contract to talk to. The pool's token PAIR and its fee tier are claims about
-/// a remote system — they are read off the pool at request time
-/// (`AgentLedger::swap_pool_metadata`), never assumed. The 2026-09-07
-/// build pinned the pair as a constant AND seeded the offline fake from the same pin: the two
-/// agreed with each other and neither agreed with the venue, so live production served each
-/// direction's rate under the other direction's label (docs/specs/2026-09-08-conversion-hardening-plan.md).
+/// A conversion venue's kind. Extensible by construction: a later Solana venue kind is a new
+/// variant (or a string on the wire), never a schema break — `cefi` is already reserved and is
+/// deliberately NOT an IC-pool shape (the `Ledger` trait takes no CeFi method; CeFi lives
+/// device-side, `app/services/opencryptopay.ts` shape).
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
-pub(crate) const SWAP_POOL_PRINCIPAL: &str = "65mrh-fqaaa-aaaar-qapoa-cai";
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VenueKind {
+    /// An on-chain IC AMM pool the user's device signs against (ICPSwap today).
+    IcAmm,
+    /// A centralized exchange integration — device-side quote/deposit/submit, no relay hop.
+    /// Reserved: no entry uses it yet, but the registry (and the served route's `kind` string)
+    /// already speaks it so adding the first CeFi venue is data, not a schema change.
+    #[allow(dead_code)]
+    Cefi,
+}
 
-/// Is `pool` a venue this relay will quote? The allowlist, keyed on the pool principal alone —
-/// the route's 400 `unknown_pool` refusal. (One PoC venue; adding one = adding an arm here.)
+/// The offline stub seed for one ic_amm venue's fake-IC pool (`ic_gateway.rs`). The pair ORDER
+/// and fee tier here are pinned against `dfx/catalog_truth.json` `venues[].fixture` — for real
+/// venues MEASURED off the live pool (the 2026-09-08 lesson: an offline fixture standing in for
+/// a remote system must be pinned by something that actually talks to that system —
+/// `just swap-venue-probe`), for fixture-only venues declared as fixture-truth. Reserves are the
+/// curve simulation (code's own choice, deliberately NOT truth-file facts).
 #[cfg(any(feature = "agent", feature = "test-helpers"))]
-pub(crate) fn is_known_swap_pool(pool: &str) -> bool {
-    pool == SWAP_POOL_PRINCIPAL
+pub(crate) struct FixtureSeed {
+    pub token0_ledger: &'static str,
+    pub token1_ledger: &'static str,
+    pub fee_millionths: u128,
+    /// Genesis reserve of the pool's OWN token0 (e8s) — follows the token, not the asset.
+    pub reserve0_e8s: u128,
+    /// Genesis reserve of the pool's OWN token1 (e8s).
+    pub reserve1_e8s: u128,
+}
+
+/// One conversion venue (multi-venue readiness Wave 1, `docs/specs/2026-09-08-multi-venue-readiness.md`
+/// V4). The endpoint principal is the ONLY venue fact held as a constant — dpay's own choice of
+/// which contract to talk to. Everything the venue says about itself (pair ORDER, fee tier) is
+/// read off the venue at request time (`AgentLedger::swap_pool_metadata`) and echoed on the
+/// quote; `pair_ledgers` here is an UNORDERED set — pinning an order is exactly the 2026-09-07
+/// defect that shipped each direction's rate under the other's label. Drift-alarmed against
+/// `dfx/catalog_truth.json` `venues[]` (Rust half here, jest half `app/__tests__/catalog.test.ts`).
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) struct VenueEntry {
+    /// Stable machine id (records, quote attribution, allowlist keys).
+    pub venue_id: &'static str,
+    /// Locale-invariant display name — the ONE home of "ICPSwap" (i18n takes it as an argument).
+    pub display_name: &'static str,
+    pub kind: VenueKind,
+    /// The dpay-chosen contract principal (pool canister for ic_amm).
+    pub endpoint: &'static str,
+    /// The pair as an UNORDERED set of ledger principals.
+    pub pair_ledgers: [&'static str; 2],
+    pub testnet: bool,
+    /// Key selecting the venue's disclosure copy family (app-side i18n).
+    pub disclosure_key: &'static str,
+    /// True = an invented offline-fixture venue (multi-venue readiness V5): it seeds a second
+    /// fake-IC pool and may be SERVED by `/api/v1/venues` only in the offline test build
+    /// (test-helpers without agent) and only behind the `POST /api/v1/test/venue` knob — see
+    /// [`venue_servable`]. Never served by the agent (prod) build, never allowlisted there,
+    /// never probed on mainnet.
+    pub test_helpers_served: bool,
+    /// The fake-IC stub seed (ic_amm venues only; `None` for cefi).
+    pub fixture: Option<FixtureSeed>,
+}
+
+/// The compiled venue registry (mirrors `dfx/catalog_truth.json` `venues[]`, drift-alarmed).
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) fn venues() -> Vec<VenueEntry> {
+    vec![
+        VenueEntry {
+            venue_id: "icpswap",
+            display_name: "ICPSwap",
+            kind: VenueKind::IcAmm,
+            // The PoC VCHF/ICP 0.3% pool (factory 4mmnk-kiaaa-aaaag-qbllq-cai), spec
+            // docs/specs/2026-09-07-delegated-conversion-spec.md §1.
+            endpoint: "65mrh-fqaaa-aaaar-qapoa-cai",
+            // UNORDERED — which side the pool calls token0 is read live off its metadata.
+            pair_ledgers: [VCHF_LEDGER_PRINCIPAL, ICP_LEDGER_PRINCIPAL],
+            testnet: false,
+            disclosure_key: "icpswap",
+            test_helpers_served: false,
+            fixture: Some(FixtureSeed {
+                // MEASURED off the live pool 2026-09-08 (token0 = VCHF, token1 = ICP, 0.30%).
+                token0_ledger: VCHF_LEDGER_PRINCIPAL,
+                token1_ledger: ICP_LEDGER_PRINCIPAL,
+                fee_millionths: 3000,
+                // token0/token1-e8s: 1.93M VCHF / 1M ICP — deep enough that PoC-size swaps
+                // barely move the price (deterministic, NOT a live-band match).
+                reserve0_e8s: 193_000_000_000_000,
+                reserve1_e8s: 100_000_000_000_000,
+            }),
+        },
+        VenueEntry {
+            // OFFLINE TEST FIXTURE — invented principal (no such canister on any network).
+            // Same pair, REVERSED seed order (token0 = ICP — the direction logic must prove it
+            // derives per pool, not once globally) and a different curve + fee (0.10%). Served
+            // ONLY by the offline test relay behind the /test/venue knob (V5) so the chooser
+            // can be driven with two venues on one pair; `testnet: true` labels it the invented
+            // stand-in it is (multi-venue readiness V5, 2026-09-11).
+            venue_id: "icpswap-fixture-b",
+            display_name: "ICPSwap (offline fixture)",
+            kind: VenueKind::IcAmm,
+            endpoint: "6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7",
+            pair_ledgers: [VCHF_LEDGER_PRINCIPAL, ICP_LEDGER_PRINCIPAL],
+            testnet: true,
+            disclosure_key: "icpswap",
+            test_helpers_served: true,
+            fixture: Some(FixtureSeed {
+                token0_ledger: ICP_LEDGER_PRINCIPAL,
+                token1_ledger: VCHF_LEDGER_PRINCIPAL,
+                fee_millionths: 1000,
+                // 0.8M ICP / 1.4M VCHF — a genuinely different curve from the PoC stub's.
+                reserve0_e8s: 80_000_000_000_000,
+                reserve1_e8s: 140_000_000_000_000,
+            }),
+        },
+    ]
+}
+
+/// The venue a quote is attributable to, by endpoint principal — this IS the allowlist
+/// (generalized: the principal must be a known ic_amm venue's ENDPOINT) and the
+/// `/api/v1/swap_quote` `venue_id` echo. Test-fixture venues resolve ONLY where they exist —
+/// the offline fake (test-helpers without agent); the agent/prod build allowlists real
+/// contracts only, so an invented principal can never be asked of a live replica.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) fn venue_of_endpoint(pool: &str) -> Option<VenueEntry> {
+    venues()
+        .into_iter()
+        .find(|v| v.kind == VenueKind::IcAmm && v.endpoint == pool && (!v.test_helpers_served || cfg!(not(feature = "agent"))))
+}
+
+/// May `v` be served by `GET /api/v1/venues` in THIS build, with the test knob `knob_armed`?
+/// (multi-venue readiness V5.) Real venues always. A [`VenueEntry::test_helpers_served`]
+/// fixture venue only in the OFFLINE test build (test-helpers WITHOUT agent) and only while
+/// its knob is armed — and the agent/prod build has NO knob at all (the `/test/venue` route,
+/// the `FakeIc` state behind it, and the `test-helpers` branch here are all cfg'd away), so it
+/// always computes this with `knob_armed == false`, which is `false` for every fixture venue.
+/// That agent-build truth is exactly what the alarm in `venue_truth_tests` pins.
+#[cfg(any(feature = "agent", feature = "test-helpers"))]
+pub(crate) fn venue_servable(v: &VenueEntry, knob_armed: bool) -> bool {
+    !v.test_helpers_served
+        || (cfg!(all(feature = "test-helpers", not(feature = "agent"))) && knob_armed)
 }
 
 /// The IC section rows of the catalog — the wallet's runtime source of truth for which assets
@@ -1491,80 +1611,252 @@ mod wire_byte_shape_tests {
 }
 
 // ---------------------------------------------------------------------------
-// Swap-venue drift alarm (2026-09-08). The relay holds ONE venue constant — the pool PRINCIPAL
-// (dpay's own choice of contract). The pool's PAIR ORDER and FEE TIER are facts about a remote
-// system, so production reads them off the pool on every quote and pins nothing.
-//
-// What still needs pinning is the offline FAKE: its stub pool has to be seeded in some order,
-// and if that order is a guess then the fake and the code agree with each other while both
-// disagree with the venue — which is exactly what happened, and exactly why the offline suite
-// could not see a live rate that was wrong by ~5.9× against the user. So the seed is MEASURED
-// (`dfx/catalog_truth.json` `swap_venue`, off the live pool 2026-09-08) and this alarm holds the
-// stub to it. The live half is `just swap-venue-probe`
-// (`crates/dpay-relay/tests/swap_venue_mainnet.rs`) — the only thing that can see the venue
-// change, since `just test-live` is PocketIC and has no ICPSwap pool in it.
+// Venue-registry drift alarm (generalized 2026-09-10 from the 2026-09-08 single-pool alarm).
+// The relay's venue registry (`venues()` above) is pinned field-for-field against
+// `dfx/catalog_truth.json` `venues[]`, and every ic_amm fixture seed is pinned against what the
+// offline fake-IC gateway is ACTUALLY seeded with — for the real venue the seed order was
+// MEASURED off the live pool (2026-09-08; a guessed seed once agreed with the code while both
+// disagreed with the venue, hiding a ~5.9×-wrong live rate behind a green suite). The live half
+// is `just swap-venue-probe` (`crates/dpay-relay/tests/swap_venue_mainnet.rs`) — the only thing
+// that can see a REAL venue change, since `just test-live` is PocketIC and has no ICPSwap pool
+// in it. Fixture-only venues are pinned as fixture-truth and never probed.
 // ---------------------------------------------------------------------------
 #[cfg(all(test, feature = "test-helpers"))]
-mod swap_venue_truth_tests {
+mod venue_truth_tests {
     use super::*;
 
     use serde_json::Value;
 
     const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
 
-    fn swap_venue_truth() -> Value {
+    fn venues_truth() -> Vec<Value> {
         serde_json::from_str::<Value>(CATALOG_TRUTH)
-            .expect("dfx/catalog_truth.json must be valid JSON")["swap_venue"]
+            .expect("dfx/catalog_truth.json must be valid JSON")["venues"]
+            .as_array()
+            .expect("catalog_truth.venues is an array")
             .clone()
     }
 
     #[test]
-    fn allowlisted_pool_is_the_measured_venue_and_nothing_else() {
-        let v = swap_venue_truth();
+    fn compiled_registry_matches_the_truth_file_field_for_field() {
+        let truth = venues_truth();
+        let compiled = venues();
         assert_eq!(
-            SWAP_POOL_PRINCIPAL,
-            v["pool"].as_str().expect("swap_venue.pool"),
-            "the allowlisted pool principal IS the measured venue"
+            compiled.len(),
+            truth.len(),
+            "the compiled venue registry and catalog_truth.venues carry the same venues"
         );
-        assert!(is_known_swap_pool(SWAP_POOL_PRINCIPAL));
-        // The allowlist is a whitelist, not a shape check: a well-formed principal that is not
-        // the PoC venue is refused (the route's 400 `unknown_pool`).
-        assert!(!is_known_swap_pool(ICP_LEDGER_PRINCIPAL));
-        assert!(!is_known_swap_pool(""));
+        for (v, t) in compiled.iter().zip(&truth) {
+            assert_eq!(v.venue_id, t["venue_id"].as_str().unwrap());
+            assert_eq!(v.display_name, t["display_name"].as_str().unwrap());
+            assert_eq!(
+                v.endpoint,
+                t["endpoint"].as_str().unwrap(),
+                "{} endpoint must equal the truth file",
+                v.venue_id
+            );
+            assert_eq!(v.testnet, t["testnet"].as_bool().unwrap());
+            assert_eq!(v.disclosure_key, t["disclosure_key"].as_str().unwrap());
+            // kind: an extensible string enum on the wire — every value the relay knows parses,
+            // and an unknown value would fail this parse (schema-break tripwire).
+            let kind = t["kind"].as_str().unwrap();
+            let expected_kind = match kind {
+                "ic_amm" => VenueKind::IcAmm,
+                "cefi" => VenueKind::Cefi,
+                other => panic!("unknown venue kind in the truth file: {other}"),
+            };
+            assert_eq!(v.kind, expected_kind);
+            // The pair is an UNORDERED set: sort both sides before comparing, so neither the
+            // truth file nor the registry can smuggle an ORDER back in unnoticed.
+            let mut truth_pair: Vec<&str> = t["pair_ledgers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|p| p.as_str().unwrap())
+                .collect();
+            truth_pair.sort_unstable();
+            let mut compiled_pair = v.pair_ledgers.to_vec();
+            compiled_pair.sort_unstable();
+            assert_eq!(
+                compiled_pair, truth_pair,
+                "{} pair must equal the truth file as an unordered set",
+                v.venue_id
+            );
+            assert_eq!(
+                v.test_helpers_served,
+                t.get("test_helpers_served").is_some_and(|f| f.as_bool().unwrap()),
+                "{} test_helpers_served marker must match the truth file",
+                v.venue_id
+            );
+            // Fixture seeds pin pair order + fee only (reserves are the curve simulation, a
+            // code choice). For the REAL venue this is the MEASURED block; see the per-pool
+            // seeding test below for the fake-gateway half.
+            if let Some(f) = &v.fixture {
+                let tf = &t["fixture"];
+                assert_eq!(f.token0_ledger, tf["token0_ledger"].as_str().unwrap());
+                assert_eq!(f.token1_ledger, tf["token1_ledger"].as_str().unwrap());
+                assert_eq!(
+                    f.fee_millionths,
+                    u128::from(tf["fee_millionths"].as_u64().unwrap())
+                );
+            }
+        }
     }
 
     #[test]
-    fn stub_pool_is_seeded_in_the_measured_live_pair_order() {
-        let v = swap_venue_truth();
-        let meta = crate::ic_gateway::FakeIc::from_catalog().swap_pool_metadata();
+    fn allowlist_generalizes_to_ic_amm_endpoints_and_gates_fixture_pools() {
+        // The PoC venue resolves; a ledger principal and garbage resolve to nothing (the quote
+        // route's "unknown_pool" refusal — `venue_of_endpoint` IS the allowlist).
+        assert!(venue_of_endpoint("65mrh-fqaaa-aaaar-qapoa-cai").is_some());
+        assert!(venue_of_endpoint(ICP_LEDGER_PRINCIPAL).is_none());
+        assert!(venue_of_endpoint("").is_none());
+        // Under test-helpers WITHOUT agent the fixture pool IS quotable — the offline loop is
+        // its only reason to exist — and resolves for quote attribution. Under the AGENT
+        // feature the production gate inside `venue_of_endpoint` correctly refuses it (fixture
+        // venues must never resolve where a live replica could be asked of an invented
+        // principal), so the assertion branches on the feature: Some in the offline build,
+        // None under `just test-live`.
+        if cfg!(feature = "agent") {
+            assert!(venue_of_endpoint("6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7").is_none());
+        } else {
+            assert!(venue_of_endpoint("6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7").is_some());
+            assert_eq!(
+                venue_of_endpoint("6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7")
+                    .expect("fixture venue resolves")
+                    .venue_id,
+                "icpswap-fixture-b"
+            );
+        }
         assert_eq!(
-            meta.token0_ledger,
-            v["token0_ledger"]
-                .as_str()
-                .expect("swap_venue.token0_ledger"),
-            "the offline stub's token0 must be the venue's OWN token0 (measured 2026-09-08) — \
-             seeding it backwards is what let a 5.9x-wrong live rate pass a green suite"
+            venue_of_endpoint("65mrh-fqaaa-aaaar-qapoa-cai")
+                .expect("the PoC venue resolves")
+                .venue_id,
+            "icpswap"
         );
+        assert!(venue_of_endpoint(ICP_LEDGER_PRINCIPAL).is_none());
+        // The invented principal must PARSE — the fake gateway and the relay tests key pools by
+        // principal text, and a typo'd fixture id would fail far from its cause.
+        dpay_icp::principal::Principal::from_text("6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7")
+            .expect("the fixture-only venue's invented principal parses");
+        // SERVED-by-default (the knob un-armed — the agent build's permanent state, and every
+        // build's state before a test opts in): never a fixture venue.
+        let served: Vec<_> = venues()
+            .into_iter()
+            .filter(|v| venue_servable(v, false))
+            .collect();
+        assert_eq!(served.len(), 1, "exactly one real venue is served today");
+        assert_eq!(served[0].venue_id, "icpswap");
+        assert!(served.iter().all(|v| !v.test_helpers_served));
+    }
+
+    /// THE AGENT-BUILD ALARM (multi-venue readiness V5): the invented fixture venue can never
+    /// be served by the production image. The agent build compiles the `/test/venue` knob, the
+    /// `FakeIc` behind it, and the `test-helpers` half of [`venue_servable`] OUT, so the value
+    /// it always computes is `venue_servable(v, false)` — pinned here directly. The knob-armed
+    /// half is asserted against THIS build's cfg so the test is honest under any feature set.
+    #[test]
+    fn fixture_venue_is_never_servable_in_the_agent_build_or_without_the_knob() {
+        let fixture = venues()
+            .into_iter()
+            .find(|v| v.venue_id == "icpswap-fixture-b")
+            .expect("the fixture venue is registered");
+        let real = venues()
+            .into_iter()
+            .find(|v| v.venue_id == "icpswap")
+            .expect("the PoC venue is registered");
+        // The agent/prod build's permanent state (it has no knob to arm):
+        assert!(
+            !venue_servable(&fixture, false),
+            "an invented venue is never served with the knob un-armed — the agent build's only state"
+        );
+        // Real venues never depend on the knob:
+        assert!(venue_servable(&real, false));
+        assert!(venue_servable(&real, true));
+        // The knob only matters in the offline test build — under `agent` (incl. the
+        // agent+test-helpers live-test config) even an armed knob must serve nothing, because
+        // the route that consults it is compiled away there.
         assert_eq!(
-            meta.token1_ledger,
-            v["token1_ledger"]
-                .as_str()
-                .expect("swap_venue.token1_ledger"),
-            "the offline stub's token1 must be the venue's OWN token1 (measured 2026-09-08)"
+            venue_servable(&fixture, true),
+            cfg!(all(feature = "test-helpers", not(feature = "agent"))),
+            "an armed knob serves the fixture venue ONLY in the offline test build"
         );
-        assert_eq!(
-            meta.fee_millionths,
-            u128::from(
-                v["fee_millionths"]
-                    .as_u64()
-                    .expect("swap_venue.fee_millionths")
-            ),
-            "the offline stub's fee tier must be the venue's OWN tier (measured 2026-09-08)"
-        );
-        // And the measured order is the REVERSE of the pin the 2026-09-07 build carried: token0
-        // is VCHF, token1 is ICP. Naming both catalog consts here makes the alarm say WHICH
-        // asset moved, not just that a string changed.
+    }
+
+    #[test]
+    fn every_ic_amm_fixture_pool_is_seeded_exactly_as_pinned() {
+        // The fake-IC gateway must hold a pool for EVERY ic_amm venue with a fixture seed, in
+        // exactly the pinned pair order + fee tier — per pool, not globally: two venues on one
+        // pair with different orders is the whole point of the second fixture pool.
+        let fake = crate::ic_gateway::FakeIc::from_catalog();
+        for v in venues().iter().filter(|v| v.kind == VenueKind::IcAmm) {
+            let Some(seed) = &v.fixture else {
+                continue;
+            };
+            let meta = fake
+                .swap_pool_metadata(v.endpoint)
+                .unwrap_or_else(|| panic!("{}: the fake gateway must seed its fixture pool", v.venue_id));
+            assert_eq!(
+                meta.token0_ledger, seed.token0_ledger,
+                "{}: the offline stub's token0 must be the pinned seed order",
+                v.venue_id
+            );
+            assert_eq!(
+                meta.token1_ledger, seed.token1_ledger,
+                "{}: the offline stub's token1 must be the pinned seed order",
+                v.venue_id
+            );
+            assert_eq!(
+                meta.fee_millionths, seed.fee_millionths,
+                "{}: the offline stub's fee tier must be the pinned tier",
+                v.venue_id
+            );
+        }
+        // And the REAL venue's measured order, named in assets so the alarm says WHICH side
+        // moved (token0 = VCHF, token1 = ICP — the reverse of the 2026-09-07 pin).
+        let meta = fake
+            .swap_pool_metadata("65mrh-fqaaa-aaaar-qapoa-cai")
+            .expect("the PoC venue's stub pool is seeded");
         assert_eq!(meta.token0_ledger, VCHF_LEDGER_PRINCIPAL);
         assert_eq!(meta.token1_ledger, ICP_LEDGER_PRINCIPAL);
+        // The fixture pool deliberately REVERSES it — one global pin could not satisfy both.
+        let b = fake
+            .swap_pool_metadata("6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7")
+            .expect("the fixture-B stub pool is seeded");
+        assert_eq!(b.token0_ledger, ICP_LEDGER_PRINCIPAL);
+        assert_eq!(b.token1_ledger, VCHF_LEDGER_PRINCIPAL);
+        assert_ne!(
+            b.fee_millionths,
+            meta.fee_millionths,
+            "the second fixture pool must differ from the PoC stub (fee tier)"
+        );
+    }
+
+    /// V9 INVARIANT 1 (catalog half, hostile-principal fixtures): a dpay-OWNED canister
+    /// principal may never resolve as a conversion venue — neither through the allowlist
+    /// ([`venue_of_endpoint`]) nor by sitting in the registry as some future venue's endpoint.
+    /// The route-half twin is `swap_quote_refuses_dpay_owned_principals_as_pools`
+    /// (tests/relay.rs); the phone-side signing-boundary twin is `app/config/venues.ts`
+    /// `DPAY_CANISTER_PRINCIPALS` (checked by `app/__tests__/venueInvariants.test.ts`). All
+    /// three lists mirror `canister_ids.json`.
+    #[test]
+    fn dpay_owned_principals_never_resolve_as_venues() {
+        // `canister_ids.json` `dpay_canister.ic` — the facade (dormant for the value rail, but
+        // dpay-owned all the same). Pinned as a literal so a redeployed facade id moves THIS
+        // alarm, not a silent allowlist hole.
+        const DPAY_FACADE_PRINCIPAL: &str = "ssqti-wiaaa-aaaab-qhdia-cai";
+        let hostile: [&str; 2] = [DPAY_FACADE_PRINCIPAL, DEMO_LEDGER_PRINCIPAL];
+        for p in hostile {
+            assert!(
+                venue_of_endpoint(p).is_none(),
+                "a dpay-owned principal ({p}) must never resolve as a venue endpoint"
+            );
+        }
+        for v in venues() {
+            assert!(
+                !hostile.contains(&v.endpoint),
+                "{}: the registry itself must never name a dpay-owned principal as an endpoint",
+                v.venue_id
+            );
+        }
     }
 }
