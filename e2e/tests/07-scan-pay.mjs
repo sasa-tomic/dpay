@@ -85,19 +85,18 @@ export async function run() {
     console.log(`[07-scan-pay] ✓ B credited: 0 → $${(Number(bobAfter) / 100).toFixed(2)}`);
 
     // --- A's Recent history lists the outgoing payment to B (refreshHistory fired on settle). --
-    // IC rail: history rows are name-less (names died with facade settlement — only the payer's
-    // REVIEW knew the name, from the request QR bytes); the row shows the payee's short PRINCIPAL
-    // text (61-merchant-received-name pins the same convention). Assert the short principal is
-    // rendered and neither the full principal nor the raw hex pubkey leaks.
+    // IC rail: the row names the payee from the annotation saved on this device at approve time
+    // (the request QR's to_name + nonce joined to the ledger row via the echoed memo nonce —
+    // flow 172 pins the grammar). The row still must not dump the full principal or raw hex.
     const bobPrincipal = await railPrincipalText(bob.publicHex);
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
     assert(hasHistory, 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();
-    assertIncludes(histBody, bobPrincipal.slice(0, 8), 'history row should show the payee short principal text');
+    assertIncludes(histBody, 'to Bob', 'history row should show the payee name (device-saved annotation)');
     assert(!histBody.includes(bobPrincipal), 'history must NOT dump the full principal');
     assert(!histBody.includes(bob.publicHex), 'history must NOT dump the raw 64-char recipient pubkey');
-    console.log('[07-scan-pay] ✓ A history shows the outgoing payment (short principal; names died with the facade)');
+    console.log('[07-scan-pay] ✓ A history shows the outgoing payment to Bob (annotation-named)');
 
     await driver.screenshot('07-scan-pay');
 

@@ -171,12 +171,13 @@ export async function run() {
     console.log('[96-icp-pay] assert Ledger outgoing row…');
     await driver.click('tab-transactions', { timeoutMs: 4_000 });
     await driver.waitForText('RECENT', { timeoutMs: 8_000 });
-    const want = (await railPrincipalText(bob.publicHex)).slice(0, 8);
-    const named = await driver.waitForText(want, { timeoutMs: 10_000 });
+    const bobPrincipal = await railPrincipalText(bob.publicHex);
+    const named = await driver.waitForText('to Bob', { timeoutMs: 10_000 });
     const bodyText = await driver.bodyText();
-    assert(named, `ledger row names the payee counterparty (short principal ${want}). ledger:\n${bodyText.slice(0, 500)}`);
+    assert(named, `ledger row names the payee via the request-QR annotation ("to Bob"). ledger:\n${bodyText.slice(0, 500)}`);
     assertIncludes(bodyText, '\u22121.00000001 ICP', 'ledger outgoing row amount (U+2212 minus + exact units)');
-    assert(!bodyText.includes(bob.publicHex), 'ledger row shows only the payee SHORT key, never the full hex');
+    assert(!bodyText.includes(bobPrincipal), 'ledger row never dumps the full principal');
+    assert(!bodyText.includes(bob.publicHex), 'ledger row shows only the annotation name, never the full hex');
 
     await driver.screenshot('96-icp-pay');
     console.log(`[96-icp-pay] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
