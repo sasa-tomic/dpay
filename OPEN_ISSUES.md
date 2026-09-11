@@ -221,9 +221,10 @@ Re-measured 2026-09-10, HEAD `4727a57`:
   `{"till":true,"demo_faucet":true}` (measured 2026-09-10): the 2026-09-10 relay deploy carried
   `d15b596` and the default flip is live. (The pre-deploy "till NOT yet served" note is retired.)
 
-**Verified-clean floor for the next session's review: `ddfea4a`** — jest 111 suites / 2269, e2e
-**153/153 GREEN** (`just e2e`, EXIT=0), and every Rust suite green in the same pass (core 61+5,
-canister 61, relay 138, icp 75+123, ffi 6). Start the next sweep from there.
+**Verified-clean floor for the next session's review: `409264e`** — full `just verify` GREEN
+(jest 121 suites / 2546, e2e **160/160 GREEN** in one pass, relay 154/154, the agent-feature
+live suite 163/163) plus `just app` device self-check GREEN (DPAY_SELFCHECK PASS, emulator) on
+the same tree — the multi-venue build (item 3). Start the next sweep from there.
 
 **One thing to know before running the suite:** `DPAY_E2E_NO_FAILFAST=1` is a trap on this box. It
 keeps launching flows past the first RED, oversubscribes the host, and turns one flake into sixteen
