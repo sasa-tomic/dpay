@@ -122,7 +122,8 @@ The shape, in design voice throughout — no bullet below is a claim about what 
 - **Only someone who can sign for the paid account may ring up a charge.** The ring-up names the
   ed25519 key whose account every payer is then told to pay; unsigned, that is a stranger's charge
   on dpay's own domain. The core carries the whole acceptance rule — `validate_till_open`,
-  `dpay-till-open-v1`, bytes pinned by `dfx/till_open_signing.json` — so the relay checks rather
+  `dpay-till-open-v1` (`-v2` when the ring-up carries a note — the payer-read purpose,
+  signed like the name; added 2026-09-13), bytes pinned by `dfx/till_open_signing.json` — so the relay checks rather
   than re-derives it. The routes are separately gated off by default, and why they are:
   `crates/dpay-relay/src/app.rs`, at the till gate. Status of both: `OPEN_ISSUES.md`.
 - **The own-relay trust rule is GONE, and nothing replaced it.** It existed to carve dpay's own till

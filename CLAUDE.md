@@ -344,7 +344,9 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   default flipped true on every build and every ledger by founder decision 2026-09-10, reversing
   the 2026-09-04 opt-in that predated the signed ring-up** (an operator can still un-serve the
   surface per deploy). A ring-up, and a cancellation, must be SIGNED by the key whose account gets paid
-  (`dpay_core::validate_till_open`, domain `dpay-till-open-v1`, bytes pinned by
+  (`dpay_core::validate_till_open`, domain `dpay-till-open-v1` — or `dpay-till-open-v2` when the ring-up
+  carries a NOTE, the one-line purpose the payer reads on review; the tag itself is the version, so a
+  v1 verifier refuses v2 bytes rather than misreading them — bytes pinned by
   `dfx/till_open_signing.json`). The counter sits inside Receive ▸ Request payment on every asset
   and arms the NFC reader with the charge's own reference, so a TAP pays the same charge a scan
   would — no new AID, no protocol change. Authority, each for its own half and none of it restated
