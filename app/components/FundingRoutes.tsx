@@ -6,7 +6,7 @@ import {decimalSep, formatMonthDayYear} from '../i18n/intl';
 import {
   fundingRoute, bankRouteApplies, BANK_ROUTE_PROVIDER,
   FUNDING_PROVIDERS, FUNDING_SOURCES_READ_ON,
-  type PublishedRate,
+  type FundingProvider, type PublishedCost, type PublishedRate,
 } from '../config/funding';
 import type {SelectableAsset} from '../config/assets';
 import type {DepositMechanism} from '../config/catalog';
@@ -101,7 +101,7 @@ export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
           {FUNDING_PROVIDERS.map(p => (
             <View key={p.key} testID={`funding-provider-${p.key}`} style={S.fundingProviderRow}>
               <Text style={S.fundingProviderName}>{p.name}</Text>
-              <Text style={S.fundingProviderCost}>{costLine(p.card, p.bank, p.minFee, p.spread)}</Text>
+              <Text style={S.fundingProviderCost}>{costLine(p)}</Text>
               <Text style={S.fundingProviderSource} selectable={true}>{p.source}</Text>
             </View>
           ))}
@@ -115,31 +115,66 @@ export function FundingRoutes({asset, isTestnet, mechanism, homeCurrency}: {
   );
 }
 
-/** One provider's published cost, assembled from whichever parts that provider actually publishes.
- *  A missing part is OMITTED rather than shown as zero or as "unknown": Transak publishes no single
- *  card percentage, and inventing one — or implying the card is free — is the failure mode this
- *  whole section exists to avoid. */
-function costLine(card: PublishedRate | null, bank: PublishedRate | null, minFee: string | null, spread: PublishedRate | null): string {
-  const parts: string[] = [];
-  if (card !== null) parts.push(M.deposit.funding.costCard(rate(card)));
-  if (bank !== null) parts.push(M.deposit.funding.costBank(rate(bank)));
-  if (minFee !== null) parts.push(M.deposit.funding.costMin(minFee));
+/** One provider's published cost, assembled from whichever parts that provider actually
+ *  publishes. A method with no published figure is OMITTED rather than shown as zero or as
+ *  "unknown" (MoonPay's bank): inventing a figure — or implying the method is free — is the
+ *  failure mode this whole section exists to avoid. Conditional rates each keep their own
+ *  segment with their qualifier, so the user can pick out the number that applies to them
+ *  rather than read a mushed range. */
+function costLine(p: FundingProvider): string {
+  const parts: string[] = p.costs.map(c => methodPart(c));
+  if (p.minFee !== null) parts.push(M.deposit.funding.costMin(p.minFee));
+  // Published only as a range with no per-currency figure — rendered as exactly that, never as
+  // its top (which would state a ceiling as the uplift) nor as a midpoint nobody published.
+  if (p.nonUsdUplift !== undefined) {
+    parts.push(M.deposit.funding.nonUsdUplift(pct(p.nonUsdUplift.fromPct), pct(p.nonUsdUplift.toPct)));
+  }
   // The spread goes through the same `rate` shape-rendering as the fees, for the same reason:
   // Transak publishes "0% to 2.5%", and "plus 2.5% margin" would state the ceiling as the margin.
-  if (spread !== null) parts.push(M.deposit.funding.costSpread(rate(spread)));
+  if (p.spread !== null) parts.push(M.deposit.funding.costSpread(rate(p.spread)));
   return parts.join(' · ');
 }
 
+/** One method's published cost, AS PUBLISHED: the rate in its published shape, then any fixed
+ *  amount published on top of it (Transak's "3.5% + €1"), then any published minimum beneath it
+ *  (its "0.99% min €1"), then — where the row is conditional — the qualifier naming which
+ *  currencies or transfer variant it is for. */
+function methodPart(c: PublishedCost): string {
+  const label = c.method === 'card' ? M.deposit.funding.costCard
+    : c.method === 'bank' ? M.deposit.funding.costBank
+    : c.method === 'sepa' ? M.deposit.funding.costSepa
+    : M.deposit.funding.costWalletPay;
+  let part = label(rate(c.rate));
+  if (c.fixed !== undefined) part += ` ${M.deposit.funding.plusFixed(c.fixed)}`;
+  if (c.min !== undefined) part += `, ${M.deposit.funding.costMin(c.min)}`;
+  if (c.applies !== undefined) part += ` (${qualifier(c.applies)})`;
+  return part;
+}
+
+/** The qualifier a conditional rate is published for. Ramp's transfer variants stay verbatim
+ *  (manual/easy/Pix are the provider's own method names, like the provider names themselves);
+ *  the currency scopes are translated. */
+function qualifier(a: NonNullable<PublishedCost['applies']>): string {
+  switch (a) {
+    case 'eur': return M.deposit.funding.qEur;
+    case 'non-eur': return M.deposit.funding.qNonEur;
+    case 'usd-eur-gbp': return M.deposit.funding.qUsdEurGbp;
+    case 'other-currencies': return M.deposit.funding.qOtherCurrencies;
+    case 'manual': return M.deposit.funding.qManual;
+    case 'easy': return M.deposit.funding.qEasy;
+    case 'pix': return M.deposit.funding.qPix;
+  }
+}
+
 /** A published rate rendered AS PUBLISHED. The qualifier is the whole point: a cap is not a price
- *  and a floor is not a cap, and a provider that publishes no figure for a method must say so
- *  rather than be given one. An earlier version of this had a single `cap` boolean and rendered
- *  Coinbase's flat 2.5% as "from 2.5%" — a different, false claim. */
+ *  and a floor is not a cap, and a provider that publishes no figure for a method must be
+ *  omitted rather than be given one. An earlier version of this had a single `cap` boolean and
+ *  rendered Coinbase's flat 2.5% as "from 2.5%" — a different, false claim. */
 function rate(r: PublishedRate): string {
   switch (r.kind) {
     case 'flat': return pct(r.pct);
     case 'cap': return M.deposit.funding.upTo(pct(r.pct));
     case 'floor': return M.deposit.funding.from(pct(r.pct));
-    case 'varies': return M.deposit.funding.varies;
   }
 }
 

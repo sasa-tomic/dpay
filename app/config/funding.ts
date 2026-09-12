@@ -22,29 +22,29 @@
 //   • Every figure below is the provider's OWN published number, with the date it was read. dpay
 //     computes nothing, blends nothing and averages nothing.
 //
-// ── Why these are ranges and not prices, which is the whole reason `cap` exists ─────────────────
-// Measured 2026-09-09 against each provider's own disclosure: NOT ONE of them publishes a price.
-// They publish a maximum ("up to 4.5%"), and three of the four take a spread that is not counted as
-// a fee at all — Transak states its quote is CoinGecko mid plus a spread of 0% to 2.5% (read
-// 2026-09-10; it said a flat 2.5% the day before), MoonPay says the spread is baked into the
-// displayed price. Printing "MoonPay: 4.5%" would therefore be false twice over: a
-// ceiling presented as a price, and a cost omitted. `cap` carries that distinction into the copy so
-// the screen cannot accidentally state a number as if it were what the user will pay.
+// ── Why these are ceilings and conditional rows, not prices — the reason `cap` exists ───────────
+// Measured 2026-09-12 against each provider's own disclosure: NOT ONE of them publishes a price.
+// MoonPay and Ramp publish maxima ("up to 4.5%"), some split by currency or transfer type (Ramp's
+// card is 3.9% for USD/EUR/GBP and 5.45% for other currencies), Transak publishes per-method rates
+// conditional on EUR, and all four take a spread that is not counted as a fee at all — Transak
+// states its quote is CoinGecko mid plus a spread of 0% to 2.5%, while Coinbase, MoonPay and Ramp
+// disclose a spread without putting a figure on it. Printing "MoonPay: 4.5%" would therefore be
+// false twice over: a ceiling presented as a price, and a cost omitted. `cap` carries that
+// distinction into the copy so the screen cannot accidentally state a number as if it were what
+// the user will pay.
 import {prettyNetwork, type SelectableAsset} from './assets';
 import type {DepositMechanism} from './catalog';
 import type {HomeCurrency} from './currency';
 
 /**
- * A published cost component, in the SHAPE the provider published it. The four kinds are not
- * decoration — each is a different claim, and collapsing them is how a screen ends up lying:
+ * A published percentage, in the SHAPE the provider published it. The qualifier is not
+ * decoration — each kind is a different claim, and collapsing them is how a screen ends up
+ * lying:
  *
  *   - `flat`   — the provider states this rate outright (Coinbase: 2.5% by card).
  *   - `cap`    — a MAXIMUM ("up to 4.5%"). Never a price. Rendering it as flat overstates
  *                certainty; rendering it as a floor understates the cost.
  *   - `floor`  — a MINIMUM ("from 1%"). The user pays this or more.
- *   - `varies` — the provider publishes no single figure for this method (Transak's is
- *                per-corridor). Saying so is honest; inventing a number from a worked example and
- *                presenting it as published is not.
  *
  * This type began as `{pct, cap: boolean}` and was wrong within a day: it forced Coinbase's flat
  * 2.5% to render as "from 2.5%", which is a different and false claim.
@@ -52,24 +52,60 @@ import type {HomeCurrency} from './currency';
 export type PublishedRate =
   | {kind: 'flat'; pct: number}
   | {kind: 'cap'; pct: number}
-  | {kind: 'floor'; pct: number}
-  | {kind: 'varies'};
+  | {kind: 'floor'; pct: number};
+
+/**
+ * One payment method's published cost. The 2026-09-12 re-read found two of the four providers
+ * (Transak, Ramp) publishing per-method tables with conditional rows, so a method is a LIST of
+ * these, each carrying exactly what its own disclosure says and nothing else:
+ *
+ *   - `rate`    — the published percentage, in its published shape (`PublishedRate`).
+ *   - `fixed`   — an amount published ON TOP of the percentage (Transak card: "3.5% + €1").
+ *                 Verbatim, in the currency the provider publishes it in — a foreign-currency
+ *                 amount, not a number to localise.
+ *   - `min`     — a published MINIMUM the method's fee cannot fall below (Transak SEPA:
+ *                 "0.99% min €1"). Also verbatim.
+ *   - `applies` — where the provider splits one method into conditional rows, the qualifier
+ *                 naming WHICH currencies (EUR vs non-EUR; USD/EUR/GBP vs other) or WHICH
+ *                 transfer variant (Ramp's manual/easy/Pix) the row is for. A conditional rate
+ *                 stays its own row: folding "3.5%" and "5.5%" into a range would average two
+ *                 different published claims into one neither makes.
+ *
+ * A method the provider publishes no figure for is OMITTED from the list entirely (MoonPay's
+ * bank), never shown as zero and never paraphrased as "varies": dpay prints what is published
+ * or nothing. The `varies` kind this model once carried was removed when Transak — its only
+ * user — started publishing figures; an unreachable shape is a way to be wrong quietly.
+ */
+export type PublishedCost = {
+  method: 'card' | 'bank' | 'sepa' | 'walletPay';
+  rate: PublishedRate;
+  fixed?: string;
+  min?: string;
+  applies?: 'eur' | 'non-eur' | 'usd-eur-gbp' | 'other-currencies' | 'manual' | 'easy' | 'pix';
+};
 
 export type FundingProvider = {
   /** Stable key for testIDs. Never shown. */
   key: string;
   /** The brand name, shown verbatim. Not translated — a company name is not a message. */
   name: string;
-  card: PublishedRate | null;
-  bank: PublishedRate | null;
+  /** Every published method rate, in the provider's own order. */
+  costs: readonly PublishedCost[];
   /** Verbatim, in the currency the provider publishes it in — a foreign-currency amount, not a
    *  number to localise. Null when the provider publishes no minimum. */
   minFee: string | null;
   /** A margin the provider discloses ON TOP of the fee, where it quantifies one — as a
    *  `PublishedRate`, not a bare number, because Transak publishes "0% to 2.5%": rendering the top
    *  of that range as "plus 2.5% margin" would state a ceiling as the margin, which is the same
-   *  overstatement `cap` exists for on the fee itself. */
+   *  overstatement `cap` exists for on the fee itself. A spread the provider DISCLOSES without
+   *  quantifying (Coinbase, MoonPay, Ramp — read 2026-09-12) is null here and named by the
+   *  section's shared caveat line instead. */
   spread: PublishedRate | null;
+  /** MoonPay (read 2026-09-12): non-USD purchases carry a higher minimum fee. The RANGE is
+   *  published (+0.25% to 10%); which currency gets which uplift is not. Stated as a range with
+   *  the variation named — never the top alone, never a midpoint. Material here because dpay's
+   *  home market is CHF, which is not USD. */
+  nonUsdUplift?: {fromPct: number; toPct: number};
   /** The published disclosure this row was read from. Shown so the user can check it. */
   source: string;
 };
@@ -77,7 +113,7 @@ export type FundingProvider = {
 /** The date every figure in `FUNDING_PROVIDERS` was read from its source. ONE date for the whole
  *  table, deliberately: a per-row date invites half the table going stale unnoticed. Re-reading is
  *  a tripwire filed in `OPEN_ISSUES.md`. */
-export const FUNDING_SOURCES_READ_ON = '2026-09-10';
+export const FUNDING_SOURCES_READ_ON = '2026-09-12';
 
 /**
  * The providers, ALPHABETICALLY. Do not reorder. Do not add a "recommended" flag. Do not add a
@@ -87,53 +123,82 @@ export const FUNDING_PROVIDERS: readonly FundingProvider[] = [
   {
     key: 'coinbase',
     name: 'Coinbase',
-    card: {kind: 'flat', pct: 2.5},
-    bank: {kind: 'flat', pct: 0.5},
+    // Re-read 2026-09-12: the FAQ's card fee is worded for credit cards and states no separate
+    // debit figure, so the row carries the one number the source publishes — no more precision
+    // than that. The 0.5% is the ACH figure, riding the generic `bank` label it always had. The
+    // spread is now DISCLOSED but not quantified: null below, named by the shared caveat line.
+    costs: [
+      {method: 'card', rate: {kind: 'flat', pct: 2.5}},
+      {method: 'bank', rate: {kind: 'flat', pct: 0.5}},
+    ],
     minFee: null,
     spread: null,
-    // The docs restructured between reads: the fee bullets (2.5% card / 0.5% ACH) moved to the
-    // FAQ page under the same section, so the source now names the page, not just the section.
     source: 'docs.cdp.coinbase.com/onramp/additional-resources/faq',
   },
   {
     key: 'moonpay',
     name: 'MoonPay',
-    card: {kind: 'cap', pct: 4.5},
-    // Re-read 2026-09-10: the pricing disclosure publishes NO bank-specific figure any more. The
-    // only "1%" on the page is the Virtual Account Transaction Fee ("typically about 1%") — a
-    // different product, and "typically" is neither a floor nor a cap. A "from 1%" this table could
-    // no longer point at would be exactly the stale claim it exists to avoid, so the part is
-    // omitted rather than kept.
-    bank: null,
+    costs: [{method: 'card', rate: {kind: 'cap', pct: 4.5}}],
+    // The DIRECT minimum; partner sites carry $4.50. dpay hands off nothing — plain domains the
+    // user types, no partner or referral links (§4 item 6) — so the direct figure is the one
+    // that applies from this screen.
     minFee: '$3.99',
-    // Disclosed but not quantified by MoonPay ("the spread is included in the price shown"), so it
-    // is named in the shared caveat line rather than given a number this table cannot source.
+    // No `bank` cost row: re-read 2026-09-10, still true 2026-09-12 — the pricing disclosure
+    // publishes NO bank-specific figure any more. The only "1%" on the page is the Virtual
+    // Account Transaction Fee ("typically about 1%") — a different product, and "typically" is
+    // neither a floor nor a cap. A "from 1%" this table could no longer point at would be
+    // exactly the stale claim it exists to avoid, so the method is omitted rather than kept.
+    // The spread is likewise disclosed but not quantified — shared caveat line, no number.
     spread: null,
+    // NEW at the 2026-09-12 re-read: non-USD purchases carry a minimum-fee uplift, published
+    // only as a range (+0.25% to 10%) with no per-currency figure. dpay's home market is CHF —
+    // for this wallet's users this is the rule, not the corner case.
+    nonUsdUplift: {fromPct: 0.25, toPct: 10},
     source: 'moonpay.com/legal/pricing_disclosure',
   },
   {
     key: 'ramp',
     name: 'Ramp',
-    card: {kind: 'cap', pct: 3.9},
-    bank: {kind: 'cap', pct: 1.4},
+    // Re-read 2026-09-12, and this is the row ticket F2 existed for: the card ceiling is 3.9%
+    // only for USD/EUR/GBP — for other currencies, CHF among them, it is 5.45%. This table used
+    // to carry the 3.9% alone, which understated the cost for exactly this wallet's home
+    // market. Both rows render, each with its own qualifier, so a CHF user can see the number
+    // that applies to them.
+    costs: [
+      {method: 'card', rate: {kind: 'cap', pct: 3.9}, applies: 'usd-eur-gbp'},
+      {method: 'card', rate: {kind: 'cap', pct: 5.45}, applies: 'other-currencies'},
+      // Bank transfer is split by transfer type. The single 1.4% this table used to carry was
+      // the MANUAL figure — presenting it as THE bank cost understated easy (2.4%) and Pix
+      // (2.9%).
+      {method: 'bank', rate: {kind: 'flat', pct: 1.4}, applies: 'manual'},
+      {method: 'bank', rate: {kind: 'flat', pct: 2.4}, applies: 'easy'},
+      {method: 'bank', rate: {kind: 'flat', pct: 2.9}, applies: 'pix'},
+    ],
     minFee: '€2.49',
+    // Ramp discloses a spread without quantifying it — named by the shared caveat line.
     spread: null,
     source: 'rampnetwork.com/pricing-policy',
   },
   {
     key: 'transak',
     name: 'Transak',
-    // Transak publishes no single percentage for either method — its rate is per-corridor, and the
-    // per-method fee tables on its disclosure page are IMAGES, so no figure is even in the text.
-    // Presenting a derived number as the provider's own figure is exactly the overstatement this
-    // table exists to avoid, so both methods say `varies` and the spread it genuinely does publish
-    // carries the cost signal.
-    card: {kind: 'varies'},
-    bank: {kind: 'varies'},
+    // Re-read 2026-09-12: the fee tables on this page are published TEXT now, not the images
+    // the 09-10 read found, and they carry per-method, per-currency rates — so the `varies`
+    // this row used to carry is no longer honest (figures ARE published). Card: 3.5% + €1 in
+    // EUR, 5.5% + €1 outside it. Apple & Google Pay: 3.5% / 5.5% with a €1 minimum. SEPA:
+    // 0.99% with the same €1 minimum. Off-ramp figures exist on the same page; this screen is
+    // the on-ramp, so they are not carried here.
+    costs: [
+      {method: 'card', rate: {kind: 'flat', pct: 3.5}, fixed: '€1', applies: 'eur'},
+      {method: 'card', rate: {kind: 'flat', pct: 5.5}, fixed: '€1', applies: 'non-eur'},
+      {method: 'walletPay', rate: {kind: 'flat', pct: 3.5}, min: '€1', applies: 'eur'},
+      {method: 'walletPay', rate: {kind: 'flat', pct: 5.5}, min: '€1', applies: 'non-eur'},
+      {method: 'sepa', rate: {kind: 'flat', pct: 0.99}, min: '€1'},
+    ],
     minFee: null,
-    // Re-read 2026-09-10: the quote is "CoinGecko at the time of the transaction, plus a spread of
-    // 0% to 2.5%, depending on how volatile the currency is" — a RANGE, where the day before it
-    // read as a flat 2.5%. Transcribed as the ceiling of that range, rendered "up to 2.5%".
+    // The quote is "CoinGecko at the time of the transaction, plus a spread of 0% to 2.5%,
+    // depending on how volatile the currency is" (unchanged since the 2026-09-10 re-read).
+    // Transcribed as the ceiling of that range, rendered "up to 2.5%".
     spread: {kind: 'cap', pct: 2.5},
     source: 'support.transak.com/en/articles/7845942',
   },

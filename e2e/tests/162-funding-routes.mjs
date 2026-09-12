@@ -17,7 +17,9 @@
 //       look for something nobody sells;
 //   (c) providers are listed with their OWN published figures, and the qualifier survives —
 //       "up to 4.5%" is a ceiling, not a price, and copy that dropped the words would be a false
-//       claim under the external-claims rule;
+//       claim under the external-claims rule. Conditional rates are their own rows with their
+//       qualifiers: Ramp's 5.45% other-currencies ceiling (CHF is one) must be visible, and
+//       Transak's now-published per-method figures must render (F2, re-read 2026-09-12);
 //   (d) the attribution says whose numbers they are and when they were read, and the screen says
 //       out loud that dpay recommends none of them and is paid by none of them;
 //   (e) native ICP — the one card-reachable Internet Computer asset — is a DIRECT buy, not a
@@ -75,9 +77,22 @@ export async function run() {
     // were the price, which is the precise false claim the spec forbids.
     assertIncludes(vchfBody, 'up to 4.5%', "MoonPay's card rate must keep its 'up to' qualifier — it is a cap, not a price");
     assertIncludes(vchfBody, 'card 2.5%', "Coinbase's card rate is published as a flat figure and reads as one");
-    // Transak publishes no single card percentage; a row that invented one would be worse than a
-    // row with none. What it DOES publish is the spread, which is the larger cost.
+    // F2 (re-read 2026-09-12): Ramp's card ceiling is 3.9% only for USD/EUR/GBP — other
+    // currencies, CHF among them (this wallet's home market), pay up to 5.45%. Both rows must
+    // be visible, each with its own qualifier; folding them would show a CHF user a number
+    // that does not apply to them as if it did.
+    assertIncludes(vchfBody, 'up to 3.9%', "Ramp's USD/EUR/GBP card ceiling must stay visible with its qualifier");
+    assertIncludes(vchfBody, 'up to 5.45%', "Ramp's other-currencies card ceiling must be its own visible row");
+    assertIncludes(vchfBody, 'incl. CHF', 'the other-currencies row must name CHF so a CHF user can find their number');
+    assertIncludes(vchfBody, 'non-USD purchases', "MoonPay's non-USD minimum-fee uplift must be stated — CHF buyers pay it");
+    // Transak now publishes per-method tables as text (the 09-10 read found only images), so
+    // the figures render and the old "varies by country" placeholder is gone — a placeholder
+    // where figures exist would be the stale claim this screen exists to avoid. The spread it
+    // also publishes stays named.
+    assertIncludes(vchfBody, '3.5% + €1', "Transak's published card rate (EUR) must render with its fixed €1 on top");
+    assertIncludes(vchfBody, 'SEPA 0.99%', "Transak's published SEPA rate must render");
     assertIncludes(vchfBody, 'margin', 'the spread most providers take must be named, not omitted');
+    assert(!(vchfBody.includes('varies by country')), 'the stale "varies" placeholder must be gone — Transak publishes figures now');
     console.log('[162-funding-routes] ✓ provider figures carry their published qualifiers');
 
     // ---- (d) attribution + the explicit non-endorsement ---------------------------------------

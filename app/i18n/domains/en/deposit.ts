@@ -298,18 +298,36 @@ export type DepositMessages = {
     bankRoute: (provider: string) => string;
     /** Heading over the provider list, stating plainly that dpay is not choosing. */
     providersTitle: string;
-    /** One provider's published cost, assembled from the parts below. */
+    /** One published method rate, prefixed by its method: `card 2.5%`, `bank 0.5%`. */
     costCard: (rate: string) => string;
     costBank: (rate: string) => string;
+    /** SEPA bank transfer, named as Transak publishes it — a specific rail, not a generic bank. */
+    costSepa: (rate: string) => string;
+    /** Apple Pay and Google Pay — one label for both, as Transak publishes them together. */
+    costWalletPay: (rate: string) => string;
+    /** A published MINIMUM — used both for a provider's overall minimum and inside a method
+     *  rate ("0.99%, min €1"). */
     costMin: (amount: string) => string;
     costSpread: (rate: string) => string;
+    /** A fixed amount published ON TOP of a percentage (Transak card: "3.5% + €1"). */
+    plusFixed: (fixed: string) => string;
+    /** A cost the provider DISCLOSES but publishes only as a range — the per-currency figure
+     *  does not exist, so the range renders as a range with its variation named, never as its
+     *  top or a midpoint. */
+    nonUsdUplift: (from: string, to: string) => string;
+    /** Conditional-rate qualifiers, rendered in parentheses after the rate they qualify. Ramp's
+     *  transfer variants stay verbatim — they are the provider's own method names. */
+    qEur: string;
+    qNonEur: string;
+    qUsdEurGbp: string;
+    qOtherCurrencies: string;
+    qManual: string;
+    qEasy: string;
+    qPix: string;
     /** A published CEILING — never a price. */
     upTo: (pct: string) => string;
     /** A published FLOOR — also never a price. */
     from: (pct: string) => string;
-    /** The provider publishes no single figure for this method. Said plainly rather than filled in
-     *  with a number derived from one of their examples. */
-    varies: string;
     /** Attribution + the two caveats that make the figures honest: they are the providers' own, on
      *  a date, and the real total includes a margin most of them do not itemise. */
     attribution: (readOn: string) => string;
@@ -539,11 +557,21 @@ export const depositEn: DepositMessages = {
     providersTitle: 'Where people buy it',
     costCard: rate => `card ${rate}`,
     costBank: rate => `bank ${rate}`,
+    costSepa: rate => `SEPA ${rate}`,
+    costWalletPay: rate => `Apple & Google Pay ${rate}`,
     costMin: amount => `min ${amount}`,
     costSpread: rate => `plus ${rate} margin`,
+    plusFixed: fixed => `+ ${fixed}`,
+    nonUsdUplift: (from, to) => `non-USD purchases: minimum fee +${from} to ${to} higher, depending on currency`,
+    qEur: 'EUR',
+    qNonEur: 'non-EUR',
+    qUsdEurGbp: 'USD, EUR, GBP',
+    qOtherCurrencies: 'other currencies, incl. CHF',
+    qManual: 'manual',
+    qEasy: 'easy',
+    qPix: 'Pix',
     upTo: pct => `up to ${pct}`,
     from: pct => `from ${pct}`,
-    varies: 'varies by country',
     attribution: readOn => `Each provider's own published figures, read ${readOn}. They are limits, not prices — your exact fee is shown before you pay, and most providers also take a margin inside the rate they quote.`,
     noEndorsement: 'Listed alphabetically. dpay does not recommend any of them, is not paid by any of them, and is not involved in what you buy.',
   },

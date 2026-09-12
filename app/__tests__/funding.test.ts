@@ -159,10 +159,11 @@ describe('the provider table obeys the constraints it exists under', () => {
   });
 
   test('every provider carries at least one published figure or is not listed', () => {
-    // A row with nothing to say is a name with an implied endorsement and no information.
+    // A row with nothing to say is a name with an implied endorsement and no information. A
+    // method with no published figure is omitted from `costs` (MoonPay's bank), so a provider
+    // whose `costs` were empty AND carried no other published part would be exactly that.
     for (const p of FUNDING_PROVIDERS) {
-      const states = (r: typeof p.card) => r !== null && r.kind !== 'varies';
-      const hasFigure = states(p.card) || states(p.bank) || p.minFee !== null || p.spread !== null;
+      const hasFigure = p.costs.length > 0 || p.minFee !== null || p.spread !== null;
       expect(hasFigure).toBe(true);
       expect(p.source.length).toBeGreaterThan(0);
     }
@@ -176,20 +177,48 @@ describe('the provider table obeys the constraints it exists under', () => {
   test('each rate carries the SHAPE it was published in, not a flattened approximation', () => {
     // This is the assertion that caught the first version of the model. A single `cap` boolean
     // forced Coinbase's flat 2.5% to render as "from 2.5%" — a different claim, and a false one.
-    // A cap is not a price, a floor is not a cap, and "no published figure" is not zero.
+    // A cap is not a price, a floor is not a cap, and an omitted method is not zero.
     const by = (k: string) => FUNDING_PROVIDERS.find(p => p.key === k);
-    expect(by('coinbase')?.card).toEqual({kind: 'flat', pct: 2.5});
-    expect(by('moonpay')?.card).toEqual({kind: 'cap', pct: 4.5});
-    // Re-read 2026-09-10: MoonPay's pricing disclosure no longer publishes a bank figure at all
-    // (its only "1%" is the Virtual Account Transaction Fee — a different product, and "typically
-    // about" is not a floor). Omitted rather than kept as a claim the source no longer supports.
-    expect(by('moonpay')?.bank).toBeNull();
-    // Transak's docs contain a 0.99% worked EXAMPLE and no published rate. Presenting a derived
-    // number as the provider's own figure is the overstatement this table exists to avoid.
-    expect(by('transak')?.card).toEqual({kind: 'varies'});
-    expect(by('transak')?.bank).toEqual({kind: 'varies'});
-    // The spread IS quantified — as "0% to 2.5%" over CoinGecko mid (re-read 2026-09-10; it read
-    // as a flat 2.5% the day before). Transcribed as the ceiling, so it renders "up to 2.5%".
+    expect(by('coinbase')?.costs).toEqual([
+      {method: 'card', rate: {kind: 'flat', pct: 2.5}},
+      {method: 'bank', rate: {kind: 'flat', pct: 0.5}},
+    ]);
+    expect(by('moonpay')?.costs).toEqual([{method: 'card', rate: {kind: 'cap', pct: 4.5}}]);
+    // Re-read 2026-09-12: MoonPay still publishes NO bank figure at all (its only "1%" is the
+    // Virtual Account Transaction Fee — a different product, and "typically about" is neither a
+    // floor nor a cap), so the method is omitted rather than kept as a stale claim. And its
+    // non-USD minimum-fee uplift is published only as a range — carried as one, never as its top.
+    expect(by('moonpay')?.costs.some(c => c.method === 'bank')).toBe(false);
+    expect(by('moonpay')?.nonUsdUplift).toEqual({fromPct: 0.25, toPct: 10});
+    // Transak (re-read 2026-09-12): the per-method fee tables are published TEXT now, not
+    // images — card 3.5% + €1 in EUR and 5.5% + €1 outside it, wallet pay 3.5% / 5.5% with a
+    // €1 minimum, SEPA 0.99% with the same minimum. The `varies` this row used to carry would
+    // now be the stale claim: figures ARE published.
+    expect(by('transak')?.costs).toEqual([
+      {method: 'card', rate: {kind: 'flat', pct: 3.5}, fixed: '€1', applies: 'eur'},
+      {method: 'card', rate: {kind: 'flat', pct: 5.5}, fixed: '€1', applies: 'non-eur'},
+      {method: 'walletPay', rate: {kind: 'flat', pct: 3.5}, min: '€1', applies: 'eur'},
+      {method: 'walletPay', rate: {kind: 'flat', pct: 5.5}, min: '€1', applies: 'non-eur'},
+      {method: 'sepa', rate: {kind: 'flat', pct: 0.99}, min: '€1'},
+    ]);
+    // The spread IS quantified — as "0% to 2.5%" over CoinGecko mid. Transcribed as the
+    // ceiling, so it renders "up to 2.5%".
     expect(by('transak')?.spread).toEqual({kind: 'cap', pct: 2.5});
+  });
+
+  test("Ramp's split rates are each their own row — nothing conditional folded into a range (F2)", () => {
+    // The F2 defect this file now guards: the table carried only the 3.9% card ceiling, which
+    // is the USD/EUR/GBP figure — for other currencies, CHF among them (this wallet's home
+    // market), Ramp's ceiling is 5.45%. A CHF user was shown a number that does not apply to
+    // them as if it did. And the bank transfer is split by type: the old single 1.4% was the
+    // MANUAL figure and understated easy (2.4%) and Pix (2.9%).
+    const ramp = FUNDING_PROVIDERS.find(p => p.key === 'ramp');
+    expect(ramp?.costs.filter(c => c.method === 'card')).toEqual([
+      {method: 'card', rate: {kind: 'cap', pct: 3.9}, applies: 'usd-eur-gbp'},
+      {method: 'card', rate: {kind: 'cap', pct: 5.45}, applies: 'other-currencies'},
+    ]);
+    expect(ramp?.costs.filter(c => c.method === 'bank').map(c => [c.applies, c.rate.pct]))
+      .toEqual([['manual', 1.4], ['easy', 2.4], ['pix', 2.9]]);
+    expect(ramp?.minFee).toBe('€2.49');
   });
 });

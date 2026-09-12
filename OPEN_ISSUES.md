@@ -164,9 +164,7 @@ wallet, and this file's own F1 row asserted that resolver was already correct:
 [`docs/specs/2026-09-09-funding-routes-plan.md`](docs/specs/2026-09-09-funding-routes-plan.md).
 Gated by e2e flows 162 + 163.
 
-| # | Item | value | effort |
-|---|------|------:|:------:|
-| F2 | **Re-read the four providers' published fee disclosures and diff against the table.** They are policy figures with a date on them; a stale row is a false claim on a money screen, not a nuance. Owner: whoever next touches funding. | 6 | S |
+**F2 is DONE (2026-09-12, removed from the table above — no items remain).** All four providers re-read against their published disclosures (sources re-verified live 2026-09-12; the 2026-09-09/10 spec stays a dated record). The model gained `PublishedCost` (`method` + rate + optional fixed/min + published qualifier — EUR/non-EUR, USD/EUR/GBP/other, manual/easy/Pix) so what is actually published can be stated exactly: Ramp's dropped **up to 5.45% for other currencies (incl. CHF — the home market)** is now its own row and its bank split is per-type (1.4/2.4/2.9); Transak's per-method figures (card 3.5%+€1 EUR / 5.5%+€1 non-EUR, wallet-pay 3.5/5.5 min €1, SEPA 0.99% min €1) replaced the dead `varies` copy (key + type removed, four locales); MoonPay's bank row stays honestly absent (no published figure — the spec's "from 1%" was stale) with its new **non-USD min-fee uplift +0.25%–10%** stated; Coinbase 2.5/0.5 re-confirmed. Read-on bumped to 2026-09-12; nothing conditional folded into a range (pinned by a dedicated jest test + flow 162's assertions).
 
 **4. First-run experience — founder verdict 2026-09-08: "VERY confusing… several screens that just
 ask me to pay in some money. Looks like scam."** Three directions landed with it: (a) greet with an
