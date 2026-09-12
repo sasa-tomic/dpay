@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
+import {View, Text, Pressable, ActivityIndicator, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
 import {NfcTap} from './NfcTap';
@@ -33,13 +33,15 @@ const CHF = 'CHF';
  * The counter: a cashier rings up a price in francs, shows a code, and watches it be paid.
  *
  * WHERE THIS LIVES, AND WHY IT IS NOT A TAB. A till charge is not a third kind of receiving — it is
- * the SAME request with a wider audience — so it sits inside Receive ▸ Request payment as a second
- * code FORM, chosen by the small selector above it. The `[ Request payment | My address ]` toggle
- * is structurally two-segment and widening it would assert a distinction that does not exist. Two
- * QR payloads cannot share one frame, which is the only reason there is a selector at all: the
- * request screen already runs QR and NFC reader mode at the same time with no per-payment toggle.
+ * the SAME request with a wider audience — so it sits inside Receive ▸ Request payment beside the
+ * till-code CHECKBOX: the amount row is the dpay-code form's own, shared, and the checkbox is what
+ * flips the single button from building a dpay payment link to ringing up a till charge. The
+ * `[ Request payment | My address ]` toggle is structurally two-segment and widening it would assert
+ * a distinction that does not exist. Two QR payloads cannot share one frame, which is the only
+ * reason there is a checkbox at all: the request screen already runs QR and NFC reader mode at the
+ * same time with no per-payment toggle.
  *
- * BOTH RAILS MOUNT THIS, and that is the point (the same-surfaces hard rule). The selector renders
+ * BOTH RAILS MOUNT THIS, and that is the point (the same-surfaces hard rule). The checkbox renders
  * for every asset on both Receive forms; a control that appeared only for VCHF would be exactly the
  * per-rail special case the rule forbids. What differs is the ANSWER: a till code is paid in VCHF
  * on the Internet Computer and in nothing else (`crates/dpay-relay/src/till.rs`), so every other
@@ -93,7 +95,7 @@ type Phase =
    *  failed — the four causes send the merchant to do four different things. */
   | {k: 'failed'; outcome: Exclude<TillOpenOutcome, {kind: 'open'}>};
 
-export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatus, onSelectAsset, onLiveChange}: {
+export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatus, onSelectAsset, amount, onHoldsForm}: {
   identity: Identity;
   relayUrl: string;
   /** The asset the wallet is currently on — the one the whole Receive tab is about. */
@@ -107,12 +109,17 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
    *  surface in the app. */
   nfcStatus: NfcStatus;
   onSelectAsset: (id: AssetId) => void;
-  /** Fires while a charge exists that a customer could pay, so the parent can lock the asset
-   *  selection and hide the code-form selector — flipping away from a live code would leave a
-   *  payable charge on screen nowhere. */
-  onLiveChange?: (live: boolean) => void;
+  /** The price typed into the SHARED amount row above (the parent owns the input; this component
+   *  owns what a till charge does with it). In francs, like every till input — parsed here by the
+   *  till's own 2-decimal rule, never by the parent's per-asset one. */
+  amount: string;
+  /** Fires from the first ring-up attempt until the cashier presses "next customer" — every phase
+   *  that is not the entry tail — so the parent can hide the shared amount row and the checkbox and
+   *  lock the asset selection. Flipping away from a live code would leave a payable charge on
+   *  screen nowhere, and leaving the row up under a Paid screen would answer a question nobody
+   *  asked. */
+  onHoldsForm?: (held: boolean) => void;
 }) {
-  const [amount, setAmount] = useState('');
   const [phase, setPhase] = useState<Phase>({k: 'entering'});
   /** The price the last ring-up ATTEMPTED, in cents — what a failure panel quotes back. Kept beside
    *  the charge rather than re-parsed from the input, so the number in the message is the number
@@ -169,9 +176,11 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   // Reported to the parent through the SAME hook every other engine reports its selection lock
   // with: the contract is identical (report each change, reset on unmount, parent's setter is a
   // stable `useState` setter), and a live till charge is exactly a thing the wallet must not be
-  // switched out from under.
-  const live = phase.k === 'opening' || phase.k === 'showing';
-  useReportLock(onLiveChange, live);
+  // switched out from under. `held` is broader than the live charge: a paid, ended or failed
+  // screen still replaces the entry form, so the parent's shared rows stay hidden through all of
+  // them — and come back exactly when the cashier presses the button that restarts the form.
+  const held = phase.k !== 'entering' && phase.k !== 'opening';
+  useReportLock(onHoldsForm, held);
 
   // The display clock — only while a code is on screen, and only to count it down.
   useEffect(() => {
@@ -348,8 +357,8 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     setErr(cancelRefusal(outcome));
   }
 
-  /** Back to an empty counter. The amount is kept — a mis-keyed total is retyped, a refused one is
-   *  usually rung up again unchanged. */
+  /** Back to an empty counter. The amount is the PARENT's and is kept untouched — a mis-keyed
+   *  total is retyped, a refused one is usually rung up again unchanged. */
   function reset() {
     setPhase({k: 'entering'});
     setUnchecked(null);
@@ -539,28 +548,14 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     );
   }
 
-  // phase 'entering' / 'opening' — the counter itself. The amount is in FRANCS (the till prices in
-  // CHF and settles 1:1 in VCHF), which is why this field is its own and not the asset-denominated
-  // one above it: a rappen is two decimals and VCHF is eight, and mixing them would let a cashier
-  // ring up a total the till cannot charge.
+  // phase 'entering' / 'opening' — the counter's entry tail. The amount row above this is the
+  // PARENT's, shared with the dpay-code form; this component takes the typed price from there and
+  // parses it with the TILL's own rule (`chfCents` — two decimals, a third is refused rather than
+  // rounded, because a rounded price is a misprice). The franc/VCHF equivalence is said out loud
+  // by the hint under the button, not left as an unstated conversion.
   const opening = phase.k === 'opening';
   return (
     <View style={S.centerTop}>
-      <Text style={S.label}>{M.receive.till.chargeLabel}</Text>
-      <View style={S.amountRow}>
-        <View style={S.prefixBtn}><Text style={S.currency}>{CHF}</Text></View>
-        <TextInput
-          testID="till-amount-input"
-          style={S.amountInput}
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="decimal-pad"
-          placeholder={M.receive.amountPlaceholder}
-          placeholderTextColor={C.sub}
-          accessibilityLabel={M.receive.till.chargeLabel}
-          accessibilityHint={M.receive.till.chargeHint}
-        />
-      </View>
       <Text style={S.dim2}>{M.receive.till.chargeHint}</Text>
       {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
       {opening ? <ActivityIndicator color={C.brandText} /> : null}
@@ -570,10 +565,10 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
         disabled={opening || amount.trim().length === 0}
         onPress={ringUp}
         accessibilityRole="button"
-        accessibilityLabel={M.receive.till.ringUp}
+        accessibilityLabel={M.receive.request}
         accessibilityHint={M.receive.till.ringUpHint}
         accessibilityState={{disabled: opening || amount.trim().length === 0}}>
-        <Text style={[S.primaryText, (opening || amount.trim().length === 0) && S.disabledText]}>{opening ? M.receive.till.ringingUp : M.receive.till.ringUp}</Text>
+        <Text style={[S.primaryText, (opening || amount.trim().length === 0) && S.disabledText]}>{opening ? M.receive.creating : M.receive.request}</Text>
       </Pressable>
     </View>
   );

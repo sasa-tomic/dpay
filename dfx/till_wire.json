@@ -5,10 +5,11 @@
     "merchant_secret": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
     "merchant_pubkey": "66be7e332c7a453332bd9d0a7f7db055f5c5ef1a06ada66d98b39fb6810c473a",
     "merchant_name": "Bahnhof Kiosk",
+    "note": "2× Kafi, Tisch 4",
     "cents": 1000,
     "nonce": "44837591c6adcf62b359a67fda167935",
     "issued_at": 1788491003,
-    "signature": "17839d23acef8dd4e0853c46ce0a9d0df821deed87766b9e2e37e14af8871dea7669668a2ab87e69ce367dba646c2d76a9b8858acb53304dc59419b0899b7d09",
+    "signature": "79d77e6868a5b388ed9b73e2228f911d742db0108ff8509d2cd834e7c5de447c3589ba47cd9ccfd7280d4e8d92bcf8c39327ce34f2f7bc424da23e9582dc9107",
     "host": "till.example",
     "forwarded_proto": "https"
   },
@@ -30,8 +31,9 @@
     "callback": "https://till.example/v1/lnurlp/cb/pl_1490fd40ca3744b0",
     "minSendable": 0,
     "maxSendable": 0,
-    "metadata": "[[\"text/plain\",\"Bahnhof Kiosk - CHF 10\"]]",
+    "metadata": "[[\"text/plain\",\"Bahnhof Kiosk - CHF 10 - 2× Kafi, Tisch 4\"]]",
     "displayName": "Bahnhof Kiosk",
+    "note": "2× Kafi, Tisch 4",
     "standard": "OpenCryptoPay",
     "possibleStandards": [
       "OpenCryptoPay"

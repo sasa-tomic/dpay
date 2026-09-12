@@ -893,6 +893,13 @@ pub(crate) struct DetailsBody {
     pub metadata: String,
     #[serde(rename = "displayName")]
     pub display_name: String,
+    /// What the charge is FOR, in the merchant's own signed words ("2× Kafi, Tisch 4"). An
+    /// addition to the measured provider's field set, exactly like `ref` on the step-3 URI: the
+    /// standard's own wallets read named fields, so one more name costs them nothing, while dpay's
+    /// payer renders it on review. Absent for a note-less (v1) charge, so that body stays
+    /// byte-identical to what the provider served before the field existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     pub standard: &'static str,
     #[serde(rename = "possibleStandards")]
     pub possible_standards: Vec<&'static str>,
@@ -2916,10 +2923,16 @@ pub(crate) async fn lnurlp_details(
         // that, because it escapes what it is given instead of trusting it.
         metadata: serde_json::json!([[
             "text/plain",
-            format!("{} - CHF {}", charge.merchant_name, charge.price_text())
+            match &charge.note {
+                // The note is display text the payer reads, so the LUD-06 description carries it
+                // too — same string, same serialiser, same rule.
+                Some(note) => format!("{} - CHF {} - {}", charge.merchant_name, charge.price_text(), note),
+                None => format!("{} - CHF {}", charge.merchant_name, charge.price_text()),
+            }
         ]])
         .to_string(),
         display_name: charge.merchant_name.clone(),
+        note: charge.note.clone(),
         standard: "OpenCryptoPay",
         possible_standards: vec!["OpenCryptoPay"],
         display_qr: true,

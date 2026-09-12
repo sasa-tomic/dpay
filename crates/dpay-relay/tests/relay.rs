@@ -2902,22 +2902,42 @@ fn till_body(
     nonce: [u8; NONCE_LEN],
     issued_at: u64,
 ) -> Value {
+    till_body_noted(key, cents, name, nonce, issued_at, None)
+}
+
+/// `till_body` carrying (or omitting, for `None`) the charge's note — the v2 spelling when present.
+/// The ONE builder stays ONE: every forgery below still goes through the same path, so a bad
+/// signature cannot hide inside a hand-shaped body.
+fn till_body_noted(
+    key: &SigningKey,
+    cents: u64,
+    name: &str,
+    nonce: [u8; NONCE_LEN],
+    issued_at: u64,
+    note: Option<&str>,
+) -> Value {
     let open = TillOpen {
         merchant_pubkey: key.verifying_key().to_bytes(),
         cents,
         nonce,
         issued_at,
         merchant_name: name.to_string(),
-            note: None,
+        note: note.map(str::to_string),
     };
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "merchant_pubkey": hex::encode(open.merchant_pubkey),
         "merchant_name": name,
         "cents": cents,
         "nonce": hex::encode(nonce),
         "issued_at": issued_at,
         "signature": hex::encode(sign_till_open(key, &open).to_bytes()),
-    })
+    });
+    // `null` and absent are the same thing to the relay (`serde(default)`), but the worked example
+    // a merchant copies should not carry a field that says nothing.
+    if let Some(note) = note {
+        body["note"] = Value::String(note.to_string());
+    }
+    body
 }
 
 /// A POST to one of the two merchant routes carrying `body`. `host`/`proto` are the pair every
@@ -2944,7 +2964,21 @@ async fn open_till(
     host: &str,
     proto: &str,
 ) -> Value {
-    let body = till_body(key, cents, name, fresh_nonce(), unix_secs());
+    open_till_noted(state, key, name, cents, None, host, proto).await
+}
+
+/// `open_till` carrying a note — the v2 ring-up, so the golden and the note tests drive the same
+/// route the merchant app does.
+async fn open_till_noted(
+    state: &AppState,
+    key: &SigningKey,
+    name: &str,
+    cents: u64,
+    note: Option<&str>,
+    host: &str,
+    proto: &str,
+) -> Value {
+    let body = till_body_noted(key, cents, name, fresh_nonce(), unix_secs(), note);
     let (status, body) = call(state, till_post("/api/v1/till", &body, host, proto)).await;
     assert_eq!(status, StatusCode::OK, "ringing up a charge: {body}");
     body
@@ -3325,6 +3359,75 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
             .unwrap_or_default()
             .contains("already been paid"),
         "the refusal says what happened and what to do: {refused}"
+    );
+}
+
+/// A ring-up may carry a NOTE — what the charge is for, in the merchant's own signed words. The
+/// payer reads it on review, so it is served on step 2 beside the name it belongs to, and folded
+/// into the LUD-06 description a third-party wallet renders instead. A note-less ring-up must not
+/// grow a `note` key: that body is the one every older wallet already parses.
+#[tokio::test]
+async fn a_noted_ring_up_serves_the_note_and_a_noteless_one_serves_nothing_new() {
+    let (state, _fake) = till_state();
+    let merchant = SigningKey::from_bytes(&[0x0b; 32]);
+
+    // --- noted: the note rides step 2 twice (own field + LUD-06 description) ----------------------
+    let opened = open_till_noted(
+        &state,
+        &merchant,
+        "Bahnhof Kiosk",
+        1_000,
+        Some("2× Kafi, Tisch 4"),
+        "till.example",
+        "https",
+    )
+    .await;
+    let id = opened["id"].as_str().unwrap().to_string();
+    let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::OK, "{details}");
+    assert_eq!(details["note"], "2× Kafi, Tisch 4");
+    let metadata: Value =
+        serde_json::from_str(details["metadata"].as_str().unwrap()).expect("LUD-06 array");
+    assert_eq!(
+        metadata[0][1], "Bahnhof Kiosk - CHF 10 - 2× Kafi, Tisch 4",
+        "the description carries the note a wallet with no `note` field would otherwise never see"
+    );
+
+    // --- note-less: the field is ABSENT, not null — the pre-note body, byte for byte ---------------
+    let opened = open_till(&state, &merchant, "Bahnhof Kiosk", 1_000, "till.example", "https").await;
+    let id = opened["id"].as_str().unwrap().to_string();
+    let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::OK, "{details}");
+    assert!(
+        details.get("note").is_none(),
+        "a note-less charge serves no note key at all: {details}"
+    );
+    let metadata: Value =
+        serde_json::from_str(details["metadata"].as_str().unwrap()).expect("LUD-06 array");
+    assert_eq!(metadata[0][1], "Bahnhof Kiosk - CHF 10");
+
+    // --- a long note: signed in full, CLAMPED for display only ------------------------------------
+    // The signature must cover every byte the merchant signed, so acceptance is over the full 40+;
+    // what step 2 serves is bounded by the same 32-byte rule as the name (a stranger's text, relay
+    // memory), cut on a character boundary.
+    let long_note = "Ein sehr langer Zweck für diese Zahlung am Kiosk ☕☕☕"; // 48 bytes, multibyte tail
+    let opened = open_till_noted(
+        &state,
+        &merchant,
+        "Bahnhof Kiosk",
+        1_000,
+        Some(long_note),
+        "till.example",
+        "https",
+    )
+    .await;
+    let id = opened["id"].as_str().unwrap().to_string();
+    let (status, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    assert_eq!(status, StatusCode::OK, "{details}");
+    let served_note = details["note"].as_str().unwrap().to_string();
+    assert!(
+        served_note.len() <= 32 && long_note.starts_with(&served_note),
+        "the served note is a character-boundary prefix of the signed one: {served_note}"
     );
 }
 
@@ -4270,6 +4373,9 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
         field(&["input", "forwarded_proto"]),
     );
     let merchant_name = field(&["input", "merchant_name"]);
+    // The golden records the v2 (noted) spelling: `note` is a plain string in the file, and the
+    // recorded signature must verify over it.
+    let note = golden["input"]["note"].as_str().map(str::to_string);
     let cents = golden["input"]["cents"]
         .as_u64()
         .expect("input.cents must be a number");
@@ -4295,7 +4401,7 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
             .as_u64()
             .expect("input.issued_at is a number"),
         merchant_name: merchant_name.clone(),
-            note: None,
+        note: note.clone(),
     };
     let recorded_sig =
         <[u8; SIG_LEN]>::try_from(hex_field(&["input", "signature"], SIG_LEN).as_slice())
@@ -4323,7 +4429,16 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
 
     // --- what the merchant's own screen gets, and the URL its QR carries --------------------------
     let rung_at = now_ns() / 1_000_000_000;
-    let opened = open_till(&state, &merchant, &merchant_name, cents, &host, &proto).await;
+    let opened = open_till_noted(
+        &state,
+        &merchant,
+        &merchant_name,
+        cents,
+        note.as_deref(),
+        &host,
+        &proto,
+    )
+    .await;
     let rung_done = now_ns() / 1_000_000_000;
     let charge_id = opened["id"]
         .as_str()

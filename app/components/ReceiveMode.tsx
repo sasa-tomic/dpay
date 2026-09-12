@@ -113,29 +113,32 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     return () => { alive = false; };
   }, [identity.secretHex]);
 
-  // A till charge is LIVE on the relay: a code is out there that a customer can pay. Reported by
-  // TillCharge (which owns the charge) and folded into the lock below, because everything that is
-  // true of an open request QR is true of it — plus one thing that is not: the charge outlives this
-  // screen, so navigating away leaves money payable with nobody watching. That is why the toggles
-  // above it are hidden while it is live, exactly as they are while a request QR is up.
-  const [tillLive, setTillLive] = useState(false);
+  // TillCharge HOLDS THE FORM: from the first ring-up attempt until the cashier presses "next
+  // customer" — a live code, a paid screen, an ended one, a failed one. Reported by TillCharge
+  // (which owns the charge) and folded into the lock below, because everything that is true of an
+  // open request QR is true of it — plus one thing that is not: the charge outlives this screen,
+  // so navigating away leaves money payable with nobody watching. That is why the toggle, the
+  // shared rows and the checkbox are hidden while it holds, exactly as the toggle is while a
+  // request QR is up.
+  const [tillHeld, setTillHeld] = useState(false);
 
   // A capability can drop under the merchant (a relay retarget, or a relay that stops serving the
   // till), and `codeForm` outlives it — it is owned by the wallet so a rail switch cannot lose it.
-  // Left stale, the toggle comes back reading "Till code" over a dpay request form: a mode the
-  // merchant is in without having chosen it. The reset belongs HERE and not beside the capability
-  // probe because `tillLive` is only known here — and it cannot un-mount a charge, live or ended:
-  // in the very state it runs in (`!tillAvailable && !tillLive`) the render below has already
-  // replaced the till form with the dpay one, so this only makes the state agree with the screen.
+  // Left stale, the checkbox comes back checked over a dpay request form: a mode the merchant is
+  // in without having chosen it. The reset belongs HERE and not beside the capability probe
+  // because `tillHeld` is only known here — and it cannot un-mount a charge: in the very state it
+  // runs in (`!tillAvailable && !tillHeld`) the render below has already replaced the till form
+  // with the dpay one, so this only makes the state agree with the screen.
   useEffect(() => {
-    if (tillAvailable || tillLive || codeForm !== 'till') return;
+    if (tillAvailable || tillHeld || codeForm !== 'till') return;
     onCodeFormChange('dpay');
-  }, [tillAvailable, tillLive, codeForm, onCodeFormChange]);
+  }, [tillAvailable, tillHeld, codeForm, onCodeFormChange]);
 
-  // Phase 5 — lock the idle asset selection while a request QR is showing or a settlement result is
-  // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is
-  // the payment link a payer may be opening; the result is the settled outcome). The idle form is free.
-  const locked = !!reqQr || !!result || tillLive;
+  // Phase 5 — lock the idle asset selection while a request QR is showing, a settlement result is
+  // displayed, or the till form is held. All three hold an in-flight money op the user must not
+  // lose to an asset switch (the QR is the payment link a payer may be opening; the result is the
+  // settled outcome; the till charge is payable on the relay). The idle form is free.
+  const locked = !!reqQr || !!result || tillHeld;
   useReportLock(onLockChange, locked);
 
   // Tick the display clock only while a request QR is shown (not after settlement) — display-only,
@@ -593,7 +596,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           that picks the sheet, so the control and its destination cannot disagree. It was two other
           conditions (a family check OR a direct-ICRC check), which is how a third answer gets to differ from
           the first two. */}
-      {mechanism !== 'none' && !tillLive ? (
+      {mechanism !== 'none' && !tillHeld ? (
         <ModeToggle
           testID="receive-mode-toggle"
           value={subMode}
@@ -606,38 +609,69 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           wallet's payment link: any phone camera opens it — dpay on a dpay phone, the web wallet
           otherwise (founder decision 2026-09-12); a till code is this merchant's own
           OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
-          It is a code FORM and not a third tab because a till charge is not a third kind of
-          receiving; the only reason it is a control at all is that two QR payloads cannot share one
-          frame. Hidden while a charge is LIVE, exactly as the toggle above is while a request QR is
-          up: flipping away would abandon a code a customer can still pay. */}
-      {tillAvailable && !tillLive ? (
-        <>
-          <Text style={S.dim2}>{M.receive.till.codeForm}</Text>
-          <ModeToggle
-            testID="receive-code-form"
-            value={codeForm}
-            onChange={(v) => onCodeFormChange(v as 'dpay' | 'till')}
-            left={{label: M.receive.till.dpayCode, value: 'dpay', testID: 'btn-code-dpay'}}
-            right={{label: M.receive.till.tillCode, value: 'till', testID: 'btn-code-till'}}
-          />
-        </>
-      ) : null}
-      {/* The capability flag gates ENTRY to this form; it never un-mounts a LIVE charge. If the
-          relay is retargeted or drops mid-charge, `tillAvailable` flips false but `tillLive` keeps
+          It is a CHECKBOX and not a second form because the request is one request: the amount row
+          above is shared, the memo is the dpay form's own (a till charge has none, so the field
+          hides rather than being silently ignored), and the box flips the single button below
+          between the two payloads. Unchecked — the dpay code — is the default. Hidden while
+          TillCharge holds the form, exactly as the toggle above is while a request QR is up:
+          flipping away would abandon a code a customer can still pay. */}
+      {/* The capability flag gates ENTRY to this form; it never un-mounts a HELD one. If the
+          relay is retargeted or drops mid-charge, `tillAvailable` flips false but `tillHeld` keeps
           TillCharge mounted — its own poll then says "Can't check this charge right now", which is
           the honest rendering of silence. Un-mounting here would render the outage as the ABSENCE
           of a sale (flow 116's whole contract). */}
-      {(tillAvailable || tillLive) && codeForm === 'till' ? (
-        <TillCharge
-          identity={identity}
-          relayUrl={relayUrl}
-          asset={activeAsset}
-          assets={assets}
-          catalog={catalog}
-          nfcStatus={nfcStatus}
-          onSelectAsset={onSelectAsset}
-          onLiveChange={setTillLive}
-        />
+      {((tillAvailable || tillHeld) && codeForm === 'till') ? (
+        <>
+          {!tillHeld ? (
+            <>
+              <Text style={S.label}>{M.receive.amountToReceive}</Text>
+              <View style={S.amountRow}>
+                {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
+                    ▾), which opens the compact currency picker below. The amount is cleared on switch so a
+                    stale '25.00' is never reinterpreted as 25 BTC (8-decimal) on the new asset. */}
+                <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel={M.receive.chooseCurrency} accessibilityHint={M.receive.chooseCurrencyHint} accessibilityState={{disabled: false}}>
+                  <Text style={S.currency}>{reqPrefix}</Text>
+                  <IconChevronDown size={20} color={C.sub}/>
+                </Pressable>
+                {/* X21 — Enter submits. Every other form on the web has taught the user that pressing
+                    Enter in the last field of a short form does the thing the form is for; this one made
+                    them reach for the mouse, and the keyboard shortcuts that DO exist stop at the tab
+                    level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
+                    hardware keyboard attached to a phone. The dpay form only: the till button is not this
+                    form's to submit (a ring-up is signed and supersedes), so the shared field carries no
+                    submit while the checkbox is checked. */}
+                <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} />
+              </View>
+              {tillAvailable ? (
+                <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
+                  <Pressable
+                    testID="btn-code-till"
+                    style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 6, marginBottom: 10, minHeight: 44}}
+                    onPress={() => onCodeFormChange(codeForm === 'till' ? 'dpay' : 'till')}
+                    accessibilityRole="checkbox"
+                    accessibilityLabel={M.receive.till.tillCode}
+                    accessibilityState={{checked: codeForm === 'till'}}>
+                    <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'till' ? C.brand : C.sub2, backgroundColor: codeForm === 'till' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
+                      {codeForm === 'till' ? <IconCheck size={14} color={C.brandInk} /> : null}
+                    </View>
+                    <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.till.tillCode}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </>
+          ) : null}
+          <TillCharge
+            identity={identity}
+            relayUrl={relayUrl}
+            asset={activeAsset}
+            assets={assets}
+            catalog={catalog}
+            nfcStatus={nfcStatus}
+            onSelectAsset={onSelectAsset}
+            amount={amount}
+            onHoldsForm={setTillHeld}
+          />
+        </>
       ) : (
         <>
       {/* Trip Ready J4 (UX hardening 2026-08-23) — the coach card ALSO mounts at the ENTRY form
