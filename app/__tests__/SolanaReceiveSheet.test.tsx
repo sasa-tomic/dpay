@@ -259,3 +259,63 @@ describe('SolanaReceiveSheet — Solana Pay QR payload', () => {
     act(() => { tree.unmount(); });
   });
 });
+
+describe('SolanaReceiveSheet — unverified detail is classified (R4, spec 2026-09-09-relay-ha-and-solana-proxy)', () => {
+  // The 'unverified' detail sentence is picked from the transport seam's SolanaReadFailure
+  // classification (threaded Wallet → SolReceiveMode → sheet; never classified at the component) —
+  // the same contract as RailUnreadableNote (R3). Each class renders its OWN sentence, and the
+  // relay-outage class ('unreachable') names dpay's relay: post-R2 the RPC path IS the relay's
+  // proxy, so that outage must never be spelled as the user's connection problem.
+  function cardText(tree: renderer.ReactTestRenderer): string {
+    const card = tree.root.findAll(node => node.props && node.props.testID === 'sol-ata-unverified')[0];
+    return card.findAll(node => typeof node.props.children === 'string')
+      .map(n => n.props.children as string)
+      .join('\n');
+  }
+
+  test("'unreachable' (relay-path outage) names dpay's relay, never the user's connection", () => {
+    const tree = mount({token: 'USDC', ataStatus: 'unverified', ataFailure: 'unreachable'});
+    const text = cardText(tree);
+    expect(text).toContain('relay');
+    expect(text).toContain('untouched');
+    expect(text).not.toContain('Check your connection');
+    act(() => { tree.unmount(); });
+  });
+
+  test("'offline' keeps the connection-honest spelling (you appear to be offline)", () => {
+    const tree = mount({token: 'USDC', ataStatus: 'unverified', ataFailure: 'offline'});
+    expect(cardText(tree)).toContain('offline');
+    act(() => { tree.unmount(); });
+  });
+
+  test("'refused' names the endpoint's refusal, not the user", () => {
+    const tree = mount({token: 'USDC', ataStatus: 'unverified', ataFailure: 'refused'});
+    expect(cardText(tree)).toContain('refused');
+    act(() => { tree.unmount(); });
+  });
+
+  test("'unreadable' names the untrustworthy answer", () => {
+    const tree = mount({token: 'USDC', ataStatus: 'unverified', ataFailure: 'unreadable'});
+    expect(cardText(tree)).toContain('cannot read');
+    act(() => { tree.unmount(); });
+  });
+
+  test('no classified cause (null — rail off / unavailable) → the class-agnostic fallback sentence', () => {
+    const tree = mount({token: 'USDC', ataStatus: 'unverified', ataFailure: null});
+    const text = cardText(tree);
+    expect(text).toContain('reach Solana');
+    expect(text).toContain('Check your connection');
+    act(() => { tree.unmount(); });
+  });
+
+  test('each class renders a DISTINCT detail (no two classes share a sentence)', () => {
+    const classes = ['refused', 'offline', 'unreachable', 'unreadable'] as const;
+    const details = classes.map(c => {
+      const tree = mount({token: 'USDC', ataStatus: 'unverified', ataFailure: c});
+      const text = cardText(tree);
+      act(() => { tree.unmount(); });
+      return text;
+    });
+    expect(new Set(details).size).toBe(classes.length);
+  });
+});

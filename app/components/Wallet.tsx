@@ -1261,6 +1261,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
                   balances={balances}
                   onSelectAsset={handleSelect}
                   tokenAtaStatus={selectedTokenState?.status ?? 'loading'}
+                  tokenAtaFailure={selectedTokenState?.failure ?? null}
                   tokenAmount={selectedTokenState?.amount ?? null}
                   solBalance={solBalance}
                   solOk={solState.status === 'ok'}

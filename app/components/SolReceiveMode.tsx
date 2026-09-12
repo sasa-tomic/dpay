@@ -19,7 +19,7 @@ import {decodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
 import {isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_MISMATCH} from '../solana/payments';
 import {extractSignedTxParts} from '../solana/tx';
-import {createSolPaymentRequest, broadcastSolPayment, isSolanaRpcAvailable} from '../solana';
+import {createSolPaymentRequest, broadcastSolPayment, isSolanaRpcAvailable, type SolanaReadFailure} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {loadSolMerchantState, saveSolMerchantState, clearSolMerchantState} from '../services/solMerchantPersist';
 import {type SolTokenStatus} from '../hooks/useSolanaBalances';
@@ -73,7 +73,7 @@ const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, m
  * new token (EURC, …) renders here with no component change. `selectedToken` stays as the
  * native-vs-SPL discriminator ('SOL' ⇔ mint null).
  */
-export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, tokenAtaStatus = 'balance', tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
+export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMode, onSubModeChange, codeForm, onCodeFormChange, tillAvailable, catalog, selectedToken, assets, selectedAssetId, balances, onSelectAsset, tokenAtaStatus = 'balance', tokenAtaFailure = null, tokenAmount = null, solBalance = null, solOk = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, onRefreshToken, onRefreshSol, depositReturnLabel, onReturnFromDeposit, onLockChange, homeCurrency = null, onReceiveRailChange}: {identity: Identity; relayUrl: string; nfcStatus: NfcStatus; solAddress: string; subMode: 'request' | 'address'; onSubModeChange: (m: 'request' | 'address') => void; codeForm: 'dpay' | 'till'; onCodeFormChange: (f: 'dpay' | 'till') => void; tillAvailable: boolean; catalog: CurrencyDescriptor[]; selectedToken: string; assets: SelectableAsset[]; selectedAssetId: AssetId | null; balances: Record<AssetId, BalanceView>; onSelectAsset: (id: AssetId) => void; tokenAtaStatus?: SolTokenStatus; tokenAtaFailure?: SolanaReadFailure | null; tokenAmount?: string | null; solBalance?: string | null; solOk?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; onRefreshToken?: () => void; onRefreshSol?: () => void;   depositReturnLabel?: string | null;
   onReturnFromDeposit?: () => void;
   onLockChange?: (locked: boolean) => void;
   homeCurrency?: HomeCurrency | null;
@@ -210,7 +210,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
     // Map the per-mint token poll status onto the sheet's tri-state gate (2026-08-14 audit): only
     // a KNOWN balance shows the QR; only KNOWN absence shows the setup card. checking/unverified
     // never claim absence — fail-closed without a false "you don't have one" message. Native SOL
-    // has no token account at all, so it is always 'ready'.
+    // has no token account at all, so it is always 'ready'. The seam's failure classification
+    // rides along untouched (R4): it picks the 'unverified' detail sentence in the sheet.
     const ataState = !isSpl
       ? 'ready'
       : tokenAtaStatus === 'balance' ? 'ready'
@@ -257,6 +258,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           symbol={unit}
           decimals={decimals}
           ataStatus={ataState}
+          ataFailure={tokenAtaFailure}
           solBalance={solBalance}
           tokenZero={(!isSpl && solOk && solBalance === '0') || (isSpl && tokenAtaStatus === 'balance' && (tokenAmount ?? null) === '0')}
           ataSetupBusy={ataSetupBusy}

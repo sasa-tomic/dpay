@@ -150,6 +150,14 @@ export const depositFr: DepositMessages = {
     ataUnverified: asset => `Impossible de vérifier votre compte ${asset}.`,
     ataUnverifiedDetail: asset =>
       `Votre adresse est correcte — nous n’arrivons simplement pas à joindre Solana pour confirmer votre compte ${asset} sur la chaîne. Vérifiez votre connexion et réessayez.`,
+    ataUnverifiedRefused: asset =>
+      `Votre adresse est correcte — le point d’accès Solana a refusé la demande, donc votre compte ${asset} n’a pas pu être confirmé sur la chaîne. Rien n’a bougé, et dpay réessaie — réessayez dans un instant.`,
+    ataUnverifiedOffline: asset =>
+      `Votre adresse est correcte — vous semblez être hors ligne, donc votre compte ${asset} n’a pas pu être confirmé sur la chaîne. Rien n’a bougé ; vérifiez à nouveau dès que vous êtes de retour en ligne.`,
+    ataUnverifiedUnreachable: asset =>
+      `Votre adresse est correcte — le relais de dpay n’arrive pas à joindre Solana, donc votre compte ${asset} n’a pas pu être confirmé sur la chaîne. Ce n’est pas votre connexion ; votre argent est intact et vos paiements Internet Computer fonctionnent toujours. Réessayez dans un instant.`,
+    ataUnverifiedUnreadable: asset =>
+      `Votre adresse est correcte — Solana a répondu avec des données que ce portefeuille ne peut pas lire, donc votre compte ${asset} n’a pas pu être confirmé sur la chaîne. Rien n’a bougé ; réessayez dans un instant.`,
     retryAtaLabel: asset => `Réessayer la vérification du compte ${asset}`,
     retryAtaHint: asset => `Vérifie à nouveau si votre compte ${asset} existe sur la chaîne`,
     checkAgain: 'Revérifier',

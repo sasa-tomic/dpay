@@ -7,6 +7,7 @@ import {C} from '../config/palette';
 import {QR_SIZE_SMALL, isSolanaDevnet} from '../config/constants';
 import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {buildSolanaPayUri, createSolanaPayReference} from '../solana/payUri';
+import type {SolanaReadFailure} from '../solana';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
@@ -29,7 +30,10 @@ import {M} from '../i18n';
  *   - 'checking'   → an honest in-progress state (M.deposit.sol.checkingAta) on the first poll;
  *                    never claims absence.
  *   - 'unverified' → M.deposit.sol.ataUnverified + Retry (RPC down/error) — fail-closed, no QR, but
- *                    NO false "you don't have one" claim either.
+ *                    NO false "you don't have one" claim either. The detail sentence is picked from
+ *                    `ataFailure` (the transport seam's SolanaReadFailure classification, threaded
+ *                    from useSolanaBalances via Wallet/SolReceiveMode — never classified here); a
+ *                    relay-path outage says so instead of blaming the user's connection (R4).
  *
  * Every token fact arrives as a prop (`token`/`mint`/`decimals`/`symbol` — the selected asset row);
  * the sheet itself holds NO token literals. Native SOL (`token === 'SOL'`, the default) never
@@ -44,6 +48,7 @@ export function SolanaReceiveSheet({
   mint = null,
   symbol,
   ataStatus = 'ready',
+  ataFailure = null,
   ataSetupBusy = false,
   ataSetupErr = null,
   solBalance = null,
@@ -68,6 +73,10 @@ export function SolanaReceiveSheet({
   /** The token's display symbol ('SOL', 'USDC', 'EURC', …). Defaults to `token`. */
   symbol?: string;
   ataStatus?: 'ready' | 'absent' | 'checking' | 'unverified';
+  /** The transport seam's classification of WHY the check failed (useSolanaBalances → Wallet →
+   *  SolReceiveMode) — picks the 'unverified' detail sentence. Null = no classified cause (rail
+   *  off / 'unavailable') → the class-agnostic fallback. */
+  ataFailure?: SolanaReadFailure | null;
   ataSetupBusy?: boolean;
   ataSetupErr?: string | null;
   solBalance?: string | null;
@@ -93,6 +102,15 @@ export function SolanaReceiveSheet({
   });
   // The asset NAME, not copy — it names the token the sentences are about (never a ledger id).
   const assetLabel = symbol ?? token;
+  // R4: the 'unverified' detail is picked FROM the seam's classification (same pattern as
+  // RailUnreadableNote) — never guessed here. Post-R2 the RPC path IS the relay's proxy, so
+  // 'unreachable' must name dpay's side rather than the user's connection.
+  const ataDetail =
+    ataFailure === 'refused' ? M.deposit.sol.ataUnverifiedRefused(assetLabel)
+    : ataFailure === 'offline' ? M.deposit.sol.ataUnverifiedOffline(assetLabel)
+    : ataFailure === 'unreachable' ? M.deposit.sol.ataUnverifiedUnreachable(assetLabel)
+    : ataFailure === 'unreadable' ? M.deposit.sol.ataUnverifiedUnreadable(assetLabel)
+    : M.deposit.sol.ataUnverifiedDetail(assetLabel);
   const status = isSpl ? ataStatus : 'ready';
   const hasSol = solBalance != null && BigInt(solBalance) >= SOL_ATA_SETUP_MIN_LAMPORTS;
   // SOL balance unconfirmed (loading/unavailable): the setup card says "checking", never claims
@@ -124,7 +142,7 @@ export function SolanaReceiveSheet({
         ) : (
           <View testID="sol-ata-unverified" style={S.instrCard}>
             <Text style={S.instrLine}>{M.deposit.sol.ataUnverified(assetLabel)}</Text>
-            <Text style={S.instrCustody}>{M.deposit.sol.ataUnverifiedDetail(assetLabel)}</Text>
+            <Text style={S.instrCustody}>{ataDetail}</Text>
           </View>
         )}
         {status === 'unverified' && onRetryAta ? (

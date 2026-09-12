@@ -217,7 +217,18 @@ export type DepositMessages = {
     checkingAta: (asset: string) => string;
     /** Fail-closed, never a false claim: the account could not be CHECKED, so nothing is asserted. */
     ataUnverified: (asset: string) => string;
+    /** The detail when NO classified cause exists (rail off / 'unavailable') — class-agnostic. */
     ataUnverifiedDetail: (asset: string) => string;
+    /** Per-class details (R4, spec 2026-09-09-relay-ha-and-solana-proxy): the sheet picks the
+     *  sentence from the transport seam's `SolanaReadFailure` classification (app/solana.ts) —
+     *  never guessed at the component. `unreachable` names dpay's relay (post-R2 the Solana RPC
+     *  path IS the relay's proxy), says the money is untouched and what still works — it never
+     *  blames the user's connection for a service outage. `offline` keeps the connection-honest
+     *  spelling; `refused` names the endpoint; `unreadable` names the untrustworthy answer. */
+    ataUnverifiedRefused: (asset: string) => string;
+    ataUnverifiedOffline: (asset: string) => string;
+    ataUnverifiedUnreachable: (asset: string) => string;
+    ataUnverifiedUnreadable: (asset: string) => string;
     retryAtaLabel: (asset: string) => string;
     retryAtaHint: (asset: string) => string;
     checkAgain: string;
@@ -441,6 +452,14 @@ export const depositEn: DepositMessages = {
     ataUnverified: asset => `Couldn't check your ${asset} account.`,
     ataUnverifiedDetail: asset =>
       `Your address is fine — we just can't reach Solana right now to confirm your ${asset} account on-chain. Check your connection and try again.`,
+    ataUnverifiedRefused: asset =>
+      `Your address is fine — Solana’s endpoint refused the request, so your ${asset} account could not be confirmed on-chain. Nothing moved, and dpay keeps retrying — try again in a moment.`,
+    ataUnverifiedOffline: asset =>
+      `Your address is fine — you appear to be offline, so your ${asset} account could not be confirmed on-chain. Nothing moved; check again once you’re back online.`,
+    ataUnverifiedUnreachable: asset =>
+      `Your address is fine — dpay’s relay can’t reach Solana right now, so your ${asset} account could not be confirmed on-chain. Your connection is not the problem; your money is untouched and your Internet Computer payments still work. Try again in a moment.`,
+    ataUnverifiedUnreadable: asset =>
+      `Your address is fine — Solana answered with data this wallet cannot read, so your ${asset} account could not be confirmed on-chain. Nothing moved; try again in a moment.`,
     retryAtaLabel: asset => `Retry checking ${asset} account`,
     retryAtaHint: asset => `Re-check whether your ${asset} account exists on-chain`,
     checkAgain: 'Check again',
