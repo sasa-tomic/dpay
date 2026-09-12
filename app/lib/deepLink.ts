@@ -8,6 +8,9 @@ import {bytesToBase64Url, base64UrlToBytes, utf8ToBytes, bytesToUtf8} from './ba
 // readable, hand-authorable, and carries no opaque blob — the shape BIP-21 (`bitcoin:<addr>?amount=`)
 // and Solana Pay (`solana:<recipient>?amount=&spl-token=`) established, mapped onto https so ONE
 // string works as an Android App Link (opens the app) and as a plain web link (opens /wallet).
+// The wallet's own request QR renders exactly this link, on every rail (founder decision
+// 2026-09-12) — a regular phone camera opens dpay or the web wallet; the machine codes survive
+// only on the NFC/scan-back paths.
 //
 //   https://dpay.kalaj.org/wallet/pay/<recipient>
 //       ?asset=<token>&network=<chain>&amount=<decimal>[&label=…][&memo=…][&ref=<32-hex>]

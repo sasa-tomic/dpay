@@ -427,14 +427,21 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
 
 ## Other open issues
 
-- **FOUNDER CALL — the dpay request QR is a machine code, not a URL (fork recorded 2026-09-12, no
-  change made).** The in-app request QR is the raw 132-byte base64url wire (IC) / `solreq:v2?<b64>`
-  (SOL, blockhash-bound ~90 s) — a generic phone camera scanning it lands nowhere, by design; only
-  the dpay scanner reads it. The shareable URL form of an IC request is the payment link (Share
-  button). Making the request QR itself a URL (wrapping the wire in an https link or a
-  `dpay:req/…` mirror) is a product fork — QR density, expiry semantics, offline resolvability of
-  the wire — founder decision. Context: till QRs and payment links BOTH deep-link into the app
-  since 2026-09-12 (flow 175); this item is only about the request QR.
+- **DECIDED + DONE — the dpay request QR is now the payment link (founder decision 2026-09-12,
+  reversing the same-day fork the other way; shipped same day).** History: the request QR was the
+  raw 132-byte base64url wire (IC) / `solreq:v2?<b64>` (SOL) — a generic camera landed nowhere —
+  and an explicit founder call had recorded that as intended. The 2026-09-12 reversal: EVERY
+  payment-request QR the wallet renders is the `…/wallet/pay/<recipient>?asset=…&network=…&amount=…`
+  URL itself, on every rail (future networks too), so a regular phone camera opens dpay (verified
+  App Link) or the web wallet. Machine codes survive ONLY on radio/confirm paths: IC `nfcHex`,
+  SOL `reqUri`/`reqSnapshot` (SolNfcTap + payer signed-QR scan-back + `solMerchantPersist`
+  reconciliation). Accepted tradeoffs, pinned by e2e flow 176: IC dpay→dpay camera payment =
+  review + Approve (2 presses) instead of wire auto-sign, and the open request screen gained a
+  settlement poll (`POLL.request`) so the link's `ref` (= request nonce = on-chain memo)
+  auto-confirms it; SOL links keep `ref: null` (never promise a memo the rail can't attach) — SOL
+  link payments do NOT auto-confirm the request screen, which still confirms via NFC/scan-back;
+  links are durable by design and payable after the screen's expiry countdown lapses. jest: QR
+  round-trips `parsePayLink` and equals what Share carries. No open residue.
 - **`just demo` settles at HEAD (fixed 2026-09-12; the 2026-09-07 measurement record and the
   step-4 double-submission gate evidence below stand as history).** (F1) the demo relay carries
   `DPAY_DEMO_LEDGER` (validated `Principal::from_text` at agent-build startup, exit-on-garbage):

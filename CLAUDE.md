@@ -292,9 +292,19 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   `https://dpay.kalaj.org/pl/?lightning=…` is claimed by a second manifest `autoVerify` filter
   (`pathPrefix="/pl/"`) — a dpay-installed phone opens the payer straight onto the OpenCryptoPay
   review (the SAME classification a camera scan takes; explicit Approve, never auto-signs), while a
-  generic camera still gets the relay's `/pl/` landing page. assetlinks.json is host-wide, so the
-  relay needed no change; e2e flow 175 pins both rails. The dpay REQUEST QR (IC wire / `solreq:v2`)
-  is a machine code, NOT a URL — camera deep-linking it is a recorded founder fork (OPEN_ISSUES).
+   generic camera still gets the relay's `/pl/` landing page. assetlinks.json is host-wide, so the
+   relay needed no change; e2e flow 175 pins both rails. **The dpay REQUEST QR is a payment link
+   too (founder decision 2026-09-12, reversing the same-day fork the other way):** every
+   payment-request QR the wallet renders is the `…/wallet/pay/…` URL itself, on every rail — a
+   regular phone camera opens dpay or the web wallet; the machine codes (IC 132-byte wire, SOL
+   `solreq:v2`) survive only on the radio/confirm paths (NFC, payer signed-QR scan-back). Tradeoff:
+   IC dpay→dpay camera payment = review + Approve instead of wire auto-sign, and the open request
+   screen now polls the rail at `POLL.request` cadence — the link's `ref` is the request nonce is
+   the on-chain memo, so a camera-scanned link payment flips the screen to Received with no second
+   radio hop (e2e flow 176). SOL links carry `ref: null` (the rail attaches no reconciliation
+   memo) — a SOL link payment shows on balances/transactions but does NOT auto-confirm the request
+   screen, which still confirms via NFC/scan-back, matching SOL share-link semantics. Links are
+   durable by design and stay payable after the screen's expiry countdown lapses.
 
 - **Send to an external address — ONE destination field, routed by what you paste (2026-08-30).**
   Pay ▸ *Send to address* now renders for every asset that can leave the wallet, not just the
