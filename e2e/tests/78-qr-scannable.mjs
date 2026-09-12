@@ -9,7 +9,7 @@
 //
 // The gate rasterizes the RENDERED element (element screenshot → PNG → vendored jsQR — the exact
 // decoder the prod web wallet ships) and asserts the decode matches the encoded value:
-//   - request-qr  (QR_SIZE 244, ecl M, brand mark, 132-byte wire request) vs window.__DPAY_QR_LAST
+//   - request-qr  (QR_SIZE 244, ecl M, brand mark, payment-link URL) vs window.__DPAY_QR_LAST
 //   - sol-receive-qr (QR_SIZE_SMALL 200, ecl L, Solana Pay URI solana:<address>?reference=<base58>)
 //     vs the on-screen address text; and the USDC variant (owner recipient + spl-token mint param)
 import { strict as assert } from 'node:assert';

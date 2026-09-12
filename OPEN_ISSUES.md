@@ -472,7 +472,8 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
   [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md).
   **2026-09-12:** the founder scanned a live till code with Oisy and got `Code/URL ist nicht gültig`
   — the relay served the provider routes with no CORS headers, so no browser wallet could read a
-  dpay till at all. Fixed, together with the false-success it exposed. **Open founder decision
+  dpay till at all. Fix staged in the relay working tree at this writing (provider-CORS sub-router
+  + tests; lands with the next relay commit), together with the false-success it exposed. **Open founder decision
   (needs a call, not effort):** whether a dpay merchant should PULL Oisy's allowance
   (`icrc2_transfer_from` from the merchant's own phone — permitted by the non-custody rule, and the
   only thing that would let an Oisy customer actually pay a dpay till). Same spec, last section.
