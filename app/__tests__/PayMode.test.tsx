@@ -71,6 +71,9 @@ jest.mock('../services/opencryptopay', () => ({
 import {DpayCore} from '../services/native';
 import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, wireRequestToIntent, type RailPrepared} from '../services/rail';
 import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+// Spied (not mocked) in the till-note tests: the store's own write behaviour is txNotes.test.ts's
+// to pin; here only the SEAM's arguments matter, and the real write keeps the rest honest.
+import * as txNotes from '../services/txNotes';
 import {PayMode} from '../components/PayMode';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {buildSelectableAssets} from '../config/assets';
@@ -709,6 +712,8 @@ const OCP_TARGET: OcpTarget = {
     quoteExpiresAt: Date.now() + 300_000,
     callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
     claimedMerchantName: 'Test Shop',
+    // What this charge is for — the dpay till's own `note`, carried as claimed display text.
+    claimedNote: '2× Kafi, Tisch 4',
     requestedAmount: {asset: 'CHF', amount: '1'},
     transferAmounts: [{method: 'InternetComputer', available: true, assets: [{asset: 'VCHF', amount: '1.'}]}],
   },
@@ -843,6 +848,45 @@ describe('PayMode — OpenCryptoPay till', () => {
     const minted = jest.mocked(prepareTransfer).mock.calls[0][2].nonceHex;
     expect(minted).toMatch(/^[0-9a-f]{32}$/);
     expect(minted).not.toBe(REF);
+  });
+
+  test('the till’s claimed note rides the review’s memo line and the payer’s history annotation', async () => {
+    // SAME SURFACE, not a parallel one (founder rule): a payment link's `memo=` already renders on
+    // `review-memo`, and the txNote seam already saves `msg` from the intent's memo — `landOcp`
+    // landing the claimed note in `intent.memo` lights up BOTH with no new surface. The ON-CHAIN
+    // memo is untouched by it: that stays `nonceHex`, the till reference the test above pins.
+    const tree = mountTill();
+    await scanTill(tree);
+    expect(textByTestID(tree, 'review-memo')).toBe('2× Kafi, Tisch 4');
+
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    await pressByLabel(tree, M.pay.approveA11y);
+    const saved = noteSpy.mock.calls.map(([, n]) => n).find(n => n.msg === '2× Kafi, Tisch 4');
+    // Keyed by the on-chain memo (a minted nonce for this reference-less fixture), named by the
+    // claimed merchant — the history row then reads: Test Shop — 2× Kafi, Tisch 4.
+    expect(saved).toBeDefined();
+    expect(saved?.k).toMatch(/^[0-9a-f]{32}$/);
+    expect(saved?.who).toBe('Test Shop');
+    noteSpy.mockRestore();
+  });
+
+  test('a till that sent no note shows no memo line and saves no msg', async () => {
+    // Null is the absence contract: the line renders nothing, and the annotation keeps only `who`.
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, details: {...OCP_TARGET.details, claimedNote: null}},
+    });
+    const tree = mountTill();
+    await scanTill(tree);
+    expect(hasTestID(tree, 'review-memo')).toBe(false);
+
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    await pressByLabel(tree, M.pay.approveA11y);
+    const notes = noteSpy.mock.calls.map(([, n]) => n);
+    expect(notes).toHaveLength(1);
+    expect(notes[0].msg).toBeUndefined();
+    expect(notes[0].who).toBe('Test Shop');
+    noteSpy.mockRestore();
   });
 
   test('the IC rail reports a CONFIRMED block index, ON ITS OWN LEDGER, and anything else as unknown', async () => {

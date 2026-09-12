@@ -337,7 +337,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       // recognise. It is not a double-pay guard and must not be read as one — a repeated memo does
       // not stop a ledger executing the transfer twice (`icp_transfer_arg` in dpay-ffi).
       nonceHex: out.target.reference ?? randNonceHex(),
-      memo: '',
+      // What the charge is FOR, as the till claimed it ("2× Kafi, Tisch 4") — DISPLAY text riding
+      // the exact surface a payment link's memo rides: the review's memo line and the txNote
+      // seam's `msg` in `approveOcp`. It is NOT the on-chain memo — that stays `nonceHex` above,
+      // the till's reconciliation reference — it only answers, on the payer's own history row, the
+      // question a receipt answers: what was this for?
+      memo: out.target.details.claimedNote ?? '',
       // A till has no dpay request expiry; its QUOTE deadline is the real one and is enforced by
       // the review's countdown + the Approve-time check.
       expiry: null,
@@ -526,8 +531,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // still unspent and the claim is worth keeping.
     const hold: {claim: RailPrepared | null} = {claim: null};
     // Same annotation as the wire/link path in `approve`, at the same last-point-before-signing
-    // seam: for a till the name is the provider's claimedMerchantName (intent.toName), and the
-    // join key is the reference the till will reconcile by (intent.nonceHex = on-chain memo).
+    // seam: for a till the name is the provider's claimedMerchantName (intent.toName), the msg is
+    // the provider's claimedNote (intent.memo — display text set by `landOcp`), and the join key
+    // is the reference the till will reconcile by (intent.nonceHex = on-chain memo).
     void saveTxNote(identity.publicHex, {k: r.nonceHex, who: r.toName || undefined, msg: r.memo || undefined}, Date.now());
     setBusy(true);
     setErr(null);
@@ -890,7 +896,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
                 />
               ) : null}
               {/* The sender-set memo (if any) — shown as a small subtitle so the payer sees the
-                  note attached to this payment before approving. Empty memo renders nothing. */}
+                  note attached to this payment before approving. For a till this line carries the
+                  claimed note ("what the charge is for") on the SAME surface a link's memo rides.
+                  Empty memo renders nothing. */}
               {intent.memo ? <Text testID="review-memo" style={S.dim2}>{intent.memo}</Text> : null}
             </>
           }

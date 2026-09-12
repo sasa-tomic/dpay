@@ -174,6 +174,12 @@ export interface OcpDetails {
   /** The merchant name the PROVIDER claims. Null when it sent none — a missing name never blocks a
    *  payment (the review screen still shows the provider host and the full destination). */
   claimedMerchantName: string | null;
+  /** What the charge is FOR ("2× Kafi, Tisch 4"), read from the body's own `note` field and claimed,
+   *  never verified. Display context exactly like `claimedMerchantName`: null on absence or
+   *  garbage, never a reason to refuse. The relay also folds the note into the LUD-06 `metadata`
+   *  description for wallets with no `note` field — this parser reads ONLY the field (the folded
+   *  string is the provider's rendering, not a second source this wallet should grow). */
+  claimedNote: string | null;
   /** What the till asked for in ITS OWN unit (e.g. CHF 1) — the merchant's price tag, and the only
    *  thing on the review a payer can check against the printed price: `0.0000162 BTC` means nothing
    *  on its own. It is the PROVIDER's number, shown as claimed and never as dpay's (dpay does not
@@ -677,6 +683,7 @@ export function parsePaymentDetails(json: unknown): OcpDetailsParse {
       quoteExpiresAt,
       callbackUrl,
       claimedMerchantName: claimedMerchantNameOf(json),
+      claimedNote: claimedNoteOf(json),
       requestedAmount: parseAssetAmount(j.requestedAmount),
       transferAmounts,
     },
@@ -730,6 +737,29 @@ export function claimedMerchantNameOf(json: unknown): string | null {
   if (json === null || typeof json !== 'object' || Array.isArray(json)) return null;
   const name = (json as {displayName?: unknown}).displayName;
   const clean = sanitiseDisplayText(typeof name === 'string' ? name : '');
+  if (clean.length === 0) return null;
+  const clamped = clampLinkText(clean);
+  return clamped === clean ? clamped : `${clamped}${TRUNCATED_MARK}`;
+}
+
+/**
+ * What the till says the charge is FOR, from the body's own `note` field — the payer's reading of
+ * "what did I pay for?", claimed and never verified. NOT read out of the LUD-06 `metadata`
+ * description the relay folds the note into: that string is the provider's rendering for wallets
+ * with no `note` field, and parsing both would grow a second, drifting source of one text.
+ *
+ * Unexported — unlike `claimedMerchantNameOf` it has exactly ONE caller, because the 404 "no charge
+ * waiting" body has no note worth showing: the payer scanned a code with no sale behind it, and
+ * "what would it have been for?" is not a question that screen answers.
+ *
+ * Sanitised and bounded by the SAME rule as the merchant name, for the same reason: whatever host
+ * a scanned code names writes this string, and unbounded it is the same LAYOUT weapon against the
+ * same three lines (host, countdown, destination). One rule for payee-authored text, one source.
+ */
+function claimedNoteOf(json: unknown): string | null {
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) return null;
+  const note = (json as {note?: unknown}).note;
+  const clean = sanitiseDisplayText(typeof note === 'string' ? note : '');
   if (clean.length === 0) return null;
   const clamped = clampLinkText(clean);
   return clamped === clean ? clamped : `${clamped}${TRUNCATED_MARK}`;

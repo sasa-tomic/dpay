@@ -631,9 +631,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     try {
       const sig = await sendSol(identity.secretHex, target.to, BigInt(target.rawAmount), signal, s => { broadcast.sig = s; });
-      // Same payer-side annotation as approveSpay, keyed by the signature: a till's claimed name
-      // is the only context this rail-side send still has at hand.
-      void saveTxNote(identity.publicHex, {k: sig, who: target.details.claimedMerchantName || undefined}, Date.now());
+      // Same payer-side annotation as approveSpay, keyed by the signature (this rail signs no
+      // memo to key by): a till's claimed name AND claimed note are the context the rail-side
+      // send still has at hand — the IC seam saves the same pair keyed by the on-chain memo.
+      void saveTxNote(identity.publicHex, {k: sig, who: target.details.claimedMerchantName || undefined, msg: target.details.claimedNote || undefined}, Date.now());
       return {kind: 'settled', txId: sig, reference: M.pay.ocp.ref.solTransaction(sig)};
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -890,6 +891,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           payableUntil={ocp.payableUntil}
           onTooLate={() => setErr(ocpTimeRefusal(ocp, Date.now()))}
         />
+        {/* The till's claimed note — what the charge is for — on the same line the IC rail shows
+            it (`review-memo`) and this rail's own link path shows a memo (`sol-pay-memo` in the
+            review phase): one surface per question, whichever rail pays. Renders nothing when the
+            till sent none. */}
+        {ocp.details.claimedNote ? <Text testID="sol-pay-memo" style={S.dim2}>{ocp.details.claimedNote}</Text> : null}
         {/* Above the button, like the IC rail's own low-balance line, so it is read before the
             press rather than after it. */}
         {ocpInsufficient ? <Text testID="sol-pay-lowbal" style={S.warnNote}>{M.pay.notEnoughBalance}</Text> : null}

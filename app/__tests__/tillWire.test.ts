@@ -21,7 +21,7 @@ import {BUNDLED_NETWORKS, icpCatalogOf, ledgerToCurrency} from '../config/catalo
 // business (`lib/opencryptopay.ts`, exercised in `opencryptopay.test.ts` and end to end by e2e flow
 // 113). What is pinned here is the wire, on both sides of it.
 const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8')) as {
-  input: {merchant_name: string; host: string};
+  input: {merchant_name: string; note: string; host: string};
   amount_raw: string;
   open: {id: string; merchant: string; url: string; lnurl: string; qr: string; amount: string; reference: string; created_secs: number; expires_at: number};
   details: Record<string, unknown>;
@@ -92,6 +92,12 @@ describe('the dpay till’s wire, read by the dpay payer', () => {
     expect(d.proofHost).toBe(GOLDEN.input.host);
     expect(d.quoteId).toBe((GOLDEN.details.quote as {id: string}).id);
     expect(d.claimedMerchantName).toBe(GOLDEN.input.merchant_name);
+    // What the charge is FOR, read from the body's OWN `note` field — never out of the LUD-06
+    // metadata the relay folds the note into for wallets with no such field (that rendering is
+    // the relay's, pinned on the relay side; this reader keeps one source). The literal pins the
+    // wire itself: the golden must keep carrying the note the till was rung up with.
+    expect(d.claimedNote).toBe(GOLDEN.input.note);
+    expect(GOLDEN.input.note).toBe('2× Kafi, Tisch 4');
     // The till prices in francs and settles in VCHF, and the two are DIFFERENT numbers: the fiat
     // ask is the price the customer agreed to, while the settlement amount is that price less the
     // ledger fee the shop absorbs, so the customer's account moves by exactly CHF 10.00. Both

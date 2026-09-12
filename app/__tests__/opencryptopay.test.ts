@@ -489,6 +489,41 @@ describe('parsePaymentDetails', () => {
     });
   });
 
+  it('reads the till’s note as claimed display context, never as a reason to refuse', () => {
+    // What the charge is FOR ("2× Kafi, Tisch 4") — the SAME contract as the merchant name: shown
+    // as claimed, null on absence or garbage, and never a refusal. The fixture body carries no
+    // `note` field (the measured provider sends none), so the default parse IS the absence case.
+    expect(detailsOf().claimedNote).toBeNull();
+    expect(detailsOf({note: '2× Kafi, Tisch 4'}).claimedNote).toBe('2× Kafi, Tisch 4');
+    for (const note of [undefined, null, '   ', 42]) {
+      expect(parsePaymentDetails(detailsBody({note}))).toEqual({
+        ok: true,
+        details: expect.objectContaining({claimedNote: null}),
+      });
+    }
+  });
+
+  it('renders a hostile note harmless instead of letting it own the review', () => {
+    // Same threat, same defence as the merchant name: whatever host a scanned code names writes
+    // this string, and React Native `Text` renders newlines — an unbounded note pushes the
+    // provider host, the countdown and the destination off the screen, deleting the lines that
+    // make the charge checkable. One cap rule for payee-authored text wherever it came from.
+    expect(detailsOf({note: '2× Kafi\n\n\n\n\n\n\n\n\n\nTisch 4'}).claimedNote).toBe('2× Kafi Tisch 4');
+    const long = 'zwei Kafi und ein Gipfeli fuer Tisch vier, alles zusammen zum Mitnehmen bitte';
+    expect(detailsOf({note: long}).claimedNote).toBe(`${long.slice(0, PAY_LINK_TEXT_BYTES)}…`);
+  });
+
+  it('never reads the note out of the LUD-06 metadata', () => {
+    // The relay folds the note into the metadata description ("Name - CHF 1 - note") for wallets
+    // with no `note` field. This wallet reads ONLY the field: two sources of one text drift apart,
+    // and the folded string is the provider's rendering, not the payer's. Asserted as an absence
+    // — no metadata-derived value exists on the narrowed details — with a metadata body present,
+    // so the pin is that it is IGNORED, not that it cannot arrive.
+    const withBoth = detailsOf({note: '2× Kafi, Tisch 4', metadata: '[["text/plain","Test Till - CHF 1 - 2× Kafi, Tisch 4"]]'}) as OcpDetails & {metadata?: unknown};
+    expect(withBoth.claimedNote).toBe('2× Kafi, Tisch 4');
+    expect(Object.keys(withBoth)).not.toContain('metadata');
+  });
+
   it('keeps paying a till that advertises methods it cannot currently settle', () => {
     // MEASURED against the live provider on 2026-09-01: every response carries `TaprootAsset`,
     // `Spark` and `Arkade` as `{available: false, assets: []}`. Refusing the whole body over them —

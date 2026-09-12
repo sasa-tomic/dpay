@@ -70,6 +70,9 @@ jest.mock('../services/opencryptopay', () => ({
 import {encodeSolReq, type SolReqInput} from '../solana/qr';
 import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, signSplPayment, type SolanaSignatureStatus} from '../solana';
 import {payAndReport, resolveOcpOffer, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
+// Spied (not mocked) in the till-note test, as in the IC twin (PayMode.test.tsx): only the SEAM's
+// arguments matter here; the store's own behaviour is txNotes.test.ts's to pin.
+import * as txNotes from '../services/txNotes';
 import {buildSelectableAssets} from '../config/assets';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 import {POLL, SOL_SEND_TIMEOUT_MS} from '../config/constants';
@@ -505,6 +508,8 @@ const OCP_TARGET: OcpTarget = {
     quoteExpiresAt: Date.now() + 300_000,
     callbackUrl: 'https://api.dfx.swiss/v1/lnurlp/cb/pl_beeddb41cd4b6d9e',
     claimedMerchantName: 'Test Shop',
+    // The dpay till's own note — the same fixture contract as the IC twin in PayMode.test.tsx.
+    claimedNote: '2× Kafi, Tisch 4',
     requestedAmount: {asset: 'CHF', amount: '1'},
     transferAmounts: [{method: 'Solana', available: true, assets: [{asset: 'SOL', amount: '0.01221422'}]}],
   },
@@ -635,6 +640,33 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     expect(method).toBe('Solana');
     expect(asset).toBe('SOL');
     expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.012214220 SOL'));
+  });
+
+  test('the till’s claimed note rides the review’s memo line and the SOL seam’s annotation', async () => {
+    // RAIL PARITY with the IC twin (PayMode.test.tsx): the note shows on the review's memo line
+    // and reaches the payer's history row as `msg` beside the claimed name — keyed by the
+    // signature here (this rail signs no memo to key by), by the on-chain memo there.
+    const tree = mountTill();
+    await scanTill(tree);
+    expect(textByTestID(tree, 'sol-pay-memo')).toBe('2× Kafi, Tisch 4');
+
+    // The seam lives in the rail-side send, which only runs when the captured sender is invoked.
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    await pressByLabel(tree, M.pay.approveA11y);
+    await (jest.mocked(payAndReport).mock.calls[0][3] as () => Promise<OcpSendResult>)();
+    const saved = noteSpy.mock.calls.map(([, n]) => n).find(n => n.msg === '2× Kafi, Tisch 4');
+    expect(saved?.k).toBe('5ig'.repeat(10)); // sendSol's mocked signature — the join key
+    expect(saved?.who).toBe('Test Shop');
+    noteSpy.mockRestore();
+
+    // Absence renders nothing — the same null contract as every other claimed field.
+    jest.mocked(resolveOcpScan).mockResolvedValue({
+      kind: 'ok',
+      target: {...OCP_TARGET, details: {...OCP_TARGET.details, claimedNote: null}},
+    });
+    const bare = mountTill();
+    await scanTill(bare);
+    expect(hasTestID(bare, 'sol-pay-memo')).toBe(false);
   });
 
   test('an outcome that is neither paid nor failed renders as neither, carrying the transaction', async () => {
