@@ -645,8 +645,21 @@ export type ReceiveMessages = {
     unsigned: string;
     tryAgain: string;
 
-    /** The code is up. `settlesAs` states what the customer's wallet will actually move. */
-    settlesAs: (amount: string) => string;
+    /** The code is up. `settlesAs` states what the SHOP receives beside what the customer pays —
+     *  two different numbers since 2026-09-12, because the shop absorbs the ledger fee, and a
+     *  cashier shown only the smaller one would read it as a bug. */
+    settlesAs: (amount: string, price: string) => string;
+    /** The till's own asset, on a relay whose catalog states no ledger fee for it. The shop pays
+     *  that fee out of the price, so there is nothing to subtract and no honest price to quote. */
+    noFeeTitle: string;
+    noFee: (symbol: string, host: string) => string;
+    /** A customer approved this shop to COLLECT rather than sending the money, and this phone is
+     *  spending that allowance. `collecting` is the live line; the three refusals send the cashier
+     *  to three different places, which is why they are three strings and not one. */
+    collecting: string;
+    collectNotApproved: string;
+    collectNoFunds: string;
+    collectFailed: string;
     /** How the customer can pay THIS code. `tap` = the reader is armed; `expired` = the tap
      *  request's certified expiry has passed while the code itself is still payable (it scans for
      *  the rest of its hour); `none` = this phone could not build a tap request at all. */
@@ -790,7 +803,18 @@ export const receiveEn: ReceiveMessages = {
       'This phone could not sign the charge, so nothing was rung up and nothing is payable. Close and reopen dpay, then ring up again.',
     tryAgain: 'Ring up again',
 
-    settlesAs: amount => `${amount} on the Internet Computer`,
+    settlesAs: (amount, price) =>
+      `You receive ${amount} on the Internet Computer. The ledger fee is yours, so the customer pays exactly ${price}.`,
+    collecting: 'Collecting the customer’s approved payment…',
+    collectNotApproved:
+      'The customer’s wallet did not approve enough for this charge, or the approval has run out. Ask them to pay the code again — nothing has been taken.',
+    collectNoFunds:
+      'The customer approved this payment but does not have the funds. Nothing has been taken; ask them to top up and pay the code again.',
+    collectFailed:
+      'The customer’s approved payment could not be collected, and nothing has been taken. The code is still payable — ask them to scan it again, or to tap.',
+    noFeeTitle: 'This till cannot price a charge',
+    noFee: (symbol, host) =>
+      `The shop pays the ledger fee out of the price, and this wallet has no fee for ${symbol} — so a charge here would quietly bill the customer for it. Nothing is payable. Update dpay, or tell whoever runs ${host} that its currency list is missing the ${symbol} fee.`,
     showToCustomer: nfc =>
       nfc === 'tap'
         ? 'Show this to the customer — any phone camera opens it, and a dpay phone can tap it too.'

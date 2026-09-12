@@ -321,7 +321,18 @@ export const receiveEs: ReceiveMessages = {
       'Este teléfono no pudo firmar el importe, así que no se abrió nada y no hay nada que pagar. Cierra dpay, ábrelo otra vez y vuelve a cobrar.',
     tryAgain: 'Volver a cobrar',
 
-    settlesAs: amount => `${amount} en Internet Computer`,
+    settlesAs: (amount, price) =>
+      `Usted recibe ${amount} en Internet Computer. La comisión del libro mayor corre de su cuenta, así que el cliente paga exactamente ${price}.`,
+    collecting: 'Cobrando el pago autorizado por el cliente…',
+    collectNotApproved:
+      'La cartera del cliente no autorizó lo suficiente para este importe, o la autorización ha caducado. Pídale que vuelva a pagar el código: no se ha cobrado nada.',
+    collectNoFunds:
+      'El cliente autorizó el pago pero no tiene saldo. No se ha cobrado nada; pídale que recargue y vuelva a pagar el código.',
+    collectFailed:
+      'No se pudo cobrar el pago autorizado, y no se ha cobrado nada. El código sigue siendo pagable: pídale al cliente que lo escanee otra vez, o que pague por contacto.',
+    noFeeTitle: 'Esta caja no puede fijar un importe',
+    noFee: (symbol, host) =>
+      `La comisión del libro mayor la paga el comercio y se descuenta del precio, pero esta aplicación no conoce ninguna comisión para ${symbol}: un cobro se la cargaría al cliente en silencio. No hay nada que pagar. Actualice dpay, o avise a quien gestiona ${host} de que a su lista de monedas le falta la comisión de ${symbol}.`,
     showToCustomer: nfc =>
       nfc === 'tap'
         ? 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre, y un teléfono dpay también puede acercarlo.'

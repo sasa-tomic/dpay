@@ -87,6 +87,20 @@
 
 ## NEXT SESSION — work order
 
+**0. The payee pays the ledger fee — everywhere, not just at the till [value 8, effort M].** Founder
+rule, 2026-09-12: *"if price of something is $1, then customer should pay exactly $1… The merchant
+pays the fees. This is standard practice and we should follow it."* **DONE for the till** (the
+amendment in
+[`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md);
+mechanism `LEDGER_FEE_RAW`, `crates/dpay-relay/src/till.rs`; flows 114 + 117 prove a customer's
+account moves by exactly the price on both scan and tap). **OPEN for every other payee-quoted
+amount**, where the payer is still silently charged the price PLUS the fee: the Receive-tab request
+QR, the `…/wallet/pay/…` payment link's `amount=`, and the NFC request the request screen arms.
+Each is a different wire with its own goldens, which is why it was not bundled into the till change.
+The rule to apply is the same one, and the open question the founder should settle with it is
+whether a person-to-person request is a *price* at all — asking a friend for CHF 10 and receiving
+CHF 9.9999 may be the wrong default even though asking a customer for CHF 10 is not.
+
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
 

@@ -53,7 +53,7 @@ jest.mock('../components/NfcTap', () => ({
 }));
 
 import {TillCharge} from '../components/TillCharge';
-import {openTillCharge, tillChargeStatus, cancelTillCharge, type TillStatus} from '../services/till';
+import {openTillCharge, tillChargeStatus, cancelTillCharge, tillRawUnits, type TillStatus} from '../services/till';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 import {NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET} from '../config/constants';
@@ -82,8 +82,17 @@ const SOL = assetOf(a => a.protocol === 'solana' && a.token === 'SOL');
  *  the wire's nonce field holds. A tap request built with anything else credits nothing. */
 const REFERENCE = '19ff3250469370d21a04c100ad5ab8bb';
 const CHARGE = {id: 'pl_ecd765908f264957', cents: '1050', qr: 'https://till.example/pl/?lightning=LNURL1XYZ', reference: REFERENCE, createdSecs: 1_788_479_954, expiresAt: 1_788_483_554};
-/** 1050 rappen at VCHF's eight decimals — what the customer's wallet actually moves. */
-const PAY_RAW = '1050000000';
+/** VCHF's ledger fee, from the same catalog row the counter reads — the fee the SHOP absorbs. */
+const VCHF_FEE_RAW = (() => {
+  const row = CATALOG.find(c => c.currency === 7);
+  if (row?.fee == null) throw new Error('the bundled catalog must state VCHF’s ledger fee');
+  return row.fee;
+})();
+
+/** What the SHOP receives for a CHF 10.50 charge: 1050 rappen at VCHF's eight decimals, less the
+ *  ledger fee. The customer's wallet moves this PLUS that fee — i.e. exactly CHF 10.50, which is
+ *  the whole point of the subtraction (`tillRawUnits`, services/till.ts). */
+const PAY_RAW = tillRawUnits('1050', 8, VCHF_FEE_RAW);
 
 /** A status body as the relay would answer for the charge above. */
 function status(over: Partial<TillStatus> = {}): TillStatus {
@@ -118,6 +127,7 @@ function mount(
   asset: SelectableAsset,
   onSelectAsset: (id: AssetId) => void = () => {},
   nfcStatus: NfcStatus = 'ready',
+  catalog: CurrencyDescriptor[] = CATALOG,
 ) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
@@ -127,7 +137,7 @@ function mount(
         relayUrl={RELAY}
         asset={asset}
         assets={ASSETS}
-        catalog={CATALOG}
+        catalog={catalog}
         nfcStatus={nfcStatus}
         onSelectAsset={onSelectAsset}
       />,
@@ -203,14 +213,36 @@ describe('which asset may ring up a till charge', () => {
 });
 
 describe('ringing up', () => {
+  test('closes the counter when the catalog states no fee, rather than billing the customer for it', async () => {
+    // The shop pays the ledger fee out of the price. A row that states no fee leaves nothing to
+    // subtract, and quoting the full price instead would put the fee back on the customer in
+    // silence — the one outcome the rule exists to prevent. So the counter refuses, names the
+    // asset and the relay, and offers no amount field at all.
+    const feeless = CATALOG.map(c => (c.currency === 7 ? {...c, fee: null} : c));
+    const tree = mount(VCHF, () => {}, 'ready', feeless);
+    expect(node(tree, 'till-no-fee')).toBeDefined();
+    expect(node(tree, 'till-amount-input')).toBeUndefined();
+    expect(node(tree, 'btn-till-ring-up')).toBeUndefined();
+    const said = visible(tree);
+    expect(said).toContain('VCHF');
+    expect(said).toContain('till.example'); // the relay whose list is missing it
+    // …and it is NOT the wrong-asset refusal, which would send the cashier to switch to the asset
+    // they are already on.
+    expect(node(tree, 'till-refused')).toBeUndefined();
+    expect(openTillCharge).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
   test('sends the exact whole rappen at the asset’s own precision, and shows the code', async () => {
     const tree = mount(VCHF);
     await ringUp(tree);
-    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals);
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW);
     expect(node(tree, 'till-qr')).toBeDefined();
     const said = visible(tree);
     expect(said).toContain('10.50 CHF');       // the price the cashier reads out
-    expect(said).toContain('10.50 VCHF');      // what the customer's wallet will actually move
+    // The SHOP's side of the same sale: the price less the ledger fee it absorbs. Both numbers are
+    // on screen on purpose — a cashier shown only the smaller one would read it as a misprice.
+    expect(said).toContain('10.4999 VCHF');
     expect(said).toContain(M.receive.till.waiting);
     // Nothing on this screen may suggest the customer has scanned or is even present.
     expect(said).not.toContain('scanned');

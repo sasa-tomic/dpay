@@ -68,17 +68,33 @@ use serde::{Deserialize, Serialize};
 use crate::ledger::TxnRecord;
 use crate::now_secs;
 
-/// VCHF's decimals — the raw units a `1.` on the wire means, and the scale `RAW_PER_CENT` below is
-/// derived from. It exists to be ASSERTED rather than used: the drift alarm in this module's tests
-/// checks it against the compiled catalog, so a catalog row that moved to another precision fails
-/// the build instead of silently re-pricing every charge this till quotes.
-#[cfg(test)]
+/// VCHF's decimals — the raw units a `1.` on the wire means, the scale `RAW_PER_CENT` below is
+/// derived from, and the precision [`Charge::amount_text`] spells a settlement amount at. The drift
+/// alarm in this module's tests checks it against the compiled catalog, so a catalog row that moved
+/// to another precision fails the build instead of silently re-pricing every charge this till
+/// quotes.
 const VCHF_DECIMALS: u32 = 8;
 
 /// Raw VCHF units per CHF cent: `10^8 / 100`. Integer arithmetic end to end — a price that passed
 /// through an `f64` is a price that can be wrong in the last digit, and the last digit of money is
 /// the one people notice.
 const RAW_PER_CENT: u64 = 1_000_000;
+
+/// THE VCHF LEDGER'S OWN TRANSFER FEE, and the shop's to pay — not the customer's.
+///
+/// A price is a price: ring up CHF 1.00 and the customer's account must go down by CHF 1.00, not by
+/// CHF 1.0001. That is how every card terminal in the world behaves and it is now how this till
+/// behaves (founder, 2026-09-12). An ICRC ledger gives exactly one lever for it, because the
+/// protocol ALWAYS debits the fee from the sender on top of the amount and has no way to charge the
+/// recipient: quote the price MINUS the fee as the settlement amount. The payer's wallet then
+/// debits `(price - fee) + fee` — the price, exactly — and the shop receives the rest, which is the
+/// shop absorbing the fee. It also means the amount on the wire can never again equal the price,
+/// which is why [`Charge::amount_text`] formats raw units rather than cents.
+///
+/// Pinned against the compiled catalog's VCHF row by this module's own drift test, for the same
+/// reason [`RAW_PER_CENT`] is: a fee that moved under us would silently overcharge or undercharge
+/// every sale by the difference.
+const LEDGER_FEE_RAW: u64 = 10_000;
 
 /// How long a quote is good for. Matched to the measured provider (300 s) so a wallet written
 /// against DFX meets the timing it already expects. It costs us nothing to honour — the price is
@@ -263,28 +279,54 @@ pub enum ChargeState {
     Expired,
 }
 
+/// A raw VCHF amount as this provider spells a decimal on the wire — the measured provider's own
+/// rule, applied to raw units: trailing zeros trimmed, and the point kept even when nothing is left
+/// after it (`1.` for one whole token). That bare trailing point is the spelling naive decimal
+/// parsers reject and dpay's own accepts, so it is reproduced rather than tidied away.
+///
+/// Pure and separate from [`Charge::amount_text`] so the spelling can be tested across its whole
+/// input domain — including the whole-token case, which a fee-netted price can no longer reach but
+/// which is still the rule, and would be reachable again the day the fee is zero.
+fn raw_decimal(raw: u64) -> String {
+    let scale = 10u64.pow(VCHF_DECIMALS);
+    let frac = format!("{:0width$}", raw % scale, width = VCHF_DECIMALS as usize);
+    format!("{}.{}", raw / scale, frac.trim_end_matches('0'))
+}
+
 impl Charge {
-    /// The exact raw VCHF the payer must transfer. 1:1 with CHF, in integers. `saturating_mul`
-    /// cannot bind: [`MAX_CENTS`] is refused at the door, and it is a saturation rather than a
-    /// panic only so this stays total for a caller holding a charge from anywhere.
+    /// The exact raw VCHF the payer must transfer — the price, LESS the ledger fee the payer's own
+    /// transfer will cost, so that what leaves the customer's account is the price and nothing
+    /// more. The whole reasoning is [`LEDGER_FEE_RAW`]; the arithmetic is here because this is the
+    /// ONE place the settlement amount exists (the wire quotes it, the payer sends it, and
+    /// [`match_payment`] credits nothing else).
+    ///
+    /// Neither saturation can bind, and both are saturations rather than panics only so this stays
+    /// total for a caller holding a charge from anywhere: [`MAX_CENTS`] is refused at the door, and
+    /// the smallest price this till can ring up is one rappen — [`RAW_PER_CENT`] raw units, a
+    /// hundred times the fee.
     pub fn amount_raw(&self) -> u64 {
-        self.cents.saturating_mul(RAW_PER_CENT)
+        self.cents
+            .saturating_mul(RAW_PER_CENT)
+            .saturating_sub(LEDGER_FEE_RAW)
     }
 
-    /// The price as the wire spells a decimal: `10.` for CHF 10, `10.5` for CHF 10.50. Trailing
-    /// zeros are trimmed because the measured provider trims them (`1.` for one franc), and a
-    /// wallet written against it must meet the spelling it already parses — including the bare
-    /// trailing point, which is the spelling naive decimal parsers reject and dpay's own does not.
+    /// The settlement amount as the wire spells a decimal: `0.9999` for CHF 1, `9.9999` for CHF 10.
+    /// Trailing zeros are trimmed because the measured provider trims them (`1.` for one franc),
+    /// and a wallet written against it must meet the spelling it already parses — including the
+    /// bare trailing point, which is the spelling naive decimal parsers reject and dpay's own does
+    /// not. That bare-point case is unreachable while the fee is subtracted (a whole number of
+    /// francs stops being a whole number of tokens), but the spelling is the provider's and this is
+    /// the function that owns it, so it is stated once here rather than left to a future fee of 0.
+    ///
+    /// Built from [`Charge::amount_raw`] rather than from cents: the two must agree to the last
+    /// digit — a wallet reads this string and [`match_payment`] compares that integer — and the
+    /// only way to guarantee that is to have one of them derive the other.
     ///
     /// This is the ASSET amount, and it is machine-read. What a human reads is
-    /// [`Charge::price_text`] — the same money, a different audience, which is why there are two.
+    /// [`Charge::price_text`] — a DIFFERENT number now as well as a different audience, because the
+    /// customer is asked for the price and the shop receives the price less the fee.
     pub fn amount_text(&self) -> String {
-        let whole = self.cents / 100;
-        match self.cents % 100 {
-            0 => format!("{whole}."),
-            r if r % 10 == 0 => format!("{whole}.{}", r / 10),
-            r => format!("{whole}.{r:02}"),
-        }
+        raw_decimal(self.amount_raw())
     }
 
     /// The price as a person writes a franc: `10`, `10.50`, `10.05`. Never the wire's bare
@@ -1029,6 +1071,23 @@ mod tests {
         row_memo(to, amount, ts, block, REF)
     }
 
+    /// The transfer that PAYS a charge of `cents` — the settlement amount that charge quotes,
+    /// asked of the production rule rather than hand-typed, because a payer reads the quote and
+    /// sends exactly it. A literal here would be a fixture describing a payment nobody would make,
+    /// and it would go stale the moment the fee it nets off moved. The rule's own arithmetic is
+    /// pinned against literals once, in `a_charge_is_priced_one_to_one_with_the_franc_in_integers`.
+    fn paying_row(to: &str, cents: u64, ts: u64, block: u64) -> TxnRecord {
+        row_memo(to, charge(cents, 0).amount_raw(), ts, block, REF)
+    }
+
+    /// A transfer of exactly the right SIZE for a charge of `cents`, carrying whatever memo the
+    /// caller names — the shape every "right money, wrong sale" test needs, and the reason the
+    /// amount must not be a literal there either: a fixture that pays the wrong amount would be
+    /// refused for the wrong reason and prove nothing about the memo.
+    fn paying_row_memo(to: &str, cents: u64, ts: u64, block: u64, memo: &str) -> TxnRecord {
+        row_memo(to, charge(cents, 0).amount_raw(), ts, block, memo)
+    }
+
     /// The same row with an explicit memo — a transfer nobody's step 3 asked for.
     fn row_memo(to: &str, amount: u64, ts: u64, block: u64, memo: &str) -> TxnRecord {
         TxnRecord {
@@ -1053,29 +1112,69 @@ mod tests {
     #[test]
     fn a_charge_is_priced_one_to_one_with_the_franc_in_integers() {
         // The entire reason v1 is VCHF-only: there is no rate here, so there is nothing to be wrong
-        // about. CHF 10 is ten francs of a franc-denominated token, exactly, forever.
-        assert_eq!(charge(1_000, 0).amount_raw(), 1_000_000_000);
-        assert_eq!(charge(1, 0).amount_raw(), 1_000_000);
+        // about. CHF 10 is ten francs of a franc-denominated token, exactly, forever — less the fee
+        // the SHOP absorbs so the customer's account moves by the price and nothing else
+        // (`LEDGER_FEE_RAW`).
+        assert_eq!(charge(1_000, 0).amount_raw(), 1_000_000_000 - 10_000);
+        assert_eq!(charge(1, 0).amount_raw(), 1_000_000 - 10_000);
         // …and never through a float: a price that visits f64 can be wrong in the last digit, which
         // is the digit a customer notices.
         assert_eq!(
             charge(u64::from(u32::MAX), 0).amount_raw(),
-            4_294_967_295 * RAW_PER_CENT
+            4_294_967_295 * RAW_PER_CENT - LEDGER_FEE_RAW
         );
         // The largest charge the door admits still multiplies exactly — which is what the door's
         // bound is for: past it the arithmetic would saturate and the till would quote a lie.
-        assert_eq!(charge(MAX_CENTS, 0).amount_raw(), MAX_CENTS * RAW_PER_CENT);
+        assert_eq!(
+            charge(MAX_CENTS, 0).amount_raw(),
+            MAX_CENTS * RAW_PER_CENT - LEDGER_FEE_RAW
+        );
+    }
+
+    /// WHAT THE CUSTOMER PAYS IS THE PRICE — the property the fee subtraction exists for, stated as
+    /// the customer's bank statement rather than as the arithmetic that produces it.
+    ///
+    /// An ICRC ledger debits the sender `amount + fee` and credits the recipient `amount`. So for
+    /// every price this till can ring up, the debit must be the price exactly, and the shop must be
+    /// the one out of pocket by the fee.
+    #[test]
+    fn the_customer_is_debited_the_price_and_the_shop_pays_the_fee() {
+        for cents in [1u64, 5, 99, 100, 250, 1_000, 99_999, MAX_CENTS] {
+            let c = charge(cents, 0);
+            let price_raw = cents * RAW_PER_CENT;
+            assert_eq!(
+                c.amount_raw() + LEDGER_FEE_RAW,
+                price_raw,
+                "CHF {cents} cents: the customer's ledger debit must be the price"
+            );
+            assert_eq!(
+                price_raw - c.amount_raw(),
+                LEDGER_FEE_RAW,
+                "CHF {cents} cents: the shop is the one short by the fee"
+            );
+            // A rappen is a hundred times the fee, so nothing the door admits can price at or below
+            // it — the subtraction never saturates into a free or unpayable charge.
+            assert!(c.amount_raw() > 0, "CHF {cents} cents priced at nothing");
+        }
     }
 
     #[test]
     fn the_amount_is_spelled_the_way_the_measured_provider_spells_it() {
-        // Including the bare trailing point — the spelling naive decimal parsers reject, which is
-        // exactly why a wallet written against the real provider must meet it here too.
-        assert_eq!(charge(100, 0).amount_text(), "1.");
-        assert_eq!(charge(1_000, 0).amount_text(), "10.");
-        assert_eq!(charge(1_050, 0).amount_text(), "10.5");
-        assert_eq!(charge(1_005, 0).amount_text(), "10.05");
-        assert_eq!(charge(1_099, 0).amount_text(), "10.99");
+        // Trailing zeros trimmed, exactly as the real provider trims them. Every one of these is
+        // the price less the fee the shop absorbs, which is why none of them is a round franc.
+        assert_eq!(charge(100, 0).amount_text(), "0.9999");
+        assert_eq!(charge(1_000, 0).amount_text(), "9.9999");
+        assert_eq!(charge(1_050, 0).amount_text(), "10.4999");
+        assert_eq!(charge(1_005, 0).amount_text(), "10.0499");
+        assert_eq!(charge(1, 0).amount_text(), "0.0099");
+        // The rest of the spelling rule, on inputs a fee-netted price can no longer reach: a whole
+        // number of tokens keeps the provider's bare trailing point rather than growing a `.0` or
+        // losing the point. Stated here so it stays true the day the subtracted fee is zero.
+        assert_eq!(raw_decimal(1_000_000_000), "10.");
+        assert_eq!(raw_decimal(100_000_000), "1.");
+        assert_eq!(raw_decimal(0), "0.");
+        assert_eq!(raw_decimal(1), "0.00000001");
+        assert_eq!(raw_decimal(150_000_000), "1.5");
     }
 
     #[test]
@@ -1096,12 +1195,13 @@ mod tests {
     #[test]
     fn a_matching_transfer_settles_the_charge_and_names_the_block_that_paid() {
         let c = charge(100, 1_000);
-        let got = match_payment(&c, &[row(MERCHANT, 100_000_000, 1_050, 77)], &unspent());
+        let got = match_payment(&c, &[paying_row(MERCHANT, 100, 1_050, 77)], &unspent());
         assert_eq!(
             got,
             Some(Settled {
                 from: PAYER.into(),
-                amount_raw: "100000000".into(),
+                // What the SHOP was credited: the price less the fee it absorbs.
+                amount_raw: "99990000".into(),
                 at_secs: 1_050,
                 // The merchant's screen can say WHICH transfer paid them, and this store can say
                 // which one is spent. Same fact, one field.
@@ -1114,17 +1214,24 @@ mod tests {
     fn a_transfer_that_is_not_this_sale_never_settles_it() {
         let c = charge(100, 1_000);
         // Wrong amount — an underpayment is not a payment, and an overpayment is not this charge.
+        // Off by ONE raw unit either way, from the amount this charge actually quotes.
         assert_eq!(
-            match_payment(&c, &[row(MERCHANT, 99_999_999, 1_050, 1)], &unspent()),
+            match_payment(&c, &[row(MERCHANT, c.amount_raw() - 1, 1_050, 1)], &unspent()),
             None
         );
         assert_eq!(
-            match_payment(&c, &[row(MERCHANT, 100_000_001, 1_050, 2)], &unspent()),
+            match_payment(&c, &[row(MERCHANT, c.amount_raw() + 1, 1_050, 2)], &unspent()),
+            None
+        );
+        // Including the one an old till would have asked for: a payer who sent the PRICE rather
+        // than the quote has overpaid by the fee this shop absorbs, and that is not this sale.
+        assert_eq!(
+            match_payment(&c, &[row(MERCHANT, 100 * RAW_PER_CENT, 1_050, 3)], &unspent()),
             None
         );
         // Someone else's account: reading a history does not mean everything in it is ours.
         assert_eq!(
-            match_payment(&c, &[row(PAYER, 100_000_000, 1_050, 3)], &unspent()),
+            match_payment(&c, &[paying_row(PAYER, 100, 1_050, 4)], &unspent()),
             None
         );
     }
@@ -1144,7 +1251,7 @@ mod tests {
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 450, 1_000);
         ring_up(&mut s, "pl_b", MERCHANT, [7u8; 32], 450, 1_001);
-        let rows = [row(MERCHANT, 450_000_000, 1_010, 12)];
+        let rows = [paying_row(MERCHANT, 450, 1_010, 12)];
 
         let first = s.settle_from_history("pl_a", &rows).expect("a live charge");
         assert_eq!(
@@ -1157,7 +1264,7 @@ mod tests {
         assert!(s.get("pl_b").expect("still open").paid.is_none());
 
         // A second, distinct transfer pays the second charge — consumption spends rows, not sales.
-        let more = [row(MERCHANT, 450_000_000, 1_011, 13), rows[0].clone()];
+        let more = [paying_row(MERCHANT, 450, 1_011, 13), rows[0].clone()];
         let third = s.settle_from_history("pl_b", &more).expect("a live charge");
         assert_eq!(
             third.map(|p| p.block),
@@ -1177,7 +1284,7 @@ mod tests {
         let c = charge(100, 1_000);
         for stamped in [995u64, 1_000 - 2 * QUOTE_TTL_SECS, 1, 9_999] {
             assert!(
-                match_payment(&c, &[row(MERCHANT, 100_000_000, stamped, 5)], &unspent()).is_some(),
+                match_payment(&c, &[paying_row(MERCHANT, 100, stamped, 5)], &unspent()).is_some(),
                 "a row stamped {stamped} carries this charge's reference and must credit it"
             );
         }
@@ -1212,8 +1319,8 @@ mod tests {
         )
         .expect("many charges per merchant is the store's shape");
         let rows = [
-            row_memo(MERCHANT, 450_000_000, 1_010, 12, &second),
-            row_memo(MERCHANT, 450_000_000, 1_011, 13, &first),
+            paying_row_memo(MERCHANT, 450, 1_010, 12, &second),
+            paying_row_memo(MERCHANT, 450, 1_011, 13, &first),
         ];
         assert_eq!(
             s.settle_from_history("pl_a", &rows)
@@ -1236,7 +1343,7 @@ mod tests {
         assert_eq!(
             match_payment(
                 &c,
-                &[row_memo(MERCHANT, 100_000_000, 1_050, 8, &first)],
+                &[paying_row_memo(MERCHANT, 100, 1_050, 8, &first)],
                 &unspent()
             ),
             None
@@ -1244,7 +1351,7 @@ mod tests {
         assert_eq!(
             match_payment(
                 &c,
-                &[row_memo(MERCHANT, 100_000_000, 1_050, 9, "")],
+                &[paying_row_memo(MERCHANT, 100, 1_050, 9, "")],
                 &unspent()
             ),
             None
@@ -1252,9 +1359,9 @@ mod tests {
         // Casing is not identity: a ledger that renders the memo's hex in capitals still pays.
         assert!(match_payment(
             &c,
-            &[row_memo(
+            &[paying_row_memo(
                 MERCHANT,
-                100_000_000,
+                100,
                 1_050,
                 10,
                 &REF.to_uppercase()
@@ -1271,13 +1378,13 @@ mod tests {
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
         let first = s
-            .settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 10, 1)])
+            .settle_from_history("pl_a", &[paying_row(MERCHANT, 100, 10, 1)])
             .unwrap();
         assert!(first.is_some());
         // A later history that no longer carries that row (a walk that scrolled past it), plus a
         // different transfer of the same size: neither may rewrite the settlement.
         let again = s
-            .settle_from_history("pl_a", &[row(OTHER_MERCHANT, 100_000_000, 99, 2)])
+            .settle_from_history("pl_a", &[paying_row(OTHER_MERCHANT, 100, 99, 2)])
             .unwrap();
         assert_eq!(
             again, first,
@@ -1427,7 +1534,7 @@ mod tests {
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_first", MERCHANT, [7u8; 32], 450, 100);
         ring_up(&mut s, "pl_second", MERCHANT, [7u8; 32], 450, 200);
-        let rows = [row(MERCHANT, 450_000_000, 150, 21)];
+        let rows = [paying_row(MERCHANT, 450, 150, 21)];
 
         let paid = s.settle_from_history("pl_first", &rows).unwrap();
         assert_eq!(
@@ -1446,7 +1553,7 @@ mod tests {
         // ever credit — the payer's money would simply sit on the ledger unclaimed.
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_a", MERCHANT, [7u8; 32], 100, 0);
-        s.settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 10, 31)])
+        s.settle_from_history("pl_a", &[paying_row(MERCHANT, 100, 10, 31)])
             .unwrap();
         assert_eq!(
             s.quote("pl_a", "plq_1".into(), 20),
@@ -1482,7 +1589,7 @@ mod tests {
         ));
 
         // A settled charge is never re-walked at all: settlement is not re-decided.
-        s.settle_from_history("pl_a", &[row(MERCHANT, 100_000_000, 1_010, 41)])
+        s.settle_from_history("pl_a", &[paying_row(MERCHANT, 100, 1_010, 41)])
             .unwrap();
         assert!(matches!(
             s.observe("pl_a", 9_999),
@@ -1526,7 +1633,7 @@ mod tests {
         let mut s = TillStore::default();
         ring_up(&mut s, "pl_paid", MERCHANT, [7u8; 32], 100, 0);
         ring_up(&mut s, "pl_stale", OTHER_MERCHANT, [8u8; 32], 100, 0);
-        s.settle_from_history("pl_paid", &[row(MERCHANT, 100_000_000, 5, 51)])
+        s.settle_from_history("pl_paid", &[paying_row(MERCHANT, 100, 5, 51)])
             .unwrap();
 
         s.sweep(CHARGE_TTL_SECS + 1);
@@ -1896,7 +2003,7 @@ mod tests {
 
         // A CREDITED charge is not cancellable, and the refusal carries the block that paid — a
         // merchant told "cancelled" here would hand over goods they have already been paid for.
-        s.settle_from_history("pl_next", &[row(MERCHANT, 100_000_000, 210, 61)])
+        s.settle_from_history("pl_next", &[paying_row(MERCHANT, 100, 210, 61)])
             .unwrap();
         assert!(matches!(
             s.void(MERCHANT, VoidCause::Cancelled),
@@ -1930,6 +2037,15 @@ mod tests {
             Some(u8::try_from(VCHF_DECIMALS).expect("decimals fit a u8"))
         );
         assert_eq!(10u64.pow(VCHF_DECIMALS) / 100, RAW_PER_CENT);
+        // The fee the SHOP now absorbs. A catalog row whose fee moved would have this till quote a
+        // price-minus-the-wrong-fee, which lands as either a customer overcharged by the difference
+        // or a transfer the ledger refuses for underfunding — silently, on every sale.
+        assert_eq!(
+            row.fee.map(|f| f.0),
+            Some(LEDGER_FEE_RAW),
+            "the till subtracts the VCHF ledger fee from every price; it must be the fee the \
+             catalog serves"
+        );
     }
 }
 

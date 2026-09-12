@@ -328,7 +328,18 @@ export const receiveDe: ReceiveMessages = {
       'Dieses Telefon konnte die Buchung nicht signieren; es wurde nichts gebucht und nichts ist bezahlbar. Schliesse dpay, öffne es neu und buche erneut.',
     tryAgain: 'Erneut buchen',
 
-    settlesAs: amount => `${amount} auf dem Internet Computer`,
+    settlesAs: (amount, price) =>
+      `Sie erhalten ${amount} auf dem Internet Computer. Die Ledger-Gebühr tragen Sie, die Kundschaft zahlt also genau ${price}.`,
+    collecting: 'Die freigegebene Zahlung wird eingezogen …',
+    collectNotApproved:
+      'Die Wallet der Kundschaft hat für diesen Betrag zu wenig freigegeben, oder die Freigabe ist abgelaufen. Bitten Sie sie, den Code noch einmal zu bezahlen — es wurde nichts abgebucht.',
+    collectNoFunds:
+      'Die Kundschaft hat die Zahlung freigegeben, hat aber nicht genug Guthaben. Es wurde nichts abgebucht; bitten Sie sie, aufzuladen und den Code erneut zu bezahlen.',
+    collectFailed:
+      'Die freigegebene Zahlung konnte nicht eingezogen werden, und es wurde nichts abgebucht. Der Code ist weiterhin zahlbar — bitten Sie die Kundschaft, ihn erneut zu scannen oder zu tappen.',
+    noFeeTitle: 'Diese Kasse kann keinen Betrag berechnen',
+    noFee: (symbol, host) =>
+      `Die Ledger-Gebühr trägt das Geschäft und wird vom Preis abgezogen — für ${symbol} kennt diese App aber keine Gebühr, ein Betrag würde sie also still der Kundschaft berechnen. Es ist nichts zahlbar. Aktualisieren Sie dpay, oder melden Sie der Betreiberin von ${host}, dass in der Währungsliste die ${symbol}-Gebühr fehlt.`,
     showToCustomer: nfc =>
       nfc === 'tap'
         ? 'Zeig das der Kundschaft — jede Handykamera öffnet es, und ein dpay-Handy kann es auch auflegen.'

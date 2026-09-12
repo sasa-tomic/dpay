@@ -42,8 +42,12 @@ import {
 
 const VCHF = 7;                 // the ONE asset a dpay till takes
 const FEE = 10_000;             // the VCHF catalog fee, charged to the SENDER
-const PRICE = '4.50';           // what the cashier types
-const PAY_RAW = 450_000_000;    // 450 rappen × 10^(8−2) — the integer the till means by "4.5"
+const PRICE = '4.50';           // what the cashier types, and what the customer's account must move by
+const PRICE_RAW = 450_000_000;  // 450 rappen × 10^(8−2) — the price, in raw VCHF
+// The SETTLEMENT amount: the price less the ledger fee the shop absorbs. A TAP must ask for this
+// and not the price, or the two channels would charge the same customer two different totals for
+// the same sale (`LEDGER_FEE_RAW`, crates/dpay-relay/src/till.rs).
+const PAY_RAW = PRICE_RAW - FEE;
 const PAYER_SEED = 2_000_000_000;
 
 export const meta = {
@@ -161,7 +165,7 @@ export async function run() {
     const armedHex = await until('reader mode arming', () => driver.eval(() => window.__DPAY_TEST_NFC_READER_REQUEST ?? null));
     const req = decodeRequest(b64urlEncode(Uint8Array.from(Buffer.from(armedHex, 'hex'))));
     assertEq(req.toHex, merchant.publicHex, 'the tap request is payable to the SHOP’s own account');
-    assertEq(String(req.amount), String(PAY_RAW), 'the tap request asks for the exact raw VCHF the charge is priced at');
+    assertEq(String(req.amount), String(PAY_RAW), 'the tap asks for what the SCAN asks for: the price less the fee the shop absorbs');
     assertEq(req.currency, VCHF, 'a till charge settles in VCHF and nothing else');
     // THE MISSING LINK, asserted: the request's nonce IS the charge's reference, so the memo the
     // payer's transfer will carry is the value the relay credits this sale on.
@@ -222,7 +226,9 @@ export async function run() {
 
     // …and the money really moved, exactly once.
     assertEq(String(await getBalance(relayBaseURL, merchant.publicHex, VCHF)), String(PAY_RAW), 'the shop was credited the exact VCHF');
-    assertEq(String(await getBalance(relayBaseURL, payer.publicHex, VCHF)), String(PAYER_SEED - PAY_RAW - FEE), 'the customer paid the amount and the ledger fee');
+    // THE FOUNDER'S RULE, over the radio: tapping a CHF 4.50 charge moved the customer's account
+    // by exactly CHF 4.50, the same as scanning it would have.
+    assertEq(String(await getBalance(relayBaseURL, payer.publicHex, VCHF)), String(PAYER_SEED - PRICE_RAW), 'the customer was debited the price and not one unit more');
 
     // --- the counter's own light is the RELAY's answer, not the tap's ------------------------------
     // Dismissing the tap screen reveals the till's verdict underneath it. Nothing about the tap set

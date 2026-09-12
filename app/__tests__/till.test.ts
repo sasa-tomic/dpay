@@ -42,6 +42,7 @@ jest.mock('../services/native', () => ({
 import {
   TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillRawUnits,
 } from '../services/till';
+import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {Identity} from '../lib/types';
 import {applyFormatLocale} from '../i18n/intl';
 
@@ -58,6 +59,17 @@ const GOLDEN = JSON.parse(
 /** VCHF's precision — read from the wallet's own catalog rather than typed here, because the whole
  *  point of `tillRawUnits` is that it converts at the ASSET's scale. */
 const VCHF_DECIMALS = 8;
+
+/** VCHF's LEDGER FEE, the one the shop absorbs so a customer's account moves by the price exactly
+ *  (`tillRawUnits`). Taken from the wallet's own bundled catalog row rather than typed as a
+ *  literal: the relay subtracts the fee ITS catalog states, and the golden below is that relay's
+ *  real recording — if the two ever disagreed, every assertion here would be checking the app
+ *  against a number the relay never used. */
+const VCHF_FEE_RAW = (() => {
+  const row = icpCatalogOf(BUNDLED_NETWORKS).find(c => c.currency === 7);
+  if (row?.fee == null) throw new Error('the bundled catalog must state VCHF’s ledger fee');
+  return row.fee;
+})();
 
 const MERCHANT: Identity = {secretHex: '0b'.repeat(32), publicHex: '66'.repeat(32), username: 'Bahnhof Kiosk'};
 const RELAY = 'https://till.example';
@@ -160,25 +172,48 @@ describe('a franc price, in integers', () => {
   test('converts to the raw ledger units the relay itself says it means', () => {
     // THE MONEY ASSERTION, pinned to the relay's own recording: its `cents` and the raw units its
     // decimal amount denotes are both in the golden, and this converter must land on that integer.
-    expect(tillRawUnits(String(GOLDEN.input.cents), VCHF_DECIMALS)).toBe(GOLDEN.amount_raw);
-    expect(tillRawUnits('1', VCHF_DECIMALS)).toBe('1000000');
+    expect(tillRawUnits(String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW)).toBe(GOLDEN.amount_raw);
+    expect(tillRawUnits('1', VCHF_DECIMALS, VCHF_FEE_RAW)).toBe('990000');
     // BigInt end to end: a cent count past 2^53 keeps every digit. The same conversion through a
     // float loses the last ones — which is the whole reason raw amounts are strings in this app.
     const huge = '90071992547409919'; // > Number.MAX_SAFE_INTEGER
-    expect(tillRawUnits(huge, VCHF_DECIMALS)).toBe('90071992547409919000000');
+    expect(tillRawUnits(huge, VCHF_DECIMALS, VCHF_FEE_RAW)).toBe('90071992547409918990000');
     expect(String(Number(huge) * 1e6)).not.toBe('90071992547409919000000');
   });
 
   test('refuses an asset too coarse to hold a rappen instead of rounding one away', () => {
-    expect(() => tillRawUnits('1050', 0)).toThrow('cannot express a CHF rappen');
-    expect(() => tillRawUnits('1050', 1)).toThrow('cannot express a CHF rappen');
+    expect(() => tillRawUnits('1050', 0, VCHF_FEE_RAW)).toThrow('cannot express a CHF rappen');
+    expect(() => tillRawUnits('1050', 1, VCHF_FEE_RAW)).toThrow('cannot express a CHF rappen');
+  });
+
+  test('the customer is debited the price and the shop is the one short by the fee', () => {
+    // THE RULE, stated as the customer's bank statement rather than as the arithmetic behind it.
+    // A ledger debits the sender `amount + fee` and credits the recipient `amount`, so quoting the
+    // price less the fee is the only way a CHF 10.50 charge can move exactly CHF 10.50.
+    const fee = BigInt(VCHF_FEE_RAW);
+    for (const cents of ['1', '5', '99', '100', '1050', '99999']) {
+      const settles = BigInt(tillRawUnits(cents, VCHF_DECIMALS, VCHF_FEE_RAW));
+      expect(settles + fee).toBe(BigInt(cents) * 1_000_000n); // what leaves the customer: the price
+      expect(BigInt(cents) * 1_000_000n - settles).toBe(fee); // what the shop gives up: the fee
+    }
+  });
+
+  test('refuses a price the fee would swallow instead of quoting a charge for nothing', () => {
+    // Unreachable on VCHF, whose fee is a hundredth of the smallest price the counter accepts — but
+    // the fee is a catalog value and the smallest price is a rappen, so the day those meet, the
+    // counter must refuse rather than quote a zero or a negative. Asserted with a fee big enough to
+    // make it happen, which is the only way to reach the branch at all.
+    expect(() => tillRawUnits('1', VCHF_DECIMALS, '1000000')).toThrow('does not cover');
+    expect(() => tillRawUnits('1', VCHF_DECIMALS, '9999999')).toThrow('does not cover');
+    // …and one rappen above the fee is still a charge, not a rounding artefact.
+    expect(tillRawUnits('2', VCHF_DECIMALS, '1000000')).toBe('1000000');
   });
 });
 
 describe('ringing up a charge', () => {
   test('signs the price with the merchant’s own seed and returns the relay’s charge', async () => {
     serve(200, GOLDEN.open);
-    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS);
+    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW);
     expect(outcome).toEqual({
       kind: 'open',
       charge: {
@@ -222,17 +257,17 @@ describe('ringing up a charge', () => {
     // Showing it would put a code in front of a customer that charges what nobody at the counter
     // chose — so nothing is shown, and the merchant is told both numbers.
     serve(200, {...GOLDEN.open, amount: '1.'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({kind: 'mispriced', quoted: '1.'});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'mispriced', quoted: '1.'});
   });
 
   test('tells a relay that serves no till apart from a till that refused', async () => {
     // An unregistered route 404s with nothing to say (`DPAY_ENABLE_TILL=false`) — a first-class
     // state with its own instruction. A live till's 404 carries the envelope and a sentence.
     serve(404, null, {unreadable: true});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({kind: 'not-served', addr: RELAY});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'not-served', addr: RELAY});
 
     serve(404, {statusCode: 404, message: 'Payment link not found', error: 'Not Found'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({
       kind: 'refused', said: 'Payment link not found', status: 404,
     });
   });
@@ -240,23 +275,23 @@ describe('ringing up a charge', () => {
   test('carries the till’s own refusal, because it already names the fix', async () => {
     const message = 'issued_at is 400 s from this till\'s clock, which allows ±120 s. Re-sync the device clock, then sign and send again';
     serve(401, {statusCode: 401, message, error: 'Unauthorized'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({kind: 'refused', said: message, status: 401});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'refused', said: message, status: 401});
 
     // A refusal with no sentence in it is still a refusal — never a null message rendered raw.
     serve(429, {statusCode: 429, error: 'Too Many Requests'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS)).toEqual({kind: 'refused', said: null, status: 429});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'refused', said: null, status: 429});
   });
 
   test('never throws at the caller: an unreachable relay is an outcome', async () => {
     serveDead('ECONNREFUSED');
-    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS);
+    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW);
     expect(outcome.kind).toBe('unreachable');
     expect(outcome.kind === 'unreachable' && outcome.detail).toContain('ECONNREFUSED');
   });
 
   test('sends nothing at all when this device cannot sign', async () => {
     serve(200, GOLDEN.open);
-    const outcome = await openTillCharge(RELAY, {...MERCHANT, secretHex: mockBrokenSeed}, '1000', VCHF_DECIMALS);
+    const outcome = await openTillCharge(RELAY, {...MERCHANT, secretHex: mockBrokenSeed}, '1000', VCHF_DECIMALS, VCHF_FEE_RAW);
     expect(outcome.kind).toBe('unsigned');
     // The nonce is single-use and the relay would refuse an unsigned body anyway; issuing the
     // request would burn a round trip and log a merchant's key as having tried to ring up.
@@ -265,7 +300,7 @@ describe('ringing up a charge', () => {
 
   test('answers unreachable rather than inventing a charge from a half-formed body', async () => {
     serve(200, {id: GOLDEN.open.id, amount: '10.'}); // no qr, no reference, no clock
-    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS);
+    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW);
     expect(outcome.kind).toBe('unreachable');
   });
 
@@ -275,7 +310,7 @@ describe('ringing up a charge', () => {
     // match — money moved, sale still open. So the shape is checked, not just the presence.
     for (const reference of ['', 'not-hex', 'ABCDEF0123456789ABCDEF0123456789', '0123456789abcdef']) {
       serve(200, {...GOLDEN.open, reference});
-      expect((await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS)).kind)
+      expect((await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW)).kind)
         .toBe('unreachable');
     }
   });

@@ -157,18 +157,32 @@ export function chfCents(text: string): {ok: true; cents: string} | {ok: false; 
   return {ok: true, cents: parsed.raw};
 }
 
-/** The exact raw ledger units a CHF-cent price means on the till's asset — `cents × 10^(d−2)`,
- *  BigInt only. The till prices 1:1 with the franc (`crates/dpay-relay/src/till.rs`), so this is
- *  the whole conversion; there is no rate anywhere, which is why there is nothing to be wrong
- *  about. Throws on an asset whose precision cannot express a rappen — a wallet that formatted a
- *  price it cannot represent would be printing a lie. */
-export function tillRawUnits(cents: string, decimals: number): string {
+/** The exact raw ledger units a CHF-cent price SETTLES for on the till's asset —
+ *  `cents × 10^(d−2)`, less `feeRaw`, BigInt only.
+ *
+ *  THE FEE IS THE SHOP'S. An ICRC ledger always debits the sender the fee ON TOP of the amount and
+ *  offers no way to charge the recipient, so the only way a customer's account can move by exactly
+ *  the price is for the shop to quote the price minus that fee — which is what a card terminal does
+ *  and what this till does (founder, 2026-09-12). The relay computes the same number from the same
+ *  catalog fee (`Charge::amount_raw`, `crates/dpay-relay/src/till.rs`, which owns the reasoning);
+ *  this is the app's own statement of it, and the two are held together by the ring-up price check
+ *  below — a relay that quoted anything else is refused rather than displayed.
+ *
+ *  The till prices 1:1 with the franc, so there is no rate anywhere and nothing to be wrong about.
+ *  Throws on an asset whose precision cannot express a rappen, and on a fee that would swallow the
+ *  price: a wallet that formatted a charge it cannot represent, or one that asks for nothing, would
+ *  be printing a lie. */
+export function tillRawUnits(cents: string, decimals: number, feeRaw: string): string {
   if (!Number.isInteger(decimals) || decimals < CHF_DECIMALS) {
     throw new Error(`till: an asset with ${decimals} decimals cannot express a CHF rappen`);
   }
   let scale = 1n;
   for (let i = CHF_DECIMALS; i < decimals; i++) scale *= 10n;
-  return (BigInt(cents) * scale).toString(10);
+  const settles = BigInt(cents) * scale - BigInt(feeRaw);
+  if (settles <= 0n) {
+    throw new Error(`till: a ${cents}-rappen price does not cover the ${feeRaw}-unit ledger fee the shop pays`);
+  }
+  return settles.toString(10);
 }
 
 function errText(e: unknown): string {
@@ -344,15 +358,18 @@ async function tillFetch(relayUrl: string, path: string, init: RequestInit, time
 /**
  * `POST /api/v1/till` — ring up a charge on the merchant's own account.
  *
- * `decimals` is the till asset's precision, and it is here for one job: the answer's price is
- * converted back to raw units and checked against the cents that were signed, so a code that would
- * charge a different number than the cashier rang up is refused instead of displayed.
+ * `decimals` and `feeRaw` are the till asset's precision and its ledger's transfer fee, and they
+ * are here for one job: the answer's price is converted back to raw units and checked against what
+ * the cents that were signed SHOULD settle for, so a code that would charge a customer a number
+ * nobody at the counter chose is refused instead of displayed. Both come from the catalog row the
+ * relay itself serves, which is what makes the check meaningful rather than circular.
  */
 export async function openTillCharge(
   relayUrl: string,
   identity: Identity,
   cents: string,
   decimals: number,
+  feeRaw: string,
 ): Promise<TillOpenOutcome> {
   let body: Record<string, unknown>;
   try {
@@ -408,7 +425,7 @@ export async function openTillCharge(
   // units; the cashier rang up cents. The charge is only honest when the two land on the same
   // integer.
   const quoted = parseDecimalToUnits(amount, decimals);
-  if (!quoted.ok || quoted.raw !== tillRawUnits(cents, decimals)) {
+  if (!quoted.ok || quoted.raw !== tillRawUnits(cents, decimals, feeRaw)) {
     console.warn(`till: rang up ${cents} cents, the till answered "${amount}" — refusing to show it`);
     return {kind: 'mispriced', quoted: amount};
   }

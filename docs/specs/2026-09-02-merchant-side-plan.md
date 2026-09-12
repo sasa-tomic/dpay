@@ -87,11 +87,21 @@ The shape, in design voice throughout — no bullet below is a claim about what 
 
 ## Decisions taken 2026-09-03 (founder), and the contract they imply
 
-- **v1 accepts VCHF only, priced 1:1 with CHF.** The merchant enters CHF 10; the payer pays exactly
-  `10.00000000` VCHF. No price feed, no oracle, no rate for dpay to stand behind, and no rounding
-  argument at a checkout — the whole pricing problem is deleted rather than solved. EURC gives the
-  EU the same deal when it lands. Other assets stay out of v1 precisely because they would require
-  quoting a rate.
+- **v1 accepts VCHF only, priced 1:1 with CHF.** The merchant enters CHF 10 and the customer's
+  account goes down by exactly CHF 10. No price feed, no oracle, no rate for dpay to stand behind,
+  and no rounding argument at a checkout — the whole pricing problem is deleted rather than solved.
+  EURC gives the EU the same deal when it lands. Other assets stay out of v1 precisely because they
+  would require quoting a rate.
+  - **AMENDED 2026-09-12 (founder): the SHOP pays the ledger fee, not the customer.** "The payer
+    pays exactly `10.00000000` VCHF" was 1:1 on the transfer and NOT on the customer's statement: an
+    ICRC ledger debits the sender the fee on top of the amount, so a CHF 10 charge was taking CHF
+    10.0001 out of the customer's account. A price is a price, as at every card terminal — so the
+    till now quotes the price MINUS the fee (`9.9999`), the ledger adds the fee back onto the
+    sender, and the customer is debited exactly CHF 10 while the shop receives CHF 9.9999. The
+    mechanism, and why subtraction is the only lever ICRC-2 offers, is `LEDGER_FEE_RAW` in
+    `crates/dpay-relay/src/till.rs`; proven end to end on both channels by e2e flows 114 (scan) and
+    117 (tap). **The same question is open for every OTHER payee-quoted amount in dpay** — payment
+    requests, payment links, NFC requests — and is filed in `OPEN_ISSUES.md`, not decided here.
 - **The provider endpoint is HOSTED ON THE RELAY**, not on the merchant's device. The payer's wallet
   must be able to *reach* the provider over https, and a shop phone behind NAT with no certificate
   cannot be reached — that is the whole reason, and it survives the corrected premise above intact

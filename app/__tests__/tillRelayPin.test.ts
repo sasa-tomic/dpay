@@ -39,6 +39,7 @@ jest.mock('../services/native', () => ({
 
 import {cancelTillCharge, openTillCharge, resetTillRelayPinForTest, tillChargeStatus, tillSessionRelay} from '../services/till';
 import {resetRelayAddressesForTest, setRelayAddresses} from '../services/relayAddresses';
+import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import type {Identity} from '../lib/types';
 
 const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8')) as {
@@ -47,6 +48,16 @@ const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_
   details: {transferAmounts: {method: string; assets: {asset: string}[]}[]};
   callback: {uri: string};
 };
+
+/** VCHF's ledger fee — the one the shop absorbs, so a ring-up's price check knows what the relay
+ *  will have subtracted (`tillRawUnits`). From the wallet's own bundled catalog, the same row the
+ *  counter reads; these tests are about WHICH RELAY is asked, so the number only has to be the
+ *  right one, not a second statement of it. */
+const VCHF_FEE_RAW = (() => {
+  const row = icpCatalogOf(BUNDLED_NETWORKS).find(c => c.currency === 7);
+  if (row?.fee == null) throw new Error('the bundled catalog must state VCHF’s ledger fee');
+  return row.fee;
+})();
 
 const MERCHANT: Identity = {secretHex: '0b'.repeat(32), publicHex: '66'.repeat(32), username: 'Bahnhof Kiosk'};
 const A = 'http://till-a.example';
@@ -117,7 +128,7 @@ describe('the till resolves ONE relay per session (first address that answers OK
       [B]: {'/api/v1/till': {ok: true, status: 200, body: openOk('charge-1')}},
     });
     setRelayAddresses([A, B]);
-    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     expect(outcome.kind).toBe('open');
     expect(tillSessionRelay()).toBe(B);
     expect(requests[0]).toBe(`${A}/api/v1/till`);
@@ -129,7 +140,7 @@ describe('the till resolves ONE relay per session (first address that answers OK
       [B]: {'/api/v1/till': {ok: true, status: 200, body: openOk('charge-2')}},
     });
     setRelayAddresses([A, B]);
-    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     expect(outcome.kind).toBe('open'); // B, FURTHER DOWN, opened it
     expect(tillSessionRelay()).toBe(B); // and B — not the 404 — owns the session
     expect(requests).toEqual([`${A}/api/v1/till`, `${B}/api/v1/till`]);
@@ -140,14 +151,14 @@ describe('the till resolves ONE relay per session (first address that answers OK
       [B]: {'/api/v1/till': 'reject'},
     });
     setRelayAddresses([A, B]);
-    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     expect(outcome.kind).toBe('not-served');
     if (outcome.kind !== 'not-served') return;
     expect(outcome.addr).toBe(A); // the sentence names the relay that actually answered
     expect(tillSessionRelay()).toBeNull(); // a relay that serves no till does not own the session
     // The next charge re-walks: nothing short-circuits it back to A's 404.
     requests.length = 0;
-    const again = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    const again = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     expect(again.kind).toBe('not-served');
     expect(requests[0]).toBe(`${A}/api/v1/till`); // A asked again — the walk retried
   });
@@ -160,13 +171,13 @@ describe('failure attribution — a dead relay is named by who was actually aske
       [B]: {'/api/v1/till': {ok: true, status: 200, body: openOk('charge-5')}},
     });
     setRelayAddresses([A, B]);
-    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8); // pins B
+    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW); // pins B
     expect(tillSessionRelay()).toBe(B);
     requests.length = 0;
     serve({}); // everything is down now — including the pin
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+      const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
       expect(outcome.kind).toBe('unreachable');
       if (outcome.kind !== 'unreachable') return;
       expect(outcome.tried).toEqual([B]); // the pin ALONE — the caller's A was never asked
@@ -190,7 +201,7 @@ describe('the pin holds while the list carries its address, and dies when it doe
       },
     });
     setRelayAddresses([A, B]);
-    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     // The operator REORDERS the list mid-session (B promoted to preferred): the charge still
     // lives on B and B is still a configured address, so the session must not move — even with
     // the caller passing A, a list member, as its own preferred URL.
@@ -214,7 +225,7 @@ describe('the pin holds while the list carries its address, and dies when it doe
       [B]: {'/api/v1/till': {ok: true, status: 200, body: openOk('charge-7')}},
     });
     setRelayAddresses([A, B]);
-    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8); // pins B
+    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW); // pins B
     expect(tillSessionRelay()).toBe(B);
     // The operator re-points the list at [C(dead), D]; B is gone from it.
     setRelayAddresses([C, D]);
@@ -237,7 +248,7 @@ describe('the pin holds while the list carries its address, and dies when it doe
       [B]: {'/api/v1/till': {ok: true, status: 200, body: openOk('charge-8')}},
     });
     setRelayAddresses([A, B]);
-    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8); // pins B
+    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW); // pins B
     // The operator re-points the list at an unreachable address; B is gone from it.
     setRelayAddresses([C]);
     requests.length = 0;
@@ -269,11 +280,11 @@ describe('the pin holds while the list carries its address, and dies when it doe
       [B]: {'/api/v1/till': {ok: true, status: 200, body: openOk('charge-4')}},
     });
     setRelayAddresses([A, B]);
-    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     expect(tillSessionRelay()).toBe(B);
     resetTillRelayPinForTest();
     expect(tillSessionRelay()).toBeNull();
-    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    const outcome = await openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     expect(outcome.kind).toBe('open'); // walked A (dead) → B again
     expect(requests.filter((u) => u === `${A}/api/v1/till`)).toHaveLength(2);
   });
@@ -297,7 +308,7 @@ describe('wave-2 — the pin guard: a stale walk never pins, and void-unreachabl
       [B]: {'/api/v1/till': {ok: true, status: 200, body: openOk('charge-6')}},
     });
     setRelayAddresses([A, B]);
-    const p = openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8);
+    const p = openTillCharge(A, MERCHANT, String(GOLDEN.input.cents), 8, VCHF_FEE_RAW);
     // Park the walk on the hung A FIRST: signedBody is async, so the fetch issues a microtask hop
     // after the call — the revision bump below must land genuinely MID-walk, not before the walk
     // began (a bump before tillFetch captured its revision would guard against itself).

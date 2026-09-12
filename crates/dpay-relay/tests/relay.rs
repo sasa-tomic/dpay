@@ -2996,6 +2996,22 @@ fn charge_reference(opened: &Value) -> String {
     reference
 }
 
+/// The raw VCHF a ring-up asked for, read off the answer's OWN quoted amount — which is what a
+/// payer does: they are told a decimal and they send exactly it. Never a literal in a test, because
+/// the quote is the price less the ledger fee the shop absorbs, and a hand-typed raw amount would
+/// be a fixture describing a payment no wallet would make (and would silently start overpaying by
+/// the fee the day that policy changed). The subtraction rule itself is pinned in `till.rs`.
+fn quoted_raw(opened: &Value) -> u64 {
+    let amount = opened["amount"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a ring-up answer quotes an amount: {opened}"));
+    let (whole, frac) = amount.split_once('.').unwrap_or((amount, ""));
+    assert!(frac.len() <= 8, "VCHF has 8 decimals: {amount}");
+    let padded = format!("{frac:0<8}");
+    whole.parse::<u64>().expect("a decimal amount") * 100_000_000
+        + padded.parse::<u64>().expect("a decimal fraction")
+}
+
 /// Pay a charge the way a payer does: a REAL signed `icrc1_transfer` on the VCHF ledger to the
 /// merchant's own account, carrying the charge's `ref` as the ICRC-1 memo. Returns the ledger block
 /// it landed in — the identity a settlement names, so a caller can assert WHICH transfer credited.
@@ -3110,8 +3126,10 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
         id.starts_with("pl_"),
         "the link id is the standard's shape: {id}"
     );
-    // CHF 10 is ten francs of a franc-denominated token. No rate anywhere.
-    assert_eq!(opened["amount"], "10.");
+    // CHF 10 is ten francs of a franc-denominated token. No rate anywhere — and the settlement
+    // amount is that price LESS the ledger fee the shop absorbs, so the customer's account moves
+    // by exactly CHF 10.00 (`LEDGER_FEE_RAW`, till.rs).
+    assert_eq!(opened["amount"], "9.9999");
     assert_eq!(opened["asset"], "VCHF");
     assert_eq!(opened["merchant"], merchant_account);
     assert_eq!(opened["url"], format!("http://till.example/v1/lnurlp/{id}"));
@@ -3135,13 +3153,17 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     );
     // The asymmetry the measured provider has and every parser must handle: the fiat ask is a JSON
     // NUMBER while the per-asset amount is a decimal STRING, trailing bare point and all.
+    // THE TWO NUMBERS A CUSTOMER'S WALLET IS GIVEN, and they are deliberately different: the ask
+    // is the PRICE (CHF 10.00 — what the customer agreed to) and the transfer is the price less
+    // the ledger fee, so that `amount + fee`, which is what their ledger debits them, IS the price.
+    // The shop is the one short by the fee. `LEDGER_FEE_RAW` in till.rs owns the reasoning.
     assert_eq!(details["requestedAmount"]["asset"], "CHF");
     assert_eq!(details["requestedAmount"]["amount"], 10.0);
     let offers = &details["transferAmounts"][0];
     assert_eq!(offers["method"], "InternetComputer");
     assert_eq!(offers["available"], true);
     assert_eq!(offers["assets"][0]["asset"], "VCHF");
-    assert_eq!(offers["assets"][0]["amount"], "10.");
+    assert_eq!(offers["assets"][0]["amount"], "9.9999");
     let quote = details["quote"]["id"].as_str().unwrap().to_string();
     // One accepted expiry spelling — ISO-8601 UTC with the Z. A local-time spelling would be read
     // as device-local by a lenient wallet: up to 14 hours of skew on a 300-second quote.
@@ -3161,8 +3183,10 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // The LIVE URI shape, naming the ledger EXPLICITLY — which is exactly what the measured
     // provider fails to honour on its own verification side.
     assert!(uri.starts_with("icp:"), "{uri}");
+    // …carrying the SETTLEMENT amount, which is the one the payer signs — never the price. The
+    // wallet was told the price separately, in `requestedAmount` above.
     assert!(
-        uri.contains(&format!("/transfer?to={merchant_account}&amount=10.")),
+        uri.contains(&format!("/transfer?to={merchant_account}&amount=9.9999")),
         "{uri}"
     );
     // …and this charge's own reference, which is what the payer echoes as the transfer's memo and
@@ -3232,13 +3256,13 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // --- the money actually arrives --------------------------------------------------------------
     // A real signed transfer to the merchant's principal on the VCHF ledger, carrying the step-3
     // `ref` as its memo — the exact thing a payer is instructed to send.
-    let paying_block = pay_till(&state, &fake, merchant_pk, 1_000_000_000, &reference).await;
+    let paying_block = pay_till(&state, &fake, merchant_pk, quoted_raw(&opened), &reference).await;
 
     // A same-amount transfer to the same merchant carrying somebody ELSE's reference is not this
     // sale. Sent second, so it is the NEWER row and the first one a newest-first walk meets:
     // matching on amount alone would take it, and this charge would be credited out of a payment
     // made for something else.
-    let stray = pay_till(&state, &fake, merchant_pk, 1_000_000_000, &"9e".repeat(16)).await;
+    let stray = pay_till(&state, &fake, merchant_pk, quoted_raw(&opened), &"9e".repeat(16)).await;
     assert_ne!(stray, paying_block, "two transfers are two ledger rows");
 
     // Waiting out the observation window, which is a real property and not a test convenience: a
@@ -3264,7 +3288,7 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     let (status, body) = call(&state, get_req(&tx)).await;
     assert_eq!(status, StatusCode::OK, "the retry settles: {body}");
     assert_eq!(body["status"], "OK");
-    assert_eq!(body["paid"]["amount_raw"], "1000000000");
+    assert_eq!(body["paid"]["amount_raw"], quoted_raw(&opened).to_string());
     assert_eq!(
         body["paid"]["block"], paying_block,
         "the sale is credited out of the transfer that NAMED it, not the newer look-alike: {body}"
@@ -3279,8 +3303,11 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     // including WHICH ledger row credited them, which is the only thing that makes a settlement
     // checkable against the chain afterwards.
     let (_, merchant_view) = call(&state, get_req(&format!("/api/v1/till/{id}"))).await;
-    assert_eq!(merchant_view["paid"]["amount_raw"], "1000000000");
-    assert_eq!(merchant_view["amount"], "10.");
+    assert_eq!(
+        merchant_view["paid"]["amount_raw"],
+        quoted_raw(&opened).to_string()
+    );
+    assert_eq!(merchant_view["amount"], "9.9999");
     assert_eq!(merchant_view["state"], "paid");
     assert!(
         merchant_view["paid"]["block"].is_u64(),
@@ -3333,7 +3360,7 @@ async fn one_transfer_credits_exactly_one_sale() {
 
     // ONE payment of exactly CHF 4.50 lands at the merchant, carrying the FIRST charge's reference
     // — the code the customer was actually holding when they paid.
-    pay_till(&state, &fake, merchant_pk, 450_000_000, &first_ref).await;
+    pay_till(&state, &fake, merchant_pk, quoted_raw(&first), &first_ref).await;
 
     let status_of = |id: &str| format!("/api/v1/till/{id}");
     let (_, a) = call(&state, get_req(&status_of(first_id))).await;
@@ -3347,7 +3374,7 @@ async fn one_transfer_credits_exactly_one_sale() {
         1,
         "one transfer may credit exactly one sale — first={a}, second={b}"
     );
-    assert_eq!(paid[0]["paid"]["amount_raw"], "450000000");
+    assert_eq!(paid[0]["paid"]["amount_raw"], quoted_raw(&first).to_string());
 
     // Which one takes it is not the order they were polled in: the transfer named the first charge,
     // so the second is left honestly open however hard it is asked. A VOIDED charge is still
@@ -3480,8 +3507,8 @@ async fn till_refuses_what_it_cannot_serve_in_the_measured_provider_s_own_words(
         "a charge of nothing points the cashier at the route that clears the till: {body}"
     );
 
-    // CHF 2.50 keeps its cents on the wire.
-    assert_eq!(opened["amount"], "2.5");
+    // CHF 2.50 keeps its cents on the wire, net of the fee the shop absorbs.
+    assert_eq!(opened["amount"], "2.4999");
 }
 
 /// A ring-up is refused unless the caller can SIGN for the account the money would go to — and a
@@ -3780,7 +3807,7 @@ async fn a_cashier_can_cancel_a_mis_keyed_total() {
         .expect("a rung-up charge carries an id")
         .to_string();
     let paid_ref = charge_reference(&paid);
-    pay_till(&state, &fake, merchant_pk, 100_000_000, &paid_ref).await;
+    pay_till(&state, &fake, merchant_pk, quoted_raw(&paid), &paid_ref).await;
     let (_, settled) = call(&state, get_req(&format!("/api/v1/till/{paid_id}"))).await;
     assert_eq!(settled["state"], "paid", "{settled}");
     let too_late = till_body(&merchant, 0, "Bahnhof Kiosk", fresh_nonce(), unix_secs());

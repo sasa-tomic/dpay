@@ -35,11 +35,14 @@ import { installTillStub, ocpStubState, setOcpTxMode, DPAY_TILL, dpayTillAt } fr
 
 const VCHF = 7;                 // the ONE asset dpay's till takes
 const FEE = 10_000;             // the VCHF catalog fee, charged to the sender (flow 95)
-const PAY_RAW = 1_000_000_000;  // the till's `10.` VCHF in raw units — checked against the golden below
+// What the payer signs, and what the SHOP receives: a CHF 10.00 charge less the ledger fee the
+// shop absorbs, so the payer's account moves by exactly CHF 10.00 (`LEDGER_FEE_RAW`, till.rs).
+// Checked against the golden below, which is the relay's own recording of that arithmetic.
+const PAY_RAW = 999_990_000;
 const SEED = 2_000_020_001;     // 20.00020001 VCHF: two payments + two fees, with an odd tail so the
                                 // header's balance can never match a prefix of another number
 const SEED_TEXT = '20.00020001 VCHF';
-const PAY_TEXT = '10.00000000 VCHF'; // the review/paid rendering: exact, padded to VCHF's 8 decimals
+const PAY_TEXT = '9.99990000 VCHF'; // the review/paid rendering: exact, padded to VCHF's 8 decimals
 
 export const meta = {
   id: '113',

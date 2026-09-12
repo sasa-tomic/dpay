@@ -23,7 +23,7 @@ import {BUNDLED_NETWORKS, icpCatalogOf, ledgerToCurrency} from '../config/catalo
 const GOLDEN = JSON.parse(readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8')) as {
   input: {merchant_name: string; host: string};
   amount_raw: string;
-  open: {id: string; merchant: string; url: string; lnurl: string; qr: string; reference: string; created_secs: number; expires_at: number};
+  open: {id: string; merchant: string; url: string; lnurl: string; qr: string; amount: string; reference: string; created_secs: number; expires_at: number};
   details: Record<string, unknown>;
   callback: {blockchain: string; expiryDate: string; uri: string};
 };
@@ -92,13 +92,17 @@ describe('the dpay till’s wire, read by the dpay payer', () => {
     expect(d.proofHost).toBe(GOLDEN.input.host);
     expect(d.quoteId).toBe((GOLDEN.details.quote as {id: string}).id);
     expect(d.claimedMerchantName).toBe(GOLDEN.input.merchant_name);
-    // The till prices in francs and settles in VCHF. Both spellings survive the parse: the fiat ask
-    // as a JSON number turned into an exact decimal string, the settlement amount as sent —
-    // trailing bare point and all, which is the spelling naive decimal parsers turn into zero.
+    // The till prices in francs and settles in VCHF, and the two are DIFFERENT numbers: the fiat
+    // ask is the price the customer agreed to, while the settlement amount is that price less the
+    // ledger fee the shop absorbs, so the customer's account moves by exactly CHF 10.00. Both
+    // spellings survive the parse — the ask as a JSON number turned into an exact decimal string,
+    // the settlement amount exactly as sent. Read from the golden rather than retyped: the relay
+    // that recorded it is the one that owns the subtraction.
     expect(d.requestedAmount).toEqual({asset: 'CHF', amount: '10'});
     expect(d.transferAmounts).toEqual([
-      {method: 'InternetComputer', available: true, assets: [{asset: 'VCHF', amount: '10.'}]},
+      {method: 'InternetComputer', available: true, assets: [{asset: 'VCHF', amount: GOLDEN.open.amount}]},
     ]);
+    expect(GOLDEN.open.amount).toBe('9.9999');
     // The deadline is read as the exact UTC instant the relay wrote, not as device-local time. The
     // round trip proves both halves: the relay's spelling is one this reader accepts, and the
     // instant it accepts is the one the relay meant.

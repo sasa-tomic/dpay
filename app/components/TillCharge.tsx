@@ -146,7 +146,13 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   // nothing new — it is what tells TYPESCRIPT this is the row that carries a `currency`, which is
   // the field a tap request has to name.
   const tillRow = asset !== null && asset.protocol === 'ic' && offerNamesAsset(TILL_OFFER, asset) ? asset : null;
-  const payable = tillRow !== null;
+  // The LEDGER's transfer fee for that row, read from the catalog the relay itself serves — the
+  // fee the SHOP absorbs, so a customer's account moves by the price and nothing more
+  // (`tillRawUnits`, `services/till.ts`). A row that states no fee cannot be priced honestly here:
+  // quoting the full price would silently charge the customer the fee on top, which is the exact
+  // thing this is for, so the counter refuses instead (`payable` below).
+  const tillFeeRaw = catalog.find(c => tillRow !== null && c.currency === tillRow.currency)?.fee ?? null;
+  const payable = tillRow !== null && tillFeeRaw !== null;
 
   // Reported to the parent through the SAME hook every other engine reports its selection lock
   // with: the contract is identical (report each change, reset on unmount, parent's setter is a
@@ -214,9 +220,11 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
    *  `prepareNfcTransfer` writes the request's nonce onto the payer's transfer as its ICRC-1 memo,
    *  and the relay credits only a transfer whose memo is this charge's reference. A tap built with
    *  a nonce of this wallet's own would move the customer's money and leave the sale open. */
-  async function armReader(charge: Charge, row: Extract<SelectableAsset, {protocol: 'ic'}>): Promise<Tap | null> {
+  async function armReader(charge: Charge, row: Extract<SelectableAsset, {protocol: 'ic'}>, feeRaw: string): Promise<Tap | null> {
     if (!nfcReady || !DpayNfc) return null;
-    const amountRaw = tillRawUnits(charge.cents, row.decimals);
+    // THE SETTLEMENT AMOUNT, not the price — the same number the QR quotes, so a tap and a scan
+    // pay the identical sale and the shop absorbs the fee either way.
+    const amountRaw = tillRawUnits(charge.cents, row.decimals, feeRaw);
     try {
       const expiryNs = await icStampExpiry(identity.secretHex, NFC_UPDATE_AHEAD_S);
       const expiry = Number(BigInt(expiryNs) / 1_000_000_000n);
@@ -236,8 +244,12 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
 
   async function ringUp() {
     // The till's own row is what makes a charge both priceable and tappable: its precision turns
-    // rappen into raw units, and its currency is what the tap request names.
-    if (tillRow === null) return;
+    // rappen into raw units, and its currency is what the tap request names. Its LEDGER FEE is
+    // what makes the price honest — the shop pays it out of the price. Neither can be missing by
+    // the time this runs (both are the render's own `payable` gate, which returns a panel instead
+    // of this form), and neither is defaulted here: a fee guessed at would be a customer charged
+    // one.
+    if (tillRow === null || tillFeeRaw === null) return;
     const parsed = chfCents(amount);
     if (!parsed.ok) { setErr(M.receive.till.badAmount(parsed.reason)); return; }
     setErr(null);
@@ -248,13 +260,13 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     setNfcKey(k => k + 1);
     setRung(parsed.cents);
     setPhase({k: 'opening'});
-    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, tillRow.decimals);
+    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, tillRow.decimals, tillFeeRaw);
     if (outcome.kind !== 'open') { setPhase({k: 'failed', outcome}); return; }
     setNow(nowSecs());
     setPhase({k: 'showing', charge: outcome.charge});
     // The code goes up FIRST and the reader is armed after it: building the request needs a
     // certified IC instant, and a customer must never wait on the radio for a code they can scan.
-    setTap(await armReader(outcome.charge, tillRow));
+    setTap(await armReader(outcome.charge, tillRow, tillFeeRaw));
   }
 
   async function cancel() {
@@ -281,6 +293,20 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     setTap(null);
     setNfcActive(false);
     setNfcKey(k => k + 1);
+  }
+
+  if (tillRow !== null && tillFeeRaw === null) {
+    // The right asset, and still not priceable: the shop pays the ledger fee out of the price, so a
+    // catalog row that states no fee leaves nothing to subtract. Quoting the full price instead
+    // would put the fee back on the customer silently — the one outcome this whole rule exists to
+    // prevent — so the counter closes and names the fix rather than ringing up a wrong number.
+    return (
+      <InstructionPanel
+        testID="till-no-fee"
+        title={M.receive.till.noFeeTitle}
+        body={M.receive.till.noFee(tillRow.symbol, relayHost(relayUrl))}
+      />
+    );
   }
 
   if (!payable) {
@@ -374,9 +400,12 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     const {charge} = phase;
     const remaining = charge.expiresAt - now;
     // `payable` above narrows `tillRow` to the till's own row; this reads its precision for the
-    // settlement line, which is the only place the asset is needed once a charge exists.
+    // settlement line, which is the only place the asset is needed once a charge exists. Two
+    // numbers, deliberately: what the SHOP receives, beside the price the customer pays — they
+    // differ by the ledger fee the shop now absorbs, and a cashier shown only the smaller one
+    // would read it as a misprice.
     const settles = fmtAssetCompact(
-      tillRawUnits(charge.cents, tillRow.decimals), tillRow.decimals, tillRow.symbol, undefined, tillRow.minFractionDigits,
+      tillRawUnits(charge.cents, tillRow.decimals, tillFeeRaw), tillRow.decimals, tillRow.symbol, undefined, tillRow.minFractionDigits,
     );
     return (
       <View style={S.center}>
@@ -399,7 +428,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
         )}
         <View testID="till-qr" style={S.qrCard}><QrCode value={charge.qr} size={QR_SIZE} ecl="M" /></View>
         <Text testID="till-amount" style={S.amountBig}>{fmtAsset(charge.cents, 2, CHF)}</Text>
-        <Text style={S.qrHint}>{M.receive.till.settlesAs(settles)}</Text>
+        <Text style={S.qrHint}>{M.receive.till.settlesAs(settles, fmtAsset(charge.cents, 2, CHF))}</Text>
         {remaining > 60 ? (
           <View style={{flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6}}>
             <IconClock size={14} color={C.sub}/>

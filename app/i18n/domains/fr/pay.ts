@@ -322,7 +322,18 @@ export const receiveFr: ReceiveMessages = {
       'Ce téléphone n’a pas pu signer le montant : rien n’a été ouvert et rien n’est payable. Fermez puis rouvrez dpay, et recommencez.',
     tryAgain: 'Encaisser à nouveau',
 
-    settlesAs: amount => `${amount} sur l’Internet Computer`,
+    settlesAs: (amount, price) =>
+      `Vous recevez ${amount} sur l’Internet Computer. Les frais du registre sont à votre charge, le client paie donc exactement ${price}.`,
+    collecting: 'Encaissement du paiement autorisé par le client …',
+    collectNotApproved:
+      'Le portefeuille du client n’a pas autorisé assez pour ce montant, ou l’autorisation a expiré. Demandez-lui de repayer le code — rien n’a été prélevé.',
+    collectNoFunds:
+      'Le client a autorisé ce paiement mais n’a pas les fonds. Rien n’a été prélevé ; demandez-lui d’approvisionner son compte et de repayer le code.',
+    collectFailed:
+      'Le paiement autorisé n’a pas pu être encaissé, et rien n’a été prélevé. Le code reste payable — demandez au client de le scanner à nouveau, ou de payer sans contact.',
+    noFeeTitle: 'Cette caisse ne peut pas chiffrer un montant',
+    noFee: (symbol, host) =>
+      `Les frais du registre sont à la charge du commerce et se déduisent du prix — or cette application ne connaît aucuns frais pour ${symbol}, un montant les facturerait donc silencieusement au client. Rien n’est payable. Mettez dpay à jour, ou signalez à l’exploitant de ${host} que sa liste de devises n’indique pas les frais ${symbol}.`,
     showToCustomer: nfc =>
       nfc === 'tap'
         ? 'Montrez ceci au client — n’importe quel appareil photo de téléphone l’ouvre, et un téléphone dpay peut aussi le contacter.'
