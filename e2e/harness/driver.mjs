@@ -831,7 +831,7 @@ function injectFreezeCss(css) {
  */
 function injectTestGlobals() {
   globalThis.__DPAY_TEST_POLL = {
-    balance: 150, history: 150, deposit: 150, receiptPay: 150, receiptRcv: 150,
+    balance: 150, history: 150, deposit: 150, receiptPay: 150, receiptRcv: 150, request: 150,
     // The IDLE cadences are overridden to the SAME 150 ms as the active ones ON PURPOSE. The suite
     // must not be paced by production cadence, and a request BUDGET expressed in wall-clock time
     // would be meaningless here anyway — flow 160 asserts requests PER TICK, which is the unit the

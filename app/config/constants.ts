@@ -109,6 +109,11 @@ export const POLL = (() => {
     deposit:    t?.deposit    ?? 10000,
     receiptPay: t?.receiptPay ?? 2500,
     receiptRcv: t?.receiptRcv ?? 1500,
+    // The open-request settlement poll (founder decision 2026-09-12): while a request QR is on
+    // screen, watch the ledger for the transfer that pays it. The link's `ref` = the request
+    // nonce = the on-chain memo, so a camera-scanned link payment confirms the screen with no
+    // scan-back. Slower than receiptRcv on purpose — this runs for the request's whole life.
+    request: t?.request ?? 4000,
     // The IDLE cadences — what the SOL rail polls at when nothing is happening. `balance`/`history`
     // above are the ACTIVE cadences, kept for the seconds around a money flow (a send just
     // confirmed, the user pressed "Check again", the wallet just opened); outside that window the

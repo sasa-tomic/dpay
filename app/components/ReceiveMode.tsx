@@ -271,6 +271,46 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillReceipt]);
 
+  // The settlement poll (founder decision 2026-09-12): while a request is open and the relay is
+  // reachable, watch the ledger for the transfer that pays it. The QR is the payment LINK and its
+  // `ref` = the request nonce = the on-chain memo, so a payer who camera-scans the QR (or pays it
+  // from the web wallet) needs no signed-QR scan-back — this poll is what flips the screen to
+  // Received. Runs only while the request screen is live; the scan-back/NFC confirm paths set the
+  // same result when they fire, and `result` in the deps tears this poll down after the first.
+  useEffect(() => {
+    if (!reqQr || result || !online) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      if (!alive) return;
+      let settled = false;
+      try {
+        settled = await confirmIncomingTransfer({
+          relayUrl,
+          receiverPublicHex: identity.publicHex,
+          currency: reqQr.currency,
+          amount: reqQr.rawAmount,
+          memoHex: reqQr.nonce,
+        }, {attempts: 1, intervalMs: POLL.request});
+      } catch {
+        // A transient relay error is not a verdict: the next tick retries.
+      }
+      if (!alive) return;
+      if (settled) {
+        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: M.receive.payer});
+        onReceived();
+        awardPaymentTested(journeyRef.current);
+        return;
+      }
+      timer = setTimeout(tick, POLL.request);
+    };
+    timer = setTimeout(tick, POLL.request);
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+    // Capture-at-fire-time: identity/relayUrl are stable for the screen's life, and reqQr is the
+    // request this poll is bound to (a new request remounts the poll with fresh facts).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reqQr, result, online]);
+
   async function onSignedQr(raw: string) {
     setScanning(false);
     setErr(null);
