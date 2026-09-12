@@ -557,6 +557,8 @@ export type ReceiveMessages = {
   offlineCantSubmit: string;
   shareRequestLink: string;
   shareRequestHint: string;
+  /** Fail-closed gate: a request whose asset or destination cannot be named in a link never opens. */
+  linkUnavailable: string;
   scanPayerSignedQr: string;
   scanPayerSignedQrPrompt: string;
   scanPayerSignedQrHint: string;
@@ -714,6 +716,7 @@ export const receiveEn: ReceiveMessages = {
   offlineCantSubmit: 'Offline — can’t submit payments until reconnected',
   shareRequestLink: 'Share request link',
   shareRequestHint: 'Share this request as a link the payer can open to pay',
+  linkUnavailable: 'This asset can’t be named in a payment code. Pick another asset to request a payment.',
   scanPayerSignedQr: "Scan payer's signed QR",
   scanPayerSignedQrPrompt: "Scan the payer's signed QR",
   scanPayerSignedQrHint: "Scan the payer's signed QR to submit their offline payment",
@@ -767,9 +770,9 @@ export const receiveEn: ReceiveMessages = {
 
     wrongAssetTitle: 'A till code is paid in VCHF',
     wrongAsset: (selected, network) =>
-      `A till code is always paid in VCHF on the Internet Computer — a counter takes one asset, and dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to ring one up, or keep the dpay code: any dpay wallet can pay that in ${selected}.`,
+      `A till code is always paid in VCHF on the Internet Computer — a counter takes one asset, and dpay never swaps. This request is in ${selected}${network ? ` on ${network}` : ''}. Switch to VCHF to ring one up, or keep the dpay code: any phone camera opens it — dpay itself, or the web wallet — and it is paid in ${selected}.`,
     noTillAsset:
-      'This wallet carries no VCHF, so there is no account for a till charge to be paid into. Use the dpay code instead — any dpay wallet can pay it in the asset you have chosen.',
+      'This wallet carries no VCHF, so there is no account for a till charge to be paid into. Use the dpay code instead — any phone camera opens it, and it takes the asset you have chosen.',
     switchTo: asset => `Switch to ${asset}`,
 
     failedTitle: 'The charge was not rung up',
@@ -790,10 +793,10 @@ export const receiveEn: ReceiveMessages = {
     settlesAs: amount => `${amount} on the Internet Computer`,
     showToCustomer: nfc =>
       nfc === 'tap'
-        ? 'Show this to the customer — their dpay wallet taps or scans it, whichever they reach for.'
+        ? 'Show this to the customer — any phone camera opens it, and a dpay phone can tap it too.'
         : nfc === 'expired'
-        ? 'Show this to the customer — their dpay wallet scans it. Tapping has timed out on this code; ring up again if they want to tap.'
-        : 'Show this to the customer — their dpay wallet scans it and pays.',
+        ? 'Show this to the customer — any phone camera opens it. Tapping has timed out on this code; ring up again if they want to tap.'
+        : 'Show this to the customer — any phone camera opens it and pays.',
     waiting: 'Waiting for the payment…',
     cantCheck:
       'Can’t check this charge right now — the till is out of contact. That does NOT mean it is unpaid. Keep the code up: this screen says so the moment it can reach the till again.',

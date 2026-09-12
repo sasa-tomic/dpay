@@ -247,6 +247,7 @@ export const receiveDe: ReceiveMessages = {
   offlineCantSubmit: 'Offline — Zahlungen können erst nach erneuter Verbindung eingereicht werden',
   shareRequestLink: 'Anfrage-Link teilen',
   shareRequestHint: 'Teilt diese Anfrage als Link, den der Zahler zum Bezahlen öffnen kann',
+  linkUnavailable: 'Dieser Wert lässt sich nicht in einem Zahlungscode benennen. Wähle einen anderen Wert, um eine Zahlung anzufragen.',
   scanPayerSignedQr: 'Signierten QR des Zahlers scannen',
   scanPayerSignedQrPrompt: 'Scanne den signierten QR des Zahlers',
   scanPayerSignedQrHint: 'Scannt den signierten QR des Zahlers, um seine Offline-Zahlung einzureichen',
@@ -307,9 +308,9 @@ export const receiveDe: ReceiveMessages = {
 
     wrongAssetTitle: 'Ein Kassen-Code wird in VCHF bezahlt',
     wrongAsset: (selected, network) =>
-      `Ein Kassen-Code wird immer in VCHF auf dem Internet Computer bezahlt — eine Kasse nimmt einen Wert an, und dpay tauscht nie um. Diese Anforderung lautet auf ${selected}${network ? ` auf ${network}` : ''}. Wechsle zu VCHF, um zu buchen — oder bleib beim dpay-Code: den kann jede dpay-Wallet in ${selected} bezahlen.`,
+      `Ein Kassen-Code wird immer in VCHF auf dem Internet Computer bezahlt — eine Kasse nimmt einen Wert an, und dpay tauscht nie um. Diese Anforderung lautet auf ${selected}${network ? ` auf ${network}` : ''}. Wechsle zu VCHF, um zu buchen — oder bleib beim dpay-Code: jede Handykamera öffnet ihn — dpay selbst oder die Web-Wallet — und er wird in ${selected} bezahlt.`,
     noTillAsset:
-      'Diese Wallet führt kein VCHF, also gibt es kein Konto, auf das eine Kassenbuchung bezahlt werden könnte. Nimm den dpay-Code — den kann jede dpay-Wallet in dem gewählten Wert bezahlen.',
+      'Diese Wallet führt kein VCHF, also gibt es kein Konto, auf das eine Kassenbuchung bezahlt werden könnte. Nimm den dpay-Code — jede Handykamera öffnet ihn, und er nimmt den gewählten Wert an.',
     switchTo: asset => `Zu ${asset} wechseln`,
 
     failedTitle: 'Der Betrag wurde nicht gebucht',
@@ -330,10 +331,10 @@ export const receiveDe: ReceiveMessages = {
     settlesAs: amount => `${amount} auf dem Internet Computer`,
     showToCustomer: nfc =>
       nfc === 'tap'
-        ? 'Zeig das der Kundschaft — ihre dpay-Wallet hält dagegen oder scannt, ganz wie sie mag.'
+        ? 'Zeig das der Kundschaft — jede Handykamera öffnet es, und ein dpay-Handy kann es auch auflegen.'
         : nfc === 'expired'
-        ? 'Zeig das der Kundschaft — ihre dpay-Wallet scannt es. Das Dagegenhalten ist bei diesem Code abgelaufen; buch neu, wenn sie halten möchte.'
-        : 'Zeig das der Kundschaft — ihre dpay-Wallet scannt und bezahlt.',
+        ? 'Zeig das der Kundschaft — jede Handykamera öffnet es. Das Auflegen ist bei diesem Code abgelaufen; buch neu, wenn sie auflegen möchte.'
+        : 'Zeig das der Kundschaft — jede Handykamera öffnet es und bezahlt.',
     waiting: 'Warten auf die Zahlung…',
     cantCheck:
       'Diese Buchung lässt sich gerade nicht prüfen — die Kasse ist nicht erreichbar. Das heisst NICHT, dass sie unbezahlt ist. Lass den Code stehen: sobald die Kasse wieder erreichbar ist, steht es hier.',

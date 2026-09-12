@@ -248,6 +248,7 @@ export const receiveFr: ReceiveMessages = {
   offlineCantSubmit: 'Hors ligne — impossible d’envoyer les paiements avant reconnexion',
   shareRequestLink: 'Partager le lien',
   shareRequestHint: 'Partage cette demande sous forme de lien que le payeur peut ouvrir pour payer',
+  linkUnavailable: 'Cet actif ne peut pas être nommé dans un code de paiement. Choisissez un autre actif pour demander un paiement.',
   scanPayerSignedQr: 'Scanner le QR signé',
   scanPayerSignedQrPrompt: 'Scannez le QR signé du payeur',
   scanPayerSignedQrHint: 'Scanne le QR signé du payeur pour envoyer son paiement hors ligne',
@@ -301,9 +302,9 @@ export const receiveFr: ReceiveMessages = {
 
     wrongAssetTitle: 'Un code de caisse se paie en VCHF',
     wrongAsset: (selected, network) =>
-      `Un code de caisse se paie toujours en VCHF sur l’Internet Computer — un comptoir accepte un seul actif, et dpay ne convertit jamais. Cette demande est en ${selected}${network ? ` sur ${network}` : ''}. Passez à VCHF pour encaisser, ou gardez le code dpay : n’importe quel portefeuille dpay peut le payer en ${selected}.`,
+      `Un code de caisse se paie toujours en VCHF sur l’Internet Computer — un comptoir accepte un seul actif, et dpay ne convertit jamais. Cette demande est en ${selected}${network ? ` sur ${network}` : ''}. Passez à VCHF pour encaisser, ou gardez le code dpay : n’importe quel appareil photo de téléphone l’ouvre — dpay lui-même, ou le portefeuille web — et il se paie en ${selected}.`,
     noTillAsset:
-      'Ce portefeuille ne détient pas de VCHF : il n’y a donc aucun compte où un encaissement pourrait être payé. Utilisez le code dpay — n’importe quel portefeuille dpay peut le payer dans l’actif choisi.',
+      'Ce portefeuille ne détient pas de VCHF : il n’y a donc aucun compte où un encaissement pourrait être payé. Utilisez le code dpay — n’importe quel appareil photo de téléphone l’ouvre, et il accepte l’actif choisi.',
     switchTo: asset => `Passer à ${asset}`,
 
     failedTitle: 'Le montant n’a pas été encaissé',
@@ -324,10 +325,10 @@ export const receiveFr: ReceiveMessages = {
     settlesAs: amount => `${amount} sur l’Internet Computer`,
     showToCustomer: nfc =>
       nfc === 'tap'
-        ? 'Montrez ceci au client — son portefeuille dpay approche le téléphone ou scanne, comme il préfère.'
+        ? 'Montrez ceci au client — n’importe quel appareil photo de téléphone l’ouvre, et un téléphone dpay peut aussi le contacter.'
         : nfc === 'expired'
-        ? 'Montrez ceci au client — son portefeuille dpay le scanne. Le paiement sans contact a expiré sur ce code ; ressaisissez le montant s’il veut approcher son téléphone.'
-        : 'Montrez ceci au client — son portefeuille dpay le scanne et paie.',
+        ? 'Montrez ceci au client — n’importe quel appareil photo de téléphone l’ouvre. Le paiement sans contact a expiré sur ce code ; ressaisissez le montant s’il veut approcher son téléphone.'
+        : 'Montrez ceci au client — n’importe quel appareil photo de téléphone l’ouvre et paie.',
     waiting: 'En attente du paiement…',
     cantCheck:
       'Impossible de vérifier ce montant pour l’instant — la caisse est injoignable. Cela ne veut PAS dire qu’il est impayé. Laissez le code affiché : cet écran le dira dès qu’il pourra joindre la caisse.',

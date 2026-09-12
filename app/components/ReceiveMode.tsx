@@ -75,10 +75,13 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   const journeyRef = useRef(journey);
   journeyRef.current = journey;
   const [memo, setMemo] = useState('');
-  // `rawAmount` (was `cents`) is the integer smallest-units the encoded request carries (2-decimal
-  // for DEMO, 8 for BTC, 6 for USDC) — now a raw-u64 decimal STRING (MC1 units 2-4). Renamed because
-  // the field was never truly cents for a non-USD currency; this is more honest.
-  const [reqQr, setReqQr] = useState<{value: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null; nfcExpiry: number | null; expiry: number} | null>(null);
+  // `rawAmount` (was `cents`) is the integer smallest-units the request settles in (2-decimal
+  // for DEMO, 8 for BTC, 6 for USDC) — a raw-u64 decimal STRING (MC1 units 2-4). `link` is THE
+  // QR: the payment link, built once at request time so the code a payer scans can never drift
+  // from the request state it reconciles against. The 132-byte wire request is gone from this
+  // screen (founder decision 2026-09-12) — a machine code survives only where a radio needs it
+  // (`nfcHex`).
+  const [reqQr, setReqQr] = useState<{link: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null; nfcExpiry: number | null; expiry: number} | null>(null);
   // A 1s display clock so the request-QR screen can show a live expiry countdown (the signed request
   // is only valid for EXPIRY_WINDOW secs; a stale QR scans to a confusing rejection). Declared here;
   // the ticking effect is wired after `result` (the gate it reads) is declared below.
@@ -130,8 +133,8 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   }, [tillAvailable, tillLive, codeForm, onCodeFormChange]);
 
   // Phase 5 — lock the idle asset selection while a request QR is showing or a settlement result is
-  // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is the
-  // encoded request a payer is scanning; the result is the settled outcome). The idle form is free.
+  // displayed. Both hold an in-flight request the user must not lose to an asset switch (the QR is
+  // the payment link a payer may be opening; the result is the settled outcome). The idle form is free.
   const locked = !!reqQr || !!result || tillLive;
   useReportLock(onLockChange, locked);
 
@@ -155,41 +158,43 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   const reqDecimals = reqDesc?.decimals ?? 2;
   const reqPrefix = currencySymbol(catalog, selectedCurrency);
 
-  // The shareable payment link for the OPEN request — the same payment the QR encodes, in the URL
-  // form a chat app can carry. `amount` is the merchant's own typed decimal (what they see is what
-  // they share); `ref` is this request's nonce, which is also the on-chain memo the settlement poll
-  // below matches, so a link payment reconciles exactly like a scanned one. Null (and the button
-  // hidden) when the asset cannot be named in a link or the principal has not derived yet — a link
-  // that cannot name its destination or its asset must never be produced.
   // The asset this whole tab is about — the merchant's chosen settlement asset. Read once and used
   // by both code forms: the dpay link names it, and the till answers whether a charge can be rung
   // up in it at all.
   const activeAsset = assets.find(a => a.id === selectedAssetId) ?? null;
-  const payLink = useMemo(() => {
-    if (!reqQr || selfPrincipal == null || activeAsset == null || activeAsset.linkToken == null) return null;
-    return encodePayLink(shareOrigin(), {
-      recipient: selfPrincipal,
-      asset: activeAsset.linkToken,
-      network: linkNetworkOf(activeAsset),
-      amount: amount.trim(),
-      label: identity.username,
-      memo: memo.trim(),
-      ref: reqQr.nonce,
-    });
-  }, [reqQr, selfPrincipal, activeAsset, amount, identity.username, memo]);
 
   async function makeRequest() {
     const rawAmount = toUnits(amount, reqDecimals);
     if (!rawAmount || rawAmount === '0') return;
+    // A press can outrun the mount-time principal derivation's first state flush — derive it
+    // directly then (a local core call, no network; the state catches up on its own). The QR is
+    // the payment link, so a request that cannot name its destination or its asset must never
+    // open — there would be nothing honest to render. Every request-capable catalog row carries a
+    // link token today (`assetLinkToken`'s null is a bare-glyph row); this gate is the fail-closed
+    // backstop, same idiom as the SOL rail's unknown-mint refusal.
+    const principal = selfPrincipal ?? await DpayCore.icpSelfPrincipal(identity.secretHex).catch(() => null);
+    if (principal == null || activeAsset == null || activeAsset.linkToken == null) { setErr(M.receive.linkUnavailable); return; }
     try {
       const nonce = randNonceHex();
       const expiry = nowSecs() + EXPIRY_WINDOW;
-      // The merchant's own username rides as `to_name`; the optional memo is attached verbatim. Both
-      // now live INSIDE the 132-byte request (wire-format v2) — the QR is plain base64url (no `|name`).
       const memoVal = memo.trim();
-      const reqB64 = await DpayCore.encodeRequest(identity.publicHex, rawAmount, nonce, expiry, selectedCurrency, identity.username, memoVal);
-      // Build the NFC request too so reader mode can start alongside the QR (best-effort). The
-      // merchant's username + memo ride as to_name/memo in the request bytes, same as the QR path.
+      // Founder decision 2026-09-12: the QR renders the payment LINK on every rail — a regular
+      // phone camera opens dpay (verified App Link) or the web wallet. The link's `ref` is the
+      // request nonce, which is also the on-chain memo the settlement poll matches, so a
+      // camera-scanned link payment reconciles on this screen exactly like the old machine code.
+      // `amount` is the merchant's own typed decimal (what they see is what the payer gets);
+      // username + memo ride as label/memo.
+      const link = encodePayLink(shareOrigin(), {
+        recipient: principal,
+        asset: activeAsset.linkToken,
+        network: linkNetworkOf(activeAsset),
+        amount: amount.trim(),
+        label: identity.username,
+        memo: memoVal,
+        ref: nonce,
+      });
+      // Build the NFC machine code too so reader mode can start alongside the QR (best-effort).
+      // The merchant's username + memo ride as to_name/memo in the request bytes.
       let nfcHex: string | null = null;
       let nfcExpiry: number | null = null;
       if (nfcReady && DpayNfc) {
@@ -201,7 +206,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           console.warn('NFC certified expiry unavailable (QR still works):', e instanceof Error ? e.message : String(e));
         }
       }
-      setReqQr({value: reqB64, rawAmount, currency: selectedCurrency, nonce, nfcHex, nfcExpiry, expiry});
+      setReqQr({link, rawAmount, currency: selectedCurrency, nonce, nfcHex, nfcExpiry, expiry});
       // Payee-side annotation (services/txNotes): when the payee typed a memo for this request,
       // save it keyed by the request nonce (= the on-chain memo) so the INCOMING row can show the
       // message the moment it settles. Deliberately NO `who` — the counterparty is the payer, and
@@ -345,7 +350,11 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
             ) : (
               <NfcStatusRow nfcStatus={nfcStatus} testID="receive-nfc" />
             )}
-            <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.value} size={QR_SIZE} ecl="M" /></View>
+            {/* The QR IS the payment link (founder decision 2026-09-12) — any phone camera opens
+                it: dpay on a dpay phone, the web wallet otherwise. ecl M holds the brand mark's
+                occlusion budget at this URL length (the pixel-decode gate, flow qr-scannable,
+                is the proof). */}
+            <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.link} size={QR_SIZE} ecl="M" /></View>
         <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
         {(() => {
           const remaining = reqQr.expiry - now;
@@ -379,18 +388,15 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 cluster) so it is seen without scrolling on a phone viewport; inline, never blocks
                 the QR or the scan path. */}
             <CoachTip tipKey="receiveRequest" />
-            {/* Share this request as a PAYMENT LINK so a payer far away (no camera, over a messaging
-                app) can open it and land on a pre-filled review — the payer still taps Approve. The
-                link names this wallet's own ICRC-1 account, the exact asset + settlement chain, and
-                carries the request nonce as `ref`, so a payment of it reconciles on THIS request
-                screen. Paying it twice pays twice — the ledger has no duplicate check here
+            {/* Share carries the SAME link the QR renders — the code and the shared message are
+                one payment, so a payer over a chat app and a payer with a camera land on the same
+                review. Paying it twice pays twice — the ledger has no duplicate check here
                 (`icp_transfer_arg` in dpay-ffi). */}
-            {payLink ? (
             <Pressable
               testID="btn-share-request"
               style={S.ghostBtn}
               onPress={() => {
-                share(payLink);
+                share(reqQr.link);
               }}
               accessibilityRole="button"
               accessibilityLabel={M.receive.shareRequestLink}
@@ -399,7 +405,6 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
               <IconShare size={16} color={C.sub}/>
               <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
             </Pressable>
-            ) : null}
             {scanning ? (
               <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>{M.receive.scanPayerSignedQrPrompt}</Text></>
             ) : (
@@ -557,8 +562,9 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           right={{label: M.receive.myAddress, value: 'address', testID: 'btn-receive-address'}}
         />
       ) : null}
-      {/* WHICH CODE, i.e. who can pay it — the same request, two audiences. A dpay code is the
-          132-byte signed request another dpay wallet scans; a till code is this merchant's own
+      {/* WHICH CODE, i.e. who can pay it — the same request, two audiences. A dpay code is this
+          wallet's payment link: any phone camera opens it — dpay on a dpay phone, the web wallet
+          otherwise (founder decision 2026-09-12); a till code is this merchant's own
           OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
           It is a code FORM and not a third tab because a till charge is not a third kind of
           receiving; the only reason it is a control at all is that two QR payloads cannot share one

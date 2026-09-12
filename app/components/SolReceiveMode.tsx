@@ -5,9 +5,9 @@ import bs58 from 'bs58';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {isSolanaDevnet, QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
-import {fmtAsset, toUnits} from '../lib/format';
+import {fmtAsset, rawToDecimal, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
-import {linkNetworkOf, type SelectableAsset} from '../config/assets';
+import {type SelectableAsset} from '../config/assets';
 import type {CurrencyDescriptor} from '../config/catalog';
 import {type HomeCurrency} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
@@ -56,10 +56,15 @@ const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, m
  * SolReceiveMode — the merchant-side payment component for the v2 recent-blockhash SOL rail.
  *
  * Rendered INLINE in the Receive tab body when SOL is the active asset (selected in Balances).
- * The merchant builds a `solreq:v2:` QR (ONLINE — fetches genesis hash + fresh blockhash), the payer
- * scans it + signs offline (SolPayMode), then the merchant scans the payer's `solpay:v2:` QR and
- * broadcasts it online (broadcastSolPayment — strict verify + freshness + confirm). On success, the
- * merchant sees the received amount + the tx signature.
+ * The QR the merchant shows is the payment LINK (founder decision 2026-09-12 — any phone camera
+ * opens it); the `solreq:v2:` machine code is built alongside (ONLINE — genesis hash + fresh
+ * blockhash) but leaves this screen only where a radio or the confirm path needs it: the NFC tap,
+ * and the payer's signed-QR scan-back + solMerchantPersist reconciliation. The payer signs
+ * offline, then the merchant scans the payer's `solpay:v2:` QR and broadcasts it online
+ * (broadcastSolPayment — strict verify + freshness + confirm); on success the merchant sees the
+ * received amount + the tx signature. A LINK payment does NOT auto-confirm this screen (the SOL
+ * rail attaches no reconciliation memo) — it lands on balances/transactions, and the request
+ * screen still confirms via NFC / signed-QR scan-back.
  *
  * Durable state: the open request + any atomically-reserved accepted tx are persisted to AsyncStorage
  * (solMerchantPersist) so a kill/restart mid-flow can reconcile (invariants #10/#11/#12). On mount,
@@ -102,25 +107,29 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   const [nfcActive, setNfcActive] = useState(false);
   const [nfcKey, setNfcKey] = useState(0);
 
-  // The shareable payment link for this request — the SAME grammar the IC rail shares, pointing at
-  // this device's Solana address (the same-surfaces hard rule: one link format, both rails). It is
-  // NOT the `solreq:v2:` QR above it: that one is blockhash-bound and dies in ~90 seconds, which is
-  // exactly why it cannot be sent through a chat. This link is durable and carries no `ref` — the
-  // SOL rail attaches no on-chain reconciliation memo, and a reference we cannot put on-chain
-  // would be a promise the rail can't keep.
   const linkAsset = assets.find(a => a.id === selectedAssetId) ?? null;
+  // The payment link this screen's QR renders (founder decision 2026-09-12: the QR is the LINK on
+  // every rail; the `solreq:v2:` machine code survives only where a radio or the confirm path needs
+  // it — NFC, the payer's signed-QR scan-back, and the solMerchantPersist reconciliation). Derived
+  // from the REQUEST's own facts, never the form: a kill/restart restores the QR from `reqSnapshot`
+  // with `amount` back at '', so the request (to/amt/cur/name/memo) is the only truth that survives
+  // — and one code path serves fresh + restored requests alike. `cur` is the registry token
+  // literal, the same `linkToken` the solana asset arm carries. No `ref`: the SOL rail attaches no
+  // on-chain reconciliation memo, and a reference we cannot put on-chain would be a promise the
+  // rail can't keep.
   const payLink = useMemo(() => {
-    if (linkAsset == null || linkAsset.linkToken == null || amount.trim().length === 0) return null;
+    if (!reqSnapshot) return null;
+    const decimals = reqSnapshot.cur === 'SOL' ? SOL_DECIMALS : solanaTokenInfo(reqSnapshot.cur)?.decimals ?? SOL_DECIMALS;
     return encodePayLink(shareOrigin(), {
-      recipient: solAddress,
-      asset: linkAsset.linkToken,
-      network: linkNetworkOf(linkAsset),
-      amount: amount.trim(),
-      label: identity.username,
-      memo: memo.trim(),
+      recipient: reqSnapshot.to,
+      asset: reqSnapshot.cur,
+      network: 'solana',
+      amount: rawToDecimal(reqSnapshot.amt, decimals),
+      label: reqSnapshot.name,
+      memo: reqSnapshot.memo,
       ref: null,
     });
-  }, [linkAsset, amount, solAddress, identity.username, memo]);
+  }, [reqSnapshot]);
   // Reconciliation state — when a broadcast was interrupted (outcome 'broadcasting'/'unknown' in
   // persist), the accepted tx is preserved so the merchant can retry. null when not reconciling.
   const [reconcile, setReconcile] = useState<{acceptedSig: string; acceptedTx: string} | null>(null);
@@ -475,7 +484,12 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
                 ) : (
                   <NfcStatusRow nfcStatus={nfcStatus} testID="sol-receive-nfc" />
                 )}
-                <View testID="sol-req-qr" style={S.qrCard}><QrCode value={reqUri} size={QR_SIZE_SMALL} ecl="M" /></View>
+                {/* The QR is the LINK (founder decision 2026-09-12) — any phone camera opens it:
+                    dpay on a dpay phone, the web wallet otherwise. `payLink` is non-null exactly
+                    when this branch renders (reqSnapshot and reqUri are set together on every
+                    path), mirroring the `reqSnapshot!` read below. The URL is SHORTER than the old
+                    solreq, so QR_SIZE_SMALL keeps gaining margin. */}
+                <View testID="sol-req-qr" style={S.qrCard}><QrCode value={payLink!} size={QR_SIZE_SMALL} ecl="M" /></View>
                 <Text style={S.amountBig}>{fmtAsset(reqSnapshot!.amt, decimals, unit)}</Text>
                 {(() => {
                   const remaining = (reqSnapshot?.exp ?? 0) - now;
@@ -497,23 +511,20 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
                     Reading-zone mount (after the status line, before the action cluster) — same
                     placement decision as the IC ReceiveMode. */}
                 <CoachTip tipKey="receiveRequest" />
-                {/* Share this request as a PAYMENT LINK — the same affordance, in the same place,
-                    as the IC rail's (same-surfaces hard rule). It carries this device's Solana
-                    address + the exact asset and amount, and unlike the QR above it does not
-                    expire, so it can travel through a messaging app. */}
-                {payLink ? (
-                  <Pressable
-                    testID="btn-share-request"
-                    style={S.ghostBtn}
-                    onPress={() => { share(payLink); }}
-                    accessibilityRole="button"
-                    accessibilityLabel={M.receive.shareRequestLink}
-                    accessibilityHint={M.receive.shareRequestHint}
-                    accessibilityState={{disabled: false}}>
-                    <IconShare size={16} color={C.sub}/>
-                    <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
-                  </Pressable>
-                ) : null}
+                {/* Share carries the SAME link the QR renders — the same affordance, in the same
+                    place, as the IC rail's (same-surfaces hard rule): a payer over a chat app and
+                    a payer with a camera land on the same send form. */}
+                <Pressable
+                  testID="btn-share-request"
+                  style={S.ghostBtn}
+                  onPress={() => { share(payLink!); }}
+                  accessibilityRole="button"
+                  accessibilityLabel={M.receive.shareRequestLink}
+                  accessibilityHint={M.receive.shareRequestHint}
+                  accessibilityState={{disabled: false}}>
+                  <IconShare size={16} color={C.sub}/>
+                  <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
+                </Pressable>
                 <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedCode} accessibilityHint={M.receive.scanPayerSignedQrHint} accessibilityState={{disabled: false}}>
                   <IconQr size={16} color={C.sub}/>
                   <Text style={S.ghostBtnText}>{M.receive.scanPayerSignedCode}</Text>

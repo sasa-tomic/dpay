@@ -247,6 +247,7 @@ export const receiveEs: ReceiveMessages = {
   offlineCantSubmit: 'Sin conexión: no se pueden enviar pagos hasta que vuelvas a conectarte',
   shareRequestLink: 'Compartir enlace de la solicitud',
   shareRequestHint: 'Comparte esta solicitud como un enlace que quien paga puede abrir para pagar',
+  linkUnavailable: 'Este activo no puede nombrarse en un código de pago. Elige otro activo para solicitar un pago.',
   scanPayerSignedQr: 'Escanear el QR firmado',
   scanPayerSignedQrPrompt: 'Escanea el QR firmado de quien paga',
   scanPayerSignedQrHint: 'Escanea el QR firmado de quien paga para enviar su pago sin conexión',
@@ -300,9 +301,9 @@ export const receiveEs: ReceiveMessages = {
 
     wrongAssetTitle: 'Un código de caja se paga en VCHF',
     wrongAsset: (selected, network) =>
-      `Un código de caja se paga siempre en VCHF en Internet Computer: un mostrador acepta un solo activo y dpay nunca convierte. Esta solicitud está en ${selected}${network ? ` en ${network}` : ''}. Cambia a VCHF para cobrar, o quédate con el código dpay: cualquier monedero dpay puede pagarlo en ${selected}.`,
+      `Un código de caja se paga siempre en VCHF en Internet Computer: un mostrador acepta un solo activo y dpay nunca convierte. Esta solicitud está en ${selected}${network ? ` en ${network}` : ''}. Cambia a VCHF para cobrar, o quédate con el código dpay: cualquier cámara de teléfono lo abre — dpay mismo, o el monedero web — y se paga en ${selected}.`,
     noTillAsset:
-      'Este monedero no tiene VCHF, así que no hay ninguna cuenta donde se pueda pagar un cobro de caja. Usa el código dpay: cualquier monedero dpay puede pagarlo en el activo que has elegido.',
+      'Este monedero no tiene VCHF, así que no hay ninguna cuenta donde se pueda pagar un cobro de caja. Usa el código dpay: cualquier cámara de teléfono lo abre, y acepta el activo que has elegido.',
     switchTo: asset => `Cambiar a ${asset}`,
 
     failedTitle: 'El importe no se abrió',
@@ -323,10 +324,10 @@ export const receiveEs: ReceiveMessages = {
     settlesAs: amount => `${amount} en Internet Computer`,
     showToCustomer: nfc =>
       nfc === 'tap'
-        ? 'Enséñaselo al cliente: su monedero dpay lo acerca o lo escanea, como prefiera.'
+        ? 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre, y un teléfono dpay también puede acercarlo.'
         : nfc === 'expired'
-        ? 'Enséñaselo al cliente: su monedero dpay lo escanea. Acercar el teléfono ha caducado en este código; vuelve a marcar el importe si quiere acercarlo.'
-        : 'Enséñaselo al cliente: su monedero dpay lo escanea y paga.',
+        ? 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre. Acercar el teléfono ha caducado en este código; vuelve a marcar el importe si quiere acercarlo.'
+        : 'Enséñaselo al cliente: cualquier cámara de teléfono lo abre y paga.',
     waiting: 'Esperando el pago…',
     cantCheck:
       'Ahora mismo no se puede comprobar este importe: la caja está incomunicada. Eso NO significa que esté sin pagar. Deja el código a la vista: esta pantalla lo dirá en cuanto pueda contactar con la caja.',

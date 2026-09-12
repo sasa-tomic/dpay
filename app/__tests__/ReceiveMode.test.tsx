@@ -45,7 +45,8 @@ import {icStampExpiry} from '../services/icp';
 import {confirmIncomingTransfer} from '../services/rail';
 import {ReceiveMode} from '../components/ReceiveMode';
 import {NfcTap} from '../components/NfcTap';
-import {receiptShareBlob} from '../lib/deepLink';
+import {receiptShareBlob, parsePayLink} from '../lib/deepLink';
+import {QrCode} from '../components/QrCode';
 import {M} from '../i18n';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {S} from '../styles';
@@ -124,7 +125,6 @@ function rerenderReceive(tree: renderer.ReactTestRenderer, over: Partial<Receive
 
 /** Enter an amount + press Request — drives makeRequest into the request-QR branch. */
 async function makeRequest(tree: renderer.ReactTestRenderer) {
-  jest.mocked(DpayCore.encodeRequest).mockResolvedValue('REQB64VALUE');
   const input = tree.root.findAll(node => node.props && node.props.testID === 'amount-input')[0];
   act(() => {
     input.props.onChangeText('25');
@@ -173,7 +173,7 @@ function asWeb() {
 }
 
 describe('ReceiveMode — share request feedback (U-F1)', () => {
-  test('NFC request uses a certified short ingress expiry while QR keeps its 15-minute expiry', async () => {
+  test('NFC request uses a certified short ingress expiry while the QR keeps its 15-minute expiry', async () => {
     jest.mocked(icStampExpiry).mockResolvedValue('1800000240123456789');
     jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
     const tree = mountReceive({nfcStatus: 'ready'});
@@ -181,9 +181,11 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
     expect(DpayNfc.buildRequest).toHaveBeenCalledWith(
       IDENTITY.publicHex, '2500', expect.any(String), 1_800_000_240, 0, IDENTITY.username, '',
     );
-    const qrExpiry = jest.mocked(DpayCore.encodeRequest).mock.calls[0][3];
-    expect(qrExpiry).not.toBe(1_800_000_240);
-    expect(qrExpiry).toBeGreaterThan(Math.floor(Date.now() / 1000) + 800);
+    // The wire encoder is GONE from the request path (founder decision 2026-09-12: the QR is the
+    // payment link; a machine code leaves the screen only over NFC) — this is the tripwire that
+    // keeps it gone. The QR's own validity is the 15-minute request window, shown by its countdown.
+    expect(DpayCore.encodeRequest).not.toHaveBeenCalled();
+    expect(texts(tree).join(' ')).toContain('Valid for ~15 min');
   });
 
   test('expired short NFC request is no longer advertised while the QR remains valid', async () => {
@@ -221,6 +223,36 @@ describe('ReceiveMode — share request feedback (U-F1)', () => {
     expect(jest.mocked(NfcTap).mock.calls.length).toBeGreaterThan(callsBeforeExpiry);
     expect(texts(tree).join(' ')).not.toContain('NFC tap expired');
     dateSpy.mockRestore();
+  });
+
+  test('the request QR IS the payment link — it round-trips parsePayLink and equals what Share carries', async () => {
+    const tree = mountReceive();
+    await makeRequest(tree);
+    const qrCard = tree.root.findAll(node => node.props && node.props.testID === 'request-qr')[0];
+    const value = qrCard.findAllByType(QrCode)[0].props.value;
+    // Founder decision 2026-09-12: the QR renders the LINK on every rail — a regular camera opens
+    // it. The invariant that matters downstream: the string re-parses into the exact payment the
+    // request screen is waiting for (recipient/asset/network/amount, `ref` = the reconciliation
+    // memo nonce).
+    expect(value).toContain(`https://dpay.kalaj.org/wallet/pay/${SELF_PRINCIPAL}?`);
+    const parsed = parsePayLink(value);
+    expect(parsed?.ok).toBe(true);
+    if (parsed?.ok) {
+      expect(parsed.link.recipient).toBe(SELF_PRINCIPAL);
+      expect(parsed.link.asset).toBe('DEMO');
+      expect(parsed.link.network).toBe('internet-computer');
+      expect(parsed.link.amount).toBe('25');
+      expect(parsed.link.ref).toMatch(/^[0-9a-f]{32}$/);
+    }
+    const btn = tree.root.findAll(node => node.props && node.props.testID === 'btn-share-request')[0];
+    await act(async () => {
+      btn.props.onPress();
+    });
+    const shared = jest.mocked(shareSpy).mock.calls[0][0] as {message: string};
+    expect(shared.message).toBe(value); // one payment, two surfaces — never two different codes
+    act(() => {
+      tree.unmount();
+    });
   });
 
   test('(web) "Share request link" flips to "Link copied ✓" after the share resolves (testID unchanged)', async () => {

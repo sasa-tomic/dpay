@@ -193,6 +193,20 @@ export function toUnits(s: string, decimals: number): string {
   return r.ok && r.raw !== '0' ? r.raw : '0';
 }
 
+// The exact inverse of `toUnits` for link building: raw smallest-units → the shortest plain
+// decimal string that re-parses to the same units ("2500000" @6dp → "2.5"). No grouping
+// separators, no unit, no locale decimal comma — a payment link's `amount=` is a canonical
+// machine decimal (the receiving side feeds it straight back into the amount parser).
+export function rawToDecimal(raw: string, decimals: number): string {
+  const n = BigInt(raw);
+  if (n === 0n) return '0';
+  let scale = 1n;
+  for (let i = 0; i < decimals; i++) scale *= 10n;
+  const whole = (n / scale).toString();
+  const frac = (n % scale).toString().padStart(decimals, '0').replace(/0+$/, '');
+  return frac.length === 0 ? whole : `${whole}.${frac}`;
+}
+
 /**
  * The ONE place a human-typed amount meets the parser: canonicalise what the keyboard produced,
  * then hand it to the exact BigInt parser. Every amount field routes through here (directly, or
