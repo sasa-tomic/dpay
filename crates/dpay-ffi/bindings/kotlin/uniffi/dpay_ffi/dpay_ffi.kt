@@ -838,6 +838,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -883,6 +887,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_decode_swap_result(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_text(
 ): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_transfer_from_result(
+): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_deposit_and_swap_arg(
@@ -912,6 +918,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_sign_update(
 fun uniffi_dpay_ffi_checksum_func_icp_swap_min_out(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_transfer_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_validate_account_id(
 ): Short
@@ -1096,6 +1104,8 @@ fun uniffi_dpay_ffi_fn_func_icp_decode_swap_result(`arg`: RustBuffer.ByValue,uni
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_text(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_transfer_from_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_transfer_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_deposit_and_swap_arg(`amountIn`: RustBuffer.ByValue,`amountOutMinimum`: RustBuffer.ByValue,`tokenInFee`: RustBuffer.ByValue,`tokenOutFee`: RustBuffer.ByValue,`zeroForOne`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -1125,6 +1135,8 @@ fun uniffi_dpay_ffi_fn_func_icp_sign_update(`secret`: RustBuffer.ByValue,`canist
 fun uniffi_dpay_ffi_fn_func_icp_swap_min_out(`quotedOut`: RustBuffer.ByValue,`slippageBps`: Short,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_transfer_arg(`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_transfer_from_arg(`fromOwnerText`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`toOwnerText`: RustBuffer.ByValue,`toSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_validate_account_id(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1325,6 +1337,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_text() != 30438.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_from_result() != 10246.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1368,6 +1383,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg() != 32597.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 26912.toShort()) {
@@ -3891,6 +3909,25 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     }
     
 
+        /**
+         * Decode an `icrc2_transfer_from` reply — the PULL's outcome.
+         *
+         * Flattens to the SAME `IcpTransferOutcome` the other two decoders produce, so a caller handles
+         * one shape; the one variant that is not an ordinary transfer's, `InsufficientAllowance`, keeps
+         * its own tag because it is the one a shop must act on differently: the customer's wallet did not
+         * approve enough (or the approval has expired, which an ICRC-2 ledger reports as an allowance of
+         * zero), so the fix is another approval, not more money.
+         */
+    @Throws(DpayException::class) fun `icpDecodeTransferFromResult`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
+            return FfiConverterTypeIcpTransferOutcome.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_transfer_from_result(
+        FfiConverterByteArray.lower(`arg`),_status)
+}
+    )
+    }
+    
+
     @Throws(DpayException::class) fun `icpDecodeTransferResult`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
             return FfiConverterTypeIcpTransferOutcome.lift(
     uniffiRustCallWithError(DpayException) { _status ->
@@ -4106,6 +4143,27 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_transfer_arg(
         FfiConverterString.lower(`toOwnerText`),FfiConverterOptionalString.lower(`toSubaccountHex`),FfiConverterOptionalString.lower(`fromSubaccountHex`),FfiConverterString.lower(`amount`),FfiConverterOptionalString.lower(`fee`),FfiConverterOptionalString.lower(`memoHex`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * `icrc2_transfer_from` argument bytes — the PULL: spend an allowance somebody granted this
+         * wallet, moving THEIR money to `to`.
+         *
+         * dpay's one caller is a shop collecting a till charge an OpenCryptoPay wallet approved it for
+         * (`crates/dpay-relay/src/till.rs`), so the shape is deliberately narrow: the charge's reference
+         * as `memo_hex` — without it the relay credits no sale — and no `created_at_time`, for the reason
+         * spelled out above `icp_transfer_arg`. The ledger debits `from` the amount PLUS its fee and
+         * credits `to` the amount; the allowance has to cover both, which is why the caller checks
+         * `icrc2_allowance` before signing rather than after being refused.
+         */
+    @Throws(DpayException::class) fun `icpTransferFromArg`(`fromOwnerText`: kotlin.String, `fromSubaccountHex`: kotlin.String?, `toOwnerText`: kotlin.String, `toSubaccountHex`: kotlin.String?, `amount`: kotlin.String, `memoHex`: kotlin.String?, `fee`: kotlin.String?): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_transfer_from_arg(
+        FfiConverterString.lower(`fromOwnerText`),FfiConverterOptionalString.lower(`fromSubaccountHex`),FfiConverterString.lower(`toOwnerText`),FfiConverterOptionalString.lower(`toSubaccountHex`),FfiConverterString.lower(`amount`),FfiConverterOptionalString.lower(`memoHex`),FfiConverterOptionalString.lower(`fee`),_status)
 }
     )
     }

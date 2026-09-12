@@ -29,6 +29,19 @@ const APPROVE_PREFIX: [u8; 78] = [
     0x6e, 0x78, 0x6c, 0x02, 0xb3, 0xb0, 0xda, 0xc3, 0x03, 0x68, 0xad, 0x86,
     0xca, 0x83, 0x05, 0x02, 0x01, 0x00,
 ];
+// TransferFromArgs (ICRC-2): rec{to:Account, fee:opt nat, spender_subaccount:opt vec nat8,
+//                                from:Account, memo:opt vec nat8, created_at_time:opt nat64,
+//                                amount:nat}
+// Same six-entry table as TransferArg with one more record field; the wire order below is by field
+// hash, which is why `to` comes before `from`.
+const TRANSFER_FROM_PREFIX: [u8; 70] = [
+    0x44, 0x49, 0x44, 0x4c, 0x06, 0x6c, 0x07, 0xfb, 0xca, 0x01, 0x01, 0xc6,
+    0xfc, 0xb6, 0x02, 0x04, 0xe1, 0x85, 0xc1, 0x94, 0x02, 0x02, 0xea, 0xca,
+    0x8a, 0x9e, 0x04, 0x01, 0xba, 0x89, 0xe5, 0xc2, 0x04, 0x02, 0x82, 0xf3,
+    0xf3, 0x91, 0x0c, 0x05, 0xd8, 0xa3, 0x8c, 0xa8, 0x0d, 0x7d, 0x6c, 0x02,
+    0xb3, 0xb0, 0xda, 0xc3, 0x03, 0x68, 0xad, 0x86, 0xca, 0x83, 0x05, 0x02,
+    0x6e, 0x03, 0x6d, 0x7b, 0x6e, 0x7d, 0x6e, 0x78, 0x01, 0x00,
+];
 // ICP ledger LEGACY TransferArgs (method `transfer`, NOT `icrc1_transfer`):
 //   rec{to: vec nat8, fee: rec{e8s:nat64}, memo: nat64, from_subaccount: opt vec nat8,
 //       created_at_time: opt rec{timestamp_nanos:nat64}, amount: rec{e8s:nat64}}
@@ -229,6 +242,41 @@ pub fn allowance_arg(account: &Account, spender: &Account) -> Vec<u8> {
     let mut out = ALLOWANCE_PREFIX.to_vec();
     put_account(&mut out, account);
     put_account(&mut out, spender);
+    out
+}
+
+/// `icrc2_transfer_from` argument bytes — the PULL: the caller spends an allowance somebody else
+/// granted them, moving that person's money to a destination.
+///
+/// The ledger debits `from` the amount PLUS the fee and credits `to` the amount, exactly as it does
+/// for `icrc1_transfer`; the allowance must cover both. dpay's one caller is a shop collecting a
+/// till charge an OpenCryptoPay wallet approved it for, so `memo` carries that charge's reference
+/// (nothing credits a sale without it) and the other three options are `None`: dpay signs no
+/// `created_at_time` (the rule and its reasoning: `icp_transfer_arg` in `crates/dpay-ffi`), lets the
+/// ledger state its own fee, and spends from the spender's default subaccount because the wallet
+/// has exactly one account per asset.
+///
+/// Arguments are in the order a caller thinks in; the wire order is by field hash, which is why the
+/// body below does not match the signature. Type table pinned byte-for-byte against candid 0.10.22
+/// + icrc-ledger-types 0.1.12 (`tests/goldens.rs`, `G_TRANSFER_FROM_*`).
+#[allow(clippy::too_many_arguments)]
+pub fn transfer_from_arg(
+    from: &Account,
+    to: &Account,
+    amount: u128,
+    memo: Option<Vec<u8>>,
+    fee: Option<u128>,
+    created_at_time_ns: Option<u64>,
+    spender_subaccount: Option<[u8; 32]>,
+) -> Vec<u8> {
+    let mut out = TRANSFER_FROM_PREFIX.to_vec();
+    put_account(&mut out, to); // to (0x6579)
+    put_opt_nat(&mut out, fee); // fee (0x4dbe46)
+    put_opt_blob(&mut out, spender_subaccount.as_ref().map(|s| &s[..])); // spender_subaccount
+    put_account(&mut out, from); // from
+    put_opt_blob(&mut out, memo.as_deref()); // memo
+    put_opt_nat64(&mut out, created_at_time_ns); // created_at_time
+    put_uleb(&mut out, amount); // amount
     out
 }
 
@@ -439,6 +487,26 @@ pub enum ApproveResult {
     /// `Ok : BlockIndex` (nat) per the ledger .did (~line 42) — not unit.
     Ok(u64),
     Err(ApproveError),
+}
+
+/// `TransferFromError` from the ledger .did. It is [`TransferError`] plus exactly one variant, so
+/// it is spelled that way rather than copied: the eight shared labels decode through the SAME arm
+/// the icrc1 path uses, and only the pull's own failure is new. A caller that must tell "they did
+/// not approve me enough" from "they do not have it" gets that distinction for free.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferFromError {
+    /// The allowance does not cover `amount + fee` — or has expired, which an ICRC-2 ledger reports
+    /// as an allowance of zero rather than as its own variant.
+    InsufficientAllowance { allowance: u128 },
+    /// Every other failure a pull can have is one an ordinary transfer can have too.
+    Transfer(TransferError),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferFromResult {
+    /// `Ok : BlockIndex` — the ledger row that moved the money.
+    Ok(u64),
+    Err(TransferFromError),
 }
 
 // --- DIDL reader ---------------------------------------------------------------------------------
@@ -883,6 +951,43 @@ pub fn decode_approve_arg(arg: &[u8]) -> Result<ApproveArg, IcpError> {
     })
 }
 
+/// Decoded `icrc2_transfer_from` argument — the PULL as a ledger reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferFromArg {
+    pub spender_subaccount: Option<[u8; 32]>,
+    pub from: Account,
+    pub to: Account,
+    pub amount: u128,
+    pub fee: Option<u128>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time_ns: Option<u64>,
+}
+
+/// Decode an `icrc2_transfer_from` argument built by [`transfer_from_arg`]. Field order is by hash
+/// — `to`, fee, spender_subaccount, `from`, memo, created_at_time, amount — which is why `to` is
+/// read before `from`; the same order the encoder writes them in, for the same reason.
+pub fn decode_transfer_from_arg(arg: &[u8]) -> Result<TransferFromArg, IcpError> {
+    let mut rd = Rd { b: arg, i: 0 };
+    rd.message()?;
+    let to = rd.account()?;
+    let fee = rd.opt_nat()?;
+    let spender_subaccount = subaccount_32(rd.opt_blob()?, "spender_subaccount")?;
+    let from = rd.account()?;
+    let memo = rd.opt_blob()?;
+    let created_at_time_ns = rd.opt_nat64()?;
+    let amount = rd.nat()?;
+    rd.finish()?;
+    Ok(TransferFromArg {
+        spender_subaccount,
+        from,
+        to,
+        amount,
+        fee,
+        memo,
+        created_at_time_ns,
+    })
+}
+
 /// Decoded `icrc1_balance_of` / `icrc2_allowance` account argument (balance_of takes one).
 pub fn decode_account_arg(arg: &[u8]) -> Result<Account, IcpError> {
     let mut rd = Rd { b: arg, i: 0 };
@@ -1058,6 +1163,54 @@ fn transfer_reply(err_variant: Option<(u8, &[u8])>, ok_block: u64) -> Vec<u8> {
         }
     }
     out
+}
+
+/// The `TransferFromResult` type table, byte-for-byte as candid 0.10.22 + icrc-ledger-types 0.1.12
+/// emit it (pinned by `tests/goldens.rs` `G_TF_*`). Frozen here because the e2e fake-IC gateway has
+/// to reply in the shape a real ledger replies in — a fixture that answered an icrc1 `TransferResult`
+/// instead would let the app's pull decoder pass offline and fail on mainnet.
+const TRANSFER_FROM_REPLY_PREFIX: [u8; 135] = [
+    0x44, 0x49, 0x44, 0x4c, 0x09, 0x6b, 0x02, 0xbc, 0x8a, 0x01, 0x7d, 0xc5,
+    0xfe, 0xd2, 0x01, 0x01, 0x6b, 0x09, 0xd1, 0xc4, 0x98, 0x7c, 0x02, 0xc2,
+    0x91, 0xec, 0xb9, 0x02, 0x7f, 0xb5, 0xda, 0x9a, 0xa3, 0x03, 0x03, 0x94,
+    0xc1, 0xc7, 0x89, 0x04, 0x04, 0xeb, 0x82, 0xa8, 0x97, 0x04, 0x05, 0xa1,
+    0xc3, 0xeb, 0xfd, 0x07, 0x06, 0xf0, 0x87, 0xe6, 0xdb, 0x09, 0x07, 0x93,
+    0xe5, 0xbe, 0xc8, 0x0c, 0x7f, 0xeb, 0x9c, 0xdb, 0xd5, 0x0f, 0x08, 0x6c,
+    0x02, 0xc7, 0xeb, 0xc4, 0xd0, 0x09, 0x71, 0xc4, 0x98, 0xb1, 0xb5, 0x0d,
+    0x7d, 0x6c, 0x01, 0xd8, 0xbb, 0xb2, 0x84, 0x0c, 0x7d, 0x6c, 0x01, 0x9b,
+    0xb3, 0xbe, 0xa6, 0x0a, 0x7d, 0x6c, 0x01, 0x8b, 0xbd, 0xf2, 0x9b, 0x01,
+    0x7d, 0x6c, 0x01, 0xbf, 0x9b, 0xb7, 0xf0, 0x0d, 0x7d, 0x6c, 0x01, 0xa3,
+    0xbb, 0x91, 0x8c, 0x0a, 0x78, 0x6c, 0x01, 0x9c, 0xba, 0xb6, 0x9c, 0x02,
+    0x7d, 0x01, 0x00,
+];
+
+/// `icrc2_transfer_from` reply bytes for `Ok(block_index)`.
+pub fn encode_transfer_from_ok(block_index: u64) -> Vec<u8> {
+    let mut out = TRANSFER_FROM_REPLY_PREFIX.to_vec();
+    out.push(0x00); // Ok
+    put_uleb(&mut out, block_index as u128);
+    out
+}
+
+/// `icrc2_transfer_from` reply bytes for one of its `Err` variants, by table index — `2` is
+/// `InsufficientAllowance { allowance }` and `8` is `InsufficientFunds { balance }`, the two a
+/// pull can actually hit. Both payloads are a single `nat`, which is why one function serves them.
+fn encode_transfer_from_err(variant_idx: u8, value: u128) -> Vec<u8> {
+    let mut out = TRANSFER_FROM_REPLY_PREFIX.to_vec();
+    out.push(0x01); // Err
+    out.push(variant_idx);
+    put_uleb(&mut out, value);
+    out
+}
+
+/// `Err(InsufficientAllowance { allowance })` — the one refusal only a pull can have.
+pub fn encode_transfer_from_insufficient_allowance(allowance: u128) -> Vec<u8> {
+    encode_transfer_from_err(2, allowance)
+}
+
+/// `Err(InsufficientFunds { balance })`, in the PULL's own variant table.
+pub fn encode_transfer_from_insufficient_funds(balance: u128) -> Vec<u8> {
+    encode_transfer_from_err(8, balance)
 }
 
 /// Reply bytes for `Ok(block_index)`.
@@ -1315,6 +1468,46 @@ pub fn decode_transfer_result(bytes: &[u8]) -> Result<TransferResult, IcpError> 
     };
     rd.finish()?;
     Ok(result)
+}
+
+/// Decode an `icrc2_transfer_from` reply (`TransferFromResult`).
+///
+/// Same shape as [`decode_transfer_result`] — a bare `variant { Ok : nat; Err : … }` — and the Err
+/// side delegates to the icrc1 decoder for every label the two share, so there is one statement of
+/// what `BadFee` or `InsufficientFunds` looks like on the wire rather than two that could drift.
+pub fn decode_transfer_from_result(bytes: &[u8]) -> Result<TransferFromResult, IcpError> {
+    let mut rd = Rd { b: bytes, i: 0 };
+    let (_, _, arg0) = rd.message()?;
+    let outer = bare_variant(&arg0)?;
+    let (label, payload) = rd.variant(outer)?;
+    let result = match label {
+        l if l == idl_hash("Ok") => TransferFromResult::Ok(u64_of(rd.nat()?, "block index")?),
+        l if l == idl_hash("Err") => {
+            let Ty::Var(inner) = payload else {
+                return Err(IcpError::DidlType("Err payload must be a variant".into()));
+            };
+            let (elabel, epayload) = rd.variant(&inner)?;
+            TransferFromResult::Err(if elabel == idl_hash("InsufficientAllowance") {
+                TransferFromError::InsufficientAllowance {
+                    allowance: num_field(&mut rd, rec_fields(&epayload, "InsufficientAllowance")?, "InsufficientAllowance")?,
+                }
+            } else {
+                TransferFromError::Transfer(transfer_error(&mut rd, elabel, &epayload)?)
+            })
+        }
+        l => return Err(IcpError::DidlType(format!("unknown TransferFromResult label {l:#x}"))),
+    };
+    rd.finish()?;
+    Ok(result)
+}
+
+/// The record fields of a variant payload, or a typed refusal naming the variant — the one
+/// `Ty::Rec` destructure the error decoders share.
+fn rec_fields<'a>(payload: &'a Ty, what: &str) -> Result<&'a [(u32, Ty)], IcpError> {
+    match payload {
+        Ty::Rec(fs) => Ok(fs),
+        _ => Err(IcpError::DidlType(format!("{what} payload must be a record"))),
+    }
 }
 
 /// A minter retrieve/withdraw reply: the shared `Ok({block_index: nat64})` shape, or the minter's

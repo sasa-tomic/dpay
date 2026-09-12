@@ -347,6 +347,10 @@ for (const c of CASES) {
     // behind it, and the pool's own Result reply. Before these existed the web build hand-rolled
     // TS twins of all three — every e2e conversion flow signed bytes the compiled core never made.
     'w_icp_deposit_and_swap_arg', 'w_icp_swap_min_out', 'w_icp_decode_swap_result',
+    // The PULL (ICRC-2 transfer_from): a shop collecting a till charge an allowance wallet
+    // approved it for. Same additive-only rule — these are money-moving bytes, so they are
+    // golden-pinned below rather than merely present.
+    'w_icp_transfer_from_arg', 'w_icp_decode_transfer_from_result',
   ];
   for (const name of PINNED_ICP_EXPORTS) {
     check(`icp export present: ${name}`, typeof ex[name] === 'function',
@@ -437,6 +441,49 @@ for (const c of CASES) {
     check('w_icp_transfer_arg(golden inputs) == dpay-icp transfer_arg hex',
       n > 0 && got === TRANSFER_ARG_HEX,
       `n=${n}\n    got:  ${got}\n    want: ${TRANSFER_ARG_HEX}`);
+  }
+
+  // w_icp_transfer_from_arg: from = OWNER+'cd'×32, to = OWNER+'ab'×32, same u128-scale amount,
+  // memo and fee as the transfer golden above — so the two differ ONLY by the shape being built.
+  // Expected hex from dpay-icp's `transfer_from_arg`, itself pinned against production candid.
+  {
+    const TRANSFER_FROM_ARG_HEX = '4449444c066c07fbca0101c6fcb60204e185c1940202eaca8a9e0401ba89e5c2040282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100010a000000000230000601010120abababababababababababababababababababababababababababababababab01904e00010a000000000230000601010120cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd0104deadbeef00d295fcf1e49df8b9c3edbfc8ee31';
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_transfer_from_arg(
+      writeStr(OWNER), sl(OWNER),
+      writeStr('cd'.repeat(32)), sl('cd'.repeat(32)),
+      writeStr(OWNER), sl(OWNER),
+      writeStr('ab'.repeat(32)), sl('ab'.repeat(32)),
+      writeStr('123456789012345678901234567890'), sl('123456789012345678901234567890'),
+      writeStr('deadbeef'), sl('deadbeef'),
+      writeStr('10000'), sl('10000'),
+      out, CAP);
+    const got = n > 0 ? hex(readBytes(out, n)) : '';
+    check('w_icp_transfer_from_arg(golden inputs) == dpay-icp transfer_from_arg hex',
+      n > 0 && got === TRANSFER_FROM_ARG_HEX,
+      `n=${n}\n    got:  ${got}\n    want: ${TRANSFER_FROM_ARG_HEX}`);
+  }
+
+  // w_icp_decode_transfer_from_result: replies produced by production candid
+  // (icrc-ledger-types TransferFromResult). The one variant only a pull can have must keep its own
+  // tag — a shop told "InsufficientFunds" would tell the customer to top up when the real fix is to
+  // approve again.
+  {
+    const decodeTf = (hexStr) => {
+      const arg = writeBytes(fromHex(hexStr));
+      const out = ex.w_alloc(512);
+      const n = ex.w_icp_decode_transfer_from_result(arg, fromHex(hexStr).length, out, 512);
+      return n > 0 ? readStr(out, n) : '';
+    };
+    const TF_TABLE = '4449444c096b02bc8a017dc5fed201016b09d1c4987c02c291ecb9027fb5da9aa3030394c1c7890404eb82a8970405a1c3ebfd0706f087e6db090793e5bec80c7feb9cdbd50f086c02c7ebc4d00971c498b1b50d7d6c01d8bbb2840c7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d0100';
+    check('w_icp_decode_transfer_from_result(Ok 81062)',
+      decodeTf(TF_TABLE + '00a6f904') === '{"ok":true,"blockIndex":"81062"}', decodeTf(TF_TABLE + '00a6f904'));
+    check('w_icp_decode_transfer_from_result(InsufficientAllowance 9999)',
+      decodeTf(TF_TABLE + '01028f4e') === '{"ok":false,"errVariant":"InsufficientAllowance","errDetail":"9999"}',
+      decodeTf(TF_TABLE + '01028f4e'));
+    check('w_icp_decode_transfer_from_result(InsufficientFunds 1234) keeps the shared tag',
+      decodeTf(TF_TABLE + '0108d209') === '{"ok":false,"errVariant":"InsufficientFunds","errDetail":"1234"}',
+      decodeTf(TF_TABLE + '0108d209'));
   }
 
   // w_icp_approve_arg: spender = OWNER+'ef'×32, from_sub = 'cd'×32, amount = u128::MAX,

@@ -490,6 +490,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_text() != 30438:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_from_result() != 10246:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result() != 49046:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_deposit_and_swap_arg() != 44898:
@@ -519,6 +521,8 @@ def _uniffi_check_api_checksums(lib):
     if lib.uniffi_dpay_ffi_checksum_func_icp_swap_min_out() != 1480:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg() != 12696:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg() != 32597:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id() != 26912:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -889,6 +893,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_text.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_from_result.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_from_result.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_result.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -994,6 +1003,17 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_from_arg.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_from_arg.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_validate_account_id.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1397,6 +1417,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_swap_result.restype = ctypes
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_text.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_text.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_from_result.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_from_result.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_transfer_result.restype = ctypes.c_uint16
@@ -1442,6 +1465,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_swap_min_out.restype = ctypes.c_uin
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_transfer_from_arg.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_validate_account_id.restype = ctypes.c_uint16
@@ -3664,6 +3690,23 @@ def icp_decode_text(arg: "bytes") -> "str":
         _UniffiConverterBytes.lower(arg)))
 
 
+def icp_decode_transfer_from_result(arg: "bytes") -> "IcpTransferOutcome":
+    """
+    Decode an `icrc2_transfer_from` reply — the PULL's outcome.
+
+    Flattens to the SAME `IcpTransferOutcome` the other two decoders produce, so a caller handles
+    one shape; the one variant that is not an ordinary transfer's, `InsufficientAllowance`, keeps
+    its own tag because it is the one a shop must act on differently: the customer's wallet did not
+    approve enough (or the approval has expired, which an ICRC-2 ledger reports as an allowance of
+    zero), so the fix is another approval, not more money.
+    """
+
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_transfer_from_result,
+        _UniffiConverterBytes.lower(arg)))
+
+
 def icp_decode_transfer_result(arg: "bytes") -> "IcpTransferOutcome":
     _UniffiConverterBytes.check_lower(arg)
     
@@ -3940,6 +3983,43 @@ def icp_transfer_arg(to_owner_text: "str",to_subaccount_hex: "typing.Optional[st
         _UniffiConverterString.lower(amount),
         _UniffiConverterOptionalString.lower(fee),
         _UniffiConverterOptionalString.lower(memo_hex)))
+
+
+def icp_transfer_from_arg(from_owner_text: "str",from_subaccount_hex: "typing.Optional[str]",to_owner_text: "str",to_subaccount_hex: "typing.Optional[str]",amount: "str",memo_hex: "typing.Optional[str]",fee: "typing.Optional[str]") -> "bytes":
+    """
+    `icrc2_transfer_from` argument bytes — the PULL: spend an allowance somebody granted this
+    wallet, moving THEIR money to `to`.
+
+    dpay's one caller is a shop collecting a till charge an OpenCryptoPay wallet approved it for
+    (`crates/dpay-relay/src/till.rs`), so the shape is deliberately narrow: the charge's reference
+    as `memo_hex` — without it the relay credits no sale — and no `created_at_time`, for the reason
+    spelled out above `icp_transfer_arg`. The ledger debits `from` the amount PLUS its fee and
+    credits `to` the amount; the allowance has to cover both, which is why the caller checks
+    `icrc2_allowance` before signing rather than after being refused.
+    """
+
+    _UniffiConverterString.check_lower(from_owner_text)
+    
+    _UniffiConverterOptionalString.check_lower(from_subaccount_hex)
+    
+    _UniffiConverterString.check_lower(to_owner_text)
+    
+    _UniffiConverterOptionalString.check_lower(to_subaccount_hex)
+    
+    _UniffiConverterString.check_lower(amount)
+    
+    _UniffiConverterOptionalString.check_lower(memo_hex)
+    
+    _UniffiConverterOptionalString.check_lower(fee)
+    
+    return _UniffiConverterBytes.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_transfer_from_arg,
+        _UniffiConverterString.lower(from_owner_text),
+        _UniffiConverterOptionalString.lower(from_subaccount_hex),
+        _UniffiConverterString.lower(to_owner_text),
+        _UniffiConverterOptionalString.lower(to_subaccount_hex),
+        _UniffiConverterString.lower(amount),
+        _UniffiConverterOptionalString.lower(memo_hex),
+        _UniffiConverterOptionalString.lower(fee)))
 
 
 def icp_validate_account_id(text: "str") -> "str":
@@ -4224,6 +4304,7 @@ __all__ = [
     "icp_decode_read_state",
     "icp_decode_swap_result",
     "icp_decode_text",
+    "icp_decode_transfer_from_result",
     "icp_decode_transfer_result",
     "icp_deposit_and_swap_arg",
     "icp_eip1559_price_arg",
@@ -4239,6 +4320,7 @@ __all__ = [
     "icp_sign_update",
     "icp_swap_min_out",
     "icp_transfer_arg",
+    "icp_transfer_from_arg",
     "icp_validate_account_id",
     "icp_validate_icrc_account",
     "icp_validate_principal",

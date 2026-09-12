@@ -17,7 +17,7 @@ use dpay_icp::envelope::{ingress_expiry as icp_ingress_expiry_ns, sign_query, si
 use dpay_icp::icrc::{
     approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
     decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg,
-    TransferError, TransferResult,
+    transfer_from_arg as icrc_transfer_from_arg, TransferError, TransferResult,
 };
 use dpay_icp::principal::{Account, Principal};
 use dpay_icp::reply::{decode_query_response, decode_read_state_tree, read_state_time, request_status, QueryOutcome, RequestStatus as RailStatus};
@@ -249,6 +249,36 @@ pub fn icp_transfer_arg(
     };
     let memo = opt_hex(&memo_hex, "memo")?;
     Ok(icrc_transfer_arg(&to, from_sub, amount, fee, memo, None))
+}
+
+/// `icrc2_transfer_from` argument bytes — the PULL: spend an allowance somebody granted this
+/// wallet, moving THEIR money to `to`.
+///
+/// dpay's one caller is a shop collecting a till charge an OpenCryptoPay wallet approved it for
+/// (`crates/dpay-relay/src/till.rs`), so the shape is deliberately narrow: the charge's reference
+/// as `memo_hex` — without it the relay credits no sale — and no `created_at_time`, for the reason
+/// spelled out above `icp_transfer_arg`. The ledger debits `from` the amount PLUS its fee and
+/// credits `to` the amount; the allowance has to cover both, which is why the caller checks
+/// `icrc2_allowance` before signing rather than after being refused.
+#[uniffi::export]
+pub fn icp_transfer_from_arg(
+    from_owner_text: String,
+    from_subaccount_hex: Option<String>,
+    to_owner_text: String,
+    to_subaccount_hex: Option<String>,
+    amount: String,
+    memo_hex: Option<String>,
+    fee: Option<String>,
+) -> Result<Vec<u8>, DpayError> {
+    let from = account(&from_owner_text, &from_subaccount_hex)?;
+    let to = account(&to_owner_text, &to_subaccount_hex)?;
+    let amount = u128_str(&amount, "amount")?;
+    let fee = match fee {
+        Some(ref f) if !f.is_empty() => Some(u128_str(f, "fee")?),
+        _ => None,
+    };
+    let memo = opt_hex(&memo_hex, "memo")?;
+    Ok(icrc_transfer_from_arg(&from, &to, amount, memo, fee, None, None))
 }
 
 /// `icrc2_approve` argument bytes: spender account, allowance amount (absent = revoke/0),
@@ -678,6 +708,33 @@ pub fn icp_decode_transfer_result(arg: Vec<u8>) -> Result<IcpTransferOutcome, Dp
     match icrc_decode_transfer_result(&arg).map_err(bad)? {
         TransferResult::Ok(idx) => Ok(IcpTransferOutcome { ok: true, block_index: Some(idx.to_string()), err_variant: String::new(), err_detail: String::new() }),
         TransferResult::Err(e) => Ok(transfer_err(e)),
+    }
+}
+
+/// Decode an `icrc2_transfer_from` reply — the PULL's outcome.
+///
+/// Flattens to the SAME `IcpTransferOutcome` the other two decoders produce, so a caller handles
+/// one shape; the one variant that is not an ordinary transfer's, `InsufficientAllowance`, keeps
+/// its own tag because it is the one a shop must act on differently: the customer's wallet did not
+/// approve enough (or the approval has expired, which an ICRC-2 ledger reports as an allowance of
+/// zero), so the fix is another approval, not more money.
+#[uniffi::export]
+pub fn icp_decode_transfer_from_result(arg: Vec<u8>) -> Result<IcpTransferOutcome, DpayError> {
+    use dpay_icp::icrc::{TransferFromError as E, TransferFromResult as R};
+    match dpay_icp::icrc::decode_transfer_from_result(&arg).map_err(bad)? {
+        R::Ok(idx) => Ok(IcpTransferOutcome {
+            ok: true,
+            block_index: Some(idx.to_string()),
+            err_variant: String::new(),
+            err_detail: String::new(),
+        }),
+        R::Err(E::InsufficientAllowance { allowance }) => Ok(IcpTransferOutcome {
+            ok: false,
+            block_index: None,
+            err_variant: "InsufficientAllowance".into(),
+            err_detail: format!("allowance {allowance}"),
+        }),
+        R::Err(E::Transfer(e)) => Ok(transfer_err(e)),
     }
 }
 

@@ -311,6 +311,44 @@ pub extern "C" fn w_icp_transfer_arg(
     write_str_out(&arg, out_ptr, cap) // binary out via write_str_out's byte-copy semantics
 }
 
+/// `icrc2_transfer_from` — the PULL. Mirrors `icp_transfer_from_arg` in dpay-ffi field for field;
+/// that function's doc owns the reasoning (why no `created_at_time`, why the memo is mandatory in
+/// practice, who the one caller is).
+#[no_mangle]
+pub extern "C" fn w_icp_transfer_from_arg(
+    from_owner_ptr: u32, from_owner_len: u32, from_sub_ptr: u32, from_sub_len: u32,
+    to_owner_ptr: u32, to_owner_len: u32, to_sub_ptr: u32, to_sub_len: u32,
+    amount_ptr: u32, amount_len: u32,
+    memo_ptr: u32, memo_len: u32,
+    fee_ptr: u32, fee_len: u32,
+    out_ptr: u32, cap: u32,
+) -> u32 {
+    let from = match account_at(from_owner_ptr, from_owner_len, from_sub_ptr, from_sub_len) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let to = match account_at(to_owner_ptr, to_owner_len, to_sub_ptr, to_sub_len) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let amount = match u128_opt_at(amount_ptr, amount_len) {
+        Ok(Some(v)) => v,
+        Ok(None) => return BAD_UTF8,
+        Err(e) => return e,
+    };
+    let fee = match u128_opt_at(fee_ptr, fee_len) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let memo = match hex_at(memo_ptr, memo_len) {
+        Ok(v) if v.is_empty() => None,
+        Ok(v) => Some(v),
+        Err(e) => return e,
+    };
+    let arg = dpay_icp::icrc::transfer_from_arg(&from, &to, amount, memo, fee, None, None);
+    write_str_out(&arg, out_ptr, cap)
+}
+
 #[no_mangle]
 pub extern "C" fn w_icp_approve_arg(
     spender_owner_ptr: u32, spender_owner_len: u32, spender_sub_ptr: u32, spender_sub_len: u32,
@@ -919,6 +957,38 @@ pub extern "C" fn w_icp_decode_transfer_result(arg_ptr: u32, arg_len: u32, out_p
         }
         TransferResult::Err(e) => {
             let (variant, detail) = transfer_error_parts(&e);
+            json.push_str("{\"ok\":false,\"errVariant\":");
+            push_json_str(variant, &mut json);
+            json.push_str(",\"errDetail\":");
+            push_json_str(&detail, &mut json);
+            json.push('}');
+        }
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+/// Decode an `icrc2_transfer_from` reply — the PULL's outcome, in the SAME compact JSON shape the
+/// two decoders above emit so the JS shim marshals all three identically. `InsufficientAllowance`
+/// keeps its own tag: see `icp_decode_transfer_from_result` in dpay-ffi for why that one matters.
+#[no_mangle]
+pub extern "C" fn w_icp_decode_transfer_from_result(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    use dpay_icp::icrc::{TransferFromError as E, TransferFromResult as R};
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 512 {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) };
+    let result = match dpay_icp::icrc::decode_transfer_from_result(arg) {
+        Ok(r) => r,
+        Err(_) => return BAD_UTF8,
+    };
+    let mut json = String::with_capacity(96);
+    match result {
+        R::Ok(idx) => json.push_str(&format!("{{\"ok\":true,\"blockIndex\":\"{idx}\"}}")),
+        R::Err(e) => {
+            let (variant, detail) = match &e {
+                E::InsufficientAllowance { allowance } => ("InsufficientAllowance", allowance.to_string()),
+                E::Transfer(t) => transfer_error_parts(t),
+            };
             json.push_str("{\"ok\":false,\"errVariant\":");
             push_json_str(variant, &mut json);
             json.push_str(",\"errDetail\":");

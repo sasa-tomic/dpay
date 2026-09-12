@@ -48,6 +48,12 @@ const G_READ_STATE_ENVELOPE: &str = "d9d9f7a367636f6e74656e74a46c726571756573745
 const G_U64_NONCE_ENVELOPE: &str = "d9d9f7a367636f6e74656e74a76c726571756573745f747970656463616c6c656e6f6e63654808070605040302016e696e67726573735f6578706972791b1764595927e9c0006673656e646572581d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d2026b63616e69737465725f6964490000000000000000026b6d6574686f645f6e616d656e69637263315f7472616e7366657263617267589c4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100011d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d2020120070707070707070707070707070707070707070707070707070707070707070701904e0108aaaaaaaaaaaaaaaa000100c0e92759596417959aef3a6d73656e6465725f7075626b6579582c302a300506032b6570032100d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a6a73656e6465725f736967584051d2843e47d5552c67d0519f31a1a5d8a216cc609a797f1e8112b64645d9423cf890c84a3d4b4166226bd403ecf3bce1e80ddc5d38436f7c0d1cbb91d03d520b";
 const G_TRANSFER_FULL: &str = "4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100011d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d2020120070707070707070707070707070707070707070707070707070707070707070701904e0108aaaaaaaaaaaaaaaa000100c0e92759596417959aef3a";
 const G_TRANSFER_MINIMAL: &str = "4449444c066c06fbca0101c6fcb60204ba89e5c20402a2de94eb060282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100011db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c02000000012000000000000000000000000000000000000000000000000000000000000000000000";
+const G_TF_OK: &str = "4449444c096b02bc8a017dc5fed201016b09d1c4987c02c291ecb9027fb5da9aa3030394c1c7890404eb82a8970405a1c3ebfd0706f087e6db090793e5bec80c7feb9cdbd50f086c02c7ebc4d00971c498b1b50d7d6c01d8bbb2840c7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d010000a6f904";
+const G_TF_LOW: &str = "4449444c096b02bc8a017dc5fed201016b09d1c4987c02c291ecb9027fb5da9aa3030394c1c7890404eb82a8970405a1c3ebfd0706f087e6db090793e5bec80c7feb9cdbd50f086c02c7ebc4d00971c498b1b50d7d6c01d8bbb2840c7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d010001028f4e";
+const G_TF_POOR: &str = "4449444c096b02bc8a017dc5fed201016b09d1c4987c02c291ecb9027fb5da9aa3030394c1c7890404eb82a8970405a1c3ebfd0706f087e6db090793e5bec80c7feb9cdbd50f086c02c7ebc4d00971c498b1b50d7d6c01d8bbb2840c7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000108d209";
+const G_TF_TOOOLD: &str = "4449444c096b02bc8a017dc5fed201016b09d1c4987c02c291ecb9027fb5da9aa3030394c1c7890404eb82a8970405a1c3ebfd0706f087e6db090793e5bec80c7feb9cdbd50f086c02c7ebc4d00971c498b1b50d7d6c01d8bbb2840c7d6c019bb3bea60a7d6c018bbdf29b017d6c01bf9bb7f00d7d6c01a3bb918c0a786c019cbab69c027d01000107";
+const G_TRANSFER_FROM_FULL: &str = "4449444c066c07fbca0101c6fcb60204e185c1940202eaca8a9e0401ba89e5c2040282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100011db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c020120030303030303030303030303030303030303030303030303030303030303030301c0843d01200909090909090909090909090909090909090909090909090909090909090909011d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d202012007070707070707070707070707070707070707070707070707070707070707070110abababababababababababababababab0163c0e92759596417904e";
+const G_TRANSFER_FROM_MINIMAL: &str = "4449444c066c07fbca0101c6fcb60204e185c1940202eaca8a9e0401ba89e5c2040282f3f3910c05d8a38ca80d7d6c02b3b0dac30368ad86ca8305026e036d7b6e7d6e780100011db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c02000000011d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d202000110828116bcad7fc45edbfb90372b81c8b900f0c5eadc03";
 const G_APPROVE: &str = "4449444c066c08c6fcb60201ba89e5c20402a2de94eb060282f3f3910c04d8a38ca80d7d919c9cbf0d01dea7f7da0d04cb96dcb40e056e7d6e036d7b6e786c02b3b0dac30368ad86ca830502010001904e000000c0843d000163c0e92759596417011db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c0201200909090909090909090909090909090909090909090909090909090909090909";
 const G_BALANCE_OF_ARG: &str = "4449444c036c02b3b0dac30368ad86ca8305016e026d7b0100011d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d20201200707070707070707070707070707070707070707070707070707070707070707";
 const G_ALLOWANCE_ARG: &str = "4449444c046c02adf9e78a0a01cb96dcb40e016c02b3b0dac30368ad86ca8305026e036d7b0100011d3d9bdaa34fe81df16699403f3e17d6030488fc8c9e37ab61036482d20201200707070707070707070707070707070707070707070707070707070707070707011db56bf994b37ae8e79f5ce000be1727a6060ae4eef24736b7cc999c3c0200";
@@ -382,6 +388,132 @@ fn golden_approve_arg() {
     let spender = Account { owner: to_principal(), subaccount: [9u8; 32] };
     let b = icrc::approve_arg(None, &spender, Some(1_000_000), None, Some(EXPIRY + 99), None, None, Some(10_000));
     assert_eq_hex(&b, G_APPROVE, "approve arg");
+}
+
+/// The PULL, both ways round: every optional present, and the shape dpay actually signs.
+/// Vectors from candid 0.10.22 + icrc-ledger-types 0.1.12 `TransferFromArgs` — the production
+/// encoder. Note the wire puts `to` BEFORE `from` (candid orders record fields by hash), which is
+/// exactly the kind of thing a hand-rolled encoder gets wrong silently and a golden catches.
+#[test]
+fn golden_transfer_from_arg() {
+    let to = Account { owner: to_principal(), subaccount: [3u8; 32] };
+    let full = icrc::transfer_from_arg(
+        &acct7(),
+        &to,
+        10_000,
+        Some(vec![0xab; 16]),
+        Some(1_000_000),
+        Some(EXPIRY + 99),
+        Some([9u8; 32]),
+    );
+    assert_eq_hex(&full, G_TRANSFER_FROM_FULL, "transfer_from arg (every option present)");
+
+    // What a shop signs to collect a till charge: default accounts on both sides, the charge's
+    // 16-byte reference as the memo, and nothing else stated — the ledger's own fee, no
+    // `created_at_time`, the spender's default subaccount.
+    let from = Account { owner: selfauth(), subaccount: [0u8; 32] };
+    let dest = Account { owner: to_principal(), subaccount: [0u8; 32] };
+    let minimal = icrc::transfer_from_arg(
+        &from,
+        &dest,
+        999_990_000,
+        Some(unhex("828116bcad7fc45edbfb90372b81c8b9")),
+        None,
+        None,
+        None,
+    );
+    assert_eq_hex(&minimal, G_TRANSFER_FROM_MINIMAL, "transfer_from arg (the shape dpay signs)");
+}
+
+/// The PULL's replies. `InsufficientAllowance` is the one failure only a pull can have and the one
+/// a shop must act on differently (ask the customer to approve again, not to top up); every other
+/// label decodes through the icrc1 arm, which is what keeps one statement of those on the wire.
+#[test]
+fn golden_decode_transfer_from_results() {
+    use dpay_icp::icrc::{TransferFromError, TransferFromResult};
+    assert_eq!(
+        icrc::decode_transfer_from_result(&unhex(G_TF_OK)).unwrap(),
+        TransferFromResult::Ok(81_062)
+    );
+    assert_eq!(
+        icrc::decode_transfer_from_result(&unhex(G_TF_LOW)).unwrap(),
+        TransferFromResult::Err(TransferFromError::InsufficientAllowance { allowance: 9_999 })
+    );
+    assert_eq!(
+        icrc::decode_transfer_from_result(&unhex(G_TF_POOR)).unwrap(),
+        TransferFromResult::Err(TransferFromError::Transfer(TransferError::InsufficientFunds {
+            balance: 1_234
+        }))
+    );
+    assert_eq!(
+        icrc::decode_transfer_from_result(&unhex(G_TF_TOOOLD)).unwrap(),
+        TransferFromResult::Err(TransferFromError::Transfer(TransferError::TooOld))
+    );
+    // A reply this decoder cannot read is an ERROR, never a default: a pull whose outcome was
+    // misread as success would have a shop hand over goods for money that never moved.
+    assert!(icrc::decode_transfer_from_result(&unhex(G_TF_OK)[..8]).is_err());
+    assert!(icrc::decode_transfer_from_result(b"").is_err());
+}
+
+/// The pull's arg ROUND-TRIPS: what the encoder writes, the decoder reads back identically. The
+/// fake-IC gateway decodes exactly these bytes to move fake money, so a decoder that read `to`
+/// where `from` is would pay the wrong account in every offline test — and pass, because both are
+/// accounts.
+#[test]
+fn transfer_from_arg_round_trips_through_the_decoder() {
+    use dpay_icp::icrc::TransferFromArg;
+    let from = Account { owner: selfauth(), subaccount: [7u8; 32] };
+    let to = Account { owner: to_principal(), subaccount: [3u8; 32] };
+    let bytes = icrc::transfer_from_arg(
+        &from, &to, 10_000, Some(vec![0xab; 16]), Some(1_000_000), Some(EXPIRY + 99), Some([9u8; 32]),
+    );
+    assert_eq!(
+        icrc::decode_transfer_from_arg(&bytes).unwrap(),
+        TransferFromArg {
+            spender_subaccount: Some([9u8; 32]),
+            from: from.clone(),
+            to: to.clone(),
+            amount: 10_000,
+            fee: Some(1_000_000),
+            memo: Some(vec![0xab; 16]),
+            created_at_time_ns: Some(EXPIRY + 99),
+        }
+    );
+    // …and the shape dpay signs, where every option is absent but the memo that credits the sale.
+    let minimal = icrc::transfer_from_arg(&from, &to, 999_990_000, Some(vec![1, 2, 3]), None, None, None);
+    let back = icrc::decode_transfer_from_arg(&minimal).unwrap();
+    assert_eq!(back.amount, 999_990_000);
+    assert_eq!(back.memo, Some(vec![1, 2, 3]));
+    assert_eq!(back.from, from);
+    assert_eq!(back.to, to);
+    assert_eq!(back.fee, None);
+    assert_eq!(back.created_at_time_ns, None);
+    assert_eq!(back.spender_subaccount, None);
+    // Truncated bytes are an ERROR, never a partially-read pull.
+    assert!(icrc::decode_transfer_from_arg(&minimal[..minimal.len() - 2]).is_err());
+}
+
+/// The fake-IC gateway's pull replies must be bytes a REAL ledger could have sent — otherwise every
+/// offline test passes against a shape mainnet never produces. Encoder against the production
+/// vectors, then straight back through the decoder.
+#[test]
+fn golden_encode_transfer_from_replies() {
+    use dpay_icp::icrc::{TransferFromError, TransferFromResult};
+    assert_eq_hex(&icrc::encode_transfer_from_ok(81_062), G_TF_OK, "transfer_from Ok reply");
+    assert_eq_hex(
+        &icrc::encode_transfer_from_insufficient_allowance(9_999),
+        G_TF_LOW,
+        "transfer_from InsufficientAllowance reply",
+    );
+    assert_eq_hex(
+        &icrc::encode_transfer_from_insufficient_funds(1_234),
+        G_TF_POOR,
+        "transfer_from InsufficientFunds reply",
+    );
+    assert_eq!(
+        icrc::decode_transfer_from_result(&icrc::encode_transfer_from_insufficient_allowance(7)).unwrap(),
+        TransferFromResult::Err(TransferFromError::InsufficientAllowance { allowance: 7 })
+    );
 }
 
 #[test]
@@ -900,4 +1032,5 @@ fn golden_swap_result_replies() {
         Err(PoolSwapError::UnsupportedToken("zzz-cai".into()))
     );
 }
+
 

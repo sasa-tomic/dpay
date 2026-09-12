@@ -503,6 +503,29 @@ async function icpTransferArg(
   return binOutHex(ex, len, out, 'icp_transfer_arg');
 }
 
+/** The PULL: spend an allowance the payer granted this wallet, moving THEIR money to `to`. Mirrors
+ *  `icp_transfer_from_arg` in dpay-ffi, which owns the reasoning. */
+async function icpTransferFromArg(
+  fromOwnerText: string, fromSubaccountHex: string,
+  toOwnerText: string, toSubaccountHex: string,
+  amount: string, memoHex: string, fee: string,
+): Promise<string> {
+  const ex = await core();
+  const from = putStr(ex, fromOwnerText);
+  const fromSub = putStr(ex, fromSubaccountHex ?? '');
+  const to = putStr(ex, toOwnerText);
+  const toSub = putStr(ex, toSubaccountHex ?? '');
+  const amt = putStr(ex, amount);
+  const memo = putStr(ex, memoHex ?? '');
+  const feeP = putStr(ex, fee ?? '');
+  const out = outBuf(ex, 512, 'icp_transfer_from_arg');
+  const len = ex.w_icp_transfer_from_arg(
+    from[0], from[1], fromSub[0], fromSub[1], to[0], to[1], toSub[0], toSub[1],
+    amt[0], amt[1], memo[0], memo[1], feeP[0], feeP[1], out, 512,
+  );
+  return binOutHex(ex, len, out, 'icp_transfer_from_arg');
+}
+
 async function icpApproveArg(
   spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string,
   amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string,
@@ -749,6 +772,17 @@ async function icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutco
   return jsonOut(ex, len, out, 'icp_decode_transfer_result') as IcpTransferOutcomeOut;
 }
 
+/** The pull's reply — same outcome shape, plus `InsufficientAllowance`, the one failure only a
+ *  pull can have (its detail is the allowance the ledger actually holds). */
+async function icpDecodeTransferFromResult(argHex: string): Promise<IcpTransferOutcomeOut> {
+  const ex = await core();
+  const arg = hex(argHex);
+  const argP = put(ex, arg);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_transfer_from_result');
+  const len = ex.w_icp_decode_transfer_from_result(argP, arg.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_transfer_from_result') as IcpTransferOutcomeOut;
+}
+
 /** Minter retrieve/withdraw Ok({block_index}) reply — mirrors icpDecodeTransferResult. */
 async function icpDecodeMinterOk(argHex: string): Promise<IcpTransferOutcomeOut> {
   const ex = await core();
@@ -827,6 +861,7 @@ export const DpayCore = {
   icpValidatePrincipal,
   icpIngressExpiry,
   icpTransferArg,
+  icpTransferFromArg,
   icpApproveArg,
   icpDepositAndSwapArg,
   icpSwapMinOut,
@@ -846,6 +881,7 @@ export const DpayCore = {
   icpDecodeQuery,
   icpDecodeReadState,
   icpDecodeTransferResult,
+  icpDecodeTransferFromResult,
   icpDecodeMinterOk,
   icpDecodeInt,
   icpValidateIcrcAccount,

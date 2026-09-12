@@ -377,6 +377,37 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * DIDL arg for icrc2_transfer_from — the PULL: spend an allowance the payer granted this
+     * wallet, moving THEIR money to `toOwnerText`. Amount/fee are raw-u128 decimal STRINGS.
+     */
+    @ReactMethod
+    fun icpTransferFromArg(
+        fromOwnerText: String,
+        fromSubaccountHex: String,
+        toOwnerText: String,
+        toSubaccountHex: String,
+        amount: String,
+        memoHex: String,
+        fee: String,
+        promise: Promise,
+    ) {
+        try {
+            val arg = uniffi.dpay_ffi.icpTransferFromArg(
+                fromOwnerText,
+                fromSubaccountHex,
+                toOwnerText,
+                toSubaccountHex,
+                amount,
+                memoHex,
+                fee,
+            )
+            promise.resolve(hex(arg))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** DIDL arg for icrc2_approve (offramp leg 1). amount="" encodes revoke(0). */
     @ReactMethod
     fun icpApproveArg(
@@ -706,6 +737,17 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
     fun icpDecodeTransferResult(argHex: String, promise: Promise) {
         try {
             promise.resolve(transferOutcomeMap(uniffi.dpay_ffi.icpDecodeTransferResult(unhex(argHex))))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
+    /** Decode an icrc2_transfer_from reply. Same outcome shape, plus the one variant only a pull
+     *  can have: `InsufficientAllowance`, whose detail is the allowance the ledger actually holds. */
+    @ReactMethod
+    fun icpDecodeTransferFromResult(argHex: String, promise: Promise) {
+        try {
+            promise.resolve(transferOutcomeMap(uniffi.dpay_ffi.icpDecodeTransferFromResult(unhex(argHex))))
         } catch (e: Throwable) {
             promise.reject("dpay_core", e)
         }

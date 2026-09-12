@@ -163,6 +163,10 @@ export type DpayCoreApi = {
   icpDecodeLegacyTransferResult(argHex: string): Promise<IcpTransferOutcome>;
   icpIngressExpiry(nowNs: string, aheadS: number): Promise<string>;
   icpTransferArg(toOwnerText: string, toSubaccountHex: string, fromSubaccountHex: string, amount: string, fee: string, memoHex: string): Promise<string>;
+  /** `icrc2_transfer_from` — the PULL: spend an allowance the payer granted THIS wallet, moving
+   *  their money to `toOwnerText`. dpay's one caller is a shop collecting a till charge an
+   *  OpenCryptoPay wallet approved it for; `icp_transfer_from_arg` in dpay-ffi owns the rules. */
+  icpTransferFromArg(fromOwnerText: string, fromSubaccountHex: string, toOwnerText: string, toSubaccountHex: string, amount: string, memoHex: string, fee: string): Promise<string>;
   icpApproveArg(spenderOwnerText: string, spenderSubaccountHex: string, fromSubaccountHex: string, amount: string, expectedAllowance: string, expiresAtNs: string, memoHex: string, fee: string): Promise<string>;
   /** ICPSwap pool `depositFromAndSwap` arg (delegated conversion): amounts + both token fees as
    *  decimal e8s strings, `zeroForOne` from the venue's own pair. Kotlin arity MUST match the
@@ -189,6 +193,10 @@ export type DpayCoreApi = {
   icpDecodeQuery(bodyHex: string): Promise<IcpQueryReply>;
   icpDecodeReadState(bodyHex: string, requestIdsHex: string[]): Promise<IcpStateRead>;
   icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutcome>;
+  /** The pull's reply — same outcome shape, plus `InsufficientAllowance`: the payer approved less
+   *  than the charge needs, or their approval has expired (an ICRC-2 ledger reports both as an
+   *  allowance, and the detail carries the number it actually holds). */
+  icpDecodeTransferFromResult(argHex: string): Promise<IcpTransferOutcome>;
   /** Minter retrieve/withdraw Ok({block_index}) reply — same shape as icpDecodeTransferResult. */
   icpDecodeMinterOk(argHex: string): Promise<IcpTransferOutcome>;
   icpDecodeInt(argHex: string): Promise<string>;
