@@ -147,9 +147,13 @@ export async function run() {
     assert(await driver.findByTestID('convert-impact', {timeoutMs: 1_000}).catch(() => null) == null,
       'no price-impact line renders (the venue publishes none)');
 
-    const minOutLine = await driver.readText('convert-min-out');
-    assertIncludes(minOutLine, `${fmt8(minOut)} VCHF`, `minimum-you'll-receive is the core's min-out at 1% (${fmt8(minOut)} VCHF)`);
-    assertIncludes(minOutLine, '1% slippage', 'slippage choice shown (default 1%)');
+    // WAITED FOR, not sampled: the quote and the min-out it derives arrive on a relay round trip,
+    // so reading the line the instant it mounts races the number into it. Under parallel load that
+    // race is what a red here means — and a gate that fails for a non-reason teaches everyone to
+    // ignore it. The ASSERTION is unchanged: the exact figure, or nothing.
+    assert(await driver.waitForText(`${fmt8(minOut)} VCHF`, {timeoutMs: 8_000}),
+      `minimum-you'll-receive is the core's min-out at 1% (${fmt8(minOut)} VCHF); screen:\n${(await driver.readText('convert-min-out'))}`);
+    assertIncludes(await driver.readText('convert-min-out'), '1% slippage', 'slippage choice shown (default 1%)');
 
     const refusal = await driver.readText('convert-refusal');
     assertIncludes(refusal, 'ICP', 'refusal outcome names the asset the user keeps');

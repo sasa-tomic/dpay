@@ -110,7 +110,12 @@ export async function run() {
     const deadFails = failures().filter((f) => f.url.startsWith(deadOrigin));
     assert(deadFails.length > 0, `the dead primary must have been tried (no failed requests to ${deadOrigin})`);
     for (const f of deadFails) {
-      assert(/CONNECTION|NETWORK|REFUSED|FAILED/i.test(f.errorText), `dead-primary failures must be connection errors, got "${f.errorText}"`);
+      // The reasons a request to a DEAD origin can fail. `ERR_ABORTED` belongs here and is not a
+      // tolerance: it is what Chrome reports when the app's own fetch timeout gives up on a relay
+      // that never answers, which is the app behaving correctly — and it is what a loaded machine
+      // produces instead of a fast REFUSED. What is still refused is a request that succeeded, or
+      // failed for a reason that would mean the walk never really tried the dead address.
+      assert(/CONNECTION|NETWORK|REFUSED|FAILED|ABORTED/i.test(f.errorText), `dead-primary failures must be connection errors, got "${f.errorText}"`);
       assert(!/UNSAFE_PORT/i.test(f.errorText), `dead-primary failures must not be UNSAFE_PORT artifacts, got "${f.errorText}"`);
     }
     console.log(`[164-relay-failover] ✓ ${deadFails.length} connection-refused request(s) to the dead primary on record`);
