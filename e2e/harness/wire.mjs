@@ -118,6 +118,12 @@ export function decodeRequest(b64OrQR) {
   return { toHex, amount, nonceHex, expiry, currency, toName, memo };
 }
 
+/** Decode a 132-byte request from the hex form the NFC reader arms with (the e2e web shim stashes
+ *  it on `__DPAY_TEST_NFC_READER_REQUEST`; same bytes the Android radio carries). */
+export function decodeRequestHex(hex) {
+  return decodeRequest(b64urlEncode(hexToBytes(hex)));
+}
+
 // --- the 196-byte signing buffer + 292-byte wire (mirrors dpay_core::Authorization::signing_bytes)
 //   from(32)|to(32)|amount_le(8)|nonce(16)|expiry_le(8)|currency_le(4)|from_name(32)|to_name(32)|memo(32)
 function buildSigningBytes(fromHex, toHex, amount, nonceHex, expiry, currency, fromName = '', toName = '', memo = '') {

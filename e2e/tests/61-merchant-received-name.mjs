@@ -49,22 +49,19 @@ export async function run() {
     const fund = await faucetAccount(relayBaseURL, bob.publicHex, 10000);
     assert(fund.ok, `payer B faucet should succeed, got status ${fund.status}: ${JSON.stringify(fund.body)}`);
 
-    // --- A creates a ∂25 receive request; read the QR the app rendered (nonce = memo). --------
+    // --- A creates a ∂25 receive request; read the QR the app rendered. Founder 2026-09-12: the
+    //     QR is the payment LINK — the `ref` param IS the request nonce (the memo B binds the
+    //     payment to), decoded in-page since the harness parser isn't in the browser context.
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '25.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
-
-    // The request QR carries the nonce at bytes 40..56 (FROZEN wire layout, single-sourced in
-    // crates/dpay-core/src/lib.rs) — decoded in-page since the harness builders aren't in the
-    // browser context. The nonce is the memo B binds the payment to.
     const req = await driver.eval((qr) => {
-      const b64 = qr.replace(/-/g, '+').replace(/_/g, '/');
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const nonceHex = Array.from(bytes.slice(40, 56)).map((b) => b.toString(16).padStart(2, '0')).join('');
-      return {nonceHex};
+      const ref = new URL(qr, 'https://dpay.invalid').searchParams.get('ref') ?? '';
+      return {nonceHex: ref};
     }, requestQR);
+    assert(/^[0-9a-f]{32}$/.test(req.nonceHex), `the link ref must be the 16-byte request nonce, got "${req.nonceHex}"`);
     console.log(`[61-merchant-received-name] A request nonce=${req.nonceHex.slice(0, 12)}…`);
 
     // --- B settles ON THE RAIL (online direct payment — no merchant-app submission). ----------

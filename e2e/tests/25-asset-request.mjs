@@ -1,19 +1,21 @@
-// Flow 25 — Multi-currency request: the merchant selects ckBTC + the encoded request carries
+// Flow 25 — Multi-currency request: the merchant selects ckBTC + the request carries
 // currency 1 (MC5: the merchant picks the EXACT settlement asset; dpay never swaps).
 //
 // Drives the REAL app's ReceiveMode asset selector (MC5): onboard → Receive → tap the ckBTC chip
-// (testID `request-asset-ckbtc`) → type a BTC amount (0.0005) → btn-request → the app encodes a
-// request with `reqCurrency = 1` (resolved at runtime from the catalog; NEVER hardcoded). Asserts:
-//   - The QR renders.
-//   - decodeRequest(qr) carries currency=1 + amount=50000 (0.0005 × 10^8 sats) — NOT currency=0.
+// (testID `request-asset-ckbtc`) → type a BTC amount (0.0005) → btn-request. Founder decision
+// 2026-09-12: the QR is the payment LINK, so the asset contract asserts the LINK (asset ckBTC,
+// network, unrounded amount, own principal) AND — with the radio forced ready — the 132-byte wire
+// the NFC reader arms with, where the currency-id encode contract still lives:
+//   - decodeRequest(reader) carries currency=1 + amount=50000 (0.0005 × 10^8 sats) — NOT currency=0.
 //   - The amount-big readout shows "0.00050000 BTC" (the family's native asset unit), NOT a `$` amount.
 //   - No dollar amount appears anywhere on the screen (the locked-asset display is unambiguous).
 //
 // Selector contract: `tab-receive`, `req-prefix` (amount glyph → opens picker), `req-pick-ckbtc`,
 // `amount-input`, `btn-request`, `request-qr`. The picker row testID matches the wallet's existing
 // `asset-ckbtc` contract (assetTestKey → 'ckbtc' for the CkBtcUtxo entry).
-import { setup, assert, onboardWallet } from '../harness/lib.mjs';
-import { decodeRequest } from '../harness/wire.mjs';
+import { setup, assert, onboardWallet, accountOf, railPrincipalText } from '../harness/lib.mjs';
+import { decodeRequestHex } from '../harness/wire.mjs';
+import { parsePayLink } from '../harness/paylink.mjs';
 
 const CKBTC_SATS = 50_000; // 0.00050000 BTC
 
@@ -24,8 +26,8 @@ export const meta = {
   id: '25',
   name: 'asset-request',
   journey: 'pay',
-  covers: ['asset-request', 'ckbtc', 'currency-id', 'encode', 'btc-units'],
-  verifies: 'ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout \'0.00050000 BTC\' (no $).',
+  covers: ['asset-request', 'ckbtc', 'currency-id', 'encode', 'btc-units', 'pay-link'],
+  verifies: 'ckBTC chip + BTC amount → QR is the payment LINK (ckBTC/IC/0.0005, own principal); NFC wire encodes RUNTIME currency 1 + 50000 sats; readout \'0.00050000 BTC\' (no $).',
   timeoutMs: 15000,
 };
 
@@ -37,7 +39,11 @@ export async function run() {
     const { driver } = env;
 
     console.log('[25-asset-request] onboarding…');
+    // Force the radio ready so the request ALSO builds the NFC machine code (its one surface now)
+    // and the reader arms — the wire-seam read below depends on it.
+    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-merchant');
+    const accountHex = (await accountOf(driver))?.publicHex;
 
     // Switch to Receive + select ckBTC as the settlement asset (the merchant CHOOSES; the payer
     // never switches — dpay does not swap). The settlement asset is picked by tapping the amount
@@ -56,13 +62,28 @@ export async function run() {
     // The request QR renders.
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
 
-    // Decode the EXACT value the QR encodes (the seam exposes it readably so the test asserts the
-    // bytes a payer would scan — not an OCR guess).
+    // Read the EXACT value the QR encodes (the seam exposes it so the test asserts the string a
+    // payer's camera would open — not an OCR guess). Founder 2026-09-12: that string is the LINK.
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
     assert(typeof requestQR === 'string' && requestQR.length > 0, `__DPAY_QR_LAST should hold the request QR value, got "${requestQR}"`);
-    const req = decodeRequest(requestQR);
+    const link = parsePayLink(requestQR);
+    assert(link !== null, `the request QR must BE the payment link, got "${requestQR}"`);
+    const selfPrincipal = await railPrincipalText(accountHex);
+    assert(link.recipient === selfPrincipal, `the link must pay THIS wallet's principal, got "${link.recipient}"`);
+    assert(link.asset === 'ckBTC', `the link must name ckBTC, got "${link.asset}"`);
+    assert(link.network === 'internet-computer', `the link must name the settlement chain, got "${link.network}"`);
+    assert(link.amount === '0.0005', `the link carries the entered amount unrounded, got "${link.amount}"`);
+    console.log('[25-asset-request] ✓ QR is the payment link (ckBTC, own principal)');
 
-    // The encoded request carries the runtime currency id (1 = ckBTC), not a hardcoded 0.
+    // The wire the NFC reader armed with carries the runtime currency id (1 = ckBTC), not a
+    // hardcoded 0 — the byte-exact encode contract lives on the radio now.
+    let readerHex = null;
+    for (let i = 0; i < 100 && !readerHex; i++) {
+      readerHex = await driver.eval(() => window.__DPAY_TEST_NFC_READER_REQUEST ?? null);
+      if (!readerHex) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert(typeof readerHex === 'string' && readerHex.length > 0, 'the NFC reader must arm with the 132-byte wire request');
+    const req = decodeRequestHex(readerHex);
     assert(req.currency === 1, `request should encode currency 1 (ckBTC), got ${req.currency}`);
     assert(req.amount === String(CKBTC_SATS), `request amount should be ${CKBTC_SATS} sats (0.00050000 BTC), got ${req.amount}`);
     console.log(`[25-asset-request] ✓ decoded: currency=${req.currency} amount=${req.amount} (= 0.00050000 BTC)`);

@@ -40,7 +40,8 @@
 // __DPAY_QR_LAST + __DPAY_TEST_DEEPLINK seams.
 import { randomBytes } from 'node:crypto';
 import { setup, assert, assertIncludes, faucetAccount, getBalance, icpCatalog, onboardWallet, accountOf, railTransfer, railPrincipalText } from '../harness/lib.mjs';
-import { generateKeypair, decodeRequest, b64urlEncode } from '../harness/wire.mjs';
+import { generateKeypair, b64urlEncode } from '../harness/wire.mjs';
+import { parsePayLink } from '../harness/paylink.mjs';
 
 const PAY_UNITS = 2500; // ∂25.00 (DEMO_USD = currency 0)
 
@@ -70,9 +71,10 @@ export async function run() {
     const alicePub = alice.publicHex;
     console.log(`[50-deeplink-receipt] wallet A (merchant): ${alicePub.slice(0, 16)}…`);
 
-    // --- A builds a REAL request through the app UI: Receive → 25.00 → Request. The QR payload is
-    //     read via the __DPAY_QR_LAST seam (the exact bytes a payer would scan) and decoded — the
-    //     nonce the payer must memo, the amount the bind will display, and `to` == A's account.
+    // --- A builds a REAL request through the app UI: Receive → 25.00 → Request. The QR value is
+    //     read via the __DPAY_QR_LAST seam (the exact string a payer's camera would open) and
+    //     parsed as the payment LINK (founder 2026-09-12) — the `ref` is the nonce the payer must
+    //     memo, the amount is what the bind will display, and the recipient is A's principal.
     console.log('[50-deeplink-receipt] A builds a ∂25.00 request via the app…');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.type('amount-input', '25.00', { timeoutMs: 4_000 });
@@ -80,12 +82,14 @@ export async function run() {
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
     const qrValue = await driver.eval(() => window.__DPAY_QR_LAST);
     assert(typeof qrValue === 'string' && qrValue.length > 0, `__DPAY_QR_LAST should hold the request QR value, got "${qrValue}"`);
-    const req = decodeRequest(qrValue);
-    assert(req.toHex === alicePub, `request.to must be the merchant's account, got ${req.toHex}`);
-    assert(req.amount === String(PAY_UNITS), `request.amount must be ${PAY_UNITS} (∂25.00), got ${req.amount}`);
-    assert(req.currency === 0, `request.currency must be 0 (DEMO), got ${req.currency}`);
-    const nonce = req.nonceHex;
-    console.log(`[50-deeplink-receipt] ✓ real request decoded: to=A amount=${req.amount} nonce=${nonce.slice(0, 8)}…`);
+    const link = parsePayLink(qrValue);
+    assert(link !== null, `the request QR must BE the payment link, got "${qrValue}"`);
+    assert(link.recipient === await railPrincipalText(alicePub), `link recipient must be the merchant's principal, got ${link.recipient}`);
+    assert(link.amount === '25.00', `link.amount must read ∂25.00, got ${link.amount}`);
+    assert(link.asset === 'DEMO' && link.network === 'internet-computer', `link must name the DEMO/IC pair, got ${link.asset}/${link.network}`);
+    assert(/^[0-9a-f]{32}$/.test(link.ref ?? ''), `the link's ref must be the 16-byte request nonce, got "${link.ref}"`);
+    const nonce = link.ref;
+    console.log(`[50-deeplink-receipt] ✓ real request link: to=A amount=${link.amount} nonce=${nonce.slice(0, 8)}…`);
 
     // --- wallet B: a fresh keypair generated in-test (the PAYER), fauceted ∂100. -------------
     // B settles A's request directly on the rail (online icrc1_transfer, memo = the request nonce)

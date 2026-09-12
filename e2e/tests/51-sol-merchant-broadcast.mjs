@@ -14,7 +14,9 @@
 // seam), then extracts the sig so the stub's sendTransaction echoes it back.
 //
 // Approach:
-//   - Merchant creates the solreq (Receive tab, ONLINE stub) → capture from __DPAY_QR_LAST.
+//   - Merchant creates the solreq (Receive tab, ONLINE stub) → capture off the armed reader seam
+//     (the QR itself is the payment LINK now — founder 2026-09-12; the machine code leaves the
+//     screen only through the radio, and `__DPAY_SOL_REQ_LAST` is what the reader armed with).
 //   - Switch to Pay tab → dispatch NFC request with the solreq → autoSign → capture solpay from
 //     __DPAY_SOL_NFC_LAST (a REAL Ed25519-signed tx).
 //   - Extract the sig from the solpay, stash it for the stub's sendTransaction to echo.
@@ -106,11 +108,16 @@ export async function run() {
     await driver.click('btn-sol-req-make', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-qr', {timeoutMs: 8_000});
 
-    // 2. Capture the solreq:v2 URI.
-    const solreqUri = await driver.eval(() => window.__DPAY_QR_LAST);
+    // 2. Capture the solreq:v2 URI — the QR is the payment LINK now (founder 2026-09-12), so the
+    //    machine code is read off the armed reader seam (what the card will actually receive).
+    let solreqUri = null;
+    for (let i = 0; i < 100 && !solreqUri; i++) {
+      solreqUri = await driver.eval(() => window.__DPAY_SOL_REQ_LAST ?? null);
+      if (!solreqUri) await new Promise((r) => setTimeout(r, 50));
+    }
     assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v2?'),
-      `the solreq:v2 QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
-    console.log('[51-sol-merchant-broadcast] ✓ solreq:v2 QR created');
+      `the reader must arm with the solreq:v2 machine code, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
+    console.log('[51-sol-merchant-broadcast] ✓ solreq:v2 armed on the reader');
 
     // 3. Switch to Pay tab → dispatch NFC request → the request AUTO-SIGNS on arrival (one-press
     //    rule, founder directive 2026-08-24: the "Pay Now" gate was the deliberate press) → a REAL

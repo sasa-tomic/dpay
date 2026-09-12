@@ -16,7 +16,8 @@
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
 import { setup, assert, getBalance, faucetAccount, icpCatalog, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
-import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
+import { generateKeypair, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
+import { parsePayLink } from '../harness/paylink.mjs';
 
 const PAY_CENTS = 3000; // ∂30.00
 const DEMO_LEDGER = 'td2nx-oaaaa-aaaab-qhdnq-cai'; // REAL DUSD ledger (catalog currency 0; the fake-IC gateway registers its ledger at this principal text — asserted against the catalog below)
@@ -59,11 +60,16 @@ export async function run() {
     await driver.type('amount-input', '30.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
+    // The QR is the payment LINK now (founder 2026-09-12) — the reconciliation key the payer must
+    // memo on-chain is the link's `ref`, and the recipient is B's own principal.
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
-    const req = decodeRequest(requestQR);
-    assertEqHex(req.toHex, bobHex, 'B request.to == B account');
-    assertEq(req.amount, String(PAY_CENTS), 'B request.amount == ∂30.00');
-    console.log(`[08-merchant-settle] B request nonce=${req.nonceHex.slice(0, 12)}…`);
+    const link = parsePayLink(requestQR);
+    assert(link !== null, `the request QR must BE the payment link, got "${requestQR}"`);
+    assertEqHex(link.recipient, await railPrincipalText(bobHex), 'B link.recipient == B principal');
+    assertEq(link.amount, '30.00', 'B link.amount == ∂30.00');
+    assert(/^[0-9a-f]{32}$/.test(link.ref ?? ''), `the link's ref must be the 16-byte request nonce, got "${link.ref}"`);
+    const nonceHex = link.ref;
+    console.log(`[08-merchant-settle] B request nonce=${nonceHex.slice(0, 12)}…`);
 
     // --- A signs a REAL icrc1_transfer envelope for B's request (memo = the request nonce). -----
     // Byte-identical to the app's wasm signer (cross-validated in flow 00), so the fake-IC gateway
@@ -72,7 +78,7 @@ export async function run() {
     const catalog = await icpCatalog(relayBaseURL);
     const ledger = catalog.find(c => c.currency === 0)?.ledger;
     assertEq(ledger, DEMO_LEDGER, 'catalog currency 0 ledger');
-    const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), BigInt(PAY_CENTS), {fee: null, memoHex: req.nonceHex});
+    const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), BigInt(PAY_CENTS), {fee: null, memoHex: nonceHex});
     const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;
     const signed = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs);
     const envelopeB64 = b64urlEncode(hexBytes(signed.envelopeHex));

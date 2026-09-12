@@ -198,10 +198,9 @@ export async function run() {
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
     const requestQRB = await driver.eval(() => window.__DPAY_QR_LAST);
+    // Founder 2026-09-12: the QR is the payment LINK — the `ref` param IS the request nonce.
     const req = await driver.eval((qr) => {
-      const b64 = qr.replace(/-/g, '+').replace(/_/g, '/');
-      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-      const nonceHex = Array.from(bytes.slice(40, 56)).map((b) => b.toString(16).padStart(2, '0')).join('');
+      const nonceHex = new URL(qr, 'https://dpay.invalid').searchParams.get('ref') ?? '';
       return { nonceHex };
     }, requestQRB);
     console.log(`[172-log-names-messages] (b) request nonce=${req.nonceHex.slice(0, 12)}… memo="${REQ_MESSAGE}"`);

@@ -8,8 +8,9 @@
 //
 // This is the envelope-twin of flow 08 (which drives the same settle from a fresh request).
 import {setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf} from '../harness/lib.mjs';
-import {generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode} from '../harness/wire.mjs';
+import {generateKeypair, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode} from '../harness/wire.mjs';
 import {railPrincipalText} from '../harness/lib.mjs';
+import {parsePayLink} from '../harness/paylink.mjs';
 
 export const meta = {
   id: '21',
@@ -39,15 +40,20 @@ export async function run() {
     await env.driver.click('tab-receive', {timeoutMs: 4_000});
     await env.driver.typeByPlaceholder('0.00', '25.00');
     await env.driver.click('btn-request', {timeoutMs: 4_000});
+    // The QR is the payment LINK (founder 2026-09-12) — the reconciliation key the payer must memo
+    // is the link's `ref`, and the recipient is B's own principal.
     const requestQR = await env.driver.eval(() => window.__DPAY_QR_LAST);
-    const req = decodeRequest(requestQR);
-    assertEqHex(req.toHex, bobHex, 'request QR payee must be merchant B');
-    assertEq(req.amount, '2500', 'request QR amount must be ∂25.00');
+    const link = parsePayLink(requestQR);
+    assert(link !== null, `the request QR must BE the payment link, got "${requestQR}"`);
+    assertEqHex(link.recipient, await railPrincipalText(bobHex), 'request link payee must be merchant B');
+    assertEq(link.amount, '25.00', 'request link amount must be ∂25.00');
+    assert(/^[0-9a-f]{32}$/.test(link.ref ?? ''), `the link's ref must be the 16-byte request nonce, got "${link.ref}"`);
+    const nonceHex = link.ref;
 
     // --- Payer signs an icrc1_transfer envelope bound to the request (memo = nonce). -----------
     const catalog = await icpCatalog(env.relayBaseURL);
     const ledger = catalog.find((c) => c.currency === 0).ledger;
-    const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), PAY_CENTS, {fee: null, memoHex: req.nonceHex});
+    const arg = icpTransferArgBytes(icpPrincipalBytes(bobHex), PAY_CENTS, {fee: null, memoHex: nonceHex});
     const expiryNs = BigInt(Date.now() + 300_000) * 1_000_000n;
     const signed = await icpSignUpdate(alice.secretHex, ledger, 'icrc1_transfer', arg, expiryNs);
     console.log(`[${meta.name}] ✓ envelope signed (request_id=${signed.requestIdHex.slice(0, 12)}…)`);

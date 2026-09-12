@@ -1,11 +1,12 @@
-// Flow 28 — Multi-currency request (ckUSDC): the merchant selects ckUSDC + the encoded request
-// carries currency 2 (6-decimal). Closes gap #2 (ReceiveMode ckUSDC merchant-create — flow 31
+// Flow 28 — Multi-currency request (ckUSDC): the merchant selects ckUSDC + the request carries
+// currency 2 (6-decimal). Closes gap #2 (ReceiveMode ckUSDC merchant-create — flow 31
 // covers the pay side, not the merchant-create side) + gap #9 (fills the empty #28 slot).
 //
-// Mirrors `25-asset-request.mjs` (ckBTC) but selects ckUSDC (currency 2, 6 decimals) and asserts the
-// 6-decimal encode contract (the precision space DEMO's 2 decimals could never produce):
-//   - The QR renders.
-//   - decodeRequest(qr) carries currency=2 + amount='50000' (0.05 × 10^6, byte-exact STRING — no
+// Founder decision 2026-09-12: the request QR is the payment LINK, so the merchant-create contract
+// asserts the LINK (asset ckUSDC, network, unrounded amount, own principal) AND — with the radio
+// forced ready — the 132-byte wire the NFC reader arms with, which is where the 6-decimal
+// byte-exact encode contract still lives:
+//   - decodeRequest(reader) carries currency=2 + amount='50000' (0.05 × 10^6, byte-exact STRING — no
 //     float drift, no '.' artifact).
 //   - The amount-big readout shows "0.050000 USDC" (6-decimal zero-padded, backing_symbol suffix).
 //   - No "$0.05" appears (fmtCurrencyAmount uses backing_symbol as the unit suffix, NOT the $ glyph;
@@ -13,9 +14,11 @@
 //
 // Selector contract: `tab-receive`, `req-prefix` (amount glyph → opens picker),
 // `req-pick-ckusdc` (assetTestKey → 'ckusdc' for the CkEthErc20 descriptor), `amount-input`,
-// `btn-request`, `request-qr`. QR seam: `window.__DPAY_QR_LAST`.
-import { setup, assert, onboardWallet } from '../harness/lib.mjs';
-import { decodeRequest } from '../harness/wire.mjs';
+// `btn-request`, `request-qr`. QR seam: `window.__DPAY_QR_LAST`; wire seam:
+// `window.__DPAY_TEST_NFC_READER_REQUEST`.
+import { setup, assert, onboardWallet, accountOf, railPrincipalText } from '../harness/lib.mjs';
+import { decodeRequestHex } from '../harness/wire.mjs';
+import { parsePayLink } from '../harness/paylink.mjs';
 
 const CKUSDC_CURRENCY = 2;
 const CKUSDC_RAW = 50_000; // 0.050000 USDC (6-decimal)
@@ -28,8 +31,8 @@ export const meta = {
   id: '28',
   name: 'ckusdc-request',
   journey: 'pay',
-  covers: ['ckusdc-merchant-create', 'request-asset-picker', 'multi-currency', '6-decimal', 'byte-exact'],
-  verifies: 'ckUSDC chip + 0.05 amount → request QR encodes currency 2 + 50000 raw (6-dec); readout \'0.050000 USDC\' (no $0.05).',
+  covers: ['ckusdc-merchant-create', 'request-asset-picker', 'multi-currency', '6-decimal', 'byte-exact', 'pay-link'],
+  verifies: 'ckUSDC chip + 0.05 amount → QR is the payment LINK (ckUSDC/IC/0.05, own principal); NFC wire encodes currency 2 + 50000 raw (6-dec); readout \'0.050000 USDC\' (no $0.05).',
   timeoutMs: 15000,
 };
 
@@ -41,7 +44,11 @@ export async function run() {
     const { driver } = env;
 
     console.log('[28-ckusdc-request] onboarding…');
+    // Force the radio ready so the request ALSO builds the NFC machine code (its one surface now)
+    // and the reader arms — the wire-seam read below depends on it.
+    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-merchant');
+    const accountHex = (await accountOf(driver))?.publicHex;
 
     // Switch to Receive + select ckUSDC as the settlement asset (MC5: merchant chooses; payer never
     // switches — dpay does not swap). The settlement asset is picked via the amount prefix glyph
@@ -60,15 +67,31 @@ export async function run() {
     // The request QR renders.
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
 
-    // Decode the EXACT value the QR encodes (the seam exposes it so the test asserts the bytes a
-    // payer would scan — not an OCR guess).
+    // Parse the EXACT value the QR encodes (the seam exposes it so the test asserts the string a
+    // payer's camera would open — not an OCR guess). Founder 2026-09-12: that string is the LINK.
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
     assert(typeof requestQR === 'string' && requestQR.length > 0, `__DPAY_QR_LAST should hold the request QR value, got "${requestQR}"`);
-    const req = decodeRequest(requestQR);
+    const link = parsePayLink(requestQR);
+    assert(link !== null, `the request QR must BE the payment link, got "${requestQR}"`);
+    const selfPrincipal = await railPrincipalText(accountHex);
+    assert(link.recipient === selfPrincipal, `the link must pay THIS wallet's principal, got "${link.recipient}"`);
+    assert(link.asset === 'ckUSDC', `the link must name ckUSDC, got "${link.asset}"`);
+    assert(link.network === 'internet-computer', `the link must name the settlement chain, got "${link.network}"`);
+    assert(link.amount === '0.05', `the link carries the entered amount unrounded, got "${link.amount}"`);
+    console.log('[28-ckusdc-request] ✓ QR is the payment link (ckUSDC, own principal)');
 
-    // The encoded request carries the runtime currency id (2 = ckUSDC), not a hardcoded 0 or 1.
-    assert(req.currency === CKUSDC_CURRENCY, `request should encode currency ${CKUSDC_CURRENCY} (ckUSDC), got ${req.currency}`);
+    // The wire the NFC reader armed with carries the runtime currency id (2 = ckUSDC), not a
+    // hardcoded 0 or 1.
+    let readerHex = null;
+    for (let i = 0; i < 100 && !readerHex; i++) {
+      readerHex = await driver.eval(() => window.__DPAY_TEST_NFC_READER_REQUEST ?? null);
+      if (!readerHex) await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert(typeof readerHex === 'string' && readerHex.length > 0, 'the NFC reader must arm with the 132-byte wire request');
+    const req = decodeRequestHex(readerHex);
+
     // 6-decimal byte-exact discipline: 0.05 × 10^6 = 50000, an integer string (no float artifact).
+    assert(req.currency === CKUSDC_CURRENCY, `request should encode currency ${CKUSDC_CURRENCY} (ckUSDC), got ${req.currency}`);
     assert(req.amount === String(CKUSDC_RAW), `request amount should be ${CKUSDC_RAW} raw (0.050000 USDC), got ${req.amount}`);
     assert(!req.amount.includes('.'), `raw amount must be an integer string (no float artifact), got ${req.amount}`);
     console.log(`[28-ckusdc-request] ✓ decoded: currency=${req.currency} amount=${req.amount} (= 0.050000 USDC)`);

@@ -10,7 +10,7 @@
 // Prerequisites proven elsewhere: envelope signing parity (flow 00), the merchant submit+poll
 // happy path (flow 08), the reader-side NFC protocol phases (flow 11).
 import { setup, assert, assertIncludes, getBalance, faucetAccount, icpCatalog, onboardWallet, accountOf } from '../harness/lib.mjs';
-import { generateKeypair, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, icpSignReadState, b64urlEncode, randNonceHex } from '../harness/wire.mjs';
+import { generateKeypair, decodeRequestHex, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, icpSignReadState, b64urlEncode, randNonceHex } from '../harness/wire.mjs';
 
 const PAY_CENTS = 1000; // ∂10.00 — the exact amount of the 2026-08-21 field failure
 
@@ -48,8 +48,17 @@ export async function run() {
     await driver.type('amount-input', '10.00', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
-    const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
-    const req = decodeRequest(requestQR);
+    // The QR is the payment LINK now (founder 2026-09-12); the wire request lives on the radio —
+    // the reader-armed stash is the machine code this flow's memo must match.
+    let readerHex = null;
+    for (let i = 0; i < 100 && !readerHex; i++) {
+      readerHex = await driver.eval(() => window.__DPAY_TEST_NFC_READER_REQUEST ?? null);
+      if (!readerHex) await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert(typeof readerHex === 'string' && readerHex.length > 0, 'the NFC reader must arm with the 132-byte wire request');
+    const req = decodeRequestHex(readerHex);
+    assert(req.toHex === bobHex, `wire.to must be the merchant's account, got ${req.toHex}`);
+    assert(req.amount === String(PAY_CENTS), `wire.amount must be ${PAY_CENTS}, got ${req.amount}`);
     console.log(`[86-nfc-unknown-reconcile] B request nonce=${req.nonceHex.slice(0, 12)}…`);
 
     // The reader NfcTap must be mounted (reader mode armed by the real buildRequest hex).

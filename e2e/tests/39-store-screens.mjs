@@ -12,7 +12,8 @@
 // `optional: true` keeps this OFF the default `just e2e` path (~37s of render-only capture that is
 // not a behavior gate); `just e2e-store` runs it on demand (DPAY_E2E_FILTER=store-screens).
 import { setup, onboardWallet, accountOf, railTransfer, assert, openBalances, selectCurrency, openReceiveAddress } from '../harness/lib.mjs';
-import { generateKeypair, decodeRequest } from '../harness/wire.mjs';
+import { generateKeypair } from '../harness/wire.mjs';
+import { parsePayLink } from '../harness/paylink.mjs';
 
 export const meta = {
   id: '39',
@@ -54,8 +55,13 @@ export async function run() {
     await driver.type('amount-input', '12.50', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
+    // The QR is the payment LINK (founder 2026-09-12) — the memo the payer must attach for the
+    // reconciliation to land is the link's `ref`.
     const qrCode = await driver.eval(() => window.__DPAY_QR_LAST);
-    const req = decodeRequest(qrCode);
+    const link = parsePayLink(qrCode);
+    assert(link !== null, `the request QR must BE the payment link, got "${qrCode}"`);
+    assert(/^[0-9a-f]{32}$/.test(link.ref ?? ''), `the link's ref must be the 16-byte request nonce, got "${link.ref}"`);
+    const req = { nonceHex: link.ref };
     const payer = await generateKeypair();
     await faucetCurrency(relayBaseURL, payer.publicHex, 0, 10_000);
     const pay = await railTransfer(relayBaseURL, payer.secretHex, hex, 1250n, {memoHex: req.nonceHex});

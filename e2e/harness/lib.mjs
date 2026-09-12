@@ -134,7 +134,7 @@ export async function ensureWireLayout() {
 let _session = null;
 let _sessionPromise = null;
 
-async function getSession(opts = {}) {
+export async function getSession(opts = {}) {
   if (_session) return _session;
   // Memoize the BUILD as a promise so concurrent callers (parallel test pool) await the SAME build
   // instead of racing to spawn a second relay/web/browser.

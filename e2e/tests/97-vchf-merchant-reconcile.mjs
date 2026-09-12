@@ -20,9 +20,10 @@ import {
   onboardWallet, accountOf, openBalances, selectCurrency,
 } from '../harness/lib.mjs';
 import {
-  generateKeypair, randNonceHex, decodeRequest, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate,
+  generateKeypair, randNonceHex, decodeRequestHex, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate,
   b64urlEncode,
 } from '../harness/wire.mjs';
+import { parsePayLink } from '../harness/paylink.mjs';
 
 const CURRENCY = 7; // VCHF
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
@@ -65,6 +66,9 @@ export async function run() {
 
     // --- (2) Merchant creates the 8-decimal request in the app --------------------------------
     console.log('[97-vchf-merchant-reconcile] merchant requests 1.00000001 VCHF in-app…');
+    // Radio ready so the request ALSO builds the NFC wire (its one surface now) — the byte-exact
+    // currency-id + raw-units encode contract is asserted off the reader seam below.
+    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-vchf-merchant');
     const merchant = await accountOf(driver);
     await openBalances(driver);
@@ -76,11 +80,28 @@ export async function run() {
     await driver.findByTestID('request-qr', { timeoutMs: 6_000 });
     assertIncludes(await driver.bodyText(), '1.00000001 VCHF', 'request screen shows exact VCHF amount');
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
-    assert(requestQR != null, 'request QR seam exposed the encoded request');
-    const req = decodeRequest(requestQR);
-    assertEq(req.currency, CURRENCY, 'encoded request currency id (VCHF)');
-    assertEq(req.amount, String(PAY), 'encoded request exact raw units (8-decimal tail)');
-    assertEq(req.toHex, merchant.publicHex, 'encoded request payee = merchant account');
+    assert(requestQR != null, 'request QR seam exposed the payment link');
+    // Founder 2026-09-12: the QR is the payment LINK — payable facts on the link, byte-exact wire
+    // on the reader seam, `ref` = the reconciliation nonce the exact-memo leg must replay.
+    const link = parsePayLink(requestQR);
+    assert(link != null, 'request QR parses as the payment link');
+    assertEq(link.asset, 'VCHF', 'link names the requested asset');
+    assertEq(link.network, 'internet-computer', 'link names the settlement network');
+    assertEq(link.amount, '1.00000001', 'link carries the exact 8-decimal amount');
+    assertEq(link.recipient, await railPrincipalText(merchant.publicHex), 'link payee = merchant principal');
+    assert(/^[0-9a-f]{32}$/.test(link.ref ?? ''), 'link ref = the 16-byte request nonce');
+    const nonceHex = link.ref;
+
+    let readerHex = null;
+    for (let i = 0; i < 100 && !readerHex; i++) {
+      readerHex = await driver.eval(() => window.__DPAY_TEST_NFC_READER_REQUEST ?? null);
+      if (!readerHex) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert(readerHex != null, 'NFC reader armed with the 132-byte wire request');
+    const req = decodeRequestHex(readerHex);
+    assertEq(req.currency, CURRENCY, 'encoded wire currency id (VCHF)');
+    assertEq(req.amount, String(PAY), 'encoded wire exact raw units (8-decimal tail)');
+    assertEq(req.toHex, merchant.publicHex, 'encoded wire payee = merchant account');
 
     const merchantBefore = {};
     for (let c = 0; c <= 8; c++) merchantBefore[c] = String(await getBalance(relayBaseURL, merchant.publicHex, c));
@@ -114,7 +135,7 @@ export async function run() {
     // --- (6) EXACT-memo leg: flips the open request to Received --------------------------------
     console.log('[97-vchf-merchant-reconcile] exact-memo transfer (must confirm)…');
     await openPayerScan(driver);
-    await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, await envelope(req.nonceHex));
+    await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, await envelope(nonceHex));
     await driver.waitForText('Received 1.00000001 VCHF', { timeoutMs: 20_000 });
     assertIncludes(await driver.bodyText(), '1.00000001 VCHF', 'received screen shows exact VCHF amount');
 

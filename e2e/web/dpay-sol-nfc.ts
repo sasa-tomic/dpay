@@ -29,7 +29,17 @@ export const DpaySolNfc = {
     return Promise.resolve();
   },
   declineSolCard: () => Promise.resolve(),
-  startSolReader: (_solreqUri: string) => Promise.resolve(),
+  // The solreq:v2 URI the merchant's reader ARMED with (founder decision 2026-09-12: the QR is the
+  // payment link now, so the machine code leaves the screen only through the radio). Stashed the
+  // same way approveSolCard stashes the signed solpay — the twin of the IC shim's
+  // `__DPAY_TEST_NFC_READER_REQUEST`. A flow that needs the REAL machine code (to dispatch a card
+  // tap, or to assert what the radio carries) reads it from here.
+  startSolReader: (solreqUri: string) => {
+    if (typeof window !== 'undefined') {
+      try { (window as any).__DPAY_SOL_REQ_LAST = solreqUri; } catch { /* stash is best-effort */ }
+    }
+    return Promise.resolve();
+  },
   stopSolReader: () => Promise.resolve(),
   confirmSolReceipt: (_status: number, _rid: string, _sig: string) => Promise.resolve(),
   // The NativeEventEmitter constructor calls these on subscribe/unsubscribe; no-op on web.

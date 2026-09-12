@@ -90,9 +90,15 @@ export async function run() {
     await driver.click('btn-sol-req-make', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-qr', {timeoutMs: 8_000});
 
-    const solreqUri = await driver.eval(() => window.__DPAY_QR_LAST);
+    // The QR is the payment LINK now (founder 2026-09-12) — the machine code is read off the
+    // armed reader seam (`__DPAY_SOL_REQ_LAST`, what the card will actually receive).
+    let solreqUri = null;
+    for (let i = 0; i < 100 && !solreqUri; i++) {
+      solreqUri = await driver.eval(() => window.__DPAY_SOL_REQ_LAST ?? null);
+      if (!solreqUri) await new Promise((r) => setTimeout(r, 50));
+    }
     assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v2?'),
-      `the solreq:v2 QR must be captured, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
+      `the reader must arm with the solreq:v2 machine code, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
 
     // 2. Produce a REAL signed solpay via the NFC auto-sign (one-press rule — same approach as
     //    flow 51: the request signs on arrival, no review/Approve).
