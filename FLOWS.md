@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **164 flows**
-> (163 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **165 flows**
+> (164 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (33) · tour (6)
+wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (34) · tour (6)
 
 ---
 
@@ -212,6 +212,7 @@ wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw
 | 165 | solana-via-relay | R2 Solana-through-relay: SOL/USDC balances render from the harness relay's proxy (stub upstream hit recorded) with the candidate list DERIVED from the App-installed relay list, and a mid-session re-point to a dead-first list still serves SOL from the second home after a recorded transport failure at the dead one's proxy route. | solana-rpc-proxy, solana-relay-derivation, solana-walk-transport, relay-solana-wire |
 | 17 | scan-cleanup | Pay tab starts gated (0 listeners until "Pay Now"); armed → 1; Pay→Receive→Pay tears down cleanly (no leak; re-mount re-gates then re-arms). | qr-scanner, teardown, unmount, listener-leak, pay-intent-gate |
 | 172 | log-names-messages | Device-saved notes name the transaction log: a paid request shows to_name + human memo on the row and Peer/Note on the receipt beside the full principal and hex reference; a payee-side request shows the typed message but never invents a payer name; a labelled Solana-Pay, an offline solreq:v2 QR, and an NFC tap all name their SOL rows by the signature the sign/send itself produced; an un-annotated transfer keeps principal + hex with no Peer/Note lines. | history, names, memo, txnotes, receipt, activity-feed, solana-pay, sol-offline, sol-nfc, honest-copy |
+| 174 | ic-gateway-override | F2 IC-gateway operator override: Settings ▸ Advanced re-points the IC /api/v2 rail — the override outranks the e2e seam (a dead local origin makes the next submit fail with ERR_CONNECTION_REFUSED at the override's /api/v2 route and settles nothing), and clearing it (empty is a value) restores the seam underneath (the next scan-pay settles again). Pinned over real HTTP: operator #1, seam #2, compose. | ic-gateway-override, operator-override, gateway-precedence, settings-advanced |
 | 24 | wallet-cleanup | Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties. | asset-cards, labels, symbols |
 | 38 | relay-retarget | Settings relay-switch retargets the LIVE balance poll: header changes from A's ∂100.00 to B's faucet-funded ∂500.00 (B's fresh per-process gateway). | relay-retarget, settings-relay-switch, live-poll |
 | 41 | a11y-census | Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface. | a11y, accessibility, aria |

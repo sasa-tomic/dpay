@@ -4,8 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
 import {S, isDark} from '../styles';
 import {M} from '../i18n';
-import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY} from '../config/constants';
+import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
+import {setIcClockRoutingCanister} from '../services/icp';
 import {base, randNonceHex} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
@@ -57,7 +58,7 @@ import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
 import {useWalletHistory} from '../hooks/useWalletHistory';
 
-export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
+export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGateway, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; /** Apply + persist the IC gateway override (App.tsx, F2 — demos/testing against a local replica). THROWS on a refusal — Settings renders it. */ setIcGateway: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   const relayUrl = relayUrls[0];
   // The wallet's surfaces. Four are TABS (home/pay/receive/ledger — the bottom bar switches
   // between them and each is a destination); two are ROUTES (accounts/convert — entered from a
@@ -260,6 +261,16 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
   // The ckBTC currency id (and any future asset's) is RESOLVED from this, never hardcoded (issue #7).
   const networks = useCatalog(relayUrl);
   const catalog = useMemo(() => icpCatalogOf(networks), [networks]);
+
+  // Certified-clock read_state routing follows the catalog's DEMO row (services/icp
+  // `setIcClockRoutingCanister`): on mainnet that row IS the prod DUSD principal the clock
+  // always targeted (byte-identical), and on a demo relay (IC-gateway override → local
+  // replica) the row is the replica's own icrc_ledger — a dfx replica 400s read_state with
+  // canister_not_found for ids it does not host, so a hardcoded mainnet id breaks signing
+  // there (measured 2026-09-12). Re-runs on every catalog change (relay switch included).
+  useEffect(() => {
+    setIcClockRoutingCanister(catalog.find(c => c.currency === PRACTICE_CURRENCY)?.ledger ?? null);
+  }, [catalog]);
 
   // ckBTC currency id, resolved from the catalog (find the CkBtcUtxo-family entry). Falls back to
   // 1 only before the catalog loads (the bundled default already carries currency 1 as CkBtcUtxo).
@@ -1366,6 +1377,8 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
           setRelayUrls={setRelayUrls}
           setSolanaRpc={setSolanaRpc}
           onSolanaRpcApplied={recheckSolBalances}
+          setIcGateway={setIcGateway}
+          onIcGatewayApplied={refreshBalances}
           onClose={closeSettings}
           onReset={onReset}
           onRestore={onRestore}

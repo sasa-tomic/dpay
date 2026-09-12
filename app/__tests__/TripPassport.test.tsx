@@ -207,6 +207,8 @@ describe('Passport deep-link wiring (the SettingsSheet host)', () => {
   const SHEET_DEFAULTS = {
     setSolanaRpc: () => {},
     onSolanaRpcApplied: () => {},
+    setIcGateway: () => {},
+    onIcGatewayApplied: () => {},
     relayUrls: ['http://127.0.0.1:4391'],
     setRelayUrls: () => {},
     localeChoice: null,

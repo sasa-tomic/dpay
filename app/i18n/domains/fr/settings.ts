@@ -115,6 +115,15 @@ export const settingsFr: SettingsMessages = {
     solanaHint: 'Le point d’accès RPC Solana utilisé par ce portefeuille',
     solanaApplyA11y: 'Appliquer le point d’accès Solana',
     solanaApplyHint: 'Bascule ce portefeuille vers le point d’accès Solana saisi',
+    // F2 — le remplacement de la passerelle IC. Réservé aux opérateurs (démos/tests contre une
+    // réplique locale), pas une fonction utilisateur ; la note le dit honnêtement, comme la
+    // ligne Solana ci-dessus.
+    icGatewayNote: 'Réservé aux opérateurs : l’URL de base vers laquelle ce portefeuille envoie les transactions Internet Computer. Laissez-la vide pour utiliser la passerelle IC publique ; indiquez l’adresse d’une réplique locale (par ex. pour une démo ou des tests sur un réseau local) pour y diriger paiements et lectures de soldes. Inutile en usage normal.',
+    icGatewayLabel: 'Passerelle IC',
+    icGatewayPlaceholder: 'http://10.0.2.2:4943',
+    icGatewayHint: 'La passerelle IC vers laquelle ce portefeuille envoie les transactions',
+    icGatewayApplyA11y: 'Appliquer la passerelle IC',
+    icGatewayApplyHint: 'Bascule ce portefeuille vers la passerelle IC saisie',
   },
 
   about: {

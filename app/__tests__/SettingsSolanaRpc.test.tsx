@@ -69,6 +69,8 @@ async function mountAdvanced(applied: string[] = [], repolls: {n: number} = {n: 
         // ones under test), and record the call.
         setSolanaRpc={(u: string) => { applied.push(u); setSolanaRpcUrl(u); }}
         onSolanaRpcApplied={() => { repolls.n += 1; }}
+        setIcGateway={() => {}}
+        onIcGatewayApplied={() => {}}
       />,
     );
   });
@@ -88,7 +90,7 @@ describe('SettingsSheet — the Solana endpoint row', () => {
   test('the row is behind Advanced, and Apply is inert until the draft differs', async () => {
     await act(async () => {
       tree = renderer.create(
-        <SettingsSheet {...DEFAULTS} setSolanaRpc={() => {}} onSolanaRpcApplied={() => {}} />,
+        <SettingsSheet {...DEFAULTS} setSolanaRpc={() => {}} onSolanaRpcApplied={() => {}} setIcGateway={() => {}} onIcGatewayApplied={() => {}} />,
       );
     });
     expect(has(tree!, 'settings-sol-rpc')).toBe(false); // collapsed by default

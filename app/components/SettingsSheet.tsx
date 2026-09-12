@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
-import {PRIVACY_URL, solanaRpcUrl} from '../config/constants';
+import {PRIVACY_URL, icGatewayUrl, solanaRpcUrl} from '../config/constants';
 import {S, isDark} from '../styles';
 import {validateSeed} from '../lib/format';
 import {hexToWords, stringToWords, wordsToHex, wordsToString, validateMnemonic} from '../lib/bip39';
@@ -46,7 +46,7 @@ import {relayBuildDrift} from '../services/relay';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep}: {
+export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, setIcGateway, onIcGatewayApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep}: {
   // R1: the operator's ordered relay address list (first = preferred). The editor below is a
   // LIST editor — one address per line — but it keeps the relay row's old draft/Apply contract:
   // nothing applies on keystroke, and an empty draft is a VALUE (it restores the addresses baked
@@ -63,6 +63,15 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
   // is read per-request, so an operator who has just fixed a dead key would otherwise stare at the
   // same dashes for half a minute and conclude the fix did not work.
   onSolanaRpcApplied: () => void;
+  // Apply + persist the IC gateway override (App.tsx `persistIcGateway`, F2). The operator-facing
+  // escape hatch for pointing the IC /api/v2 rail at a local replica (demos/testing) instead of
+  // icp-api.io — NOT a user feature. Throws on a refusal (unparseable URL, plain http on a public
+  // host) and the row renders the message verbatim, same contract as the Solana endpoint.
+  setIcGateway: (s: string) => void;
+  // Fired after an ACCEPTED override change so the IC balance poll re-reads at once (mirrors
+  // onSolanaRpcApplied: the gateway is read per-request, so without this the operator would stare
+  // at stale balances until the idle poll).
+  onIcGatewayApplied: () => void;
   onClose: () => void;
   onReset: () => void;
   // Replace the current identity with a restored one (built from a 64-hex seed the user pastes).
@@ -258,6 +267,32 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
       onSolanaRpcApplied();
     } catch (e: unknown) {
       setSolRpcErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // The IC gateway row — the Solana endpoint row's twin (F2). Empty is a VALUE (it restores the
+  // default icp-api.io base), applying can fail (the setter throws an actionable refusal that
+  // renders under the field), and after an apply the field re-seeds from `icGatewayUrl()` so
+  // clearing it shows which base "empty" means. One deliberate simplification vs the SOL row:
+  // no live-follow re-seed effect — the resolved SOL endpoint follows the relay list (an adjacent
+  // row can move it while this sheet is open), whereas the IC gateway is either the operator
+  // override (only this row mutates it) or the constant default. Nothing else to follow.
+  const [draftIcGw, setDraftIcGw] = useState(icGatewayUrl);
+  const [appliedIcGw, setAppliedIcGw] = useState(icGatewayUrl);
+  const [icGwErr, setIcGwErr] = useState<string | null>(null);
+  const icGwDirty = draftIcGw.trim() !== appliedIcGw.trim();
+  const applyIcGw = () => {
+    if (!icGwDirty) return;
+    try {
+      setIcGateway(draftIcGw);
+      setIcGwErr(null);
+      // Re-seed from the RESOLVED base (an empty draft resolves to the default).
+      const active = icGatewayUrl();
+      setDraftIcGw(active);
+      setAppliedIcGw(active);
+      onIcGatewayApplied();
+    } catch (e: unknown) {
+      setIcGwErr(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -742,6 +777,37 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   accessibilityHint={M.settings.advanced.solanaApplyHint}
                   accessibilityState={{disabled: !solRpcDirty}}>
                   <Text style={[S.applyBtnText, !solRpcDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
+                </Pressable>
+                {/* The IC gateway override — the Solana endpoint row's twin, one section down.
+                    Operator-facing only: it exists so a demo/replica drive can point the IC /api/v2
+                    rail at a local gateway instead of icp-api.io. The note above the field says so
+                    honestly; a refusal (unparseable URL, plain http on a public host) renders under
+                    the field. */}
+                <Text style={S.dim2}>{M.settings.advanced.icGatewayNote}</Text>
+                <Text style={S.inputLabel}>{M.settings.advanced.icGatewayLabel}</Text>
+                <TextInput
+                  testID="settings-ic-gateway"
+                  style={S.relayInput}
+                  value={draftIcGw}
+                  onChangeText={(t) => { setDraftIcGw(t); setIcGwErr(null); }}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  placeholder={M.settings.advanced.icGatewayPlaceholder}
+                  placeholderTextColor={C.sub2}
+                  accessibilityLabel={M.settings.advanced.icGatewayLabel}
+                  accessibilityHint={M.settings.advanced.icGatewayHint}
+                />
+                {icGwErr ? <Text testID="settings-ic-gateway-err" style={S.err}>{icGwErr}</Text> : null}
+                <Pressable
+                  testID="btn-ic-gateway-apply"
+                  style={[S.applyBtn, !icGwDirty && S.disabledFlat]}
+                  disabled={!icGwDirty}
+                  onPress={applyIcGw}
+                  accessibilityRole="button"
+                  accessibilityLabel={M.settings.advanced.icGatewayApplyA11y}
+                  accessibilityHint={M.settings.advanced.icGatewayApplyHint}
+                  accessibilityState={{disabled: !icGwDirty}}>
+                  <Text style={[S.applyBtnText, !icGwDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
                 </Pressable>
               </View>
             ) : null}

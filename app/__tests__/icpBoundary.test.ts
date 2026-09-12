@@ -20,7 +20,8 @@ jest.mock('../services/native', () => ({
 }));
 
 import {fetchWithTimeout} from '../services/relay';
-import {IC_GATEWAY_DEFAULT, icSubmit} from '../services/icp';
+import {IC_GATEWAY_DEFAULT} from '../config/constants';
+import {icSubmit} from '../services/icp';
 import {BUNDLED_VENUES, DPAY_CANISTER_PRINCIPALS} from '../config/venues';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 

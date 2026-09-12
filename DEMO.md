@@ -23,11 +23,6 @@ echo 'fs.inotify.max_user_instances=512' | sudo tee /etc/sysctl.d/60-inotify.con
 
 ## Demo A — phone (payer) + laptop (merchant)   ★ recommended
 
-> ⚠ **Measured broken at HEAD (2026-09-07):** the phone→local-replica leg cannot settle — the
-> demo relay’s catalog resolves the DEMO currency to a mainnet ledger the clean replica does not
-> carry, and the app has no operator override for its IC gateway (it always targets `icp-api.io`).
-> Details + the workaround used to rehearse: `OPEN_ISSUES.md` (“`just demo` cannot settle”).
-
 **What the audience sees:** a phone in airplane mode signs a payment; the laptop scans it and it
 settles on the ledger in seconds; scanning again is refused.
 
@@ -55,18 +50,32 @@ Plug in an Android phone (USB debugging on) or use the emulator, then:
 just app
 ```
 
-The dpay app installs and opens as **“You,” with a live $100.00 balance** read from the ledger.
-`just app` bakes the **Tailscale** URL of this laptop into the app (a real phone reaches the laptop
-over your tailnet); it's shown at the bottom of the app under **ledger** and is editable. The green
-dot next to the balance means the wallet can see the ledger.
+The dpay app installs and opens as **“You.”** On a fresh install the wallet starts at **$0** —
+fund it once from the demo faucet (**Accounts ▸ the Demo $ row ▸ the faucet button**; $100 per
+wallet, rate-limited by pubkey). The green dot next to the balance means the wallet can see the
+ledger.
+
+Two operator settings point the phone at THIS laptop's demo (Settings ▸ Advanced, once per
+install):
+
+- **Relay list** → the laptop's URL (`http://<laptop-tailscale-ip>:8787`; on the Android
+  emulator `http://10.0.2.2:8787` reaches the laptop's loopback).
+- **IC gateway** → where the wallet submits Internet Computer transactions. Leave it empty for
+  the real IC; for this demo point it at the laptop's replica (`http://10.0.2.2:4943` on the
+  emulator, `http://<laptop-ip>:4943` on a physical phone on the same LAN/tailnet). This is an
+  operator/testing override — normal use never touches it.
 
 ### 3. The flow (~15 seconds when online)
 
 1. **Laptop (Receive tab):** enter the amount → the **request QR** appears
    (it encodes *who to pay, how much, and a single-use request id*).
 2. **Phone:** point the camera at the request QR → **“Pay $X to Café Demo”** → **Approve**.
-   - **Online (normal):** the phone submits straight to the ledger; the laptop shows
-     **“Received …”** within ~1s (it polls the chain), and the phone's balance drops. No second scan.
+   - **Online (normal):** the phone submits straight to the ledger; its balance drops and the
+     payment lands in the laptop’s **Recent** list (DEMO balance ticks up) within a few seconds —
+     no second scan. The open request itself confirms only on the ingest paths below (camera,
+     NFC, or the payer’s shared receipt); for the online path **Recent + balances are the settle
+     evidence**. *(Verified 2026-09-12: a $3.50 link payment settled on-ledger and in both
+     Recent lists; the request screen’s flip is scan/NFC/receipt-only by design.)*
    - **Offline / flaky link:** after 5s the phone shows a **signed QR**; the laptop's **Scan payer's
      signed QR**
       camera scans it (the terminal ingests by camera only — there is no paste box;
@@ -108,8 +117,9 @@ modes. Either can pay the other.
    demo faucet. (`just demo` must be up so the faucet + ledger are reachable over Tailscale.)
 2. **Bob** taps **Receive** → enters an amount → shows a **request QR** (carries Bob's account + name).
 3. **Alice** taps **Pay** → scans Bob's QR → **"Pay $X to Bob"** → **Approve**.
-   - Online → Alice pays directly; **Bob's screen flips to "Received $X from Alice"** within ~1s, both
-     balances move, and it lands in both **Recent** lists.
+   - Online → Alice pays directly; both balances move and it lands in both **Recent** lists.
+     Alice's **Share receipt** hands Bob the proof, which flips his open request to
+     **"Received $X"** (verified against the ledger history, never just the shared link).
    - Bob offline / flaky → Alice shows a signed QR; Bob taps **"Payer offline? Scan their QR"** and
      scans it to submit.
 4. Swap roles — Bob can now pay Alice back from what he received.
@@ -135,8 +145,9 @@ just verify    # the whole offline inner loop (core + canister + relay + UI), in
 
 - **Build fails with `EMFILE` / `inotify`** → raise `fs.inotify.max_user_instances` (see setup).
 - **Webcam won’t scan** → the terminal has no paste fallback today (camera-only ingest); use
-  Chrome on `localhost` and show it the phone’s signed QR. Also note the `just demo` settle path
-  is broken at HEAD — see the warning under Demo A and `OPEN_ISSUES.md`.
+  Chrome on `localhost` and show it the phone’s signed QR.
+- **Phone balance stuck at 0 / “offline”** → check the two operator settings (relay list + IC
+  gateway, Demo A §2) still point at the laptop, and that `just demo` is up.
 - **“Refused”** on the terminal → the payment was rejected by the canister (expired, over-cap,
   insufficient funds, or a reused nonce) — the reason is shown.
 - **Reset balances** → re-run `just demo` (it deploys a fresh `--clean` replica each time).

@@ -113,6 +113,15 @@ export const settingsEs: SettingsMessages = {
     solanaHint: 'El endpoint RPC de Solana que usa esta billetera',
     solanaApplyA11y: 'Aplicar el endpoint de Solana',
     solanaApplyHint: 'Cambia esta billetera al endpoint de Solana introducido',
+    // F2 — el override de la pasarela IC. Solo para operadores (demos/pruebas contra una réplica
+    // local), no es una función de usuario; la nota lo dice con honestidad, como la línea de
+    // Solana de arriba.
+    icGatewayNote: 'Solo para operadores: la URL base a la que esta billetera envía las transacciones de Internet Computer. Déjala vacía para usar la pasarela IC pública; pon la dirección de una réplica local (p. ej. para una demo o pruebas contra una red local) para dirigir allí pagos y lecturas de saldos. No hace falta para el uso normal.',
+    icGatewayLabel: 'Pasarela IC',
+    icGatewayPlaceholder: 'http://10.0.2.2:4943',
+    icGatewayHint: 'La pasarela IC a la que esta billetera envía las transacciones',
+    icGatewayApplyA11y: 'Aplicar la pasarela IC',
+    icGatewayApplyHint: 'Cambia esta billetera a la pasarela IC introducida',
   },
 
   about: {

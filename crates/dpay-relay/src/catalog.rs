@@ -41,6 +41,34 @@ use crate::ledger::types::{
 /// (`principals.demo_ledger`) by the `catalog_truth_tests` module below.
 pub(crate) const DEMO_LEDGER_PRINCIPAL: &str = "td2nx-oaaaa-aaaab-qhdnq-cai";
 
+/// The DEMO row's ledger text, with the local-replica demo override applied (F1, 2026-09-12).
+///
+/// `DPAY_DEMO_LEDGER=<principal>` — set ONLY by `scripts/demo.sh` — re-points the DEMO row at
+/// the replica's freshly-created `icrc_ledger`, so the demo has ONE ledger end to end: the
+/// relay's `/balances` reads, the faucet's `mint` (which transfers from the facade-owned
+/// minting account on the ledger `demo_ledger` names in the facade's init arg), and the app's
+/// signed `icrc1_transfer` envelopes all land on the same canister. Unset — every prod, lean
+/// and test build — the mainnet DUSD principal stands and the served bytes are unchanged
+/// (`catalog_truth_tests` + `wire_byte_shape_tests` pin exactly that). Read once via
+/// `OnceLock`: the catalog is rebuilt per request and must not re-parse the env each call; the
+/// principal's SHAPE is validated at relay startup (`main.rs`, agent build, where `candid`
+/// exists). The fake-IC gateway keys its ledgers off the same rows, so the offline loop and
+/// the demo agree on wherever this points.
+fn demo_ledger_text() -> String {
+    use std::sync::OnceLock;
+    static OVERRIDE: OnceLock<Option<String>> = OnceLock::new();
+    OVERRIDE
+        .get_or_init(|| {
+            std::env::var("DPAY_DEMO_LEDGER")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        })
+        .as_deref()
+        .unwrap_or(DEMO_LEDGER_PRINCIPAL)
+        .to_string()
+}
+
 /// The ckBTC LEDGER principal (mainnet) — `mxzaz-hqaaa-aaaar-qaada-cai`, the live chain-key
 /// Bitcoin ICRC-1 ledger (currency 1; 8 decimals). Replaces the fake-universe anonymous
 /// stand-in the promoted row carried. Cross-checked against
@@ -287,10 +315,11 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
     vec![
         CurrencyDescriptor {
             currency: DEMO_USD,
-            // The REAL DUSD ledger (owned, `td2nx-…` — docs/CANISTERS.md). The offline fake-IC
-            // gateway keys its fake ledger at this same text, so the offline loop and prod agree
-            // on where a DEMO transfer lands.
-            ledger: DEMO_LEDGER_PRINCIPAL.to_string(),
+            // The REAL DUSD ledger (owned, `td2nx-…` — docs/CANISTERS.md) — unless the demo
+            // override names the local replica's ledger (see `demo_ledger_text` above). The
+            // offline fake-IC gateway keys its fake ledger at this same text, so the offline
+            // loop and prod agree on where a DEMO transfer lands.
+            ledger: demo_ledger_text(),
             mintable: true,
             minter: None,
             minter_family: None,

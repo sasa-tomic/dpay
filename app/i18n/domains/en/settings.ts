@@ -166,6 +166,12 @@ export type SettingsMessages = {
     solanaHint: string;
     solanaApplyA11y: string;
     solanaApplyHint: string;
+    icGatewayNote: string;
+    icGatewayLabel: string;
+    icGatewayPlaceholder: string;
+    icGatewayHint: string;
+    icGatewayApplyA11y: string;
+    icGatewayApplyHint: string;
   };
 
   about: {
@@ -277,6 +283,14 @@ export const settingsEn: SettingsMessages = {
     solanaHint: 'The Solana RPC endpoint this wallet uses',
     solanaApplyA11y: 'Apply Solana endpoint',
     solanaApplyHint: 'Switch this wallet to the entered Solana endpoint',
+    // F2 — the IC gateway override. Operator-facing (demos/testing against a local replica), not a
+    // user feature; the note says so honestly, mirroring the Solana endpoint row's disclosure.
+    icGatewayNote: 'Operator only: the base URL this wallet sends Internet Computer transactions to. Leave it empty to use the public IC gateway; set a local replica address (for example when running a demo or testing a local network) to point payments and balance reads at it. Not needed for normal use.',
+    icGatewayLabel: 'IC gateway',
+    icGatewayPlaceholder: 'http://10.0.2.2:4943',
+    icGatewayHint: 'The IC gateway this wallet sends transactions to',
+    icGatewayApplyA11y: 'Apply IC gateway',
+    icGatewayApplyHint: 'Point this wallet at the entered IC gateway',
   },
 
   about: {

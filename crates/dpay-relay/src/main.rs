@@ -80,10 +80,52 @@ const EXIT_CONFIG: i32 = 2;
 
 #[tokio::main]
 async fn main() {
+    // scripts/demo.sh helper (DEMO.md runbook, F1 2026-09-12): print the self-authenticating
+    // principal of the DPAY_CONTROLLER_SEED identity and exit — the demo installs the facade
+    // with THIS principal as its controller (inline init arg), so the relay agent's faucet
+    // `mint` passes the canister's admin gate on first try, with no set_controller dance.
+    #[cfg(feature = "agent")]
+    if std::env::args().any(|a| a == "--print-controller-principal") {
+        use ic_agent::identity::Identity as _;
+        match parse_controller_seed()
+            .map(|key: [u8; 32]| ic_agent::identity::BasicIdentity::from_raw_key(&key))
+        {
+            Some(ident) => match ident.sender() {
+                Ok(p) => {
+                    println!("{p}");
+                    process::exit(0);
+                }
+                Err(e) => {
+                    eprintln!("dpay-relay: could not derive the controller principal: {e}");
+                    process::exit(EXIT_CONFIG);
+                }
+            },
+            None => {
+                eprintln!(
+                    "dpay-relay: DPAY_CONTROLLER_SEED is unset or malformed — nothing to print"
+                );
+                process::exit(EXIT_CONFIG);
+            }
+        }
+    }
+
     let cfg = Config::from_env().unwrap_or_else(|e| {
         eprintln!("dpay-relay: bad configuration: {e}");
         process::exit(EXIT_CONFIG);
     });
+
+    // F1 (2026-09-12, demo runbook): validate DPAY_DEMO_LEDGER once at startup. The catalog
+    // override re-points the DEMO row at the local replica's icrc_ledger; a typo'd principal
+    // would silently strand every DEMO read/write on a canister that doesn't exist. Validated
+    // here (not in catalog.rs) because `candid` is feature-gated to `agent` — the only build
+    // the demo script runs. Every other build leaves the env unset and never sees this.
+    #[cfg(feature = "agent")]
+    if let Some(v) = non_empty("DPAY_DEMO_LEDGER") {
+        if let Err(e) = candid::Principal::from_text(&v) {
+            eprintln!("dpay-relay: DPAY_DEMO_LEDGER={v:?} is not a principal: {e}");
+            process::exit(EXIT_CONFIG);
+        }
+    }
 
     let (ledger, faucet_available) = build_ledger(&cfg).await;
     let apk = load_apk();

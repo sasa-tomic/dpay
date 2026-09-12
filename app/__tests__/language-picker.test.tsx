@@ -26,6 +26,8 @@ import {LOCALE_STORAGE_KEY} from '../config/constants';
 const SHEET_DEFAULTS = {
   setSolanaRpc: () => {},
   onSolanaRpcApplied: () => {},
+  setIcGateway: () => {},
+  onIcGatewayApplied: () => {},
   relayUrls: ['http://127.0.0.1:4391'],
   setRelayUrls: () => {},
   onClose: () => {},

@@ -24,14 +24,13 @@ import {fetchWithTimeout, readBodyWithin} from './relay';
 import {hexToBytes, bytesToHex} from '../lib/format';
 import type {IcpStateRead} from '../lib/types';
 import {M} from '../i18n';
+import {icGatewayUrl} from '../config/constants';
 
-export const IC_GATEWAY_DEFAULT = 'https://icp-api.io';
-// Test/harness override seam (same pattern as the Solana RPC override): the e2e fake-IC gateway and the
-// dfx replica suite inject its base URL before the bundle evaluates; prod never sets it. Read
-// PER CALL (not at module load) so a test can flip the gateway at runtime — the only way the
-// harness can simulate an IC-unreachable (airplane-mode) payer for the offline handoff flow.
-const icGatewayBase = (): string =>
-  (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY ?? IC_GATEWAY_DEFAULT;
+// The /api/v2 gateway base lives in ONE place now — `config/constants.ts` `icGatewayUrl()` — with
+// the operator override (Settings ▸ Advanced, `IC_GATEWAY_STORAGE_KEY`) on top, then the
+// `__DPAY_TEST_IC_GATEWAY` test/harness seam (read PER CALL there, so a test can flip the gateway
+// at runtime — the only way the harness can simulate an IC-unreachable payer for the offline
+// handoff flow), then the production default icp-api.io. See that module for the full precedence.
 
 // Timeout budget: the boundary node answers a call POST with 202 quickly, but a cold or far
 // replica can take a few seconds. 8s bounds every submit; read_state polls use 5s.
@@ -60,6 +59,20 @@ const POLL_FALLBACK_AHEAD_S = 120;
 // canister-known validation for read_state (relay ic_gateway.rs), so the offline suites
 // are agnostic to this id.
 const IC_TIME_ROUTING_CANISTER = 'td2nx-oaaaa-aaaab-qhdnq-cai';
+// The routing target follows the CATALOG's DEMO row when one is loaded (Wallet wires it,
+// `setIcClockRoutingCanister`): on mainnet that row IS the same prod DUSD principal above
+// (byte-identical routing), and on a demo relay (Settings ▸ Advanced IC-gateway override →
+// local replica) the row is the replica's own icrc_ledger — a dfx replica 400s read_state
+// with canister_not_found for ANY id it does not host (measured 2026-09-12: td2nx and even
+// 'aaaaa-aa' both refuse; a hosted ledger answers 200 with a decodable time leaf). Unset
+// (catalog not loaded yet) keeps the mainnet default.
+let clockRoutingCanister: string | null = null;
+/** Point the certified-clock read_state at the given canister (the catalog's DEMO ledger).
+ * Null/empty resets to the mainnet default. No validation: the value comes from the app's
+ * own catalog parse, not user input. */
+export function setIcClockRoutingCanister(text: string | null): void {
+  clockRoutingCanister = text != null && text.length > 0 ? text : null;
+}
 // REFUSE to sign value envelopes when the device clock and certified IC time disagree beyond
 // this — a badly skewed stamp can land outside the ingress window and silently never execute.
 export const MAX_CLOCK_SKEW_NS = 60n * 1_000_000_000n; // 60s in ns
@@ -117,7 +130,7 @@ async function postEnvelope(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Response | null> {
-  const url = `${icGatewayBase()}/api/v2/canister/${canisterText}/${kind}`;
+  const url = `${icGatewayUrl()}/api/v2/canister/${canisterText}/${kind}`;
   try {
     return await fetchWithTimeout(
       url,
@@ -300,7 +313,7 @@ export async function icNowNs(secretHex: string, signal?: AbortSignal): Promise<
   clockInFlight ??= (async () => {
     try {
       const expiry = await DpayCore.icpIngressExpiry((BigInt(Date.now()) * 1_000_000n).toString(), CLOCK_SYNC_AHEAD_S);
-      const state = await readStateWithExpiry(secretHex, IC_TIME_ROUTING_CANISTER, [], true, expiry, signal);
+      const state = await readStateWithExpiry(secretHex, clockRoutingCanister ?? IC_TIME_ROUTING_CANISTER, [], true, expiry, signal);
       if (state?.timeNs != null) {
         cachedIcNowNs = BigInt(state.timeNs);
         cachedAtMs = Date.now();

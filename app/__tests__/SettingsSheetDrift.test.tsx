@@ -88,6 +88,8 @@ function mountSheet() {
         setRelayUrls={jest.fn()}
         setSolanaRpc={jest.fn()}
         onSolanaRpcApplied={jest.fn()}
+        setIcGateway={jest.fn()}
+        onIcGatewayApplied={jest.fn()}
         onClose={jest.fn()}
         onReset={jest.fn()}
         onRestore={jest.fn<(id: Identity) => Promise<void>>().mockImplementation(async () => {})}

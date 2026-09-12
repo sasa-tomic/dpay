@@ -23,6 +23,8 @@ const DEFAULTS = {
   relayUrls: ['https://primary.example'],
   setSolanaRpc: () => {},
   onSolanaRpcApplied: () => {},
+  setIcGateway: () => {},
+  onIcGatewayApplied: () => {},
   onClose: () => {},
   onReset: () => {},
   onRestore: async () => {},

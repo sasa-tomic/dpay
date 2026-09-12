@@ -15,7 +15,7 @@
 // (The v1 durable-nonce reclaim tool was removed 2026-08-14: no user ever held v1 nonce funds.)
 
 import bs58 from 'bs58';
-import {solanaRpcUrl, solanaRpcUrls, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
+import {solanaRpcUrl, solanaRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT_MAX_WINDOW_SECONDS, SOL_PAYMENT_COMMITMENT, SOL_BROADCAST_TIMEOUT_MS} from './config/constants';
 import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
@@ -100,15 +100,16 @@ const CONNECTIVITY_PROBE_MS = 2500;
 const CONNECTIVITY_PROBE_TTL_MS = 10000;
 let connectivityMemo: {probeUrl: string; at: number; result: 'unreachable' | 'offline'} | null = null;
 
-/** The IC boundary origin the oracle probes — the SAME host and the SAME override seam
- *  `services/icp.ts` uses (`IC_GATEWAY_DEFAULT` + the per-call `__DPAY_TEST_IC_GATEWAY` override;
- *  duplicated here because this seam must not statically import the services layer — icp.ts pulls
- *  the native DpayCore module, and the offline jest/e2e loop must never load it from here). Read
- *  PER CALL, exactly like icp.ts, so the e2e harness's fake-IC gateway redirect covers the oracle
- *  too: in e2e the probe lands on the in-process gateway (a known origin), never on the real
- *  icp-api.io. */
-const icProbeUrl = (): string =>
-  (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY ?? 'https://icp-api.io';
+/** The IC boundary origin the oracle probes — the SAME resolution `services/icp.ts` submits to
+ *  (`icGatewayUrl()` in config/constants: the operator override, then the per-call
+ *  `__DPAY_TEST_IC_GATEWAY` seam, then icp-api.io). This seam must not statically import the
+ *  services layer — icp.ts pulls the native DpayCore module, and the offline jest/e2e loop must
+ *  never load it from here — which is exactly why the resolution lives in config/constants, the
+ *  one pure module both sides can share (before the operator override existed the literal was
+ *  duplicated here; the duplication ended when the two resolutions had to agree). Read PER CALL,
+ *  exactly like icp.ts, so the e2e harness's fake-IC gateway redirect covers the oracle too: in
+ *  e2e the probe lands on the in-process gateway (a known origin), never on the real icp-api.io. */
+const icProbeUrl = (): string => icGatewayUrl();
 
 /**
  * The offline/unreachable oracle (R3, spec 2026-09-09: "the phone has no connectivity" vs "the

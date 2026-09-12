@@ -306,6 +306,79 @@ export function isSolanaDevnet(): boolean {
   return /devnet|testnet/i.test(solanaRpcUrl());
 }
 
+// ── The IC /api/v2 gateway base (where the app-signed envelopes submit) ─────────────────────────
+//
+// The production gateway is icp-api.io. There was no way to point the wallet anywhere else: the
+// app signs IC request envelopes locally and posts them DIRECTLY to `{base}/api/v2/canister/…`
+// (services/icp.ts), so a demo against a local dfx replica (`just demo`) — where the ledger lives
+// at 127.0.0.1:4943, not on the real boundary — could never settle (OPEN_ISSUES demo bullet, F2,
+// measured 2026-09-07). This override is the operator escape hatch, mirroring the Solana RPC
+// override above (R2, 2026-09-10) but SIMPLER, because the IC gateway is a single base URL, not a
+// list to walk. The precedence, top wins:
+//   1. the OPERATOR override — `setIcGatewayUrl`, persisted under `IC_GATEWAY_STORAGE_KEY`, read
+//      at boot in App.tsx, editable in Settings ▸ Advanced. If set, the /api/v2 gateway base IS
+//      that URL. `''` CLEARS it — icp-api.io again. This is for demos and testing (a local
+//      replica); a wallet that never sets it is indistinguishable from today's prod behavior.
+//   2. `__DPAY_TEST_IC_GATEWAY` — the e2e/jest seam, read PER CALL (not module load) so the
+//      harness can retarget or kill the gateway mid-session (flow 22's airplane-mode stage).
+//      Fresh jest/e2e contexts never set the operator override, so the seam behaves exactly as
+//      before; compose, don't replace.
+//   3. `IC_GATEWAY_DEFAULT`.
+export const IC_GATEWAY_STORAGE_KEY = 'dpay.icpGateway.v1';
+export const IC_GATEWAY_DEFAULT = 'https://icp-api.io';
+
+// null = no operator choice — the test seam / default resolves the gateway.
+let operatorIcGateway: string | null = null;
+
+/** The /api/v2 gateway base every IC envelope submit, query, and read_state uses RIGHT NOW.
+ *  A function, not a constant, because the operator's choice lands after module load (boot
+ *  storage read, Settings apply) and the test seam can flip at runtime. Call it per use. */
+export function icGatewayUrl(): string {
+  if (operatorIcGateway !== null) return operatorIcGateway;
+  return (globalThis as unknown as {__DPAY_TEST_IC_GATEWAY?: string}).__DPAY_TEST_IC_GATEWAY ?? IC_GATEWAY_DEFAULT;
+}
+
+/** Is this host loopback or RFC1918 private space? Plain-http gateways are accepted ONLY for
+ *  these — the demo case (`http://10.0.2.2:4943`, the emulator's alias for the host's loopback
+ *  replica). A PUBLIC host must be https for the same transit-tamper reason the Solana override
+ *  refuses it: a gateway on the value path can lie about a query reply. */
+function isLocalIcGatewayHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, ''); // IPv6 brackets, if any
+  if (h === 'localhost' || h.endsWith('.localhost') || h === '::1') return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+}
+
+/**
+ * Point this wallet's IC /api/v2 gateway at a different base. `''` clears the choice: icp-api.io
+ * again. THROWS, with an actionable message, on anything it will not accept — the caller
+ * (Settings, or the boot loader reading the persisted value) shows or logs it. One refusal,
+ * fail-closed like the Solana twin: a non-https URL on a PUBLIC host. Plain http is accepted
+ * only for loopback/RFC1918 addresses — the local-replica demo case, where the transit-tamper
+ * concern does not apply and https is not served. Trailing slashes are stripped so the base
+ * composes cleanly into `{base}/api/v2/…`.
+ */
+export function setIcGatewayUrl(url: string): void {
+  const trimmed = url.trim().replace(/\/+$/, '');
+  if (trimmed === '') {
+    operatorIcGateway = null;
+    return;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`Not a valid URL: "${trimmed}". Paste the gateway's full base URL — for a local replica demo, e.g. http://10.0.2.2:4943`);
+  }
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocalIcGatewayHost(parsed.hostname))) {
+    throw new Error(`The IC gateway must start with https:// (got "${parsed.protocol}//"). Plain http is accepted only for local addresses, e.g. a local replica demo at http://10.0.2.2:4943`);
+  }
+  operatorIcGateway = trimmed;
+}
+
 // SOL native send: getLatestBlockhash + sendTransaction + confirmTransaction (which polls up to
 // CONFIRM_TIMEOUT_MS=30s). 60s gives headroom over the full confirm path so a slow-but-finalising
 // transfer is never reported as a false failure.

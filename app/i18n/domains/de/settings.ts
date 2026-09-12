@@ -114,6 +114,14 @@ export const settingsDe: SettingsMessages = {
     solanaHint: 'Der Solana-RPC-Endpunkt, den diese Wallet nutzt',
     solanaApplyA11y: 'Solana-Endpunkt übernehmen',
     solanaApplyHint: 'Schaltet diese Wallet auf den eingegebenen Solana-Endpunkt um',
+    // F2 — der IC-Gateway-Override. Nur für Betreiber (Demos/Tests gegen eine lokale Replica),
+    // kein Nutzer-Feature; der Hinweis sagt es ehrlich, wie die Solana-Zeile darüber.
+    icGatewayNote: 'Nur für Betreiber: die Basis-URL, an die diese Wallet Internet-Computer-Transaktionen sendet. Leer lassen, um das öffentliche IC-Gateway zu verwenden; eine lokale Replica-Adresse eintragen (z. B. für eine Demo oder Tests gegen ein lokales Netzwerk), um Zahlungen und Guthabenabfragen dorthin zu lenken. Für die normale Nutzung nicht nötig.',
+    icGatewayLabel: 'IC-Gateway',
+    icGatewayPlaceholder: 'http://10.0.2.2:4943',
+    icGatewayHint: 'Das IC-Gateway, an das diese Wallet Transaktionen sendet',
+    icGatewayApplyA11y: 'IC-Gateway übernehmen',
+    icGatewayApplyHint: 'Schaltet diese Wallet auf das eingegebene IC-Gateway um',
   },
 
   about: {

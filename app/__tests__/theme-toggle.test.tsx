@@ -27,6 +27,8 @@ import {THEME_STORAGE_KEY} from '../config/constants';
 const SET_SHEET_DEFAULTS = {
   setSolanaRpc: () => {},
   onSolanaRpcApplied: () => {},
+  setIcGateway: () => {},
+  onIcGatewayApplied: () => {},
   relayUrls: ['http://127.0.0.1:4391'],
   setRelayUrls: () => {},
   localeChoice: null,

@@ -33,7 +33,7 @@ import {SafeAreaView, ActivityIndicator, View, useColorScheme} from 'react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {RELAY_DEFAULT} from './relayConfig';
 import {C, DARK, LIGHT} from './config/palette';
-import {STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY, SOLANA_RPC_STORAGE_KEY, setRelayBaseForSolana, setSolanaRpcUrl} from './config/constants';
+import {STORAGE_KEY, THEME_STORAGE_KEY, LOCALE_STORAGE_KEY, HOME_CURRENCY_STORAGE_KEY, SOLANA_RPC_STORAGE_KEY, IC_GATEWAY_STORAGE_KEY, setRelayBaseForSolana, setSolanaRpcUrl, setIcGatewayUrl} from './config/constants';
 import {loadPersistedRelayAddresses, parseRelayAddress, persistRelayAddresses, setRelayAddresses, splitRelayListParam} from './services/relayAddresses';
 import {parseTheme, resolveTheme, themePersistValue, type ThemeOverride} from './config/theme';
 import {parseHomeCurrency, type HomeCurrency} from './config/currency';
@@ -134,8 +134,9 @@ export default function App() {
       AsyncStorage.getItem(LOCALE_STORAGE_KEY),
       AsyncStorage.getItem(HOME_CURRENCY_STORAGE_KEY),
       AsyncStorage.getItem(SOLANA_RPC_STORAGE_KEY),
+      AsyncStorage.getItem(IC_GATEWAY_STORAGE_KEY),
     ])
-      .then(([idV, relayListV, themeV, localeV, currencyV, solRpcV]) => {
+      .then(([idV, relayListV, themeV, localeV, currencyV, solRpcV, icGwV]) => {
         // The operator's Solana endpoint, applied BEFORE the wallet renders (the balance hooks read
         // it on their first poll). A stored value was validated when it was set, so a rejection here
         // means the store was corrupted: say so loudly and stay on the built-in default rather than
@@ -145,6 +146,16 @@ export default function App() {
             setSolanaRpcUrl(solRpcV);
           } catch (e: unknown) {
             console.log(`[dpay] stored Solana RPC endpoint rejected, using the built-in default: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+        // The operator's IC gateway override, same pattern (F2, 2026-09-12): applied before the
+        // wallet renders so the first envelope submit targets the right boundary. It exists for
+        // demos/testing against a local replica; a rejection here is the same corruption story.
+        if (typeof icGwV === 'string' && icGwV.length > 0) {
+          try {
+            setIcGatewayUrl(icGwV);
+          } catch (e: unknown) {
+            console.log(`[dpay] stored IC gateway override rejected, using the default: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
         setIdentity(idV ? JSON.parse(idV) : null);
@@ -217,6 +228,17 @@ export default function App() {
     setSolanaRpcUrl(url); // throws → the caller shows it; nothing is stored
     AsyncStorage.setItem(SOLANA_RPC_STORAGE_KEY, url.trim()).catch((e: unknown) => {
       console.log(`[dpay] failed to persist Solana RPC endpoint: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }, []);
+
+  // The IC gateway override's single mutator — the same shape as persistSolanaRpc (F2). THROWS on
+  // a refusal (unparseable, plain http on a public host) and the Settings row renders the message;
+  // persistence only after acceptance. `''` clears: icp-api.io again. This is the operator/demo
+  // escape hatch — nothing in the normal user flow ever calls it.
+  const persistIcGateway = useCallback((url: string) => {
+    setIcGatewayUrl(url); // throws → the caller shows it; nothing is stored
+    AsyncStorage.setItem(IC_GATEWAY_STORAGE_KEY, url.trim()).catch((e: unknown) => {
+      console.log(`[dpay] failed to persist IC gateway override: ${e instanceof Error ? e.message : String(e)}`);
     });
   }, []);
 
@@ -324,5 +346,5 @@ export default function App() {
     // same marker, so first run is never blocked by it.
     return <View style={S.screenFrame}><Practice identity={identity} relayUrl={relayUrl} onDone={() => markJourneySeen(FIRST_RUN_PRACTICE)} /></View>;
   }
-  return <View style={S.screenFrame}><Wallet identity={identity} relayUrls={relayUrls} setRelayUrls={persistRelayList} setSolanaRpc={persistSolanaRpc} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
+  return <View style={S.screenFrame}><Wallet identity={identity} relayUrls={relayUrls} setRelayUrls={persistRelayList} setSolanaRpc={persistSolanaRpc} setIcGateway={persistIcGateway} onReset={onReset} onRestore={onRestore} resolvedTheme={themeOverride} themeChoice={themeChoice} onSetTheme={persistTheme} localeChoice={localeChoice} onSetLocale={persistLocale} homeCurrency={homeCurrency} onSetHomeCurrency={persistHomeCurrency} /></View>;
 }
