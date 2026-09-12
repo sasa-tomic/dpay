@@ -481,7 +481,7 @@ describe('watching the charge', () => {
 
 describe('a customer who approves instead of sending', () => {
   /** Ring up, then let one poll carry a pull claim. */
-  async function claimArrives(tree: renderer.ReactTestRenderer) {
+  async function claimArrives(_tree: renderer.ReactTestRenderer) {
     jest.mocked(tillChargeStatus).mockResolvedValue({
       kind: 'status',
       status: status({pull: {payer: PAYER_PRINCIPAL, atSecs: CHARGE.createdSecs + 3}}),

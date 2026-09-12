@@ -1,10 +1,11 @@
 {
-  "_doc": "The canonical bytes a merchant signs to ring up a charge on dpay's own OpenCryptoPay till, and the ONE statement of that encoding outside dpay_core::TillOpen. Emitted from the real core by `just wire-layout`; read back by crates/dpay-fixture (which rebuilds the golden struct from these offsets alone) and by scripts/check-wasm-core.mjs (which reproduces the buffer field-by-field in JS and checks the committed wasm's w_till_open_sig against sig_hex). The relay verifies with dpay_core::validate_till_open, so it shares the encoding rather than a copy of it. Same convention as dfx/wire_layout.json — regenerated when the encoding deliberately changes, never hand-edited to make a test pass.",
-  "domain": "dpay-till-open-v1",
-  "domain_hex": "647061792d74696c6c2d6f70656e2d7631",
+  "_doc": "The canonical bytes a merchant signs to ring up a charge on dpay's own OpenCryptoPay till, and the ONE statement of that encoding outside dpay_core::TillOpen. Two spellings live here: `golden` is the v2 buffer (domain dpay-till-open-v2) a request carrying a sale's `note` signs — the note rides its own u32-LE length prefix after the name — and `legacy_v1` is the frozen note-less buffer (domain dpay-till-open-v1) the wasm export w_till_open_sig must keep producing under the additive-only ABI policy. Emitted from the real core by `just wire-layout`; read back by crates/dpay-fixture (which rebuilds the golden struct from these offsets alone) and by scripts/check-wasm-core.mjs (which reproduces both buffers field-by-field in JS and checks the committed wasm's w_till_open_sig against legacy_v1.sig_hex and w_till_open_sig_note against golden.sig_hex). The relay verifies with dpay_core::validate_till_open, so it shares the encoding rather than a copy of it. Same convention as dfx/wire_layout.json — regenerated when the encoding deliberately changes, never hand-edited to make a test pass.",
+  "domain": "dpay-till-open-v2",
+  "domain_hex": "647061792d74696c6c2d6f70656e2d7632",
   "max_skew_secs": 120,
   "fixed_len": 81,
   "name_len_bytes": 4,
+  "note_len_bytes": 4,
   "sig_len": 64,
   "fields": {
     "domain": {
@@ -36,6 +37,11 @@
       "offset": 81,
       "len": 4,
       "endian": "le"
+    },
+    "note_len": {
+      "offset": 102,
+      "len": 4,
+      "endian": "le"
     }
   },
   "golden": {
@@ -45,6 +51,14 @@
     "nonce_hex": "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a",
     "issued_at": 1786815398,
     "merchant_name": "Café Bahnhof ☕",
+    "note": "2× Kafi, Tisch 4 ☕",
+    "signing_hex": "647061792d74696c6c2d6f70656e2d7632ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1e8030000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2aa6a3806a0000000011000000436166c3a9204261686e686f6620e298951500000032c397204b6166692c205469736368203420e29895",
+    "sig_hex": "0e29cedb2aa83c6c37f47c8fd0465791e762e2ac3e748b7789b9f97e350bb7606c9b9d8413468b2cc864b2b4da9af024b7876948ef2bdd83aab60a8045266f07"
+  },
+  "legacy_v1": {
+    "domain": "dpay-till-open-v1",
+    "domain_hex": "647061792d74696c6c2d6f70656e2d7631",
+    "fixed_len": 81,
     "signing_hex": "647061792d74696c6c2d6f70656e2d7631ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1e8030000000000002a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2aa6a3806a0000000011000000436166c3a9204261686e686f6620e29895",
     "sig_hex": "fd7e1ca4eee4f2d7b6996e8debf7fb199602ef3bc3aef9d2adb640623f34d5ff05616742536126532fb88b1da02c0ce4f2ba6c9b52bf21ca39064af1e93e1b08"
   }

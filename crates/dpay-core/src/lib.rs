@@ -285,11 +285,23 @@ pub fn sign_withdraw(key: &SigningKey, auth: &WithdrawAuth) -> Signature {
 // The reverse direction is closed by the same fact: a till-open buffer starts with the tag, so
 // reading it as an `Authorization` would put the tag where `from` belongs and the signature (made by
 // the merchant's real key) does not verify under that. The version rides IN the tag rather than in a
-// separate version byte — one statement of "which format is this", not two that can disagree.
+// separate version byte — one statement of "which format is this", not two that can disagree. A
+// request carrying a `note` (the sale's purpose, v2) signs under `dpay-till-open-v2`; a note-less
+// request signs under `dpay-till-open-v1`. Two tags, not one tag plus an optional field, so the
+// two encodings cannot be confused for each other by any verifier that reads the tag it verifies.
 
-/// Domain-separation tag, and the first bytes of every till-open signing buffer. FROZEN: changing it
-/// invalidates every signature ever made, which is exactly what a version bump should mean.
+/// Domain-separation tag, and the first bytes of every note-less (v1) till-open signing buffer.
+/// FROZEN: changing it invalidates every signature ever made, which is exactly what a version bump
+/// should mean. Requests carrying a `note` sign under [`TILL_OPEN_DOMAIN_V2`] instead — the version
+/// rides in the tag, so a v1 signature can never be re-read as v2 bytes or the other way round.
 pub const TILL_OPEN_DOMAIN: &[u8; 17] = b"dpay-till-open-v1";
+
+/// Domain-separation tag for till-open requests that carry a `note` (the sale's purpose, shown to
+/// the payer on review). A SEPARATE tag rather than an appended field under the old one: the tag is
+/// the one statement of "which format is this", and a v1 verifier (a relay not yet upgraded) must
+/// refuse v2 bytes as a bad signature rather than accept them as a different spelling of the same
+/// request — which is exactly what a different tag makes it do.
+pub const TILL_OPEN_DOMAIN_V2: &[u8; 17] = b"dpay-till-open-v2";
 
 /// How far a merchant's `issued_at` may sit from the verifier's clock, in EITHER direction.
 ///
@@ -299,13 +311,19 @@ pub const TILL_OPEN_DOMAIN: &[u8; 17] = b"dpay-till-open-v1";
 /// window only has to remember accepted nonces for `2 × TILL_OPEN_MAX_SKEW_SECS`.
 pub const TILL_OPEN_MAX_SKEW_SECS: u64 = 120;
 
-/// Fixed-width prefix of a till-open signing buffer:
+/// Fixed-width prefix of a note-less (v1) till-open signing buffer:
 /// `domain(17) | merchant_pubkey(32) | cents_le(8) | nonce(16) | issued_at_le(8)` = 81 bytes. The
 /// variable-length `merchant_name` follows, prefixed by its own u32-LE byte length.
 pub const TILL_OPEN_FIXED_LEN: usize =
     TILL_OPEN_DOMAIN.len() + PUBKEY_LEN + 8 + NONCE_LEN + 8;
+/// Fixed-width prefix of a v2 (note-bearing) till-open signing buffer — same fields, one byte
+/// longer, because the v2 domain tag is.
+pub const TILL_OPEN_FIXED_LEN_V2: usize =
+    TILL_OPEN_DOMAIN_V2.len() + PUBKEY_LEN + 8 + NONCE_LEN + 8;
 /// Width of the merchant-name length prefix (u32 LE) appended after the fixed prefix.
 pub const TILL_OPEN_NAME_LEN_BYTES: usize = 4;
+/// Width of the note length prefix (u32 LE), appended after the name in v2 buffers only.
+pub const TILL_OPEN_NOTE_LEN_BYTES: usize = 4;
 
 /// A merchant's authenticated request to ring up one charge on dpay's own OpenCryptoPay till.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -321,31 +339,74 @@ pub struct TillOpen {
     pub issued_at: u64,
     /// What the merchant calls themselves — CLAIMED, shown to payers, and bound by the signature.
     pub merchant_name: String,
+    /// What the charge is FOR — "2× Kafi", table 4 — CLAIMED like the name, shown to the payer on
+    /// review, and bound by the signature for the same reason: an unsigned field inside a signed
+    /// request is a field the relay cannot attribute to anybody. `None` signs the v1 buffer (the
+    /// frozen encoding every deployed relay already verifies); `Some` signs the v2 buffer under
+    /// [`TILL_OPEN_DOMAIN_V2`]. `Some("")` is a v2 buffer with an empty note, NOT a v1 buffer —
+    /// the presence of the field is itself information the tag states.
+    pub note: Option<String>,
 }
 
 impl TillOpen {
-    /// Canonical, deterministic signing message. FROZEN field order:
-    /// `domain | merchant_pubkey | cents_le | nonce | issued_at_le | name_len_le(4) | name_utf8`.
+    /// Canonical, deterministic signing message. Which buffer a request signs is stated by its own
+    /// first bytes — the version rides IN the tag:
+    ///
+    /// * `note: None` (v1, FROZEN field order):
+    ///   `dpay-till-open-v1 | merchant_pubkey | cents_le | nonce | issued_at_le | name_len_le(4) |
+    ///   name_utf8`
+    /// * `note: Some` (v2):
+    ///   `dpay-till-open-v2 | merchant_pubkey | cents_le | nonce | issued_at_le | name_len_le(4) |
+    ///   name_utf8 | note_len_le(4) | note_utf8`
     ///
     /// The domain tag is FIRST (see the module note above — that placement is what makes a signature
-    /// from any other dpay payload unusable here). The name is LAST and length-prefixed, so the
+    /// from any other dpay payload unusable here). Both strings are LAST and length-prefixed, so the
     /// encoding is self-delimiting and unambiguous: no two different `{cents, nonce, issued_at,
-    /// name}` tuples can produce the same bytes.
+    /// name, note}` tuples can produce the same bytes.
     pub fn signing_bytes(&self) -> Vec<u8> {
         let name = self.merchant_name.as_bytes();
-        let mut b =
-            Vec::with_capacity(TILL_OPEN_FIXED_LEN + TILL_OPEN_NAME_LEN_BYTES + name.len());
-        b.extend_from_slice(TILL_OPEN_DOMAIN);
-        b.extend_from_slice(&self.merchant_pubkey);
-        b.extend_from_slice(&self.cents.to_le_bytes());
-        b.extend_from_slice(&self.nonce);
-        b.extend_from_slice(&self.issued_at.to_le_bytes());
-        // Length-prefix the name (u32 LE), matching `WithdrawAuth`'s address prefix; bounds the name
-        // at 4 GiB, far beyond any real input.
-        let len = u32::try_from(name.len()).expect("merchant name length fits u32");
-        b.extend_from_slice(&len.to_le_bytes());
-        b.extend_from_slice(name);
-        b
+        match self.note.as_deref() {
+            // v1: the frozen buffer, byte for byte, so an upgraded relay still verifies the ring-ups
+            // of every already-deployed signer (and the frozen `w_till_open_sig` wasm export keeps
+            // its documented semantics).
+            None => {
+                let mut b = Vec::with_capacity(
+                    TILL_OPEN_FIXED_LEN + TILL_OPEN_NAME_LEN_BYTES + name.len(),
+                );
+                b.extend_from_slice(TILL_OPEN_DOMAIN);
+                b.extend_from_slice(&self.merchant_pubkey);
+                b.extend_from_slice(&self.cents.to_le_bytes());
+                b.extend_from_slice(&self.nonce);
+                b.extend_from_slice(&self.issued_at.to_le_bytes());
+                let len = u32::try_from(name.len()).expect("merchant name length fits u32");
+                b.extend_from_slice(&len.to_le_bytes());
+                b.extend_from_slice(name);
+                b
+            }
+            // v2: the note rides its own tag and its own length prefix, after the name.
+            Some(note) => {
+                let note = note.as_bytes();
+                let mut b = Vec::with_capacity(
+                    TILL_OPEN_FIXED_LEN_V2
+                        + TILL_OPEN_NAME_LEN_BYTES
+                        + name.len()
+                        + TILL_OPEN_NOTE_LEN_BYTES
+                        + note.len(),
+                );
+                b.extend_from_slice(TILL_OPEN_DOMAIN_V2);
+                b.extend_from_slice(&self.merchant_pubkey);
+                b.extend_from_slice(&self.cents.to_le_bytes());
+                b.extend_from_slice(&self.nonce);
+                b.extend_from_slice(&self.issued_at.to_le_bytes());
+                let len = u32::try_from(name.len()).expect("merchant name length fits u32");
+                b.extend_from_slice(&len.to_le_bytes());
+                b.extend_from_slice(name);
+                let len = u32::try_from(note.len()).expect("note length fits u32");
+                b.extend_from_slice(&len.to_le_bytes());
+                b.extend_from_slice(note);
+                b
+            }
+        }
     }
 }
 
@@ -1127,6 +1188,7 @@ mod tests {
             nonce: [0x2a; NONCE_LEN],
             issued_at: 1_786_815_398,
             merchant_name: "Café Bahnhof ☕".to_string(),
+            note: None,
         }
     }
 
@@ -1177,6 +1239,65 @@ mod tests {
             validate_till_open(&t_name, &sig, now, false),
             Err(TillOpenError::BadSignature),
             "the CLAIMED name is shown to payers, so it must be signed"
+        );
+    }
+
+    #[test]
+    fn till_open_note_rides_its_own_tag_length_prefix_and_signature() {
+        let sk = generate_keypair();
+        // Multi-byte note on purpose: the length prefix must count BYTES, not characters, exactly
+        // like the name prefix beside it.
+        let open = TillOpen {
+            note: Some("2× Kafi, Tisch 4 ☕".to_string()),
+            ..till_open(&sk)
+        };
+        let sig = sign_till_open(&sk, &open).to_bytes();
+        let now = open.issued_at;
+        let buf = open.signing_bytes();
+        let note = open.note.as_deref().unwrap();
+
+        assert_eq!(&buf[..TILL_OPEN_DOMAIN_V2.len()], TILL_OPEN_DOMAIN_V2.as_slice());
+        assert_eq!(
+            buf.len(),
+            TILL_OPEN_FIXED_LEN_V2
+                + TILL_OPEN_NAME_LEN_BYTES
+                + open.merchant_name.len()
+                + TILL_OPEN_NOTE_LEN_BYTES
+                + note.len()
+        );
+        // The declared note length counts bytes, and the note lands after the name's bytes.
+        let note_len_at = TILL_OPEN_FIXED_LEN_V2 + TILL_OPEN_NAME_LEN_BYTES + open.merchant_name.len();
+        let declared = u32::from_le_bytes(
+            buf[note_len_at..note_len_at + TILL_OPEN_NOTE_LEN_BYTES].try_into().unwrap(),
+        );
+        assert_eq!(declared as usize, note.len());
+        assert!(declared as usize > note.chars().count(), "the golden note is multi-byte");
+        assert_eq!(&buf[note_len_at + TILL_OPEN_NOTE_LEN_BYTES..], note.as_bytes());
+        assert_eq!(validate_till_open(&open, &sig, now, false), Ok(()));
+
+        // Tampering with the note breaks verification — it is payer-read text, same class as the
+        // claimed name, so it must be attribution-bearing the same way.
+        let t_note = TillOpen { note: Some("1× Kafi".to_string()), ..open.clone() };
+        assert_eq!(validate_till_open(&t_note, &sig, now, false), Err(TillOpenError::BadSignature));
+
+        // v1/v2 confusion is impossible by construction: the same fields with the note REMOVED sign
+        // a different buffer (different tag), so a v2 signature never validates a v1 request and a
+        // v1 signature never validates a v2 one — in either direction.
+        let v1 = TillOpen { note: None, ..open.clone() };
+        let v1_sig = sign_till_open(&sk, &v1).to_bytes();
+        assert_ne!(v1.signing_bytes(), open.signing_bytes());
+        assert_eq!(validate_till_open(&v1, &sig, now, false), Err(TillOpenError::BadSignature));
+        assert_eq!(validate_till_open(&open, &v1_sig, now, false), Err(TillOpenError::BadSignature));
+
+        // An EMPTY note is still v2 — the field's presence is information the tag states, and an
+        // upgraded signer cannot silently fall back to the v1 buffer by clearing the note.
+        let empty = TillOpen { note: Some(String::new()), ..open };
+        let empty_sig = sign_till_open(&sk, &empty).to_bytes();
+        assert_eq!(validate_till_open(&empty, &empty_sig, now, false), Ok(()));
+        assert_eq!(
+            validate_till_open(&empty, &v1_sig, now, false),
+            Err(TillOpenError::BadSignature),
+            "Some(\"\") and None sign different buffers"
         );
     }
 
@@ -1341,6 +1462,9 @@ mod tests {
                     bytes[o + PUBKEY_LEN + 8 + NONCE_LEN..TILL_OPEN_FIXED_LEN].try_into().unwrap(),
                 ),
                 merchant_name: open.merchant_name.clone(),
+                // The proptest walks the v1 buffer (the range stops at the v1 fixed prefix), so the
+                // reconstruction is the v1 request: no note.
+                note: None,
             };
             // `now` follows the tampered time so a flipped `issued_at` fails on the SIGNATURE (the
             // property under test) rather than trivially on staleness.

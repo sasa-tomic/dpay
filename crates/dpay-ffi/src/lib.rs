@@ -272,9 +272,13 @@ pub fn decode_request(qr: String) -> Result<PaymentRequestData, DpayError> {
 ///
 /// `nonce` is 16 bytes (single-use — the relay records it on acceptance); `issued_at` is unix
 /// seconds and must be within `dpay_core::TILL_OPEN_MAX_SKEW_SECS` of the relay's clock;
-/// `merchant_name` is the CLAIMED display name and is bound by the signature. Returns the raw
-/// 64-byte Ed25519 signature. The canonical bytes are `dpay_core::TillOpen::signing_bytes` — the
-/// relay rebuilds them and calls `dpay_core::validate_till_open`, so there is ONE encoding.
+/// `merchant_name` is the CLAIMED display name and is bound by the signature. `note` is the
+/// one-line purpose the payer reads on review ("2× Kafi, Tisch 4") — CLAIMED like the name and
+/// bound by the signature the same way. An EMPTY `note` signs the note-less (v1) encoding, so a
+/// merchant who rings up without a purpose needs no relay upgrade to be accepted; any non-empty
+/// note signs under `TILL_OPEN_DOMAIN_V2`. Returns the raw 64-byte Ed25519 signature. The
+/// canonical bytes are `dpay_core::TillOpen::signing_bytes` — the relay rebuilds them and calls
+/// `dpay_core::validate_till_open`, so there is ONE encoding.
 #[uniffi::export]
 pub fn till_open_signature(
     secret: Vec<u8>,
@@ -282,6 +286,7 @@ pub fn till_open_signature(
     nonce: Vec<u8>,
     issued_at: u64,
     merchant_name: String,
+    note: String,
 ) -> Result<Vec<u8>, DpayError> {
     let key = signing_key_from_seed(&secret)?;
     let open = TillOpen {
@@ -290,6 +295,7 @@ pub fn till_open_signature(
         nonce: fixed_nonce(&nonce)?,
         issued_at,
         merchant_name,
+        note: if note.is_empty() { None } else { Some(note) },
     };
     Ok(dpay_core::sign_till_open(&key, &open).to_bytes().to_vec())
 }
@@ -746,17 +752,21 @@ mod tests {
     }
 
     /// `till_open_signature` signs under the seed's OWN key and its output validates through the
-    /// core rule — the positive path the relay's `POST /api/v1/till` will accept.
+    /// core rule — the positive path the relay's `POST /api/v1/till` will accept. A non-empty note
+    /// signs the v2 spelling and must verify against `note: Some(…)`; the EMPTY note must sign the
+    /// note-less v1 bytes, so a merchant without a purpose needs no relay upgrade.
     #[test]
     fn till_open_signature_validates_through_the_core_rule() {
         let secret = vec![0x11u8; 32];
         let public = keypair_from_secret(secret.clone()).expect("derive keypair").public;
+        let note = "2× Kafi, Tisch 4 ☕";
         let sig = till_open_signature(
             secret,
             1_000,
             test_nonce().to_vec(),
             1_786_815_398,
             "Café Bahnhof ☕".to_string(),
+            note.to_string(),
         )
         .expect("sign a till ring-up");
         assert_eq!(sig.len(), dpay_core::SIG_LEN);
@@ -767,6 +777,7 @@ mod tests {
             nonce: test_nonce(),
             issued_at: 1_786_815_398,
             merchant_name: "Café Bahnhof ☕".to_string(),
+            note: Some(note.to_string()),
         };
         assert_eq!(
             dpay_core::validate_till_open(
@@ -777,17 +788,38 @@ mod tests {
             ),
             Ok(())
         );
+
+        // Empty note → the note-less (v1) encoding, verified against `note: None`.
+        let bare = till_open_signature(
+            vec![0x11u8; 32],
+            1_000,
+            test_nonce().to_vec(),
+            1_786_815_398,
+            "Café Bahnhof ☕".to_string(),
+            String::new(),
+        )
+        .expect("sign a note-less ring-up");
+        let v1 = dpay_core::TillOpen { note: None, ..open.clone() };
+        assert_eq!(
+            dpay_core::validate_till_open(
+                &v1,
+                &bare.as_slice().try_into().expect("64-byte signature"),
+                v1.issued_at,
+                false,
+            ),
+            Ok(())
+        );
     }
 
     /// Malformed inputs are typed FFI errors, never a silently wrong signature.
     #[test]
     fn till_open_signature_refuses_a_bad_seed_or_nonce_length() {
         assert!(matches!(
-            till_open_signature(vec![0u8; 31], 1, test_nonce().to_vec(), 1, String::new()),
+            till_open_signature(vec![0u8; 31], 1, test_nonce().to_vec(), 1, String::new(), String::new()),
             Err(DpayError::BadSecretLength)
         ));
         assert!(matches!(
-            till_open_signature(vec![0u8; 32], 1, vec![0u8; 15], 1, String::new()),
+            till_open_signature(vec![0u8; 32], 1, vec![0u8; 15], 1, String::new(), String::new()),
             Err(DpayError::BadNonceLength)
         ));
     }

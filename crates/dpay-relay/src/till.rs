@@ -183,6 +183,14 @@ pub struct Charge {
     /// What the merchant calls themselves. CLAIMED, never verified — every wallet that renders it
     /// must mark it so, exactly as dpay's own payer side marks a provider's `displayName`.
     pub merchant_name: String,
+    /// What the charge is FOR, in the merchant's own words ("2× Kafi, Tisch 4") — the one-line
+    /// purpose a payer reads on review before paying. CLAIMED like the name and SIGNED with it
+    /// (under `TILL_OPEN_DOMAIN_V2`), because an unsigned field inside a signed request is a field
+    /// this relay cannot attribute to anybody — and this one tells the payer what they are paying
+    /// for. `None` = the note-less v1 request every older app sends. Clamped for display by
+    /// [`TillStore::open`] under the same bound as the name, strictly AFTER the signature covered
+    /// every byte (see [`clamp_name`]).
+    pub note: Option<String>,
     /// The price in CHF cents — the number the merchant typed and the cashier reads aloud.
     pub cents: u64,
     /// THIS CHARGE'S NAME ON THE LEDGER: 16 bytes of OS randomness as hex, minted at ring-up, put
@@ -558,6 +566,7 @@ impl TillStore {
         merchant: String,
         merchant_pubkey: [u8; 32],
         merchant_name: String,
+        note: Option<String>,
         cents: u64,
         now_secs: u64,
     ) -> Result<Charge, TillError> {
@@ -579,6 +588,9 @@ impl TillStore {
             // Clamped HERE so no caller can store an unbounded name: a name arrives from a
             // stranger, is display text, and must not be a way to spend this relay's memory.
             merchant_name: clamp_name(&merchant_name),
+            // Same rule for the same kind of string: the note is display text a stranger typed.
+            // `None` passes through untouched — an absent note is not an empty one.
+            note: note.as_deref().map(clamp_name),
             cents,
             reference,
             created_secs: now_secs,
@@ -1066,6 +1078,12 @@ pub(crate) struct OpenCharge {
     pub merchant_pubkey: String,
     #[serde(default)]
     pub merchant_name: String,
+    /// The one-line purpose the payer reads on review ("2× Kafi, Tisch 4"), or absent for the
+    /// note-less (v1) request every older app sends — `None` and an omitted field are the same
+    /// thing, which is what `serde(default)` buys. Inside the signed bytes under
+    /// `TILL_OPEN_DOMAIN_V2` when present, so the relay can attribute it.
+    #[serde(default)]
+    pub note: Option<String>,
     /// The price in CHF cents; `0` on the cancel route and nowhere else.
     pub cents: u64,
     /// 32 hex — the 16-byte single-use nonce that makes this signature good exactly once.
@@ -1108,6 +1126,7 @@ mod tests {
             merchant.into(),
             pk,
             "Shop".into(),
+            None,
             cents,
             at,
         )
@@ -1123,6 +1142,7 @@ mod tests {
             MERCHANT.into(),
             [7u8; 32],
             "Test Shop".into(),
+            None,
             cents,
             created,
         )
@@ -1370,6 +1390,7 @@ mod tests {
             MERCHANT.into(),
             [7u8; 32],
             "Shop".into(),
+            None,
             450,
             1_000,
         )
@@ -1380,6 +1401,7 @@ mod tests {
             MERCHANT.into(),
             [7u8; 32],
             "Shop".into(),
+            None,
             450,
             1_001,
         )
@@ -1675,6 +1697,7 @@ mod tests {
                 MERCHANT.into(),
                 [7u8; 32],
                 name,
+                None,
                 100,
                 0,
             )
@@ -1870,6 +1893,7 @@ mod tests {
                 MERCHANT.into(),
                 [7u8; 32],
                 "Shop".into(),
+                None,
                 100,
                 0
             )
@@ -1897,6 +1921,7 @@ mod tests {
                 OTHER_MERCHANT.into(),
                 [8u8; 32],
                 "Kiosk".into(),
+                None,
                 100,
                 0
             )
@@ -1911,6 +1936,7 @@ mod tests {
                 MERCHANT.into(),
                 [7u8; 32],
                 "Shop".into(),
+                None,
                 100,
                 CHARGE_TTL_SECS
             )
@@ -1946,6 +1972,7 @@ mod tests {
             nonce: [nonce; NONCE_LEN],
             issued_at,
             merchant_name: "Bahnhof Kiosk".to_string(),
+            note: None,
         };
         let sig = sign_till_open(&sk, &open).to_bytes();
         (open, sig)
@@ -2436,7 +2463,7 @@ fn hex_field<const N: usize>(value: &str, field: &str) -> Result<[u8; N], Respon
 /// verified here must be the byte-identical string the merchant signed; the display clamp
 /// ([`clamp_name`], applied by `TillStore::open`) runs strictly AFTER acceptance. Clamping first
 /// would silently rewrite the message and refuse every honest signature over a name of 33 bytes
-/// or more.
+/// or more. `note` follows the same rule for the same reason.
 fn decoded(req: &OpenCharge) -> Result<(TillOpen, [u8; SIG_LEN]), Response> {
     let open = TillOpen {
         merchant_pubkey: hex_field::<PUBKEY_LEN>(&req.merchant_pubkey, "merchant_pubkey")?,
@@ -2444,6 +2471,7 @@ fn decoded(req: &OpenCharge) -> Result<(TillOpen, [u8; SIG_LEN]), Response> {
         nonce: hex_field::<NONCE_LEN>(&req.nonce, "nonce")?,
         issued_at: req.issued_at,
         merchant_name: req.merchant_name.clone(),
+        note: req.note.clone(),
     };
     Ok((open, hex_field::<SIG_LEN>(&req.signature, "signature")?))
 }
@@ -2569,6 +2597,7 @@ pub(crate) async fn open_charge(
             account,
             open.merchant_pubkey,
             open.merchant_name,
+            open.note,
             req.cents,
             now,
         ) {

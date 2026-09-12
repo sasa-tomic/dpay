@@ -130,9 +130,11 @@ export type DpayCoreApi = {
   // key the caller does not own. The merchant pubkey is derived from `secretHex` inside the core —
   // never passed in. `cents` is a raw-u64 decimal string; `issuedAt` is unix SECONDS and must be
   // inside the relay's skew window (`dpay_core::TILL_OPEN_MAX_SKEW_SECS`); `merchantName` is the
-  // CLAIMED display name and is bound by the signature. Canonical bytes + the anti-replay rule:
+  // CLAIMED display name and is bound by the signature; `note` is the one-line purpose the payer
+  // reads on review — an EMPTY string signs the note-less (v1) encoding, non-empty signs under
+  // `TILL_OPEN_DOMAIN_V2`. Canonical bytes + the anti-replay rule:
   // `dpay_core::TillOpen` (golden `dfx/till_open_signing.json`). Resolves 64-byte hex.
-  tillOpenSignature(secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string): Promise<string>;
+  tillOpenSignature(secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string, note: string): Promise<string>;
   // Append one line to the on-device diagnostic log (`services/log.ts`). Resolves false when the
   // line could not be written — a logger must never reject and never throw on the money path.
   // Optional for the same reason as `nfcStatus`: builds without the native method simply have no

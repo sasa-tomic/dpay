@@ -245,7 +245,7 @@ async function signedBody(identity: Identity, cents: string): Promise<Record<str
   }
   const nonce = randNonceHex();
   const issuedAt = nowSecs();
-  const signature = await DpayCore.tillOpenSignature(identity.secretHex, cents, nonce, issuedAt, identity.username);
+  const signature = await DpayCore.tillOpenSignature(identity.secretHex, cents, nonce, issuedAt, identity.username, '');
   return {
     merchant_pubkey: identity.publicHex,
     merchant_name: identity.username,

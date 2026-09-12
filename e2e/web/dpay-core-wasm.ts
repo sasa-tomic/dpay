@@ -806,9 +806,11 @@ async function icpDecodeInt(argHex: string): Promise<string> {
 /** Merchant side: sign a ring-up on dpay's own OpenCryptoPay till. The merchant pubkey is derived
  *  from the seed INSIDE the core, so the signature always covers the key that will be paid. The
  *  canonical bytes and the anti-replay rule live in `dpay_core::TillOpen`; the golden is
- *  `dfx/till_open_signing.json`. Returns the 64-byte signature as hex. */
+ *  `dfx/till_open_signing.json`. A NON-EMPTY note signs the v2 encoding via `w_till_open_sig_note`
+ *  (feature-detected by symbol presence per the wasm ABI policy); an empty note signs the note-less
+ *  v1 bytes through the frozen `w_till_open_sig`. Returns the 64-byte signature as hex. */
 async function tillOpenSignature(
-  secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string,
+  secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string, note: string,
 ): Promise<string> {
   const ex = await core();
   const seed = hex(secretHex);
@@ -821,8 +823,15 @@ async function tillOpenSignature(
   const out = outBuf(ex, SIG_LEN, 'tillOpenSignature');
   const [centsLo, centsHi] = splitU64(cents);
   const [iatLo, iatHi] = splitU64(issuedAt);
-  const status = ex.w_till_open_sig(seedP, centsLo, centsHi, nonceP, iatLo, iatHi, nameP, nameLen, out);
-  if (status !== 0) bail(status, 'w_till_open_sig');
+  let status: number;
+  if (note !== '' && typeof ex.w_till_open_sig_note === 'function') {
+    const [noteP, noteLen] = putStr(ex, note);
+    status = ex.w_till_open_sig_note(seedP, centsLo, centsHi, nonceP, iatLo, iatHi, nameP, nameLen, noteP, noteLen, out);
+    if (status !== 0) bail(status, 'w_till_open_sig_note');
+  } else {
+    status = ex.w_till_open_sig(seedP, centsLo, centsHi, nonceP, iatLo, iatHi, nameP, nameLen, out);
+    if (status !== 0) bail(status, 'w_till_open_sig');
+  }
   return bytesToHex(readBytes(ex, out, SIG_LEN));
 }
 

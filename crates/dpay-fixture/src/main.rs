@@ -18,8 +18,8 @@
 use dpay_core::{
     Authorization, PaymentRequest, ReceiptClaim, SignedAuthorization, TillOpen, WithdrawAuth,
     DEMO_USD, MEMO_LEN, NAME_LEN, NONCE_LEN, PUBKEY_LEN, RECEIPT_CLAIM_LEN, REQUEST_LEN, SIG_LEN,
-    SIGNING_LEN, TILL_OPEN_DOMAIN, TILL_OPEN_FIXED_LEN, TILL_OPEN_MAX_SKEW_SECS,
-    TILL_OPEN_NAME_LEN_BYTES, WIRE_LEN,
+    SIGNING_LEN, TILL_OPEN_DOMAIN, TILL_OPEN_DOMAIN_V2, TILL_OPEN_FIXED_LEN, TILL_OPEN_FIXED_LEN_V2,
+    TILL_OPEN_MAX_SKEW_SECS, TILL_OPEN_NAME_LEN_BYTES, TILL_OPEN_NOTE_LEN_BYTES, WIRE_LEN,
 };
 use ed25519_dalek::SigningKey;
 use serde::Serialize;
@@ -558,13 +558,13 @@ fn receipt_layout() -> ReceiptLayout {
 // The golden name is deliberately MULTI-BYTE UTF-8: it is the only cheap way to prove the length
 // prefix counts bytes rather than characters on both sides of the language boundary.
 
-/// `domain` offset within the till-open signing buffer.
+/// `domain` offset within the till-open signing buffer (identical in v1 and v2 — the tag is first).
 const T_DOMAIN_OFF: usize = 0;
-const T_PUBKEY_OFF: usize = TILL_OPEN_DOMAIN.len();
+const T_PUBKEY_OFF: usize = TILL_OPEN_DOMAIN_V2.len();
 const T_CENTS_OFF: usize = T_PUBKEY_OFF + PUBKEY_LEN;
 const T_NONCE_OFF: usize = T_CENTS_OFF + 8;
 const T_ISSUED_AT_OFF: usize = T_NONCE_OFF + NONCE_LEN;
-const T_NAME_LEN_OFF: usize = TILL_OPEN_FIXED_LEN;
+const T_NAME_LEN_OFF: usize = TILL_OPEN_FIXED_LEN_V2;
 
 /// One till-open signing-buffer field (offset + len + endian), mirroring [`WithdrawFieldSpec`].
 #[derive(Serialize)]
@@ -582,9 +582,12 @@ struct TillOpenFields {
     nonce: TillOpenFieldSpec,
     issued_at: TillOpenFieldSpec,
     name_len: TillOpenFieldSpec,
+    note_len: TillOpenFieldSpec,
 }
 
 /// The golden signed till-open bytes, every `*_hex` derived from the real `dpay_core::TillOpen`.
+/// The GOLDEN is the v2 (note-bearing) buffer this encoding now exists for; `legacy_v1` below pins
+/// the frozen note-less buffer the committed wasm export `w_till_open_sig` must keep producing.
 #[derive(Serialize)]
 struct GoldenTillOpen {
     secret_hex: String,
@@ -593,6 +596,18 @@ struct GoldenTillOpen {
     nonce_hex: String,
     issued_at: u64,
     merchant_name: String,
+    note: String,
+    signing_hex: String,
+    sig_hex: String,
+}
+
+/// The frozen v1 (note-less) spelling of the same request, kept so the wasm guard can check the
+/// additive-only export against the bytes it has always produced.
+#[derive(Serialize)]
+struct LegacyTillOpenV1 {
+    domain: &'static str,
+    domain_hex: String,
+    fixed_len: usize,
     signing_hex: String,
     sig_hex: String,
 }
@@ -606,9 +621,11 @@ struct TillOpenDoc {
     max_skew_secs: u64,
     fixed_len: usize,
     name_len_bytes: usize,
+    note_len_bytes: usize,
     sig_len: usize,
     fields: TillOpenFields,
     golden: GoldenTillOpen,
+    legacy_v1: LegacyTillOpenV1,
 }
 
 /// Build the till-open golden. Pure (no I/O) so the unit test can compare it against the committed
@@ -619,11 +636,13 @@ fn till_open_doc() -> TillOpenDoc {
     let merchant_pubkey: [u8; PUBKEY_LEN] = secret.verifying_key().to_bytes();
 
     // CHF 10.00 — the same price `dfx/till_wire.json` records for its golden charge, so the two
-    // documents describe the same imagined sale. Multi-byte name on purpose (see the note above).
+    // documents describe the same imagined sale. Multi-byte name AND note on purpose (see the note
+    // above): each length prefix must count bytes rather than characters.
     const T_CENTS: u64 = 1_000;
     let nonce = [42u8; NONCE_LEN];
     const T_ISSUED_AT: u64 = 1_786_815_398; // stable, non-round unix seconds
     let merchant_name = "Café Bahnhof ☕".to_string();
+    let note = "2× Kafi, Tisch 4 ☕".to_string();
 
     let open = TillOpen {
         merchant_pubkey,
@@ -631,25 +650,34 @@ fn till_open_doc() -> TillOpenDoc {
         nonce,
         issued_at: T_ISSUED_AT,
         merchant_name: merchant_name.clone(),
+        note: Some(note.clone()),
     };
     let signing = open.signing_bytes();
     let sig = dpay_core::sign_till_open(&secret, &open).to_bytes();
+    let note_len_offset = TILL_OPEN_FIXED_LEN_V2 + TILL_OPEN_NAME_LEN_BYTES + merchant_name.len();
+
+    // The same request without a note — the v1 buffer every deployed verifier already checks.
+    let legacy = TillOpen { note: None, ..open.clone() };
+    let legacy_signing = legacy.signing_bytes();
+    let legacy_sig = dpay_core::sign_till_open(&secret, &legacy).to_bytes();
 
     TillOpenDoc {
-        doc: "The canonical bytes a merchant signs to ring up a charge on dpay's own OpenCryptoPay till, and the ONE statement of that encoding outside dpay_core::TillOpen. Emitted from the real core by `just wire-layout`; read back by crates/dpay-fixture (which rebuilds the golden struct from these offsets alone) and by scripts/check-wasm-core.mjs (which reproduces the buffer field-by-field in JS and checks the committed wasm's w_till_open_sig against sig_hex). The relay verifies with dpay_core::validate_till_open, so it shares the encoding rather than a copy of it. Same convention as dfx/wire_layout.json — regenerated when the encoding deliberately changes, never hand-edited to make a test pass.",
-        domain: "dpay-till-open-v1",
-        domain_hex: hex(TILL_OPEN_DOMAIN),
+        doc: "The canonical bytes a merchant signs to ring up a charge on dpay's own OpenCryptoPay till, and the ONE statement of that encoding outside dpay_core::TillOpen. Two spellings live here: `golden` is the v2 buffer (domain dpay-till-open-v2) a request carrying a sale's `note` signs — the note rides its own u32-LE length prefix after the name — and `legacy_v1` is the frozen note-less buffer (domain dpay-till-open-v1) the wasm export w_till_open_sig must keep producing under the additive-only ABI policy. Emitted from the real core by `just wire-layout`; read back by crates/dpay-fixture (which rebuilds the golden struct from these offsets alone) and by scripts/check-wasm-core.mjs (which reproduces both buffers field-by-field in JS and checks the committed wasm's w_till_open_sig against legacy_v1.sig_hex and w_till_open_sig_note against golden.sig_hex). The relay verifies with dpay_core::validate_till_open, so it shares the encoding rather than a copy of it. Same convention as dfx/wire_layout.json — regenerated when the encoding deliberately changes, never hand-edited to make a test pass.",
+        domain: "dpay-till-open-v2",
+        domain_hex: hex(TILL_OPEN_DOMAIN_V2),
         max_skew_secs: TILL_OPEN_MAX_SKEW_SECS,
-        fixed_len: TILL_OPEN_FIXED_LEN,
+        fixed_len: TILL_OPEN_FIXED_LEN_V2,
         name_len_bytes: TILL_OPEN_NAME_LEN_BYTES,
+        note_len_bytes: TILL_OPEN_NOTE_LEN_BYTES,
         sig_len: SIG_LEN,
         fields: TillOpenFields {
-            domain: TillOpenFieldSpec { offset: T_DOMAIN_OFF, len: TILL_OPEN_DOMAIN.len(), endian: None },
+            domain: TillOpenFieldSpec { offset: T_DOMAIN_OFF, len: TILL_OPEN_DOMAIN_V2.len(), endian: None },
             merchant_pubkey: TillOpenFieldSpec { offset: T_PUBKEY_OFF, len: PUBKEY_LEN, endian: None },
             cents: TillOpenFieldSpec { offset: T_CENTS_OFF, len: 8, endian: Some("le") },
             nonce: TillOpenFieldSpec { offset: T_NONCE_OFF, len: NONCE_LEN, endian: None },
             issued_at: TillOpenFieldSpec { offset: T_ISSUED_AT_OFF, len: 8, endian: Some("le") },
             name_len: TillOpenFieldSpec { offset: T_NAME_LEN_OFF, len: TILL_OPEN_NAME_LEN_BYTES, endian: Some("le") },
+            note_len: TillOpenFieldSpec { offset: note_len_offset, len: TILL_OPEN_NOTE_LEN_BYTES, endian: Some("le") },
         },
         golden: GoldenTillOpen {
             secret_hex: hex(&secret.to_bytes()),
@@ -658,8 +686,16 @@ fn till_open_doc() -> TillOpenDoc {
             nonce_hex: hex(&nonce),
             issued_at: T_ISSUED_AT,
             merchant_name,
+            note,
             signing_hex: hex(&signing),
             sig_hex: hex(&sig),
+        },
+        legacy_v1: LegacyTillOpenV1 {
+            domain: "dpay-till-open-v1",
+            domain_hex: hex(TILL_OPEN_DOMAIN),
+            fixed_len: TILL_OPEN_FIXED_LEN,
+            signing_hex: hex(&legacy_signing),
+            sig_hex: hex(&legacy_sig),
         },
     }
 }
@@ -1086,8 +1122,9 @@ mod tests {
         let signing = hex::decode(&g.signing_hex).expect("signing_hex decodes");
         assert_eq!(
             signing.len(),
-            doc.fixed_len + doc.name_len_bytes + g.merchant_name.len(),
-            "signing buffer = fixed prefix + 4-byte name length + the name's BYTES"
+            doc.fixed_len + doc.name_len_bytes + g.merchant_name.len()
+                + doc.note_len_bytes + g.note.len(),
+            "signing buffer = fixed prefix + 4-byte name length + the name's BYTES + 4-byte note length + the note's BYTES"
         );
 
         // The domain tag sits at its emitted offset — the placement that keeps a signature made for
@@ -1114,8 +1151,21 @@ mod tests {
         let name_off = doc.fields.name_len.offset + doc.fields.name_len.len;
         let merchant_name = String::from_utf8(signing[name_off..][..name_len].to_vec())
             .expect("the name field is UTF-8");
+        let note_len = u32::from_le_bytes(
+            signing[doc.fields.note_len.offset..][..doc.fields.note_len.len].try_into().unwrap(),
+        ) as usize;
+        let note_off = doc.fields.note_len.offset + doc.fields.note_len.len;
+        let note = String::from_utf8(signing[note_off..][..note_len].to_vec())
+            .expect("the note field is UTF-8");
 
-        let rebuilt = TillOpen { merchant_pubkey, cents, nonce, issued_at, merchant_name };
+        let rebuilt = TillOpen {
+            merchant_pubkey,
+            cents,
+            nonce,
+            issued_at,
+            merchant_name,
+            note: Some(note),
+        };
         assert_eq!(
             hex(&rebuilt.signing_bytes()),
             g.signing_hex,
@@ -1125,6 +1175,28 @@ mod tests {
         assert_eq!(rebuilt.cents, g.cents);
         assert_eq!(rebuilt.issued_at, g.issued_at);
         assert_eq!(rebuilt.merchant_name, g.merchant_name);
+        assert_eq!(rebuilt.note.as_deref(), Some(g.note.as_str()));
+
+        // The legacy section is the SAME request without a note: the frozen v1 buffer, verifiable
+        // by every already-deployed relay, and distinct from the v2 bytes.
+        let legacy_signing = hex::decode(&doc.legacy_v1.signing_hex).expect("decodes");
+        assert_eq!(
+            &legacy_signing[..TILL_OPEN_DOMAIN.len()],
+            TILL_OPEN_DOMAIN.as_slice()
+        );
+        assert_eq!(
+            legacy_signing.len(),
+            doc.legacy_v1.fixed_len + doc.name_len_bytes + g.merchant_name.len()
+        );
+        let legacy = TillOpen { note: None, ..rebuilt.clone() };
+        assert_eq!(hex(&legacy.signing_bytes()), doc.legacy_v1.signing_hex);
+        let legacy_sig: [u8; SIG_LEN] =
+            hex::decode(&doc.legacy_v1.sig_hex).expect("decodes").try_into().expect("64 bytes");
+        assert_eq!(
+            dpay_core::validate_till_open(&legacy, &legacy_sig, legacy.issued_at, false),
+            Ok(())
+        );
+        assert_ne!(doc.legacy_v1.signing_hex, g.signing_hex, "v1 and v2 bytes differ at the tag");
 
         // The golden signature satisfies the acceptance rule the relay runs, at the golden instant.
         let sig: [u8; SIG_LEN] =

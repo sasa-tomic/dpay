@@ -2908,6 +2908,7 @@ fn till_body(
         nonce,
         issued_at,
         merchant_name: name.to_string(),
+            note: None,
     };
     serde_json::json!({
         "merchant_pubkey": hex::encode(open.merchant_pubkey),
@@ -4294,6 +4295,7 @@ async fn till_wire_matches_the_golden_the_payer_parses() {
             .as_u64()
             .expect("input.issued_at is a number"),
         merchant_name: merchant_name.clone(),
+            note: None,
     };
     let recorded_sig =
         <[u8; SIG_LEN]>::try_from(hex_field(&["input", "signature"], SIG_LEN).as_slice())

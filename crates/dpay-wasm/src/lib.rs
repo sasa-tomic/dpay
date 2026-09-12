@@ -60,7 +60,8 @@
 //! | `w_verify_receipt_sig` | `(pub_ptr, claim_ptr, claim_len, sig_ptr) -> u32` | `1` = valid, `0` = invalid (any reason) |
 //! | `w_build_request` | `(to_ptr, amount_lo, amount_hi, nonce_ptr, expiry_lo, expiry_hi, currency, to_name_ptr, to_name_len, memo_ptr, memo_len, out_req_ptr /*132*/) -> u32` | builds the merchant's 132-byte request (`PaymentRequest::to_bytes`); u64s as (lo, hi) u32 halves; `to_name`/`memo` UTF-8, byte-truncated + NUL-padded to 32 |
 //! | `w_receipt_claim` | `(nonce_ptr, from_ptr, to_ptr, amount_lo, amount_hi, currency, block_index_lo, block_index_hi, settle_ts_lo, settle_ts_hi, out_claim_ptr /*108*/) -> u32` | builds the byte-exact 108-byte `ReceiptClaim::signing_bytes` the canister signs; u64s as (lo, hi) u32 halves |
-//! | `w_till_open_sig` | `(seed_ptr, cents_lo, cents_hi, nonce_ptr, issued_at_lo, issued_at_hi, name_ptr, name_len, out_sig_ptr /*64*/) -> u32` | signs a ring-up on dpay's own OpenCryptoPay till (`TillOpen::signing_bytes`); the merchant pubkey is the SEED's own; u64s as (lo, hi) u32 halves |
+//! | `w_till_open_sig` | `(seed_ptr, cents_lo, cents_hi, nonce_ptr, issued_at_lo, issued_at_hi, name_ptr, name_len, out_sig_ptr /*64*/) -> u32` | signs a ring-up on dpay's own OpenCryptoPay till (`TillOpen::signing_bytes`); the merchant pubkey is the SEED's own; u64s as (lo, hi) u32 halves. FROZEN to the v1 (note-less) encoding — a note rides `w_till_open_sig_note` |
+//! | `w_till_open_sig_note` | `(seed_ptr, cents_lo, cents_hi, nonce_ptr, issued_at_lo, issued_at_hi, name_ptr, name_len, note_ptr, note_len, out_sig_ptr /*64*/) -> u32` | same ring-up carrying a `note` (what the charge is FOR): signs under `TILL_OPEN_DOMAIN_V2` with the note length-prefixed after the name; u64s as (lo, hi) u32 halves |
 //!
 //! `w_sign_request` semantics: it builds the signed authorization from the request's own
 //! `to`/`amount`/`nonce`/`expiry`/`currency`/`to_name`/`memo` fields verbatim (the same
@@ -703,6 +704,7 @@ fn till_open_sig_bytes(
     nonce: &[u8; NONCE_LEN],
     issued_at: u64,
     merchant_name: &str,
+    note: Option<&str>,
 ) -> [u8; SIG_LEN] {
     let open = TillOpen {
         merchant_pubkey: sk.verifying_key().to_bytes(),
@@ -710,6 +712,7 @@ fn till_open_sig_bytes(
         nonce: *nonce,
         issued_at,
         merchant_name: merchant_name.to_string(),
+        note: note.map(str::to_string),
     };
     dpay_core::sign_till_open(sk, &open).to_bytes()
 }
@@ -720,6 +723,9 @@ fn till_open_sig_bytes(
 /// u64s arrive as (lo, hi) u32 halves (same ABI as `w_sign_withdraw`); `merchant_name` is UTF-8 and
 /// is length-prefixed into the signed bytes VERBATIM (no truncation — unlike the 32-byte wire name
 /// fields, this one is not a fixed-width wire field). Writes `SIG_LEN` bytes to `out_sig_ptr`.
+///
+/// FROZEN to the note-less (v1) encoding — this export's byte semantics may not change. A ring-up
+/// carrying a note signs under `w_till_open_sig_note`.
 #[no_mangle]
 pub extern "C" fn w_till_open_sig(
     seed_ptr: u32,
@@ -751,6 +757,62 @@ pub extern "C" fn w_till_open_sig(
         &nonce,
         join_u64(issued_at_lo, issued_at_hi),
         name,
+        None,
+    );
+    if !in_bounds(out_sig_ptr, SIG_LEN as u32) {
+        return BAD_LEN;
+    }
+    unsafe { write_at(out_sig_ptr, &sig) };
+    OK
+}
+
+/// Same ring-up carrying a `note` — the one-line purpose the payer reads on review ("2× Kafi,
+/// Tisch 4"). Signs under `TILL_OPEN_DOMAIN_V2`, so the bytes differ from `w_till_open_sig` at the
+/// tag even before the note's own length prefix rides after the name (see
+/// `dpay_core::TillOpen::signing_bytes`). `note_ptr`/`note_len` follow the same rules as the name:
+/// UTF-8, length-prefixed verbatim, no fixed-width truncation. An EMPTY note is a valid v2
+/// request — callers that have no note should call `w_till_open_sig` instead.
+#[no_mangle]
+pub extern "C" fn w_till_open_sig_note(
+    seed_ptr: u32,
+    cents_lo: u32,
+    cents_hi: u32,
+    nonce_ptr: u32,
+    issued_at_lo: u32,
+    issued_at_hi: u32,
+    name_ptr: u32,
+    name_len: u32,
+    note_ptr: u32,
+    note_len: u32,
+    out_sig_ptr: u32,
+) -> u32 {
+    let sk = match read_seed(seed_ptr) {
+        Ok(sk) => sk,
+        Err(e) => return e,
+    };
+    if !in_bounds(nonce_ptr, NONCE_LEN as u32)
+        || !in_bounds(name_ptr, name_len)
+        || !in_bounds(note_ptr, note_len)
+    {
+        return BAD_LEN;
+    }
+    let nonce: [u8; NONCE_LEN] =
+        unsafe { slice_at(nonce_ptr, NONCE_LEN as u32) }.try_into().unwrap();
+    let name = match std::str::from_utf8(unsafe { slice_at(name_ptr, name_len) }) {
+        Ok(s) => s,
+        Err(_) => return BAD_UTF8,
+    };
+    let note = match std::str::from_utf8(unsafe { slice_at(note_ptr, note_len) }) {
+        Ok(s) => s,
+        Err(_) => return BAD_UTF8,
+    };
+    let sig = till_open_sig_bytes(
+        &sk,
+        join_u64(cents_lo, cents_hi),
+        &nonce,
+        join_u64(issued_at_lo, issued_at_hi),
+        name,
+        Some(note),
     );
     if !in_bounds(out_sig_ptr, SIG_LEN as u32) {
         return BAD_LEN;
@@ -1150,7 +1212,8 @@ mod tests {
 
     /// `w_till_open_sig`'s pure half signs over the SEED's own public key and produces a signature
     /// the core's own acceptance rule takes — the web merchant surface and the relay cannot hold two
-    /// versions of the ring-up proof. Covers the u64 lo/hi joins at both ends of the range.
+    /// versions of the ring-up proof. Covers the u64 lo/hi joins at both ends of the range, and the
+    /// note-carrying (v2) spelling beside the note-less one.
     #[test]
     fn till_open_sig_matches_the_core_rule_through_the_export_path() {
         let sk = SigningKey::from_bytes(&[0x11; 32]);
@@ -1161,18 +1224,36 @@ mod tests {
             ("u64max", u64::MAX, u32::MAX, u32::MAX, u64::MAX, u32::MAX, u32::MAX),
             ("hi-only", 0xdead_0000_0000_0000, 0, 0xdead_0000, 1 << 63, 0, 0x8000_0000),
         ] {
-            let sig = till_open_sig_bytes(&sk, join_u64(cents_lo, cents_hi), &nonce, join_u64(iat_lo, iat_hi), name);
+            let sig = till_open_sig_bytes(&sk, join_u64(cents_lo, cents_hi), &nonce, join_u64(iat_lo, iat_hi), name, None);
             let open = TillOpen {
                 merchant_pubkey: sk.verifying_key().to_bytes(),
                 cents,
                 nonce,
                 issued_at: iat,
                 merchant_name: name.to_string(),
+                note: None,
             };
             assert_eq!(
                 dpay_core::validate_till_open(&open, &sig, iat, false),
                 Ok(()),
                 "[{label}] the export's signature must satisfy the core's own rule"
+            );
+            // The same ring-up WITH a note signs under the v2 tag and satisfies the same rule —
+            // `w_till_open_sig_note`'s pure half, pinned here so the two spellings stay one rule.
+            let note = "2× Kafi, Tisch 4 ☕";
+            let noted_sig = till_open_sig_bytes(&sk, join_u64(cents_lo, cents_hi), &nonce, join_u64(iat_lo, iat_hi), name, Some(note));
+            let noted = TillOpen { note: Some(note.to_string()), ..open.clone() };
+            assert_eq!(
+                dpay_core::validate_till_open(&noted, &noted_sig, iat, false),
+                Ok(()),
+                "[{label}] a noted ring-up must satisfy the same acceptance rule"
+            );
+            assert_ne!(sig.to_vec(), noted_sig.to_vec(),
+                "[{label}] v1 and v2 spellings must differ at the tag, not just the tail");
+            assert_eq!(
+                dpay_core::validate_till_open(&open, &noted_sig, iat, false),
+                Err(dpay_core::TillOpenError::BadSignature),
+                "[{label}] a v2 signature must not verify against the note-less request"
             );
             // Negative: the same bytes under another merchant's key open nothing.
             let other = SigningKey::from_bytes(&[0x22; 32]);
