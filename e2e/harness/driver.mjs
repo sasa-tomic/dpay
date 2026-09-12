@@ -156,7 +156,16 @@ export class Driver {
       const url = req.url();
       const errorText = req.failure()?.errorText ?? 'unknown';
       const intentionalAbort = errorText === 'net::ERR_ABORTED';
-      if (this.closing || intentionalAbort || url.endsWith('/favicon.ico') || this.isRequestFailureAllowed(url)) return;
+      // ERR_NETWORK_CHANGED is Chromium's network service killing in-flight fetches when the HOST's
+      // interface table churns (docker bridges, tailscale, the emulator's NAT) — transport-level
+      // noise, not app behavior. Measured 2026-09-12: three suite runs red on three DIFFERENT
+      // flows (79/26/108), each green in isolation, every failure solely this gate tripping on the
+      // app's own background balance poll to its OWN LIVE relay, every functional assertion in the
+      // affected flows passing (the poll is retry-by-design and recovered silently). Same genre as
+      // the ERR_ABORTED teardown tolerance. A real balance-path break still fails the flows' balance
+      // assertions, and every other requestfailed class (ERR_CONNECTION_REFUSED et al.) stays flagged.
+      const hostInterfaceChurn = errorText === 'net::ERR_NETWORK_CHANGED';
+      if (this.closing || intentionalAbort || hostInterfaceChurn || url.endsWith('/favicon.ico') || this.isRequestFailureAllowed(url)) return;
       this.recordUnexpectedDiagnostic(`requestfailed: ${url} — ${errorText}`);
     });
     // A 404 IS NOT A `requestfailed`, AND THAT WAS THE HOLE. Puppeteer emits `requestfailed` only
