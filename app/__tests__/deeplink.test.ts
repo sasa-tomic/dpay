@@ -22,6 +22,7 @@ import {
   PAY_LINK_TEXT_BYTES,
   clampLinkText,
   parsePayLink,
+  parseTillCode,
   encodePayLink,
   readPayLink,
   shareOrigin,
@@ -462,5 +463,45 @@ describe('readPaymentDeeplink (web ?pay= reader)', () => {
   it('returns null on native (Platform.OS !== web)', () => {
     Platform.OS = 'ios';
     withSearch('?pay=abc', () => { expect(readPaymentDeeplink()).toBeNull(); });
+  });
+});
+
+describe('parseTillCode', () => {
+  // The till code is the OTHER https URL the relay mints: `{origin}/pl/?lightning=<LNURL…>`
+  // (TILL_CODE_PATH in crates/dpay-relay/src/till.rs is the authority; deepLink.ts mirrors it).
+  // parseTillCode only owns the PATH question — "is this the till-code door?" — and hands back the
+  // ORIGINAL string; the OpenCryptoPay parser owns the payload grammar (including refusing a code
+  // with no usable lightning param), and the caller routes it through the scan classifier.
+  it('recognises a till code the relay mints and returns the original string', () => {
+    const url = 'https://dpay.kalaj.org/pl/?lightning=LNURL1QPYSYMRXVSSP4';
+    expect(parseTillCode(url)).toBe(url);
+  });
+  it('is host-liberal: a self-hosted relay mints the same artifact', () => {
+    const url = 'https://relay.example.com/pl/?lightning=LNURL1QPYSY';
+    expect(parseTillCode(url)).toBe(url);
+  });
+  it('accepts a path-only /pl/ (a relative URL is anchored like parsePayLink does)', () => {
+    expect(parseTillCode('/pl/?lightning=LNURL1QPYSY')).toBe('/pl/?lightning=LNURL1QPYSY');
+  });
+  it('still recognises a /pl/ that carries no lightning param (the classifier refuses it honestly)', () => {
+    expect(parseTillCode('https://dpay.kalaj.org/pl/')).toBe('https://dpay.kalaj.org/pl/');
+  });
+  it('null for the payment-link path (a different door owns it)', () => {
+    expect(parseTillCode('https://dpay.kalaj.org/wallet/pay/abc?asset=ICP')).toBeNull();
+  });
+  it('null for deeper /pl/ paths and the bare host (only the exact till path is the door)', () => {
+    expect(parseTillCode('https://dpay.kalaj.org/pl/x?lightning=LNURL1')).toBeNull();
+    expect(parseTillCode('https://dpay.kalaj.org/pl')).toBeNull();
+    expect(parseTillCode('https://dpay.kalaj.org/')).toBeNull();
+  });
+  it('null for non-URLs: a bare LNURL is NOT a till code (a different scan kind owns it)', () => {
+    expect(parseTillCode('lnurl1qpysymrx')).toBeNull();
+    expect(parseTillCode('lightning:lnurl1qpysymrx')).toBeNull();
+    expect(parseTillCode('dpay:pay/abc')).toBeNull();
+  });
+  it('never throws: empty and junk input return null', () => {
+    expect(parseTillCode('')).toBeNull();
+    expect(parseTillCode('not a url')).toBeNull();
+    expect(parseTillCode('::::')).toBeNull();
   });
 });

@@ -63,6 +63,21 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" android:host="dpay.kalaj.org" android:pathPrefix="/wallet/pay/" />
         </intent-filter>
+        <!-- Android App Link for a TILL code (https://dpay.kalaj.org/pl/?lightning=<LNURL…>) — the
+             QR a dpay till prints when the merchant rings a sale up (`TILL_CODE_PATH` in
+             crates/dpay-relay/src/till.rs mints it; the same assetlinks.json verification covers
+             it, host-wide). Without this filter a phone WITH the app still opened the browser's
+             static landing page when its camera read the till QR — the app could only pay a till
+             through its own in-app scanner. With it, the camera opens the app straight into the
+             OpenCryptoPay payer flow; every other camera still gets the /pl/ landing page, which
+             is why the path stays https rather than a private scheme. Wallet routes the URL into
+             the SAME classification a camera scan takes — explicit review, NEVER auto-sign. -->
+        <intent-filter android:autoVerify="true">
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" android:host="dpay.kalaj.org" android:pathPrefix="/pl/" />
+        </intent-filter>
         <!-- dpay: scheme — the NFC-less receipt hand-back `dpay:pay/<blob>`: the payer shares the
              rail proof of a settled payment back to the merchant, whose Receive screen verifies it
              against on-chain history (never trusting the blob alone). This one stays a private

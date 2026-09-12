@@ -288,6 +288,13 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   App Links are LIVE and verified end-to-end on physical hardware (2026-08-30):** prod serves
   assetlinks.json (HTTP 200, all 4 certs), the phone reports `dpay.kalaj.org: verified`, and a real
   `…/wallet/pay/…` link opens the app straight onto the pre-filled review — no browser, no chooser.
+  **The till code is an App Link too (2026-09-12):** the relay's ring-up QR
+  `https://dpay.kalaj.org/pl/?lightning=…` is claimed by a second manifest `autoVerify` filter
+  (`pathPrefix="/pl/"`) — a dpay-installed phone opens the payer straight onto the OpenCryptoPay
+  review (the SAME classification a camera scan takes; explicit Approve, never auto-signs), while a
+  generic camera still gets the relay's `/pl/` landing page. assetlinks.json is host-wide, so the
+  relay needed no change; e2e flow 175 pins both rails. The dpay REQUEST QR (IC wire / `solreq:v2`)
+  is a machine code, NOT a URL — camera deep-linking it is a recorded founder fork (OPEN_ISSUES).
 
 - **Send to an external address — ONE destination field, routed by what you paste (2026-08-30).**
   Pay ▸ *Send to address* now renders for every asset that can leave the wallet, not just the

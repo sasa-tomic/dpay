@@ -427,6 +427,14 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
 
 ## Other open issues
 
+- **FOUNDER CALL — the dpay request QR is a machine code, not a URL (fork recorded 2026-09-12, no
+  change made).** The in-app request QR is the raw 132-byte base64url wire (IC) / `solreq:v2?<b64>`
+  (SOL, blockhash-bound ~90 s) — a generic phone camera scanning it lands nowhere, by design; only
+  the dpay scanner reads it. The shareable URL form of an IC request is the payment link (Share
+  button). Making the request QR itself a URL (wrapping the wire in an https link or a
+  `dpay:req/…` mirror) is a product fork — QR density, expiry semantics, offline resolvability of
+  the wire — founder decision. Context: till QRs and payment links BOTH deep-link into the app
+  since 2026-09-12 (flow 175); this item is only about the request QR.
 - **`just demo` settles at HEAD (fixed 2026-09-12; the 2026-09-07 measurement record and the
   step-4 double-submission gate evidence below stand as history).** (F1) the demo relay carries
   `DPAY_DEMO_LEDGER` (validated `Principal::from_text` at agent-build startup, exit-on-garbage):
@@ -455,6 +463,12 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
   IC OpenCryptoPay payer is Option-A (`icrc2_approve` + sender report; no tx id, no memo), DFX's
   wallet list names none. Source-only detail:
   [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md).
+  **2026-09-12:** the founder scanned a live till code with Oisy and got `Code/URL ist nicht gültig`
+  — the relay served the provider routes with no CORS headers, so no browser wallet could read a
+  dpay till at all. Fixed, together with the false-success it exposed. **Open founder decision
+  (needs a call, not effort):** whether a dpay merchant should PULL Oisy's allowance
+  (`icrc2_transfer_from` from the merchant's own phone — permitted by the non-custody rule, and the
+  only thing that would let an Oisy customer actually pay a dpay till). Same spec, last section.
 - **dpay speaks no external payment standard, either direction — except Solana Pay, now spoken in
   BOTH directions** (2026-09-05, `app/solana/payUri.ts` + `parseSolanaPayUri`). Everything else is
   refused by name with a practical instruction (BIP-21/321, EIP-681, BOLT-11 → `coin-request`;

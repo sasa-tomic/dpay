@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **165 flows**
-> (164 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **166 flows**
+> (165 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (34) · tour (6)
+wire (1) · onboard (23) · pay (44) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (34) · tour (6)
 
 ---
 
@@ -91,6 +91,7 @@ wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw
 | 148 | pay-camera-and-funded-account | A zero balance on the SELECTED asset no longer hides the scanner: with VCHF selected and empty, the Pay tab still opens the camera and a DEMO request scanned there settles — while the fund instruction survives beside it and names the ∂100.00 practice balance, one tap away. | fund-gate, scan, sign, settle, demo, honest-copy, zero-funds |
 | 159 | lowbal-recovers | A payment refused on a low balance becomes payable — with a deliberate Approve, never a silent re-sign — as soon as the poll reads enough. | low-balance, insufficient, no-sign-gate, scan, sign, settle |
 | 170 | pay-no-convert-cta | The payment surfaces (IC PayMode and the SOL PayMode twin) expose zero conversion entry points — no convert testID and no Convert CTA — conversion stays a standalone wallet action (Accounts tab only). | pay, scan, solana, convert, separation |
+| 175 | till-deeplink | A till code arriving as an OS App Link (…/pl/?lightning=…) routes from idle Balances — the Pay tab never opened — straight into the SAME OpenCryptoPay review a camera scan of the same QR produces, on both rails: exact amount, full destination, one price+host line, and no auto-sign (IC ledger balance unchanged, zero Solana broadcasts until an Approve that this flow never presses). | deeplink, app-link, opencryptopay, explicit-approve, never-auto-sign, sol-rail |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
 | 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5); Alice's history names the row "to Bob" + "coffee" from the DEVICE-SAVED note (rail rows stay name-less; the payee reconciles by nonce). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |

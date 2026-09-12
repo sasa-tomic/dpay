@@ -55,7 +55,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_SUBMIT_TIMEOUT_MS
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
-export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -384,6 +384,22 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // closure for no behavioral change).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillIntent, phase]);
+
+  // The TILL entry: an OS-delivered till code (`…/pl/?lightning=<LNURL…>` — an Android App Link on
+  // the /pl/ path, or the same URL scanned by this camera) arrives here as a prefilled SCAN, not a
+  // parsed intent: it enters onNotARequest, the SAME classification every non-wire scan takes. So a
+  // well-formed till code lands on the explicit OpenCryptoPay review — the SAME zero-press rule as
+  // the link above: no Pay Now gate was passed, so it NEVER auto-signs — and a broken one gets the
+  // same honest refusal a camera scan of it would. Guarded on phase==='scan' + cleared on take,
+  // exactly like the link prefill above.
+  useEffect(() => {
+    if (prefillScan == null) return;
+    if (phase !== 'scan') return;
+    onPrefillScanConsumed?.();
+    onNotARequest(prefillScan);
+    // Same inline-closure reasoning as the link prefill above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillScan, phase]);
 
   // Reconcile an offline (QR-dance) settlement via the IC rail: poll read_state for the prepared
   // envelope's request_id. Terminal replied → Paid (decoded TransferResult); rejected → surfaced

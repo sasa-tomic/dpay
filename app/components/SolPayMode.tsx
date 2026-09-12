@@ -71,7 +71,7 @@ import {M} from '../i18n';
  * `reference` pubkeys as instruction account keys and the optional `memo` as an SPL Memo
  * instruction — the matching mechanism the standard is built on (`sendSolanaPay`).
  */
-export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string; label?: string; memo?: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string; label?: string; memo?: string} | null; onSendPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
@@ -112,6 +112,20 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   // leaving the scan sub-mode; rail/tab switches unmount this component.
   const [scanArmed, setScanArmed] = useState(false);
   useEffect(() => { if (subMode !== 'scan') setScanArmed(false); }, [subMode]);
+
+  // The TILL entry's SOL twin (same-surfaces rule): an OS-delivered till code
+  // (`…/pl/?lightning=<LNURL…>`, the OpenCryptoPay QR a till prints) arrives as a prefilled SCAN —
+  // it enters onNotARequest, the SAME classification a camera scan takes, so the SOL rail offers
+  // the same explicit review a scanned till code gets here (never an auto-sign; a broken code the
+  // same honest refusal). Guarded on phase==='scan' + cleared on take, like the IC rail's prefill.
+  useEffect(() => {
+    if (prefillScan == null) return;
+    if (phase !== 'scan') return;
+    onPrefillScanConsumed?.();
+    onNotARequest(prefillScan);
+    // Inline-closure identity is irrelevant under the guard + immediate clear.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillScan, phase]);
   // Camera remount key — IC twin: PayMode's `scanKey`, same reason. One code per mount means a
   // refusal that stays on this screen would otherwise leave a dead camera under copy that says
   // "scan again".
