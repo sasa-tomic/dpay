@@ -166,7 +166,8 @@ export async function run() {
     // THE MISSING LINK, asserted: the request's nonce IS the charge's reference, so the memo the
     // payer's transfer will carry is the value the relay credits this sale on.
     assertEq(req.nonceHex, open.reference, 'the tap request’s nonce must be the charge’s own reference');
-    assertIncludes(await driver.bodyText(), 'taps or scans it', 'the cashier is told the code can be tapped as well as scanned');
+    // 2026-09-12 link-QR decision: the QR any camera opens, the tap a dpay phone adds on top.
+    assertIncludes(await driver.bodyText(), 'any phone camera opens it, and a dpay phone can tap it too', 'the cashier is told the code opens on any camera and taps on a dpay phone');
     await driver.screenshot('117-till-armed');
 
     // --- the customer taps: an offline-signed bundle over the merchant's reader -------------------

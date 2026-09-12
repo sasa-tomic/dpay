@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **166 flows**
-> (165 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **167 flows**
+> (166 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (44) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (34) · tour (6)
+wire (1) · onboard (23) · pay (45) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (34) · tour (6)
 
 ---
 
@@ -65,7 +65,7 @@ wire (1) · onboard (23) · pay (44) · offline (12) · deposit (13) · withdraw
 
 | # | Flow | Verifies | Covers |
 |---|------|----------|--------|
-| 06 | request-qr | Merchant enters amount → request QR renders AND decodes to a valid 132-byte request (to_name + memo); Share emits the payment link for the SAME request (own principal, exact asset/chain/amount, ref = the request nonce). | request-qr, encode, merchant, to-name, memo, pay-link, share |
+| 06 | request-qr | Merchant enters amount → request QR renders the payment LINK (own principal, exact asset/chain/amount/label, ref = reconciliation nonce); Share emits the SAME link; the NFC reader arms with the real 132-byte request, decoded field-for-field. | request-qr, pay-link, merchant, to-name, memo, share, nfc-wire |
 | 07 | scan-pay | Payer scans (auto-sign, one press): two-wallet real ed25519 sign + relay settle → 'Paid ✓', balances correct. | scan, sign, settle, receipt, history, recipient-name |
 | 08 | merchant-settle | Merchant scans the payer's signed icrc1_transfer envelope, submits it to the IC gateway → recipient 'Received' confirmation. | receive, settle, confirmation |
 | 09 | double-spend | identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard) | pay, replay-safety, confirmation |
@@ -92,11 +92,12 @@ wire (1) · onboard (23) · pay (44) · offline (12) · deposit (13) · withdraw
 | 159 | lowbal-recovers | A payment refused on a low balance becomes payable — with a deliberate Approve, never a silent re-sign — as soon as the poll reads enough. | low-balance, insufficient, no-sign-gate, scan, sign, settle |
 | 170 | pay-no-convert-cta | The payment surfaces (IC PayMode and the SOL PayMode twin) expose zero conversion entry points — no convert testID and no Convert CTA — conversion stays a standalone wallet action (Accounts tab only). | pay, scan, solana, convert, separation |
 | 175 | till-deeplink | A till code arriving as an OS App Link (…/pl/?lightning=…) routes from idle Balances — the Pay tab never opened — straight into the SAME OpenCryptoPay review a camera scan of the same QR produces, on both rails: exact amount, full destination, one price+host line, and no auto-sign (IC ledger balance unchanged, zero Solana broadcasts until an Approve that this flow never presses). | deeplink, app-link, opencryptopay, explicit-approve, never-auto-sign, sol-rail |
+| 176 | paylink-camera-loop | The request QR is the payment LINK: camera-scanning the exact QR string opens the payer flow on each rail — IC review+Approve settles with ref-as-memo and the open request auto-confirms Received; SOL pre-fills Send-to-address and broadcasts (screen does not auto-confirm). | request-qr, pay-link, camera-scan, pay-review, memo-reconcile, sol-send, rail-parity |
 | 19 | low-balance | Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely. | low-balance, insufficient, no-sign-gate |
-| 25 | asset-request | ckBTC chip + BTC amount → request QR encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units |
+| 25 | asset-request | ckBTC chip + BTC amount → QR is the payment LINK (ckBTC/IC/0.0005, own principal); NFC wire encodes RUNTIME currency 1 + 50000 sats; readout '0.00050000 BTC' (no $). | asset-request, ckbtc, currency-id, encode, btc-units, pay-link |
 | 26 | names-memo | Alice pays Bob with memo 'coffee' → review shows the name + short pubkey + memo (U-F5); Alice's history names the row "to Bob" + "coffee" from the DEVICE-SAVED note (rail rows stay name-less; the payee reconciles by nonce). | names, memo, history, wire-v2, friendly-counterparties, review-short-payee |
 | 27 | asset-pay | ckBTC pay (faucet-funded at principal): review '0.00050000 BTC' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units. | asset-pay, ckbtc, per-asset-balance, locked-asset-display, ledger-units, review-short-payee |
-| 28 | ckusdc-request | ckUSDC chip + 0.05 amount → request QR encodes currency 2 + 50000 raw (6-dec); readout '0.050000 USDC' (no $0.05). | ckusdc-merchant-create, request-asset-picker, multi-currency, 6-decimal, byte-exact |
+| 28 | ckusdc-request | ckUSDC chip + 0.05 amount → QR is the payment LINK (ckUSDC/IC/0.05, own principal); NFC wire encodes currency 2 + 50000 raw (6-dec); readout '0.050000 USDC' (no $0.05). | ckusdc-merchant-create, request-asset-picker, multi-currency, 6-decimal, byte-exact, pay-link |
 | 29 | exact-amount | Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/signed-envelope/ledger-settle on the IC rail (BigInt codec, uleb128 + u128 ledger, decimal strings). | exact-amount, decimal-transport, u64, bigint-codec |
 | 31 | ckusdc-pay | ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review '0.050000 USDC', byte-exact raw, app-signed icrc1_transfer settles on currency 2. | ckusdc-pay, multi-currency, 6-decimal, byte-exact |
 | 36 | bad-qr | Three unpayable codes in a row (non-base64, a bech32-damaged OpenCryptoPay till code, a wrong-length base64) each surface their OWN honest error; the review never mounts; and after every refusal the scanner REMOUNTS (mount counter advances) so the next, different code is genuinely read rather than swallowed. | bad-qr, malformed, error-handling, input-validation, rescan |
