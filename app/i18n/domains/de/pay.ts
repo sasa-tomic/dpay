@@ -296,6 +296,8 @@ export const receiveDe: ReceiveMessages = {
 
     chargeLabel: 'Zu belastender Betrag',
     chargeHint: 'In Franken ausgezeichnet, in VCHF bezahlt — ein Franken, ein VCHF, kein Umtausch.',
+    noteLabel: 'Notiz',
+    notePlaceholder: 'Wofür ist diese Buchung? (optional)',
     ringUp: 'Buchen',
     ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen bezahlbaren Code zeigen',
     ringingUp: 'Wird gebucht…',

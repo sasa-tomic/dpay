@@ -619,6 +619,11 @@ export type ReceiveMessages = {
     chargeLabel: string;
     chargeHint: string;
     ringUp: string;
+    /** The optional note field under the amount — what this charge is for. The label is the
+     *  field's accessibility name; the placeholder is the invitation, and the only place
+     *  "optional" is said. */
+    noteLabel: string;
+    notePlaceholder: string;
     ringUpHint: string;
     ringingUp: string;
     /** Why the typed total cannot be a till charge. Three causes, three different corrections. */
@@ -771,6 +776,8 @@ export const receiveEn: ReceiveMessages = {
 
     chargeLabel: 'Total to charge',
     chargeHint: 'Priced in francs, paid in VCHF — one franc, one VCHF, no conversion.',
+    noteLabel: 'Note',
+    notePlaceholder: 'What is this charge for? (optional)',
     ringUp: 'Ring up',
     ringUpHint: 'Open this charge on your till and show the customer a code they can pay',
     ringingUp: 'Ringing up…',

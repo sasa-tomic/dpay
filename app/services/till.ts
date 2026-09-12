@@ -235,18 +235,24 @@ function whole(o: Record<string, unknown>, key: string): number | null {
 const STATES: readonly TillChargeState[] = ['open', 'paid', 'superseded', 'cancelled', 'expired'];
 
 /** The merchant's signed request — a ring-up (`cents ≥ 1`) or a cancellation (`cents = 0`), told
- *  apart by the SIGNED price and by nothing else. Throws when the core cannot sign, which every
- *  caller turns into `unsigned`: an unsigned request is one the relay would refuse anyway, and
- *  sending it would burn a nonce for nothing. */
-async function signedBody(identity: Identity, cents: string): Promise<Record<string, unknown>> {
+ *  apart by the SIGNED price and by nothing else. `note` is what the charge is for, and it rides
+ *  the SIGNATURE, not just the body: an unsigned field inside a signed request is one the relay
+ *  cannot attribute, and this text is payer-read on review. Trimmed empty — the cashier typed
+ *  nothing but whitespace — signs the legacy note-less v1 bytes and OMITS the wire key, so a
+ *  note-less ring-up is byte-for-byte the request every older app sends; anything else signs under
+ *  the v2 tag and crosses as the trimmed text, one spelling of it everywhere. Throws when the core
+ *  cannot sign, which every caller turns into `unsigned`: an unsigned request is one the relay
+ *  would refuse anyway, and sending it would burn a nonce for nothing. */
+async function signedBody(identity: Identity, cents: string, note: string): Promise<Record<string, unknown>> {
   const centsNum = Number(cents);
   if (!Number.isSafeInteger(centsNum)) {
     throw new Error(`till: ${cents} cents cannot cross the wire exactly (the field is a JSON number)`);
   }
+  const trimmed = note.trim();
   const nonce = randNonceHex();
   const issuedAt = nowSecs();
-  const signature = await DpayCore.tillOpenSignature(identity.secretHex, cents, nonce, issuedAt, identity.username, '');
-  return {
+  const signature = await DpayCore.tillOpenSignature(identity.secretHex, cents, nonce, issuedAt, identity.username, trimmed);
+  const body: Record<string, unknown> = {
     merchant_pubkey: identity.publicHex,
     merchant_name: identity.username,
     cents: centsNum,
@@ -254,6 +260,8 @@ async function signedBody(identity: Identity, cents: string): Promise<Record<str
     issued_at: issuedAt,
     signature,
   };
+  if (trimmed !== '') body.note = trimmed;
+  return body;
 }
 
 /** How long a merchant route may take. Generous next to a balance poll because a ring-up is a
@@ -366,10 +374,13 @@ async function tillFetch(relayUrl: string, path: string, init: RequestInit, time
  * `POST /api/v1/till` — ring up a charge on the merchant's own account.
  *
  * `decimals` and `feeRaw` are the till asset's precision and its ledger's transfer fee, and they
- * are here for one job: the answer's price is converted back to raw units and checked against what
- * the cents that were signed SHOULD settle for, so a code that would charge a customer a number
- * nobody at the counter chose is refused instead of displayed. Both come from the catalog row the
- * relay itself serves, which is what makes the check meaningful rather than circular.
+ *  are here for one job: the answer's price is converted back to raw units and checked against what
+ *  the cents that were signed SHOULD settle for, so a code that would charge a customer a number
+ *  nobody at the counter chose is refused instead of displayed. Both come from the catalog row the
+ *  relay itself serves, which is what makes the check meaningful rather than circular.
+ *
+ * `note` is what the charge is for, already the cashier's raw typing: trimmed here, and empty
+ *  treated as absent (see `signedBody`).
  */
 export async function openTillCharge(
   relayUrl: string,
@@ -377,10 +388,11 @@ export async function openTillCharge(
   cents: string,
   decimals: number,
   feeRaw: string,
+  note: string,
 ): Promise<TillOpenOutcome> {
   let body: Record<string, unknown>;
   try {
-    body = await signedBody(identity, cents);
+    body = await signedBody(identity, cents, note);
   } catch (e) {
     const detail = errText(e);
     console.warn(`till: could not sign a ring-up: ${detail}`);
@@ -522,7 +534,7 @@ function parseSettled(value: unknown): TillSettled | null {
 export async function cancelTillCharge(relayUrl: string, identity: Identity): Promise<TillVoidOutcome> {
   let body: Record<string, unknown>;
   try {
-    body = await signedBody(identity, '0');
+    body = await signedBody(identity, '0', '');
   } catch (e) {
     const detail = errText(e);
     console.warn(`till: could not sign a cancellation: ${detail}`);

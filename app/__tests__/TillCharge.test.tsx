@@ -1,6 +1,7 @@
 /**
  * The counter (`components/TillCharge.tsx`) — the merchant's own OpenCryptoPay charge, rendered
- * inside Receive ▸ Request payment as a second code FORM.
+ * inside Receive ▸ Request payment beside the till-code CHECKBOX: the amount row is the parent's,
+ * shared with the dpay-code form, and arrives here as a prop.
  *
  * WHAT THIS SUITE OWNS. The client's outcomes are `till.test.ts`'s business and the signed bytes are
  * `tillOpenSignature.test.ts`'s; the three routes are mocked at their module boundary here so what
@@ -16,8 +17,12 @@
  * double here, and its own three verdicts are `nfc-merchant-verdict.test.tsx`'s business while a
  * real tap settling a real charge is e2e flow 117's. What only this suite can state is the join —
  * that the request the counter arms carries the CHARGE's reference as its nonce, because that nonce
- * becomes the ICRC-1 memo the relay credits the sale on, and that nothing about the tap is allowed
- * to turn the paid light green.
+ *  becomes the ICRC-1 memo the relay credits the sale on, and that nothing about the tap is allowed
+ *  to turn the paid light green.
+ *
+ * The NOTE cases pin the merchant half of the signed note: what the cashier typed is what was
+ * signed, sent, shown on the payer's tap and saved against the charge's reference — one spelling
+ * everywhere. How the payer READS the note back is the payer's suites, off the same golden.
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
@@ -68,6 +73,12 @@ jest.mock('../components/NfcTap', () => ({
     return null;
   },
 }));
+
+// The payee-side annotation store, at its module boundary: what this suite asserts is the note is
+// SAVED, keyed by the charge's reference (the memo the incoming transfer carries); how the store
+// keeps and merges rows is `txNotes.test.ts`'s business.
+const mockSaveTxNote = jest.fn(async (..._a: unknown[]) => undefined);
+jest.mock('../services/txNotes', () => ({saveTxNote: (...a: unknown[]) => mockSaveTxNote(...a)}));
 
 import {TillCharge} from '../components/TillCharge';
 import {openTillCharge, tillChargeStatus, cancelTillCharge, tillRawUnits, type TillStatus} from '../services/till';
@@ -149,6 +160,8 @@ function mount(
   onSelectAsset: (id: AssetId) => void = () => {},
   nfcStatus: NfcStatus = 'ready',
   catalog: CurrencyDescriptor[] = CATALOG,
+  /** What the PARENT's shared amount row holds — the price the cashier typed there. */
+  amount = '10.50',
 ) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
@@ -161,15 +174,15 @@ function mount(
         catalog={catalog}
         nfcStatus={nfcStatus}
         onSelectAsset={onSelectAsset}
+        amount={amount}
       />,
     );
   });
   return tree;
 }
 
-/** Ring up CHF 10.50 and let the open resolve. */
-async function ringUp(tree: renderer.ReactTestRenderer, amount = '10.50') {
-  act(() => { node(tree, 'till-amount-input').props.onChangeText(amount); });
+/** Press "Show code" and let the open resolve — the amount is already on the tree as a prop. */
+async function ringUp(tree: renderer.ReactTestRenderer) {
   await act(async () => { node(tree, 'btn-till-ring-up').props.onPress(); await flush(); });
 }
 
@@ -182,6 +195,7 @@ beforeEach(() => {
   jest.mocked(cancelTillCharge).mockReset();
   mockTap.props = null;
   mockBuildRequest.mockClear();
+  mockSaveTxNote.mockClear();
   // A certified instant comfortably ahead of the wall clock, so a freshly armed tap is LIVE. The
   // stamp is nanoseconds, exactly as `icStampExpiry` returns it.
   mockStampExpiry.mockReset();
@@ -202,8 +216,8 @@ describe('which asset may ring up a till charge', () => {
     const picked: AssetId[] = [];
     const tree = mount(CKBTC, id => picked.push(id));
     expect(has(tree, 'till-refused')).toBe(true);
-    // No counter at all: a form that cannot produce a payable code must not be typed into.
-    expect(has(tree, 'till-amount-input')).toBe(false);
+    // No button at all: a form that cannot produce a payable code must not be pressed.
+    expect(has(tree, 'btn-till-ring-up')).toBe(false);
     const said = visible(tree);
     // The BACKING symbol, as every other surface in this wallet names it — never the `ck*` wrapper.
     expect(said).toContain('BTC');
@@ -230,7 +244,7 @@ describe('which asset may ring up a till charge', () => {
 
   test('opens the counter for the asset a till code is actually paid in', () => {
     const tree = mount(VCHF);
-    expect(has(tree, 'till-amount-input')).toBe(true);
+    expect(has(tree, 'btn-till-ring-up')).toBe(true);
     expect(has(tree, 'till-refused')).toBe(false);
     act(() => { tree.unmount(); });
   });
@@ -245,7 +259,6 @@ describe('ringing up', () => {
     const feeless = CATALOG.map(c => (c.currency === 7 ? {...c, fee: null} : c));
     const tree = mount(VCHF, () => {}, 'ready', feeless);
     expect(node(tree, 'till-no-fee')).toBeDefined();
-    expect(node(tree, 'till-amount-input')).toBeUndefined();
     expect(node(tree, 'btn-till-ring-up')).toBeUndefined();
     const said = visible(tree);
     expect(said).toContain('VCHF');
@@ -260,7 +273,7 @@ describe('ringing up', () => {
   test('sends the exact whole rappen at the asset’s own precision, and shows the code', async () => {
     const tree = mount(VCHF);
     await ringUp(tree);
-    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW);
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
     expect(node(tree, 'till-qr')).toBeDefined();
     const said = visible(tree);
     expect(said).toContain('10.50 CHF');       // the price the cashier reads out
@@ -274,8 +287,8 @@ describe('ringing up', () => {
   });
 
   test('refuses a price finer than a rappen without sending anything', async () => {
-    const tree = mount(VCHF);
-    await ringUp(tree, '10.505');
+    const tree = mount(VCHF, () => {}, 'ready', CATALOG, '10.505');
+    await ringUp(tree);
     expect(openTillCharge).not.toHaveBeenCalled();
     expect(visible(tree)).toContain(M.receive.till.badAmount('too-precise'));
     expect(has(tree, 'till-qr')).toBe(false);
@@ -298,6 +311,70 @@ describe('ringing up', () => {
     const tree = mount(VCHF);
     await ringUp(tree);
     expect(visible(tree)).toContain('Re-sync the device clock');
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('the note — what this charge is for', () => {
+  const NOTE = '2× Kafi, Tisch 4';
+
+  test('offers the optional field under the shared amount row, on a words keyboard', () => {
+    const tree = mount(VCHF);
+    const field = node(tree, 'till-note-input');
+    expect(field).toBeDefined();
+    expect(field.props.placeholder).toBe(M.receive.till.notePlaceholder);
+    expect(field.props.maxLength).toBe(32);
+    // The amount above this field is the decimal-pad's job; a note is words, and a pad here would
+    // make "2× Kafi, Tisch 4" literally untypeable.
+    expect(field.props.keyboardType).toBeUndefined();
+    act(() => { tree.unmount(); });
+  });
+
+  test('rides the ring-up trimmed — signed, displayed on the tap, and saved against the reference', async () => {
+    const tree = mount(VCHF);
+    act(() => { node(tree, 'till-note-input').props.onChangeText(`  ${NOTE}  `); });
+    await ringUp(tree);
+    // The whitespace is the cashier's, not the payer's: ONE trimmed spelling travels everywhere.
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, NOTE);
+    // …it is the tap request's DISPLAY memo — what the payer's phone shows while it asks them to
+    // confirm. The SETTLEMENT memo stays the reference, asserted by the reader cases below.
+    expect(mockBuildRequest.mock.calls[0][6]).toBe(NOTE);
+    // …and the payee-side annotation is keyed by the one thing the incoming transfer carries: the
+    // charge's reference, which is the ICRC-1 memo the relay credits the sale on — so the history
+    // row this sale settles into already says what it was for.
+    expect(mockSaveTxNote).toHaveBeenCalledWith(IDENTITY.publicHex, {k: REFERENCE, msg: NOTE}, expect.any(Number));
+    act(() => { tree.unmount(); });
+  });
+
+  test('no note typed: v1 ring-up, nothing annotated, no display memo', async () => {
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
+    expect(mockBuildRequest.mock.calls[0][6]).toBe('');
+    expect(mockSaveTxNote).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
+  test('whitespace the cashier typed is not a note', async () => {
+    const tree = mount(VCHF);
+    act(() => { node(tree, 'till-note-input').props.onChangeText('   '); });
+    await ringUp(tree);
+    expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
+    expect(mockSaveTxNote).not.toHaveBeenCalled();
+    act(() => { tree.unmount(); });
+  });
+
+  test('a refused ring-up keeps the note for the re-ring, like the amount above it', async () => {
+    // The counter's reset contract: a refused total is usually rung up again for the same thing,
+    // so the note survives the round trip exactly as the parent's amount does.
+    jest.mocked(openTillCharge).mockResolvedValue({kind: 'refused', said: 'Re-sync the device clock', status: 401});
+    const tree = mount(VCHF);
+    act(() => { node(tree, 'till-note-input').props.onChangeText(NOTE); });
+    await ringUp(tree);
+    expect(has(tree, 'till-failed')).toBe(true);
+    await act(async () => { node(tree, 'till-failed-go').props.onPress(); await flush(); });
+    expect(has(tree, 'till-note-input')).toBe(true);
+    expect(node(tree, 'till-note-input').props.value).toBe(NOTE);
     act(() => { tree.unmount(); });
   });
 });
@@ -610,7 +687,7 @@ function surfaceOf(tree: renderer.ReactTestRenderer): {alignSelf?: string; justi
 describe('the counter fits the screen it is nested in', () => {
   test('the ring-up form fills its column and starts at the top', () => {
     const tree = mount(VCHF);
-    expect(has(tree, 'till-amount-input')).toBe(true);
+    expect(has(tree, 'btn-till-ring-up')).toBe(true);
     expect(surfaceOf(tree)).toEqual(StyleSheet.flatten(S.centerTop));
     expect(surfaceOf(tree).alignSelf).toBe('stretch');
     expect(surfaceOf(tree).justifyContent).toBeUndefined();

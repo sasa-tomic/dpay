@@ -290,6 +290,8 @@ export const receiveFr: ReceiveMessages = {
 
     chargeLabel: 'Montant à encaisser',
     chargeHint: 'Affiché en francs, payé en VCHF — un franc, un VCHF, sans conversion.',
+    noteLabel: 'Note',
+    notePlaceholder: 'À quoi correspond ce montant (facultatif)',
     ringUp: 'Encaisser',
     ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code qu’il peut payer',
     ringingUp: 'Encaissement…',

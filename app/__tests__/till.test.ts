@@ -10,6 +10,9 @@
  *   • `tillWire.test.ts` reads the same relay bodies as the PAYER. This one reads them as the
  *     MERCHANT, off the same committed golden (`dfx/till_wire.json`), so the two halves of dpay's
  *     own till are pinned to one recording rather than to each other's expectations.
+ *   • The note rides the SIGNATURE, so it is asserted where the signature is: what was signed (the
+ *     core's sixth arg) is what crossed the wire (`note`). How the payer READS it back belongs to
+ *     the payer's suites, off the same golden.
  *
  * The money-critical case is `an unreadable answer is "can't check", never "unpaid"`: a cashier who
  * is told a paid customer has not paid either hands the goods over twice or accuses them, and both
@@ -49,7 +52,7 @@ import {applyFormatLocale} from '../i18n/intl';
 const GOLDEN = JSON.parse(
   readFileSync(join(__dirname, '..', '..', 'dfx', 'till_wire.json'), 'utf8'),
 ) as {
-  input: {cents: number};
+  input: {cents: number; note: string};
   amount_raw: string;
   open: {id: string; qr: string; amount: string; merchant: string; reference: string; created_secs: number; expires_at: number};
   details: {transferAmounts: {method: string; assets: {asset: string}[]}[]};
@@ -213,7 +216,7 @@ describe('a franc price, in integers', () => {
 describe('ringing up a charge', () => {
   test('signs the price with the merchant’s own seed and returns the relay’s charge', async () => {
     serve(200, GOLDEN.open);
-    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW);
+    const outcome = await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, '');
     expect(outcome).toEqual({
       kind: 'open',
       charge: {
@@ -245,6 +248,11 @@ describe('ringing up a charge', () => {
     expect(nonce).toBe(body.nonce);
     expect(issuedAt).toBe(body.issued_at);
     expect(name).toBe(MERCHANT.username);
+    // Note-less is the legacy v1 signing, frozen: the core's sixth arg is empty and the wire body
+    // carries NO note key at all — not an empty-string one — so a note-less ring-up is byte-for-byte
+    // the request every older app sends.
+    expect(mockSignatureCalls[0][5]).toBe('');
+    expect('note' in body).toBe(false);
     expect(body.merchant_pubkey).toBe(MERCHANT.publicHex);
     expect(body.cents).toBe(GOLDEN.input.cents);
     expect(body.signature).toBe('ab'.repeat(64));
@@ -252,22 +260,51 @@ describe('ringing up a charge', () => {
     expect(String(body.nonce)).toMatch(/^[0-9a-f]{32}$/);
   });
 
+  test('signs and sends the note when the cashier typed one — one spelling, trimmed, everywhere', async () => {
+    // The golden's own recording carried a note, so the note this app sends is pinned against the
+    // very text a real relay already accepted: WHAT WAS SIGNED (the core's sixth arg) is WHAT
+    // CROSSED THE WIRE (`note`). One spelling is the whole point — the payer's review, the tap's
+    // display memo and the history annotation all carry this exact string, so a note that changed
+    // shape between signing and sending would have the payer confirming a different sale than the
+    // one the till opened.
+    serve(200, GOLDEN.open);
+    await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, GOLDEN.input.note);
+    expect(postedBody().note).toBe(GOLDEN.input.note);
+    expect(mockSignatureCalls[0][5]).toBe(GOLDEN.input.note);
+
+    // The whitespace is the cashier's, not the payer's: the note is trimmed ONCE, before the
+    // signature, and that trimmed string is the one spelling that travels.
+    mockSignatureCalls.length = 0;
+    requests.length = 0;
+    serve(200, GOLDEN.open);
+    await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, `  ${GOLDEN.input.note}  `);
+    expect(postedBody().note).toBe(GOLDEN.input.note);
+    expect(mockSignatureCalls[0][5]).toBe(GOLDEN.input.note);
+  });
+
+  test('a note of nothing but whitespace is no note: v1 bytes, no wire key', async () => {
+    serve(200, GOLDEN.open);
+    await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '   ');
+    expect('note' in postedBody()).toBe(false);
+    expect(mockSignatureCalls[0][5]).toBe('');
+  });
+
   test('refuses a code that would charge a different number than was rung up', async () => {
     // The till answering `1.` for a CHF 10.00 ring-up is a wrong price wearing the right shape.
     // Showing it would put a code in front of a customer that charges what nobody at the counter
     // chose — so nothing is shown, and the merchant is told both numbers.
     serve(200, {...GOLDEN.open, amount: '1.'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'mispriced', quoted: '1.'});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'mispriced', quoted: '1.'});
   });
 
   test('tells a relay that serves no till apart from a till that refused', async () => {
     // An unregistered route 404s with nothing to say (`DPAY_ENABLE_TILL=false`) — a first-class
     // state with its own instruction. A live till's 404 carries the envelope and a sentence.
     serve(404, null, {unreadable: true});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'not-served', addr: RELAY});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'not-served', addr: RELAY});
 
     serve(404, {statusCode: 404, message: 'Payment link not found', error: 'Not Found'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({
       kind: 'refused', said: 'Payment link not found', status: 404,
     });
   });
@@ -275,23 +312,23 @@ describe('ringing up a charge', () => {
   test('carries the till’s own refusal, because it already names the fix', async () => {
     const message = 'issued_at is 400 s from this till\'s clock, which allows ±120 s. Re-sync the device clock, then sign and send again';
     serve(401, {statusCode: 401, message, error: 'Unauthorized'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'refused', said: message, status: 401});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'refused', said: message, status: 401});
 
     // A refusal with no sentence in it is still a refusal — never a null message rendered raw.
     serve(429, {statusCode: 429, error: 'Too Many Requests'});
-    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW)).toEqual({kind: 'refused', said: null, status: 429});
+    expect(await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '')).toEqual({kind: 'refused', said: null, status: 429});
   });
 
   test('never throws at the caller: an unreachable relay is an outcome', async () => {
     serveDead('ECONNREFUSED');
-    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW);
+    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '');
     expect(outcome.kind).toBe('unreachable');
     expect(outcome.kind === 'unreachable' && outcome.detail).toContain('ECONNREFUSED');
   });
 
   test('sends nothing at all when this device cannot sign', async () => {
     serve(200, GOLDEN.open);
-    const outcome = await openTillCharge(RELAY, {...MERCHANT, secretHex: mockBrokenSeed}, '1000', VCHF_DECIMALS, VCHF_FEE_RAW);
+    const outcome = await openTillCharge(RELAY, {...MERCHANT, secretHex: mockBrokenSeed}, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '');
     expect(outcome.kind).toBe('unsigned');
     // The nonce is single-use and the relay would refuse an unsigned body anyway; issuing the
     // request would burn a round trip and log a merchant's key as having tried to ring up.
@@ -300,7 +337,7 @@ describe('ringing up a charge', () => {
 
   test('answers unreachable rather than inventing a charge from a half-formed body', async () => {
     serve(200, {id: GOLDEN.open.id, amount: '10.'}); // no qr, no reference, no clock
-    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW);
+    const outcome = await openTillCharge(RELAY, MERCHANT, '1000', VCHF_DECIMALS, VCHF_FEE_RAW, '');
     expect(outcome.kind).toBe('unreachable');
   });
 
@@ -310,7 +347,7 @@ describe('ringing up a charge', () => {
     // match — money moved, sale still open. So the shape is checked, not just the presence.
     for (const reference of ['', 'not-hex', 'ABCDEF0123456789ABCDEF0123456789', '0123456789abcdef']) {
       serve(200, {...GOLDEN.open, reference});
-      expect((await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW)).kind)
+      expect((await openTillCharge(RELAY, MERCHANT, String(GOLDEN.input.cents), VCHF_DECIMALS, VCHF_FEE_RAW, '')).kind)
         .toBe('unreachable');
     }
   });
@@ -414,6 +451,10 @@ describe('clearing the till', () => {
     expect(requests[0].url).toBe(`${RELAY}/api/v1/till/void`);
     expect(postedBody().cents).toBe(0);
     expect(mockSignatureCalls[0][1]).toBe('0');
+    // A cancellation never carries a note — it is the legacy v1 shape exactly, so nothing about
+    // notes can make one relay accept a void another would refuse.
+    expect('note' in postedBody()).toBe(false);
+    expect(mockSignatureCalls[0][5]).toBe('');
   });
 
   test('a charge that was already paid is refused, with the relay’s own reason kept', async () => {

@@ -6,7 +6,9 @@
  * `__DPAY_WASM_BYTES` seam, so this exercises the same bytes the web wallet loads and the same
  * `dpay_core::TillOpen` encoding the relay verifies with `validate_till_open`. The expected values
  * come from the committed golden (`dfx/till_open_signing.json`, emitted from Rust by
- * `just wire-layout`) — never restated here, so this suite cannot drift from the encoding.
+ * `just wire-layout`) — never restated here, so this suite cannot drift from the encoding. The
+ * golden carries BOTH spellings: `golden` is the v2 signature a note-carrying ring-up signs,
+ * `legacy_v1` the frozen note-less bytes an empty note must keep producing.
  *
  * Why a signature is required at all: without it `POST /api/v1/till` accepts any 32-byte hex as the
  * destination key, and a probe opened a live production charge with `deadbeef…deadbeef` on
@@ -28,8 +30,10 @@ const GOLDEN = JSON.parse(
     nonce_hex: string;
     issued_at: number;
     merchant_name: string;
+    note: string;
     sig_hex: string;
   };
+  legacy_v1: {sig_hex: string};
 };
 const G = GOLDEN.golden;
 
@@ -43,7 +47,7 @@ beforeAll(() => {
 
 /** Load the shim fresh (its wasm instance is module-level state). */
 async function withCore(fn: (core: {
-  tillOpenSignature(secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string): Promise<string>;
+  tillOpenSignature(secretHex: string, cents: string, nonceHex: string, issuedAt: number, merchantName: string, note: string): Promise<string>;
   keypairFromSecret(secretHex: string): Promise<{secretHex: string; publicHex: string}>;
 }) => Promise<void>): Promise<void> {
   await jest.isolateModulesAsync(async () => {
@@ -56,9 +60,15 @@ describe('DpayCore.tillOpenSignature', () => {
   test('reproduces the committed golden signature byte-for-byte', async () => {
     await withCore(async core => {
       const sig = await core.tillOpenSignature(
-        G.secret_hex, String(G.cents), G.nonce_hex, G.issued_at, G.merchant_name,
+        G.secret_hex, String(G.cents), G.nonce_hex, G.issued_at, G.merchant_name, G.note,
       );
       expect(sig).toBe(G.sig_hex);
+      // An EMPTY note signs the frozen v1 bytes — the request every older app sends — so both
+      // encodings stay pinned against the core, not just the newest one.
+      const legacy = await core.tillOpenSignature(
+        G.secret_hex, String(G.cents), G.nonce_hex, G.issued_at, G.merchant_name, '',
+      );
+      expect(legacy).toBe(GOLDEN.legacy_v1.sig_hex);
       // The signature covers the seed's OWN public key — the app never passes one in, so it cannot
       // sign a ring-up for an account it does not hold the key to.
       expect((await core.keypairFromSecret(G.secret_hex)).publicHex).toBe(G.merchant_pubkey_hex);
@@ -67,29 +77,31 @@ describe('DpayCore.tillOpenSignature', () => {
 
   test('binds the price, the nonce, the timestamp and the claimed merchant name', async () => {
     await withCore(async core => {
-      const sign = (cents: number, nonceHex: string, issuedAt: number, name: string) =>
-        core.tillOpenSignature(G.secret_hex, String(cents), nonceHex, issuedAt, name);
+      const sign = (cents: number, nonceHex: string, issuedAt: number, name: string, note: string) =>
+        core.tillOpenSignature(G.secret_hex, String(cents), nonceHex, issuedAt, name, note);
       // Ed25519 is deterministic, so a differing signature proves the field entered the signed bytes.
-      expect(await sign(G.cents + 1, G.nonce_hex, G.issued_at, G.merchant_name)).not.toBe(G.sig_hex);
-      expect(await sign(G.cents, 'ff'.repeat(16), G.issued_at, G.merchant_name)).not.toBe(G.sig_hex);
-      expect(await sign(G.cents, G.nonce_hex, G.issued_at + 1, G.merchant_name)).not.toBe(G.sig_hex);
+      expect(await sign(G.cents + 1, G.nonce_hex, G.issued_at, G.merchant_name, G.note)).not.toBe(G.sig_hex);
+      expect(await sign(G.cents, 'ff'.repeat(16), G.issued_at, G.merchant_name, G.note)).not.toBe(G.sig_hex);
+      expect(await sign(G.cents, G.nonce_hex, G.issued_at + 1, G.merchant_name, G.note)).not.toBe(G.sig_hex);
       // The CLAIMED name is what every paying wallet renders as `displayName`, so it is signed too.
-      expect(await sign(G.cents, G.nonce_hex, G.issued_at, 'Migros')).not.toBe(G.sig_hex);
+      expect(await sign(G.cents, G.nonce_hex, G.issued_at, 'Migros', G.note)).not.toBe(G.sig_hex);
+      // The NOTE is what the payer reads as what the charge is for, so it is signed as well.
+      expect(await sign(G.cents, G.nonce_hex, G.issued_at, G.merchant_name, 'Tisch 5')).not.toBe(G.sig_hex);
       // …and signing the same inputs twice is stable (no RNG anywhere on this path).
-      expect(await sign(G.cents, G.nonce_hex, G.issued_at, G.merchant_name)).toBe(G.sig_hex);
+      expect(await sign(G.cents, G.nonce_hex, G.issued_at, G.merchant_name, G.note)).toBe(G.sig_hex);
     });
   });
 
   test('refuses a malformed seed or nonce instead of signing something wrong', async () => {
     await withCore(async core => {
       await expect(
-        core.tillOpenSignature('11'.repeat(31), String(G.cents), G.nonce_hex, G.issued_at, ''),
+        core.tillOpenSignature('11'.repeat(31), String(G.cents), G.nonce_hex, G.issued_at, '', ''),
       ).rejects.toThrow('Length');
       await expect(
-        core.tillOpenSignature(G.secret_hex, String(G.cents), 'ab'.repeat(15), G.issued_at, ''),
+        core.tillOpenSignature(G.secret_hex, String(G.cents), 'ab'.repeat(15), G.issued_at, '', ''),
       ).rejects.toThrow('nonce length: 15');
       await expect(
-        core.tillOpenSignature(G.secret_hex, String(G.cents), 'nothex!!', G.issued_at, ''),
+        core.tillOpenSignature(G.secret_hex, String(G.cents), 'nothex!!', G.issued_at, '', ''),
       ).rejects.toThrow('Length');
     });
   });
@@ -99,8 +111,8 @@ describe('DpayCore.tillOpenSignature', () => {
       // `cents` crosses as a decimal STRING for exactly this reason (MC1). Above 2^53 a `number`
       // would round, and a rounded price signs a charge nobody asked for.
       const huge = '18446744073709551615';
-      const sig = await core.tillOpenSignature(G.secret_hex, huge, G.nonce_hex, G.issued_at, '');
-      const off = await core.tillOpenSignature(G.secret_hex, '18446744073709551614', G.nonce_hex, G.issued_at, '');
+      const sig = await core.tillOpenSignature(G.secret_hex, huge, G.nonce_hex, G.issued_at, '', '');
+      const off = await core.tillOpenSignature(G.secret_hex, '18446744073709551614', G.nonce_hex, G.issued_at, '', '');
       expect(sig).toHaveLength(128);
       expect(sig).not.toBe(off);
     });

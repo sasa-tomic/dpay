@@ -1,11 +1,11 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, ActivityIndicator, Platform} from 'react-native';
+import {View, Text, Pressable, TextInput, ActivityIndicator, Platform, type TextStyle} from 'react-native';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
 import {NfcTap} from './NfcTap';
 import {NfcStatusRow} from './NfcStatusRow';
 import {NfcIcon} from './NfcIcon';
-import {C} from '../config/palette';
+import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {fmtAsset, fmtAssetCompact, nowSecs, short} from '../lib/format';
@@ -16,6 +16,7 @@ import type {AssetId, Identity, NfcStatus} from '../lib/types';
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {preparePull, submitTransfer} from '../services/rail';
+import {saveTxNote} from '../services/txNotes';
 import {
   TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillRawUnits,
   type TillCharge as Charge, type TillOpenOutcome, type TillSettled, type TillVoidOutcome,
@@ -28,6 +29,13 @@ import {M} from '../i18n';
  *  locale, so it is a unit like `BTC`/`SOL` rather than a translated word. Formatted by the wallet's
  *  own amount formatter (`fmtAsset`), never by string concatenation. */
 const CHF = 'CHF';
+
+// The till's optional note input — the same secondary-field idiom as the dpay form's memo field
+// (`memoInputStyle`, ReceiveMode): white field + hairline line2 border + Space Grotesk, 44pt-min,
+// full-width so it lines up with the shared amount row above and the ring-up button below. A
+// FUNCTION for the same reason that one is: `C` is mutated in place on a theme flip, so a
+// module-level style object would freeze one theme's field into the other.
+const noteInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
 
 /**
  * The counter: a cashier rings up a price in francs, shows a code, and watches it be paid.
@@ -121,6 +129,10 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   onHoldsForm?: (held: boolean) => void;
 }) {
   const [phase, setPhase] = useState<Phase>({k: 'entering'});
+  /** What this charge is for, the cashier's own typing ("2× Kafi, Tisch 4") — signed with the
+   *  price, shown to the payer on review, and kept across a reset like the amount is: a refused
+   *  ring-up is usually re-rung for the same thing. */
+  const [note, setNote] = useState('');
   /** The price the last ring-up ATTEMPTED, in cents — what a failure panel quotes back. Kept beside
    *  the charge rather than re-parsed from the input, so the number in the message is the number
    *  that was actually signed and sent. */
@@ -296,7 +308,7 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
    *  `prepareNfcTransfer` writes the request's nonce onto the payer's transfer as its ICRC-1 memo,
    *  and the relay credits only a transfer whose memo is this charge's reference. A tap built with
    *  a nonce of this wallet's own would move the customer's money and leave the sale open. */
-  async function armReader(charge: Charge, row: Extract<SelectableAsset, {protocol: 'ic'}>, feeRaw: string): Promise<Tap | null> {
+  async function armReader(charge: Charge, row: Extract<SelectableAsset, {protocol: 'ic'}>, feeRaw: string, note: string): Promise<Tap | null> {
     if (!nfcReady || !DpayNfc) return null;
     // THE SETTLEMENT AMOUNT, not the price — the same number the QR quotes, so a tap and a scan
     // pay the identical sale and the shop absorbs the fee either way.
@@ -304,8 +316,10 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     try {
       const expiryNs = await icStampExpiry(identity.secretHex, NFC_UPDATE_AHEAD_S);
       const expiry = Number(BigInt(expiryNs) / 1_000_000_000n);
+      // The rung note rides the tap request as its DISPLAY memo — what the payer's phone shows
+      // while it asks them to confirm. The SETTLEMENT memo is and stays `charge.reference`.
       const requestHex = await DpayNfc.buildRequest(
-        identity.publicHex, amountRaw, charge.reference, expiry, row.currency, identity.username, '',
+        identity.publicHex, amountRaw, charge.reference, expiry, row.currency, identity.username, note,
       );
       return {
         requestHex,
@@ -328,6 +342,9 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     if (tillRow === null || tillFeeRaw === null) return;
     const parsed = chfCents(amount);
     if (!parsed.ok) { setErr(M.receive.till.badAmount(parsed.reason)); return; }
+    // One spelling of the note everywhere it travels: the signed body, the wire key, the payer's
+    // tap-request display, and the history annotation below. Whitespace-only is nothing.
+    const noteVal = note.trim();
     setErr(null);
     setUnchecked(null);
     setWatchingLate(false);
@@ -336,13 +353,18 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     setNfcKey(k => k + 1);
     setRung(parsed.cents);
     setPhase({k: 'opening'});
-    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, tillRow.decimals, tillFeeRaw);
+    const outcome = await openTillCharge(relayUrl, identity, parsed.cents, tillRow.decimals, tillFeeRaw, noteVal);
     if (outcome.kind !== 'open') { setPhase({k: 'failed', outcome}); return; }
+    // The payee-side annotation, the same save the dpay form makes for its memo: keyed by the
+    // charge's reference — the memo the incoming transfer carries, so the history row this sale
+    // settles into shows what it was for. No `who`: whoever pays is exactly what a till does not
+    // know at ring-up time.
+    if (noteVal) void saveTxNote(identity.publicHex, {k: outcome.charge.reference, msg: noteVal}, Date.now());
     setNow(nowSecs());
     setPhase({k: 'showing', charge: outcome.charge});
     // The code goes up FIRST and the reader is armed after it: building the request needs a
     // certified IC instant, and a customer must never wait on the radio for a code they can scan.
-    setTap(await armReader(outcome.charge, tillRow, tillFeeRaw));
+    setTap(await armReader(outcome.charge, tillRow, tillFeeRaw, noteVal));
   }
 
   async function cancel() {
@@ -358,7 +380,8 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   }
 
   /** Back to an empty counter. The amount is the PARENT's and is kept untouched — a mis-keyed
-   *  total is retyped, a refused one is usually rung up again unchanged. */
+   *  total is retyped, a refused one is usually rung up again unchanged. The note is this form's
+   *  own and is kept the same way: a re-ring is almost always for the same thing. */
   function reset() {
     setPhase({k: 'entering'});
     setUnchecked(null);
@@ -552,11 +575,23 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   // PARENT's, shared with the dpay-code form; this component takes the typed price from there and
   // parses it with the TILL's own rule (`chfCents` — two decimals, a third is refused rather than
   // rounded, because a rounded price is a misprice). The franc/VCHF equivalence is said out loud
-  // by the hint under the button, not left as an unstated conversion.
+  // by the hint, not left as an unstated conversion. The note is the till's own field, under the
+  // shared amount row where the dpay form's memo sits — a plain keyboard (words, not a price), and
+  // no submit-on-Enter: a ring-up is signed, so the button stays the only thing that does it.
   const opening = phase.k === 'opening';
   return (
     <View style={S.centerTop}>
       <Text style={S.dim2}>{M.receive.till.chargeHint}</Text>
+      <TextInput
+        testID="till-note-input"
+        style={noteInputStyle()}
+        value={note}
+        onChangeText={setNote}
+        placeholder={M.receive.till.notePlaceholder}
+        placeholderTextColor={C.sub}
+        accessibilityLabel={M.receive.till.noteLabel}
+        maxLength={32}
+      />
       {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
       {opening ? <ActivityIndicator color={C.brandText} /> : null}
       <Pressable
