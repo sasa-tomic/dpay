@@ -88,8 +88,15 @@ export async function run() {
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[38-relay-retarget] GREEN in ${elapsed}s`);
   } finally {
-    try { await r2.stop(); } catch {}
+    // Teardown ORDER is load-bearing (the 164/166/167 idiom): close the driver FIRST, then stop
+    // relay B. Stopping the relay first leaves this page — still live on relay B after the
+    // retarget — polling a dead origin at the 150 ms test cadence, so an in-flight balance poll
+    // fails with ERR_CONNECTION_REFUSED and the strict unexpected-diagnostics gate fails a
+    // functionally-green run (reproducible under host load). env.stop() quiesces every poll by
+    // destroying the page (in-flight fetches abort with net::ERR_ABORTED, which the gate
+    // ignores), after which r2.stop() cannot be observed by anything.
     await env.stop();
+    try { await r2.stop(); } catch {}
   }
 }
 
