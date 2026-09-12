@@ -327,9 +327,7 @@ of it measured against Helius's own published docs, with the one check only the 
 That file also owns the two founder directions (both builds, not config), the §4.3 objection that
 was raised and overruled, the order they must ship in, and the failure-state contract R3 below.
 
-| # | Item | value | effort |
-|---|------|------:|:------:|
-| R4 | **Receive-flow copy needs the R3 classification treatment:** `M.deposit.sol.ataUnverifiedDetail` (SolanaReceiveSheet) is a pre-existing unclassified connectivity sentence naming Solana and the user's connection — post-R2, a relay outage renders it blaming the wrong party. Small copy+classification follow-up, filed with R2's landing (2026-09-10). | 5 | S |
+**R4 is DONE (2026-09-12, removed from the table above — no items remain).** The receive sheet's unverified-ATA sentence is now classified at the seam: the failure `selectedTokenState.failure` already carried threads `Wallet → SolReceiveMode → SolanaReceiveSheet.ataFailure` (new optional prop, no component-side re-classification), and the sentence splits per class (`ataUnverifiedRefused/Offline/Unreachable/Unreadable` beside the kept class-agnostic fallback, four locales) — `unreachable` follows R3's honesty pattern: names dpay's relay as the service side, says the connection is not the problem, money untouched, IC payments still work. Pinned by 6 new jest tests incl. pairwise class-distinctness (SolanaReceiveSheet suite, 45 green).
 
 **R1 is DONE (2026-09-10, removed from the table above).** One relay client over an ordered
 address list (`relayFetch` in `app/services/relay.ts`): transport failure or ≥ 500 → next
@@ -427,24 +425,26 @@ Nothing from the swarm's defect inventory remains open.
 
 ## Tech-debt follow-ups
 
-| # | Item | value | effort |
-|---|------|------:|:------:|
-| U4 | **`CODEBASE_ANALYSIS.md` carries a hand-maintained ~40-flow enumeration that duplicates the generated `FLOWS.md` wholesale.** It is labelled "illustrative, not exhaustive", but since `just check` now regenerates and diffs `FLOWS.md` (recipe `flows-md`) its remaining value is close to zero and it is a standing DRY violation in the file every session opens with. It cannot be deleted blind: it carries a few non-flow facts (the testID contract, the seed/backup surface, the restore surface, the asset-segregation note) that need re-homing first. | 6 | S |
+U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration was deleted from `CODEBASE_ANALYSIS.md` and replaced by the pointer paragraph ("Flow coverage lives in `FLOWS.md`, not here — this file points, it never restates"; `just check` regenerating + diffing `FLOWS.md` is recorded beside it), and every non-flow fact it carried was re-homed first (the testID contract, the seed/backup surface, and the restore surface as their own paragraphs in the e2e-harness section; the asset-segregation note into "Where the design earns its keep"). The row survived that commit by oversight. No tech-debt items remain open.
 
 ## Other open issues
 
-- **`just demo` cannot settle at HEAD (Demo A’s phone→replica leg; measured 2026-09-07).** Two
-  independent breaks: (F1) the demo relay’s catalog resolves the DEMO currency to mainnet DUSD
-  `td2nx…`, absent on the clean replica the script boots — while its faucet mints on
-  `dpay_canister`, so no payment can settle; (F2) the app has NO operator override for its IC
-  `/api/v2` gateway (always `icp-api.io`; the only redirect is the e2e-only
-  `__DPAY_TEST_IC_GATEWAY` seam), so the phone cannot target the local replica even with F1
-  fixed. **The step-4 double-submission gate was DRIVEN the same day** via the offline
-  test-helpers relay: identical signed code re-submitted → free 202 dedup, balances unmoved, no
-  second Recent row, terminal settles on the honest dim line “Couldn’t confirm this payment yet —
-  if the payer paid, it lands with the next balance refresh.” — the exact `118e122` copy promise
-  (stale copy fixed with it: demo.sh’s “Already paid” banner, DEMO.md’s nonexistent terminal
-  “paste box”). Fix shape, NOT built: a demo/operator gateway override + demo catalog alignment.
+- **`just demo` settles at HEAD (fixed 2026-09-12; the 2026-09-07 measurement record and the
+  step-4 double-submission gate evidence below stand as history).** (F1) the demo relay carries
+  `DPAY_DEMO_LEDGER` (validated `Principal::from_text` at agent-build startup, exit-on-garbage):
+  demo.sh now installs facade + a REAL `icrc_ledger` on the replica with the facade's
+  `demo_ledger = <replica ledger>` + controller = the relay principal (`--print-controller-principal`
+  bakes it), so catalog/faucet/balances/payments all resolve to ONE ledger — the tracked
+  `init.arg` baking mainnet DUSD `td2nx…` was the root cause, and the production/agent catalogs are
+  byte-identical when the env is unset (23 relay catalog tests). (F2) the app gained an operator
+  IC-gateway override — `dpay.icpGateway.v1`, Settings ▸ Advanced beside the SOL RPC row, precedence
+  operator #1 → e2e seam #2 → `icp-api.io` (the seam still works; flow 174 pins compose-not-replace,
+  round-trip/persist/clear, and a dead override refusing honestly) — plus catalog-driven clock
+  routing (`icNowNs` targets the DEMO row's ledger; a replica 400s unhosted ids, which had made
+  demo signing impossible). Driven to settlement on emulator-5554: phone "Paid ✓ ∂3.50", merchant
+  balance ∂103.50 with the request ref as memo, ledger truth `icrc1_balance_of` = 10_000¢ faucet +
+  350¢ payment. DEMO.md rewritten to match reality (incl. two false "auto-flip within ~1s" claims
+  replaced with the real online-path evidence).
 - **OCP tx-id fix is prod-proven, both spellings** (`a913c6d` live, measured 2026-09-05;
   physical-device orders: `2609` native ICP block `38190401`, `2610` VCHF block `81062` submitted
   prefixed — both accepted by DFX). Tripwires: `just ocp-ledger-probe` + flow 113. DFX still owes
