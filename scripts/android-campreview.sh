@@ -2,8 +2,8 @@
 # Camera-preview device gate — REAL pixels, ZERO mocks.
 #
 # Drives the REAL installed APK (org.kalaj.dpay) on the REAL emulator through the IC (DEMO) and
-# SOL Pay scan screens (Balances → asset row), then asserts that REAL camera pixels from the
-# emulated camera HAL (virtual scene) are visible inside the scan box:
+# SOL Pay scan screens (Home ▸ accounts route → asset row), then asserts that REAL camera pixels
+# from the emulated camera HAL (virtual scene) are visible inside the scan box:
 #   PASS ⟺ per-channel stddev ≥ 10 AND mean luminance ≥ 60 over the box crop.
 # Measured on dpay_api36: healthy virtual-scene feed = std 79–84, lum ~194; collapsed/flat box =
 # std 0.00, lum ~7.7; permission-placeholder branch = std 2.5, lum ~7.7 (the luminance guard is
@@ -13,9 +13,9 @@
 # the placeholder branch, which has intrinsic width): a scan-screen layout change that collapses
 # the camera preview to 0×0 (e.g. an unstyled, content-sized wrapper around <QrScanner/>).
 #
-# SOL leg note: the SOL RPC endpoint is iptables-REJECTed on-device for the run so the fund-first
-# gate (known-zero mainnet SOL would replace the scanner with the FundFirstPanel) takes its
-# documented FAIL-OPEN path and renders the scanner — see the blackhole block below.
+# SOL leg note: the SOL RPC endpoint is made unreachable for the run so the fund-first gate
+# (known-zero mainnet SOL would replace the scanner with the FundFirstPanel) takes its
+# documented FAIL-OPEN path and renders the scanner — see the override-seed block below.
 #
 # Exit codes: 0 = green on both screens; 1 = camera preview not rendering (the regression);
 # 2 = UI navigation/anchor failure (app UI changed — fix the script's anchors); 3 = device/app
@@ -26,12 +26,26 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PKG=org.kalaj.dpay
 ACT=org.kalaj.dpay/com.dpay.MainActivity
 ART="$(mktemp -d /tmp/opencode/campreview.XXXXXX)"
-BLOCK_IPS=""
+# The SOL-leg override seed (see the block that sets SOL_SEEDED): the key the app itself owns,
+# the DB it lives in, the unreachable endpoint that forces the fail-open path, and the prior
+# value to restore in the EXIT trap. Prior '' = no row (delete on restore).
+SOL_RPC_KEY='dpay.solanaRpc.v1'
+SOL_RPC_DB="/data/data/$PKG/databases/AsyncStorage"
+SOL_OVERRIDE_URL='https://127.0.0.1:9/'
+SOL_OVERRIDE_PRIOR=''
+SOL_SEEDED=""
 cleanup() {
-  # remove any iptables REJECT rules this run added (idempotent — also drains leftovers)
-  for ip in ${BLOCK_IPS:-}; do
-    $ADB shell "while iptables -C OUTPUT -d $ip -j REJECT 2>/dev/null; do iptables -D OUTPUT -d $ip -j REJECT; done" >/dev/null 2>&1 || true
-  done
+  # restore the SOL RPC operator override this gate seeded, if it did (idempotent). force-stop
+  # first: the app holds the DB open (WAL), and a write under a live app process could be lost
+  # or clobbered by the app's own next AsyncStorage flush.
+  if [ -n "$SOL_SEEDED" ]; then
+    $ADB shell am force-stop "$PKG" >/dev/null 2>&1 || true
+    if [ -n "$SOL_OVERRIDE_PRIOR" ]; then
+      $ADB shell "sqlite3 $SOL_RPC_DB \"insert or replace into Storage(key,value) values('$SOL_RPC_KEY','$SOL_OVERRIDE_PRIOR')\"" >/dev/null 2>&1 || true
+    else
+      $ADB shell "sqlite3 $SOL_RPC_DB \"delete from Storage where key='$SOL_RPC_KEY'\"" >/dev/null 2>&1 || true
+    fi
+  fi
   echo "   artifacts: $ART" >&2
 }
 trap cleanup EXIT
@@ -57,60 +71,34 @@ grep -q "^package:$PKG$" <<<"$PKGS" \
   || { echo "FAIL: $PKG not installed (run: just app)"; exit 3; }
 $ADB shell pm grant "$PKG" android.permission.CAMERA 2>/dev/null || true
 
-# ---- SOL-RPC blackhole (fund-first gate → documented fail-open path) --------
+# ---- SOL-RPC override seed (fund-first gate → documented fail-open path) -------------
 # Since the zero-funds UX (2026-08-16), a wallet with KNOWN-zero mainnet SOL renders the
 # FundFirstPanel IN PLACE OF the SOL Pay scanner (solPayGate 'sol-zero') — correct product
 # behavior, but it leaves this gate no scan box to measure. The app state that renders the
 # scanner with SOL unreachable is the FAIL-OPEN path (RPC error → gate 'none'; e2e flow 79
-# step 4). This gate exercises exactly that: REJECT the SOL RPC endpoint's IPs at the device
-# network layer (adb-root iptables). Only the RPC I/O boundary is cut — the camera path stays
-# 100% real. Scoped to the endpoint's exact A records; the relay's IPs are asserted DISJOINT
-# first (both sit on Cloudflare) so the IC leg + faucet stay live. Rules are removed by the
-# EXIT trap. Hostnames are read from the app's own constants (single source of truth).
-echo "== blackhole the SOL RPC endpoint (fail-open path: known-zero would show the fund panel) =="
-sol_rpc_host() {
-  python3 - app/config/constants.ts <<'PY'
-import re, sys
-src = open(sys.argv[1]).read()
-m = re.search(r"SOLANA_RPC_URL.*?'https?://([^/']+)", src, re.S)
-print(m.group(1) if m else '')
-PY
-}
-relay_host() {
-  python3 - app/relayConfig.ts <<'PY'
-import re, sys
-src = open(sys.argv[1]).read()
-m = re.search(r"RELAY_DEFAULT\s*=\s*'https?://([^/']+)", src)
-print(m.group(1) if m else '')
-PY
-}
-collect_ips() { # <hostname>: unique IPv4s — union of host resolver (3 rounds) + device resolver (2)
-  local h="$1" ips="" ip
-  for _ in 1 2 3; do ips="$ips$(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1}' || true)"$'\n'; done
-  for _ in 1 2; do
-    ip="$($ADB shell "ping -c1 -W2 $h" 2>/dev/null | grep -oE '\([0-9.]+\)' | head -1 | tr -d '()' || true)"
-    [ -n "$ip" ] && ips="$ips$ip"$'\n' || true
-  done
-  printf '%s\n' "$ips" | grep -v '^$' | sort -u || true
-}
-SOL_RPC_HOST="$(sol_rpc_host)"
-[ -n "$SOL_RPC_HOST" ] || { echo "FAIL: no SOL RPC URL literal in app/config/constants.ts — revisit this gate"; exit 3; }
-BLOCK_IPS="$(collect_ips "$SOL_RPC_HOST")"
-[ -n "$BLOCK_IPS" ] || { echo "FAIL: could not resolve $SOL_RPC_HOST (need its IPs to blackhole)"; exit 3; }
-RELAY_HOST="$(relay_host)"
-[ -n "$RELAY_HOST" ] || { echo "FAIL: no RELAY_DEFAULT literal in app/relayConfig.ts — revisit this gate"; exit 3; }
-RELAY_IPS="$(collect_ips "$RELAY_HOST")"
-COMMON="$(comm -12 <(printf '%s\n' "$BLOCK_IPS") <(printf '%s\n' "$RELAY_IPS"))"
-[ -z "$COMMON" ] || { echo "FAIL: $SOL_RPC_HOST and relay $RELAY_HOST share IPs ($COMMON) — refusing to block"; exit 3; }
+# step 4). This gate exercises exactly that. R2 (2026-09) removed the baked RPC literal —
+# SOL RPC now rides the relay proxy — so the old network-layer blackhole (iptables-REJECT the
+# RPC host's IPs, disjoint from the relay) has no host of its own to block without cutting
+# the relay itself. Instead the gate seeds the app's OWN operator override (precedence #1 in
+# config/constants.ts#solanaRpcUrls, the escape hatch of record) with an unreachable endpoint
+# straight into the on-device AsyncStorage DB (root sqlite3 on the emulator): 127.0.0.1:9
+# refuses instantly, needs no DNS, passes the app's https/mainnet validation, and leaves the
+# relay — which now also carries the SOL path — fully live, so the IC leg + faucet stay up
+# and the camera path stays 100% real. The prior value (if any) is restored by the EXIT trap.
+echo "== seed the SOL RPC operator override (fail-open path; known-zero would show the fund panel) =="
 $ADB root >/dev/null 2>&1; $ADB wait-for-device
-for ip in $BLOCK_IPS; do
-  $ADB shell "iptables -C OUTPUT -d $ip -j REJECT 2>/dev/null || iptables -A OUTPUT -d $ip -j REJECT" >/dev/null
-done
-for ip in $BLOCK_IPS; do
-  $ADB shell "ping -c1 -W3 $ip" >/dev/null 2>&1 \
-    && { echo "FAIL: $ip still reachable after iptables REJECT"; exit 3; }
-done
-echo "   blocked: $SOL_RPC_HOST →$(printf ' %s' $BLOCK_IPS) (relay $RELAY_HOST unaffected)"
+# the key must still be the app's own literal (single source of truth; refuses silently drifted gates)
+grep -q "SOLANA_RPC_STORAGE_KEY = '$SOL_RPC_KEY'" app/config/constants.ts \
+  || { echo "FAIL: '$SOL_RPC_KEY' is no longer the SOLANA_RPC_STORAGE_KEY literal in app/config/constants.ts — revisit this gate"; exit 3; }
+$ADB shell am force-stop "$PKG"
+DB_OK="$($ADB shell "test -f $SOL_RPC_DB && echo yes" 2>/dev/null | tr -d '\r')"
+[ "$DB_OK" = "yes" ] || { echo "FAIL: no AsyncStorage DB at $SOL_RPC_DB (run: just app, launch once)"; exit 3; }
+SOL_OVERRIDE_PRIOR="$($ADB shell "sqlite3 $SOL_RPC_DB \"select ifnull(value,'') from Storage where key='$SOL_RPC_KEY'\"" 2>/dev/null | tr -d '\r\n')"
+$ADB shell "sqlite3 $SOL_RPC_DB \"insert or replace into Storage(key,value) values('$SOL_RPC_KEY','$SOL_OVERRIDE_URL')\"" >/dev/null
+SEEDED_VAL="$($ADB shell "sqlite3 $SOL_RPC_DB \"select value from Storage where key='$SOL_RPC_KEY'\"" 2>/dev/null | tr -d '\r\n')"
+[ "$SEEDED_VAL" = "$SOL_OVERRIDE_URL" ] || { echo "FAIL: could not seed $SOL_RPC_KEY into $SOL_RPC_DB"; exit 3; }
+SOL_SEEDED=1
+echo "   seeded $SOL_RPC_KEY → $SOL_OVERRIDE_URL (RPC refuses instantly → gate 'none')"
 
 echo "== (re)launch + wait for the on-device self-check =="
 $ADB shell am force-stop "$PKG"
@@ -292,10 +280,29 @@ print(f"{std:.2f} {lum:.1f} {uniq}")
 PY
 }
 
-# check_screen <label> <asset-rid> <ic|sol>: navigate Balances → asset → assert live pixels
+# check_screen <label> <asset-rid> <ic|sol>: navigate Home ▸ accounts → asset → assert live pixels.
+# (2026-09-08 home surface: the wallet LANDS on Home — `btn-home-accounts` opens the accounts
+# ROUTE; the old `balance` chip tap only worked pre-home-surface, when the balances list was
+# the landing itself. The tab bar is outside the mode switch, so tab-home → accounts works
+# from wherever the previous screen left the wallet.)
 check_screen() {
   local label="$1" rid="$2" which="$3"
-  tap_rid balance
+  tap_rid tab-home
+  sleep 1
+  tap_rid btn-home-accounts
+  sleep 2
+  # Prime: a wallet whose selected asset is ALREADY the target (DEMO is the IC default) would
+  # no-op the target tap, and the label-change check below could never observe a transition.
+  # Select a DIFFERENT row first — VEUR is always in the catalog, DEMO is the fallback primer —
+  # so the target tap always has an observable before-label.
+  local primer="$([ "$rid" = asset-veur ] && echo asset-demo || echo asset-veur)"
+  for _ in 1 2 3 4 5; do
+    dump_ui || { sleep 1; continue; }
+    grep -q "resource-id=\"$primer\"" "$ART/ui.xml" && break
+    $ADB shell input swipe 540 1700 540 700 300 || true
+    sleep 1
+  done
+  tap_rid "$primer" || true
   sleep 2
   # The accounts list is longer than one viewport — the target row (e.g. USDC · Solana) can sit
   # below the uiautomator fold. Scroll-and-retry until the row anchor is in the dumped viewport,
@@ -365,12 +372,15 @@ PY
 }
 
 # ensure_wallet: fresh emulator data (read-only AVD) lands on Onboarding — create the demo
-# wallet so the Balances navigation below has its `balance` anchor. Idempotent: an existing
-# wallet skips this (Onboarding never renders). Drives the full onboarding progression
-# (create → 24-word backup checkbox → continue → optional faucet-fallback continue).
+# wallet so the navigation below has its anchors. Idempotent: an existing wallet skips this
+# (Onboarding never renders). Drives the full onboarding progression (create → 24-word backup
+# checkbox → continue → optional faucet-fallback continue). Wallet-present anchor is the
+# bottom tab bar (`tab-home`, outside the mode switch since 2026-09-08): the old `balance`
+# anchor only renders on non-Home modes now, and Home is the landing mode — a fresh wallet
+# would sit on Home forever waiting for an anchor that never comes.
 ensure_wallet() {
   dump_ui || { echo "FAIL nav: uiautomator dump failed"; exit 2; }
-  if grep -q 'resource-id="balance"' "$ART/ui.xml"; then
+  if grep -q 'resource-id="tab-home"' "$ART/ui.xml"; then
     echo "   wallet present"
     return 0
   fi
@@ -378,7 +388,7 @@ ensure_wallet() {
   local ok=""
   for _ in $(seq 1 60); do
     dump_ui || { sleep 1; continue; }
-    if grep -q 'resource-id="balance"' "$ART/ui.xml"; then ok=1; break; fi
+    if grep -q 'resource-id="tab-home"' "$ART/ui.xml"; then ok=1; break; fi
     local step
     step="$(python3 - "$ART/ui.xml" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -433,15 +443,15 @@ PY
     fi
     sleep 1
   done
-  [ -n "$ok" ] || { echo "FAIL nav: wallet creation did not reach the Wallet surface (no 'balance' anchor); ui dump: $ART/ui.xml"; exit 2; }
+  [ -n "$ok" ] || { echo "FAIL nav: wallet creation did not reach the Wallet surface (no 'tab-home' anchor); ui dump: $ART/ui.xml"; exit 2; }
   echo "   demo wallet created"
 }
 ensure_wallet
 
 echo "== IC (DEMO asset) Pay scan screen — positive control =="
-check_screen demo asset-demo-select ic
+check_screen demo asset-demo ic
 
 echo "== SOL Pay scan screen — the reported regression =="
-check_screen sol asset-sol-select sol
+check_screen sol asset-sol sol
 
 echo "== camera-preview gate GREEN on both rails =="
