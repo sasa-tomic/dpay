@@ -236,6 +236,26 @@ describe('HistoryRow — the device-saved annotation replaces display text, neve
     expect(all).toContain(NONCE_HEX); // the reconciliation reference, visible in the log
     act(() => { tree.unmount(); });
   });
+
+  test('a max-length name AND max-length message both render in full and displace nothing', () => {
+    // Every input path caps a peer name / human message at 32 bytes (the wire's NAME_LEN, the
+    // link's PAY_LINK_TEXT_BYTES, the SOL codec's MAX_NAME_LEN) — the longest note a payment can
+    // save. Both must render WRAPPED (no numberOfLines anywhere in the row: hidden context is
+    // worse than a tall row), and neither may crowd out the amount or the time — the money keeps
+    // its own anchor whatever the annotation's length.
+    const who = 'N'.repeat(32);
+    const msg = 'M'.repeat(32);
+    const tree = mountNoted(txn('ic:0', '2500', TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX}), {who, msg}, 4);
+    const all = texts(tree);
+    expect(all).toContain(M.wallet.ledger.to(who));
+    expect(all).toContain(msg);
+    expect(all).toContain('−∂25.00'); // the amount still renders (testPrefix-amt-4's own text)
+    expect(all).toContain('Aug 24'); // the time still renders (testPrefix-time-4's own text)
+    for (const node of tree.root.findAllByType(Text)) {
+      expect(node.props.numberOfLines).toBeUndefined();
+    }
+    act(() => { tree.unmount(); });
+  });
 });
 
 describe('TxnReceipt — Peer and Note lines are ADDITIVE to the checkable ledger fields', () => {

@@ -15,6 +15,8 @@ import {signSolPayment, signSplPayment, broadcastSolPayment} from '../solana';
 import {friendlySolTapError} from '../solana/errors';
 import {decideSolPayerReceiptV2, isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE, RECEIPT_MISMATCH} from '../solana/payments';
 import {DpaySolNfc} from '../services/native';
+import {saveTxNote} from '../services/txNotes';
+import {sanitiseDisplayText} from '../lib/deepLink';
 import {withTimeout} from '../lib/timeout';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
@@ -240,6 +242,10 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       expectedRidRef.current = decoded.rid;
       const parts = extractSignedTxParts(solpay.tx);
       expectedSigRef.current = parts ? bs58.encode(parts.signature) : '';
+      // Device-saved annotation (services/txNotes): the tap request's claimed name + human memo
+      // ride nowhere else — record them against the signature just captured (the SOL join key; the
+      // settling row will carry it), same seam as SolPayMode's QR sign. Best-effort by contract.
+      void saveTxNote(identity.publicHex, {k: expectedSigRef.current, who: sanitiseDisplayText(decoded.name) || undefined, msg: sanitiseDisplayText(decoded.memo) || undefined}, Date.now());
       const solpayUri = encodeSolPay(solpay);
       await DpaySolNfc.approveSolCard(solpayUri);
     } catch (e: unknown) {

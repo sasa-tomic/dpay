@@ -46,6 +46,7 @@ import {icpCatalogOf, fmtCurrencyAmount} from '../config/catalog';
 import {useCatalog} from '../hooks/useCatalog';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, relayFetch} from '../services/relay';
+import {saveTxNote} from '../services/txNotes';
 import {prepareTransfer, submitTransfer, wireRequestToIntent} from '../services/rail';
 import {JOURNEY_STAMPS, awardStamp} from '../lib/journey';
 import {useEscapeToClose} from '../hooks/useHotkeys';
@@ -210,6 +211,11 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
     setBusy(true);
     setErr(null);
     try {
+      // Device-saved annotation (services/txNotes), at the same last-point-before-signing seam as
+      // PayMode.approve: the practice row must read "to <payee>" in the log like every payment.
+      // Keyed by the intent's nonce hex (the on-chain memo the relay echoes back). Best-effort by
+      // contract — the note can never break the payment it describes.
+      void saveTxNote(identity.publicHex, {k: i.nonceHex, who: M.education.practice.payeeName}, Date.now());
       const prepared = await prepareTransfer(identity.secretHex, {currencies: catalog}, i);
       const out = await submitTransfer(prepared, identity.secretHex, PRACTICE_POLL_BUDGET);
       if (!alive.current) return;

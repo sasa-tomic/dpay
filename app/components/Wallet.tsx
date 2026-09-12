@@ -97,7 +97,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
   const [prefillIntent, setPrefillIntent] = useState<PayIntent | null>(null);
   // The Solana rail's equivalent: address + decimal amount pre-filled into the "Send to address"
   // form (SOL has no request/review engine — same tab, same toggle, per the same-surfaces rule).
-  const [solPrefill, setSolPrefill] = useState<{address: string; amount: string} | null>(null);
+  const [solPrefill, setSolPrefill] = useState<{address: string; amount: string; label?: string; memo?: string} | null>(null);
   // The symmetric `dpay:pay/<blob>` (NFC-less receipt hand-back): a payer who settled online shares
   // the rail proof {ledger, block_index, request_id} back to the merchant. This holds the raw blob;
   // ReceiveMode consumes it via its verify effect (format-check → request_id binding → on-chain
@@ -723,8 +723,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, onReset
         if (!alive || gen !== linkGenRef.current) return;
         selectAsset(asset.id);
         // SOL has no IC-style request/review engine; its equivalent surface is the pre-filled
-        // "Send to address" form in the SAME Pay tab (the same-surfaces hard rule).
-        setSolPrefill({address: link.recipient, amount: link.amount});
+        // "Send to address" form in the SAME Pay tab (the same-surfaces hard rule). The link's
+        // label/memo ride along exactly as the IC twin's toName/memo do (PayMode's prefillIntent):
+        // shown as the claimed payee on the review, saved as a device note on send.
+        setSolPrefill({address: link.recipient, amount: link.amount, label: link.label, memo: link.memo});
         setPaySubMode('send');
       }
       setMode('pay');

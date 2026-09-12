@@ -4,10 +4,12 @@
 // 16-byte nonce (the reconciliation key — extending it was REJECTED), on Solana the message is
 // write-only (parsing memos back on every history tick is flow 160's forbidden path). So the only
 // place a friendly row can come from is the device's own record of the moment it paid or requested
-// (app/services/txNotes.ts), written at six seams: PayMode approve/approveOcp, NfcTap approve,
-// ReceiveMode makeRequest, SolPayMode approveSpay/sendSolForOcp.
+// (app/services/txNotes.ts), written at the seams: PayMode approve/approveOcp, NfcTap approve,
+// ReceiveMode makeRequest, SolPayMode approveSpay/sendSolForOcp + the offline solreq:v2 sign
+// (approve), SolNfcTap approve (card-side auto-sign), Practice approve, the SOL pay-link send
+// (SolanaWithdrawSheet confirm), and the convert legs (executeConvert, venue-named).
 //
-// This flow drives four of them through the real UI and asserts what the USER sees:
+// This flow drives six of them through the real UI and asserts what the USER sees:
 //   (a) payer pays a request QR carrying to_name="Bob" + memo="coffee" → Home feed and the
 //       Transactions ledger read "to Bob" + "coffee"; the receipt carries Peer="Bob",
 //       Note="coffee", the FULL payee principal, the hex nonce as reference, and the honest
@@ -17,10 +19,19 @@
 //       invented) while the typed message annotates the memo line; its receipt has NO Peer line;
 //   (c) a Solana-Pay URI with label + message → the SOL row is named and carries the message,
 //       keyed by the signature the send itself returned (the stub echoes it into history);
+//   (e) an OFFLINE solreq:v2 merchant QR (name + memo) auto-signs → the note is keyed by the
+//       signature the SIGN itself produced (extracted from the solpay:v2 QR) — the merchant's
+//       later broadcast is simulated by pinning the stub's history to that signature;
+//   (f) the same sign-time note through the NFC card (flow-47 event seam; the radio hop stays
+//       a physical-device gate) → the tap's solpay signature names the row;
 //   (d) a plain un-annotated harness transfer stays EXACTLY as before: short principal + hex
 //       nonce on the row, no Peer/Note lines, the plain "read from the ledger" footer.
+//
+// Not drivable here: the practice payment (F3) and the convert legs (F6) — the practice screen
+// needs a first-run identity and the convert legs need a venue-pool fixture; both seams are
+// pinned in jest (Practice.test.tsx / convert.test.ts) instead.
 import { setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, railTransfer,
-  railPrincipalText, armPayScan, openBalances } from '../harness/lib.mjs';
+  railPrincipalText, armPayScan, armNfcCard, openBalances } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const SOL_MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
@@ -28,6 +39,45 @@ const SOL_REFERENCE = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
 const SPAY_LABEL = 'Coffee Bar';
 const SPAY_MESSAGE = 'Order 42';
 const REQ_MESSAGE = 'bike parts';
+const SOL_REQ_NAME = 'Market Stall'; // ≤32 code units — the qr codec's MAX_NAME_LEN cap
+const SOL_REQ_MEMO = 'Farm veg box';
+const SOL_NFC_NAME = 'Bakery Van';
+const SOL_NFC_MEMO = 'Sourdough';
+const SOL_BH = 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN'; // flow-46/47 fixture blockhash
+const SOL_LAMPORTS = '1000000'; // 0.001 SOL — matches the stub's fabricated getTransaction delta
+
+// Minimal base58 encoder (avoids a bs58 dependency in the e2e node_modules — flow-47 precedent).
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function bs58Encode(bytes) {
+  let num = 0n;
+  for (const b of bytes) num = num * 256n + BigInt(b);
+  let out = '';
+  while (num > 0n) { out = B58[Number(num % 58n)] + out; num /= 58n; }
+  for (const b of bytes) { if (b === 0) out = '1' + out; else break; }
+  return out;
+}
+
+// Extract the first 64-byte signature from a v2 solpay URI (base64url tx → compact-u16 || sig64 || msg).
+function extractSig(solpayUri) {
+  const payload = solpayUri.split('solpay:v2?')[1];
+  const obj = JSON.parse(Buffer.from(payload, 'base64url').toString());
+  const tx = Buffer.from(obj.tx, 'base64url');
+  // tx layout: compact-u16 sigCount (1 byte for count 1) || sigCount*64 bytes || message
+  return bs58Encode(new Uint8Array(tx.slice(1, 65)));
+}
+
+// Canonical-order solreq:v2 URI (decode re-serializes and compares — field order is load-bearing).
+function buildSolReqUri(rid, name, memo) {
+  const iat = Math.floor(Date.now() / 1000);
+  const obj = {
+    v: 2, rid, net: 'mainnet-beta',
+    bh: SOL_BH, lvh: 300_000_000, slot: 250_000_000,
+    iat, exp: iat + 90,
+    to: SOL_MERCHANT, amt: SOL_LAMPORTS, cur: 'SOL',
+    mint: null, toAta: null, name, memo,
+  };
+  return 'solreq:v2?' + Buffer.from(JSON.stringify(obj)).toString('base64url');
+}
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -36,8 +86,8 @@ export const meta = {
   id: '172',
   name: 'log-names-messages',
   journey: 'system',
-  covers: ['history', 'names', 'memo', 'txnotes', 'receipt', 'activity-feed', 'solana-pay', 'honest-copy'],
-  verifies: 'Device-saved notes name the transaction log: a paid request shows to_name + human memo on the row and Peer/Note on the receipt beside the full principal and hex reference; a payee-side request shows the typed message but never invents a payer name; a labelled Solana-Pay names its row by signature; an un-annotated transfer keeps principal + hex with no Peer/Note lines.',
+  covers: ['history', 'names', 'memo', 'txnotes', 'receipt', 'activity-feed', 'solana-pay', 'sol-offline', 'sol-nfc', 'honest-copy'],
+  verifies: 'Device-saved notes name the transaction log: a paid request shows to_name + human memo on the row and Peer/Note on the receipt beside the full principal and hex reference; a payee-side request shows the typed message but never invents a payer name; a labelled Solana-Pay, an offline solreq:v2 QR, and an NFC tap all name their SOL rows by the signature the sign/send itself produced; an un-annotated transfer keeps principal + hex with no Peer/Note lines.',
   timeoutMs: 120_000,
 };
 
@@ -49,6 +99,11 @@ export async function run() {
     const { driver, relayBaseURL } = env;
 
     console.log('[172-log-names-messages] onboarding…');
+    // NFC must read 'ready' BEFORE the Wallet mounts (the status is read once at mount + on
+    // AppState changes — a mid-session flip is invisible in the browser). Arming the card from
+    // the start is inert until (f): nothing dispatches tap events until then.
+    await driver.eval(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
+
     await onboardWallet(driver, 'e2e-lognames');
     const me = await accountOf(driver);
 
@@ -208,6 +263,74 @@ export async function run() {
     await driver.click('btn-txn-receipt-close', { timeoutMs: 4_000 });
     await driver.waitGone('txn-receipt', { timeoutMs: 4_000 });
     console.log('[172-log-names-messages] ✓ (c) SOL spay: named row + message, keyed by the send\'s own signature');
+
+    // ── (e) OFFLINE solreq:v2 merchant QR: the note is keyed by the SIGN's own signature ────
+    // The offline QR path never touches the network, so the only key the note can carry is the
+    // signature signSolPayment just produced — extracted here from the solpay:v2 the QR shows
+    // (the harness twin of what the merchant's reader will broadcast; flow 51 minus the radio).
+    // The stub's history half returns only __DPAY_LAST_SOL_SIG, so pinning that global to the
+    // extracted signature IS the simulated broadcast + settlement.
+    const ridE = 'e'.repeat(32);
+    await driver.click('tab-pay', { timeoutMs: 4_000 }); // (c) left the ledger tab open
+    await driver.findByTestID('sol-pay-scan', { timeoutMs: 5_000 });
+    await armPayScan(driver);
+    await driver.eval((uri) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(uri); }, buildSolReqUri(ridE, SOL_REQ_NAME, SOL_REQ_MEMO));
+    await driver.findByTestID('sol-pay-qr', { timeoutMs: 8_000 });
+    assert(await driver.waitForText(SOL_REQ_NAME, { timeoutMs: 5_000 }), '(e) the signed QR shows the claimed merchant name');
+    const solpayUriE = await driver.eval(() => window.__DPAY_QR_LAST);
+    assert(typeof solpayUriE === 'string' && solpayUriE.startsWith('solpay:v2?'), `(e) the offline sign should render a solpay:v2 QR, got ${JSON.stringify(solpayUriE)?.slice(0, 60)}`);
+    const sigE = extractSig(solpayUriE);
+    await driver.screenshot('172-log-names-messages-e-qr');
+    await driver.click('btn-sol-pay-handed', { timeoutMs: 5_000 });
+    await driver.click('btn-sol-pay-done', { timeoutMs: 5_000 });
+
+    await driver.eval((sig) => { globalThis.__DPAY_LAST_SOL_SIG = sig; }, sigE); // merchant broadcast it
+    await driver.click('tab-transactions', { timeoutMs: 4_000 });
+    assert(await driver.waitForText(SOL_REQ_MEMO, { timeoutMs: 15_000 }), '(e) the offline SOL row should show the memo');
+    const histBodyE = await driver.bodyText();
+    assertIncludes(histBodyE, `to ${SOL_REQ_NAME}`, '(e) the offline SOL row is named by the sign-time note (keyed by the sign\'s own signature)');
+    assert(!histBodyE.includes(SOL_MERCHANT), '(e) the full merchant pubkey stays off the ledger rows');
+    await driver.click('hist-row-0', { timeoutMs: 5_000 }); // newest row = the offline payment
+    await driver.findByTestID('txn-receipt', { timeoutMs: 5_000 });
+    assertEqText(await driver.readText('txn-receipt-peer'), SOL_REQ_NAME, '(e) receipt Peer is the solreq claimed name');
+    assertEqText(await driver.readText('txn-receipt-note'), SOL_REQ_MEMO, '(e) receipt Note is the solreq memo');
+    assertEqText(await driver.readText('txn-receipt-account'), SOL_MERCHANT, '(e) receipt account is the FULL merchant pubkey');
+    await driver.click('btn-txn-receipt-close', { timeoutMs: 4_000 });
+    await driver.waitGone('txn-receipt', { timeoutMs: 4_000 });
+    console.log('[172-log-names-messages] ✓ (e) offline solreq:v2: named row + memo, keyed by the sign\'s own signature');
+
+    // ── (f) the NFC card: the same sign-time note through the tap's radio twin ────────────────
+    // The radio hop is a physical-device gate; this drives the JS event plumbing the real Kotlin
+    // DpaySolNfc module emits (flow-47 seam) through the REAL SolNfcTap state machine: request
+    // arrival AUTO-SIGNS (one-press rule), the signed solpay is stashed by the shim, and a settled
+    // receipt matching rid+sig lands the paid phase.
+    const ridF = 'f'.repeat(32);
+    await driver.click('tab-pay', { timeoutMs: 4_000 });
+    await armPayScan(driver); // the (e) scan cycle closed the gate — the card only mounts armed
+    const dispatch = async (event) => { await armNfcCard(driver, 'sol', { timeoutMs: 10_000 }); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
+    await dispatch({ type: 'request', role: 'card', solreqUri: buildSolReqUri(ridF, SOL_NFC_NAME, SOL_NFC_MEMO) });
+    assert(await driver.waitForText('Communicating', { timeoutMs: 8_000 }), '(f) the tap request should auto-sign → exchanging (no review park)');
+    const solpayUriF = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
+    assert(typeof solpayUriF === 'string' && solpayUriF.startsWith('solpay:v2?'), `(f) the tap auto-sign should produce a solpay:v2 URI, got ${JSON.stringify(solpayUriF)?.slice(0, 60)}`);
+    const sigF = extractSig(solpayUriF);
+    await dispatch({ type: 'receipt', role: 'card', status: 0, rid: ridF, sig: sigF });
+    assert(await driver.waitForText('Sent', { timeoutMs: 6_000 }), '(f) the settled receipt should land the honest pending ("Sent · awaiting")');
+    await driver.screenshot('172-log-names-messages-f-paid');
+    await driver.click('btn-sol-pay-done', { timeoutMs: 5_000 });
+
+    await driver.eval((sig) => { globalThis.__DPAY_LAST_SOL_SIG = sig; }, sigF); // merchant broadcast it
+    await driver.click('tab-transactions', { timeoutMs: 4_000 });
+    assert(await driver.waitForText(SOL_NFC_MEMO, { timeoutMs: 15_000 }), '(f) the NFC-paid SOL row should show the memo');
+    const histBodyF = await driver.bodyText();
+    assertIncludes(histBodyF, `to ${SOL_NFC_NAME}`, '(f) the NFC-paid SOL row is named by the tap\'s sign-time note');
+    await driver.click('hist-row-0', { timeoutMs: 5_000 }); // newest row = the NFC payment
+    await driver.findByTestID('txn-receipt', { timeoutMs: 5_000 });
+    assertEqText(await driver.readText('txn-receipt-peer'), SOL_NFC_NAME, '(f) receipt Peer is the tap request\'s claimed name');
+    assertEqText(await driver.readText('txn-receipt-note'), SOL_NFC_MEMO, '(f) receipt Note is the tap request\'s memo');
+    assertEqText(await driver.readText('txn-receipt-account'), SOL_MERCHANT, '(f) receipt account is the FULL merchant pubkey');
+    await driver.click('btn-txn-receipt-close', { timeoutMs: 4_000 });
+    await driver.waitGone('txn-receipt', { timeoutMs: 4_000 });
+    console.log('[172-log-names-messages] ✓ (f) NFC tap: named row + memo, keyed by the tap signature');
 
     // ── (d) a plain un-annotated transfer stays EXACTLY as the ledger said it ────────────────
     const payer4 = await generateKeypair();

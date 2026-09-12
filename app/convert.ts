@@ -70,10 +70,12 @@ import {
   icAmmVenueForPair,
   registeredVenues,
   setRuntimeVenues,
+  venueDisplayName,
   venueEndpointOf,
   venueOfId,
   type VenueEntry,
 } from './config/venues';
+import {saveTxNote} from './services/txNotes';
 import {M} from './i18n';
 
 /** The bundled registry's mainnet IC-AMM venue id — DERIVED, never a literal, so this module
@@ -962,6 +964,10 @@ export async function executeConvert(
 
   // --- approving: the icrc2_approve leg (nothing can move yet — worst case the ledger refuses) --
   if (rec.step === 'approving') {
+    // Device-saved annotation (services/txNotes): the conversion legs settle as venue rows whose
+    // name was known only here — record it against the leg's request id hex (the per-leg nonce;
+    // the row-memo join where the venue ledger echoes one). Best-effort by contract.
+    void saveTxNote(deps.publicHex, {k: rec.legs[0].requestIdHex, who: venueDisplayName(rec.venueId)}, nowMs);
     const outcome = await submitEnvelope(rec.legs[0].canister, rec.legs[0].envelopeHex, rec.legs[0].requestIdHex);
     if (outcome === 'settled') {
       rec = await advance({...rec, step: 'approved'});
@@ -990,6 +996,8 @@ export async function executeConvert(
     // Called through a wrapper, not a detached method reference: `DpayCore` is a NativeModules
     // object, and a bare reference would only break on a device (the same shape rail.ts uses).
     const swapLeg = rec.legs[1];
+    // Same annotation as the approve leg above, against the swapping leg's own request id.
+    void saveTxNote(deps.publicHex, {k: swapLeg.requestIdHex, who: venueDisplayName(rec.venueId)}, nowMs);
     const outcome = await submitEnvelope(
       swapLeg.canister, swapLeg.envelopeHex, swapLeg.requestIdHex,
       (replyArgHex: string) => DpayCore.icpDecodeSwapResult(replyArgHex),

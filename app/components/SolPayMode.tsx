@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {View, Text, Pressable, TextInput} from 'react-native';
+import bs58 from 'bs58';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
 import {SolanaAtaSetupCard} from './SolanaAtaSetupCard';
@@ -28,6 +29,7 @@ import {withTimeout} from '../lib/timeout';
 import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
 import {decodeSolReq, encodeSolPay} from '../solana/qr';
 import type {SolReqV2} from '../solana/qr';
+import {extractSignedTxParts} from '../solana/tx';
 import {isSolReqV2Expired} from '../solana/payments';
 import {parseSolanaPayUri, type SolanaPayRequest, type SolanaPayRefusal} from '../solana/payUri';
 import {getSolSignatureStatus, sendSol, sendSolanaPay, signSolPayment, signSplPayment, type SolanaSignatureStatus} from '../solana';
@@ -69,7 +71,7 @@ import {M} from '../i18n';
  * `reference` pubkeys as instruction account keys and the optional `memo` as an SPL Memo
  * instruction — the matching mechanism the standard is built on (`sendSolanaPay`).
  */
-export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
+export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCurrency, balances, solBalance, tokenBalance, tokenAtaAbsent, tokenBalances, payGate = 'none', solZero = false, solChecking = false, selectedToken, onSent, onSentToken, onShowSolAddress, onShowTokenAddress, onRecheckBalances, recheckBusy = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, subMode, onSubModeChange, sendPrefill = null, onSendPrefillConsumed, onScannedLink, onLockChange, onSwitchRail}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; assets: SelectableAsset[]; catalog: CurrencyDescriptor[]; homeCurrency: HomeCurrency | null; balances: RailBalances; solBalance: string; tokenBalance: string; tokenAtaAbsent: boolean; /** Per-mint token states for every visible SPL asset (the Wallet's per-mint hook states) — a scanned Solana Pay request names its OWN mint, which need not be the selected asset's. */ tokenBalances: SolMintStates; payGate?: SolPayGate; solZero?: boolean; solChecking?: boolean; selectedToken: string; onSent: () => void; /** Refreshes the token account that moved — names the request's mint when the sender knows it, else repolls every visible mint. */ onSentToken: (mint?: string | null) => void; onShowSolAddress: () => void; onShowTokenAddress: () => void; onRecheckBalances: () => void; recheckBusy?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; sendPrefill?: {address: string; amount: string; label?: string; memo?: string} | null; onSendPrefillConsumed?: () => void; onScannedLink: (url: string) => void; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp' | 'ocp-choose' | 'ocp-done' | 'spay-review' | 'spay-done'>('scan');
   const [req, setReq] = useState<SolReqV2 | null>(null);
   // An OpenCryptoPay merchant till the camera read, and its outcome. Same two states the IC rail
@@ -674,6 +676,13 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       const solpay = r.cur === 'SOL'
         ? signSolPayment(identity.secretHex, r)
         : signSplPayment(identity.secretHex, r);
+      // Device-saved annotation (services/txNotes): the request's claimed name + human memo are
+      // known only on this device and only now, and neither survives the QR hand-off. Join key =
+      // the signature this device just produced (the SOL key the settling row will carry),
+      // extracted exactly as SolNfcTap binds its receipt. Sanitised for display only — the signed
+      // bytes above stay canonical (the merchant re-derives the request to verify the payment).
+      const parts = extractSignedTxParts(solpay.tx);
+      void saveTxNote(identity.publicHex, {k: parts != null ? bs58.encode(parts.signature) : '', who: sanitiseDisplayText(r.name) || undefined, msg: sanitiseDisplayText(r.memo) || undefined}, Date.now());
       setSolpayUri(encodeSolPay(solpay));
       setPhase('qr');
     } catch (e: unknown) {

@@ -15,6 +15,7 @@ import {solanaTokenInfo} from '../solana/tokens';
 import {sendSol, sendSpl} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
+import {saveTxNote} from '../services/txNotes';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {withTimeout} from '../lib/timeout';
@@ -54,7 +55,7 @@ const SOL_NETWORK = 'Solana';
  * Bitcoin address pasted into the wrong wallet, and which offered neither a scanner nor an address
  * book that the IC surface had. CLAUDE.md's same-surfaces rule calls that divergence a bug.
  */
-export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onSent, onClose}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string} | null; onPrefillConsumed?: () => void; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onSent, onClose}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -62,6 +63,11 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   const [signature, setSignature] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedAddress[]>([]);
   const [saveName, setSaveName] = useState('');
+  // A pay link's claimed label + memo (the SOL twin of the IC prefill's toName/memo). `for` pins
+  // them to the recipient the link named: the claim belongs to that address, so it renders and is
+  // saved only while the destination is still that address — a hand-edited destination is a
+  // different payment with no claim.
+  const [linkNote, setLinkNote] = useState<{who: string; msg: string; for: string} | null>(null);
   // Trip Ready J5b — paymentTested: the same stamp the IC rails award, on the same event (a send
   // that CONFIRMED). `sendSol`/`sendSpl` resolve only on a confirmed signature and throw otherwise,
   // so the catch below — the honest "we don't know" path — never reaches the award.
@@ -79,6 +85,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
     if (prefill == null || phase !== 'form') return;
     setAddress(prefill.address);
     setAmountStr(prefill.amount);
+    setLinkNote((prefill.label ?? '') !== '' || (prefill.memo ?? '') !== '' ? {who: prefill.label ?? '', msg: prefill.memo ?? '', for: prefill.address} : null);
     onPrefillConsumed?.();
     // onPrefillConsumed is an inline closure; the [prefill, phase] guard + immediate clear make its
     // identity irrelevant (exhaustive-deps would force a re-run on every render's new closure).
@@ -137,6 +144,13 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
 
   const canReview = resolved?.ok === true && raw !== '0' && !overBalance;
 
+  // The link's claimed name, live only while the destination is still the link's recipient — the
+  // same claim window the address-book name would have (PaymentReview's PayeeLine presentation:
+  // the name in the to-line, the checkable address demoted beneath it).
+  const notedDestination = linkNote != null && address.trim() === linkNote.for && linkNote.who !== ''
+    ? linkNote.who
+    : null;
+
   async function confirm() {
     if (!canReview || !resolved?.ok) {
       return;
@@ -154,6 +168,13 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
       const sig = splMint != null
         ? await sendSpl(identity.secretHex, destination, BigInt(raw), splMint, signal)
         : await sendSol(identity.secretHex, destination, BigInt(raw), signal);
+      // Device-saved annotation (services/txNotes): a pay link's claimed label + memo, recorded
+      // against the signature this send just produced (the SOL join key the settling row will
+      // carry) — the same seam as the IC twin's PayMode.approve. Only for the link's own
+      // recipient; best-effort by contract, it can never break the send it describes.
+      if (linkNote != null && destination === linkNote.for) {
+        void saveTxNote(identity.publicHex, {k: sig, who: linkNote.who || undefined, msg: linkNote.msg || undefined}, Date.now());
+      }
       setSignature(sig);
       setPhase('done');
       void rememberAddress(assetKey, destination, saveName.trim(), Date.now());
@@ -273,7 +294,14 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
             <View testID="sol-send-review" style={S.reviewCard}>
               <Text style={S.reviewLabel}>{M.withdraw.sol.reviewTitle}</Text>
               <Text testID="sol-send-review-amount" style={S.reviewAmount}>{M.withdraw.sol.sendAmount(fmt(raw))}</Text>
-              <Text style={S.reviewTo}>{M.withdraw.toDestination(address.trim() || '—')}</Text>
+              {notedDestination != null ? (
+                <>
+                  <Text style={S.reviewTo}>{M.pay.toWho(notedDestination)}</Text>
+                  <Text testID="sol-send-review-payee" style={S.dim2}>{M.withdraw.toDestination(address.trim() || '—')}</Text>
+                </>
+              ) : (
+                <Text style={S.reviewTo}>{M.withdraw.toDestination(address.trim() || '—')}</Text>
+              )}
               {isSpl ? (
                 <Text testID="sol-send-ata-note" style={S.dim2}>
                   {M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), unit)}

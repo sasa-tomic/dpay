@@ -474,12 +474,15 @@ Nothing from the swarm's defect inventory remains open.
   founder follow-up, NOT in-tree.~~ **SUPERSEDED for the payer/request side (2026-09-11):** the
   wire stays frozen — the IC memo remains the 16-byte nonce reconciliation key and SOL on-chain
   memos are never read back — but history rows are now named from DEVICE-SAVED annotations
-  (`app/services/txNotes.ts` + `app/hooks/useTxNotes.ts` in `Wallet`, written at the six payment
+  (`app/services/txNotes.ts` + `app/hooks/useTxNotes.ts` in `Wallet`, written at the payment
   seams: PayMode wire/link + OCP till, NfcTap payer, ReceiveMode payee request, SolPayMode spay
-  + SOL OCP; keyed by IC nonce hex / SOL signature, cap 500, per-identity AsyncStorage). The
+  + SOL OCP + the offline solreq:v2 sign, SolNfcTap card auto-sign, Practice first-run payment,
+  the SOL pay-link send (SolanaWithdrawSheet confirm — label rides the prefill like the IC twin),
+  and the convert legs (executeConvert, venue-named per leg, keyed by the leg's request-id hex);
+  keyed by IC nonce hex / SOL signature, cap 500, per-identity AsyncStorage). The
   payer's log shows the request's `to_name`/human memo, the payee's log shows the typed request
   message, and receipts keep the full principal + hex reference while adding honest Peer/Note
-  lines (jest suites + flow 172). **Payee-side payer names stay impossible by design** (the name
+  lines (jest suites + flow 172 — which now also drives the offline solreq:v2 and NFC-tap seams). **Payee-side payer names stay impossible by design** (the name
   lives on the payer's device, never on the rail; incoming rows keep the payer's principal
   prefix) and a signed name registry remains a founder follow-up, not in-tree.
 - ~~**Default-tab/first-impression** — landing on the Pay scanner is the intended default.~~

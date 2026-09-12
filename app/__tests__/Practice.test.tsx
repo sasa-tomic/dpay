@@ -43,6 +43,7 @@ jest.mock('../hooks/useCatalog', () => ({
 }));
 
 import {DpayCore} from '../services/native';
+import {txNotesKey} from '../services/txNotes';
 import {prepareTransfer, submitTransfer, wireRequestToIntent, type RailPrepared} from '../services/rail';
 import {Practice, practiceRefusal, FIRST_RUN_PRACTICE} from '../components/Practice';
 import {M} from '../i18n';
@@ -216,6 +217,24 @@ describe('Practice — the payment', () => {
     const j = JSON.parse((await AsyncStorage.getItem(JOURNEY_STORAGE_KEY)) as string);
     expect(j.stamps).toEqual(['flowUnderstood']);
     expect(j.stamps).not.toContain('paymentTested');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the payment leaves the log-naming note: payee name keyed by the intent\'s nonce hex', async () => {
+    // The practice row must read "to <payee>" in the log like every payment (the same device-saved
+    // annotation PayMode writes at its sign seam). Pinned here — the practice screen needs a
+    // first-run identity, which the browser harness cannot drive mid-flow (see flow 172's header).
+    installRelay();
+    (submitTransfer as jest.Mock<typeof submitTransfer>).mockResolvedValue({kind: 'settled', blockIndex: '42'});
+    const tree = await mount();
+    await openReview(tree);
+    await act(async () => { findByTestID(tree, 'btn-approve').props.onPress(); });
+    await act(async () => {});
+
+    const notes = JSON.parse((await AsyncStorage.getItem(txNotesKey(IDENTITY.publicHex))) as string) as Array<{k: string; who?: string; msg?: string}>;
+    const note = notes.find(n => n.k === REQ.nonceHex);
+    expect(note?.who).toBe(M.education.practice.payeeName);
+    expect(note?.msg).toBeUndefined(); // the practice memo IS the nonce — nothing to add
     act(() => { tree.unmount(); });
   });
 

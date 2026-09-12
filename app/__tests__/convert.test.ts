@@ -43,7 +43,8 @@ import {
   type ConvertRecord,
 } from '../convert';
 import {resolveConvertDirection} from '../config/convert';
-import {BUNDLED_VENUES, setRuntimeVenues, venueEndpointOf, venuesForPair, type VenueEntry} from '../config/venues';
+import {BUNDLED_VENUES, setRuntimeVenues, venueDisplayName, venueEndpointOf, venuesForPair, type VenueEntry} from '../config/venues';
+import {loadTxNotes} from '../services/txNotes';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {convertEn} from '../i18n/domains/en/convert';
 import {convertDe} from '../i18n/domains/de/convert';
@@ -733,6 +734,13 @@ describe('executeConvert — the §4 state machine', () => {
     const steps = d.onUpdate.mock.calls.map((c: unknown[]) => (c[0] as ConvertRecord).step);
     expect(steps).toEqual(['approved', 'swapping', 'settling', 'done']);
     expect((await loadConvertRecords('pub')).abc123?.step).toBe('done');
+    // F6: each leg's submission also left a device-saved venue-name note keyed by THAT leg's own
+    // request id hex — the convert rows are venue-named in the log, not principal-prefixed. Pinned
+    // here (a venue-pool fixture is beyond the browser harness; see flow 172's header).
+    const notes = await loadTxNotes('pub');
+    expect(notes.find(n => n.k === 'bbdd')?.who).toBe(venueDisplayName(VENUE.venue_id));
+    expect(notes.find(n => n.k === 'ddbb')?.who).toBe(venueDisplayName(VENUE.venue_id));
+    expect(notes.find(n => n.k === 'bbdd')?.msg).toBeUndefined(); // venue rows carry a name, never a message
   });
 
   test("a 'unknown' submit retries the SAME signed bytes, never rebuilds args", async () => {
