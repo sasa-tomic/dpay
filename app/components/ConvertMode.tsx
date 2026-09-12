@@ -625,6 +625,14 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
           </Text>
+          {/* The staleness notice renders HERE, pinned to the quote-source row it is about — the
+              user sees "refreshing" where the number is shown, not at the checklist bottom where
+              an unscrolled viewport hides it. Same testID flows 143 pin; single instance. */}
+          {staleRefreshing ? (
+            <Text testID="convert-stale" style={S.convertHeadlineMeta}>
+              {M.convert.staleRefreshing}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -715,11 +723,6 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         {math != null && netStr != null ? (
           <Text testID="convert-net" style={S.convertChecklistLine}>
             {M.convert.netEndStateLine(netStr)}
-          </Text>
-        ) : null}
-        {staleRefreshing ? (
-          <Text testID="convert-stale" style={S.convertMetaLine}>
-            {M.convert.staleRefreshing}
           </Text>
         ) : null}
         {quoteChanged != null ? (
