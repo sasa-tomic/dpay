@@ -68,6 +68,43 @@ export async function prepareTransfer(
   return {ledger: desc.ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, amount: req.amount, currency: req.currency, memoHex: req.nonceHex};
 }
 
+/** Build + sign a PULL: collect an allowance a payer granted THIS wallet, via `icrc2_transfer_from`.
+ *
+ *  The one caller is a shop collecting a till charge an ICRC-2 allowance wallet (Oisy) approved it
+ *  for: that wallet approves the shop as spender and reports its own principal, and only the shop's
+ *  device can spend the allowance — the relay holds no key and never will. `PullClaim` in
+ *  `crates/dpay-relay/src/till.rs` owns the trust model; this is the signing half of it.
+ *
+ *  Same envelope discipline as `prepareTransfer` (clock-gated, resubmit verbatim, never re-sign),
+ *  and the same memo rule: `nonceHex` is the charge's reference, which is the ONLY thing that
+ *  credits the sale. Pulling without it would move a customer's money and leave the shop's own
+ *  charge open.
+ *
+ *  NOTHING IS CHECKED BEFORE SIGNING, deliberately. The obvious alternative — read `icrc2_allowance`
+ *  first — costs an extra round trip, cannot close the race (the allowance can be spent or expire
+ *  between the read and the call), and tells us nothing the attempt does not: the ledger's own
+ *  `InsufficientAllowance` carries the allowance it actually holds. The ledger is the authority
+ *  either way, so we ask it once. A pull that is refused costs no fee and moves nothing. */
+export async function preparePull(
+  secretHex: string,
+  catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>},
+  req: {fromAccount: string; toAccount: string; amount: string; currency: number; nonceHex: string},
+): Promise<RailPrepared> {
+  const desc = catalog.currencies.find(c => c.currency === req.currency);
+  if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
+  const from = await DpayCore.icpValidateIcrcAccount(req.fromAccount);
+  const to = await DpayCore.icpValidateIcrcAccount(req.toAccount);
+  // The fee is left to the LEDGER (''), unlike `prepareTransfer`'s explicit one: the allowance was
+  // sized by the payer's wallet against the ledger's own fee, so naming a different one here is the
+  // one way to have a correct allowance refused.
+  const argHex = await DpayCore.icpTransferFromArg(
+    from.owner, from.subaccountHex, to.owner, to.subaccountHex, req.amount, req.nonceHex, '',
+  );
+  const expiry = await icStampExpiry(secretHex);
+  const signed = await DpayCore.icpSignUpdate(secretHex, desc.ledger, 'icrc2_transfer_from', argHex, expiry);
+  return {ledger: desc.ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, amount: req.amount, currency: req.currency, memoHex: req.nonceHex};
+}
+
 /** Build + sign a send to a 64-hex ICP account identifier, via the ICP ledger's legacy
  *  `transfer`. Same envelope discipline as `prepareTransfer` (clock-gated, resubmit verbatim,
  *  never re-sign) — only the method and arg shape differ.

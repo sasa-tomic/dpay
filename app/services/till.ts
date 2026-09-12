@@ -83,6 +83,12 @@ export type TillChargeState = 'open' | 'paid' | 'superseded' | 'cancelled' | 'ex
  *  row that paid — what the merchant's screen names, and the only stable identity a transfer has. */
 export type TillSettled = {from: string; amountRaw: string; atSecs: number; block: number};
 
+/** A payer's CLAIM that they approved this shop to COLLECT the charge, rather than sending it.
+ *  An ICRC-2 allowance wallet (Oisy) pays that way: it approves the shop as spender and reports its
+ *  own principal, and only the shop's own device can spend the allowance. `PullClaim` in
+ *  `crates/dpay-relay/src/till.rs` owns the trust model — including why a claim is never believed. */
+export type TillPullClaim = {payer: string; atSecs: number};
+
 export type TillStatus = {
   id: string;
   cents: string;
@@ -90,6 +96,7 @@ export type TillStatus = {
   createdSecs: number;
   expiresAt: number;
   paid: TillSettled | null;
+  pull: TillPullClaim | null;
 };
 
 export type TillOpenOutcome =
@@ -474,7 +481,24 @@ function parseStatus(json: unknown): TillStatus | null {
   const createdSecs = whole(o, 'created_secs');
   const expiresAt = whole(o, 'expires_at');
   if (id === null || state === null || cents === null || createdSecs === null || expiresAt === null) return null;
-  return {id, state, cents: String(cents), createdSecs, expiresAt, paid: parseSettled(o.paid)};
+  return {id, state, cents: String(cents), createdSecs, expiresAt, paid: parseSettled(o.paid), pull: parsePull(o.pull)};
+}
+
+/** A pull claim, or null when there is none — which is the common case and not an error: a payer
+ *  who simply sent the money never claims anything. A claim that is PRESENT but unreadable answers
+ *  null too, and says so: acting on half of one would build a collection against a principal this
+ *  build could not parse. */
+function parsePull(value: unknown): TillPullClaim | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object') return null;
+  const p = value as Record<string, unknown>;
+  const payer = str(p, 'payer');
+  const atSecs = whole(p, 'at_secs');
+  if (payer === null || atSecs === null) {
+    console.warn(`till: a pull claim arrived in a shape this build cannot read: ${JSON.stringify(p).slice(0, 200)}`);
+    return null;
+  }
+  return {payer, atSecs};
 }
 
 /** The settlement half. A `paid` that is present but unreadable answers null — the state field

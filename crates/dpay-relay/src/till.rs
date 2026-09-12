@@ -221,6 +221,39 @@ pub struct Charge {
     /// The settlement, once observed on the ledger. Set once and never cleared: a credited sale
     /// does not become uncredited because a later read of history was slow or empty.
     pub paid: Option<Settled>,
+    /// A payer's CLAIM that they have approved this shop to collect the charge — see [`PullClaim`].
+    /// Nothing here believes it; it is carried to the merchant, whose own device is the only thing
+    /// that can act on it and the only thing that can find out whether it was true.
+    pub pull: Option<PullClaim>,
+}
+
+/// "I have approved you — come and take it."
+///
+/// The report an ICRC-2 *allowance* wallet makes instead of sending a transfer (Oisy is one): it
+/// calls `icrc2_approve` naming the shop as spender, then reports its own principal to step 4 so
+/// the provider can call `icrc2_transfer_from`. dpay's relay cannot: it holds no key, by the
+/// non-custody rule, and it never will. The shop's own phone can — the allowance names the SHOP as
+/// spender, that phone holds the shop's key and is already polling this charge — so the relay's
+/// whole job here is to carry the message.
+///
+/// **This is a claim, not a fact, and it arrives on an unauthenticated route.** Anyone who holds
+/// the charge id can post any principal. What stops that from mattering: a pull can only ever move
+/// money that principal DELIBERATELY approved this shop to take, for this charge's exact amount, so
+/// a made-up claim moves nothing and fails at the ledger. The residual is real and narrow, and is
+/// written down rather than hidden: a customer who approved this shop for one charge and walked
+/// away leaves an allowance that a claim naming them could aim at the shop's NEXT charge of the
+/// same size, inside the wallet's five-minute approval window. One live charge per merchant and
+/// that window are the bounds; the customer is standing at the counter for both.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct PullClaim {
+    /// The account the payer says they approved FROM, as canonical principal text — claimed, never
+    /// verified here. It is also, deliberately, the same fact this route already publishes about a
+    /// SETTLED charge (`Settled::from`), so carrying it changes no disclosure class.
+    pub payer: String,
+    /// When the claim arrived. The merchant's screen uses it to say how fresh it is, and the store
+    /// uses nothing at all: a claim is not a clock and does not expire on its own — the allowance
+    /// behind it does, on the ledger, which is the only place that can be checked.
+    pub at_secs: u64,
 }
 
 /// A charge that has been paid, as OBSERVED on the merchant's own ledger history.
@@ -553,6 +586,7 @@ impl TillStore {
             voided: None,
             observed_at: None,
             paid: None,
+            pull: None,
         };
         self.current.insert(charge.merchant.clone(), id.clone());
         self.by_id.insert(id, charge.clone());
@@ -608,6 +642,27 @@ impl TillStore {
 
     pub fn get(&self, id: &str) -> Option<&Charge> {
         self.by_id.get(id)
+    }
+
+    /// Record a payer's claim that they have approved this shop to collect the charge
+    /// ([`PullClaim`]). Refused for a charge that is no longer payable, and for one already paid —
+    /// there is nothing left to collect in either case, and carrying a claim onto a settled sale
+    /// would put a "come and take it" on a screen that has already said "paid".
+    ///
+    /// The LATEST claim wins, and exactly one is kept. Two customers cannot be mid-payment on one
+    /// charge (a ring-up voids the previous charge, and a shop serves one person at a time), so a
+    /// second claim is the same person's wallet reporting again — which is the retry the standard
+    /// makes free. Keeping a list would only give the merchant's phone several doomed pulls to try.
+    pub fn claim_pull(&mut self, id: &str, payer: String, now_secs: u64) -> Result<(), TillError> {
+        let Some(charge) = self.by_id.get_mut(id) else {
+            return Err(TillError::UnknownCharge);
+        };
+        charge.payable(now_secs)?;
+        charge.pull = Some(PullClaim {
+            payer,
+            at_secs: now_secs,
+        });
+        Ok(())
     }
 
     /// Mint a quote for a charge and return it. Every read of the payment details mints a fresh one
@@ -965,6 +1020,16 @@ pub(crate) struct ChargeStatus {
     pub created_secs: u64,
     pub expires_at: u64,
     pub paid: Option<Settled>,
+    /// A payer's claim that they approved this shop to COLLECT the charge ([`PullClaim`]) — the
+    /// one thing on this body the merchant's phone is expected to act on rather than render.
+    ///
+    /// It rides the unauthenticated poll for the same reason `paid.from` already does: it is the
+    /// payer's own principal, which this route publishes the moment the charge settles anyway. What
+    /// keeps that safe is that the claim is not a capability — acting on it can only move money the
+    /// named account deliberately approved this shop to take. Omitted entirely when there is none,
+    /// so a wallet that never claims changes no byte of this body.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull: Option<PullClaim>,
 }
 
 impl ChargeStatus {
@@ -980,6 +1045,7 @@ impl ChargeStatus {
             state: charge.state(now_secs),
             created_secs: charge.created_secs,
             expires_at: charge.expires_at(),
+            pull: charge.pull.clone(),
             paid: charge.paid.clone(),
         }
     }
@@ -2857,6 +2923,15 @@ pub(crate) struct PayQuery {
     /// The payer's transaction identifier. Accepted because the standard says so and recorded for
     /// support, but NEVER the thing that decides settlement — see `observe_payment`.
     pub tx: Option<String>,
+    /// The payer's own principal, reported INSTEAD of a transaction: the marker of a wallet that
+    /// paid by granting an ICRC-2 allowance and is asking this provider to pull it with
+    /// `icrc2_transfer_from`. Oisy is one, and names the parameter for exactly that purpose
+    /// (`payIcp`, `src/frontend/src/icp/services/ic-open-crypto-pay.services.ts`).
+    ///
+    /// dpay's till cannot pull: it holds no key, by the non-custody rule, and a charge is credited
+    /// by reading a transfer that ALREADY happened. So this parameter decides nothing about the
+    /// money and exists here only to be REFUSED out loud — see [`lnurlp_submit`].
+    pub sender: Option<String>,
 }
 
 /// `GET /v1/lnurlp/cb/{id}` — step 3, where to send the money.
@@ -2925,6 +3000,14 @@ pub(crate) async fn lnurlp_callback(
 /// costs a round trip rather than a payment. The measured provider burns both the quote and the
 /// transaction id here even on failure, which is the loss path dpay's payer side is built to
 /// survive; as the provider, we refuse to create it.
+///
+/// THE ONE REPORT THIS ROUTE DOES SOMETHING WITH: a `sender` principal in place of a transaction id
+/// says the wallet granted an ICRC-2 allowance and is waiting to be collected from. Nothing will
+/// ever arrive from such a wallet on its own, so the report is recorded as a [`PullClaim`] and
+/// handed to the merchant, whose phone holds the key the allowance names. The answer stays the
+/// standard's retryable `PENDING`, which is now true rather than merely polite — and it matters
+/// that it is, because the wallet that sends it (Oisy) treats ANY 2xx as a completed payment and
+/// tells its user so.
 pub(crate) async fn lnurlp_submit(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -2944,16 +3027,23 @@ pub(crate) async fn lnurlp_submit(
     // Recorded for support, never believed. Both values came off the wire from a stranger, so
     // both are sanitised: a raw `%0A` here writes whatever line its sender chose into this
     // relay's log.
-    match q.tx.as_deref() {
-        Some(tx) => eprintln!(
+    match (q.tx.as_deref(), q.sender.as_deref()) {
+        (Some(tx), _) => eprintln!(
             "dpay-relay: till {}: payer reported transaction {}",
             log_safe(&id),
             log_safe(tx)
         ),
+        // An allowance wallet, named so the line that follows the refusal below says WHO to look
+        // for on the ledger if they later send the transfer this till actually reads.
+        (None, Some(sender)) => eprintln!(
+            "dpay-relay: till {}: payer {} reported an approval instead of a transfer",
+            log_safe(&id),
+            log_safe(sender)
+        ),
         // The standard's `tx` is optional and a report without one is still a valid nudge to
         // re-read the ledger — worth a line, because a wallet that never sends one is a wallet
         // whose behaviour we would otherwise be guessing at.
-        None => eprintln!(
+        (None, None) => eprintln!(
             "dpay-relay: till {}: payer reported a payment without a transaction id",
             log_safe(&id)
         ),
@@ -2979,6 +3069,25 @@ pub(crate) async fn lnurlp_submit(
                 log_safe(&id),
                 charge.reference
             );
+            // INSTEAD OF, not merely alongside: a report carrying a transaction id is a wallet
+            // that pushed, whatever else it also said about itself, and its transfer may simply
+            // not have landed yet. Only a `sender` standing in FOR the transaction is the
+            // allowance flow.
+            // An allowance report is HANDED ON, not answered: the relay cannot collect it and the
+            // merchant's own phone can, so the claim is recorded for that phone to find on its
+            // next poll (see `PullClaim`). The answer stays the standard's retryable `PENDING`,
+            // which is now true rather than merely polite — something IS about to happen, and the
+            // wallet that sent it will see `OK` on its retry once the shop has pulled.
+            if let (Some(payer), None) = (q.sender.as_deref(), q.tx.as_deref()) {
+                let mut tills = state.tills.lock().unwrap_or_else(|p| p.into_inner());
+                match tills.claim_pull(&id, payer.to_string(), now_secs()) {
+                    Ok(()) => {}
+                    // The charge stopped being payable between the read above and this write. The
+                    // payer's own refusal is the honest answer — it names WHICH kind of dead, and
+                    // an approval aimed at a dead charge must not be left looking live.
+                    Err(e) => return e.to_response(),
+                }
+            }
             (
                 StatusCode::ACCEPTED,
                 Json(json!({"status": "PENDING", "message": "no matching transfer seen yet — safe to retry"})),

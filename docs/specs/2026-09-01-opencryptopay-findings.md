@@ -97,12 +97,12 @@ Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is B
 - **It is an Option-A wallet.** `payIcp` does `icrc2_approve(spender, amount+fee, 5-minute expiry)`
   then `GET /tx?quote=&method=&asset=&sender=<principal>` (`getIcPaymentUri`) — it never reports a
   tx id, so the CHF-1 spelling class cannot occur in its flow.
-- **The `&ref=` hazard is real at source but weaker than feared.** `decodeQrCodeUrn` keeps unknown
-  params (`DecodedUrnSchema` uses `.catchall()`), but `validateIcTransfer` reads only
-  `to`/`amount` and the approve sets no memo — `ref` is accepted and dropped. Against a dpay till
-  (Option-B only: `PayQuery` accepts `quote|method|asset|tx`, `match_payment` wants a memo-carrying
-  transfer) NO funds move — the 5-minute approval expires unused. Money-moves-but-uncredited needs a
-  provider that pulls (DFX), and there the pull's memo is DFX's own.
+- **The `&ref=` hazard is real at source and is answered by who writes the memo.** `decodeQrCodeUrn`
+  keeps unknown params (`DecodedUrnSchema` uses `.catchall()`), but `validateIcTransfer` reads only
+  `to`/`amount` and the approve sets no memo — `ref` is accepted and dropped. It does not need to
+  survive: against a dpay till the memo is written by the party that COLLECTS, and that is the
+  shop's own phone, which has the reference from its own ring-up (see the 2026-09-12 section below).
+  Money-moves-but-uncredited would need a collector using somebody else's memo; ours cannot.
 - **Ingestion + drive boundary:** the only entry is the in-app scanner (`ScannerCode.svelte`);
   `parseOpenCryptoPayCode` requires a URL with a `?lightning=` param, so a bare `LNURL1…` string is
   refused as an invalid code, and `AppPath` defines no OCP deep-link route. Live (2026-09-05):
@@ -110,11 +110,62 @@ Bitcoin + Monero, Phoenix and Wallet of Satoshi are Lightning only, Binance is B
   sign-in (WebAuthn + CAPTCHA) — the flow was not driven past that gate. Everything above the gate
   is measured; everything below it stays source-only.
 
-**Verdict on "no third-party wallet can settle an IC asset":** stands for every wallet DFX offers
-(re-measured). Oisy is the one counter-candidate — source-only, undriven — and it settles IC only
-via the approve flow, which dpay refuses on both sides (never grants, never pulls). A dpay till
-cannot be settled by it: nothing would move at all.
+#### The wallet is a WEB page, and that broke the scan outright (measured + fixed 2026-09-12)
 
+The founder scanned a live dpay till code with Oisy and got `Code/URL ist nicht gültig` — the
+scanner's one catch-all (`ScannerCode.svelte`, `scanner.error.code_link_is_not_valid`), which fires
+when anything in the read throws. The code itself was never the problem: it decodes (independently,
+through the same `bech32` algorithm Oisy uses) to this relay's own `/v1/lnurlp/{id}`, and that route
+answers a correct `payRequest`. What threw was the fetch. Oisy runs in a browser and sends
+`Content-Type: application/json` on the GET, so the read is preflighted — and prod answered `OPTIONS`
+with `405` and carried no `Access-Control-Allow-Origin` on the GET either, so Chrome refused the
+request before a handler ran. The reference provider answers `access-control-allow-origin: *` on the
+same three paths; dpay now does too, on those three and nothing else
+(`provider_cors_middleware`, `crates/dpay-relay/src/app.rs`). Reproduced and re-driven in real
+Chrome, cross-origin, with web security ON: `Failed to fetch` against prod, `HTTP 200` against the
+fixed build, and `/api/v1/*` still refused in both.
+
+**And it makes the next question unavoidable, which is why that landed in the same session.** Oisy
+reports its approve with `GET /tx?…&sender=<principal>` and treats ANY 2xx as a completed payment
+(`payIcp` → `PAYMENT_CONFIRMED`). A till that could be READ but not paid would therefore have told
+an Oisy user they had paid while their allowance expired unspent — strictly worse than the
+invalid-code refusal it replaced. So the till does not refuse an allowance report; it collects the
+allowance. See the verdict below.
+
+**Verdict on "no third-party wallet can settle an IC asset": the reason it held has been removed
+(2026-09-12, founder-directed).** It stands for every wallet DFX offers (re-measured), and Oisy is
+still the one counter-candidate. What changed is that dpay's till now COLLECTS an allowance instead
+of refusing one. The merchant's own phone does it — never the relay, which still holds no key —
+because the spender Oisy approves is the merchant's own principal (`validateIcUriTransfer` reads
+`to` from our URI), and that phone already holds the key and is already polling the charge.
+
+**The shape, and why it is the only one that fits the non-negotiables.** The relay is a courier: a
+`sender` report becomes an untrusted `PullClaim` on the charge and is handed to the merchant on the
+poll they already make. The phone signs a real `icrc2_transfer_from` carrying the charge's `ref` as
+the memo — without which money would move and the sale would stay open — and the RELAY's own ledger
+read is still the only thing that turns the sale green. No dpay-controlled address is involved at
+any step. Nothing is checked before signing, deliberately: reading `icrc2_allowance` first costs a
+round trip, cannot close the race, and tells us nothing the ledger's own `InsufficientAllowance`
+does not already carry. The pieces, each owning its own half: `PullClaim` and `claim_pull`
+(`crates/dpay-relay/src/till.rs`), `preparePull` (`app/services/rail.ts`), `collect`
+(`app/components/TillCharge.tsx`), `transfer_from_arg` (`crates/dpay-icp/src/icrc.rs`).
+
+**Proven offline end to end, and still undriven against Oisy itself.** e2e flow 177 drives the
+whole path on the fake-IC gateway — a real signed `icrc2_approve` from a stand-in allowance wallet,
+the standard's own step-4 report, the app's own `icrc2_transfer_from`, the relay observing it, and
+the customer's account down by exactly the price. What remains unproven is everything on Oisy's
+side of the wire: its scanner reaching the fetch, and VCHF being enabled for a given user (it sits
+in Oisy's *additional* ICRC set, `tokens.icrc.json`, not its chain-fusion defaults, so a user who
+has not added it would be shown a priced charge with nothing to pay it in). Driving Oisy needs an
+account past its Internet Identity gate and a franc or two — a founder operation, not an agent one.
+
+**The residual hazard, written down rather than hidden.** A claim is unauthenticated: anyone holding
+a charge id can name any principal. A forged one moves nothing (a pull can only spend what that
+account deliberately approved this shop for, at this charge's exact amount). The narrow real case is
+a customer who approved this shop, walked away, and left an allowance inside the wallet's five-minute
+window that a claim could aim at the shop's next same-priced charge. One live charge per merchant
+and that window are the bounds. `PullClaim`'s own doc carries this; it is repeated here only because
+this file is what an outsider reads.
 ## Stale-README trap #1: the IC URI shape
 
 README says `icp:<canister>?amount=<n>`. The live API returns:

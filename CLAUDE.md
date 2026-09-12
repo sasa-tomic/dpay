@@ -352,12 +352,17 @@ Claude and all subagents treat `third_party/` as the canonical local source cach
   and `app/lib/opencryptopay.ts` for the payer side; founder decisions
   `docs/specs/2026-09-02-merchant-side-plan.md`; measured provider behaviour
   `docs/specs/2026-09-01-opencryptopay-findings.md`.
-  **Who can pay a dpay till: a dpay wallet, and only a dpay wallet.** No wallet on the standard's
-  own compatibility list settles any Internet Computer asset (measured twice — the findings doc), so
-  serving the standard is future-proofing, not distribution. **Never put third-party wallet reach in
-  a deck, a demo script, a video or an investor email.** State the asymmetry exactly: a dpay payer
-  can be OFFLINE over NFC or QR, and an OpenCryptoPay payer cannot — that standard makes its payer
-  fetch the quote, fetch the destination and report the proof over https.
+  **Who has been MEASURED paying a dpay till: a dpay wallet, and only a dpay wallet.** No wallet on
+  the standard's own compatibility list settles any Internet Computer asset (measured twice — the
+  findings doc). Oisy is the one wallet whose source carries an IC leg, and 2026-09-12 removed both
+  things that stopped it: the provider routes now answer a browser (CORS), and the till now COLLECTS
+  the ICRC-2 allowance such a wallet grants instead of refusing it — the MERCHANT's phone signs that
+  `icrc2_transfer_from`, never the relay, which still holds no key. Proven offline end to end (flow
+  177) and **never driven against Oisy itself**, whose scanner sits behind Internet Identity. So it
+  is a capability, not traction: **never put third-party wallet reach in a deck, a demo script, a
+  video or an investor email.** State the asymmetry exactly: a dpay payer can be OFFLINE over NFC or
+  QR, and an OpenCryptoPay payer cannot — that standard makes its payer fetch the quote, fetch the
+  destination and report the proof over https.
   Verified at `702c359`: `just verify` EXIT=0 with 112/112 e2e (flows 113–117), `just test-relay`
   88/88, `just test-live` 106/106, jest 83 suites/1682, `just ondevice` 10/10 and `just app` green on
   the emulator. **Live provider acceptance proved 2026-09-05, both tx-id spellings:** a freshly

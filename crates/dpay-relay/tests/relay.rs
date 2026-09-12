@@ -3327,6 +3327,144 @@ async fn till_serves_the_standard_and_settles_only_on_a_real_transfer() {
     );
 }
 
+/// A WALLET MAY BE A WEB PAGE, and until 2026-09-12 this till was unreadable by every one of them.
+///
+/// Oisy — the only wallet measured to carry an Internet Computer OpenCryptoPay leg at all — runs in
+/// a browser and fetches the decoded LNURL with a `Content-Type` header, which makes the read a
+/// preflighted cross-origin request. The relay answered the preflight `405` with no CORS header of
+/// any kind, so the browser refused the fetch before a handler ran and the wallet could only report
+/// the code itself as invalid. Measured against prod, and against the reference provider serving
+/// `access-control-allow-origin: *` on the same paths.
+///
+/// The `Allow-Methods` assertion is what makes this test about the PRODUCTION layer: this binary
+/// also carries the permissive test-only fixture layer, which answers `GET, POST, OPTIONS`. A
+/// read-only `GET, HEAD, OPTIONS` can only have come from the provider layer — i.e. it also pins
+/// that the fixture does NOT wrap these three routes, which is what keeps every other surface on
+/// this relay (the Solana proxy above all) closed to a stranger's web page in production.
+#[tokio::test]
+async fn a_browser_wallet_can_read_the_provider_routes() {
+    let (state, _fake) = till_state();
+    let merchant = SigningKey::from_bytes(&[31u8; 32]);
+    let opened = open_till(&state, &merchant, "Kiosk", 250, "till.example", "https").await;
+    let id = opened["id"].as_str().unwrap().to_string();
+    let (_, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    let quote = details["quote"]["id"].as_str().unwrap().to_string();
+
+    // Every route a wallet fetches, in the order it fetches them.
+    for path in [
+        format!("/v1/lnurlp/{id}?timeout=0"),
+        format!("/v1/lnurlp/cb/{id}?quote={quote}&method=InternetComputer&asset=VCHF"),
+        format!("/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF&tx=abc"),
+    ] {
+        let preflight = Request::builder()
+            .method("OPTIONS")
+            .uri(&path)
+            .header(header::ORIGIN, "https://oisy.com")
+            .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+            .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+            .body(Body::empty())
+            .unwrap();
+        let (status, headers, _) = call_raw(&state, preflight).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "preflight {path}");
+        assert_eq!(
+            headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&header::HeaderValue::from_static("*")),
+            "preflight {path}"
+        );
+        assert_eq!(
+            headers.get(header::ACCESS_CONTROL_ALLOW_METHODS),
+            Some(&header::HeaderValue::from_static("GET, HEAD, OPTIONS")),
+            "the provider layer, not the test fixture's, must own these routes: {path}"
+        );
+        assert_eq!(
+            headers.get(header::ACCESS_CONTROL_ALLOW_HEADERS),
+            Some(&header::HeaderValue::from_static("Content-Type")),
+            "a wallet sends Content-Type on the GET, which is what needs the preflight: {path}"
+        );
+
+        // …and the read itself, which is the one the browser actually hands to the wallet.
+        let (_, headers, _) = call_raw(&state, get_req(&path)).await;
+        assert_eq!(
+            headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            Some(&header::HeaderValue::from_static("*")),
+            "GET {path}"
+        );
+    }
+}
+
+/// AN ALLOWANCE IS NOT A PAYMENT — it is a message for the SHOP, and the relay's job is to carry it.
+///
+/// Oisy pays an IC charge by `icrc2_approve`-ing the destination and reporting its own principal as
+/// `sender` instead of a transaction id, for the provider to collect with `icrc2_transfer_from`.
+/// This relay cannot collect — it holds no key — but the shop's phone can, because the allowance
+/// names the SHOP as spender. So the report is recorded as a claim and handed to that phone on the
+/// poll it is already making, and the payer keeps the standard's retryable `PENDING`.
+#[tokio::test]
+async fn an_approval_is_carried_to_the_shop_whose_phone_can_collect_it() {
+    let (state, _fake) = till_state();
+    let merchant = SigningKey::from_bytes(&[32u8; 32]);
+    let payer = user_principal(&pubkey(&SigningKey::from_bytes(&[33u8; 32]))).to_text();
+    let opened = open_till(&state, &merchant, "Kiosk", 250, "till.example", "https").await;
+    let id = opened["id"].as_str().unwrap().to_string();
+    let (_, details) = call(&state, get_req(&format!("/v1/lnurlp/{id}?timeout=0"))).await;
+    let quote = details["quote"]["id"].as_str().unwrap().to_string();
+    let report = format!("/v1/lnurlp/tx/{id}?quote={quote}&method=InternetComputer&asset=VCHF");
+    let poll = format!("/api/v1/till/{id}");
+
+    // Before anyone claims anything, the body carries no claim at all — a wallet that never
+    // approves changes no byte of it.
+    let (_, before) = call(&state, get_req(&poll)).await;
+    assert!(before.get("pull").is_none(), "{before}");
+
+    let (status, answered) = call(&state, get_req(&format!("{report}&sender={payer}"))).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{answered}");
+    assert_eq!(answered["status"], "PENDING");
+
+    // The shop's own poll now carries it, naming the account to collect FROM. Nothing is credited:
+    // the relay did not move money and cannot.
+    let (_, claimed) = call(&state, get_req(&poll)).await;
+    assert_eq!(claimed["pull"]["payer"], payer, "{claimed}");
+    assert!(claimed["pull"]["at_secs"].is_u64(), "{claimed}");
+    assert!(claimed["paid"].is_null(), "{claimed}");
+    assert_eq!(claimed["state"], "open");
+
+    // A second report from the same wallet — the retry the standard makes free — replaces the
+    // claim rather than stacking a second doomed pull onto the shop's phone.
+    let (status, _) = call(&state, get_req(&format!("{report}&sender={payer}"))).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (_, again) = call(&state, get_req(&poll)).await;
+    assert_eq!(again["pull"]["payer"], payer, "{again}");
+
+    // A wallet that PUSHED is untouched by any of this: it reports a transaction id, gets the same
+    // retryable PENDING, and leaves no claim for the shop to act on.
+    let fresh = open_till(&state, &merchant, "Kiosk", 250, "till.example", "https").await;
+    let fresh_id = fresh["id"].as_str().unwrap().to_string();
+    let (_, fresh_details) = call(&state, get_req(&format!("/v1/lnurlp/{fresh_id}?timeout=0"))).await;
+    let fresh_quote = fresh_details["quote"]["id"].as_str().unwrap().to_string();
+    let (status, body) = call(
+        &state,
+        get_req(&format!(
+            "/v1/lnurlp/tx/{fresh_id}?quote={fresh_quote}&method=InternetComputer&asset=VCHF&tx=999999&sender={payer}"
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+    let (_, pushed) = call(&state, get_req(&format!("/api/v1/till/{fresh_id}"))).await;
+    assert!(
+        pushed.get("pull").is_none(),
+        "a wallet that named a transaction pushed; it is not asking to be collected from: {pushed}"
+    );
+
+    // …and the charge the first claim was aimed at is DEAD now (ringing up the second voided it).
+    // An approval aimed at a dead charge is refused by name rather than left looking live.
+    let (status, refused) = call(&state, get_req(&format!("{report}&sender={payer}"))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{refused}");
+    assert!(
+        refused["message"].as_str().unwrap_or_default().contains("replaced"),
+        "the payer is told WHICH kind of dead, and what to do: {refused}"
+    );
+}
+
 /// ONE TRANSFER, ONE SALE — the money bug, over the real HTTP surface.
 ///
 /// Two charges for the same price at the same till and exactly one payment. Matching on amount

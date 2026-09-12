@@ -38,7 +38,24 @@ jest.mock('../services/till', () => {
 // job on a device; what matters here is the ARGUMENTS it is handed.
 const mockBuildRequest = jest.fn(async (..._args: unknown[]) => 'de'.repeat(66));
 const mockStampExpiry = jest.fn(async (..._args: unknown[]) => '0');
-jest.mock('../services/native', () => ({DpayNfc: {buildRequest: (...a: unknown[]) => mockBuildRequest(...a)}}));
+const mockPrincipalFromPubkey = jest.fn(async (..._a: unknown[]) => MERCHANT_PRINCIPAL);
+const mockDecodeTransferFrom = jest.fn(async (..._a: unknown[]) => ({ok: true, blockIndex: '1'}));
+jest.mock('../services/native', () => ({
+  DpayNfc: {buildRequest: (...a: unknown[]) => mockBuildRequest(...a)},
+  DpayCore: {
+    icpPrincipalFromPubkey: (...a: unknown[]) => mockPrincipalFromPubkey(...a),
+    icpDecodeTransferFromResult: (...a: unknown[]) => mockDecodeTransferFrom(...a),
+  },
+}));
+
+// The PULL, at its module boundary: this suite asserts what the counter asks the rail to sign, not
+// what the rail then does with it (that is rail's own business, and e2e flow 118's end to end).
+const mockPreparePull = jest.fn(async (..._a: unknown[]) => ({ledger: 'ly36x', envelopeHex: 'aa', requestIdHex: 'bb', amount: '0', currency: 7, memoHex: ''}));
+const mockSubmitTransfer = jest.fn(async (..._a: unknown[]) => ({kind: 'settled', blockIndex: '91'} as const));
+jest.mock('../services/rail', () => ({
+  preparePull: (...a: unknown[]) => mockPreparePull(...a),
+  submitTransfer: (...a: unknown[]) => mockSubmitTransfer(...a),
+}));
 jest.mock('../services/icp', () => ({icStampExpiry: (...a: unknown[]) => mockStampExpiry(...a)}));
 
 // The reader itself is a double: this suite asserts what it is MOUNTED with, and drives its two
@@ -63,6 +80,10 @@ import type {AssetId, Identity, NfcStatus} from '../lib/types';
 
 const IDENTITY: Identity = {secretHex: '0b'.repeat(32), publicHex: '66'.repeat(32), username: 'Bahnhof Kiosk'};
 const RELAY = 'https://till.example';
+/** The shop's own account — what the allowance names as spender and what a collection pays TO. */
+const MERCHANT_PRINCIPAL = 'snzff-yj2qd-fjns7-lqhvw-rsgq7-tohk2-fjnw4-uq3d6-wtk56-pxgry-mqe';
+/** A customer who approved instead of sending. */
+const PAYER_PRINCIPAL = 'ygf2v-2qaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-4ae';
 
 // The wallet's REAL selectable rows, both rails — the same list the Receive forms hand this
 // component in production, so "which asset can ring one up" is decided against the shipping
@@ -96,7 +117,7 @@ const PAY_RAW = tillRawUnits('1050', 8, VCHF_FEE_RAW);
 
 /** A status body as the relay would answer for the charge above. */
 function status(over: Partial<TillStatus> = {}): TillStatus {
-  return {id: CHARGE.id, cents: '1050', state: 'open', createdSecs: CHARGE.createdSecs, expiresAt: CHARGE.expiresAt, paid: null, ...over};
+  return {id: CHARGE.id, cents: '1050', state: 'open', createdSecs: CHARGE.createdSecs, expiresAt: CHARGE.expiresAt, paid: null, pull: null, ...over};
 }
 
 function textOf(children: unknown): string {
@@ -165,6 +186,9 @@ beforeEach(() => {
   // stamp is nanoseconds, exactly as `icStampExpiry` returns it.
   mockStampExpiry.mockReset();
   mockStampExpiry.mockResolvedValue(String((BigInt(Math.floor(Date.now() / 1000)) + BigInt(NFC_UPDATE_AHEAD_S)) * 1_000_000_000n));
+  mockPreparePull.mockClear();
+  mockSubmitTransfer.mockClear();
+  mockSubmitTransfer.mockResolvedValue({kind: 'settled', blockIndex: '91'} as const);
 });
 
 afterEach(() => {
@@ -452,6 +476,100 @@ describe('watching the charge', () => {
       act(() => { tree.unmount(); });
       jest.mocked(tillChargeStatus).mockResolvedValue({kind: 'status', status: status()});
     }
+  });
+});
+
+describe('a customer who approves instead of sending', () => {
+  /** Ring up, then let one poll carry a pull claim. */
+  async function claimArrives(tree: renderer.ReactTestRenderer) {
+    jest.mocked(tillChargeStatus).mockResolvedValue({
+      kind: 'status',
+      status: status({pull: {payer: PAYER_PRINCIPAL, atSecs: CHARGE.createdSecs + 3}}),
+    });
+    await act(async () => { jest.advanceTimersByTime(POLL.receiptRcv); await flush(); });
+  }
+
+  test('collects the approval: the customer’s account, the shop’s own, and the charge’s reference', async () => {
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    await claimArrives(tree);
+
+    // WHAT IS SIGNED. Every field is the thing that makes this sale creditable rather than a
+    // transfer that moves money and leaves the charge open.
+    expect(mockPreparePull).toHaveBeenCalledTimes(1);
+    const [secret, cat, req] = mockPreparePull.mock.calls[0] as [string, unknown, Record<string, string | number>];
+    expect(secret).toBe(IDENTITY.secretHex);
+    expect(req.fromAccount).toBe(PAYER_PRINCIPAL);       // whose allowance is being spent
+    expect(req.toAccount).toBe(MERCHANT_PRINCIPAL);      // the shop's own account, never dpay's
+    expect(req.amount).toBe(PAY_RAW);                    // the price less the fee the shop absorbs
+    expect(req.nonceHex).toBe(REFERENCE);                // the ONLY thing that credits this sale
+    expect(req.currency).toBe(7);
+    expect(cat).toEqual({currencies: CATALOG});
+    // …and the reply is decoded as a PULL's, which is what keeps `InsufficientAllowance` legible.
+    const decode = mockSubmitTransfer.mock.calls[0][3] as (hex: string) => Promise<unknown>;
+    await decode('ff');
+    expect(mockDecodeTransferFrom).toHaveBeenCalledWith('ff');
+    act(() => { tree.unmount(); });
+  });
+
+  test('a collection that moved money still does NOT turn the light green — the relay does', async () => {
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    await claimArrives(tree);
+    // The ledger said settled. The screen says nothing of the kind: one settlement owner, and it is
+    // the relay observing the money on the merchant's own history.
+    expect(has(tree, 'till-paid')).toBe(false);
+    expect(has(tree, 'till-qr')).toBe(true);
+
+    // …and when the relay DOES see it, the sale lands the ordinary way.
+    jest.mocked(tillChargeStatus).mockResolvedValue({
+      kind: 'status',
+      status: status({state: 'paid', paid: {from: PAYER_PRINCIPAL, amountRaw: PAY_RAW, atSecs: CHARGE.createdSecs + 9, block: 91}}),
+    });
+    await act(async () => { jest.advanceTimersByTime(POLL.receiptRcv); await flush(); });
+    expect(has(tree, 'till-paid')).toBe(true);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the same claim is collected ONCE, however many times it is polled', async () => {
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    await claimArrives(tree);
+    await act(async () => { jest.advanceTimersByTime(POLL.receiptRcv * 4); await flush(); });
+    expect(mockPreparePull).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a refusal names what the CUSTOMER must do, and leaves the code payable', async () => {
+    const cases: Array<[string, string]> = [
+      ['InsufficientAllowance', M.receive.till.collectNotApproved],
+      ['InsufficientFunds', M.receive.till.collectNoFunds],
+      ['SomethingNobodyHasSeen', M.receive.till.collectFailed],
+    ];
+    for (const [variant, sentence] of cases) {
+      mockSubmitTransfer.mockResolvedValue({kind: 'rejected', reason: 'no', variant} as never);
+      const tree = mount(VCHF);
+      await ringUp(tree);
+      await claimArrives(tree);
+      expect(visible(tree)).toContain(sentence);
+      // Nothing was taken and nothing is claimed: the code is still on screen and still payable.
+      expect(has(tree, 'till-qr')).toBe(true);
+      expect(has(tree, 'till-paid')).toBe(false);
+      act(() => { tree.unmount(); });
+      mockPreparePull.mockClear();
+    }
+  });
+
+  test('an unknown outcome is left to the poll rather than shown as a failure', async () => {
+    // The money may well have moved — the ledger simply did not answer inside this phone's budget.
+    // Saying "could not collect" there would send a cashier to ask for a second payment.
+    mockSubmitTransfer.mockResolvedValue({kind: 'unknown'} as never);
+    const tree = mount(VCHF);
+    await ringUp(tree);
+    await claimArrives(tree);
+    expect(has(tree, 'till-collect-err')).toBe(false);
+    expect(visible(tree)).toContain(M.receive.till.waiting);
+    act(() => { tree.unmount(); });
   });
 });
 

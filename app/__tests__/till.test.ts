@@ -335,9 +335,29 @@ describe('watching a charge', () => {
         id: 'pl_ecd765908f264957', cents: '1000', state: 'paid',
         createdSecs: 1788479954, expiresAt: 1788483554,
         paid: {from: 'lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe', amountRaw: '1000000000', atSecs: 1788480000, block: 77},
+        // A wallet that SENT the money leaves no pull claim — the field is absent on the wire and
+        // reads as null here, which is what keeps the collection path off a screen that has none.
+        pull: null,
       },
     });
     expect(requests[0].url).toBe(`${RELAY}/api/v1/till/pl_ecd765908f264957`);
+  });
+
+  test('reads a pull claim, and refuses to half-read one', async () => {
+    // The payer approved instead of sending. The claim is what the merchant's own device acts on,
+    // so it is parsed strictly: a shape this build cannot read is NOT a claim, because collecting
+    // against a principal we could not parse is the one way to move a customer's money wrongly.
+    serve(200, {...OPEN_STATUS, pull: {payer: 'ygf2v-2qaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-4ae', at_secs: 1788480010}});
+    const ok = await tillChargeStatus(RELAY, 'pl_x');
+    expect(ok.kind === 'status' && ok.status.pull).toEqual({payer: 'ygf2v-2qaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-aaaaa-4ae', atSecs: 1788480010});
+
+    for (const bad of [{payer: ''}, {at_secs: 5}, {payer: 7, at_secs: 5}, {payer: 'x', at_secs: 'soon'}, 'nope']) {
+      serve(200, {...OPEN_STATUS, pull: bad});
+      const outcome = await tillChargeStatus(RELAY, 'pl_x');
+      expect(outcome.kind === 'status' && outcome.status.pull).toBeNull();
+      // …and the REST of the status still reads: an unreadable claim is not an unreadable charge.
+      expect(outcome.kind === 'status' && outcome.status.state).toBe('open');
+    }
   });
 
   test('keeps the four non-paid states apart, because they send the cashier different ways', async () => {

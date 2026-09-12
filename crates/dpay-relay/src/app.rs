@@ -410,19 +410,21 @@ pub fn app(state: AppState) -> Router {
         .route("/dpay-core.wasm", get(dpay_core_wasm))
         .route("/shots/{name}", get(screenshot));
 
-    // The payer-facing half of the same till, behind the same gate (see above). The three
-    // `/v1/lnurlp/*` routes sit at the paths the STANDARD dictates rather than under this relay's
-    // own namespace: a wallet derives the submission URL from the callback by swapping `/cb/` for
-    // `/tx/`, so those segments are part of the protocol. The fourth is where a GENERIC phone camera
-    // lands — the till's QR carries the LNURL inside an ordinary web address, so a camera that is
-    // not a wallet opens a page rather than a 404 (`crate::till::till_code_page`). The fifth is
-    // the cashier's own screen — the merchant's OTHER half, which watches the charge they rang up
-    // in the app (`crate::till::till_page`).
-    let router = if state.till_enabled {
+    // The till's two HTML surfaces, behind the same gate (see above). The first is where a GENERIC
+    // phone camera lands — the till's QR carries the LNURL inside an ordinary web address, so a
+    // camera that is not a wallet opens a page rather than a 404 (`crate::till::till_code_page`).
+    // The second is the cashier's own screen — the merchant's OTHER half, which watches the charge
+    // they rang up in the app (`crate::till::till_page`).
+    //
+    // The three routes a WALLET fetches are merged at the very END of this function, after the
+    // test-only CORS layer, because they carry a CORS layer of their own and a response with two
+    // `Access-Control-Allow-Origin` headers is refused by every browser.
+    let till_enabled = state.till_enabled;
+    // The same state, not a second one: every field that matters here is behind an `Arc`, so the
+    // provider sub-router reads and writes the charges the merchant routes above opened.
+    let provider_state = state.clone();
+    let router = if till_enabled {
         router
-            .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
-            .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
-            .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
             .route(
                 crate::till::TILL_CODE_PATH,
                 get(crate::till::till_code_page),
@@ -449,47 +451,112 @@ pub fn app(state: AppState) -> Router {
 
     // Test-only CORS: allows the web build of the app (served by vite on a different port) to make
     // direct fetch() calls to the relay during e2e + UX review. Gated behind `test-helpers` so the
-    // prod image (built without the feature) never sends CORS headers. The e2e harness ALSO launches
-    // Chrome with --disable-web-security, but this layer makes the relay usable by ANY web-based test
-    // tool without requiring browser flags.
+    // prod image (built without the feature) never sends CORS headers on these routes. The e2e
+    // harness ALSO launches Chrome with --disable-web-security, but this layer makes the relay
+    // usable by ANY web-based test tool without requiring browser flags.
+    //
+    // Applied BEFORE the provider routes are merged, which in axum means it does not wrap them
+    // (`Router::layer` only wraps what is already registered). That is deliberate: those routes
+    // carry the production layer below in EVERY build, so what the relay test suite drives is the
+    // header set a real wallet meets rather than this fixture's.
     #[cfg(feature = "test-helpers")]
     let router = router.layer(axum::middleware::from_fn(test_cors_middleware));
 
-    router
+    // The payer-facing half of the till — the three routes a WALLET fetches, and the only routes on
+    // this relay that answer a cross-origin browser request.
+    //
+    // WHY THEY NEED CORS AT ALL, and why nothing else here does: an OpenCryptoPay wallet may be a
+    // WEB page. Oisy is (oisy.com IS the wallet), and its scanner fetches the decoded LNURL
+    // directly — so without an `Access-Control-Allow-Origin` on these three the browser refuses the
+    // read before our handler is ever consulted, and the wallet can only report the code itself as
+    // invalid. Measured 2026-09-12 against prod (preflight `405`, no CORS header on the GET) and
+    // against the reference provider, which answers `access-control-allow-origin: *` on the very
+    // same paths (`docs/specs/2026-09-01-opencryptopay-findings.md`).
+    //
+    // `*` is the right origin for exactly the reason it is wrong almost everywhere else: these
+    // three are public, unauthenticated, credential-free reads of a charge whose id is printed on a
+    // QR code in a shop window. The relay's OWN surfaces are NOT in here — the Solana RPC proxy
+    // alone would hand any web page the operator's provider quota — which is why this is a merged
+    // sub-router and not a layer over everything.
+    if till_enabled {
+        router.merge(
+            Router::new()
+                // The paths the STANDARD dictates, rather than this relay's own namespace: a wallet
+                // derives the submission URL from the callback by swapping `/cb/` for `/tx/`, so
+                // those segments are part of the protocol.
+                .route("/v1/lnurlp/{id}", get(crate::till::lnurlp_details))
+                .route("/v1/lnurlp/cb/{id}", get(crate::till::lnurlp_callback))
+                .route("/v1/lnurlp/tx/{id}", get(crate::till::lnurlp_submit))
+                .with_state(provider_state)
+                .layer(axum::middleware::from_fn(provider_cors_middleware)),
+        )
+    } else {
+        router
+    }
 }
 
-/// Permissive CORS middleware (test-only, feature-gated). Adds `Access-Control-Allow-Origin: *` to
-/// every response + intercepts OPTIONS preflight with a 204.
-#[cfg(feature = "test-helpers")]
-async fn test_cors_middleware(
+/// Answer any origin, and answer the preflight here.
+///
+/// The ONE statement of what permissive CORS means on this relay, so its two users cannot drift:
+/// the OpenCryptoPay provider routes (production — a wallet may be a web page) and the test-only
+/// fixture layer. `methods` is the only thing that differs between them, because it is the only
+/// thing that IS different: the provider surface is read-only.
+///
+/// The preflight is answered here rather than passed down because a router that only has `get` on
+/// a path answers `OPTIONS` with `405` and no headers at all, which a browser reads as "this
+/// server refuses cross-origin requests" — the exact failure this whole function exists to fix.
+/// `insert` (never `append`): two `Access-Control-Allow-Origin` headers are refused by every
+/// browser, so a response that somehow passes through twice still carries exactly one.
+async fn cors_any_origin(
     req: axum::extract::Request,
     next: axum::middleware::Next,
+    methods: &'static str,
 ) -> Response {
-    use axum::http::Method;
-    if req.method() == Method::OPTIONS {
+    let preflight = req.method() == axum::http::Method::OPTIONS;
+    let mut resp = if preflight {
         let mut resp = Response::new(axum::body::Body::empty());
         *resp.status_mut() = StatusCode::NO_CONTENT;
-        let h = resp.headers_mut();
-        h.insert(
-            header::ACCESS_CONTROL_ALLOW_ORIGIN,
-            header::HeaderValue::from_static("*"),
-        );
+        resp
+    } else {
+        next.run(req).await
+    };
+    let h = resp.headers_mut();
+    h.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        header::HeaderValue::from_static("*"),
+    );
+    if preflight {
         h.insert(
             header::ACCESS_CONTROL_ALLOW_METHODS,
-            header::HeaderValue::from_static("GET, POST, OPTIONS"),
+            header::HeaderValue::from_static(methods),
         );
         h.insert(
             header::ACCESS_CONTROL_ALLOW_HEADERS,
             header::HeaderValue::from_static("Content-Type"),
         );
-        return resp;
     }
-    let mut resp = next.run(req).await;
-    resp.headers_mut().insert(
-        header::ACCESS_CONTROL_ALLOW_ORIGIN,
-        header::HeaderValue::from_static("*"),
-    );
     resp
+}
+
+/// CORS for the three OpenCryptoPay routes a wallet fetches — production, every build. Why these
+/// and only these: see the merge site in [`app`].
+///
+/// `Content-Type` is in the allowed headers because a wallet sends it on a GET (Oisy does), and
+/// that alone is what turns an otherwise-simple request into one that needs this preflight.
+async fn provider_cors_middleware(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    cors_any_origin(req, next, "GET, HEAD, OPTIONS").await
+}
+
+/// Permissive CORS middleware (test-only, feature-gated) — see the layer site in [`app`].
+#[cfg(feature = "test-helpers")]
+async fn test_cors_middleware(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    cors_any_origin(req, next, "GET, POST, OPTIONS").await
 }
 
 /// The rate limit BOTH faucet handlers run before crediting anything, so the offline fixture and

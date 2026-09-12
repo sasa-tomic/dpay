@@ -591,6 +591,9 @@ impl FakeIc {
             "icrc1_transfer" => Self::icrc1_transfer(s, &canister, &from_key, &sender, arg, block),
             "transfer" => Self::legacy_transfer(s, &canister, &from_key, &sender, arg, block),
             "icrc2_approve" => Self::icrc2_approve(s, &canister, &env.sender, arg, block),
+            "icrc2_transfer_from" => {
+                Self::icrc2_transfer_from(s, &canister, &env.sender, arg, block)
+            }
             "depositFromAndSwap" => {
                 Self::pool_deposit_from_and_swap(s, &canister, &env.sender, arg, block)
             }
@@ -812,6 +815,83 @@ impl FakeIc {
             (amount.unwrap_or(0), arg.expires_at_ns),
         );
         RequestState::Replied(encode_approve_ok(block))
+    }
+
+    /// `icrc2_transfer_from`: the PULL. The CALLER spends an allowance the `from` account granted
+    /// them, which is how a dpay shop collects a till charge an ICRC-2 allowance wallet approved it
+    /// for (`PullClaim`, `crate::till`).
+    ///
+    /// Same sequence a real ledger runs, and in the same order, because the ORDER is what the app's
+    /// error handling branches on: allowance first (the customer must approve again), then funds
+    /// (the customer must top up). The fee comes out of `from`, like every other ICRC debit, and the
+    /// allowance must cover amount + fee — the reason the till quotes the price MINUS the fee.
+    ///
+    /// The history row records the PAYER as `from`, not the caller: that is what the relay's
+    /// settlement read matches on, and a row naming the shop would credit a sale to nobody.
+    fn icrc2_transfer_from(
+        s: &mut FakeIcState,
+        canister: &str,
+        sender: &Principal,
+        arg: &[u8],
+        block: u64,
+    ) -> RequestState {
+        let Some(cfg) = s.ledgers.get(canister).cloned() else {
+            return RequestState::Rejected {
+                code: 3,
+                message: format!("canister {canister} not found"),
+            };
+        };
+        let Ok(arg) = dpay_icp::icrc::decode_transfer_from_arg(arg) else {
+            return RequestState::Rejected {
+                code: 5,
+                message: "malformed icrc2_transfer_from arg".into(),
+            };
+        };
+        let fee = cfg.fee.unwrap_or(0);
+        // An explicitly-stated fee that is not the ledger's own is refused exactly as it is on the
+        // push path. dpay states none, which is what lets one allowance cover one charge.
+        if let (Some(expected), Some(stated)) = (cfg.fee, arg.fee) {
+            if stated != expected {
+                return RequestState::Replied(encode_transfer_bad_fee(expected));
+            }
+        }
+        let from_key = (canister.to_string(), account_owner(&arg.from));
+        let to_key = (canister.to_string(), account_owner(&arg.to));
+        let allowance_key = (from_key.clone(), (sender.to_text(), [0u8; 32]));
+        let (allowed, expires) = effective_allowance(s, &allowance_key);
+        let spend = arg.amount + fee;
+        if allowed < spend {
+            return RequestState::Replied(
+                dpay_icp::icrc::encode_transfer_from_insufficient_allowance(allowed),
+            );
+        }
+        let bal = *s.balances.get(&from_key).unwrap_or(&0);
+        if bal < spend {
+            return RequestState::Replied(
+                dpay_icp::icrc::encode_transfer_from_insufficient_funds(bal),
+            );
+        }
+        *s.balances.entry(from_key.clone()).or_insert(0) -= spend;
+        *s.balances.entry(to_key.clone()).or_insert(0) += arg.amount;
+        // Spending an allowance CONSUMES it — which is what makes a second pull of the same
+        // approval fail rather than double-charge the customer.
+        s.allowances.insert(allowance_key, (allowed - spend, expires));
+        let memo_hex = arg
+            .memo
+            .clone()
+            .map(|m| m.iter().map(|b| format!("{b:02x}")).collect::<String>())
+            .unwrap_or_default();
+        s.txns.push(FakeTxn {
+            kind: "transfer",
+            from: from_key.1 .0.clone(),
+            to: to_key.1 .0.clone(),
+            amount: arg.amount,
+            currency: cfg.currency,
+            memo_hex,
+            timestamp: now_secs(),
+            block,
+        });
+        RequestState::Replied(dpay_icp::icrc::encode_transfer_from_ok(block))
     }
 
     /// `depositFromAndSwap` on the stub ICPSwap pool (delegated-conversion PoC): validate the

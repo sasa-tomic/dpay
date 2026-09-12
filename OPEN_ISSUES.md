@@ -484,13 +484,17 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
   IC OpenCryptoPay payer is Option-A (`icrc2_approve` + sender report; no tx id, no memo), DFX's
   wallet list names none. Source-only detail:
   [`docs/specs/2026-09-01-opencryptopay-findings.md`](docs/specs/2026-09-01-opencryptopay-findings.md).
-  **2026-09-12:** the founder scanned a live till code with Oisy and got `Code/URL ist nicht gültig`
-  — the relay served the provider routes with no CORS headers, so no browser wallet could read a
-  dpay till at all. Fix staged in the relay working tree at this writing (provider-CORS sub-router
-  + tests; lands with the next relay commit), together with the false-success it exposed. **Open founder decision
-  (needs a call, not effort):** whether a dpay merchant should PULL Oisy's allowance
-  (`icrc2_transfer_from` from the merchant's own phone — permitted by the non-custody rule, and the
-  only thing that would let an Oisy customer actually pay a dpay till). Same spec, last section.
+  **2026-09-12 — both reasons it held are gone, and BOTH fixes are uncommitted working-tree changes
+  at this writing.** (1) The founder scanned a live till code with Oisy and got `Code/URL ist nicht
+  gültig`: the relay served the provider routes with no CORS headers, so no browser wallet could
+  read a dpay till at all (provider-CORS sub-router + tests). (2) Even read, it could not pay,
+  because Oisy approves an allowance and dpay refused to collect one — so, founder-directed, the
+  merchant's own phone now signs the `icrc2_transfer_from` while the relay still holds no key
+  (`PullClaim` → `preparePull` → `collect`; e2e flow 177 drives the whole path offline).
+  **Oisy ITSELF is still undriven** — its scanner sits behind Internet Identity, so a real payment
+  needs a founder account and a franc or two. Until that run happens "a third-party wallet can pay a
+  dpay till" is a CAPABILITY, not a claim, and must not appear in a deck, a demo or an investor
+  mail. Same spec.
 - **dpay speaks no external payment standard, either direction — except Solana Pay, now spoken in
   BOTH directions** (2026-09-05, `app/solana/payUri.ts` + `parseSolanaPayUri`). Everything else is
   refused by name with a practical instruction (BIP-21/321, EIP-681, BOLT-11 → `coin-request`;

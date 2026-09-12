@@ -13,8 +13,9 @@ import {offerNamesAsset} from '../lib/opencryptopay';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
-import {DpayNfc} from '../services/native';
+import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
+import {preparePull, submitTransfer} from '../services/rail';
 import {
   TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillRawUnits,
   type TillCharge as Charge, type TillOpenOutcome, type TillSettled, type TillVoidOutcome,
@@ -121,6 +122,17 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   const [unchecked, setUnchecked] = useState<string | null>(null);
   /** The relay says the code has expired and we are still watching for a late transfer. */
   const [watchingLate, setWatchingLate] = useState(false);
+  /** A customer approved this shop to COLLECT rather than sending the money, and this phone is
+   *  spending that allowance right now. Display only — it never turns the paid light green, which
+   *  stays the relay's own answer (see the component doc). */
+  const [collecting, setCollecting] = useState(false);
+  /** Why a collection did not work, in the cashier's terms. Not a payment state either: the charge
+   *  stays open and payable by every other means. */
+  const [collectErr, setCollectErr] = useState<string | null>(null);
+  /** Claims this screen has already acted on, as `payer@at_secs`. A pull is attempted ONCE per
+   *  claim: the ledger's verdict does not change between polls, and a doomed one retried every
+   *  1.5 s would be a loop with a cashier watching it. */
+  const [tried] = useState<Set<string>>(() => new Set());
   const [err, setErr] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [now, setNow] = useState(() => nowSecs());
@@ -185,6 +197,11 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
       setUnchecked(null);
       if (answer.kind === 'gone') { setPhase({k: 'ended', reason: 'gone'}); return; }
       const s = answer.status;
+      // A CUSTOMER WHO APPROVED INSTEAD OF SENDING. Their wallet cannot move the money and the
+      // relay must not, so this phone — which holds the key the allowance names — collects it.
+      // Attempted once per distinct claim: a doomed pull retried on every poll would hammer the
+      // ledger and tell the cashier nothing new.
+      if (s.pull !== null && phase.k === 'showing') void collect(s.pull, phase.charge);
       switch (s.state) {
         case 'paid':
           // Functional form: the charge comes from the phase this poll belongs to, so a settlement
@@ -210,7 +227,57 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     void tick();
     const id = setInterval(() => { void tick(); }, POLL.receiptRcv);
     return () => { alive = false; clearInterval(id); };
+    // `collect` and `phase` are read inside `tick` but deliberately NOT depended on: this effect is
+    // keyed by the CHARGE, and re-running it on every phase change would restart the poll clock
+    // mid-charge. `collect` guards its own re-entry by claim, and reads the charge it was handed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chargeId, relayUrl]);
+
+  /**
+   * COLLECT an allowance a customer granted this shop — the other way an OpenCryptoPay wallet pays.
+   *
+   * Oisy and wallets like it do not send money: they call `icrc2_approve` naming this shop as
+   * spender and then tell the provider to take it. The relay cannot (it holds no key, by the
+   * non-custody rule) and this phone can, because the allowance names the key this phone holds. So
+   * the claim arrives on the poll and is spent here, with the charge's own reference as the memo —
+   * without which the money would move and the sale would stay open.
+   *
+   * THIS DOES NOT SETTLE THE SALE. It moves money; the relay's next poll observes it on the ledger
+   * and only that turns the light green — the same rule a tap obeys, and for the same reason: one
+   * settlement owner. A pull that fails leaves the charge exactly as payable as it was.
+   */
+  async function collect(claim: {payer: string; atSecs: number}, charge: Charge) {
+    if (tillRow === null || tillFeeRaw === null) return;
+    const key = `${claim.payer}@${claim.atSecs}`;
+    if (tried.has(key)) return;
+    tried.add(key);
+    setCollectErr(null);
+    setCollecting(true);
+    try {
+      const me = await DpayCore.icpPrincipalFromPubkey(identity.publicHex);
+      const prepared = await preparePull(identity.secretHex, {currencies: catalog}, {
+        fromAccount: claim.payer,
+        toAccount: me,
+        amount: tillRawUnits(charge.cents, tillRow.decimals, tillFeeRaw),
+        currency: tillRow.currency,
+        nonceHex: charge.reference,
+      });
+      const outcome = await submitTransfer(
+        prepared, identity.secretHex, PULL_POLL,
+        hex => DpayCore.icpDecodeTransferFromResult(hex),
+      );
+      // 'settled' says the ledger moved it; the RELAY still has to see it, so nothing is claimed
+      // here. 'unknown' is honest ignorance and is left to the same poll — the money may well have
+      // moved. Only a refusal is worth a sentence, because only a refusal needs the cashier.
+      if (outcome.kind === 'rejected') setCollectErr(collectRefusal(outcome.variant ?? ''));
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      console.warn(`till: could not collect the approval for ${charge.id}: ${detail}`);
+      setCollectErr(M.receive.till.collectFailed);
+    } finally {
+      setCollecting(false);
+    }
+  }
 
   /** The 132-byte reader request for a live charge, or null when this phone cannot serve one — no
    *  radio, or the certified IC instant its expiry needs was out of reach. Null is a QR-only code
@@ -437,17 +504,24 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
         ) : remaining > 0 ? (
           <Text style={S.qrExpiryWarn}>{M.receive.expiresIn((remaining % 60).toString().padStart(2, '0'))}</Text>
         ) : null}
-        {/* The three things this screen may say about the money, in the order they outrank each
-            other: we cannot see the till; the code has expired but a late transfer can still land;
-            or we are simply waiting. None of them ever claims the customer has scanned anything. */}
+        {/* The four things this screen may say about the money, in the order they outrank each
+            other: we are collecting an approval the customer granted (the one state where something
+            is actively happening); we cannot see the till; the code has expired but a late transfer
+            can still land; or we are simply waiting. None of them ever claims the customer has
+            scanned anything, and none of them claims a sale — only the relay's own answer does. */}
         {/* `qrExpiryWarn` rather than `warnNote`: this line sits directly under the countdown, and
             warnNote's negative top margin (it is built to hug the element above it on a form) drew
             the warning ON TOP of the validity line. */}
         <Text testID="till-status" style={unchecked !== null || watchingLate ? S.qrExpiryWarn : S.qrHint}>
-          {unchecked !== null
+          {collecting
+            ? M.receive.till.collecting
+            : unchecked !== null
             ? M.receive.till.cantCheck
             : watchingLate ? M.receive.till.expiredWatching : M.receive.till.waiting}
         </Text>
+        {/* A collection that did not work. It is NOT a payment state: the charge is still payable by
+            every other means, which is exactly what each of these sentences goes on to say. */}
+        {collectErr ? <Text testID="till-collect-err" style={S.err}>{collectErr}</Text> : null}
         {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
         {cancelling ? <ActivityIndicator color={C.brandText} /> : null}
         <Pressable
@@ -503,6 +577,26 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
       </Pressable>
     </View>
   );
+}
+
+/** How long this phone waits for the ledger's verdict on a collection. Short and bounded: a
+ *  customer is standing at the counter, the relay's own poll keeps running underneath, and an
+ *  answer that has not arrived by then is honest ignorance rather than a failure — the money may
+ *  well have moved, and the sale will turn green the moment the relay sees it. */
+const PULL_POLL = {attempts: 12, intervalMs: 500} as const;
+
+/** Why a collection was refused, in the cashier's terms — and every one of them ends somewhere.
+ *  The variant tags are the ledger's own (`icp_decode_transfer_from_result`, dpay-ffi); an
+ *  unrecognised one is not guessed at, because a wrong instruction at a till is worse than a
+ *  general one. */
+function collectRefusal(variant: string): string {
+  switch (variant) {
+    // The two that mean the CUSTOMER must do something, and they are opposite things: approve
+    // again (or approve enough), versus put money in the account first.
+    case 'InsufficientAllowance': return M.receive.till.collectNotApproved;
+    case 'InsufficientFunds': return M.receive.till.collectNoFunds;
+    default: return M.receive.till.collectFailed;
+  }
 }
 
 /** The host a merchant would name when they ask why their till did not answer — the relay that was

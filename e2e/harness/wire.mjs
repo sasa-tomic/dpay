@@ -465,6 +465,33 @@ export function icpTransferArgBytes(toPrincipalBytes, amount, { fee = null, memo
   return Uint8Array.from(out);
 }
 
+// APPROVE_PREFIX golden (78 bytes): DIDL + type table for icrc2_approve.
+const APPROVE_PREFIX = Buffer.from(
+  '4449444c066c08c6fcb60201ba89e5c20402a2de94eb060282f3f3910c04d8a3' +
+  '8ca80d7d919c9cbf0d01dea7f7da0d04cb96dcb40e056e7d6e036d7b6e786c02' +
+  'b3b0dac30368ad86ca83050201 00'.replace(/ /g, ''), 'hex'
+);
+if (APPROVE_PREFIX.length !== 78) throw new Error('APPROVE_PREFIX golden length drift');
+
+/** icrc2_approve arg (hash order: fee, memo, from_subaccount, created_at_time, amount,
+ *  expected_allowance, expires_at, spender), byte-mirrors dpay_icp::icrc::approve_arg.
+ *
+ *  The harness needs this to stand in for an ICRC-2 ALLOWANCE WALLET (Oisy): one that does not
+ *  send money at all, but approves a shop to collect it. Nothing in dpay signs an approve on this
+ *  rail — which is exactly why the fixture has to. */
+export function icpApproveArgBytes(spenderPrincipalBytes, amount, { fee = null, expiresAtNs = null } = {}) {
+  const out = [...APPROVE_PREFIX];
+  out.push(...didlPutOptNat(fee));
+  out.push(...didlPutOptBlob(null));   // memo
+  out.push(...didlPutOptBlob(null));   // from_subaccount
+  out.push(...didlPutOptNat64(null));  // created_at_time
+  out.push(...uleb(BigInt(amount)));
+  out.push(...didlPutOptNat(null));    // expected_allowance
+  out.push(...didlPutOptNat64(expiresAtNs));
+  out.push(...didlPutAccount(spenderPrincipalBytes, null));
+  return Uint8Array.from(out);
+}
+
 /** icrc1_balance_of arg (single account record), byte-mirrors ACCOUNT_PREFIX golden (25B incl trailing nargs=01 ref=00). */
 const ACCOUNT_PREFIX = Buffer.from('4449444c036c02b3b0dac30368ad86ca8305016e026d7b0100', 'hex');
 export function icpBalanceOfArgBytes(ownerPrincipalBytes) {
