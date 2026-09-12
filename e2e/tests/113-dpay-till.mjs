@@ -14,7 +14,8 @@
 //
 //   1. PAYABLE, and paid. The till's own code lands on the explicit review (the VCHF amount, the
 //      FULL destination account, the relay host as the price's source, the merchant's claimed name,
-//      the CHF price the till is charging) and signs nothing until Approve. Approve moves real VCHF
+//      the CHF price the till is charging, the note the merchant signed at ring-up — what the
+//      charge is for) and signs nothing until Approve. Approve moves real VCHF
 //      — asserted as money on both sides of the ledger, not as pixels — and reports the proof
 //      exactly once → Paid ✓.
 //   2. PENDING IS NOT PAID. dpay's till answers a submission `202 {"status":"PENDING"}` while it has
@@ -25,7 +26,8 @@
 // The till fixture is READ from the committed golden, not authored here (`../harness/ocp.mjs`).
 //
 // Selector contract: `ocp-price`, `ocp-expiry`, `ocp-outcome`,
-// `pay-amount`, `review-payee`, `btn-approve`, `btn-new` (and `btn-start-scan` via armPayScan).
+// `pay-amount`, `review-payee`, `review-memo`, `btn-approve`, `btn-new` (and `btn-start-scan` via
+// armPayScan).
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, armPayScan, railPrincipalText,
@@ -48,8 +50,8 @@ export const meta = {
   id: '113',
   name: 'dpay-till',
   journey: 'pay',
-  covers: ['opencryptopay', 'tx-ledger-spelling', 'vchf', 'explicit-approve', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'settle'],
-  verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer pays it — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name and the CHF price, and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) carrying the till\'s per-charge `ref` as the transfer\'s on-chain memo, then reports the proof exactly once — as `<vchf ledger>:<block index>`, the spelling a non-ICP ICRC ledger requires and the one whose absence cost a real payment — → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
+  covers: ['opencryptopay', 'tx-ledger-spelling', 'vchf', 'explicit-approve', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'signed-note', 'settle'],
+  verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer pays it — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name, the CHF price and the note the merchant signed at ring-up (what the charge is for), and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) carrying the till\'s per-charge `ref` as the transfer\'s on-chain memo, then reports the proof exactly once — as `<vchf ledger>:<block index>`, the spelling a non-ICP ICRC ledger requires and the one whose absence cost a real payment — → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
   timeoutMs: 45000, // 2 legs: 4 provider round trips + 2 real IC settlements
 };
 
@@ -125,6 +127,11 @@ export async function run() {
       'the review shows the till\'s own price, so the payer can check it against the sale');
     assertIncludes(price, till.host, 'the review names the host that set the price');
     assertIncludes(await driver.bodyText(), DPAY_TILL.merchant, 'the review shows the name the till claims');
+    // The ring-up's NOTE — what the charge is for, signed under `dpay-till-open-v2` when the
+    // merchant rang the charge up and served back on step-2 (`input.note` of the same golden every
+    // other value here comes from). Claimed, never verified: it rides the review's memo line.
+    assertEq(await driver.readText('review-memo'), DPAY_TILL.note,
+      'the review shows what the till says the charge is for — the note the merchant signed at ring-up');
     assert(!(await driver.isPresent('review-claimed')), 'the review carries no unactionable name caveat');
     assert(!(await driver.isPresent('ocp-expiry')),
       'a quote with minutes left must not put a countdown on the review');

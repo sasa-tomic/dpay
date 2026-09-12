@@ -103,6 +103,10 @@ if (TILL_REF === null) throw new Error(`till_wire.json's callback URI names no p
  *  amount means (`amount_raw` — the integer the payer's converter has to land on). */
 export const DPAY_TILL = {
   merchant: TILL_WIRE.input.merchant_name,
+  /** What the charge is FOR — the note the merchant signed at ring-up (domain `dpay-till-open-v2`),
+   *  served back on step-2 for the payer's review. Read from the golden's `input` like the name,
+   *  so a ring-up that changes its note changes this fixture with it. */
+  note: TILL_WIRE.input.note,
   paymentId: TILL_WIRE.open.id,
   transferAmounts: TILL_WIRE.details.transferAmounts,
   requestedAmount: TILL_WIRE.details.requestedAmount,
@@ -146,6 +150,7 @@ export function dpayTillAt(relayBaseURL, destination) {
       paymentId: DPAY_TILL.paymentId,
       callbackUrl: `${origin}/v1/lnurlp/cb/${DPAY_TILL.paymentId}`,
       merchantName: DPAY_TILL.merchant,
+      note: DPAY_TILL.note,
       transferAmounts: DPAY_TILL.transferAmounts,
       requestedAmount: DPAY_TILL.requestedAmount,
       pendingBody: DPAY_TILL.pendingBody,
@@ -162,7 +167,8 @@ export function dpayTillAt(relayBaseURL, destination) {
  *
  * `cfg` carries what differs per flow: `passOrigins` (the harness's own relay + web servers),
  * `uris` (the step-3 destination per `<method>/<asset>`, so a flow only fixtures the rail it pays),
- * and `detailsDelayMs` (how slow the step-2 read is, when a flow wants to observe the waiting copy).
+ * `note` (the charge's signed note, served on step-2 — only tills that rang one up set it), and
+ * `detailsDelayMs` (how slow the step-2 read is, when a flow wants to observe the waiting copy).
  */
 export async function installTillStub(driver, cfg) {
   await driver.eval((c) => {
@@ -204,6 +210,11 @@ export async function installTillStub(driver, cfg) {
         metadata: '[["text/plain","OpenCryptoPay"]]',
         minSendable: 100000,
         mode: 'Single',
+        // The note a till that HAS one serves — what the charge is for, as the merchant signed it at
+        // ring-up. OPTIONAL by design: omitted whole when `cfg.note` is unset (JSON drops nothing
+        // here because the key is never added), so the stranger till — the default cfg — stays a
+        // genuine no-note fixture and the no-note payer leg keeps a real provider shape to parse.
+        ...(c.note ? {note: c.note} : {}),
         possibleStandards: ['OpenCryptoPay', 'FrankencoinPay', 'LightningBolt11'],
         quote: {id: state.quoteId, expiration: isoIn(c.quoteLifetimeMs)},
         recipient: {name: c.merchantName},
