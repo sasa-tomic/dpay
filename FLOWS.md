@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **163 flows**
-> (162 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **164 flows**
+> (163 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (9) · nfc (12) · system (33) · tour (6)
+wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (33) · tour (6)
 
 ---
 
@@ -173,6 +173,7 @@ wire (1) · onboard (23) · pay (43) · offline (12) · deposit (13) · withdraw
 | 167 | convert-venue-order-stable | Mutating each venue's output mid-test (the relay's pool knobs floor the real pool to zero, re-price fixture B, then floor fixture B while the real pool restores) does NOT move the chooser rows in EITHER direction — non-first-best or first-best: registry order survives every re-fetch, nothing is ever preselected, and each row's displayed number follows its own venue's re-priced reply. | convert, venues, venue-chooser, registry-order, no-ranking, no-preselection, pool-knob |
 | 168 | convert-fixture-venue-payout | Picking the served fixture venue B in the chooser executes through pool B end-to-end: the checklist quotes B (its reversed token order → zero_for_one true, its own 0.10% tier), confirm settles on pool B, and the output ledger pays B's quoted amount verbatim. | convert, venues, venue-chooser, pool-keyed-execution, venue-attribution, fixture-venue-b |
 | 169 | convert-resume-reload | A conversion parked on pending_withdrawal survives a full app reload under the identity-scoped store key, and the wallet-load resume engine (no Convert screen open) drives it to done when the venue settles — nothing re-signed, outTx recorded, VCHF credited exactly; a terminal record is not resurrected onto the reopened screen. | convert, icp, vchf, pending-withdrawal, reload, identity-scoped-store, resume-engine, unmounted-driving, no-resubmit, resolution |
+| 173 | convert-order-reverse | The chooser's order/no-preselection red lines hold in the REVERSE direction (VCHF → ICP): with both venues armed on a private relay, flooring the real pool and then flooring fixture B instead — each venue taking a turn being strictly worse — never moves the rows off registry order, never auto-selects a row (radio-dot probe), and confirm stays disabled until the user picks. | convert, venues, venue-chooser, registry-order, no-ranking, no-preselection, pool-knob, reverse-direction, vchf |
 
 ### NFC (tap-to-pay)
 
