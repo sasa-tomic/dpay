@@ -89,7 +89,7 @@ export async function run() {
     //      destination (`fmtAsset to name`), so the amount + U-F5 short-payee asserts read there.
     await driver.findByTestID('sol-pay-qr', {timeoutMs: 8_000});
     const qrBody = await driver.bodyText();
-    assert(/0\.001000000 SOL/.test(qrBody), `the qr surface should show the SOL amount (0.001000000 for PAY_LAMPORTS=1_000_000), got: "${qrBody.slice(0, 200)}"`);
+    assert(/0\.001005 SOL/.test(qrBody), `the qr surface should show the SOL amount (0.001005 for PAY_LAMPORTS=1_000_000), got: "${qrBody.slice(0, 200)}"`);
     // U-F5 (SOL twin of flows 26/27): the merchant name alone is not verifiable — the dim
     // sol-pay-payee line carries the short base58 destination under the name.
     const payee = await driver.findByTestID('sol-pay-payee', {timeoutMs: 5_000});

@@ -29,12 +29,13 @@ const POOL = '65mrh-fqaaa-aaaar-qapoa-cai'; // the REAL venue's pool (the census
 const ICP_FEE = 10000n; // raw e8s, the catalog fee field (same numbers flow 140's census pins)
 const VCHF_FEE = 10000n;
 
-/** fmtAsset twin (8 decimals, no grouping under 1000, '.' separator — the web driver locale). */
+/** fmtAssetCompact twin (8 decimals, trailing zeros trimmed — the app renders fees and amounts
+ *  compact since 2026-09-13; '.' separator, no grouping under 1000 — the web driver locale). */
 function fmt8(raw) {
   const n = BigInt(raw);
   const whole = n / 100000000n;
-  const frac = (n % 100000000n).toString().padStart(8, '0');
-  return `${whole}.${frac}`;
+  const frac = (n % 100000000n).toString().padStart(8, '0').replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
 export const meta = {

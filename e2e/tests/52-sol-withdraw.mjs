@@ -117,7 +117,7 @@ export async function run() {
     // 4. The review card appears once a valid amount is entered.
     const review = await driver.findByTestID('sol-send-review', {timeoutMs: 4_000});
     const reviewTxt = await review.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/0\.001000000 SOL/.test(reviewTxt), `review should show 0.001000000 SOL, got: "${reviewTxt}"`);
+    assert(/0\.001 SOL/.test(reviewTxt), `review should show 0.001 SOL, got: "${reviewTxt}"`);
     console.log(`[52-sol-withdraw] ✓ review: ${reviewTxt}`);
 
     // 5. Confirm → sendSol signs locally + broadcasts via the stub → "Sent ✓".

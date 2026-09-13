@@ -33,7 +33,7 @@
 import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances, selectCurrency, openReceiveAddress, railPrincipalText } from '../harness/lib.mjs';
 
 const DEPOSIT_CURRENCY = 1; // ckBTC — the Balances row selected for the deposit flow
-const SEED_SATS = 50_000;   // 0.00050000 BTC
+const SEED_SATS = 50_000;   // 0.0005 BTC
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -143,13 +143,13 @@ export async function run() {
       if (!already) throw e;
     });
 
-    // 7. The sheet flips to "Deposited ✓" + the minted delta ("0.00050000 BTC minted" via
+    // 7. The sheet flips to "Deposited ✓" + the minted delta ("0.0005 BTC minted" via
     //    fmtAsset(delta, 8, 'BTC')). This is the honest balance-delta report — no per-UTXO cues.
     console.log('[05-deposit-credited] waiting for the deposit to be detected…');
     const credited = await driver.waitForText('Deposited', { timeoutMs: 8_000 });
     const body = await driver.bodyText();
     assert(credited, `deposit sheet should show "Deposited ✓" after the recheck. body excerpt:\n${body.slice(0, 600)}`);
-    assertIncludes(body, '0.00050000 BTC', 'sheet should show the minted BTC delta');
+    assertIncludes(body, '0.0005 BTC', 'sheet should show the minted BTC delta');
     console.log('[05-deposit-credited] ✓ sheet shows "Deposited ✓" + minted delta');
 
     // 8. The credited path proven directly on the rail: the currency-1 balance grew by the funded

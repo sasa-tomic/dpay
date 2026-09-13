@@ -90,7 +90,7 @@ export async function run() {
     assert(!why1.includes('—'), `a pure preference adds no reason suffix, got "${why1}"`);
     const fee1 = await driver.readText('receive-rail-fee');
     assertIncludes(fee1, 'Internet Computer', 'the fee line names the rail\'s network');
-    assertIncludes(fee1, 'Fee 0.010000 ckUSDC', 'the fee is stated in the rail\'s own unit (0.01 ckUSDC, 6 decimals)');
+    assertIncludes(fee1, 'Fee 0.01 ckUSDC', 'the fee is stated in the rail\'s own unit (0.01 ckUSDC, 6 decimals)');
     const toggleTxt = await driver.readText('receive-rail-toggle');
     assertIncludes(toggleTxt, 'Internet Computer', 'the rail toggle offers the IC side');
     assertIncludes(toggleTxt, 'Solana', 'the rail toggle offers the Solana side');
@@ -111,8 +111,8 @@ export async function run() {
     assertIncludes(why2, 'USDC · Solana', 'the sibling rail is named by its own line');
     assert(!why2.includes('—'), `the sibling carries no reason suffix (only the pick does), got "${why2}"`);
     const fee2 = await driver.readText('receive-rail-fee');
-    assertIncludes(fee2, 'Solana · Fee 0.000005000 SOL', 'the Solana per-transfer fee is stated in SOL');
-    assertIncludes(fee2, 'one-time account rent 0.002039280 SOL', 'the USDC ATA rent is disclosed as the one-time cost');
+    assertIncludes(fee2, 'Solana · Fee 0.000005 SOL', 'the Solana per-transfer fee is stated in SOL');
+    assertIncludes(fee2, 'one-time account rent 0.00203928 SOL', 'the USDC ATA rent is disclosed as the one-time cost');
     const solAddr = (await driver.readText('sol-receive-address')).trim();
     assert(BASE58.test(solAddr), `the USDC rail address is a valid base58 Solana address, got "${solAddr}"`);
     await driver.screenshot('122-receive-rail-usd-sol');

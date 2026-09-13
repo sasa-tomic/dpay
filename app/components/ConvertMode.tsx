@@ -59,7 +59,7 @@ import {
 } from '../convertResume';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
-import {fmtAsset, parseUserAmount} from '../lib/format';
+import {fmtAssetCompact, parseUserAmount} from '../lib/format';
 import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -452,7 +452,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const {inSym, outSym, inDecimals, outDecimals} = legs;
   const balanceRaw = selectedAsset != null && selectedAsset.protocol === 'ic' ? assetBalances[selectedAsset.currency] : undefined;
   const balanceN = balanceRaw != null ? BigInt(balanceRaw) : null;
-  const balanceStr = balanceRaw != null ? fmtAsset(balanceRaw, inDecimals, inSym) : null;
+  const balanceStr = balanceRaw != null ? fmtAssetCompact(balanceRaw, inDecimals, inSym) : null;
 
   // Fail closed BEFORE the confirm, never after it (2026-09-08: the button was live on a wallet
   // holding nothing — a confirm that can only be refused by the ledger). A conversion costs the
@@ -470,7 +470,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // (undefined) is not a zero and is not offered — the same fail-open rule the gate above uses.
     const otherRaw = assetBalances[legs.outDesc.currency];
     const otherHeld = otherRaw != null && BigInt(otherRaw) > 0n
-      ? fmtAsset(otherRaw, outDecimals, outSym)
+      ? fmtAssetCompact(otherRaw, outDecimals, outSym)
       : null;
     return (
       <View testID="convert-screen" style={S.convertWrap}>
@@ -523,7 +523,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // In chooser mode this also withholds the confirm until a row is picked (activeQuote is null
   // without a selection — the none-preselected red line, expressed as data, not as a flag).
   const canConfirm = activeQuote != null && math != null && !quoteBusy && !confirmBusy && !insufficient;
-  const netStr = math != null ? fmtAsset(math.netOut, outDecimals, outSym) : null;
+  const netStr = math != null ? fmtAssetCompact(math.netOut, outDecimals, outSym) : null;
   return (
     <View testID="convert-screen" style={S.convertWrap}>
       <ConvertHeader title={M.convert.heading(inSym, outSym)} onBack={onBack} />
@@ -548,7 +548,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       ) : null}
       {insufficient ? (
         <Text testID="convert-insufficient" style={S.err}>
-          {M.convert.insufficientLine(fmtAsset(neededN!.toString(), inDecimals, inSym), balanceStr!)}
+          {M.convert.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)}
         </Text>
       ) : null}
 
@@ -586,7 +586,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
                   <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{v.display_name}</Text>
                   {vq != null ? (
                     <Text testID={`convert-venue-${v.venue_id}-quote`} style={S.convertVenueAmount}>
-                      {M.convert.venueRowQuote(fmtAsset(vq.amountOutGross, outDecimals, outSym))}
+                      {M.convert.venueRowQuote(fmtAssetCompact(vq.amountOutGross, outDecimals, outSym))}
                     </Text>
                   ) : verr != null ? (
                     <Text testID={`convert-venue-${v.venue_id}-err`} style={S.err}>{verr}</Text>
@@ -620,7 +620,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           <Text style={S.convertHeadlineAmount}>{netStr}</Text>
           <View testID="convert-rate" style={S.convertRateRow}>
             <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, outSym)}</Text>
-            <Text style={S.convertRateValue}>{fmtAsset(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, outDecimals), outDecimals, outSym)}</Text>
+            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, outDecimals), outDecimals, outSym)}</Text>
           </View>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
@@ -671,12 +671,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         ) : null}
         {math != null ? (
           <Text testID="convert-in-fee" style={S.convertChecklistLine}>
-            {M.convert.inputFeeLine(fmtAsset(math.inFee, inDecimals, inSym))}
+            {M.convert.inputFeeLine(fmtAssetCompact(math.inFee, inDecimals, inSym))}
           </Text>
         ) : null}
         {math != null ? (
           <Text testID="convert-out-fee" style={S.convertChecklistLine}>
-            {M.convert.outputFeeLine(fmtAsset(math.outFee, outDecimals, outSym))}
+            {M.convert.outputFeeLine(fmtAssetCompact(math.outFee, outDecimals, outSym))}
           </Text>
         ) : null}
         {math != null ? (
@@ -712,7 +712,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         ) : null}
         {math != null ? (
           <Text testID="convert-min-out" style={S.convertMinOutLine}>
-            {M.convert.minReceiveLine(fmtAsset(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
+            {M.convert.minReceiveLine(fmtAssetCompact(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
           </Text>
         ) : null}
         {math != null ? (
@@ -728,8 +728,8 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         {quoteChanged != null ? (
           <Text testID="convert-quote-changed" style={S.convertChecklistWarn}>
             {M.convert.quoteChanged(
-              fmtAsset(quoteChanged.oldAmt, outDecimals, outSym),
-              fmtAsset(quoteChanged.newAmt, outDecimals, outSym),
+              fmtAssetCompact(quoteChanged.oldAmt, outDecimals, outSym),
+              fmtAssetCompact(quoteChanged.newAmt, outDecimals, outSym),
             )}
           </Text>
         ) : null}
@@ -853,7 +853,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.approvingTitle}</Text>
           <Text style={S.convertStateBody}>
-            {M.convert.approvingBody(fmtAsset(record.amountIn, inDecimals, inSymbol), formatClock(new Date(legExpiryMs)))}
+            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), formatClock(new Date(legExpiryMs)))}
           </Text>
         </View>
       ) : null}
@@ -874,7 +874,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
       {record.step === 'done' ? (
         <View testID="convert-done">
           <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
-          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAsset(record.outAmountNet ?? '0', outDecimals, outSymbol))}</Text>
+          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAssetCompact(record.outAmountNet ?? '0', outDecimals, outSymbol))}</Text>
           {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
       ) : null}
@@ -908,7 +908,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
           {minOut != null ? (
             <Text style={S.convertStateMeta}>
-              {M.convert.stuckSigned(fmtAsset(record.amountIn, inDecimals, inSymbol), fmtAsset(minOut, outDecimals, outSymbol), venueName)}
+              {M.convert.stuckSigned(fmtAssetCompact(record.amountIn, inDecimals, inSymbol), fmtAssetCompact(minOut, outDecimals, outSymbol), venueName)}
             </Text>
           ) : null}
           <Text testID="convert-expiry" style={S.convertStateMeta}>

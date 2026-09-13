@@ -89,18 +89,18 @@ export async function run() {
     await driver.findByTestID('send-status', { timeoutMs: 5_000 });
     const routeLine = await driver.readText('send-status');
     assertIncludes(routeLine, 'Internet Computer', 'the route line names the settlement network');
-    assertIncludes(routeLine, '0.00010000 VCHF', 'the route line discloses the ledger fee before committing');
+    assertIncludes(routeLine, '0.0001 VCHF', 'the route line discloses the ledger fee before committing');
     console.log(`[104-send-to-address] route disclosed: "${routeLine}"`);
 
     // Amount → the review card shows amount, fee and the TOTAL that will leave the account.
     await driver.type('send-amount-input', SEND_TEXT, { timeoutMs: 4_000 });
     await driver.findByTestID('send-review-amount', { timeoutMs: 4_000 });
     const reviewAmount = await driver.readText('send-review-amount');
-    assertIncludes(reviewAmount, '1.25000000 VCHF', 'review shows the exact amount being sent');
+    assertIncludes(reviewAmount, '1.25 VCHF', 'review shows the amount being sent, compact');
     const reviewFee = await driver.readText('send-review-fee');
-    assertIncludes(reviewFee, '0.00010000', 'review shows the ledger fee');
+    assertIncludes(reviewFee, '0.0001', 'review shows the ledger fee');
     const reviewTotal = await driver.readText('send-review-total');
-    assertIncludes(reviewTotal, '1.25010000', 'review shows amount + fee as the total leaving the account');
+    assertIncludes(reviewTotal, '1.2501', 'review shows amount + fee as the total leaving the account');
 
     console.log('[104-send-to-address] confirming (signs one icrc1_transfer on-device)…');
     await driver.click('btn-send-confirm', { timeoutMs: 5_000 });

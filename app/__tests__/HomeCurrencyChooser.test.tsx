@@ -145,9 +145,9 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
     press(tree, 'home-currency-EUR');
     // Fee facts — the M.receive.rail vocabulary, each rail in its own unit:
     expect(rowText(tree, 'rail-detail-fee-sol-eurc')).toBe(
-      'Solana · Fee 0.000005000 SOL + one-time account rent 0.002039280 SOL',
+      'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
     );
-    expect(rowText(tree, 'rail-detail-fee-veur')).toBe('Internet Computer · Fee 0.00010000 VEUR');
+    expect(rowText(tree, 'rail-detail-fee-veur')).toBe('Internet Computer · Fee 0.0001 VEUR');
     // Liquidity: deep on EURC (pro line), thin on VEUR (warn statement, named by ledger token).
     expect(rowText(tree, 'rail-detail-liquidity-sol-eurc')).toBe('Circulates widely on-chain today.');
     expect(rowText(tree, 'rail-detail-liquidity-veur')).toBe(

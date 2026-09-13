@@ -139,7 +139,7 @@ export async function run() {
     for (const id of ['ic:1', 'ic:7', 'ic:8']) {
       assert(await driver.isPresent(`ocp-option-${id}`), `the menu must offer ${id} — the till lists it and this wallet carries it`);
     }
-    assertIncludes(await driver.readText('ocp-option-ic:8'), '0.50795551 ICP', 'the option states its own exact amount');
+    assertIncludes(await driver.readText('ocp-option-ic:8'), '0.50805551 ICP', 'the option states its total debit (amount + catalog fee)');
     assert(!(await driver.isPresent('ocp-option-solana:SOL')), 'the menu must not offer an asset on the other rail');
     assert(!(await driver.isPresent('pay-amount')), 'the menu must never render a payment review');
     assert(!(await driver.isPresent('btn-approve')), 'the menu must never render an Approve button');
@@ -155,7 +155,10 @@ export async function run() {
     // PICKING pays the chosen asset, not the one that was selected in Balances.
     await driver.click('ocp-option-ic:8');
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
-    assertEq(await driver.readText('pay-amount'), 'Pay 0.50795551 ICP',
+    // The total debit (amount + ledger fee) needs the async icrc1_fee round trip — WAIT for it.
+    assert(await driver.waitForText('Pay 0.50805551 ICP', {timeoutMs: 15_000}),
+      'the picked review must reach the fee-inclusive total');
+    assertEq(await driver.readText('pay-amount'), 'Pay 0.50805551 ICP',
       'picking ICP off the menu reviews ICP — never the ckUSDC the payer had selected');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the picked review still shows the FULL destination account');
@@ -178,8 +181,10 @@ export async function run() {
       'the waiting message names who is being asked');
 
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
-    assertEq(await driver.readText('pay-amount'), 'Pay 0.50795551 ICP',
-      'the review shows the till\'s exact quoted amount, converted at ICP\'s own precision');
+    assert(await driver.waitForText('Pay 0.50805551 ICP', {timeoutMs: 15_000}),
+      'the review must reach the fee-inclusive total debit');
+    assertEq(await driver.readText('pay-amount'), 'Pay 0.50805551 ICP',
+      'the review shows the till\'s quoted amount + the ledger fee, converted at ICP\'s own precision');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the review shows the FULL destination account — the one thing on screen the payer can check');
     // ONE provider line, carrying both facts. WHAT THE TILL IS CHARGING, in the till's own unit:
@@ -215,7 +220,7 @@ export async function run() {
     // --- 3. paid ------------------------------------------------------------------------------
     console.log('[111-opencryptopay-till] leg 3 — approving…');
     await driver.click('btn-approve', {timeoutMs: 5_000});
-    assert(await driver.waitForText('Paid ✓ 0.50795551 ICP', {timeoutMs: 20_000}),
+    assert(await driver.waitForText('Paid ✓ 0.50805551 ICP', {timeoutMs: 20_000}),
       'an accepted submission renders the paid state with the exact amount');
     assert(!(await driver.isPresent('ocp-outcome')),
       'a clean payment carries no unresolved note — that surface is for the loss path alone');
@@ -258,7 +263,7 @@ export async function run() {
 
     body = await driver.bodyText();
     assert(!body.includes('Paid ✓'), 'an unresolved payment must NEVER render as paid');
-    assertIncludes(body, 'Sent 0.50795551 ICP', 'the unresolved outcome is the honest pending headline');
+    assertIncludes(body, 'Sent 0.50805551 ICP', 'the unresolved outcome is the honest pending headline');
     // …and it says what it is waiting on IN ITS OWN WORDS. The offline hand-off's "awaiting the
     // merchant's confirmation" line must NOT be borrowed here: that state resolves by waiting, this
     // one never does — the transfer is final and only the merchant can credit it, which is what the

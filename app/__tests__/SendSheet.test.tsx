@@ -267,7 +267,7 @@ describe('SendSheet — Max is balance MINUS fee', () => {
     expect(present(tree, 'send-overbalance')).toBe(false);
     expect(confirm(tree).disabled).toBe(false);
     // The point of subtracting the fee: the total is exactly the balance, never above it.
-    expect(textOf(tree, 'send-review-total')).toBe('5.00000000 VCHF');
+    expect(textOf(tree, 'send-review-total')).toBe('5.00 VCHF');
 
     act(() => { tree.unmount(); });
   });
@@ -291,8 +291,8 @@ describe('SendSheet — an unreachable ledger leaves the fee UNKNOWN, never 0', 
     await typeAddress(tree, K2);
     await typeAmount(tree, '1.00000000');
     expect(fetchLedgerFee).toHaveBeenCalledWith(IDENTITY.secretHex, VCHF.ledger);
-    expect(textOf(tree, 'send-review-fee')).toBe('0.00010000 VCHF');
-    expect(textOf(tree, 'send-review-total')).toBe('1.00010000 VCHF');
+    expect(textOf(tree, 'send-review-fee')).toBe('0.0001 VCHF');
+    expect(textOf(tree, 'send-review-total')).toBe('1.0001 VCHF');
 
     act(() => { tree.unmount(); });
   });
@@ -314,7 +314,7 @@ describe('SendSheet — an unreachable ledger leaves the fee UNKNOWN, never 0', 
     await typeAmount(tree, '1.00000000');
     expect(textOf(tree, 'send-review-fee')).toBe(M.withdraw.send.feeUnknown);
     expect(present(tree, 'send-review-total')).toBe(false);
-    expect(textOf(tree, 'send-review-amount')).toBe('1.00000000 VCHF'); // the amount is known, and shown
+    expect(textOf(tree, 'send-review-amount')).toBe('1.00 VCHF'); // the amount is known, and shown
     expect(confirm(tree).disabled).toBe(false);
 
     act(() => { tree.unmount(); });
@@ -522,7 +522,7 @@ describe('SendSheet — the route line names the rail for home-currency rails (O
     const tree = await mountSend({desc: CKUSDC, balance: '500000000', homeRail: CKUSDC_RAIL});
     await typeAddress(tree, K2);
     expect(field(tree).status).toEqual({
-      text: 'ckUSDC · Internet Computer · arrives in seconds · fee 0.010000 USDC',
+      text: 'ckUSDC · Internet Computer · arrives in seconds · fee 0.01 USDC',
       tone: 'ok',
     });
     act(() => { tree.unmount(); });
@@ -532,7 +532,7 @@ describe('SendSheet — the route line names the rail for home-currency rails (O
     const tree = await mountSend({desc: CKUSDC, balance: '500000000', homeRail: null});
     await typeAddress(tree, K2);
     expect(field(tree).status).toEqual({
-      text: 'Internet Computer · arrives in seconds · fee 0.010000 USDC',
+      text: 'Internet Computer · arrives in seconds · fee 0.01 USDC',
       tone: 'ok',
     });
     act(() => { tree.unmount(); });

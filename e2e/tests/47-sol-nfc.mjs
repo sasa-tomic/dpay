@@ -112,7 +112,7 @@ export async function run() {
       const body = await driver.bodyText();
       assert(body.includes('Hold the phones together to send'),
         'the exchanging card-role hint should ask the payer to hold the phones together');
-      assert(body.includes('Paying 0.001000000 SOL'), 'the read-only amount should ride the status line');
+      assert(body.includes('Paying 0.001005 SOL'), 'the read-only amount should ride the status line');
       assert(!(await driver.isPresent('btn-nfc-approve')), 'no Approve button exists (one press already spent at "Pay Now")');
     }
     console.log('[47-sol-nfc] ✓ request → auto-sign → "Communicating…" (sign + approveSolCard fired)');

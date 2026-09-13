@@ -6,7 +6,7 @@ import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {toUnits, randNonceHex, nowSecs} from '../lib/format';
 import {encodePayLink, shareOrigin, decodeReceiptDeeplink, parseRailProof} from '../lib/deepLink';
-import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmount, currencySymbol, depositMechanism, isTestnetCurrency} from '../config/catalog';
+import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmountCompact, currencySymbol, depositMechanism, isTestnetCurrency} from '../config/catalog';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {type HomeCurrency, currencyRails} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
@@ -349,7 +349,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     return (
       <View style={S.center}>
         <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-        <Text style={S.paidText}>{M.receive.receivedAmount(fmtCurrencyAmount(catalog, result.currency, result.amount))}</Text>
+        <Text style={S.paidText}>{M.receive.receivedAmount(fmtCurrencyAmountCompact(catalog, result.currency, result.amount))}</Text>
         <Text style={S.paidSub}>{M.receive.fromWho(result.from)}</Text>
         <Pressable style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.receive.newRequest} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.receive.newRequest}</Text></Pressable>
       </View>
@@ -398,7 +398,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 occlusion budget at this URL length (the pixel-decode gate, flow qr-scannable,
                 is the proof). */}
             <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.link} size={QR_SIZE} ecl="M" /></View>
-        <Text style={S.amountBig}>{fmtCurrencyAmount(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
+        <Text style={S.amountBig}>{fmtCurrencyAmountCompact(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
         {(() => {
           const remaining = reqQr.expiry - now;
           if (remaining <= 0) return <Text style={S.qrExpired}>{M.receive.expiredMakeNew}</Text>;

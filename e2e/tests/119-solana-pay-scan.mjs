@@ -99,7 +99,7 @@ export async function run() {
     );
     const amount = await driver.findByTestID('sol-pay-amount', {timeoutMs: 8_000});
     const amountTxt = await amount.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/0\.001000000 SOL/.test(amountTxt), `review should show 0.001000000 SOL, got: "${amountTxt}"`);
+    assert(/0.001005 SOL/.test(amountTxt), `review should show the total debit 0.001005 SOL, got: "${amountTxt}"`);
     assertEq(await driver.readText('sol-pay-payee'), MERCHANT, 'the FULL merchant address must be on the review');
     await driver.waitForText('Coffee Bar', {timeoutMs: 5_000});
     await driver.waitForText('Order 42', {timeoutMs: 5_000});
@@ -116,7 +116,7 @@ export async function run() {
     await driver.click('btn-approve', {timeoutMs: 5_000});
     const status = await driver.findByTestID('sol-pay-status', {timeoutMs: 12_000});
     const statusTxt = await status.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/0\.001000000 SOL/.test(statusTxt), `the outcome should name the paid amount, got: "${statusTxt}"`);
+    assert(/0\.001005 SOL/.test(statusTxt), `the outcome should name the total debited, got: "${statusTxt}"`);
     const sig = await driver.findByTestID('sol-spay-signature', {timeoutMs: 5_000});
     const sigTxt = await sig.evaluate((n) => (n.textContent ?? '').trim());
     assert(/^sig_/.test(sigTxt), `the transaction signature should be rendered, got: "${sigTxt}"`);
@@ -134,14 +134,14 @@ export async function run() {
     );
     const usdcAmount = await driver.findByTestID('sol-pay-amount', {timeoutMs: 8_000});
     const usdcTxt = await usdcAmount.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/1\.500000 USDC/.test(usdcTxt), `the spl-token review should show 1.500000 USDC, got: "${usdcTxt}"`);
+    assert(/1\.5 USDC/.test(usdcTxt), `the spl-token review should show 1.5 USDC, got: "${usdcTxt}"`);
     await driver.findByTestID('sol-spay-ata-note', {timeoutMs: 5_000});
     console.log('[119-solana-pay-scan] ✓ USDC review with the ATA rent disclosed');
     await driver.waitGone('sol-pay-lowbal', {timeoutMs: 10_000});
     await driver.click('btn-approve', {timeoutMs: 5_000});
     const usdcStatus = await driver.findByTestID('sol-pay-status', {timeoutMs: 12_000});
     const usdcStatusTxt = await usdcStatus.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/1\.500000 USDC/.test(usdcStatusTxt), `the USDC outcome should name the paid amount, got: "${usdcStatusTxt}"`);
+    assert(/1\.5 USDC/.test(usdcStatusTxt), `the USDC outcome should name the paid amount, got: "${usdcStatusTxt}"`);
     console.log(`[119-solana-pay-scan] ✓ USDC paid — ${usdcStatusTxt}`);
     await driver.screenshot('119-spay-usdc-paid');
 

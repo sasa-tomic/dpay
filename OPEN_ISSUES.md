@@ -93,7 +93,11 @@ pays the fees. This is standard practice and we should follow it."* **DONE for t
 amendment in
 [`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md);
 mechanism `LEDGER_FEE_RAW`, `crates/dpay-relay/src/till.rs`; flows 114 + 117 prove a customer's
-account moves by exactly the price on both scan and tap). **OPEN for every other payee-quoted
+account moves by exactly the price on both scan and tap). The payer-facing DISPLAY side is now
+honest too (2026-09-13): every review/paid/hand-off screen shows the TOTAL DEBIT (amount + ledger
+fee) in the compact form — at a till that IS the shelf price ("10.00 VCHF"), elsewhere the price
+plus the fee ("1.00010001 VCHF"); fee fetched live via `icrc1_fee` (falls back to the amount when
+offline), SOL rail adds `SOL_FEE_LAMPORTS` for native SOL. **OPEN for every other payee-quoted
 amount**, where the payer is still silently charged the price PLUS the fee: the Receive-tab request
 QR, the `…/wallet/pay/…` payment link's `amount=`, and the NFC request the request screen arms.
 Each is a different wire with its own goldens, which is why it was not bundled into the till change.

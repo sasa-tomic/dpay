@@ -70,7 +70,7 @@ import {convertEn} from '../i18n/domains/en/convert';
 import {convertDe} from '../i18n/domains/de/convert';
 import {convertEs} from '../i18n/domains/es/convert';
 import {convertFr} from '../i18n/domains/fr/convert';
-import {fmtAsset} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 
 const CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 const ASSETS = buildSelectableAssets(CATALOG, {showTestnet: false, solanaEnabled: false, solanaTokens: false});
@@ -170,10 +170,10 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
     expect(occurrences(textOf(tree, 'convert-out-fee'), 'VCHF')).toBe(1);
     expect(occurrences(textOf(tree, 'convert-min-out'), 'VCHF')).toBe(1);
     expect(occurrences(textOf(tree, 'convert-net'), 'VCHF')).toBe(1);
-    // …and the amounts themselves are still the formatter's exact strings.
-    expect(textOf(tree, 'convert-balance')).toContain('2.50000000 ICP');
-    expect(textOf(tree, 'convert-in-fee')).toContain('0.00010000 ICP');
-    expect(textOf(tree, 'convert-out-fee')).toContain('0.00010000 VCHF');
+    // …and the amounts themselves are the compact formatter's strings (trailing zeros trimmed).
+    expect(textOf(tree, 'convert-balance')).toContain('2.5 ICP');
+    expect(textOf(tree, 'convert-in-fee')).toContain('0.0001 ICP');
+    expect(textOf(tree, 'convert-out-fee')).toContain('0.0001 VCHF');
     expect(textOf(tree, 'convert-min-out')).toContain('0.40782196 VCHF');
     expect(textOf(tree, 'convert-net')).toContain('0.41184138 VCHF');
   });
@@ -266,7 +266,7 @@ describe('C3 — a confirm that can only fail is refused before it is offered', 
     const tree = await mountConvert('0', null, {assetBalances: {8: '0', 7: '120000000'}, onSwitchAsset});
     expect(present(tree, 'convert-fund-other')).toBe(true);
     const line = textOf(tree, 'convert-fund-other-holds');
-    expect(line).toContain('1.20000000 VCHF'); // what is actually held, in its own ledger unit
+    expect(line).toContain('1.2 VCHF'); // what is actually held, in its own ledger unit
     expect(line).toContain('ICP');            // and what it would become
     const btn = node(tree, 'btn-convert-fund-other');
     expect(btn!.props.accessibilityRole).toBe('button');
@@ -302,8 +302,8 @@ describe('C3 — a confirm that can only fail is refused before it is offered', 
     expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
     const line = textOf(tree, 'convert-insufficient');
     expect(line).toContain('ICP');
-    expect(line).toContain('2.00020000 ICP'); // 2 ICP + the two ledger fees it also costs
-    expect(line).toContain('1.00000000 ICP'); // the balance it is measured against
+    expect(line).toContain('2.0002 ICP'); // 2 ICP + the two ledger fees it also costs
+    expect(line).toContain('1 ICP'); // the balance it is measured against
   });
 
   test('the fee overhead is part of the check: exactly-the-balance is still refused', async () => {
@@ -368,7 +368,7 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     // rendered string is pinned to the pure derivation, never to a hand-copied literal.
     const tree = await mountConvert('250000000', '1');
     const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 8n) / BigInt(QUOTE.amountIn);
-    const expected = fmtAsset(scaled.toString(), 8, 'VCHF');
+    const expected = fmtAssetCompact(scaled.toString(), 8, 'VCHF');
     expect(expected).toBe('0.41194138 VCHF'); // 41194138e8 / 100000000 — the derivation itself
     expect(textOf(tree, 'convert-rate')).toContain(expected);
     expect(textOf(tree, 'convert-rate')).toContain(convertEn.rateLabel('ICP', 'VCHF'));
@@ -490,7 +490,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     expect(present(tree, 'convert-venues')).toBe(true);
     expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_A.venue_id}`, `convert-venue-${VENUE_B.venue_id}`]);
     // B quotes better (0.90000000 vs 0.41194138) yet stays row 2 — the never-rank red line.
-    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-quote`)).toContain('0.90000000 VCHF');
+    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-quote`)).toContain('0.9 VCHF');
     // NOTHING is selected: both rows radio-off, the none-selected line shows, and the decision
     // surfaces (headline, checklist, confirm) that follow a pick are all absent/disabled.
     for (const id of [VENUE_A.venue_id, VENUE_B.venue_id]) {
@@ -515,8 +515,8 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     await act(async () => {
       node(tree, 'convert-amount')!.props.onChangeText('12');
     });
-    expect(textOf(tree, `convert-venue-${VENUE_A.venue_id}-quote`)).toContain('0.90000000 VCHF');
-    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-quote`)).toContain('0.20000000 VCHF');
+    expect(textOf(tree, `convert-venue-${VENUE_A.venue_id}-quote`)).toContain('0.9 VCHF');
+    expect(textOf(tree, `convert-venue-${VENUE_B.venue_id}-quote`)).toContain('0.2 VCHF');
     // The refetch really happened (values above prove it) and the order did NOT move.
     expect(rowOrder(tree)).toEqual([`convert-venue-${VENUE_A.venue_id}`, `convert-venue-${VENUE_B.venue_id}`]);
     // Still nothing selected: no last-used default appears just because rates diverged.
@@ -535,7 +535,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     expect(present(tree, 'convert-venue-none')).toBe(false);
     expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({checked: true});
     expect(node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.accessibilityState).toEqual({checked: false});
-    expect(textOf(tree, 'convert-headline')).toContain('0.89990000 VCHF');
+    expect(textOf(tree, 'convert-headline')).toContain('0.8999 VCHF');
     expect(textOf(tree, 'convert-pool-principal').trim()).toBe(FIXTURE_POOL); // B's pool, not A's
     // Confirm re-quotes the PICKED venue only and executes through it.
     await act(async () => {
@@ -574,8 +574,8 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     });
     // B's own quote: 90000000 out for 100000000 in ⇒ scaled 90000000 ⇒ exactly this string.
     const scaled = (BigInt(QUOTE_B.amountOutGross) * 10n ** 8n) / BigInt(QUOTE_B.amountIn);
-    expect(textOf(tree, 'convert-rate')).toContain(fmtAsset(scaled.toString(), 8, 'VCHF'));
-    expect(textOf(tree, 'convert-rate')).toContain('0.90000000 VCHF');
+    expect(textOf(tree, 'convert-rate')).toContain(fmtAssetCompact(scaled.toString(), 8, 'VCHF'));
+    expect(textOf(tree, 'convert-rate')).toContain('0.9 VCHF');
   });
 
   test('a picked-but-unquoted venue is attributed HONESTLY — never another venue\'s name or pool', async () => {
@@ -738,7 +738,7 @@ describe('V9 — chooser invariants parametric over arbitrary venue sets', () =>
     test('INV-4 render half: each row shows ITS OWN venue reply, byte-identical to the echo', async () => {
       const tree = await mountConvert('250000000', '1');
       for (const v of venues) {
-        const expected = convertEn.venueRowQuote(fmtAsset(QUOTES[v.venue_id]!.amountOutGross, 8, 'VCHF'));
+        const expected = convertEn.venueRowQuote(fmtAssetCompact(QUOTES[v.venue_id]!.amountOutGross, 8, 'VCHF'));
         expect(textOf(tree, `convert-venue-${v.venue_id}-quote`).trim()).toBe(expected);
       }
     });
@@ -914,7 +914,7 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     // (41194138 × 10^6) / 10^8 = 411941 raw ⇒ "0.411941 VCHF". A literal-8 scaling instead
     // yields 41194138 raw, which at this catalog's 6 decimals renders "41.194138 VCHF".
     const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 6n) / BigInt(QUOTE.amountIn);
-    expect(textOf(tree, 'convert-rate')).toContain(fmtAsset(scaled.toString(), 6, 'VCHF'));
+    expect(textOf(tree, 'convert-rate')).toContain(fmtAssetCompact(scaled.toString(), 6, 'VCHF'));
     expect(textOf(tree, 'convert-rate')).toContain('0.411941 VCHF');
   });
 
@@ -924,7 +924,7 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     expect(present(tree, 'convert-approving')).toBe(true);
     // amountIn 100000000 raw at SIX decimals = 100.000000 ICP; a literal-8 regression prints
     // 1.00000000 ICP — a 100× lie about what was approved.
-    expect(textOf(tree, 'convert-approving')).toContain('100.000000 ICP');
+    expect(textOf(tree, 'convert-approving')).toContain('100 ICP');
   });
 
   test('the stuck panel carries BOTH legs\' frozen decimals (signed amount in, minimum out)', async () => {
@@ -933,7 +933,7 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-stuck')).toBe(true);
     // minOut 40782196 raw at SIX decimals = 40.782196 VCHF (literal-8 regression: 0.40782196).
-    expect(textOf(tree, 'convert-stuck')).toContain('100.000000 ICP');
+    expect(textOf(tree, 'convert-stuck')).toContain('100 ICP');
     expect(textOf(tree, 'convert-stuck')).toContain('40.782196 VCHF');
   });
 
@@ -943,7 +943,7 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     const tree = await mountConvert('250000000', null);
     expect(present(tree, 'convert-stuck')).toBe(true);
     // No decimals on the record ⇒ 8 (today's IC reality), never a crash or a blank line.
-    expect(textOf(tree, 'convert-stuck')).toContain('1.00000000 ICP');
+    expect(textOf(tree, 'convert-stuck')).toContain('1 ICP');
     expect(textOf(tree, 'convert-stuck')).toContain('0.40782196 VCHF');
   });
 });

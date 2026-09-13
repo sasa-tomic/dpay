@@ -6,7 +6,7 @@ import {S} from '../styles';
 import {POLL, QR_SIZE_SMALL} from '../config/constants';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
-import {type CurrencyDescriptor, displayName, fmtCurrencyAmount} from '../config/catalog';
+import {type CurrencyDescriptor, displayName, fmtCurrencyAmountCompact} from '../config/catalog';
 import {type SelectableAsset, linkNetworkOf, prettyNetwork} from '../config/assets';
 import {railBalanceOf} from '../services/rail';
 import {DpayCore} from '../services/native';
@@ -106,7 +106,7 @@ export function IcrcDepositSheet({identity, catalog, asset, funding, onClose}: {
   const network = prettyNetwork(linkNetworkOf(asset));
   // The ledger fee from the catalog descriptor (already formatted in the asset's own units); the
   // feeNone word only renders for a malformed descriptor the caller failed to gate out.
-  const feeVal = desc && desc.fee != null ? fmtCurrencyAmount(catalog, desc.currency, desc.fee) : M.deposit.ck.feeNone;
+  const feeVal = desc && desc.fee != null ? fmtCurrencyAmountCompact(catalog, desc.currency, desc.fee) : M.deposit.ck.feeNone;
 
   const body = (
     <>
@@ -123,7 +123,7 @@ export function IcrcDepositSheet({identity, catalog, asset, funding, onClose}: {
         <View style={S.centerAll}>
           <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
           <Text style={S.paidText}>{M.deposit.deposited}</Text>
-          <Text style={S.paidSub}>{M.deposit.icrc.receivedAmount(desc ? fmtCurrencyAmount(catalog, desc.currency, receivedTotal) : '')}</Text>
+          <Text style={S.paidSub}>{M.deposit.icrc.receivedAmount(desc ? fmtCurrencyAmountCompact(catalog, desc.currency, receivedTotal) : '')}</Text>
           <Text style={S.dim2}>{M.deposit.balanceAuto}</Text>
           <Pressable testID="btn-deposit-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
         </View>

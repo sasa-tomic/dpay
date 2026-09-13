@@ -2,7 +2,7 @@ import {useCallback, useEffect, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {fmtAsset, toUnits} from '../lib/format';
+import {fmtAssetCompact, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
@@ -52,7 +52,7 @@ export function WithdrawSheet({identity, catalog, currency, decimals, display, f
   const {journey} = useJourney();
   const {copied, copy: doCopy} = useCopyFeedback();
   // Every amount on this sheet is the same asset at the same precision — one formatter, one place.
-  const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, display.nativeAsset, display.amountDecimals);
+  const fmt = (rawAmount: string) => fmtAssetCompact(rawAmount, decimals, display.nativeAsset, display.amountDecimals);
 
   useEscapeToClose(onClose);
 

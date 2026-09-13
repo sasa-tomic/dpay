@@ -136,10 +136,12 @@ export function fmtAsset(raw: string, decimals: number, unit: string, displayDec
   const fracStr = fracPart.toString().padStart(decimals, '0').slice(0, dd).padEnd(dd, '0');
   return `${whole}${decimalSep()}${fracStr} ${unit}`;
 }
-// The COMPACT sibling of `fmtAsset` — the glanceable amount (Balances rows, the wallet header,
-// Ledger history). `fmtAsset` stays the EXACT formatter and keeps every surface where the user
-// commits money (payment review, fees, Max, receipts, the NFC disclosure): a padded, full-precision
-// string. Two display contracts, one BigInt core; a compact string never reaches a signing screen.
+// The COMPACT sibling of `fmtAsset` — the DEFAULT for every glanceable money surface (reviews, paid
+// screens, Balances rows, the wallet header, Ledger history, receipts, fees, the NFC disclosure —
+// founder rule 2026-09-13: everywhere the user just READS money shows the best-effort rounded
+// amount). `fmtAsset` stays the EXACT formatter for the one thing that still needs its padded,
+// full-precision string: a value that must round-trip through the amount parser (an input fill,
+// e.g. SendSheet's Max). Two display contracts, one BigInt core.
 //
 // Three rules, in order of importance:
 //   1. Trim trailing zeros down to `minFractionDigits` (the asset's `min_fraction_digits`, 0 when

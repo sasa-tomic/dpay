@@ -6,7 +6,7 @@
 //         unit + network ("VCHF · Internet Computer") and NO ramp actions — no "Add money" /
 //         "Cash out" anywhere, and the only btn-topup in the accounts list is DEMO's faucet button.
 //   * (3) The payer opens a VCHF payment link, sees the exact unit + amount
-//         ("Pay 1.00000001 VCHF"), the payee short key + merchant name — and the request does NOT
+//         ("Pay 1.00010001 VCHF" — the total debit: amount + ledger fee), the payee short key + merchant name — and the request does NOT
 //         auto-sign: the deeplink entry keeps the full review card with a single explicit Approve.
 //   * (4) The app signs an icrc1_transfer whose ONLY canister target is VCHF's exact ledger
 //         principal ly36x-wiaaa-aaaai-aqj7q-cai (asserted via a fetch recorder installed over
@@ -53,7 +53,7 @@ export const meta = {
   name: 'vchf-pay',
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'asset-selector', 'no-ramp', 'deeplink', 'explicit-approve', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a 1.00000001 VCHF deeplink request reviews with exact unit/amount and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key.',
+  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a 1.00000001 VCHF deeplink request reviews with the total debit (amount + ledger fee, compact) in exact unit and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + deeplink reload + settle polls
 };
 
@@ -135,7 +135,8 @@ export async function run() {
 
     const payAmount = await driver.findByTestID('pay-amount', { timeoutMs: 6_000 });
     assert(payAmount != null, 'the payment link reaches the review card');
-    assertIncludes(await driver.readText('pay-amount'), 'Pay 1.00000001 VCHF', 'review shows exact unit + amount');
+    await driver.waitForText('Pay 1.00010001 VCHF', { timeoutMs: 6_000 });
+    assertIncludes(await driver.readText('pay-amount'), 'Pay 1.00010001 VCHF', 'review shows the total debit — exact unit, amount + ledger fee, compact');
     assertEq(await driver.readText('review-payee'), bobPrincipal, 'review shows the full destination account');
     assertIncludes(await driver.bodyText(), 'Bob', 'review shows the label the link carried');
     assert(!(await driver.bodyText()).match(/\bPaid\b/), 'a payment link must NOT auto-sign (no Paid before Approve)');
@@ -156,7 +157,7 @@ export async function run() {
     console.log('[95-vchf-pay] approve…');
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     await driver.waitForText('Paid', { timeoutMs: 12_000 });
-    assertIncludes(await driver.bodyText(), '1.00000001 VCHF', 'paid screen shows exact paid amount');
+    assertIncludes(await driver.bodyText(), '1.00010001 VCHF', 'paid screen shows the total debited (amount + ledger fee), compact');
 
     // (4) Every canister call the app made targets VCHF's exact ledger principal.
     const seen = (await driver.eval(() => window.__E2E_CANISTER_CALLS ?? [])) || [];

@@ -2,13 +2,13 @@
 // founder directive 2026-08-24). Drives the REAL NfcTap state machine through the
 // __DPAY_TEST_NFC_SESSION seam with a `request` event carrying currency 1 (ckBTC) + amount 50000
 // sats, and asserts the sign-status/exchanging surface discloses the honest asset name +
-// asset-correct amount ("Paying 0.00050000 BTC on Bitcoin") + hold-to-send copy. The "Pay Now"
+// asset-correct amount ("Paying 0.0005 BTC on Bitcoin") + hold-to-send copy. The "Pay Now"
 // gate that armed the card was the single deliberate press — the request AUTO-SIGNS on arrival,
 // so the wire exists immediately (no Approve click, no review card).
 //
 // The blind-tap bug this pinned historically: the amount disclosure used to land AFTER signing
 // began (generic "Communicating…", no asset/amount) and the post-sign line rendered the DEMO `usd()`
-// formatter for ckBTC ("∂0.00050000"). The disclosure contract survives the one-press rework:
+// formatter for ckBTC ("∂0.0005"). The disclosure contract survives the one-press rework:
 // honest asset/amount sit in front of the payer WHILE the money moves, never a generic spinner
 // hiding what's being spent.
 //
@@ -27,7 +27,7 @@ export const meta = {
   name: 'nfc-disclosure',
   journey: 'nfc',
   covers: ['nfc-disclosure', 'consent', 'asset-name', 'auto-sign'],
-  verifies: 'NFC auto-sign exchanging status discloses honest asset + amount ("Paying 0.00050000 BTC on Bitcoin") + hold-to-send; the wire exists on arrival (one-press rule).',
+  verifies: 'NFC auto-sign exchanging status discloses honest asset + amount ("Paying 0.0005 BTC on Bitcoin") + hold-to-send; the wire exists on arrival (one-press rule).',
   timeoutMs: 15000,
 };
 
@@ -61,7 +61,7 @@ export async function run() {
     await dispatch({
       type: 'request', role: 'card',
       toHex: '11'.repeat(32),     // merchant pubkey (32 bytes)
-      amount: '50000',            // 50000 sats = 0.00050000 BTC
+      amount: '50000',            // 50000 sats = 0.0005 BTC
       nonceHex: 'ab'.repeat(16),  // 16-byte single-use nonce
       expiry: nowSecs + 300,      // 5 min from now
       currency: 1,                // ckBTC
@@ -79,10 +79,10 @@ export async function run() {
     {
       const body = await driver.bodyText();
       assert(body.includes('BTC'), 'the exchanging status should disclose the asset name "BTC"');
-      assert(body.includes('0.00050000'), 'the exchanging status should disclose the asset-correct amount "0.00050000"');
+      assert(body.includes('0.0005'), 'the exchanging status should disclose the asset-correct amount "0.0005"');
       // The blind-tap bug rendered the DEMO ∂ formatter for ckBTC — assert it is NOT present.
       assert(!/∂0\.00050000/.test(body), 'the exchanging status must NOT render the DEMO ∂ formatter for a ckBTC amount');
-      assert(body.includes('Paying 0.00050000 BTC on Bitcoin'), 'the read-only amount line should read "Paying 0.00050000 BTC on Bitcoin"');
+      assert(body.includes('Paying 0.0005 BTC on Bitcoin'), 'the read-only amount line should read "Paying 0.0005 BTC on Bitcoin"');
       assert(body.includes('Hold the phones together to send'), 'the exchanging card-role hint should render');
       // One-press honesty: the review affordances are gone — no card, no buttons, no countdown.
       assert(!(await driver.isPresent('nfc-pay-amount')), 'no review-card amount node (nfc-pay-amount) may exist');
@@ -90,7 +90,7 @@ export async function run() {
       const wire = await driver.eval(() => window.__DPAY_TEST_NFC_APPROVED_WIRE);
       assert(wire != null && typeof wire.envelopeHex === 'string' && wire.envelopeHex.length > 128,
         'the signed wire should exist right after arrival (auto-sign) — no Approve click ever happened');
-      console.log('[32-nfc-disclosure] ✓ auto-sign: Paying 0.00050000 BTC on Bitcoin + hold-to-send, wire stashed, no ∂ formatter');
+      console.log('[32-nfc-disclosure] ✓ auto-sign: Paying 0.0005 BTC on Bitcoin + hold-to-send, wire stashed, no ∂ formatter');
     }
 
     await driver.screenshot('32-nfc-disclosure-sign');

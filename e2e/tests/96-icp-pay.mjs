@@ -6,7 +6,7 @@
 //         unit + network ("ICP · Internet Computer") and NO ramp actions — no "Add money" /
 //         "Cash out" anywhere, and the only btn-topup in the accounts list is DEMO's faucet button.
 //   * (3) The payer scans the merchant's request QR, sees the exact unit + amount on the sign
-//         surface and the Paid screen ("1.00000001 ICP"), and the payment completes end-to-end.
+//         surface and the Paid screen ("1.00010001 ICP" — the total debited: amount + ledger fee), and the payment completes end-to-end.
 //   * (4) The app signs an icrc1_transfer whose ONLY canister target is ICP's exact ledger
 //         principal ryjl3-tyaaa-aaaaa-aaaba-cai (fetch recorder over window.fetch, installed
 //         before the scan; every /api/v2/canister/<id>/call checked).
@@ -133,7 +133,7 @@ export async function run() {
     await armPayScan(driver); // no-op when already armed
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
     await driver.waitForText('Paid', { timeoutMs: 12_000 }); // camera path auto-signs (one-press rule)
-    assertIncludes(await driver.bodyText(), '1.00000001 ICP', 'paid screen shows exact unit + amount');
+    assertIncludes(await driver.bodyText(), '1.00010001 ICP', 'paid screen shows the total debited (amount + ledger fee), compact');
 
     // (4) Every canister call the app made targets ICP's exact ledger principal.
     const seen = (await driver.eval(() => window.__E2E_CANISTER_CALLS ?? [])) || [];

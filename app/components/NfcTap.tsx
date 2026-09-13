@@ -1,7 +1,7 @@
 import {useCallback, useRef, useState} from 'react';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
-import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcDisclosure, fmtCurrencyAmount} from '../config/catalog';
+import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcDisclosure, fmtCurrencyAmountCompact} from '../config/catalog';
 import type {NfcEvent, Identity} from '../lib/types';
 import {
   confirmIncomingTransfer,
@@ -286,7 +286,7 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
 
   const formattedAmt = role === 'card'
     ? disclosure?.formattedAmount ?? null
-    : reqInfo ? fmtCurrencyAmount(catalog, reqInfo.currency, reqInfo.amount) : null;
+    : reqInfo ? fmtCurrencyAmountCompact(catalog, reqInfo.currency, reqInfo.amount) : null;
   const networkLabel = role === 'card' ? disclosure?.networkLabel ?? null : null;
   return (
     <NfcTapView

@@ -44,7 +44,7 @@ const PAY_RAW = 999_990_000;
 const SEED = 2_000_020_001;     // 20.00020001 VCHF: two payments + two fees, with an odd tail so the
                                 // header's balance can never match a prefix of another number
 const SEED_TEXT = '20.00020001 VCHF';
-const PAY_TEXT = '9.99990000 VCHF'; // the review/paid rendering: exact, padded to VCHF's 8 decimals
+const PAY_TEXT = '10.00 VCHF'; /* the review/paid rendering: the TOTAL DEBIT — the till prices the fee in, so the total IS the shelf price — compact (VCHF min 2 fraction digits). Wire amount is PAY_RAW; the diff is the ledger fee the till absorbs. */
 
 export const meta = {
   id: '113',
@@ -116,6 +116,10 @@ export async function run() {
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
     // THE ASSERTION THIS FLOW EXISTS FOR. Before the trust rule this screen was a refusal reading
     // "dpay can't confirm that this provider would credit VCHF" — about dpay's own relay.
+    // The total (amount + ledger fee) needs the async icrc1_fee round trip, so WAIT for it —
+    // reading the node the instant it mounts can still show the pre-fee fallback.
+    assert(await driver.waitForText(`Pay ${PAY_TEXT}`, {timeoutMs: 15_000}),
+      'the review must reach the fee-inclusive total debit');
     assertEq(await driver.readText('pay-amount'), `Pay ${PAY_TEXT}`,
       'the review shows the till\'s exact quoted amount, in the one asset that till takes');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,

@@ -44,12 +44,14 @@ async function relayQuote(relayBaseURL, tokenIn, tokenOut, amountIn) {
   return r.json();
 }
 
-/** fmtAsset twin (8 decimals, no grouping under 1000, '.' separator — the web driver locale). */
+/** fmtAssetCompact twin (8 decimals, trailing zeros trimmed, '.' separator — the web driver
+  * locale). The app renders the compact formatter everywhere now (founder rule 2026-09-13). */
 function fmt8(raw) {
   const n = BigInt(raw);
   const whole = n / 100000000n;
-  const frac = (n % 100000000n).toString().padStart(8, '0');
-  return `${whole}.${frac}`;
+  let frac = (n % 100000000n).toString().padStart(8, '0');
+  frac = frac.replace(/0+$/, '');
+  return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
 export const meta = {

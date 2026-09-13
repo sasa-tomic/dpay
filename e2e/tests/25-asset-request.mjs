@@ -7,7 +7,7 @@
 // network, unrounded amount, own principal) AND — with the radio forced ready — the 132-byte wire
 // the NFC reader arms with, where the currency-id encode contract still lives:
 //   - decodeRequest(reader) carries currency=1 + amount=50000 (0.0005 × 10^8 sats) — NOT currency=0.
-//   - The amount-big readout shows "0.00050000 BTC" (the family's native asset unit), NOT a `$` amount.
+//   - The amount-big readout shows "0.0005 BTC" (the family's native asset unit), NOT a `$` amount.
 //   - No dollar amount appears anywhere on the screen (the locked-asset display is unambiguous).
 //
 // Selector contract: `tab-receive`, `req-prefix` (amount glyph → opens picker), `req-pick-ckbtc`,
@@ -17,7 +17,7 @@ import { setup, assert, onboardWallet, accountOf, railPrincipalText } from '../h
 import { decodeRequestHex } from '../harness/wire.mjs';
 import { parsePayLink } from '../harness/paylink.mjs';
 
-const CKBTC_SATS = 50_000; // 0.00050000 BTC
+const CKBTC_SATS = 50_000; // 0.0005 BTC
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -27,7 +27,7 @@ export const meta = {
   name: 'asset-request',
   journey: 'pay',
   covers: ['asset-request', 'ckbtc', 'currency-id', 'encode', 'btc-units', 'pay-link'],
-  verifies: 'ckBTC chip + BTC amount → QR is the payment LINK (ckBTC/IC/0.0005, own principal); NFC wire encodes RUNTIME currency 1 + 50000 sats; readout \'0.00050000 BTC\' (no $).',
+  verifies: 'ckBTC chip + BTC amount → QR is the payment LINK (ckBTC/IC/0.0005, own principal); NFC wire encodes RUNTIME currency 1 + 50000 sats; readout \'0.0005 BTC\' (no $).',
   timeoutMs: 15000,
 };
 
@@ -85,16 +85,16 @@ export async function run() {
     assert(typeof readerHex === 'string' && readerHex.length > 0, 'the NFC reader must arm with the 132-byte wire request');
     const req = decodeRequestHex(readerHex);
     assert(req.currency === 1, `request should encode currency 1 (ckBTC), got ${req.currency}`);
-    assert(req.amount === String(CKBTC_SATS), `request amount should be ${CKBTC_SATS} sats (0.00050000 BTC), got ${req.amount}`);
-    console.log(`[25-asset-request] ✓ decoded: currency=${req.currency} amount=${req.amount} (= 0.00050000 BTC)`);
+    assert(req.amount === String(CKBTC_SATS), `request amount should be ${CKBTC_SATS} sats (0.0005 BTC), got ${req.amount}`);
+    console.log(`[25-asset-request] ✓ decoded: currency=${req.currency} amount=${req.amount} (= 0.0005 BTC)`);
 
     // The amount-big readout renders the EXACT requested asset in its own units (MC5 locked-asset
     // display). It must NOT show a dollar amount — a misleading `$0.50` would be a swap-adjacent
     // framing the no-swap rule forbids.
     const body = await driver.bodyText();
-    assert(body.includes('0.00050000 BTC'), `request screen should show "0.00050000 BTC", got body:\n${body}`);
+    assert(body.includes('0.0005 BTC'), `request screen should show "0.0005 BTC", got body:\n${body}`);
     assert(!body.includes('$0.50'), `must NOT show a dollar amount for a ckBTC request. body:\n${body}`);
-    console.log('[25-asset-request] ✓ request screen shows "0.00050000 BTC" (no $)');
+    console.log('[25-asset-request] ✓ request screen shows "0.0005 BTC" (no $)');
 
     await driver.screenshot('25-asset-request');
 

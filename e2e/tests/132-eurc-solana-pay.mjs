@@ -2,7 +2,7 @@
 //
 // The solana engine speaks ANY catalogued SPL token (commit b2f3998): with home=EUR the wallet
 // sits on the EURC rail, and a scanned `solana:` URI naming EURC's mint pays EURC — the review
-// NAMES the token it will move (1.500000 EURC, 6 decimals), the full payee, and the ATA rent —
+// NAMES the token it will move (1.5 EURC, 6 decimals), the full payee, and the ATA rent —
 // and Approve completes with the amount restated in EURC. The refusal half is the honesty gate:
 // a mint that is NOT in the catalog is refused BY NAME with its pubkey, never guessed at, never
 // silently routed to another token.
@@ -89,7 +89,7 @@ export async function run() {
     );
     const amount = await driver.findByTestID('sol-pay-amount', {timeoutMs: 8_000});
     const amountTxt = await amount.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/1\.500000 EURC/.test(amountTxt), `the review should name 1.500000 EURC, got: "${amountTxt}"`);
+    assert(/1\.5 EURC/.test(amountTxt), `the review should name 1.5 EURC, got: "${amountTxt}"`);
     assertEq(await driver.readText('sol-pay-payee'), MERCHANT, 'the FULL merchant address must be on the review');
     await driver.waitForText('Kaffeestation', {timeoutMs: 5_000});
     await driver.findByTestID('sol-spay-ata-note', {timeoutMs: 5_000});
@@ -101,7 +101,7 @@ export async function run() {
     await driver.click('btn-approve', {timeoutMs: 5_000});
     const status = await driver.findByTestID('sol-pay-status', {timeoutMs: 12_000});
     const statusTxt = await status.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/1\.500000 EURC/.test(statusTxt), `the outcome should name the paid EURC amount, got: "${statusTxt}"`);
+    assert(/1\.5 EURC/.test(statusTxt), `the outcome should name the paid EURC amount, got: "${statusTxt}"`);
     const sig = await driver.findByTestID('sol-spay-signature', {timeoutMs: 5_000});
     const sigTxt = await sig.evaluate((n) => (n.textContent ?? '').trim());
     assert(/^sig_/.test(sigTxt), `the transaction signature should be rendered, got: "${sigTxt}"`);

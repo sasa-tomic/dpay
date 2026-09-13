@@ -8,18 +8,18 @@
 // the funded ckBTC balance as `asset-ckbtc` "0.0006 BTC" — this PROVES assetBalances[1] is
 // populated + flows into PayMode's review gate.
 //
-// Then wallet B "Bob" (in-test keypair) builds a ckBTC request: 50000 sats (0.00050000 BTC). A
+// Then wallet B "Bob" (in-test keypair) builds a ckBTC request: 50000 sats (0.0005 BTC). A
 // scans it via the camera seam. The KEY assertion: the OLD code would gate Approve as insufficient
 // because `req.amount (50000) > shownBalance (10000 cents)` — a cross-asset comparison that is
 // nonsense (sats vs cents). The NEW code (MC5) checks `assetBalances[1] (60000 sats) >= req.amount
 // (50000 sats)` → sufficient → Approve is ENABLED → the click succeeds → A's app signs an
 // icrc1_transfer envelope (payee = B's principal, memo = the request nonce) + submits it to the
 // fake-IC gateway → settlement lands on currency 1's ledger (B credited 50000 ckBTC sats). The
-// review also displays "0.00050000 BTC" (NOT a misleading "$500.00") — the locked-asset display.
+// review also displays "0.0005 BTC" (NOT a misleading "$500.00") — the locked-asset display.
 //
 // Asserts:
 //   - After funding, A's app shows `0.0006 BTC` (assetBalances[1] populated through the poll).
-//   - The review's pay-amount reads "Pay 0.00050000 BTC" (locked-asset display, no `$`).
+//   - The review's pay-amount reads "Pay 0.0005 BTC" (locked-asset display, no `$`).
 //   - The review names the merchant "Bob" (from the request bytes).
 //   - the per-asset balance gate (60_000 ≥ 50_000 sats) lets the AUTO-SIGN through → Paid.
 //   - B's ckBTC balance (currency 1) grew by 50000 sats (correct ledger settlement at the principal).
@@ -33,7 +33,7 @@ import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.m
 
 const CKBTC_CURRENCY = 1;
 const SEED_SATS = 60_000;   // 0.00060000 BTC
-const PAY_SATS = 50_000;    // 0.00050000 BTC
+const PAY_SATS = 50_000;    // 0.0005 BTC
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -43,7 +43,7 @@ export const meta = {
   name: 'asset-pay',
   journey: 'pay',
   covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display', 'ledger-units', 'review-short-payee'],
-  verifies: 'ckBTC pay (faucet-funded at principal): review \'0.00050000 BTC\' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units.',
+  verifies: 'ckBTC pay (faucet-funded at principal): review \'0.0005 BTC\' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units.',
   timeoutMs: 20000,
 };
 
@@ -92,7 +92,7 @@ export async function run() {
 
     // --- AUTO-SIGN → settle: the locked-asset display asserts ride the STABLE Paid surface. --
     // (The local settle is fast — the read-only sign status flashes between decode and `paid`;
-    // the paid headline uses the same fmtCurrencyAmount, so "0.00050000 BTC" / no-`$` still
+    // the paid headline uses the same fmtCurrencyAmountCompact, so "0.0005 BTC" / no-`$` still
     // prove the 8-decimal locked-asset display contract. U-F5 short-payee: flow 49's deeplink
     // review owns that pin now.)
 

@@ -13,12 +13,12 @@
 // native modules emit; the radio hop itself stays a physical-device gate):
 //   IC payer card (NfcTap):  idle armed pay surface · linking · exchanging · settling · the
 //                            success terminal ("Paid ✓") · the auto-sign exchanging status with
-//                            the honest asset disclosure ("Paying 0.00050000 BTC on Bitcoin",
+//                            the honest asset disclosure ("Paying 0.0005 BTC on Bitcoin",
 //                            flow-32 shape — money moving, the strongest place for a CTA to
 //                            creep in) · the declined terminal · the error terminal ("Tap
 //                            failed").
 //   SOL payer card (SolNfcTap): idle armed SolPayMode · linking · the auto-sign exchanging
-//                            status ("Paying 0.001000000 SOL") · the receipt-bound paid phase
+//                            status ("Paying 0.001005 SOL") · the receipt-bound paid phase
 //                            ("Sent · awaiting the merchant's confirmation").
 // On each, the same zero-tolerance census flow 170 uses must count ZERO convert affordances
 // (no convert-* testIDs, no Accounts-Convert entry, no button/radio/link labelled "Convert").
@@ -166,9 +166,9 @@ export async function run() {
     assert(await driver.waitForText('Communicating', {timeoutMs: 6_000}), 'a payable request should auto-sign → exchanging');
     {
       const body = await driver.bodyText();
-      assert(body.includes('Paying 0.00050000 BTC on Bitcoin'), 'the honest asset disclosure rides the status (pre-condition)');
+      assert(body.includes('Paying 0.0005 BTC on Bitcoin'), 'the honest asset disclosure rides the status (pre-condition)');
     }
-    await zeroConvert('IC auto-sign exchanging (Paying 0.00050000 BTC on Bitcoin)');
+    await zeroConvert('IC auto-sign exchanging (Paying 0.0005 BTC on Bitcoin)');
     await dispatch({type: 'phase', role: 'card', phase: 'declined'}); // terminal cleanup (flow-32 pattern)
     await driver.waitForText('Declined', {timeoutMs: 5_000});
     await zeroConvert('IC declined terminal');
@@ -213,9 +213,9 @@ export async function run() {
     assert(await driver.waitForText('Communicating', {timeoutMs: 6_000}), 'SOL request should auto-sign → exchanging');
     {
       const body = await driver.bodyText();
-      assert(body.includes('Paying 0.001000000 SOL'), 'the SOL read-only amount rides the status (pre-condition)');
+      assert(body.includes('Paying 0.001005 SOL'), 'the SOL read-only amount rides the status (pre-condition)');
     }
-    await zeroConvert('SOL auto-sign exchanging (Paying 0.001000000 SOL)');
+    await zeroConvert('SOL auto-sign exchanging (Paying 0.001005 SOL)');
 
     const solpayUri = await driver.eval(() => window.__DPAY_SOL_NFC_LAST);
     assert(typeof solpayUri === 'string' && solpayUri.startsWith('solpay:v2?'), 'the auto-sign produced a solpay:v2 URI (pre-condition)');

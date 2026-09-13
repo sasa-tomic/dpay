@@ -3,14 +3,14 @@ import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'rea
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {SOL_SEND_TIMEOUT_MS} from '../config/constants';
-import {fmtAsset, toUnits} from '../lib/format';
+import {fmtAssetCompact, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
 import {detectAddressShape, routeForSolana, chainNameOfShape} from '../lib/destination';
 import type {Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT, deriveSolanaAddress, isValidSolanaAddress} from '../solana/identity';
-import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {solanaTokenInfo} from '../solana/tokens';
 import {sendSol, sendSpl} from '../solana';
 import {friendlySolError} from '../solana/errors';
@@ -96,7 +96,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
   const decimals = decimalsProp ?? (isSpl ? solanaTokenInfo(token)?.decimals ?? SOL_DECIMALS : SOL_DECIMALS);
   const unit = symbol ?? token;
   // Every amount on this sheet is the same token at the same precision — one formatter, one place.
-  const fmt = (rawAmount: string) => fmtAsset(rawAmount, decimals, unit);
+  const fmt = (rawAmount: string) => fmtAssetCompact(rawAmount, decimals, unit);
 
   // Per-token address book, mirroring the IC rail's `ic:<currency>` key: distinct tokens are sent
   // to the same KIND of address but to different people, so one shared list would mix audiences.
@@ -294,6 +294,19 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
             <View testID="sol-send-review" style={S.reviewCard}>
               <Text style={S.reviewLabel}>{M.withdraw.sol.reviewTitle}</Text>
               <Text testID="sol-send-review-amount" style={S.reviewAmount}>{M.withdraw.sol.sendAmount(fmt(raw))}</Text>
+              {/* Fee + total disclosure (founder rule 2026-09-13), mirroring the IC SendSheet rows:
+                  the fee is always real and paid in SOL; a TOTAL only exists for native-SOL sends
+                  (a token amount and its SOL fee do not sum into one honest number). */}
+              <View style={S.reviewRow}>
+                <Text>{M.withdraw.send.feeLine('')}</Text>
+                <Text testID="sol-send-review-fee">{fmtAssetCompact(String(SOL_FEE_LAMPORTS), SOL_DECIMALS, SOL_UNIT)}</Text>
+              </View>
+              {!isSpl ? (
+                <View style={S.reviewRow}>
+                  <Text>{M.withdraw.send.totalLine('')}</Text>
+                  <Text testID="sol-send-review-total">{fmtAssetCompact((BigInt(raw) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT)}</Text>
+                </View>
+              ) : null}
               {notedDestination != null ? (
                 <>
                   <Text style={S.reviewTo}>{M.pay.toWho(notedDestination)}</Text>
@@ -304,7 +317,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
               )}
               {isSpl ? (
                 <Text testID="sol-send-ata-note" style={S.dim2}>
-                  {M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), unit)}
+                  {M.withdraw.sol.recipientAtaNote(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), unit)}
                 </Text>
               ) : null}
             </View>

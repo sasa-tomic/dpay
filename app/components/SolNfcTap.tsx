@@ -3,9 +3,10 @@ import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
 import bs58 from 'bs58';
 import {SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
-import {fmtAsset} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 import type {SolNfcEvent, Identity} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
+import {SOL_FEE_LAMPORTS} from '../solana/spl';
 import {solanaTokenInfo, solanaTokenOfMint} from '../solana/tokens';
 import {solSignCaveat, solSplSignGate, type SolMintStates} from '../config/assets';
 import {decodeSolReq, decodeSolPay, encodeSolPay} from '../solana/qr';
@@ -104,7 +105,10 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       if (signedRidRef.current === decoded.rid) return; // re-tap duplicate — sign already fired
       signedRidRef.current = decoded.rid;
       const {decimals, unit} = solUnit(decoded.cur);
-      setAmtText(fmtAsset(decoded.amt, decimals, unit));
+      // Payer sees the total debit: native SOL requests add the ledger fee on top of the amount
+      // (founder rule 2026-09-13 — the review number is what actually leaves the account).
+      const totalRaw = decoded.cur === 'SOL' ? (BigInt(decoded.amt) + SOL_FEE_LAMPORTS).toString() : decoded.amt;
+      setAmtText(fmtAssetCompact(totalRaw, decimals, unit));
       await approveRef.current(decoded, ctx);
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : String(e);
@@ -129,7 +133,7 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       }
       // The amount/cur are known from the merchant's own request (the v2 SolPay carries only rid+tx).
       const {decimals, unit} = solUnit(req.cur);
-      setAmtText(fmtAsset(req.amt, decimals, unit));
+      setAmtText(fmtAssetCompact(req.amt, decimals, unit));
       const receipt = await broadcastSolPayment(req, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (settled)', e); }

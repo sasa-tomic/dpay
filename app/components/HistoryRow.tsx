@@ -2,9 +2,9 @@ import {Pressable, ScrollView, Text, View} from 'react-native';
 import {S} from '../styles';
 import {M} from '../i18n';
 import {C} from '../config/palette';
-import {fmtCurrencyAmount, fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
+import {fmtCurrencyAmountCompact, type CurrencyDescriptor} from '../config/catalog';
 import {type SelectableAsset} from '../config/assets';
-import {fmtAsset, fmtAssetCompact} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {AppModal} from './AppModal';
@@ -32,18 +32,16 @@ export function fmtRowAmount(t: Txn, catalog: CurrencyDescriptor[], assets: Sele
     : fmtAssetCompact(t.amount, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
 }
 
-// The RECEIPT's amount — the same dispatch, through the EXACT formatters. A receipt is a
-// money-committed surface (`fmtAsset`'s own rule: "the exact formatter keeps every surface where
-// the user commits money … receipts"), so it never carries the row's compact trim or its "≈"
-// truncation marker: a merchant showing what they were paid must be able to show every digit the
-// ledger recorded. The sign is a plain prefix here — the exact formatters emit no marker for it to
-// land inside.
+// The RECEIPT's amount — the same dispatch, through the same COMPACT formatters as the row
+// (founder rule 2026-09-13: every glanceable money surface shows the best-effort rounded amount;
+// the padded exact form survives only where a string round-trips through the amount parser).
+// The sign goes THROUGH the formatter so it lands inside a truncation marker, same as the row.
 function fmtReceiptAmount(t: Txn, catalog: CurrencyDescriptor[], asset: SelectableAsset | undefined): string {
   if (!asset) return M.wallet.asset.unsupported;
   const sign = t.dir === 'out' ? '−' : '+';
   return asset.protocol === 'ic'
-    ? `${sign}${fmtCurrencyAmount(catalog, asset.currency, t.amount)}`
-    : `${sign}${fmtAsset(t.amount, asset.decimals, asset.symbol)}`;
+    ? fmtCurrencyAmountCompact(catalog, asset.currency, t.amount, sign)
+    : fmtAssetCompact(t.amount, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
 }
 
 // One transaction row — the shared renderer extracted verbatim from Ledger's list map so the Home

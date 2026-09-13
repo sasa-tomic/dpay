@@ -16,7 +16,7 @@ const BUNDLED_CATALOG = icpCatalogOf(BUNDLED_NETWORKS);
 // asset name / amount / network. Worse, the post-sign amount line rendered `usd(amt)` (the DEMO
 // formatter) even for ckBTC → a misleading "$0.00050000". The fix is a PURE resolver that returns
 // the honest asset name + network + asset-correct amount BEFORE the first await, so React renders
-// "Paying 0.00050000 BTC on Bitcoin" during the exchanging/awaitingApproval/settling window.
+// "Paying 0.0005 BTC on Bitcoin" during the exchanging/awaitingApproval/settling window.
 //
 // `null` is the defense-in-depth decline: if a payable asset somehow can't resolve an honest
 // name+network+amount, the caller (autoSign) declines the card and never signs.
@@ -33,12 +33,12 @@ const CKUSDC_DESC: CurrencyDescriptor = mk({currency: 2, ledger: 'l', minter: 's
 const KNOWN_CATALOG: CurrencyDescriptor[] = [CKBTC_DESC, CKUSDC_DESC];
 
 describe('resolveNfcDisclosure — ckBTC (currency 1) honest disclosure', () => {
-  it('returns {BTC, Bitcoin, "0.00050000 BTC"} for a 50000-sat request', () => {
+  it('returns {BTC, Bitcoin, "0.0005 BTC"} for a 50000-sat request', () => {
     const d = resolveNfcDisclosure(KNOWN_CATALOG, {currency: 1, amount: '50000'});
     expect(d).not.toBeNull();
     expect(d!.assetName).toBe('BTC');
     expect(d!.networkLabel).toBe('Bitcoin');
-    expect(d!.formattedAmount).toBe('0.00050000 BTC');
+    expect(d!.formattedAmount).toBe('0.0005 BTC');
   });
 
   it('NEVER returns a DEMO/∂ formatted amount for ckBTC (the blind-tap bug)', () => {
@@ -49,12 +49,12 @@ describe('resolveNfcDisclosure — ckBTC (currency 1) honest disclosure', () => 
 });
 
 describe('resolveNfcDisclosure — ckUSDC (currency 2) honest disclosure', () => {
-  it('returns {USDC, Ethereum, "1.000000 USDC"} for a 1000000-raw request', () => {
+  it('returns {USDC, Ethereum, "1 USDC"} for a 1000000-raw request', () => {
     const d = resolveNfcDisclosure(KNOWN_CATALOG, {currency: 2, amount: '1000000'});
     expect(d).not.toBeNull();
     expect(d!.assetName).toBe('USDC');
     expect(d!.networkLabel).toBe('Ethereum');
-    expect(d!.formattedAmount).toBe('1.000000 USDC');
+    expect(d!.formattedAmount).toBe('1 USDC');
   });
 });
 
@@ -102,11 +102,11 @@ describe('resolveNfcDisclosure — defense-in-depth: null when an honest disclos
 describe('resolveNfcDisclosure — BUNDLED_CATALOG real values', () => {
   it('ckBTC in the bundled catalog resolves exactly', () => {
     const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 1, amount: '50000'});
-    expect(d).toEqual({assetName: 'BTC', networkLabel: 'Bitcoin', formattedAmount: '0.00050000 BTC'});
+    expect(d).toEqual({assetName: 'BTC', networkLabel: 'Bitcoin', formattedAmount: '0.0005 BTC'});
   });
   it('ckUSDC in the bundled catalog resolves exactly', () => {
     const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 2, amount: '1000000'});
-    expect(d).toEqual({assetName: 'USDC', networkLabel: 'Ethereum', formattedAmount: '1.000000 USDC'});
+    expect(d).toEqual({assetName: 'USDC', networkLabel: 'Ethereum', formattedAmount: '1.00 USDC'});
   });
   it('DEMO in the bundled catalog resolves exactly', () => {
     const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 0, amount: '5000'});
@@ -115,11 +115,11 @@ describe('resolveNfcDisclosure — BUNDLED_CATALOG real values', () => {
   it('VCHF (7) in the bundled catalog resolves exactly', () => {
     // The no-minter direct-ICRC row: honest VCHF name, "Internet Computer" network, 8-dec amount.
     const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 7, amount: '50000'});
-    expect(d).toEqual({assetName: 'VCHF', networkLabel: 'Internet Computer', formattedAmount: '0.00050000 VCHF'});
+    expect(d).toEqual({assetName: 'VCHF', networkLabel: 'Internet Computer', formattedAmount: '0.0005 VCHF'});
   });
   it('ICP (8) in the bundled catalog resolves exactly', () => {
     const d = resolveNfcDisclosure(BUNDLED_CATALOG, {currency: 8, amount: '10000'});
-    expect(d).toEqual({assetName: 'ICP', networkLabel: 'Internet Computer', formattedAmount: '0.00010000 ICP'});
+    expect(d).toEqual({assetName: 'ICP', networkLabel: 'Internet Computer', formattedAmount: '0.0001 ICP'});
   });
 });
 

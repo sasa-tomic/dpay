@@ -37,12 +37,13 @@ async function relayQuote(relayBaseURL, pool, tokenIn, tokenOut, amountIn) {
   return res.json();
 }
 
-/** Raw e8s → the formatter's exact 8-decimal string. */
+/** Raw e8s → the compact formatter's string (8 decimals, trailing zeros trimmed — 2026-09-13). */
 function fmt8(raw) {
   const n = BigInt(raw);
   const sign = n < 0n ? '-' : '';
   const abs = n < 0n ? -n : n;
-  return `${sign}${abs / 10n ** 8n}.${(abs % 10n ** 8n).toString().padStart(8, '0')}`;
+  const frac = (abs % 10n ** 8n).toString().padStart(8, '0').replace(/0+$/, '');
+  return `${sign}${abs / 10n ** 8n}${frac ? '.' + frac : ''}`;
 }
 
 export async function run() {

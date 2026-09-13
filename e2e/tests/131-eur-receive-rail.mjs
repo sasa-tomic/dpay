@@ -73,7 +73,7 @@ export async function run() {
     // docs/specs/2026-09-07-ux-decisions.md
     assert(!why1.includes('—'), `a pure preference adds no reason suffix, got "${why1}"`);
     assertEq((await driver.readText('receive-rail-fee')).trim(),
-      'Solana · Fee 0.000005000 SOL + one-time account rent 0.002039280 SOL',
+      'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
       'the EURC fee fact: signature fee + the one-time ATA rent, in SOL — never converted');
     const disclosure1 = await driver.readText('receive-rail-disclosure');
     assert(!disclosure1.includes('Very little'),
@@ -94,7 +94,7 @@ export async function run() {
     assertIncludes(why2, 'VEUR · Internet Computer', 'the sibling rail is named by its own line');
     assert(!why2.includes('—'), `the sibling carries no reason suffix (only the pick does), got "${why2}"`);
     assertEq((await driver.readText('receive-rail-fee')).trim(),
-      'Internet Computer · Fee 0.00010000 VEUR',
+      'Internet Computer · Fee 0.0001 VEUR',
       'the VEUR fee fact: the catalog row\'s 10000-e8s fee, in VEUR\'s own 8 decimals');
     const disclosure2 = await driver.readText('receive-rail-disclosure');
     assertIncludes(disclosure2, 'Very little VEUR exists on-chain today',

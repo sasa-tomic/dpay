@@ -33,7 +33,7 @@
 import {type SelectableAsset, linkNetworkOf, prettyNetwork, tokenEq} from './assets';
 import {type CurrencyDescriptor} from './catalog';
 import {type BalanceView} from '../lib/assetBalances';
-import {fmtAsset} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 import {type AssetId} from '../lib/types';
 import {SOL_ATA_RENT_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
@@ -158,7 +158,7 @@ export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescri
   if (rail.protocol === 'solana') {
     const signature = SOL_FEE_LAMPORTS.toString();
     const fee: RailFees = {
-      perTransfer: {raw: signature, formatted: fmtAsset(signature, SOL_DECIMALS, SOL_UNIT)},
+      perTransfer: {raw: signature, formatted: fmtAssetCompact(signature, SOL_DECIMALS, SOL_UNIT)},
       oneTime: null,
     };
     if (rail.token !== 'SOL') {
@@ -166,13 +166,13 @@ export function railFees(rail: SelectableAsset, catalog: readonly CurrencyDescri
       // used — the rent is a property of holding the token, not of USDC specifically. Native SOL is
       // its own account and needs none.
       const rent = SOL_ATA_RENT_LAMPORTS.toString();
-      fee.oneTime = {raw: rent, formatted: fmtAsset(rent, SOL_DECIMALS, SOL_UNIT)};
+      fee.oneTime = {raw: rent, formatted: fmtAssetCompact(rent, SOL_DECIMALS, SOL_UNIT)};
     }
     return fee;
   }
   const fee = catalog.find(c => c.currency === rail.currency)?.fee;
   const perTransfer = fee != null && /^\d+$/.test(fee)
-    ? {raw: fee, formatted: fmtAsset(fee, rail.decimals, rail.linkToken ?? rail.symbol)}
+    ? {raw: fee, formatted: fmtAssetCompact(fee, rail.decimals, rail.linkToken ?? rail.symbol)}
     : null;
   return {perTransfer, oneTime: null};
 }

@@ -83,10 +83,10 @@ export async function run() {
 
     // --- 3. every panel line is a catalog field, in the rail's OWN units ------------------------
     assertEq((await driver.readText('rail-detail-fee-sol-eurc')).trim(),
-      'Solana · Fee 0.000005000 SOL + one-time account rent 0.002039280 SOL',
+      'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
       'the EURC fee fact: signature fee + the ATA rent (EURC states its one-time rent too), in SOL');
     assertEq((await driver.readText('rail-detail-fee-veur')).trim(),
-      'Internet Computer · Fee 0.00010000 VEUR',
+      'Internet Computer · Fee 0.0001 VEUR',
       'the VEUR fee fact: the catalog row\'s 10000-e8s transfer fee, in VEUR\'s own 8 decimals');
     assertEq((await driver.readText('rail-detail-liquidity-sol-eurc')).trim(),
       'Circulates widely on-chain today.',

@@ -14,9 +14,9 @@ import {type HomeCurrency, currencyOfAsset, type RailBalances} from '../config/c
 import {FundedSiblingRail} from './FundedSiblingRail';
 import {RailLiquidityNote} from './RailLiquidityNote';
 import {cmpRaw} from '../lib/amount';
-import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmount, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
+import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurrencyAmountCompact, isPayableAsset, isDirectIcrcAsset, displayName, isTestnetCurrency, testnetDisplayName} from '../config/catalog';
 import type {AssetId, Identity, PayIntent, NfcStatus} from '../lib/types';
-import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, type RailOutcome, type RailPrepared} from '../services/rail';
+import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, fetchLedgerFee, type RailOutcome, type RailPrepared} from '../services/rail';
 import {saveTxNote} from '../services/txNotes';
 import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
@@ -181,6 +181,49 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // One re-poll at a time. The claim's effect below runs on an interval and each tick can outlive
   // the next, so without this two ticks could both reach a settled transfer and both report it.
   const ocpChecking = useRef(false);
+
+  // The LEDGER FEE for the payment under review, live from the paying ledger (the same
+  // `fetchLedgerFee` SendSheet uses; the catalog's `fee` field is display metadata). The review,
+  // the paid screen and the offline QR hand-off all render the TOTAL DEBIT — amount + fee — so the
+  // payer reads the number their account actually moves (founder rule 2026-09-13: at a till that
+  // total IS the shelf price, because the fee was priced in). Unknown (offline, DEMO play money, or
+  // the query failed) stays null and every display falls back to the amount alone — never a
+  // guessed 0. Keyed on `intent` only: review/qr/paid all hold the same intent (only `reset()`
+  // clears it), so one fetch serves the whole journey.
+  const [feeRaw, setFeeRaw] = useState<string | null>(null);
+  // No fee fetch while the review cannot be approved (online + insufficient): a doomed payment
+  // must touch NOTHING on the network (flow 101's zero-canister-call invariant — a read-only
+  // icrc1_fee query included), and offline the fetch could not succeed anyway. The headline
+  // falls back to the amount alone on such reviews — honest either way, for a payment that can
+  // never leave the screen.
+  const reviewBlocked = intent != null && online
+    && (() => { const b = balanceOfRequested(intent.currency); return b != null && cmpRaw(intent.amount, b) > 0; })();
+  useEffect(() => {
+    setFeeRaw(null);
+  }, [intent]);
+  useEffect(() => {
+    const cur = intent?.currency ?? null;
+    if (cur == null || cur === 0) return; // DEMO is play money — no honest fee to add
+    const ledger = catalog.find(c => c.currency === cur)?.ledger;
+    if (!ledger) return;
+    // Keep any fee this journey already fetched: `reviewBlocked` flips true AFTER a payment
+    // lands (the account just moved) and the paid screen still needs the fee for its total.
+    if (reviewBlocked) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const fee = await fetchLedgerFee(identity.secretHex, ledger);
+        if (alive) setFeeRaw(fee);
+      } catch (e: unknown) {
+        console.warn('review fee fetch failed (total falls back to the amount):', e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { alive = false; };
+  }, [intent, catalog, identity.secretHex, reviewBlocked]);
+  // The total debit a payer-facing amount on this journey renders: amount + fee when the fee is
+  // known, the amount alone when it is not. The signed envelope is NEVER built from this — it stays
+  // display-side only (`intent.amount` remains the wire amount everywhere money moves).
+  const totalOf = (raw: string): string => (feeRaw != null ? (BigInt(raw) + BigInt(feeRaw)).toString() : raw);
 
   // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
   // (the paid-screen receipt link + the offline-QR auth code — mutually exclusive phases, so one
@@ -714,7 +757,8 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // settle + an idempotent replay both show the checkmark; the honest pending hand-off shows a
     // clock (awaiting the merchant's confirmation). Headline/sub labels are unchanged text.
     const mark = paid.pending ? <IconClock size={44} color={C.brandInk}/> : <IconCheck size={44} color={C.brandInk}/>;
-    const amt = fmtCurrencyAmount(catalog, paid.currency, paid.amount);
+    // The total debit (amount + fee when known) — the number the payer's account moved, compact.
+    const amt = fmtCurrencyAmountCompact(catalog, paid.currency, totalOf(paid.amount));
     const headline = paid.pending ? M.pay.sent(amt) : paid.already ? M.pay.alreadyPaid : M.nfc.paidAmount(amt);
     // A `note` marks an OpenCryptoPay outcome, which is pending for a DIFFERENT reason than an
     // offline hand-off: no merchant is going to submit anything on the payer's behalf, so it must
@@ -781,7 +825,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       <View style={S.center}>
         <Text style={S.label}>{M.pay.showThisTo(qr.who)}</Text>
         <View style={S.qrCard}><QrCode value={qr.code} size={QR_SIZE} ecl="L" /></View>
-        <Text style={S.amountBig}>{M.pay.amountToWho(fmtCurrencyAmount(catalog, qr.currency, qr.amount), qr.who)}</Text>
+        <Text style={S.amountBig}>{M.pay.amountToWho(fmtCurrencyAmountCompact(catalog, qr.currency, totalOf(qr.amount)), qr.who)}</Text>
         <Text style={S.badgeOk}>{M.pay.signedOnThisDevice}</Text>
         {/* The reconcile poll surfaced a TERMINAL ledger rejection of this envelope (item 3): the
             QR is dead — the merchant's submission was refused. Show why + stop polling; the payer
@@ -819,11 +863,15 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         // Only an IC row carries `currency`, which is what formats an amount at the asset's own
         // precision. The resolver's same-rail filter means every option here is one; a miss falls
         // back to the provider's own spelling rather than dropping a payable option off the menu.
+        // The label is the TOTAL DEBIT where the catalog states the asset's ledger fee (a till
+        // prices it in, so the option reads the shelf price, not wire-minus-fee); an asset with no
+        // catalog fee shows the wire amount — the explicit review after the pick adds the LIVE fee.
         labelOf={o => {
           const row = assets.find(a => a.id === o.assetId) ?? null;
-          return row !== null && row.protocol === 'ic'
-            ? fmtCurrencyAmount(catalog, row.currency, o.rawAmount)
-            : `${o.amount} ${o.asset}`;
+          if (row === null || row.protocol !== 'ic') return `${o.amount} ${o.asset}`;
+          const fee = catalog.find(c => c.currency === row.currency)?.fee;
+          const total = fee != null ? (BigInt(o.rawAmount) + BigInt(fee)).toString() : o.rawAmount;
+          return fmtCurrencyAmountCompact(catalog, row.currency, total);
         }}
         onPick={o => void chooseOcpOffer(o)}
         onCancel={reset}
@@ -874,6 +922,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <PaymentReview
           catalog={catalog}
           intent={intent}
+          totalRaw={totalOf(intent.amount)}
           isSelf={isSelf}
           insufficient={insufficient}
           blockApprove={blockApprove}
@@ -913,7 +962,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     return (
       <View style={S.center}>
         <Text style={S.label}>{M.pay.paying}</Text>
-        <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
+        <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmountCompact(catalog, intent.currency, intent.amount))}</Text>
         <PayeeLine intent={intent} isSelf={isSelf} />
         {insufficient ? (
           <Text testID="review-lowbal" style={S.warnNote}>{blockApprove

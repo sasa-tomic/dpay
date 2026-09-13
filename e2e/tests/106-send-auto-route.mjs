@@ -13,7 +13,7 @@
 //
 // The flow asserts BOTH readings of the same field, in one session, without leaving the screen:
 //   1. a Bitcoin address       → the route line names Bitcoin and quotes the chain's ~10 min +
-//                                0.00050000 BTC minimum, and the chain-key withdraw body appears
+//                                0.0005 BTC minimum, and the chain-key withdraw body appears
 //                                (its amount field carries the minimum rule)
 //   2. an IC principal         → the route line flips to the Internet Computer with a per-transfer
 //                                fee, and the DIRECT send body appears instead
@@ -68,7 +68,7 @@ export async function run() {
     assertEq(senderBefore, String(SEED_SATS), 'pre-send ckBTC balance');
 
     await openBalances(driver);
-    await driver.waitForText('0.00200000 BTC', { timeoutMs: 8_000 });
+    await driver.waitForText('0.002 BTC', { timeoutMs: 8_000 });
     await selectCurrency(driver, ASSET_KEY);
     await openPaySend(driver);
     await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
@@ -79,7 +79,7 @@ export async function run() {
     await driver.waitForText('Bitcoin', { timeoutMs: 6_000 });
     const btcRoute = await driver.readText('send-status');
     assertIncludes(btcRoute, 'Bitcoin', 'the route line names the Bitcoin chain');
-    assertIncludes(btcRoute, '0.00050000', "the route line quotes Bitcoin's withdraw minimum, not an IC fee");
+    assertIncludes(btcRoute, '0.0005', "the route line quotes Bitcoin's withdraw minimum, not an IC fee");
     // The chain-key body is what renders for a native destination — its amount field is the tell.
     await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
     assert(!(await driver.isPresent('send-amount-input')), 'the DIRECT send body must not render for a native destination');

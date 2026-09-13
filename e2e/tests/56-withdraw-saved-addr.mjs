@@ -75,7 +75,7 @@ export async function run() {
     // 2. Open the Balances hub; wait for the funded BTC row, then SELECT it → Pay →
     //    "Send to address" (the shared destination field).
     await openBalances(driver);
-    await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
+    await driver.waitForText('0.001 BTC', { timeoutMs: 8_000 });
 
     // 3. On a FIRST send there is nothing in the book → the saved list must be ABSENT (proves the
     //    list is persistence-gated, not always-on chrome).

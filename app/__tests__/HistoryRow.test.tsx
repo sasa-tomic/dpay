@@ -166,7 +166,7 @@ describe('TxnReceipt — the merchant-reconciliation surface', () => {
     });
     const tree = mountReceipt(t);
     const all = texts(tree);
-    expect(all).toContain('−1.500000000 SOL');
+    expect(all).toContain('−1.5 SOL');
     expect(all).toContain('5Nq1FakeSig11111111111111111111111111111111111111111111111111111111');
     expect(all).toContain(M.receipt.signatureLabel);
     expect(all).toContain(M.receipt.noReferenceSolana);
@@ -187,7 +187,7 @@ describe('TxnReceipt — the merchant-reconciliation surface', () => {
       txn('ic:2', '2500000', TS_NEW, {dir: 'out', who: 'Shop', counterparty: 'aaaaa-aa', memo: 'ab12', ledgerRef: '7'}),
       CATALOG, ASSETS,
     );
-    expect(ic).toContain('−2.500000 USDC');
+    expect(ic).toContain('−2.50 USDC');
     expect(ic).toContain('aaaaa-aa');
     expect(ic).toContain('ab12');
     expect(ic).toContain('7');

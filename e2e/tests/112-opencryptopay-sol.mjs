@@ -54,7 +54,7 @@ import {
 // payer ever sees it, so a made-up string would be refused rather than displayed.
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
 /** The till's `0.01219252` SOL rendered at SOL's own 9 decimals — what the review must say. */
-const PAY_DISPLAY = '0.012192520 SOL';
+const PAY_DISPLAY = '0.01219752 SOL';
 
 export const meta = {
   id: '112',

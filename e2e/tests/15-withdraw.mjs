@@ -78,7 +78,7 @@ export async function run() {
     //    up the faucet credit), then SELECT it (makes it the active asset).
     console.log('[15-withdraw] opening Balances; waiting for the funded BTC row…');
     await openBalances(driver);
-    await driver.waitForText('0.00100000 BTC', { timeoutMs: 8_000 });
+    await driver.waitForText('0.001 BTC', { timeoutMs: 8_000 });
 
     // 4. Select the BTC asset → Pay → "Send to address" (the inline WithdrawSheet body).
     console.log('[15-withdraw] selecting BTC → Pay → Send to address…');
@@ -92,7 +92,7 @@ export async function run() {
     //    amount rules, renders below it. Then enter the amount (>= the 0.0005 min) and confirm.
     await driver.type('send-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
     const routeTxt = await driver.readText('send-status', { timeoutMs: 4_000 });
-    assertEq(routeTxt, 'Bitcoin · about 10 min · minimum 0.00050000 BTC', 'the route line discloses the Bitcoin burn before the user commits');
+    assertEq(routeTxt, 'Bitcoin · about 10 min · minimum 0.0005 BTC', 'the route line discloses the Bitcoin burn before the user commits');
     await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
     const sheetBody = await driver.bodyText();
     assertIncludes(sheetBody, 'native BTC address', 'the withdraw sheet presents the BTC destination surface');
@@ -100,7 +100,7 @@ export async function run() {
     // The review card appears once a valid amount is entered — proves the app parsed the BTC amount.
     await driver.findByTestID('withdraw-review-amount', { timeoutMs: 4_000 });
     const reviewTxt = await driver.readText('withdraw-review-amount');
-    assert(reviewTxt.includes('0.00050000 BTC'), `review should show the BTC amount, got: "${reviewTxt}"`);
+    assert(reviewTxt.includes('0.0005 BTC'), `review should show the BTC amount, got: "${reviewTxt}"`);
 
     console.log('[15-withdraw] confirming (signs approve + retrieve on-device, POSTs to /api/v2)…');
     await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });
@@ -145,7 +145,7 @@ export async function run() {
     const reduced = await driver.waitForText('0.0005 BTC', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
     assert(reduced, `Balances ckBTC row should show the reduced 0.0005 BTC (50000 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
-    assert(!balBody.includes('0.00100000 BTC'), 'Balances must NOT still show the pre-withdraw 0.00100000 BTC (stale balance cache?)');
+    assert(!balBody.includes('0.001 BTC'), 'Balances must NOT still show the pre-withdraw 0.001 BTC (stale balance cache?)');
     console.log('[15-withdraw] ✓ UI ckBTC balance dropped to 0.0005 BTC (matches the gateway delta)');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);

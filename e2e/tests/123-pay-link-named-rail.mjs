@@ -108,7 +108,7 @@ export async function run() {
     // 3. The review pays the NAMED rail exactly; nothing was sent by the link itself.
     const review = await driver.findByTestID('sol-send-review', {timeoutMs: 5_000});
     const reviewTxt = await review.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/0.001000 USDC/.test(reviewTxt), `review should show 0.001000000 USDC, got: "${reviewTxt}"`);
+    assert(/0.001 USDC/.test(reviewTxt), `review should show 0.001 USDC, got: "${reviewTxt}"`);
     assert(!/Sent/.test(body), 'a payment link must NOT auto-send — the review is the terminal state');
 
     console.log('[123-pay-link-named-rail] confirming (sign + broadcast via stub)…');

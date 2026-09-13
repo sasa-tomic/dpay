@@ -175,7 +175,7 @@ describe('NfcTap (IC) auto-sign (one-press rule)', () => {
     expect(hasID('nfc-pay-amount')).toBe(false);
     // The status carries the read-only amount + the hold-to-send hint (e2e flow 32 contract).
     expect(hasText('Hold the phones together to send')).toBe(true);
-    expect(hasText('Paying 0.00050000 BTC on Bitcoin')).toBe(true);
+    expect(hasText('Paying 0.0005 BTC on Bitcoin')).toBe(true);
   });
 
   it('a duplicate request during the sign is dead (signing latch + hook drop)', async () => {
@@ -230,7 +230,7 @@ describe('SolNfcTap (SOL) auto-sign (one-press rule)', () => {
     expect(hasID('nfc-pay-amount')).toBe(false);
     // Card-role exchanging: hold-to-send + the read-only amount (no network label on SOL).
     expect(hasText('Hold the phones together to send')).toBe(true);
-    expect(hasText('Paying 0.001000000 SOL')).toBe(true);
+    expect(hasText('Paying 0.001005 SOL')).toBe(true);
   });
 
   it('rid dedup: a re-tap pushing the SAME solreq after the sign changes nothing', async () => {

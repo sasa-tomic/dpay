@@ -42,7 +42,7 @@ const PAY_RAW = 50_795_551;   // the till's 0.50795551 ICP at 8 decimals (the st
 // SYNTHETIC (same provenance as flow 112): a real, checksum-valid base58 Solana address — the app
 // validates it with `isValidSolanaAddress` before the payer ever sees it.
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
-const SOL_PAY_DISPLAY = '0.012192520 SOL'; // the till's 0.01219252 SOL at 9 decimals
+const SOL_PAY_DISPLAY = '0.01219752 SOL'; // the till's 0.01219252 SOL at 9 decimals
 
 /** The Solana RPC simulator (the same seam every SOL flow uses): this flow never approves, so the
  *  stub only has to fund the wallet (5 SOL) and answer balance reads. `__E2E_SOL_SENT` is the
@@ -117,7 +117,11 @@ export async function run() {
     await driver.eval((u) => { window.__DPAY_TEST_DEEPLINK(u); }, TILL_LINK);
 
     await driver.findByTestID('pay-amount', {timeoutMs: 15_000});
-    assertEq(await driver.readText('pay-amount'), 'Pay 0.50795551 ICP',
+    // The total debit (amount + ledger fee, async icrc1_fee) — the same total the scan review
+    // shows; WAIT for it because the instant-read can catch the pre-fee fallback.
+    assert(await driver.waitForText('Pay 0.50805551 ICP', {timeoutMs: 15_000}),
+      'the till App Link review must reach the fee-inclusive total');
+    assertEq(await driver.readText('pay-amount'), 'Pay 0.50805551 ICP',
       'the till App Link lands on the SAME review a camera scan of the same QR produces');
     assertEq(await driver.readText('review-payee'), merchantPrincipal,
       'the review shows the FULL destination account');

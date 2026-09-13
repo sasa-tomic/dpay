@@ -2,7 +2,7 @@ import {View, Text, Pressable, ActivityIndicator} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {isSolanaDevnet} from '../config/constants';
-import {fmtAsset} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
 import {IconAlert} from './icons';
@@ -53,7 +53,7 @@ export function SolanaAtaSetupCard({
   onCreateAta?: () => void;
   onShowSolAddress?: () => void;
 }) {
-  const setupCost = fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT);
+  const setupCost = fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT);
   const canCreate = !!onCreateAta && !busy && hasSol;
   return (
     <>

@@ -97,13 +97,13 @@ export async function run() {
     await driver.waitForText('ICP account', { timeoutMs: 6_000 });
     const routeLine = await driver.readText('send-status');
     assertIncludes(routeLine, 'ICP account', 'the route line names the ICP account rail');
-    assertIncludes(routeLine, '0.00010000 ICP', 'the route line discloses the ledger fee');
+    assertIncludes(routeLine, '0.0001 ICP', 'the route line discloses the ledger fee');
     console.log(`[107-send-account-identifier] route disclosed: "${routeLine}"`);
 
     await driver.type('send-amount-input', SEND_TEXT, { timeoutMs: 4_000 });
     await driver.findByTestID('send-review-total', { timeoutMs: 4_000 });
     const total = await driver.readText('send-review-total');
-    assertIncludes(total, '1.00010000', 'the review totals amount + fee');
+    assertIncludes(total, '1.0001', 'the review totals amount + fee');
 
     console.log('[107-send-account-identifier] confirming (signs one legacy `transfer` on-device)…');
     await driver.click('btn-send-confirm', { timeoutMs: 5_000 });

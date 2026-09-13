@@ -10,7 +10,7 @@ import {IconAlert, IconCheck, IconClock, IconScan, IconShare} from './icons';
 import {POLL, QR_SIZE} from '../config/constants';
 import {solSignCaveat, solSplSignGate, type SolMintStates, type SolPayGate} from '../config/assets';
 import type {AssetId, Identity, NfcStatus} from '../lib/types';
-import {fmtAsset, short, toUnits} from '../lib/format';
+import {fmtAssetCompact, short, toUnits} from '../lib/format';
 import {parseDecimalToUnits} from '../lib/amount';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
 import {SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
@@ -496,7 +496,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       if (BigInt(tokenBalances[request.splToken ?? '']?.amount ?? '0') < rawAmount) { setErr(M.pay.notEnoughBalance); return; }
     }
     const who = sanitiseDisplayText(request.label ?? '') || request.recipient;
-    const amount = fmtAsset(raw, decimals, unit);
+    // TOTAL DEBIT for the done screen: native SOL adds the network fee (the number the wallet
+    // actually moved); a spl-token transfer spends its fee in SOL, a different unit — the token
+    // amount is the honest total for its own row.
+    const amount = fmtAssetCompact((isSol ? rawAmount + SOL_FEE_LAMPORTS : rawAmount).toString(), decimals, unit);
     const broadcast: {sig: string | null} = {sig: null};
     const {signal, cancel} = withTimeout(SOL_SEND_TIMEOUT_MS);
     setBusy(true);
@@ -662,7 +665,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       return;
     }
     const who = target.details.claimedMerchantName ?? target.host;
-    const amount = fmtAsset(target.rawAmount, SOL_DECIMALS, SOL_UNIT);
+    // TOTAL DEBIT for the done screen — amount + network fee, compact (matches the review).
+    const amount = fmtAssetCompact((BigInt(target.rawAmount) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT);
     // Filled by the send below when — and only when — the transfer's own outcome stayed indefinite.
     // That is exactly the case in which the provider has NOT been told, so the one submission is
     // still unspent and the claim is worth keeping.
@@ -855,8 +859,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         declined={ocpChoice.declined}
         options={ocpChoice.options}
         busy={ocpBusy}
-        // This rail spends lamports, so every option it can take is denominated in SOL.
-        labelOf={o => fmtAsset(o.rawAmount, SOL_DECIMALS, SOL_UNIT)}
+        // This rail spends lamports, so every option it can take is denominated in SOL. The label
+        // is the TOTAL DEBIT (amount + network fee, fee constant and known here) — a till prices
+        // the fee in, so the option reads the shelf price, not wire-minus-fee.
+        labelOf={o => fmtAssetCompact((BigInt(o.rawAmount) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT)}
         onPick={o => void chooseOcpOffer(o)}
         onCancel={reset}
       />
@@ -880,7 +886,10 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       <View style={S.center}>
         {/* No screen title: it sat directly above "Pay <amount>" with Approve underneath, and the
             IC rail's review dropped its own for the same reason (founder, 2026-09-09). */}
-        <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(ocp.rawAmount, SOL_DECIMALS, SOL_UNIT))}</Text>
+        {/* TOTAL DEBIT (amount + network fee — the fee is a known constant on this rail, so the
+            headline IS the shelf price at a till; founder rule 2026-09-13). Compact, like every
+            glanceable money surface. */}
+        <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAssetCompact((BigInt(ocp.rawAmount) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT))}</Text>
         <Text style={S.reviewTo}>{M.pay.toWho(ocp.details.claimedMerchantName ?? ocp.host)}</Text>
         {/* The FULL destination address, never shortened: the provider chose it, so it is the one
             thing on this screen the payer can actually check. */}
@@ -962,7 +971,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     return (
       <View style={S.center}>
         {spay.amount !== null ? (
-          <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(raw, decimals, unit))}</Text>
+          // TOTAL DEBIT where the fee shares the asset (native SOL); a spl-token transfer's fee is
+          // SOL — different unit — so its review shows the token amount. Compact either way.
+          <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAssetCompact((isSol ? BigInt(raw) + SOL_FEE_LAMPORTS : BigInt(raw)).toString(), decimals, unit))}</Text>
         ) : (
           <>
             <Text style={S.dim2}>{M.pay.spay.amountLabel}</Text>
@@ -984,7 +995,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         {spayMessage ? <Text testID="sol-spay-message" style={S.dim2}>{M.pay.spay.merchantMessage(spayMessage)}</Text> : null}
         {/* The token path may need the recipient's token account created in the same transaction —
             the sender covers its one-time rent. Same disclosure line as the send form. */}
-        {!isSol ? <Text testID="sol-spay-ata-note" style={S.dim2}>{M.withdraw.sol.recipientAtaNote(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), unit)}</Text> : null}
+        {!isSol ? <Text testID="sol-spay-ata-note" style={S.dim2}>{M.withdraw.sol.recipientAtaNote(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), unit)}</Text> : null}
         {insufficient ? <Text testID="sol-pay-lowbal" style={S.warnNote}>{M.pay.notEnoughBalance}</Text> : null}
         {err ? <Text testID="sol-pay-err" style={S.err}>{err}</Text> : null}
         <Pressable
@@ -1037,7 +1048,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     return (
       <View style={S.center}>
         <Text style={S.label}>{M.pay.paying}</Text>
-        <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAsset(req.amt, decimals, unit))}</Text>
+        <Text testID="sol-pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtAssetCompact((req.cur === 'SOL' ? BigInt(req.amt) + SOL_FEE_LAMPORTS : BigInt(req.amt)).toString(), decimals, unit))}</Text>
         <Text style={S.reviewTo}>{M.pay.toWho(claimedName || req.to)}</Text>
         {/* U-F5 twin of PayMode's review-payee: a merchant name alone is not verifiable — show the
             short destination under it. Without a name the primary line already carries the full
@@ -1062,7 +1073,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       <View style={S.center}>
         <Text style={S.label}>{M.pay.showThisToMerchant}</Text>
         <View testID="sol-pay-qr" style={S.qrCard}><QrCode value={solpayUri} size={QR_SIZE} ecl="L" /></View>
-        <Text style={S.amountBig}>{M.pay.amountToWho(fmtAsset(req!.amt, decimals, unit), claimedName || req!.to)}</Text>
+        <Text style={S.amountBig}>{M.pay.amountToWho(fmtAssetCompact((req!.cur === 'SOL' ? BigInt(req!.amt) + SOL_FEE_LAMPORTS : BigInt(req!.amt)).toString(), decimals, unit), claimedName || req!.to)}</Text>
         {/* U-F5: the sync auto-sign batch-skips the sign-status surface (straight to qr), so the
             short destination must live HERE — a merchant name alone is not verifiable. */}
         {claimedName ? <Text testID="sol-pay-payee" style={S.dim2}>{short(req!.to)}</Text> : null}
@@ -1107,8 +1118,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   }
 
   // phase === 'paid'. `req` may be null if the payment was via NFC (the autoSign decoded the
-  // request internally; SolPayMode's `req` state is only set on QR scan).
-  const paidAmt = req ? fmtAsset(req.amt, decimals, unit) : null;
+  // request internally; SolPayMode's `req` state is only set on QR scan). TOTAL DEBIT for native
+  // SOL (fee is a known constant); the token amount alone for a spl-token (fee is SOL).
+  const paidAmt = req ? fmtAssetCompact((req.cur === 'SOL' ? BigInt(req.amt) + SOL_FEE_LAMPORTS : BigInt(req.amt)).toString(), decimals, unit) : null;
   const paidTo = req ? claimedName || req.to : null;
   return (
     <View style={S.center}>

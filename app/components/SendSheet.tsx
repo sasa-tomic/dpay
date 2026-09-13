@@ -2,7 +2,7 @@ import {useCallback, useEffect, useMemo, useState} from 'react';
 import {View, Text, Pressable, TextInput, ActivityIndicator, Platform} from 'react-native';
 import {C} from '../config/palette';
 import {S} from '../styles';
-import {fmtAsset, toUnits} from '../lib/format';
+import {fmtAsset, fmtAssetCompact, toUnits} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import {useJourney} from '../lib/journey';
 import {awardPaymentTested} from '../lib/readiness';
@@ -10,7 +10,7 @@ import type {Identity} from '../lib/types';
 import type {SelectableAsset} from '../config/assets';
 import {railLineLabel} from '../config/currency';
 import type {CurrencyDescriptor, FamilyDisplay, MinterFamily} from '../config/catalog';
-import {displayName, fmtCurrencyAmount, isTestnetCurrency, testnetDisplayName, isValidDestinationAddress} from '../config/catalog';
+import {displayName, fmtCurrencyAmountCompact, isTestnetCurrency, testnetDisplayName, isValidDestinationAddress} from '../config/catalog';
 import {detectAddressShape, routeForShape, chainNameOfShape} from '../lib/destination';
 import {prepareTransfer, prepareLegacyTransfer, submitTransfer, decodeLegacyReply, fetchLedgerFee, type RailPrepared, type RailOutcome} from '../services/rail';
 import {loadAddressBook, rememberAddress, forgetAddress, type SavedAddress} from '../services/addressBook';
@@ -111,8 +111,8 @@ export function SendSheet({
   const feeKnown = feeRaw != null;
   const assetKey = `ic:${desc.currency}`;
   const fmt = useCallback(
-    (raw: string) => fmtAsset(raw, decimals, unit, displayDecimals),
-    [decimals, unit, displayDecimals],
+    (raw: string) => fmtAssetCompact(raw, decimals, unit, displayDecimals, desc.min_fraction_digits ?? 0),
+    [decimals, unit, displayDecimals, desc.min_fraction_digits],
   );
   // How a fee READS. A ledger that genuinely charges nothing says so in words — the deposit sheets
   // set this precedent (`M.deposit.ck.feeNone`), because "0.00000000 BTC" on a money screen looks
@@ -234,7 +234,7 @@ export function SendSheet({
           ? M.withdraw.send.routeNative(
               display.networkLabel,
               display.blockMin,
-              fmtAsset(String(display.withdrawMinRaw), decimals, display.nativeAsset, display.amountDecimals),
+              fmtAssetCompact(String(display.withdrawMinRaw), decimals, display.nativeAsset, display.amountDecimals),
             )
           : M.withdraw.send.routeNativeNoMin(display.networkLabel, display.blockMin),
         tone: 'ok',
@@ -445,7 +445,7 @@ export function SendSheet({
         <View testID="send-review" style={S.reviewCard}>
           <Text style={S.reviewLabel}>{M.withdraw.send.reviewTitle}</Text>
           <Text testID="send-review-amount" style={S.reviewAmount}>
-            {fmtCurrencyAmount([desc], desc.currency, raw)}
+            {fmtCurrencyAmountCompact([desc], desc.currency, raw)}
           </Text>
           <View style={S.reviewRow}>
             <Text style={S.reviewRowLabel}>{M.withdraw.ic.sentTo}</Text>

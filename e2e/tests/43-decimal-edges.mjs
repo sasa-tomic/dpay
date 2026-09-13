@@ -68,26 +68,27 @@ const CKUSDC_CURRENCY = 2;
 const CKETH_CURRENCY = 6;
 
 // Each case: { label, currency, raw, expected }. `expected` is the exact substring the sign status's
-// `pay-amount` should contain (PayMode renders `Pay ${fmtCurrencyAmount(...)}`, so the assertion is
+// `pay-amount` should contain (PayMode renders `Pay ${fmtCurrencyAmountCompact(...)}` — the compact
+// formatter: trailing zeros trimmed, never rounded — so the assertion is
 // a substring check on the formatted amount + unit, NOT the whole review body — guards against a
 // future UI change adding unrelated numbers).
 const CASES = [
   // ckBTC (8 dec) — full-precision, low-digit, trailing-zero
   { label: 'ckBTC mid (12345678 sats)',  currency: CKBTC_CURRENCY, raw: 12_345_678,  expected: '0.12345678 BTC' },
   { label: 'ckBTC low (1 sat)',          currency: CKBTC_CURRENCY, raw: 1,           expected: '0.00000001 BTC' },
-  { label: 'ckBTC pad (100000000 sats)', currency: CKBTC_CURRENCY, raw: 100_000_000, expected: '1.00000000 BTC' },
+  { label: 'ckBTC pad (100000000 sats)', currency: CKBTC_CURRENCY, raw: 100_000_000, expected: '1 BTC' },
   // ckUSDC (6 dec) — full-precision, low-digit, trailing-zero
   { label: 'ckUSDC mid (1234567 raw)',   currency: CKUSDC_CURRENCY, raw: 1_234_567,   expected: '1.234567 USDC' },
   { label: 'ckUSDC low (1 raw)',         currency: CKUSDC_CURRENCY, raw: 1,           expected: '0.000001 USDC' },
-  { label: 'ckUSDC pad (1000000 raw)',   currency: CKUSDC_CURRENCY, raw: 1_000_000,   expected: '1.000000 USDC' },
+  { label: 'ckUSDC pad (1000000 raw)',   currency: CKUSDC_CURRENCY, raw: 1_000_000,   expected: '1.00 USDC' },
   // ckETH (18 dec, display 6) — full-precision raw past 2^53, display-truncation (never rounding),
   // low-digit, trailing-zero. BigInt literals are REQUIRED: the mid + pad raw values exceed 2^53,
   // so a Number literal would lose low digits BEFORE the wire codec's `BigInt(val)` ever ran (the
   // codec is exact, but Number parsing is not). The display strings are the TRUNCATED-to-6 forms —
   // a float `(raw/1e18).toFixed(6)` path would render '1.234568' (rounded) and FAIL the mid case.
   { label: 'ckETH mid (1234567890123456789 wei)', currency: CKETH_CURRENCY, raw: 1_234_567_890_123_456_789n, expected: '1.234567 ETH' },
-  { label: 'ckETH low (1 wei)',                     currency: CKETH_CURRENCY, raw: 1n,                        expected: '0.000000 ETH' },
-  { label: 'ckETH pad (1000000000000000000 wei)',   currency: CKETH_CURRENCY, raw: 1_000_000_000_000_000_000n, expected: '1.000000 ETH' },
+  { label: 'ckETH low (1 wei)',                     currency: CKETH_CURRENCY, raw: 1n,                        expected: '< 0.000001 ETH' },
+  { label: 'ckETH pad (1000000000000000000 wei)',   currency: CKETH_CURRENCY, raw: 1_000_000_000_000_000_000n, expected: '1 ETH' },
 ];
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
@@ -98,7 +99,7 @@ export const meta = {
   name: 'decimal-edges',
   journey: 'pay',
   covers: ['decimal', 'format', 'ckbtc', 'ckerc20', '18-decimal', 'display-decimals'],
-  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec ckETH (display-TRUNCATED to 6, never rounded) amounts render with exact decimals on the sign surface (no rounding, no sci-notation, no trailing-zero drift).',
+  verifies: '8-dec (ckBTC) + 6-dec (ckUSDC) + 18-dec ckETH (display-TRUNCATED to 6, never rounded) amounts render in the compact form on the sign surface (trailing zeros trimmed, sub-resolution spelled out, no rounding, no sci-notation).',
   timeoutMs: 35000, // 9 scan/cancel cycles + onboard — wider than the 20s default
 };
 

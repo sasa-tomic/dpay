@@ -105,13 +105,13 @@ export async function run() {
     await driver.type('sol-send-amount-input', SEND_AMOUNT, {timeoutMs: 4_000});
     const review = await driver.findByTestID('sol-send-review-amount', {timeoutMs: 4_000});
     const reviewTxt = await review.evaluate((n) => (n.textContent ?? '').trim());
-    assert(reviewTxt === 'Send 1.500000 USDC', `review should read "Send 1.500000 USDC", got: "${reviewTxt}"`);
+    assert(reviewTxt === 'Send 1.5 USDC', `review should read "Send 1.5 USDC", got: "${reviewTxt}"`);
     console.log(`[77-sol-usdc-withdraw] ✓ review: ${reviewTxt}`);
 
     const note = await driver.findByTestID('sol-send-ata-note', {timeoutMs: 4_000});
     const noteTxt = await note.evaluate((n) => (n.textContent ?? '').trim());
     assertIncludes(noteTxt, "If they don't have a USDC account yet, this creates it for them", 'the USDC review card must disclose the recipient-ATA rent');
-    assertIncludes(noteTxt, 'one-time ≈0.002044280 SOL paid by you', 'the rent disclosure must carry the exact SOL_ATA_SETUP_MIN_LAMPORTS cost');
+    assertIncludes(noteTxt, 'one-time ≈0.00204428 SOL paid by you', 'the rent disclosure must carry the exact SOL_ATA_SETUP_MIN_LAMPORTS cost');
     console.log('[77-sol-usdc-withdraw] ✓ rent disclosure note rendered');
 
     // 4. Confirm → sendSpl through the stub (sender+recipient exist → plain SPL transfer) → Sent ✓.
@@ -148,12 +148,12 @@ export async function run() {
     const err = await driver.findByTestID('sol-send-err', {timeoutMs: 12_000});
     const errTxt = await err.evaluate((n) => (n.textContent ?? '').trim());
     // The WHOLE sentence, not a prefix. The prefix version of this assertion ended at the amount
-    // and therefore passed for two years' worth of "…0.002044280 SOL of SOL in this wallet" — the
+    // and therefore passed for two years' worth of "…0.00204428 SOL of SOL in this wallet" — the
     // unit printed twice, on the error path, in every locale (fixed 2026-09-08: `fmtAsset` owns
     // the unit, so the i18n template must not re-append it; pinned in __tests__/solana-ata-copy).
     assertEq(
       errTxt,
-      "They don't have a USDC account yet — creating it needs about 0.002044280 SOL in this wallet "
+      "They don't have a USDC account yet — creating it needs about 0.00204428 SOL in this wallet "
       + '(one-time rent + fee, paid by you) — send a little SOL here first',
       'the pre-check error renders the whole sentence, with the rent amount carrying its unit ONCE',
     );

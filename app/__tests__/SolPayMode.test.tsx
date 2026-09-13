@@ -574,8 +574,9 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     await scanTill(tree);
 
     expect(textByTestID(tree, 'ocp-choose')).toBe(M.pay.ocp.chooseAsset('USDC'));
-    // The amount is stated in the asset's OWN units — picking blind is not consent.
-    expect(textByTestID(tree, 'ocp-option-solana:SOL')).toContain('0.01221422');
+    // The amount is stated in the asset's OWN units — picking blind is not consent. Fee-inclusive
+    // total (founder rule 2026-09-13): the label is what leaves the account.
+    expect(textByTestID(tree, 'ocp-option-solana:SOL')).toContain('0.01221922');
     expect(hasTestID(tree, 'btn-approve')).toBe(false);
 
     await act(async () => { pressByTestID(tree, 'ocp-option-solana:SOL'); });
@@ -619,7 +620,7 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     const tree = mountTill();
     await scanTill(tree);
 
-    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.01221422');
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.01221922');
     expect(textByTestID(tree, 'sol-pay-payee')).toBe(MERCHANT);
     expect(textByTestID(tree, 'ocp-price')).toContain('api.dfx.swiss');
     expect(hasTestID(tree, 'review-claimed')).toBe(false);
@@ -639,7 +640,7 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     expect(details).toBe(OCP_TARGET.details);
     expect(method).toBe('Solana');
     expect(asset).toBe('SOL');
-    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.012214220 SOL'));
+    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.01221922 SOL'));
   });
 
   test('the till’s claimed note rides the review’s memo line and the SOL seam’s annotation', async () => {
@@ -677,7 +678,7 @@ describe('SolPayMode — OpenCryptoPay till', () => {
     await pressByLabel(tree, M.pay.approveA11y);
 
     expect(textByTestID(tree, 'ocp-outcome')).toBe(message);
-    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('0.012214220 SOL'));
+    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('0.01221922 SOL'));
   });
 
   test('the Solana rail reports a CONFIRMED signature, and a broadcast it cannot confirm as unknown', async () => {
@@ -904,7 +905,7 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
     expect(sends[1]).toEqual({kind: 'settled', txId: SIGNATURE, reference: M.pay.ocp.ref.solTransaction(SIGNATURE)});
     expect(jest.mocked(getSolSignatureStatus).mock.calls[0][0]).toBe(SIGNATURE); // re-read, never re-broadcast
     expect(sendSol).toHaveBeenCalledTimes(1);
-    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.012214220 SOL'));
+    expect(texts(tree).join(' ')).toContain(M.nfc.paidAmount('0.01221922 SOL'));
     expect(hasTestID(tree, 'ocp-outcome')).toBe(false);
 
     // The claim is SPENT. `/tx` is granted exactly once in total, so no later tick may report again.
@@ -951,7 +952,7 @@ describe('SolPayMode — an unresolved till transfer stays recoverable', () => {
 
     expect(sends).toEqual([{kind: 'unknown'}]); // the submission was NOT spent
     expect(textByTestID(tree, 'ocp-outcome')).toBe(M.pay.ocp.submitTooLate(M.pay.ocp.ref.solTransaction(SIGNATURE)));
-    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('0.012214220 SOL'));
+    expect(texts(tree).join(' ')).not.toContain(M.nfc.paidAmount('0.01221922 SOL'));
     nowSpy.mockRestore();
     act(() => { tree.unmount(); });
   });
@@ -1018,7 +1019,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
   test('a full request reviews FIXED values — amount, label, message, FULL destination — never auto-signs', async () => {
     const tree = mountSolPay();
     await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}&label=Coffee%20Bar&message=Order%2042`);
-    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.001000000 SOL');
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.001005 SOL');
     expect(textByTestID(tree, 'sol-pay-payee')).toBe(MERCHANT);
     expect(texts(tree)).toContain(M.pay.toWho('Coffee Bar'));
     expect(textByTestID(tree, 'sol-spay-message')).toBe(M.pay.spay.merchantMessage('Order 42'));
@@ -1038,7 +1039,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
     expect(secretHex).toBe(IDENTITY.secretHex);
     expect(transfer).toEqual({recipient: MERCHANT, splToken: null, amount: 1000000n, references: [REFERENCE], memo: 'order-42'});
     expect(sent).toEqual(['sol']);
-    expect(textByTestID(tree, 'sol-pay-status')).toContain('0.001000000 SOL');
+    expect(textByTestID(tree, 'sol-pay-status')).toContain('0.001005 SOL');
     expect(textByTestID(tree, 'sol-spay-signature')).toBe('SigSpayBase58');
     expect(hasTestID(tree, 'btn-sol-pay-done')).toBe(true);
     act(() => { tree.unmount(); });
@@ -1068,7 +1069,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
     const sentMints: string[] = [];
     const tree = mountSolPay({tokenBalance: '2000000', tokenBalances: {[USDC_MINT_ADDRESS]: {amount: '2000000', status: 'balance'}}, onSentToken: mint => sentMints.push(mint ?? '')});
     await scanCode(tree, `solana:${MERCHANT}?spl-token=${USDC_MINT_ADDRESS}&amount=1.5&reference=${REFERENCE}`);
-    expect(textByTestID(tree, 'sol-pay-amount')).toContain('1.500000 USDC');
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('1.5 USDC');
     expect(hasTestID(tree, 'sol-spay-ata-note')).toBe(true);
     await pressByLabel(tree, M.pay.approveA11y);
     const [, transfer] = jest.mocked(sendSolanaPay).mock.calls[0];
@@ -1132,7 +1133,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
     await scanCode(tree, `solana:${MERCHANT}?amount=0.001&reference=${REFERENCE}`);
     await pressByLabel(tree, M.pay.approveA11y);
     // The money may be landing: no Paid claim, the signature is the record, the note says so.
-    expect(texts(tree)).not.toContain(M.nfc.paidAmount('0.001000000 SOL'));
+    expect(texts(tree)).not.toContain(M.nfc.paidAmount('0.001005 SOL'));
     expect(textByTestID(tree, 'sol-spay-signature')).toBe('SigSpayUnknown');
     expect(textByTestID(tree, 'sol-spay-outcome')).toBe(M.pay.spay.pendingNote);
     expect(sent).toEqual(['sol']);
@@ -1160,7 +1161,7 @@ describe('SolPayMode — a scanned Solana Pay request (the open standard the rec
     expect(hasTestID(tree, 'sol-pay-scan')).toBe(true);
     expect(errText(tree)).toBe('');
     await scanCode(tree, `solana:${MERCHANT}?amount=0.002&reference=${REFERENCE}`);
-    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.002000000 SOL');
+    expect(textByTestID(tree, 'sol-pay-amount')).toContain('0.002005 SOL');
     act(() => { tree.unmount(); });
   });
 });

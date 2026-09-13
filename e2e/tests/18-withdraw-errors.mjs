@@ -76,7 +76,7 @@ export async function run() {
 
     // Open Balances; wait for the funded native-ETH row, then SELECT it → Pay → "Send to address".
     await openBalances(driver);
-    await driver.waitForText('5.000000 ETH', { timeoutMs: 8_000 });
+    await driver.waitForText('5 ETH', { timeoutMs: 8_000 });
     await selectCurrency(driver, 'cketh');
     await openPaySend(driver);
     await driver.findByTestID('send-address-input', { timeoutMs: 5_000 });
@@ -88,7 +88,7 @@ export async function run() {
     await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
     await driver.type('withdraw-amount-input', '0.001', { timeoutMs: 4_000 }); // 1e15 Wei < 1e16 min
     const bodyBelow = await driver.bodyText();
-    assertIncludes(bodyBelow, 'Below the 0.010000 ETH minimum withdrawal.', 'below-min warning');
+    assertIncludes(bodyBelow, 'Below the 0.01 ETH minimum withdrawal.', 'below-min warning');
     // The confirm button is the gate: `canReview` is false when belowMin, so the Pressable is
     // disabled (the review card itself still renders the amount — that's fine; the SUBMIT is blocked).
     await assertDisabled(driver, 'btn-withdraw-confirm', 'the confirm button must be DISABLED for a below-min amount (canReview=false)');
@@ -96,9 +96,9 @@ export async function run() {
 
     // --- 2. OVER-BALANCE (UI guard): type an amount exceeding the available balance. -----------
     console.log('[18-withdraw-errors] over-balance UI guard…');
-    await driver.type('withdraw-amount-input', '6', { timeoutMs: 4_000 }); // 6 ETH > 5.000000 ETH available
+    await driver.type('withdraw-amount-input', '6', { timeoutMs: 4_000 }); // 6 ETH > 5 ETH available
     const bodyOver = await driver.bodyText();
-    assertIncludes(bodyOver, 'More than your available 5.000000 ETH.', 'over-balance warning');
+    assertIncludes(bodyOver, 'More than your available 5 ETH.', 'over-balance warning');
     await assertDisabled(driver, 'btn-withdraw-confirm', 'the confirm button must be DISABLED for an over-balance amount (canReview=false)');
     console.log('[18-withdraw-errors] ✓ over-balance warning shows + confirm disabled');
 

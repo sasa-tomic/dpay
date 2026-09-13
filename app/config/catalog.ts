@@ -432,7 +432,7 @@ export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): 
 // payer saw a generic "Communicating…" with NO asset name / amount / network. This PURE resolver
 // returns the honest asset name + network + asset-correct amount so the caller (autoSign) can set
 // the disclosure state SYNCHRONOUSLY BEFORE the first await — React then renders
-// "Paying 0.00050000 BTC on Bitcoin" during the exchanging/awaitingApproval/settling window.
+// "Paying 0.0005 BTC on Bitcoin" during the exchanging/awaitingApproval/settling window.
 //
 // Returns `null` when an honest disclosure is impossible (defense-in-depth): the caller declines the
 // card and NEVER signs. This is a STRICTER gate than `isPayableAsset` — a payable asset whose amount
@@ -442,7 +442,7 @@ export function familyDisplay(catalog: CurrencyDescriptor[], currency: number): 
 export type NfcDisclosure = {
   assetName: string;        // the honest asset NAME (BTC/USDC/DEMO) — never a raw ledger id
   networkLabel: string | null; // the native settlement network (Bitcoin/Ethereum); null for DEMO
-  formattedAmount: string;  // asset-correct amount ("0.00050000 BTC"), never the DEMO ∂ formatter
+  formattedAmount: string;  // asset-correct amount ("0.0005 BTC"), never the DEMO ∂ formatter
 };
 export function resolveNfcDisclosure(
   catalog: CurrencyDescriptor[],
@@ -463,7 +463,7 @@ export function resolveNfcDisclosure(
   if (name === M.wallet.asset.unsupported) return null; // no honest name → decline
   const network = a.network ?? familyDisplay(catalog, currency)?.networkLabel ?? null;
   if (!network) return null; // no honest network → decline
-  const formatted = fmtCurrencyAmount(catalog, currency, amount);
+  const formatted = fmtCurrencyAmountCompact(catalog, currency, amount);
   if (formatted === M.wallet.asset.unsupported) return null; // no honest amount → decline
   return {assetName: name, networkLabel: network, formattedAmount: formatted};
 }
@@ -745,9 +745,10 @@ export function currencySymbol(catalog: CurrencyDescriptor[], currency: number):
 // renders as `∂`; any other currency renders via its catalog descriptor's decimals + the
 // per-currency backing symbol (MC1 unit 5: `descriptor.backing_symbol` instead of a family-level
 // nativeAsset assumption, so a future ckUSDT no longer renders "… USDC"). e.g. "50000" raw @
-// currency 1 → "0.00050000 BTC". Used by ReceiveMode + PayMode so a ckBTC request/review reads
-// "0.00050000 BTC" (never a misleading dollar amount) — the merchant-selected asset is what the
-// payer sees + pays. Per CLAUDE.md, dpay never swaps, so the display NEVER converts across assets.
+// currency 1 → "0.00050000 BTC". The EXACT, padded form — kept for the one place a formatted string
+// must round-trip through the amount parser (an input fill, e.g. SendSheet's Max); every glanceable
+// money surface uses `fmtCurrencyAmountCompact` instead (founder rule 2026-09-13). Per CLAUDE.md,
+// dpay never swaps, so the display NEVER converts across assets.
 // Decimals come from the catalog descriptor directly (display_decimals ?? decimals, NOT
 // `familyDisplay`, which would mis-render DEMO_USD's 2). MC1 unit 6 — FAIL-CLOSED: an unknown family
 // returns the explicit "Unsupported" sentinel instead of a wrong "… BTC" amount.
@@ -762,9 +763,10 @@ export function fmtCurrencyAmount(catalog: CurrencyDescriptor[], currency: numbe
 }
 
 // The COMPACT sibling — same asset resolution, `fmtAssetCompact` instead of the exact formatter.
-// Reserved for the glanceable surfaces (Balances rows, the wallet header, Ledger history); every
-// screen where the user commits money keeps `fmtCurrencyAmount`. See `fmtAssetCompact` for the
-// trim/truncate/mark rules.
+// The DEFAULT for every glanceable money surface (reviews, paid screens, history rows, receipts,
+// fees, disclosures — founder rule 2026-09-13: best-effort rounded amounts everywhere the user just
+// READS money); the exact `fmtCurrencyAmount` survives only where a string must round-trip through
+// the amount parser (an input fill). See `fmtAssetCompact` for the trim/truncate/mark rules.
 export function fmtCurrencyAmountCompact(
   catalog: CurrencyDescriptor[], currency: number, raw: string, sign = '',
 ): string {

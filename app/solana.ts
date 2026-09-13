@@ -19,7 +19,7 @@ import {solanaRpcUrl, solanaRpcUrls, icGatewayUrl, SOL_GENESIS_HASH, SOL_PAYMENT
 import {solanaTokenAvailable} from './config/assets';
 import {deriveSolanaKeypair, deriveSolanaAddress} from './solana/identity';
 import {SOL_DECIMALS, SOL_UNIT} from './solana/identity';
-import {fmtAsset} from './lib/format';
+import {fmtAssetCompact} from './lib/format';
 import {base58Decode32, buildSignedTransfer, signTransaction, assembleMessage, buildCanonicalSolMessage, verifySolPayment, extractSignedTxParts, buildMemoInstruction, buildSolTransferInstruction, type Instruction} from './solana/tx';
 import {buildSplTransferInstruction, buildTransferCheckedInstruction, buildCreateAtaIdempotentInstruction, buildCanonicalSplMessage, deriveAta, decodeSplTokenAmount, decodeSplMintDecimals, SOL_ATA_SETUP_MIN_LAMPORTS} from './solana/spl';
 import {isEndpointRefusal, isRelayPathDown} from './solana/errors';
@@ -400,7 +400,7 @@ export async function sendSpl(
     // broadcast with a raw "custom program error: 0x1" that no friendlySolError pattern matches.
     const lamports = await getBalance(solanaRpcUrls(), senderAddress, {signal});
     if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-      throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
+      throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
     }
     ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(destAddress), base58Decode32(mint)));
   }
@@ -484,7 +484,7 @@ export async function sendSolanaPay(
       // broadcast with a raw program error no friendlySolError pattern matches.
       const lamports = await getBalance(solanaRpcUrls(), senderAddress, {signal});
       if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-        throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token));
+        throw new Error(M.errors.solana.recipientNoTokenAccount(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token));
       }
       ixs.push(buildCreateAtaIdempotentInstruction(publicKey, recipientAta, base58Decode32(transfer.recipient), base58Decode32(transfer.splToken)));
     }
@@ -525,7 +525,7 @@ export async function createTokenAta(secretHex: string, mint: string, signal?: A
 
   const lamports = await getBalance(solanaRpcUrls(), ownerAddress, {signal});
   if (BigInt(lamports) < SOL_ATA_SETUP_MIN_LAMPORTS) {
-    throw new Error(M.errors.solana.ownTokenAccountRent(fmtAsset(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
+    throw new Error(M.errors.solana.ownTokenAccountRent(fmtAssetCompact(String(SOL_ATA_SETUP_MIN_LAMPORTS), SOL_DECIMALS, SOL_UNIT), token ?? mint));
   }
 
   const ix = buildCreateAtaIdempotentInstruction(publicKey, ata, publicKey, base58Decode32(mint));

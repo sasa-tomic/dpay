@@ -79,7 +79,7 @@ export async function run() {
     //    picks up the faucet credit), then SELECT ckETH (makes it the active asset).
     console.log('[44-cketh-withdraw] opening Balances; waiting for the funded ckETH row…');
     await openBalances(driver);
-    await driver.waitForText('5.000000 ETH', { timeoutMs: 8_000 });
+    await driver.waitForText('5 ETH', { timeoutMs: 8_000 });
 
     // 4. Select ckETH → Pay → "Send to address" (the inline WithdrawSheet body, family-dispatched
     //    to the native-ETH withdraw_eth branch).
@@ -93,7 +93,7 @@ export async function run() {
     //    body renders below it, family-dispatched to the withdraw_eth branch.
     await driver.type('send-address-input', WITHDRAW_ADDR, { timeoutMs: 4_000 });
     const routeTxt = await driver.readText('send-status', { timeoutMs: 4_000 });
-    assertEq(routeTxt, 'Ethereum · about 1 min · minimum 0.010000 ETH', 'the route line discloses the Ethereum burn before the user commits');
+    assertEq(routeTxt, 'Ethereum · about 1 min · minimum 0.01 ETH', 'the route line discloses the Ethereum burn before the user commits');
     await driver.findByTestID('withdraw-amount-input', { timeoutMs: 5_000 });
 
     // 5b. Family-dispatch discriminator, asserted on the RENDERED native body: token_contract ==
@@ -106,10 +106,10 @@ export async function run() {
     // Enter the amount (in ETH, >= the 0.01 ETH local floor), then confirm.
     await driver.type('withdraw-amount-input', WITHDRAW_ETH, { timeoutMs: 4_000 });
     // The review card appears once a valid amount is entered — proves the app parsed the ETH amount
-    // at 18-dec Wei precision (display shows 6 fractional places via display_decimals).
+    // at 18-dec Wei precision (compact display: trailing zeros trimmed, ckETH has no min fraction).
     await driver.findByTestID('withdraw-review-amount', { timeoutMs: 4_000 });
     const reviewTxt = await driver.readText('withdraw-review-amount');
-    assert(reviewTxt.includes('1.000000 ETH'), `review should show the ETH amount at 6-dec display precision, got: "${reviewTxt}"`);
+    assert(reviewTxt.includes('1 ETH'), `review should show the ETH amount compact, got: "${reviewTxt}"`);
 
     console.log('[44-cketh-withdraw] confirming (gas query + signs approve + withdraw_eth on-device, POSTs to /api/v2)…');
     await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });

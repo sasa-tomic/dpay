@@ -47,7 +47,7 @@ export async function run() {
     await faucetCurrency(relayBaseURL, hex, 2, 25_000_000); // 25.00 USDC
 
     // Wait for the balance poll to reflect funded amounts.
-    await driver.waitForText('0.05000', { timeoutMs: 8_000 }).catch(() => {});
+    await driver.waitForText('0.05 BTC', { timeoutMs: 8_000 }).catch(() => {});
 
     // 3. Do a payment so the Ledger has history: Alex requests ∂12.50, an in-test payer wallet
     // settles it on the rail (icrc1_transfer with memo = request nonce).

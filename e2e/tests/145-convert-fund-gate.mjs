@@ -89,7 +89,7 @@ export async function run() {
     await driver.navigate(webBaseURL, `/wallet?relay=${encodeURIComponent(relayBaseURL)}`, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 10_000 });
     await openConvert(driver);
-    assertIncludes(await driver.readText('convert-balance'), '0.50000000 ICP', 'the balance line shows the funded amount, with ONE unit');
+    assertIncludes(await driver.readText('convert-balance'), '0.5 ICP', 'the balance line shows the funded amount, with ONE unit');
 
     await driver.type('convert-amount', '2');
     await driver.waitForFunction(
@@ -97,8 +97,8 @@ export async function run() {
       { timeoutMs: 8_000 },
     );
     const refusal = await driver.readText('convert-insufficient');
-    assertIncludes(refusal, '2.00020000 ICP', 'the refusal states what the conversion needs: 2 ICP plus BOTH input-ledger fees');
-    assertIncludes(refusal, '0.50000000 ICP', 'the refusal states the balance it is measured against');
+    assertIncludes(refusal, '2.0002 ICP', 'the refusal states what the conversion needs: 2 ICP plus BOTH input-ledger fees');
+    assertIncludes(refusal, '0.5 ICP', 'the refusal states the balance it is measured against');
     assert((await confirmDisabled(driver)) === 'true', 'the confirm is aria-disabled while the amount is out of reach');
     await driver.screenshot('145-convert-insufficient');
 

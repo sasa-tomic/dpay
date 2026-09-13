@@ -1,7 +1,7 @@
 import type {ReactNode} from 'react';
 import {View, Text, Pressable} from 'react-native';
 import {S} from '../styles';
-import {type CurrencyDescriptor, fmtCurrencyAmount} from '../config/catalog';
+import {type CurrencyDescriptor, fmtCurrencyAmountCompact} from '../config/catalog';
 import type {PayIntent} from '../lib/types';
 import {M} from '../i18n';
 
@@ -27,10 +27,19 @@ import {M} from '../i18n';
  * `approveDisabled` is computed HERE, once: a shown error or a blocked balance must never leave a
  * doomed payment re-tappable, and two call sites deriving that separately is two chances to get it
  * wrong.
+ *
+ * The headline is the TOTAL DEBIT (founder rule 2026-09-13): `totalRaw` carries amount + ledger
+ * fee when the caller knows the fee (a dpay till prices the fee IN, so the total IS the shelf
+ * price; a p2p request adds the fee on top). Absent/null (fee unknown — offline, or DEMO play
+ * money) it falls back to the intent's own amount. Either way it renders COMPACT — the same
+ * best-effort rounding every glanceable surface uses; the exact padded form survives only where a
+ * string must round-trip through the amount parser (input fills).
  */
-export function PaymentReview({catalog, intent, notes, isSelf, insufficient, blockApprove, err, busy, onApprove, onCancel}: {
+export function PaymentReview({catalog, intent, totalRaw, notes, isSelf, insufficient, blockApprove, err, busy, onApprove, onCancel}: {
   catalog: CurrencyDescriptor[];
   intent: PayIntent;
+  /** Amount + ledger fee, in raw units, when the fee is known — what the payer's account moves. */
+  totalRaw?: string | null;
   notes?: ReactNode;
   /** Is the destination this wallet's own account? REQUIRED rather than defaulted, so a new entry
    *  into this screen has to answer the question instead of inheriting a silent `false`. */
@@ -48,7 +57,7 @@ export function PaymentReview({catalog, intent, notes, isSelf, insufficient, blo
       {/* No screen title. "Review payment" sat directly above "Pay <amount>" with Approve and
           Cancel underneath — the screen named itself three times, and the eyebrow was the copy that
           said the least (founder, 2026-09-09). */}
-      <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmount(catalog, intent.currency, intent.amount))}</Text>
+      <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmountCompact(catalog, intent.currency, totalRaw ?? intent.amount))}</Text>
       <PayeeLine intent={intent} isSelf={isSelf} />
       {notes}
       {/* C1/C2 + L5: the warning + any error render ABOVE the button (not below) so they're seen

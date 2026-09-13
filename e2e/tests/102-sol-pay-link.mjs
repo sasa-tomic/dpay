@@ -87,7 +87,7 @@ export async function run() {
     //    two fields by hand.
     const review = await driver.findByTestID('sol-send-review', {timeoutMs: 5_000});
     const reviewTxt = await review.evaluate((n) => (n.textContent ?? '').trim());
-    assert(/0\.001000000 SOL/.test(reviewTxt), `review should show 0.001000000 SOL, got: "${reviewTxt}"`);
+    assert(/0\.001005 SOL/.test(reviewTxt), `review should show 0.001005 SOL, got: "${reviewTxt}"`);
     const body = await driver.bodyText();
     assert(!/Sent/.test(body), 'a payment link must NOT auto-send — the review is the terminal state');
 

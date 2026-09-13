@@ -166,7 +166,7 @@ describe('railFees — fee FACTS in each rail\'s own unit, never a cross-token v
 
   it('formats an IC rail\'s catalog fee with the asset\'s own decimals and token', () => {
     const ckusdc = withSol.find(a => a.id === 'ic:2')!;
-    expect(railFees(ckusdc, [DEMO, CKUSDC_FEE, VCHF]).perTransfer).toEqual({raw: '10000', formatted: '0.010000 ckUSDC'});
+    expect(railFees(ckusdc, [DEMO, CKUSDC_FEE, VCHF]).perTransfer).toEqual({raw: '10000', formatted: '0.01 ckUSDC'});
     expect(railFees(ckusdc, [DEMO, CKUSDC_FEE, VCHF]).oneTime).toBeNull();
   });
 
@@ -178,29 +178,29 @@ describe('railFees — fee FACTS in each rail\'s own unit, never a cross-token v
 
   it('reports a native-SOL rail\'s signature fee in SOL, with no one-time cost', () => {
     const sol = withSol.find(a => a.id === 'solana:SOL')!;
-    expect(railFees(sol, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005000 SOL'});
+    expect(railFees(sol, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005 SOL'});
     expect(railFees(sol, []).oneTime).toBeNull();
   });
 
   it('keeps the USDC rail\'s signature fee in SOL (not USDC decimals) and adds the one-time ATA rent', () => {
-    // The signature fee is charged in SOL even when moving USDC — 9-decimal padding proves the
-    // unit is SOL, not the rail token's 6.
+    // The signature fee is charged in SOL even when moving USDC — the unit label stays SOL
+    // (9-decimal lamports raw), not the rail token's decimals; display is compact.
     const usdc = withSol.find(a => a.id === 'solana:USDC')!;
-    expect(railFees(usdc, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005000 SOL'});
-    expect(railFees(usdc, []).oneTime).toEqual({raw: '2039280', formatted: '0.002039280 SOL'});
+    expect(railFees(usdc, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005 SOL'});
+    expect(railFees(usdc, []).oneTime).toEqual({raw: '2039280', formatted: '0.00203928 SOL'});
   });
 
   it('states EURC\'s one-time ATA rent too — the rent is a property of ANY SPL token rail', () => {
     // Generalized from the USDC special case: holding EURC needs the same associated token
     // account, so its fee fact carries the same rent in SOL at EURC's own rail.
     const eurc = withSol.find(a => a.id === 'solana:EURC')!;
-    expect(railFees(eurc, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005000 SOL'});
-    expect(railFees(eurc, []).oneTime).toEqual({raw: '2039280', formatted: '0.002039280 SOL'});
+    expect(railFees(eurc, []).perTransfer).toEqual({raw: '5000', formatted: '0.000005 SOL'});
+    expect(railFees(eurc, []).oneTime).toEqual({raw: '2039280', formatted: '0.00203928 SOL'});
   });
 
-  it('formats the VEUR rail\'s catalog fee with the IC row\'s own 8 decimals and token', () => {
+  it('formats the VEUR rail\'s catalog fee with the IC row\'s own token', () => {
     const veur = build([DEMO, VEUR], true).find(a => a.id === 'ic:9')!;
-    expect(railFees(veur, [VEUR]).perTransfer).toEqual({raw: '10000', formatted: '0.00010000 VEUR'});
+    expect(railFees(veur, [VEUR]).perTransfer).toEqual({raw: '10000', formatted: '0.0001 VEUR'});
   });
 });
 

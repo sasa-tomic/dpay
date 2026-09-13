@@ -5,7 +5,7 @@ import bs58 from 'bs58';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {isSolanaDevnet, QR_SIZE_SMALL, SOL_ACTIVE_POLL_WINDOW_MS, SOL_BROADCAST_TIMEOUT_MS} from '../config/constants';
-import {fmtAsset, rawToDecimal, toUnits} from '../lib/format';
+import {fmtAssetCompact, rawToDecimal, toUnits} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64';
 import {type SelectableAsset} from '../config/assets';
 import type {CurrencyDescriptor} from '../config/catalog';
@@ -424,7 +424,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       <View style={S.center}>
         {toggle}
         <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
-        <Text testID="sol-req-status" style={S.paidText}>{M.receive.receivedAmount(fmtAsset(result.amount, result.cur === 'SOL' ? SOL_DECIMALS : solanaTokenInfo(result.cur)?.decimals ?? SOL_DECIMALS, result.cur === 'SOL' ? SOL_UNIT : result.cur))}</Text>
+        <Text testID="sol-req-status" style={S.paidText}>{M.receive.receivedAmount(fmtAssetCompact(result.amount, result.cur === 'SOL' ? SOL_DECIMALS : solanaTokenInfo(result.cur)?.decimals ?? SOL_DECIMALS, result.cur === 'SOL' ? SOL_UNIT : result.cur))}</Text>
         {result.sig ? (
           <>
             <Text style={S.dim2}>{M.receive.transactionSignature}</Text>
@@ -490,7 +490,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
                     path), mirroring the `reqSnapshot!` read below. The URL is SHORTER than the old
                     solreq, so QR_SIZE_SMALL keeps gaining margin. */}
                 <View testID="sol-req-qr" style={S.qrCard}><QrCode value={payLink!} size={QR_SIZE_SMALL} ecl="M" /></View>
-                <Text style={S.amountBig}>{fmtAsset(reqSnapshot!.amt, decimals, unit)}</Text>
+                <Text style={S.amountBig}>{fmtAssetCompact(reqSnapshot!.amt, decimals, unit)}</Text>
                 {(() => {
                   const remaining = (reqSnapshot?.exp ?? 0) - now;
                   if (remaining <= 0) return <Text style={S.qrExpired}>{M.receive.expiredMakeNew}</Text>;

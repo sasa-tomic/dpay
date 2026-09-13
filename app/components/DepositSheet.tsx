@@ -4,7 +4,7 @@ import {QrCode} from './QrCode';
 import {C} from '../config/palette';
 import {S} from '../styles';
 import {POLL, DEPOSIT_TIMEOUT_MS, DEPOSIT_ADDRESS_TIMEOUT_MS, QR_SIZE_SMALL} from '../config/constants';
-import {fmtAsset} from '../lib/format';
+import {fmtAssetCompact} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
 import type {Identity} from '../lib/types';
 import type {CurrencyDescriptor, FamilyDisplay} from '../config/catalog';
@@ -168,8 +168,8 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, fu
   // (vs a bare "—") keeps the field from reading as "broken/loading" on a money screen: see
   // M.deposit.ck.feeNone / .minNone. MC1 units 2-4: fee/min are raw-u64 decimal STRINGS;
   // zero-presence via `cmpRaw` (BigInt) — never `> 0`.
-  const feeVal = info && cmpRaw(info.deposit_fee, '0') > 0 ? fmtAsset(info.deposit_fee, display.amountDecimals, display.nativeAsset) : M.deposit.ck.feeNone;
-  const minVal = info && info.deposit_min_amount != null && cmpRaw(info.deposit_min_amount, '0') > 0 ? fmtAsset(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : M.deposit.ck.minNone;
+  const feeVal = info && cmpRaw(info.deposit_fee, '0') > 0 ? fmtAssetCompact(info.deposit_fee, display.amountDecimals, display.nativeAsset) : M.deposit.ck.feeNone;
+  const minVal = info && info.deposit_min_amount != null && cmpRaw(info.deposit_min_amount, '0') > 0 ? fmtAssetCompact(info.deposit_min_amount, display.amountDecimals, display.nativeAsset) : M.deposit.ck.minNone;
 
   // The body content is rendered inline in the Receive tab's "My address" sub-mode (the tab body
   // already provides the scroll surface + the overlay chrome). `onClose` is wired to the inner
@@ -191,7 +191,7 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, fu
         <View style={S.centerAll}>
           <View style={S.check}><IconCheck size={44} color={C.brandInk}/></View>
           <Text style={S.paidText}>{M.deposit.deposited}</Text>
-          <Text style={S.paidSub}>{M.deposit.ck.mintedAmount(fmtAsset(mintedTotal, display.amountDecimals, display.nativeAsset))}</Text>
+          <Text style={S.paidSub}>{M.deposit.ck.mintedAmount(fmtAssetCompact(mintedTotal, display.amountDecimals, display.nativeAsset))}</Text>
           <Text style={S.dim2}>{M.deposit.balanceAuto}</Text>
           <Pressable testID="btn-deposit-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={onClose} accessibilityRole="button" accessibilityLabel={M.common.done} accessibilityState={{disabled: false}}><Text style={S.ghostBtnText}>{M.common.done}</Text></Pressable>
         </View>

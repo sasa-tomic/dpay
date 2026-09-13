@@ -42,7 +42,7 @@ import {
 } from '../config/constants';
 import {base, randNonceHex} from '../lib/format';
 import {cmpRaw} from '../lib/amount';
-import {icpCatalogOf, fmtCurrencyAmount} from '../config/catalog';
+import {icpCatalogOf, fmtCurrencyAmountCompact} from '../config/catalog';
 import {useCatalog} from '../hooks/useCatalog';
 import {DpayCore} from '../services/native';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, relayFetch} from '../services/relay';
@@ -252,7 +252,7 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
   }, [phase, onDone]);
   useEscapeToClose(escape);
 
-  const fmt = (raw: string) => fmtCurrencyAmount(catalog, PRACTICE_CURRENCY, raw);
+  const fmt = (raw: string) => fmtCurrencyAmountCompact(catalog, PRACTICE_CURRENCY, raw);
   const shortfall = balance !== null && cmpRaw(PRACTICE_AMOUNT_RAW, balance) > 0;
   const P = M.education.practice;
 

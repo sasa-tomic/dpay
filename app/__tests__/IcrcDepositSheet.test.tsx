@@ -102,7 +102,7 @@ describe('IcrcDepositSheet', () => {
     expect(instr).toContain('VCHF');                      // names the EXACT asset
     expect(instr).toContain('Internet Computer');         // names the network to send from
     expect(instr).toContain('No memo or reference needed'); // plain-transfer instruction
-    expect(instr).toContain('0.00010000 VCHF');        // ledger fee formatted via the descriptor
+    expect(instr).toContain('0.0001 VCHF');        // ledger fee formatted via the descriptor
     expect(has(tree, 'deposit-qr')).toBe(true);
     expect(has(tree, 'btn-deposit-copy')).toBe(true);
     expect(has(tree, 'deposit-status')).toBe(true);
@@ -134,7 +134,7 @@ describe('IcrcDepositSheet', () => {
     expect(textOf(tree, 'deposit-address')).toBe(PRINCIPAL);
     const instr = allText(tree.root.findAll(n => n.props && n.props.testID === 'deposit-instructions')[0]);
     expect(instr).toContain('ICP');
-    expect(instr).toContain('0.00010000 ICP'); // ICP ledger fee 10_000 e8s
+    expect(instr).toContain('0.0001 ICP'); // ICP ledger fee 10_000 e8s
   });
 
   test('ckUSDC (the home-currency IC rail): same surface, network named as the SETTLEMENT chain', async () => {
@@ -145,7 +145,7 @@ describe('IcrcDepositSheet', () => {
     expect(instr).toContain('USDC');            // displayName's family vocabulary for CkEthErc20
     expect(instr).toContain('Internet Computer'); // the chain the transfer settles on
     expect(instr).not.toContain('Ethereum');      // the catalog's backing-chain field must NOT leak
-    expect(instr).toContain('0.010000 USDC');     // ckUSDC ledger fee 10_000 e6s, formatted via the descriptor
+    expect(instr).toContain('0.01 USDC');     // ckUSDC ledger fee 10_000 e6s, formatted via the descriptor
     expect(has(tree, 'deposit-qr')).toBe(true);
     expect(has(tree, 'btn-deposit-copy')).toBe(true);
   });
@@ -179,7 +179,7 @@ describe('IcrcDepositSheet', () => {
     });
     const card = allText(tree.root).toString();
     expect(card).toContain('received');
-    expect(card).toContain('0.00010000 VCHF');
+    expect(card).toContain('0.0001 VCHF');
     expect(has(tree, 'btn-deposit-done')).toBe(true);
     expect(has(tree, 'deposit-instructions')).toBe(false); // the watch surface is replaced
   });
