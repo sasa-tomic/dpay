@@ -542,8 +542,8 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
             can still land; or we are simply waiting. None of them ever claims the customer has
             scanned anything, and none of them claims a sale — only the relay's own answer does. */}
         {/* `qrExpiryWarn` rather than `warnNote`: this line sits directly under the countdown, and
-            warnNote's negative top margin (it is built to hug the element above it on a form) drew
-            the warning ON TOP of the validity line. */}
+            warnNote's top margin (negative until the 2026-09-13 clearance fix) drew the warning ON
+            TOP of the validity line. */}
         <Text testID="till-status" style={unchecked !== null || watchingLate ? S.qrExpiryWarn : S.qrHint}>
           {collecting
             ? M.receive.till.collecting

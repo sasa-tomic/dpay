@@ -426,11 +426,11 @@ function buildStyles(p: Palette) {
   camPlaceholder: {flex: 1, alignItems: 'center', justifyContent: 'center'},
   reviewAmount: {fontSize: 32, fontWeight: '700', color: p.ink, textAlign: 'center', fontFamily: FONT.sansBold, letterSpacing: -0.6},
   reviewTo: {fontSize: 17, color: p.sub, marginTop: 6, textAlign: 'center', fontFamily: FONT.sansMedium},
-  warnNote: {fontSize: 13, color: p.warn, textAlign: 'center', marginTop: -10, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18, fontFamily: FONT.sans},
+  warnNote: {fontSize: 13, color: p.warn, textAlign: 'center', marginTop: 6, marginBottom: 18, paddingHorizontal: 8, lineHeight: 18, fontFamily: FONT.sans},
   // Icon-led warning row: IconAlert + text where a warning previously LED with a '⚠' text
   // glyph. Mirrors warnNote's sizing/margins in row form; the icon tops the first line so a
   // wrapped body doesn't drag it off-center.
-  warnRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: -10, marginBottom: 18, paddingHorizontal: 8},
+  warnRow: {flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 6, marginBottom: 18, paddingHorizontal: 8},
   warnRowText: {flex: 1, fontSize: 13, color: p.warn, lineHeight: 18, fontFamily: FONT.sans},
   // Primary action button — stretched full-width, tangerine fill, soft lift (no neon glow; the
   // porcelain design gets its energy from color, not emission). Row layout + gap so a leading
@@ -853,7 +853,7 @@ function buildStyles(p: Palette) {
   // ─── Trip Ready J2B (2026-08-22): recovery ritual, rehearsal, first-use coaching ──────────
   // The backup screen's ownership line — the ritual sentence ABOVE the warning. Slightly larger
   // than the warning, ink (not warn-tinted): the moment reads as ownership first, risk second.
-  backupRitualNote: {fontSize: 15, color: p.ink, textAlign: 'center', marginTop: -8, marginBottom: 14, paddingHorizontal: 8, lineHeight: 21, fontFamily: FONT.sansMedium},
+  backupRitualNote: {fontSize: 15, color: p.ink, textAlign: 'center', marginTop: 6, marginBottom: 0, paddingHorizontal: 8, lineHeight: 21, fontFamily: FONT.sansMedium},
   // The RECOVERY SAVED passport-stamp chip (the post-faucet beat): tangerine ring, mono
   // letterspaced caps, a kept -3° tilt (the stamp lands slightly crooked — passport-stamp
   // aesthetic; the tilt itself is animated, this is the resting angle).

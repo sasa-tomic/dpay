@@ -437,9 +437,7 @@ function Outcome({outcome, amount, left}: {outcome: Outcome; amount: string; lef
         {settled ? P.settledBody : outcome.kind === 'unknown' ? P.pendingBody : P.refusedBody}
       </Text>
       {/* The ledger's own decoded words, verbatim — the payer is entitled to the actual reason. */}
-      {/* `warnNote` pulls itself UP by 10 to sit tight under an amount; here it follows a body
-          sentence, so the pull is cancelled rather than allowed to overlap the line above it. */}
-      {outcome.kind === 'rejected' ? <Text testID="practice-refused-reason" style={[S.warnNote, {marginTop: 14}]}>{outcome.reason}</Text> : null}
+      {outcome.kind === 'rejected' ? <Text testID="practice-refused-reason" style={S.warnNote}>{outcome.reason}</Text> : null}
       {settled && left !== null ? <Text testID="practice-left" style={S.dim2}>{P.settledBalance(left)}</Text> : null}
     </View>
   );
