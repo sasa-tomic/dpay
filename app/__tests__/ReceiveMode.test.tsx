@@ -34,6 +34,7 @@ jest.mock('../services/rail', () => ({
   confirmIncomingTransfer: jest.fn(),
   submitAndConfirmIncomingTransfer: jest.fn(),
   qrPayloadToEnvelopeHex: jest.fn(),
+  fetchLedgerFee: jest.fn(),
 }));
 jest.mock('../components/QrScanner', () => ({
   QrScanner: (_props: {onScan: (raw: string) => void}) => null,
@@ -42,13 +43,13 @@ jest.mock('../components/NfcTap', () => ({NfcTap: jest.fn(() => null)}));
 
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
-import {confirmIncomingTransfer} from '../services/rail';
+import {confirmIncomingTransfer, fetchLedgerFee} from '../services/rail';
 import {ReceiveMode} from '../components/ReceiveMode';
 import {NfcTap} from '../components/NfcTap';
 import {receiptShareBlob, parsePayLink} from '../lib/deepLink';
 import {QrCode} from '../components/QrCode';
 import {M} from '../i18n';
-import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {BUNDLED_NETWORKS, icpCatalogOf, fmtCurrencyAmountCompact} from '../config/catalog';
 import {S} from '../styles';
 import type {CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
@@ -124,10 +125,10 @@ function rerenderReceive(tree: renderer.ReactTestRenderer, over: Partial<Receive
 }
 
 /** Enter an amount + press Request — drives makeRequest into the request-QR branch. */
-async function makeRequest(tree: renderer.ReactTestRenderer) {
+async function makeRequest(tree: renderer.ReactTestRenderer, amount = '25') {
   const input = tree.root.findAll(node => node.props && node.props.testID === 'amount-input')[0];
   act(() => {
-    input.props.onChangeText('25');
+    input.props.onChangeText(amount);
   });
   const btn = tree.root.findAll(node => node.props && node.props.testID === 'btn-request')[0];
   await act(async () => {
@@ -158,6 +159,9 @@ beforeEach(() => {
   // and past the test's end. Date stays real (the request expiry math uses Date.now()).
   jest.useFakeTimers({doNotFake: ['Date']});
   shareSpy.mockReset().mockResolvedValue({action: 'sharedAction' as const});
+  // The live ledger-fee query behind the exact-price netting (each netting test pins its own
+  // answer; the default is a benign known fee for any mount that never asks — DEMO never does).
+  jest.mocked(fetchLedgerFee).mockReset().mockResolvedValue('10000');
 });
 
 afterEach(() => {
@@ -513,5 +517,137 @@ describe('ReceiveMode — a form is laid out as a form, a code as a moment', () 
     const surface = surfaceOf(tree);
     expect(surface.justifyContent).toBe('center');
     expect(surface.alignSelf).toBe('stretch');
+  });
+});
+
+// --- Exact-price fee netting (founder rule 2026-09-12) -------------------------------------------
+// If something costs $1, the customer pays exactly $1 — the merchant pays the fees. The p2p
+// request is the payee's QUOTE, so the WIRE it builds (the link `amount=`, the NFC machine code,
+// every confirm) carries price − ledger-fee, exactly like the relay's till (`till_raw_units`).
+// The payee-facing headline keeps saying the typed PRICE; ONE dim line discloses fee + net. A
+// price that does not clear the fee refuses the request before any wire exists. An unknowable
+// fee nets nothing — the payer then pays price+fee, honestly displayed, never a guessed number.
+describe('ReceiveMode — payee-quoted fee netting (exact-price rule, 2026-09-12)', () => {
+  const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
+  // VCHF (currency 7): 8 decimals, catalog fee '10000' (0.0001). A '1' request quotes
+  // priceRaw 100000000, wire 99990000 — the payer pays exactly 0.9999.
+  const VCHF_ASSET: SelectableAsset = {
+    id: 'ic:7', protocol: 'ic', currency: 7, symbol: 'VCHF', linkToken: 'VCHF',
+    networkLabel: 'Internet Computer', network: null, decimals: 8, minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'vchf',
+  };
+  const FORGED = receiptShareBlob({request_id: '00'.repeat(32), block_index: '7', ledger: 'x'});
+
+  /** Mount the VCHF request form (NFC-ready) and let the mount-time fee fetch settle first. */
+  async function mountVchf(over: Partial<ReceiveModeProps> = {}) {
+    jest.mocked(icStampExpiry).mockResolvedValue('1800000240123456789');
+    jest.mocked(DpayNfc.buildRequest).mockResolvedValue('nfc-request');
+    const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 7, assets: [VCHF_ASSET], selectedAssetId: 'ic:7', nfcStatus: 'ready', ...over});
+    await act(async () => {}); // flush the live-fee effect's promise into feeRaw state
+    return tree;
+  }
+
+  /** The link `amount=` of the open request QR, as the payer's scanner will read it. */
+  function linkAmountOf(tree: renderer.ReactTestRenderer): string | undefined {
+    const qrCard = tree.root.findAll(node => node.props && node.props.testID === 'request-qr')[0];
+    const parsed = parsePayLink(qrCard.findAllByType(QrCode)[0].props.value);
+    return parsed?.ok ? parsed.link.amount : undefined;
+  }
+
+  test('a live ledger fee nets into the ONE wire number — link, NFC, headline, disclosure', async () => {
+    jest.mocked(fetchLedgerFee).mockResolvedValue('10000');
+    const tree = await mountVchf();
+    await makeRequest(tree, '1');
+    // The link amount is the NETTED wire as the exact canonical decimal ('0.9999') — the number
+    // the payer pays and the payee's confirms expect, identical everywhere by construction.
+    expect(linkAmountOf(tree)).toBe('0.9999');
+    // The NFC machine code carries the same netted raw (one request, one number).
+    expect(DpayNfc.buildRequest).toHaveBeenCalledWith(
+      IDENTITY.publicHex, '99990000', expect.any(String), 1_800_000_240, 7, IDENTITY.username, '',
+    );
+    // The payee-facing headline keeps the TYPED price (not the wire)…
+    expect(texts(tree).join(' ')).toContain(fmtCurrencyAmountCompact(BUNDLED, 7, '100000000'));
+    // …and the one-line disclosure states the fee and what actually arrives.
+    const feeLine = tree.root.findAll(node => node.props && node.props.testID === 'request-fee-line')[0];
+    const feeText = textOf(feeLine.props.children);
+    expect(feeText).toContain('0.0001'); // the fee the payee absorbs
+    expect(feeText).toContain('0.9999'); // the net that lands
+  });
+
+  test('a settled proof confirms the NETTED wire but reports the price — Received says what was asked', async () => {
+    jest.mocked(fetchLedgerFee).mockResolvedValue('10000');
+    const onReceived = jest.fn();
+    const tree = await mountVchf({onReceived});
+    await makeRequest(tree, '1');
+    jest.mocked(confirmIncomingTransfer).mockReset().mockResolvedValue(true);
+    rerenderReceive(tree, {catalog: BUNDLED, selectedCurrency: 7, assets: [VCHF_ASSET], selectedAssetId: 'ic:7', onReceived, prefillReceipt: FORGED});
+    await act(async () => {});
+    // Ledger history is matched against the WIRE raw — what actually lands is what confirms.
+    expect(confirmIncomingTransfer).toHaveBeenCalledWith(expect.objectContaining({
+      receiverPublicHex: IDENTITY.publicHex, currency: 7, amount: '99990000',
+    }), expect.any(Object));
+    // The settled screen reports the PRICE the payee typed, not the net.
+    const settled = texts(tree).join(' ');
+    expect(settled).toContain('Received');
+    expect(settled).toContain(fmtCurrencyAmountCompact(BUNDLED, 7, '100000000'));
+    expect(onReceived).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('live fetch failed → the catalog fee nets instead (stale-tolerant, never a guess)', async () => {
+    jest.mocked(fetchLedgerFee).mockRejectedValue(new Error('offline'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const tree = await mountVchf();
+      await makeRequest(tree, '1');
+      // The bundled VCHF row carries fee '10000' — the same net as the live answer would quote.
+      expect(linkAmountOf(tree)).toBe('0.9999');
+      expect(DpayNfc.buildRequest).toHaveBeenCalledWith(
+        IDENTITY.publicHex, '99990000', expect.any(String), expect.any(Number), 7, IDENTITY.username, '',
+      );
+      act(() => { tree.unmount(); });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a price that does not clear the fee is refused — no wire, no code, a named reason', async () => {
+    jest.mocked(fetchLedgerFee).mockResolvedValue('100000000'); // the fee IS the whole 1.00 price
+    const tree = await mountVchf();
+    jest.mocked(DpayNfc.buildRequest).mockClear(); // earlier tests' calls don't count against this one
+    await makeRequest(tree, '1');
+    expect(texts(tree).join(' ')).toContain('clear the ledger fee');
+    expect(hasTestID(tree, 'request-qr')).toBe(false); // no request screen ever opened
+    expect(DpayNfc.buildRequest).not.toHaveBeenCalled(); // no zero-unit wire was built
+    expect(DpayCore.encodeRequest).not.toHaveBeenCalled();
+  });
+
+  test('no fee known anywhere (ckBTC offline, catalog null) → the wire is the price verbatim', async () => {
+    jest.mocked(fetchLedgerFee).mockRejectedValue(new Error('offline'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // ckBTC (currency 1): 8 decimals, catalog fee null — "read live at runtime", and it can't.
+      const CKBTC_ASSET: SelectableAsset = {
+        id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'ckBTC', linkToken: 'ckBTC',
+        networkLabel: 'Internet Computer', network: null, decimals: 8, minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'ckbtc',
+      };
+      const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 1, assets: [CKBTC_ASSET], selectedAssetId: 'ic:1'});
+      await act(async () => {});
+      await makeRequest(tree, '25');
+      // The typed decimal rides verbatim (the payer pays price+fee, honestly displayed) and the
+      // disclosure stays silent — an unknown fee invents no numbers.
+      expect(linkAmountOf(tree)).toBe('25');
+      expect(hasTestID(tree, 'request-fee-line')).toBe(false);
+      act(() => { tree.unmount(); });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('DEMO is play money: no fee query, no netting — the request path bit-for-bit as before', async () => {
+    const tree = mountReceive(); // DEMO (currency 0) is the default fixture
+    await makeRequest(tree);
+    expect(fetchLedgerFee).not.toHaveBeenCalled(); // play money has no honest fee to net
+    expect(linkAmountOf(tree)).toBe('25'); // the typed decimal, verbatim
+    expect(hasTestID(tree, 'request-fee-line')).toBe(false);
   });
 });

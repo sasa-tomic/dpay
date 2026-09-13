@@ -13,7 +13,7 @@ import {type HomeCurrency} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId, NfcStatus} from '../lib/types';
 import {SOL_DECIMALS, SOL_UNIT} from '../solana/identity';
-import {deriveAta, SOL_ATA_SETUP_MIN_LAMPORTS} from '../solana/spl';
+import {deriveAta, netSolWireLamports, SOL_ATA_SETUP_MIN_LAMPORTS, SOL_FEE_LAMPORTS} from '../solana/spl';
 import {solanaTokenInfo} from '../solana/tokens';
 import {decodeSolPay} from '../solana/qr';
 import type {SolReqV2, SolPayV2} from '../solana/qr';
@@ -288,11 +288,22 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   // blockhash and builds a SolReqV2 with a ~90s validity window. The request is persisted BEFORE the
   // QR is shown (invariant #10: persist before send).
   async function makeRequest() {
-    const raw = toUnits(amount, decimals);
-    if (!raw || raw === '0') return;
+    const typedPriceRaw = toUnits(amount, decimals);
+    if (!typedPriceRaw || typedPriceRaw === '0') return;
     // An SPL request needs the registry row's mint — a token without one cannot be requested
     // (fail honestly at the button, never build a broken QR).
     if (!isNativeSol && selectedMint == null) { setErr(friendlySolError(`unknown token ${selectedToken}`)); return; }
+    // NATIVE-SOL netting (founder rule 2026-09-12: the customer pays exactly the typed price —
+    // the merchant pays the fees): the wire `amt` is the typed price minus the one-signature fee,
+    // the SOL twin of the till's `amount_raw = price − fee`. It must land HERE, in the request the
+    // payee builds — every downstream signer/verifier is byte-exact against the request, so the
+    // payer cannot change the amount at sign time, and their displayed total (wire + fee) IS the
+    // typed price with no payer-side change. SPL is the ONE documented exception: its fee is
+    // separate-asset SOL gas, impossible to subtract from a token amount, so the typed amount
+    // rides the wire verbatim (see netSolWireLamports). A price the fee would swallow is refused
+    // BEFORE any wire exists — there is no honest amount left to request.
+    const wireAmt = isNativeSol ? netSolWireLamports(typedPriceRaw) : typedPriceRaw;
+    if (wireAmt == null) { setErr(M.receive.solAmountUnderFee(fmtAssetCompact(SOL_FEE_LAMPORTS.toString(), SOL_DECIMALS, SOL_UNIT))); return; }
     setBusy(true); setErr(null);
     const {signal, cancel} = withTimeout(SOL_BROADCAST_TIMEOUT_MS);
     try {
@@ -300,8 +311,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       // row. The QR codec validates shape only — membership in the registry is enforced here by
       // construction (the row exists or the button never fires).
       const input = !isNativeSol && selectedMint != null
-        ? {to: solAddress, amt: raw, cur: selectedToken, mint: selectedMint, toAta: bs58.encode(deriveAta(solAddress, selectedMint)), name: identity.username, memo: memo.trim()}
-        : {to: solAddress, amt: raw, cur: 'SOL', mint: null, toAta: null, name: identity.username, memo: memo.trim()};
+        ? {to: solAddress, amt: wireAmt, cur: selectedToken, mint: selectedMint, toAta: bs58.encode(deriveAta(solAddress, selectedMint)), name: identity.username, memo: memo.trim()}
+        : {to: solAddress, amt: wireAmt, cur: 'SOL', mint: null, toAta: null, name: identity.username, memo: memo.trim()};
       const {request, uri} = await createSolPaymentRequest(input, signal);
       setReqSnapshot(request);
       setReqUri(uri);
@@ -443,6 +454,13 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   }
 
   if (phase === 'reqQr' && reqUri) {
+    // The headline is the TYPED price; for native SOL the wire `amt` is netted (price − fee — the
+    // netting in makeRequest), so the price is re-derived as wire + fee: the exact inverse, the
+    // same sum the payer's total display makes, and the only truth that survives a kill/restart
+    // (the request restores from solMerchantPersist with the form empty). SPL wires are verbatim,
+    // so their headline stays the wire amount. Misuse-proof by name: `typedPriceRaw` is never the
+    // QR's amount — `reqSnapshot.amt` is.
+    const typedPriceRaw = reqSnapshot!.cur === 'SOL' ? String(BigInt(reqSnapshot!.amt) + SOL_FEE_LAMPORTS) : reqSnapshot!.amt;
     return (
       <View style={S.center}>
         {toggle}
@@ -490,7 +508,14 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
                     path), mirroring the `reqSnapshot!` read below. The URL is SHORTER than the old
                     solreq, so QR_SIZE_SMALL keeps gaining margin. */}
                 <View testID="sol-req-qr" style={S.qrCard}><QrCode value={payLink!} size={QR_SIZE_SMALL} ecl="M" /></View>
-                <Text style={S.amountBig}>{fmtAssetCompact(reqSnapshot!.amt, decimals, unit)}</Text>
+                <Text testID="sol-req-price" style={S.amountBig}>{fmtAssetCompact(typedPriceRaw, decimals, unit)}</Text>
+                {/* The ONE honest fee/receives line, native SOL only — the fee was netted out of
+                    the wire, so the payee sees both numbers (same row discipline as the IC till's
+                    settlesAs). SPL keeps its existing display only: nothing was subtracted, and a
+                    token-fee line would invent a fee nobody pays in that asset. */}
+                {reqSnapshot!.cur === 'SOL' ? (
+                  <Text testID="sol-req-fee-line" style={S.qrHint}>{M.receive.solFeeLine(fmtAssetCompact(SOL_FEE_LAMPORTS.toString(), SOL_DECIMALS, SOL_UNIT), fmtAssetCompact(reqSnapshot!.amt, decimals, unit))}</Text>
+                ) : null}
                 {(() => {
                   const remaining = (reqSnapshot?.exp ?? 0) - now;
                   if (remaining <= 0) return <Text style={S.qrExpired}>{M.receive.expiredMakeNew}</Text>;

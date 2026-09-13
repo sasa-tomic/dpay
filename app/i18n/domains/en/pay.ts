@@ -530,6 +530,15 @@ export type ReceiveMessages = {
   creating: string;
   creatingRequest: string;
   solanaOffline: string;
+  /** NATIVE-SOL request, typed price at or under the one-signature fee: netting would leave
+   *  nothing (or less) on the wire, so no request is built. `fee` is the network fee, ALREADY
+   *  FORMATTED with its unit — this catalog never formats numbers. */
+  solAmountUnderFee: (fee: string) => string;
+  /** The ONE honest fee/receives line under a native-SOL request headline (the fee nets payee-side,
+   *  founder rule 2026-09-12 — the IC twin is the till's `settlesAs`). Both args ALREADY FORMATTED
+   *  with units. SPL requests show nothing here: their fee is separate-asset gas that was never
+   *  subtracted, so their existing display is already the whole truth. */
+  solFeeLine: (fee: string, receives: string) => string;
 
   // --- the asset picker ----------------------------------------------------------------------
   receiveInTitle: string;
@@ -546,6 +555,13 @@ export type ReceiveMessages = {
     feeWithOneTime: (network: string, fee: string, oneTime: string) => string;
     feeUnknown: (network: string) => string;
   };
+  /** The one-line fee disclosure under the request headline (exact-price rule, founder
+   *  2026-09-12): the ledger fee this payee absorbs, and what actually arrives once it is
+   *  netted out of the wire — both pre-formatted amounts. */
+  feeNetLine: (fee: string, net: string) => string;
+  /** Refusal: the typed price does not clear the ledger fee, so no honest wire exists (the
+   *  customer would be paying the payee's fee twice over). `fee` is pre-formatted. */
+  feeTooBig: (fee: string) => string;
   /** 'tap' = the payer may tap instead; 'expired' = the short NFC request lapsed; 'none' = QR only. */
   showToPayer: (nfc: 'tap' | 'expired' | 'none') => string;
   expiredMakeNew: string;
@@ -708,6 +724,9 @@ export const receiveEn: ReceiveMessages = {
   creating: 'Creating…',
   creatingRequest: 'Creating request…',
   solanaOffline: 'Solana is offline — go online to create a payment request.',
+  solAmountUnderFee: fee =>
+    `A SOL request has to be for more than the network fee (${fee}). The fee is yours — the payer pays exactly what you type.`,
+  solFeeLine: (fee, receives) => `Fee ${fee} · you receive ${receives}`,
 
   receiveInTitle: 'Receive in',
   receiveIn: symbol => `Receive in ${symbol}`,
@@ -720,6 +739,8 @@ export const receiveEn: ReceiveMessages = {
     feeWithOneTime: (network, fee, oneTime) => `${network} · Fee ${fee} + one-time account rent ${oneTime}`,
     feeUnknown: network => `${network} · Fee unknown`,
   },
+  feeNetLine: (fee, net) => `Fee ${fee} · you receive ${net}`,
+  feeTooBig: fee => `This amount doesn’t clear the ledger fee (${fee}) — request a larger amount.`,
   showToPayer: nfc =>
     `Show this to the payer${nfc === 'tap' ? ' · or let them tap' : nfc === 'expired' ? ' · NFC tap expired' : ''}`,
   expiredMakeNew: 'Expired — make a new request',

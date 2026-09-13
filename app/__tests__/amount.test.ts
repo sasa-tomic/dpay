@@ -3,6 +3,7 @@ import {
   parseDecimalToUnits,
   cmpRaw,
   applyOffline,
+  nettedWireRaw,
 } from '../lib/amount';
 
 // Mirrors `dpay_core::{parse_decimal_to_units, format_units_to_decimal}` and the Python FFI round-
@@ -178,5 +179,37 @@ describe('rejections — typed err codes matching Rust AmountError', () => {
     });
     expect(parseDecimalToUnits('1', 19)).toEqual({ ok: false, err: 'overflow' });
     expect(parseDecimalToUnits('1', -1 as unknown as number)).toEqual({ ok: false, err: 'overflow' });
+  });
+});
+
+// The payee-quoted wire under the exact-price rule (founder 2026-09-12: if something costs $1,
+// the customer pays exactly $1 — the merchant pays the fees). `nettedWireRaw` is the p2p
+// request's half of what the dpay till does at quote time (`till_raw_units` in the relay): the
+// wire carries price − fee, so the payer — who pays the wire verbatim — moves their account by
+// exactly the price. An unknowable fee nets nothing (the payer then pays price+fee, honestly
+// displayed); a price that does not clear the fee refuses the request outright — a zero/negative
+// wire is money nonsense.
+describe('nettedWireRaw — payee-quoted fee netting (exact-price rule, 2026-09-12)', () => {
+  test('fee null → wire = price verbatim (DEMO / fee unknowable — never a guessed number)', () => {
+    expect(nettedWireRaw('2500', null)).toEqual({ok: true, wireRaw: '2500'});
+  });
+
+  test('fee < price → wire = price − fee (exact BigInt)', () => {
+    // VCHF at 8 decimals: a 1.00 request, 0.0001 ledger fee → the payer pays exactly 0.9999.
+    expect(nettedWireRaw('100000000', '10000')).toEqual({ok: true, wireRaw: '99990000'});
+  });
+
+  test('fee ≥ price → refused — no zero/negative wire can exist', () => {
+    expect(nettedWireRaw('10000', '10000')).toEqual({ok: false, err: 'fee_covers_price'});
+    expect(nettedWireRaw('9999', '10000')).toEqual({ok: false, err: 'fee_covers_price'});
+  });
+
+  test('exact BigInt math: 2^53+1 boundary nets exactly (no Number loss)', () => {
+    expect(nettedWireRaw('9007199254740993', '1')).toEqual({ok: true, wireRaw: '9007199254740992'});
+  });
+
+  test('throws TypeError on non-digit input (debuggable, no silent NaN)', () => {
+    expect(() => nettedWireRaw('abc', '10')).toThrow(TypeError);
+    expect(() => nettedWireRaw('100', 'x')).toThrow(TypeError);
   });
 });

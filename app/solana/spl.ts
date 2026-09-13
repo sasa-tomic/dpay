@@ -42,6 +42,29 @@ export const SOL_FEE_LAMPORTS = 5_000n;
 /** Minimum SOL a wallet needs to create its USDC ATA (rent + one fee). */
 export const SOL_ATA_SETUP_MIN_LAMPORTS = SOL_ATA_RENT_LAMPORTS + SOL_FEE_LAMPORTS;
 
+/** Net the one-signature network fee out of a payee-quoted NATIVE-SOL request price — founder rule
+ *  2026-09-12: "if price of something is $1, the customer pays exactly $1 — the merchant pays the
+ *  fees". The wire `amt` a native-SOL request carries is `price − SOL_FEE_LAMPORTS` (the SOL twin
+ *  of the dpay till's `amount_raw = price − fee`, till.rs:348), so the payer's displayed total
+ *  (wire amount + fee) IS the typed price and the fee lands payee-side. The netting belongs to the
+ *  REQUEST BUILDER, never the signer: every downstream verify (verifySolPayment) is byte-exact
+ *  against the canonical rebuild of the request, so the payer cannot change the amount at sign
+ *  time — and cannot repair a request that was never netted either.
+ *
+ *  SPL tokens (USDC, EURC, …) are the ONE documented exception and are NOT netted: their fee is
+ *  separate-asset SOL gas, physically impossible to subtract from a token amount (the uniform-IA
+ *  divergence rule allows exactly this and nothing else). An SPL request carries the typed token
+ *  amount verbatim.
+ *
+ *  `priceLamports` is a decimal digit-string of raw lamports (what `toUnits` yields). Returns the
+ *  netted wire lamports as a digit-string, or null when the price is ≤ SOL_FEE_LAMPORTS — a price
+ *  the fee would swallow, which the request builder must REFUSE (netting would zero or invert the
+ *  request: there is no honest wire amount left). */
+export function netSolWireLamports(priceLamports: string): string | null {
+  const price = BigInt(priceLamports);
+  return price > SOL_FEE_LAMPORTS ? (price - SOL_FEE_LAMPORTS).toString() : null;
+}
+
 // ── Account LAYOUTS (read side) ────────────────────────────────────────────────────────────────
 // The balance poll reads accounts in one `getMultipleAccounts` call and decodes the bytes here,
 // instead of asking the node to parse one account per request. Every offset below is pinned

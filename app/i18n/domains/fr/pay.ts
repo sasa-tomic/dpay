@@ -226,6 +226,9 @@ export const receiveFr: ReceiveMessages = {
   creating: 'Création…',
   creatingRequest: 'Création de la demande…',
   solanaOffline: 'Solana est hors ligne — reconnectez-vous pour créer une demande de paiement.',
+  solAmountUnderFee: fee =>
+    `Une demande en SOL doit dépasser les frais de réseau (${fee}). Les frais sont à votre charge — le payeur paie exactement le montant que vous saisissez.`,
+  solFeeLine: (fee, receives) => `Frais ${fee} · vous recevez ${receives}`,
 
   receiveInTitle: 'Recevoir en',
   receiveIn: symbol => `Recevoir en ${symbol}`,
@@ -238,6 +241,8 @@ export const receiveFr: ReceiveMessages = {
     feeWithOneTime: (network, fee, oneTime) => `${network} · Frais ${fee} + loyer unique ${oneTime}`,
     feeUnknown: network => `${network} · Frais inconnus`,
   },
+  feeNetLine: (fee, net) => `Frais ${fee} · vous recevez ${net}`,
+  feeTooBig: fee => `Ce montant ne couvre pas les frais de réseau (${fee}) — demandez un montant plus élevé.`,
   showToPayer: nfc =>
     `Montrez ceci au payeur${nfc === 'tap' ? ' · ou sans contact' : nfc === 'expired' ? ' · NFC expiré' : ''}`,
   expiredMakeNew: 'Expiré — créez une nouvelle demande',

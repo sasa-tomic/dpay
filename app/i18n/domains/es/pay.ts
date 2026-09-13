@@ -225,6 +225,9 @@ export const receiveEs: ReceiveMessages = {
   creating: 'Creando…',
   creatingRequest: 'Creando la solicitud…',
   solanaOffline: 'Solana está sin conexión: conéctate para crear una solicitud de pago.',
+  solAmountUnderFee: fee =>
+    `Una solicitud en SOL debe superar la comisión de red (${fee}). La comisión es tuya: quien paga paga exactamente lo que tú escribes.`,
+  solFeeLine: (fee, receives) => `Comisión ${fee} · recibes ${receives}`,
 
   receiveInTitle: 'Recibir en',
   receiveIn: symbol => `Recibir en ${symbol}`,
@@ -237,6 +240,8 @@ export const receiveEs: ReceiveMessages = {
     feeWithOneTime: (network, fee, oneTime) => `${network} · Comisión ${fee} + alquiler único ${oneTime}`,
     feeUnknown: network => `${network} · Comisión desconocida`,
   },
+  feeNetLine: (fee, net) => `Comisión ${fee} · recibes ${net}`,
+  feeTooBig: fee => `Este importe no cubre la comisión de red (${fee}) — solicita un importe mayor.`,
   showToPayer: nfc =>
     `Muéstraselo a quien paga${nfc === 'tap' ? ' · o que acerque su teléfono' : nfc === 'expired' ? ' · NFC caducado' : ''}`,
   expiredMakeNew: 'Caducada: crea una solicitud nueva',

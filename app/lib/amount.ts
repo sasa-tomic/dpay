@@ -157,3 +157,46 @@ export function applyOffline(
   // entry above the balance transiently — clamp here as well so the display is always whole.
   return cmpRaw(balance, spent) >= 0 ? (BigInt(balance) - BigInt(spent)).toString() : '0';
 }
+
+/** `nettedWireRaw`'s result: the wire the request should carry, or the one way it cannot have one. */
+export type NettedWire =
+  | {ok: true; wireRaw: string}
+  | {ok: false; err: 'fee_covers_price'};
+
+/**
+ * The payee-quoted WIRE amount under the exact-price rule (founder rule 2026-09-12: if something
+ * costs $1, the customer pays exactly $1 — the merchant pays the fees). The dpay till nets the
+ * same way at quote time (`till_raw_units`, crates/dpay-relay/src/till.rs); this is the p2p
+ * request's half of the same rule. A wire for the full typed price would arrive as price−fee (the
+ * ledger takes its per-transfer fee out of what lands), silently re-billing the difference to the
+ * payee — so the payee quotes the NETTED amount instead and the payer pays the wire verbatim,
+ * which the payer's own review reconciles by adding the live fee back on top: the customer's
+ * account moves by exactly the price.
+ *
+ *   fee == null  → wire = price verbatim. The fee is unknowable (DEMO play money, or a ledger the
+ *                  catalog states no fee for AND the live query could not reach); the payer then
+ *                  pays price+fee, honestly displayed — the same exposure the till ships with its
+ *                  const. No number is ever guessed.
+ *   fee ≥ price  → REFUSED (`err: 'fee_covers_price'`). The caller must refuse the request BEFORE
+ *                  any wire is built — a zero/negative-unit wire is money nonsense — with a
+ *                  localized message naming the fee.
+ *   fee < price  → wire = price − fee (exact BigInt; the one number the link, the NFC wire and
+ *                  every confirm consumer carry).
+ *
+ * Pure + total. `priceRaw` MUST be a non-empty decimal-digit string and a non-null `feeRaw` must
+ * be one too — anything else `TypeError`s like `cmpRaw` (debuggable, never silent NaN). A zero
+ * price is the caller's gate, not this function's (`ReceiveMode.makeRequest` refuses it first).
+ */
+export function nettedWireRaw(priceRaw: string, feeRaw: string | null): NettedWire {
+  if (feeRaw == null) return {ok: true, wireRaw: priceRaw};
+  if (!RE_RAW_DIGITS.test(priceRaw)) {
+    throw new TypeError(`nettedWireRaw: priceRaw must be a decimal-digit string, got ${JSON.stringify(priceRaw)}`);
+  }
+  if (!RE_RAW_DIGITS.test(feeRaw)) {
+    throw new TypeError(`nettedWireRaw: feeRaw must be a decimal-digit string, got ${JSON.stringify(feeRaw)}`);
+  }
+  const price = BigInt(priceRaw);
+  const fee = BigInt(feeRaw);
+  if (fee >= price) return {ok: false, err: 'fee_covers_price'};
+  return {ok: true, wireRaw: (price - fee).toString()};
+}

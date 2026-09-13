@@ -4,14 +4,15 @@ import {QrCode} from './QrCode';
 import {C, FONT} from '../config/palette';
 import {S} from '../styles';
 import {EXPIRY_WINDOW, NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
-import {toUnits, randNonceHex, nowSecs} from '../lib/format';
+import {toUnits, randNonceHex, nowSecs, rawToDecimal} from '../lib/format';
+import {nettedWireRaw} from '../lib/amount';
 import {encodePayLink, shareOrigin, decodeReceiptDeeplink, parseRailProof} from '../lib/deepLink';
 import {type CurrencyDescriptor, type FamilyDisplay, fmtCurrencyAmountCompact, currencySymbol, depositMechanism, isTestnetCurrency} from '../config/catalog';
 import {linkNetworkOf, type SelectableAsset} from '../config/assets';
 import {type HomeCurrency, currencyRails} from '../config/currency';
 import {type BalanceView} from '../lib/assetBalances';
 import type {Identity, AssetId, NfcStatus} from '../lib/types';
-import {qrPayloadToEnvelopeHex, submitAndConfirmIncomingTransfer, confirmIncomingTransfer} from '../services/rail';
+import {qrPayloadToEnvelopeHex, submitAndConfirmIncomingTransfer, confirmIncomingTransfer, fetchLedgerFee} from '../services/rail';
 import {saveTxNote} from '../services/txNotes';
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
@@ -75,13 +76,19 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   const journeyRef = useRef(journey);
   journeyRef.current = journey;
   const [memo, setMemo] = useState('');
-  // `rawAmount` (was `cents`) is the integer smallest-units the request settles in (2-decimal
-  // for DEMO, 8 for BTC, 6 for USDC) — a raw-u64 decimal STRING (MC1 units 2-4). `link` is THE
-  // QR: the payment link, built once at request time so the code a payer scans can never drift
-  // from the request state it reconciles against. The 132-byte wire request is gone from this
-  // screen (founder decision 2026-09-12) — a machine code survives only where a radio needs it
-  // (`nfcHex`).
-  const [reqQr, setReqQr] = useState<{link: string; rawAmount: string; currency: number; nonce: string; nfcHex: string | null; nfcExpiry: number | null; expiry: number} | null>(null);
+  // A request carries TWO raw amounts and they are NOT interchangeable (founder rule 2026-09-12:
+  // if something costs $1, the customer pays exactly $1 — the merchant pays the fees):
+  // `priceRaw` is what the payee TYPED — integer smallest-units (2-decimal for DEMO, 8 for BTC,
+  // 6 for USDC), a raw-u64 decimal STRING (MC1 units 2-4) — and stays the payee-facing headline;
+  // `wireRaw` is the NETTED transfer amount (price − ledger fee, `nettedWireRaw`) that the link
+  // `amount=`, the NFC 132-byte wire and EVERY confirm consumer carry — the payer pays it
+  // verbatim, so the payer's account moves by exactly the price. `feeRaw` is the fee the wire was
+  // netted with, null = not netted (DEMO, or the fee was unknowable — then `wireRaw === priceRaw`
+  // and the payer pays price+fee, honestly displayed on their review). `link` is THE QR: the
+  // payment link, built once at request time so the code a payer scans can never drift from the
+  // request state it reconciles against. The 132-byte wire request is gone from this screen
+  // (founder decision 2026-09-12) — a machine code survives only where a radio needs it (`nfcHex`).
+  const [reqQr, setReqQr] = useState<{link: string; priceRaw: string; wireRaw: string; feeRaw: string | null; currency: number; nonce: string; nfcHex: string | null; nfcExpiry: number | null; expiry: number} | null>(null);
   // A 1s display clock so the request-QR screen can show a live expiry countdown (the signed request
   // is only valid for EXPIRY_WINDOW secs; a stale QR scans to a confusing rejection). Declared here;
   // the ticking effect is wired after `result` (the gate it reads) is declared below.
@@ -149,8 +156,10 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
     return () => clearInterval(id);
   }, [reqQr, result]);
   // Stable across renders (NfcTap's effect depends on it) — only changes when the request does.
+  // `amount` is the WIRE raw (what lands on the ledger), the same netted number the till's
+  // reader advertises — the payer's tap-confirm matches ledger history against it.
   const readerReqInfo = useMemo(
-    () => (reqQr ? {amount: reqQr.rawAmount, nonce: reqQr.nonce, who: M.receive.payer, currency: reqQr.currency} : undefined),
+    () => (reqQr ? {amount: reqQr.wireRaw, nonce: reqQr.nonce, who: M.receive.payer, currency: reqQr.currency} : undefined),
     [reqQr],
   );
 
@@ -166,9 +175,35 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   // up in it at all.
   const activeAsset = assets.find(a => a.id === selectedAssetId) ?? null;
 
+  // The LEDGER FEE for the asset a request will be quoted in, live from the paying ledger (the
+  // same `fetchLedgerFee` PayMode/SendSheet use — the ledger is authoritative, the catalog's
+  // `fee` is stale-tolerant display metadata). This is the payee-side half of the exact-price
+  // rule (founder 2026-09-12): the fee is netted OUT of the wire at quote time, so the customer
+  // pays the price and this wallet pays the fee. Unknown (offline, query failed) stays null and
+  // `makeRequest` falls back to the catalog fee, then to no netting at all — never a guessed 0
+  // (the PayMode fee-house rule). DEMO (currency 0) is play money: no fee to net, no query —
+  // the request path stays bit-for-bit what it was.
+  const [feeRaw, setFeeRaw] = useState<string | null>(null);
+  useEffect(() => { setFeeRaw(null); }, [selectedCurrency]);
+  useEffect(() => {
+    if (selectedCurrency === 0) return; // DEMO is play money — no honest fee to net
+    const ledger = catalog.find(c => c.currency === selectedCurrency)?.ledger;
+    if (!ledger) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const fee = await fetchLedgerFee(identity.secretHex, ledger);
+        if (alive) setFeeRaw(fee);
+      } catch (e: unknown) {
+        console.warn('request fee fetch failed (wire falls back to the catalog fee):', e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { alive = false; };
+  }, [selectedCurrency, catalog, identity.secretHex]);
+
   async function makeRequest() {
-    const rawAmount = toUnits(amount, reqDecimals);
-    if (!rawAmount || rawAmount === '0') return;
+    const priceRaw = toUnits(amount, reqDecimals);
+    if (!priceRaw || priceRaw === '0') return;
     // A press can outrun the mount-time principal derivation's first state flush — derive it
     // directly then (a local core call, no network; the state catches up on its own). The QR is
     // the payment link, so a request that cannot name its destination or its asset must never
@@ -181,35 +216,52 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
       const nonce = randNonceHex();
       const expiry = nowSecs() + EXPIRY_WINDOW;
       const memoVal = memo.trim();
+      // Exact-price rule (founder 2026-09-12: if something costs $1, the customer pays exactly
+      // $1 — the merchant pays the fees): net the ledger fee out of the wire HERE, at quote
+      // time, the same way the dpay till does (`till_raw_units`). Live ledger fee when the
+      // effect has one, else the catalog's row, else nothing — an unknown fee never blocks or
+      // fakes a number (the payer then pays price+fee, honestly displayed on their review). A
+      // price that does not clear the fee is refused BEFORE any wire exists — a zero-unit wire
+      // is money nonsense.
+      const feeKnown = feeRaw ?? reqDesc?.fee ?? null;
+      const priced = nettedWireRaw(priceRaw, feeKnown);
+      if (!priced.ok) {
+        setErr(M.receive.feeTooBig(fmtCurrencyAmountCompact(catalog, selectedCurrency, feeKnown!)));
+        return;
+      }
+      const wireRaw = priced.wireRaw;
       // Founder decision 2026-09-12: the QR renders the payment LINK on every rail — a regular
       // phone camera opens dpay (verified App Link) or the web wallet. The link's `ref` is the
       // request nonce, which is also the on-chain memo the settlement poll matches, so a
       // camera-scanned link payment reconciles on this screen exactly like the old machine code.
-      // `amount` is the merchant's own typed decimal (what they see is what the payer gets);
-      // username + memo ride as label/memo.
+      // `amount` is the NETTED wire decimal — the payer pays the wire verbatim, which with a
+      // known fee re-parses to exactly `wireRaw` (their review adds the fee back on top, so
+      // their account still moves by the price); with NO fee known the typed decimal rides
+      // verbatim, exactly as before the rule. Username + memo ride as label/memo.
       const link = encodePayLink(shareOrigin(), {
         recipient: principal,
         asset: activeAsset.linkToken,
         network: linkNetworkOf(activeAsset),
-        amount: amount.trim(),
+        amount: feeKnown != null ? rawToDecimal(wireRaw, reqDecimals) : amount.trim(),
         label: identity.username,
         memo: memoVal,
         ref: nonce,
       });
       // Build the NFC machine code too so reader mode can start alongside the QR (best-effort).
-      // The merchant's username + memo ride as to_name/memo in the request bytes.
+      // It carries the SAME netted wire raw as the link (one request, one number everywhere);
+      // the merchant's username + memo ride as to_name/memo in the request bytes.
       let nfcHex: string | null = null;
       let nfcExpiry: number | null = null;
       if (nfcReady && DpayNfc) {
         try {
           const nfcExpiryNs = await icStampExpiry(identity.secretHex, NFC_UPDATE_AHEAD_S);
           nfcExpiry = Number(BigInt(nfcExpiryNs) / 1_000_000_000n);
-          nfcHex = await DpayNfc.buildRequest(identity.publicHex, rawAmount, nonce, nfcExpiry, selectedCurrency, identity.username, memoVal);
+          nfcHex = await DpayNfc.buildRequest(identity.publicHex, wireRaw, nonce, nfcExpiry, selectedCurrency, identity.username, memoVal);
         } catch (e) {
           console.warn('NFC certified expiry unavailable (QR still works):', e instanceof Error ? e.message : String(e));
         }
       }
-      setReqQr({link, rawAmount, currency: selectedCurrency, nonce, nfcHex, nfcExpiry, expiry});
+      setReqQr({link, priceRaw, wireRaw, feeRaw: feeKnown, currency: selectedCurrency, nonce, nfcHex, nfcExpiry, expiry});
       // Payee-side annotation (services/txNotes): when the payee typed a memo for this request,
       // save it keyed by the request nonce (= the on-chain memo) so the INCOMING row can show the
       // message the moment it settles. Deliberately NO `who` — the counterparty is the payer, and
@@ -254,12 +306,12 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           relayUrl,
           receiverPublicHex: identity.publicHex,
           currency: reqQr.currency,
-          amount: reqQr.rawAmount,
+          amount: reqQr.wireRaw,
           memoHex: reqQr.nonce,
         }, {attempts: PROOF_POLL_BUDGET, intervalMs: POLL.receiptRcv});
         if (!alive) return;
         if (settled) {
-          setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: M.receive.payer});
+          setResult({amount: reqQr.priceRaw, currency: reqQr.currency, from: M.receive.payer});
           onReceived();
           awardPaymentTested(journeyRef.current);
         } else {
@@ -292,7 +344,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           relayUrl,
           receiverPublicHex: identity.publicHex,
           currency: reqQr.currency,
-          amount: reqQr.rawAmount,
+          amount: reqQr.wireRaw,
           memoHex: reqQr.nonce,
         }, {attempts: 1, intervalMs: POLL.request});
       } catch {
@@ -300,7 +352,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
       }
       if (!alive) return;
       if (settled) {
-        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: M.receive.payer});
+        setResult({amount: reqQr.priceRaw, currency: reqQr.currency, from: M.receive.payer});
         onReceived();
         awardPaymentTested(journeyRef.current);
         return;
@@ -328,11 +380,11 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         relayUrl,
         receiverPublicHex: identity.publicHex,
         currency: reqQr.currency,
-        amount: reqQr.rawAmount,
+        amount: reqQr.wireRaw,
         memoHex: reqQr.nonce,
       }, {attempts: PROOF_POLL_BUDGET, intervalMs: POLL.receiptRcv});
       if (settled) {
-        setResult({amount: reqQr.rawAmount, currency: reqQr.currency, from: M.receive.payer});
+        setResult({amount: reqQr.priceRaw, currency: reqQr.currency, from: M.receive.payer});
         onReceived();
         awardPaymentTested(journeyRef.current);
       } else {
@@ -398,7 +450,19 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 occlusion budget at this URL length (the pixel-decode gate, flow qr-scannable,
                 is the proof). */}
             <View testID="request-qr" style={S.qrCard}><QrCode value={reqQr.link} size={QR_SIZE} ecl="M" /></View>
-        <Text style={S.amountBig}>{fmtCurrencyAmountCompact(catalog, reqQr.currency, reqQr.rawAmount)}</Text>
+        <Text style={S.amountBig}>{fmtCurrencyAmountCompact(catalog, reqQr.currency, reqQr.priceRaw)}</Text>
+        {/* The exact-price fee disclosure (founder rule 2026-09-12): ONE dim line under the
+            price headline — the ledger fee this payee absorbs, and what actually arrives once it
+            is netted out of the wire. Only a wire that WAS netted (a known fee) earns the line;
+            an unknown fee invents no numbers. Same visual family as the expiry line below. */}
+        {reqQr.feeRaw != null && reqQr.wireRaw !== reqQr.priceRaw ? (
+          <Text testID="request-fee-line" style={S.qrExpiry}>
+            {M.receive.feeNetLine(
+              fmtCurrencyAmountCompact(catalog, reqQr.currency, reqQr.feeRaw),
+              fmtCurrencyAmountCompact(catalog, reqQr.currency, reqQr.wireRaw),
+            )}
+          </Text>
+        ) : null}
         {(() => {
           const remaining = reqQr.expiry - now;
           if (remaining <= 0) return <Text style={S.qrExpired}>{M.receive.expiredMakeNew}</Text>;
