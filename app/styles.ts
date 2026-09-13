@@ -452,7 +452,10 @@ function buildStyles(p: Palette) {
   // — informational, not a hard error (the wait state is still valid; the poll reconciles).
   qrOfflinePill: {flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: withAlpha(p.bad, p.wash), borderWidth: 1, borderColor: withAlpha(p.bad, 0.28)},
   qrOfflinePillText: {fontSize: 12, fontWeight: '600', color: p.bad, fontFamily: FONT.sansMedium},
-  confirmRow: {flexDirection: 'row', gap: 12, marginTop: 12},
+  // Wraps when a locale's label pair outgrows the row (de/es "handed to merchant" + Cancel ran
+  // ~14-51px past the right edge at 390px): the Cancel button flows to a second line instead of
+  // off-screen. en/fr never reach the wrap at current widths, so they render pixel-identical.
+  confirmRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 12},
   paidBtn: {backgroundColor: p.ok, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center', ...LIFT},
   paidBtnText: {color: p.brandInk, fontWeight: '700', fontSize: 16, fontFamily: FONT.sansBold},
   notPaidBtn: {backgroundColor: p.card, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 24, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: p.line2},
