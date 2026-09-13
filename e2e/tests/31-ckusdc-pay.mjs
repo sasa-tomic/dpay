@@ -36,7 +36,7 @@ import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '..
 const CKUSDC_CURRENCY = 2;
 const SEED_RAW = 60_000;        // 0.060000 USDC (6-decimal) — covers 50_000 pay + 10_000 fee
 const PAY_RAW = 50_000;         // 0.050000 USDC (6-decimal) — mirrors flow 27's PAY_SATS shape
-const EXPECTED_DISPLAY = '0.050000 USDC'; // fmtCurrencyAmount output for 6-dec USDC
+const EXPECTED_DISPLAY = '0.05 USDC'; // compact formatter output for 6-dec USDC (min 2 fraction digits)
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -46,7 +46,7 @@ export const meta = {
   name: 'ckusdc-pay',
   journey: 'pay',
   covers: ['ckusdc-pay', 'multi-currency', '6-decimal', 'byte-exact'],
-  verifies: 'ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review \'0.050000 USDC\', byte-exact raw, app-signed icrc1_transfer settles on currency 2.',
+  verifies: 'ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal): review \'0.05 USDC\', byte-exact raw, app-signed icrc1_transfer settles on currency 2.',
   timeoutMs: 20000,
 };
 
@@ -118,10 +118,11 @@ export async function run() {
     //     principal (the fee is charged to the sender).
     const paid = await driver.waitForText('Paid', { timeoutMs: 10_000 });
     assert(paid, 'payer should reach Paid after settling the ckUSDC payment');
-    // Paid text shows the exact ckUSDC amount + asset unit (the locked-asset display continues).
-    const paidBody = await driver.bodyText();
-    assertIncludes(paidBody, EXPECTED_DISPLAY, `Paid screen should show "${EXPECTED_DISPLAY}" (6-decimal ckUSDC amount), got body:\n${paidBody.slice(0, 400)}`);
-    console.log(`[31-ckusdc-pay] ✓ Paid reached: ${EXPECTED_DISPLAY}`);
+    // Paid text shows the TOTAL DEBIT — 6-dec amount + the ledger fee (10_000 raw) — compact:
+    // 60_000 raw = "0.06 USDC". The fee fetch is async, so wait for the total to land.
+    const totalShown = await driver.waitForText('0.06 USDC', { timeoutMs: 10_000 });
+    assert(totalShown, 'Paid screen should show the fee-inclusive total "0.06 USDC"');
+    console.log('[31-ckusdc-pay] ✓ Paid reached: 0.06 USDC (amount 0.05 + fee 0.01)');
 
     // --- B was credited on currency 2 at her principal (the request's exact asset — no
     //     substitution). Assert the raw amount is byte-exact: 50_000 raw 6-decimal units credited

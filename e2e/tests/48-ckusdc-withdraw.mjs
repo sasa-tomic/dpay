@@ -119,10 +119,10 @@ export async function run() {
     // 6. Enter the amount (in USDC, >= the 0 floor), then confirm.
     await driver.type('withdraw-amount-input', WITHDRAW_USDC, { timeoutMs: 4_000 });
     // The review card appears once a valid amount is entered — proves the app parsed the USDC amount
-    // at 6-dec precision. fmtAsset(1e6, 6, 'USDC') = "1.000000 USDC".
+    // compact (trailing zeros trimmed; the withdraw sheet's display carries no min-fraction floor).
     await driver.findByTestID('withdraw-review-amount', { timeoutMs: 4_000 });
     const reviewTxt = await driver.readText('withdraw-review-amount');
-    assert(reviewTxt.includes('1.000000 USDC'), `review should show the USDC amount at 6-dec precision, got: "${reviewTxt}"`);
+    assert(reviewTxt.includes('1 USDC'), `review should show the USDC amount compact, got: "${reviewTxt}"`);
 
     console.log('[48-ckusdc-withdraw] confirming (gas query + signs gas-approve + amount-approve + withdraw_erc20 on-device, POSTs to /api/v2)…');
     await driver.click('btn-withdraw-confirm', { timeoutMs: 5_000 });

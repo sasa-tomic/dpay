@@ -22,7 +22,7 @@ import { parsePayLink } from '../harness/paylink.mjs';
 
 const CKUSDC_CURRENCY = 2;
 const CKUSDC_RAW = 50_000; // 0.050000 USDC (6-decimal)
-const EXPECTED_DISPLAY = '0.050000 USDC';
+const EXPECTED_DISPLAY = '0.05 USDC';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -32,7 +32,7 @@ export const meta = {
   name: 'ckusdc-request',
   journey: 'pay',
   covers: ['ckusdc-merchant-create', 'request-asset-picker', 'multi-currency', '6-decimal', 'byte-exact', 'pay-link'],
-  verifies: 'ckUSDC chip + 0.05 amount → QR is the payment LINK (ckUSDC/IC/0.05, own principal); NFC wire encodes currency 2 + 50000 raw (6-dec); readout \'0.050000 USDC\' (no $0.05).',
+  verifies: 'ckUSDC chip + 0.05 amount → QR is the payment LINK (ckUSDC/IC/0.05, own principal); NFC wire encodes currency 2 + 50000 raw (6-dec); readout \'0.05 USDC\' (no $0.05).',
   timeoutMs: 15000,
 };
 
