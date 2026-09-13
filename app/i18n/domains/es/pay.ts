@@ -220,7 +220,7 @@ export const receiveEs: ReceiveMessages = {
   chooseCurrency: 'Elige la moneda del pago',
   chooseCurrencyHint: 'Elige qué activo te enviará quien paga',
   chooseAssetHint: 'Elige qué activo te va a enviar quien paga',
-  request: 'Solicitar',
+  request: 'Mostrar código',
   requestHint: 'Muestra tu código QR para que quien paga lo escanee y te pague',
   creating: 'Creando…',
   creatingRequest: 'Creando la solicitud…',
@@ -283,17 +283,12 @@ export const receiveEs: ReceiveMessages = {
   broadcasting: 'Enviando a la red de Solana: puede tardar hasta un minuto.',
 
   till: {
-    codeForm: 'Quién puede pagar este código',
-    dpayCode: 'Código dpay',
-    tillCode: 'Código de caja',
+    tillCode: 'Código de caja (OpenCryptoPay)',
 
-    chargeLabel: 'Importe a cobrar',
     chargeHint: 'Se marca en francos y se paga en VCHF: un franco, un VCHF, sin conversión.',
     noteLabel: 'Nota',
     notePlaceholder: '¿A qué corresponde este importe? (opcional)',
-    ringUp: 'Cobrar',
     ringUpHint: 'Abrir este importe en tu caja y mostrar al cliente un código que pueda pagar',
-    ringingUp: 'Cobrando…',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Un importe de caja llega hasta el céntimo: pon 10.50 en lugar de 10.505.'
@@ -321,7 +316,7 @@ export const receiveEs: ReceiveMessages = {
       `Cobraste ${rung} y la caja respondió con ${quoted}. dpay no muestra un código que cobre una cifra que aquí no ha elegido nadie, así que no hay nada que pagar. Vuelve a cobrar y, si ocurre otra vez, avisa a quien gestiona el relay antes de aceptar dinero.`,
     unsigned:
       'Este teléfono no pudo firmar el importe, así que no se abrió nada y no hay nada que pagar. Cierra dpay, ábrelo otra vez y vuelve a cobrar.',
-    tryAgain: 'Volver a cobrar',
+    tryAgain: 'Reintentar',
 
     settlesAs: (amount, price) =>
       `Usted recibe ${amount} en Internet Computer. La comisión del libro mayor corre de su cuenta, así que el cliente paga exactamente ${price}.`,
@@ -369,7 +364,7 @@ export const receiveEs: ReceiveMessages = {
         : reason === 'superseded'
         ? 'En esta caja se abrió un cobro más reciente, así que este código ya no acepta dinero. Vuelve a cobrar para enseñar uno nuevo.'
         : 'El relay ya no lo tiene, casi seguro porque se reinició. Aquí no se abonó nada. Vuelve a cobrar; si el cliente dice que pagó, mira tu saldo de VCHF y las Transacciones antes de pedirle que pague dos veces.',
-    ringUpNext: 'Cobrar al siguiente cliente',
+    ringUpNext: 'Siguiente cliente',
 
     paidAmount: price => `Pagado ${price}`,
     paidBlock: block => `Bloque del registro ${block}`,

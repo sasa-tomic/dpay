@@ -29,7 +29,7 @@
 // Does NOT overlap flow 86 (an NFC bundle settling a dpay REQUEST — there is no charge, no till and
 // no reference there) or flow 114 (the same charge paid through the provider routes, no tap).
 //
-// Selector contract: `btn-code-till`, `till-amount-input`, `btn-till-ring-up`, `till-qr`,
+// Selector contract: `btn-code-till`, `amount-input`, `btn-till-ring-up`, `till-qr`,
 // `till-tap-hint`, `nfc-status`, `till-paid`, `till-paid-block`.
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
@@ -132,7 +132,7 @@ export async function run() {
     await driver.click('tab-receive', {timeoutMs: 4_000});
     await observeTillOpens(driver);
     await driver.click('btn-code-till', {timeoutMs: 4_000});
-    await driver.type('till-amount-input', PRICE, {timeoutMs: 4_000});
+    await driver.type('amount-input', PRICE, {timeoutMs: 4_000});
     await driver.click('btn-till-ring-up', {timeoutMs: 4_000});
     await driver.findByTestID('till-qr', {timeoutMs: 15_000});
 

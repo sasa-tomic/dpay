@@ -21,7 +21,7 @@
 // a third implementation of LUD-01 in this repo (the relay encodes, the app decodes — see
 // `e2e/harness/lnurl.mjs`, which says exactly this).
 //
-// Selector contract: `btn-code-till`, `till-amount-input`, `btn-till-ring-up`, `till-qr`,
+// Selector contract: `btn-code-till`, `amount-input`, `btn-till-ring-up`, `till-qr`,
 // `till-amount`, `till-status`, `till-paid`, `till-paid-block`, `btn-till-new`, `receive-code-form`.
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
@@ -44,7 +44,7 @@ export const meta = {
   name: 'till-ring-up',
   journey: 'pay',
   covers: ['till', 'merchant-till', 'opencryptopay', 'signed-ring-up', 'vchf', 'observed-settlement', 'charge-reference', 'honest-instructions', 'settle'],
-  verifies: 'A shop rings up CHF 10.50 on its own dpay wallet: the Receive tab’s code-form selector opens the till counter, the app signs the ring-up with its own key, and the relay answers with a real charge — the screen shows the code, the franc price, what settles in VCHF, and an honest "waiting" that never claims the customer scanned anything. A payer then resolves that code through the till’s own OpenCryptoPay routes (which name the MERCHANT’s account, not dpay’s) and pays the exact VCHF carrying the charge’s `ref` as the on-chain memo; the merchant’s screen flips to Paid with the ledger block that paid, and the money is on the ledger (the customer’s account moves by exactly CHF 10.50 — the shop absorbs the ledger fee, so it receives 10.4999). "Ring up the next customer" returns to an empty counter.',
+  verifies: 'A shop rings up CHF 10.50 on its own dpay wallet: the Receive tab’s till-code checkbox switches the shared amount row’s button to the till counter, the app signs the ring-up with its own key, and the relay answers with a real charge — the screen shows the code, the franc price, what settles in VCHF, and an honest "waiting" that never claims the customer scanned anything. A payer then resolves that code through the till’s own OpenCryptoPay routes (which name the MERCHANT’s account, not dpay’s) and pays the exact VCHF carrying the charge’s `ref` as the on-chain memo; the merchant’s screen flips to Paid with the ledger block that paid, and the money is on the ledger (the customer’s account moves by exactly CHF 10.50 — the shop absorbs the ledger fee, so it receives 10.4999). "Next customer" returns to the shared form.',
   timeoutMs: 60_000, // ring-up + a 4-call provider walk + a real IC settlement + the merchant poll
 };
 
@@ -124,11 +124,11 @@ export async function run() {
     await openBalances(driver);
     await selectCurrency(driver, 'vchf');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
-    // The selector is a CODE FORM inside Request payment — not a third tab.
-    assert(await driver.isPresent('receive-code-form'), 'the code-form selector must render on the Receive form');
+    // The till code is a CHECKBOX beside the shared amount row — not a third tab.
+    assert(await driver.isPresent('receive-code-form'), 'the till-code checkbox must render on the Receive form');
     await observeTillOpens(driver);
     await driver.click('btn-code-till', { timeoutMs: 4_000 });
-    await driver.type('till-amount-input', PRICE, { timeoutMs: 4_000 });
+    await driver.type('amount-input', PRICE, { timeoutMs: 4_000 });
     await driver.click('btn-till-ring-up', { timeoutMs: 4_000 });
 
     await driver.findByTestID('till-qr', { timeoutMs: 15_000 });
@@ -138,8 +138,8 @@ export async function run() {
     assertIncludes(shown, 'Waiting for the payment', 'the honest waiting line');
     // The status route exposes no scan signal, so the screen may never imply one.
     assert(!/scanned/i.test(shown), `the screen must not claim the customer scanned anything:\n${shown.slice(0, 400)}`);
-    // A live charge hides both toggles: flipping away would abandon a code a customer can pay.
-    assert(!(await driver.isPresent('receive-code-form')), 'the code-form selector hides while a charge is live');
+    // A live charge hides the toggles and the checkbox: flipping away would abandon a payable code.
+    assert(!(await driver.isPresent('receive-code-form')), 'the till-code checkbox hides while a charge is live');
     assert(!(await driver.isPresent('receive-mode-toggle')), 'the request/address toggle hides while a charge is live');
     await driver.screenshot('114-till-code');
 
@@ -179,8 +179,8 @@ export async function run() {
 
     // --- back to an empty counter ---------------------------------------------------------------
     await driver.click('btn-till-new', { timeoutMs: 4_000 });
-    await driver.findByTestID('till-amount-input', { timeoutMs: 4_000 });
-    assert(await driver.isPresent('receive-code-form'), 'the selector returns once nothing is live');
+    await driver.findByTestID('btn-till-ring-up', { timeoutMs: 4_000 });
+    assert(await driver.isPresent('receive-code-form'), 'the checkbox returns once nothing is live');
 
     console.log(`[114-till-ring-up] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {

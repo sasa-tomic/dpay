@@ -220,7 +220,7 @@ export const receiveDe: ReceiveMessages = {
   chooseCurrency: 'Abwicklungswährung wählen',
   chooseCurrencyHint: 'Wähle, welches Asset der Zahler dir sendet',
   chooseAssetHint: 'Wähle das Asset, das der Zahler dir sendet',
-  request: 'Anfordern',
+  request: 'Code anzeigen',
   requestHint: 'Zeigt deinen QR-Code, damit der Zahler ihn scannen und dich bezahlen kann',
   creating: 'Wird erstellt…',
   creatingRequest: 'Anfrage wird erstellt…',
@@ -290,17 +290,12 @@ export const receiveDe: ReceiveMessages = {
   broadcasting: 'Übertragung auf Solana — das kann bis zu einer Minute dauern.',
 
   till: {
-    codeForm: 'Wer diesen Code bezahlen kann',
-    dpayCode: 'dpay-Code',
-    tillCode: 'Kassen-Code',
+    tillCode: 'Kassen-Code (OpenCryptoPay)',
 
-    chargeLabel: 'Zu belastender Betrag',
     chargeHint: 'In Franken ausgezeichnet, in VCHF bezahlt — ein Franken, ein VCHF, kein Umtausch.',
     noteLabel: 'Notiz',
     notePlaceholder: 'Wofür ist diese Buchung? (optional)',
-    ringUp: 'Buchen',
     ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen bezahlbaren Code zeigen',
-    ringingUp: 'Wird gebucht…',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Ein Kassenbetrag geht auf ganze Rappen — buche 10.50 statt 10.505.'
@@ -328,7 +323,7 @@ export const receiveDe: ReceiveMessages = {
       `Du hast ${rung} gebucht, die Kasse hat ${quoted} zurückgemeldet. dpay zeigt keinen Code, der einen Betrag verlangt, den hier niemand gewählt hat — nichts ist bezahlbar. Buche erneut, und wenn es wieder passiert, sag der Person Bescheid, die das Relay betreibt, bevor du Geld annimmst.`,
     unsigned:
       'Dieses Telefon konnte die Buchung nicht signieren; es wurde nichts gebucht und nichts ist bezahlbar. Schliesse dpay, öffne es neu und buche erneut.',
-    tryAgain: 'Erneut buchen',
+    tryAgain: 'Erneut versuchen',
 
     settlesAs: (amount, price) =>
       `Sie erhalten ${amount} auf dem Internet Computer. Die Ledger-Gebühr tragen Sie, die Kundschaft zahlt also genau ${price}.`,
@@ -376,7 +371,7 @@ export const receiveDe: ReceiveMessages = {
         : reason === 'superseded'
         ? 'Auf dieser Kasse wurde eine neuere Buchung erfasst, dieser Code nimmt kein Geld mehr an. Buche erneut und zeig einen frischen Code.'
         : 'Das Relay hat sie nicht mehr — höchstwahrscheinlich wurde es neu gestartet. Hier wurde nichts gutgeschrieben. Buche erneut; sagt die Kundschaft, sie habe bezahlt, prüfe erst deinen VCHF-Bestand und die Transaktionen, bevor sie ein zweites Mal zahlt.',
-    ringUpNext: 'Nächste Kundschaft buchen',
+    ringUpNext: 'Nächste Kundschaft',
 
     paidAmount: price => `Bezahlt ${price}`,
     paidBlock: block => `Ledger-Block ${block}`,

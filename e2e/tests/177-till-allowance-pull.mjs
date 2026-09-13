@@ -22,7 +22,7 @@
 //      ledger read. A screen that went green off the app's own pull would be claiming a sale on
 //      the strength of its own opinion.
 //
-// Selector contract: `btn-code-till`, `till-amount-input`, `btn-till-ring-up`, `till-qr`,
+// Selector contract: `btn-code-till`, `amount-input`, `btn-till-ring-up`, `till-qr`,
 // `till-status`, `till-paid`, `till-paid-block`.
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
@@ -124,7 +124,7 @@ export async function run() {
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await observeTillOpens(driver);
     await driver.click('btn-code-till', { timeoutMs: 4_000 });
-    await driver.type('till-amount-input', PRICE, { timeoutMs: 4_000 });
+    await driver.type('amount-input', PRICE, { timeoutMs: 4_000 });
     await driver.click('btn-till-ring-up', { timeoutMs: 4_000 });
     await driver.findByTestID('till-qr', { timeoutMs: 15_000 });
 

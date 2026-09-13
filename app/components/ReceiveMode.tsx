@@ -606,119 +606,104 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         />
       ) : null}
       {/* WHICH CODE, i.e. who can pay it — the same request, two audiences. A dpay code is this
-          wallet's payment link: any phone camera opens it — dpay on a dpay phone, the web wallet
-          otherwise (founder decision 2026-09-12); a till code is this merchant's own
-          OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
-          It is a CHECKBOX and not a second form because the request is one request: the amount row
-          above is shared, the memo is the dpay form's own (a till charge has none, so the field
-          hides rather than being silently ignored), and the box flips the single button below
-          between the two payloads. Unchecked — the dpay code — is the default. Hidden while
-          TillCharge holds the form, exactly as the toggle above is while a request QR is up:
-          flipping away would abandon a code a customer can still pay. */}
+           wallet's payment link: any phone camera opens it — dpay on a dpay phone, the web wallet
+           otherwise (founder decision 2026-09-12); a till code is this merchant's own
+           OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
+           It is a CHECKBOX and not a second form because the request is one request: the amount row
+           above is shared, the memo is the dpay form's own (the till takes a NOTE — a different,
+           signed "what is this for" the counter renders itself — so the dpay memo would be silently
+           ignored and the field hides instead), and the box flips the single button below between
+           the two payloads. Unchecked — the dpay code — is the default. Hidden while TillCharge
+           holds the form, exactly as the toggle above is while a request QR is up: flipping away
+           would abandon a code a customer can still pay. */}
       {/* The capability flag gates ENTRY to this form; it never un-mounts a HELD one. If the
           relay is retargeted or drops mid-charge, `tillAvailable` flips false but `tillHeld` keeps
           TillCharge mounted — its own poll then says "Can't check this charge right now", which is
           the honest rendering of silence. Un-mounting here would render the outage as the ABSENCE
           of a sale (flow 116's whole contract). */}
-      {((tillAvailable || tillHeld) && codeForm === 'till') ? (
+      {!tillHeld ? (
         <>
-          {!tillHeld ? (
-            <>
-              <Text style={S.label}>{M.receive.amountToReceive}</Text>
-              <View style={S.amountRow}>
-                {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
-                    ▾), which opens the compact currency picker below. The amount is cleared on switch so a
-                    stale '25.00' is never reinterpreted as 25 BTC (8-decimal) on the new asset. */}
-                <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel={M.receive.chooseCurrency} accessibilityHint={M.receive.chooseCurrencyHint} accessibilityState={{disabled: false}}>
-                  <Text style={S.currency}>{reqPrefix}</Text>
-                  <IconChevronDown size={20} color={C.sub}/>
-                </Pressable>
-                {/* X21 — Enter submits. Every other form on the web has taught the user that pressing
-                    Enter in the last field of a short form does the thing the form is for; this one made
-                    them reach for the mouse, and the keyboard shortcuts that DO exist stop at the tab
-                    level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
-                    hardware keyboard attached to a phone. The dpay form only: the till button is not this
-                    form's to submit (a ring-up is signed and supersedes), so the shared field carries no
-                    submit while the checkbox is checked. */}
-                <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} />
-              </View>
-              {tillAvailable ? (
-                <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
-                  <Pressable
-                    testID="btn-code-till"
-                    style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 6, marginBottom: 10, minHeight: 44}}
-                    onPress={() => onCodeFormChange(codeForm === 'till' ? 'dpay' : 'till')}
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={M.receive.till.tillCode}
-                    accessibilityState={{checked: codeForm === 'till'}}>
-                    <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'till' ? C.brand : C.sub2, backgroundColor: codeForm === 'till' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
-                      {codeForm === 'till' ? <IconCheck size={14} color={C.brandInk} /> : null}
-                    </View>
-                    <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.till.tillCode}</Text>
-                  </Pressable>
+          {/* Trip Ready J4 (UX hardening 2026-08-23) — the coach card ALSO mounts at the ENTRY form
+              (was: only after pressing Request, so first-time receivers never saw it). Same one-time
+              seen marker — whichever surface shows it first wins; the card never returns after.
+              The dpay form only: a till entry is about the charge, not about requesting. */}
+          {((tillAvailable || tillHeld) && codeForm === 'till') ? null : <CoachTip tipKey="receiveRequest" />}
+          <Text style={S.label}>{M.receive.amountToReceive}</Text>
+          <View style={S.amountRow}>
+            {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
+                ▾), which opens the compact currency picker below. The amount is cleared on switch so a
+                stale '25.00' is never reinterpreted as 25 BTC (8-decimal) on the new asset. */}
+            <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel={M.receive.chooseCurrency} accessibilityHint={M.receive.chooseCurrencyHint} accessibilityState={{disabled: false}}>
+              <Text style={S.currency}>{reqPrefix}</Text>
+              <IconChevronDown size={20} color={C.sub}/>
+            </Pressable>
+            {/* X21 — Enter submits. Every other form on the web has taught the user that pressing
+                Enter in the last field of a short form does the thing the form is for; this one made
+                them reach for the mouse, and the keyboard shortcuts that DO exist stop at the tab
+                level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
+                hardware keyboard attached to a phone. The DPAY form only: a ring-up is signed and
+                supersedes the live charge, so the shared field does not submit while the till
+                checkbox is checked — the till's own button is the one that rings up. */}
+            <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} onSubmitEditing={(tillAvailable || tillHeld) && codeForm === 'till' ? undefined : makeRequest} returnKeyType="done" />
+          </View>
+          {((tillAvailable || tillHeld) && codeForm === 'till') ? null : (
+            <TextInput
+              testID="memo-input"
+              style={memoInputStyle()}
+              value={memo}
+              onChangeText={setMemo}
+              placeholder={M.receive.memoPlaceholder}
+              placeholderTextColor={C.sub}
+              accessibilityLabel={M.receive.memo}
+              accessibilityHint={M.receive.memoHint}
+              maxLength={32}
+              onSubmitEditing={makeRequest}
+              returnKeyType="done"
+            />
+          )}
+          {tillAvailable ? (
+            <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
+              <Pressable
+                testID="btn-code-till"
+                style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 6, marginBottom: 10, minHeight: 44}}
+                onPress={() => onCodeFormChange(codeForm === 'till' ? 'dpay' : 'till')}
+                accessibilityRole="checkbox"
+                accessibilityLabel={M.receive.till.tillCode}
+                accessibilityState={{checked: codeForm === 'till'}}>
+                <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'till' ? C.brand : C.sub2, backgroundColor: codeForm === 'till' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
+                  {codeForm === 'till' ? <IconCheck size={14} color={C.brandInk} /> : null}
                 </View>
-              ) : null}
-            </>
+                <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.till.tillCode}</Text>
+              </Pressable>
+            </View>
           ) : null}
-          <TillCharge
-            identity={identity}
-            relayUrl={relayUrl}
-            asset={activeAsset}
-            assets={assets}
-            catalog={catalog}
-            nfcStatus={nfcStatus}
-            onSelectAsset={onSelectAsset}
-            amount={amount}
-            onHoldsForm={setTillHeld}
-          />
         </>
+      ) : null}
+      {((tillAvailable || tillHeld) && codeForm === 'till') ? (
+        <TillCharge
+          identity={identity}
+          relayUrl={relayUrl}
+          asset={activeAsset}
+          assets={assets}
+          catalog={catalog}
+          nfcStatus={nfcStatus}
+          onSelectAsset={onSelectAsset}
+          amount={amount}
+          onHoldsForm={setTillHeld}
+        />
       ) : (
         <>
-      {/* Trip Ready J4 (UX hardening 2026-08-23) — the coach card ALSO mounts at the ENTRY form
-          (was: only after pressing Request, so first-time receivers never saw it). Same one-time
-          seen marker — whichever surface shows it first wins; the card never returns after. */}
-      <CoachTip tipKey="receiveRequest" />
-      <Text style={S.label}>{M.receive.amountToReceive}</Text>
-      <View style={S.amountRow}>
-        {/* MC5: the merchant selects the EXACT settlement asset by tapping the amount prefix (glyph +
-            ▾), which opens the compact currency picker below. The amount is cleared on switch so a
-            stale '25.00' is never reinterpreted as 25 BTC (8-decimal) on the new asset. */}
-        <Pressable testID="req-prefix" style={S.prefixBtn} onPress={() => setPickOpen(true)} accessibilityRole="button" accessibilityLabel={M.receive.chooseCurrency} accessibilityHint={M.receive.chooseCurrencyHint} accessibilityState={{disabled: false}}>
-          <Text style={S.currency}>{reqPrefix}</Text>
-          <IconChevronDown size={20} color={C.sub}/>
-        </Pressable>
-        {/* X21 — Enter submits. Every other form on the web has taught the user that pressing
-            Enter in the last field of a short form does the thing the form is for; this one made
-            them reach for the mouse, and the keyboard shortcuts that DO exist stop at the tab
-            level. `onSubmitEditing` is the RN-native spelling of it, so the same key works on a
-            hardware keyboard attached to a phone. Both fields submit: the memo is optional, so
-            either one can legitimately be the last field the user touches. */}
-        <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} onSubmitEditing={makeRequest} returnKeyType="done" />
-      </View>
-      <TextInput
-        testID="memo-input"
-        style={memoInputStyle()}
-        value={memo}
-        onChangeText={setMemo}
-        placeholder={M.receive.memoPlaceholder}
-        placeholderTextColor={C.sub}
-        accessibilityLabel={M.receive.memo}
-        accessibilityHint={M.receive.memoHint}
-        maxLength={32}
-        onSubmitEditing={makeRequest}
-        returnKeyType="done"
-      />
-      <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel={M.receive.request} accessibilityHint={M.receive.requestHint} accessibilityState={{disabled: false}}><Text style={S.primaryText}>{M.receive.request}</Text></Pressable>
-      {err ? <Text style={S.err}>{err}</Text> : null}
-      <AssetPicker
-        open={pickOpen}
-        assets={assets}
-        selectedId={selectedAssetId}
-        balances={balances}
-        homeCurrency={homeCurrency}
-        onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
-        onClose={() => setPickOpen(false)}
-      />
+          <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel={M.receive.request} accessibilityHint={M.receive.requestHint} accessibilityState={{disabled: false}}><Text style={S.primaryText}>{M.receive.request}</Text></Pressable>
+          {err ? <Text style={S.err}>{err}</Text> : null}
+          <AssetPicker
+            open={pickOpen}
+            assets={assets}
+            selectedId={selectedAssetId}
+            balances={balances}
+            homeCurrency={homeCurrency}
+            onSelect={(id) => { setAmount(''); onSelectAsset(id); }}
+            onClose={() => setPickOpen(false)}
+          />
         </>
       )}
     </View>

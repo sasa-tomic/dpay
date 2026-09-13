@@ -15,7 +15,7 @@
 // Offline here is the real thing the harness uses everywhere else: the app is retargeted at a port
 // nothing listens on, so the poll meets a genuine connection refusal rather than a stubbed one.
 //
-// Selector contract: `btn-code-till`, `till-amount-input`, `btn-till-ring-up`, `till-qr`,
+// Selector contract: `btn-code-till`, `amount-input`, `btn-till-ring-up`, `till-qr`,
 // `till-status`, `btn-till-cancel`, `till-ended`, `till-ended-go`.
 import {
   setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency, goOffline, setRelay,
@@ -43,7 +43,7 @@ export async function run() {
     await selectCurrency(driver, 'vchf');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
     await driver.click('btn-code-till', { timeoutMs: 4_000 });
-    await driver.type('till-amount-input', '4.50', { timeoutMs: 4_000 });
+    await driver.type('amount-input', '4.50', { timeoutMs: 4_000 });
     await driver.click('btn-till-ring-up', { timeoutMs: 4_000 });
     await driver.findByTestID('till-qr', { timeoutMs: 15_000 });
     assertIncludes(await driver.readText('till-status'), 'Waiting for the payment', 'a reachable till waits');
@@ -80,7 +80,7 @@ export async function run() {
 
     // …and the counter reopens from the panel itself.
     await driver.click('till-ended-go', { timeoutMs: 4_000 });
-    await driver.findByTestID('till-amount-input', { timeoutMs: 6_000 });
+    await driver.findByTestID('btn-till-ring-up', { timeoutMs: 6_000 });
 
     console.log(`[116-till-offline-cancel] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {

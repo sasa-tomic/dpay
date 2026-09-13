@@ -221,7 +221,7 @@ export const receiveFr: ReceiveMessages = {
   chooseCurrency: 'Choisir la monnaie de règlement',
   chooseCurrencyHint: 'Choisit l’actif que le payeur vous enverra',
   chooseAssetHint: 'Choisissez l’actif que le payeur vous enverra',
-  request: 'Créer la demande',
+  request: 'Afficher le code',
   requestHint: 'Affiche votre QR pour que le payeur le scanne et vous paie',
   creating: 'Création…',
   creatingRequest: 'Création de la demande…',
@@ -284,17 +284,12 @@ export const receiveFr: ReceiveMessages = {
   broadcasting: 'Envoi sur Solana — cela peut prendre jusqu’à une minute.',
 
   till: {
-    codeForm: 'Qui peut payer ce code',
-    dpayCode: 'Code dpay',
-    tillCode: 'Code de caisse',
+    tillCode: 'Code de caisse (OpenCryptoPay)',
 
-    chargeLabel: 'Montant à encaisser',
     chargeHint: 'Affiché en francs, payé en VCHF — un franc, un VCHF, sans conversion.',
     noteLabel: 'Note',
     notePlaceholder: 'À quoi correspond ce montant (facultatif)',
-    ringUp: 'Encaisser',
     ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code qu’il peut payer',
-    ringingUp: 'Encaissement…',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'Un montant de caisse s’arrête au centime — saisissez 10.50 plutôt que 10.505.'
@@ -322,7 +317,7 @@ export const receiveFr: ReceiveMessages = {
       `Vous avez encaissé ${rung} et la caisse a répondu ${quoted}. dpay n’affiche pas un code qui réclame un montant que personne n’a choisi ici : rien n’est payable. Recommencez — et si cela se reproduit, prévenez la personne qui exploite le relais avant d’accepter le moindre paiement.`,
     unsigned:
       'Ce téléphone n’a pas pu signer le montant : rien n’a été ouvert et rien n’est payable. Fermez puis rouvrez dpay, et recommencez.',
-    tryAgain: 'Encaisser à nouveau',
+    tryAgain: 'Réessayer',
 
     settlesAs: (amount, price) =>
       `Vous recevez ${amount} sur l’Internet Computer. Les frais du registre sont à votre charge, le client paie donc exactement ${price}.`,
@@ -370,7 +365,7 @@ export const receiveFr: ReceiveMessages = {
         : reason === 'superseded'
         ? 'Un montant plus récent a été ouvert sur cette caisse : ce code n’accepte plus de paiement. Recommencez pour en montrer un tout neuf.'
         : 'Le relais ne l’a plus — très probablement parce qu’il a redémarré. Rien n’a été crédité ici. Recommencez ; si le client dit avoir payé, vérifiez votre solde VCHF et vos Transactions avant de lui demander de payer une deuxième fois.',
-    ringUpNext: 'Encaisser le client suivant',
+    ringUpNext: 'Client suivant',
 
     paidAmount: price => `Payé ${price}`,
     paidBlock: block => `Bloc du registre ${block}`,

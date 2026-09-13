@@ -1,7 +1,7 @@
 // Flow 115 — the till control exists everywhere, and says NO by name where it must.
 //
 // The hard UI rule is that every asset and every rail is handled through the SAME surfaces, so the
-// code-form selector renders on both Receive forms for every asset — a control that appeared only
+// till-code checkbox renders on both Receive forms for every asset — a control that appeared only
 // for the one asset a till takes would be exactly the per-rail special case the rule forbids, and a
 // shop holding ckBTC would be left guessing whether their phone can ring up at all.
 //
@@ -19,7 +19,7 @@
 // the point: every one of these is decided on the device, with the money nowhere near it.
 //
 // Selector contract: `receive-code-form`, `btn-code-till`, `till-refused`, `till-refused-go`,
-// `till-amount-input`, `btn-till-ring-up`, `till-err`, `till-qr`.
+// `amount-input`, `btn-till-ring-up`, `till-err`, `till-qr`.
 import {
   setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency,
 } from '../harness/lib.mjs';
@@ -29,7 +29,7 @@ export const meta = {
   name: 'till-refusals',
   journey: 'pay',
   covers: ['till', 'merchant-till', 'rail-parity', 'same-surfaces', 'fail-closed', 'honest-instructions', 'asset-switch'],
-  verifies: 'The till code form renders for EVERY asset on BOTH Receive rails and fails closed by name where a charge cannot be rung up: with ckBTC selected it names the asset and its chain, says a till code is paid in VCHF, and offers one tap that switches — after which the counter is open with the till form still chosen (the code form is wallet-owned, so it survives the rail re-mount). With SOL selected the same control renders on the Solana Receive form and refuses naming SOL on Solana. A price finer than a rappen is refused on the device with the correction spelled out, and nothing is signed or sent.',
+  verifies: 'The till-code checkbox renders for EVERY asset on BOTH Receive rails and fails closed by name where a charge cannot be rung up: with ckBTC selected it names the asset and its chain, says a till code is paid in VCHF, and offers one tap that switches — after which the counter is open with the checkbox still checked (the code form is wallet-owned, so it survives the rail re-mount). With SOL selected the same checkbox renders on the Solana Receive form and refuses naming SOL on Solana. A price finer than a rappen is refused on the device with the correction spelled out, and nothing is signed or sent.',
   timeoutMs: 45_000,
 };
 
@@ -46,7 +46,7 @@ export async function run() {
     await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');
     await driver.click('tab-receive', { timeoutMs: 4_000 });
-    assert(await driver.isPresent('receive-code-form'), 'the code form renders for ckBTC too — the same-surfaces rule');
+    assert(await driver.isPresent('receive-code-form'), 'the till-code checkbox renders for ckBTC too — the same-surfaces rule');
     await driver.click('btn-code-till', { timeoutMs: 4_000 });
     await driver.findByTestID('till-refused', { timeoutMs: 5_000 });
     const refusedBtc = await driver.readText('till-refused');
@@ -54,14 +54,14 @@ export async function run() {
     assertIncludes(refusedBtc, 'Bitcoin', 'and the chain it is on');
     assertIncludes(refusedBtc, 'VCHF', 'and what a till code IS paid in');
     assert(!refusedBtc.includes('ckBTC'), `the wallet names the backing symbol, never the wrapper:\n${refusedBtc}`);
-    // A form that cannot produce a payable code must not be typed into.
-    assert(!(await driver.isPresent('till-amount-input')), 'no counter is offered for an asset a till cannot take');
+    // A form that cannot produce a payable code must not be pressed.
+    assert(!(await driver.isPresent('btn-till-ring-up')), 'no button is offered for an asset a till cannot take');
     await driver.screenshot('115-till-refused-ckbtc');
 
     // --- 2. the one tap that fixes it -----------------------------------------------------------
     console.log('[115-till-refusals] switching to VCHF from the refusal itself…');
     await driver.click('till-refused-go', { timeoutMs: 4_000 });
-    await driver.findByTestID('till-amount-input', { timeoutMs: 6_000 });
+    await driver.findByTestID('btn-till-ring-up', { timeoutMs: 6_000 });
     assert(!(await driver.isPresent('till-refused')), 'the refusal is gone once the asset it named is switched');
 
     // --- 3. the SAME control on the Solana rail --------------------------------------------------
@@ -69,7 +69,7 @@ export async function run() {
     await openBalances(driver);
     await driver.click('asset-sol-select', { timeoutMs: 5_000 });
     await driver.click('tab-receive', { timeoutMs: 4_000 });
-    assert(await driver.isPresent('receive-code-form'), 'the code form renders on the Solana Receive form as well');
+    assert(await driver.isPresent('receive-code-form'), 'the till-code checkbox renders on the Solana Receive form as well');
     // The till form is STILL the chosen one — the wallet owns the choice across the rail re-mount.
     await driver.findByTestID('till-refused', { timeoutMs: 5_000 });
     const refusedSol = await driver.readText('till-refused');
@@ -79,11 +79,11 @@ export async function run() {
     await driver.screenshot('115-till-refused-sol');
     // …and the same one tap crosses the rail.
     await driver.click('till-refused-go', { timeoutMs: 4_000 });
-    await driver.findByTestID('till-amount-input', { timeoutMs: 6_000 });
+    await driver.findByTestID('btn-till-ring-up', { timeoutMs: 6_000 });
 
     // --- 4. a price a till cannot charge, refused on the device ---------------------------------
     console.log('[115-till-refusals] a sub-rappen price is refused before anything is signed…');
-    await driver.type('till-amount-input', '10.505', { timeoutMs: 4_000 });
+    await driver.type('amount-input', '10.505', { timeoutMs: 4_000 });
     await driver.click('btn-till-ring-up', { timeoutMs: 4_000 });
     const err = await driver.readText('till-err');
     assertIncludes(err, 'rappen', 'the refusal names the rule that was broken');

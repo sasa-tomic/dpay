@@ -20,7 +20,7 @@
 // identical 533px till root), which is why it is a SEPARATE pass rather than the only one: the
 // structural fix has to hold for the widest copy the app ships.
 //
-// Selector contract: `btn-code-till`, `till-amount-input`, `btn-till-ring-up`, `btn-pay-send`,
+// Selector contract: `btn-code-till`, `amount-input`, `btn-till-ring-up`, `btn-pay-send`,
 // `send-address-input`, `btn-send-max`, `btn-lang-de`, `btn-settings`, `btn-settings-close`.
 import {
   setup, assert, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency,
@@ -34,7 +34,7 @@ export const meta = {
   name: 'money-forms-fit',
   journey: 'pay',
   covers: ['till', 'merchant-till', 'send-to-address', 'layout', 'viewport-fit', 'receive', 'vchf', 'i18n', 'regression'],
-  verifies: 'The two forms a user types money into — the cashier ring-up and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the CHF prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll.',
+  verifies: 'The two forms a user types money into — the till ring-up (the shared Receive amount row with the till checkbox checked) and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the unit prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll.',
   timeoutMs: 60_000,
 };
 
@@ -105,12 +105,12 @@ function assertFits(m, painted, where) {
     `${where}: the page scrolls horizontally (${m.documentScrollW}px of content in a ${m.viewportW}px viewport) — ${shown}`);
 }
 
-/** Receive ▸ Request payment ▸ Till code. The code-form choice persists, so the toggle is a no-op
- *  on the second visit — clicking it blindly would flip BACK to the dpay code. */
+/** Receive ▸ Request payment ▸ the till checkbox. The code-form choice persists, so the checkbox
+ *  is a no-op on the second visit — clicking it blindly would flip BACK to the dpay code. */
 async function openRingUpForm(driver) {
   await driver.click('tab-receive', {timeoutMs: 5_000});
   if (await driver.isPresent('btn-code-till')) await driver.click('btn-code-till', {timeoutMs: 5_000});
-  await driver.findByTestID('till-amount-input', {timeoutMs: 8_000});
+  await driver.findByTestID('btn-till-ring-up', {timeoutMs: 8_000});
 }
 
 /** Pay ▸ Send to address — same persistence rule as the code form. */
@@ -123,7 +123,7 @@ async function openSendForm(driver) {
 /** Measure + assert both forms in whatever language the app is currently in. */
 async function bothForms(driver, locale) {
   await openRingUpForm(driver);
-  const till = await measureIn(driver, 'till-amount-input', ['till-amount-input', 'btn-till-ring-up']);
+  const till = await measureIn(driver, 'amount-input', ['amount-input', 'btn-till-ring-up']);
   console.log(`[146-money-forms-fit] ring-up (${locale}): ${JSON.stringify(till.m)}`);
   assertFits(till.m, till.painted, `ring-up form (${locale})`);
   await driver.screenshot(`146-till-form-${locale}`);

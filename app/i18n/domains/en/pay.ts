@@ -611,21 +611,17 @@ export type ReceiveMessages = {
    * that (`services/till.ts`).
    */
   till: {
-    /** The selector above the amount: which code is being made, i.e. who can pay it. */
-    codeForm: string;
-    dpayCode: string;
+    /** The checkbox under the amount: the same request, two audiences. The label names the
+     *  standard a till code speaks, because "Till code" alone does not say who can scan it. */
     tillCode: string;
 
-    chargeLabel: string;
     chargeHint: string;
-    ringUp: string;
     /** The optional note field under the amount — what this charge is for. The label is the
      *  field's accessibility name; the placeholder is the invitation, and the only place
      *  "optional" is said. */
     noteLabel: string;
     notePlaceholder: string;
     ringUpHint: string;
-    ringingUp: string;
     /** Why the typed total cannot be a till charge. Three causes, three different corrections. */
     badAmount: (reason: 'too-precise' | 'not-a-number' | 'too-large') => string;
 
@@ -707,7 +703,7 @@ export const receiveEn: ReceiveMessages = {
   chooseCurrency: 'Choose settlement currency',
   chooseCurrencyHint: 'Pick which asset the payer will send you',
   chooseAssetHint: 'Choose which asset the payer will send you',
-  request: 'Request',
+  request: 'Show code',
   requestHint: 'Show your QR code so the payer can scan it to pay you',
   creating: 'Creating…',
   creatingRequest: 'Creating request…',
@@ -770,17 +766,12 @@ export const receiveEn: ReceiveMessages = {
   broadcasting: 'Broadcasting on Solana — this can take up to a minute.',
 
   till: {
-    codeForm: 'Who can pay this code',
-    dpayCode: 'dpay code',
-    tillCode: 'Till code',
+    tillCode: 'Till code (OpenCryptoPay)',
 
-    chargeLabel: 'Total to charge',
     chargeHint: 'Priced in francs, paid in VCHF — one franc, one VCHF, no conversion.',
     noteLabel: 'Note',
     notePlaceholder: 'What is this charge for? (optional)',
-    ringUp: 'Ring up',
     ringUpHint: 'Open this charge on your till and show the customer a code they can pay',
-    ringingUp: 'Ringing up…',
     badAmount: reason =>
       reason === 'too-precise'
         ? 'A till charge is in whole rappen — ring up 10.50 rather than 10.505.'
@@ -808,7 +799,7 @@ export const receiveEn: ReceiveMessages = {
       `You rang up ${rung} and the till answered with ${quoted}. dpay will not show a code that charges a number nobody at this counter chose, so nothing is payable. Ring up again — and if it happens twice, tell whoever runs the relay before taking any money.`,
     unsigned:
       'This phone could not sign the charge, so nothing was rung up and nothing is payable. Close and reopen dpay, then ring up again.',
-    tryAgain: 'Ring up again',
+    tryAgain: 'Try again',
 
     settlesAs: (amount, price) =>
       `You receive ${amount} on the Internet Computer. The ledger fee is yours, so the customer pays exactly ${price}.`,
@@ -856,7 +847,7 @@ export const receiveEn: ReceiveMessages = {
         : reason === 'superseded'
         ? 'Another charge was rung up on this till, so this code no longer takes money. Ring up again to show a fresh one.'
         : 'The relay does not have it any more — most likely it restarted. Nothing was credited here. Ring up again; if the customer says they paid, check your VCHF balance and Transactions before asking them to pay twice.',
-    ringUpNext: 'Ring up the next customer',
+    ringUpNext: 'Next customer',
 
     paidAmount: price => `Paid ${price}`,
     paidBlock: block => `Ledger block ${block}`,

@@ -559,41 +559,18 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   return (
     <View style={S.centerTop}>
       {toggle}
-      {/* The code-form selector, on the SOL rail exactly as on the IC one — the same-surfaces hard
-          rule: a control that appeared only where it can succeed would be a per-rail special case,
-          and the merchant would be left guessing whether their phone can do it at all. What gates
-          it is the RELAY and not the rail: a relay that serves no till shows the selector on
-          neither rail. Where it does show, choosing a till code here lands on the honest closed
-          branch (a till code is paid in VCHF on the Internet Computer, and this request is on
-          Solana) with the one tap that fixes it. No `onLiveChange`: a charge can never go live from
-          this rail, so a live-state reporter would be dead code. */}
-      {tillAvailable ? (
-        <>
-          <Text style={S.dim2}>{M.receive.till.codeForm}</Text>
-          <ModeToggle
-            testID="receive-code-form"
-            value={codeForm}
-            onChange={(v) => onCodeFormChange(v as 'dpay' | 'till')}
-            left={{label: M.receive.till.dpayCode, value: 'dpay', testID: 'btn-code-dpay'}}
-            right={{label: M.receive.till.tillCode, value: 'till', testID: 'btn-code-till'}}
-          />
-        </>
-      ) : null}
-      {tillAvailable && codeForm === 'till' ? (
-        <TillCharge
-          identity={identity}
-          relayUrl={relayUrl}
-          asset={assets.find(a => a.id === selectedAssetId) ?? null}
-          assets={assets}
-          catalog={catalog}
-          nfcStatus={nfcStatus}
-          onSelectAsset={onSelectAsset}
-        />
-      ) : (
-        <>
-      {/* Trip Ready J4 (UX hardening 2026-08-23) — entry-form mount, same one-time marker as the
-          IC ReceiveMode (was: only visible after pressing Request). */}
-      <CoachTip tipKey="receiveRequest" />
+      {/* WHICH CODE — the same checkbox, on the SOL rail exactly as on the IC one — the
+          same-surfaces hard rule: a control that appeared only where it can succeed would be a
+          per-rail special case, and the merchant would be left guessing whether their phone can do
+          it at all. What gates it is the RELAY and not the rail: a relay that serves no till shows
+          the checkbox on neither rail. Where it does show, checking it keeps the shared amount row
+          and swaps the button for the till's own — which lands on the honest closed branch (a till
+          code is paid in VCHF on the Internet Computer, and this request is on Solana) with the one
+           tap that fixes it. The memo is the dpay form's own and hides when the box is checked (the
+           till's note is the counter's own signed field, rendered there). No
+           `onHoldsForm`: a charge can never go live from this rail, so a held-form reporter would be
+           dead code. */}
+      {!tillAvailable || codeForm !== 'till' ? <CoachTip tipKey="receiveRequest" /> : null}
       <Text style={S.label}>{M.receive.amountToReceive}</Text>
       <View style={S.amountRow}>
         <Pressable
@@ -618,16 +595,47 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           accessibilityLabel={M.receive.amountToReceive}
         />
       </View>
-      <TextInput
-        testID="sol-req-memo-input"
-        style={memoInputStyle()}
-        value={memo}
-        onChangeText={setMemo}
-        placeholder={M.receive.memoPlaceholder}
-        placeholderTextColor={C.sub}
-        accessibilityLabel={M.receive.memo}
-        maxLength={32}
-      />
+      {!tillAvailable || codeForm !== 'till' ? (
+        <TextInput
+          testID="sol-req-memo-input"
+          style={memoInputStyle()}
+          value={memo}
+          onChangeText={setMemo}
+          placeholder={M.receive.memoPlaceholder}
+          placeholderTextColor={C.sub}
+          accessibilityLabel={M.receive.memo}
+          maxLength={32}
+        />
+      ) : null}
+      {tillAvailable ? (
+        <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
+          <Pressable
+            testID="btn-code-till"
+            style={{flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', marginTop: 6, marginBottom: 10, minHeight: 44}}
+            onPress={() => onCodeFormChange(codeForm === 'till' ? 'dpay' : 'till')}
+            accessibilityRole="checkbox"
+            accessibilityLabel={M.receive.till.tillCode}
+            accessibilityState={{checked: codeForm === 'till'}}>
+            <View style={{width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: codeForm === 'till' ? C.brand : C.sub2, backgroundColor: codeForm === 'till' ? C.brand : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 10}}>
+              {codeForm === 'till' ? <IconCheck size={14} color={C.brandInk} /> : null}
+            </View>
+            <Text style={{color: C.sub, fontSize: 15, flex: 1}}>{M.receive.till.tillCode}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {tillAvailable && codeForm === 'till' ? (
+        <TillCharge
+          identity={identity}
+          relayUrl={relayUrl}
+          asset={assets.find(a => a.id === selectedAssetId) ?? null}
+          assets={assets}
+          catalog={catalog}
+          nfcStatus={nfcStatus}
+          onSelectAsset={onSelectAsset}
+          amount={amount}
+        />
+      ) : (
+        <>
       {/* 2026-08-14 audit: a token request whose settlement is doomed must not be creatable. If the
           device's token account is KNOWN absent, the payer would sign a transferChecked to a
           non-existent account — broadcast fails AFTER they walked away. Inline the same one-tap
