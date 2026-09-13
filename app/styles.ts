@@ -598,7 +598,7 @@ function buildStyles(p: Palette) {
   assetGlyphLg: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.glyphBorderLg},
   assetGlyphText: {fontWeight: '700', fontFamily: FONT.sansBold},
   settingsSection: {alignSelf: 'stretch', marginBottom: 28},
-  relayInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 14, height: 50, paddingHorizontal: 16, fontSize: 14, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
+  relayInput: {alignSelf: 'stretch', backgroundColor: p.field, borderRadius: 14, minHeight: 50, paddingHorizontal: 16, fontSize: 14, color: p.ink, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2},
   // Advanced relay section — the relay edit is demoted below consumer settings and applied
   // EXPLICITLY via the Apply button (no live retarget on each keystroke). `advancedLabel` is the
   // small uppercase eyebrow shared with the other section headers; `applyBtn` mirrors the primary
