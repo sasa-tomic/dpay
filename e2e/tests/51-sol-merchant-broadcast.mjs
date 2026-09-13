@@ -32,7 +32,7 @@ export const meta = {
   name: 'sol-merchant-broadcast',
   journey: 'offline',
   covers: ['sol-merchant', 'sol-broadcast', 'sol-v2-strict-verify', 'qr-scan'],
-  verifies: 'SOL v2 merchant: createSolPaymentRequest (ONLINE) → scan real signed solpay → broadcast → Received.',
+  verifies: 'SOL v2 merchant: createSolPaymentRequest (ONLINE) quotes the NETTED wire (typed 0.025 → amt 0.024995; fee is the payee\'s cost, founder rule) → scan real signed solpay → broadcast → Received.',
   timeoutMs: 30000,
 };
 
@@ -118,6 +118,17 @@ export async function run() {
     assert(typeof solreqUri === 'string' && solreqUri.startsWith('solreq:v2?'),
       `the reader must arm with the solreq:v2 machine code, got: ${JSON.stringify(solreqUri)?.slice(0, 80)}`);
     console.log('[51-sol-merchant-broadcast] ✓ solreq:v2 armed on the reader');
+
+    // 2b. Founder rule (2026-09-12): the customer pays exactly the price — the solreq carries the
+    //     NETTED wire (typed 0.025 − 5000-lamport fee = 24995000), and the request screen
+    //     headlines the typed price with the fee/receives line naming the netted wire.
+    const solreq = JSON.parse(Buffer.from(solreqUri.split('solreq:v2?')[1], 'base64url').toString());
+    assert(solreq.amt === '24995000',
+      `the solreq wire must be netted (0.025 price − 0.000005 fee = 24995000), got: ${solreq.amt}`);
+    const reqBody = await driver.bodyText();
+    assert(reqBody.includes('0.025 SOL'), 'the request screen should headline the typed price');
+    assert(reqBody.includes('you receive 0.024995 SOL'), 'the fee line should name the netted wire the payee receives');
+    console.log('[51-sol-merchant-broadcast] ✓ netted wire: amt=24995000 (price 0.025 − fee 0.000005)');
 
     // 3. Switch to Pay tab → dispatch NFC request → the request AUTO-SIGNS on arrival (one-press
     //    rule, founder directive 2026-08-24: the "Pay Now" gate was the deliberate press) → a REAL

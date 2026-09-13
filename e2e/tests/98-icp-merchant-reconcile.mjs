@@ -2,17 +2,21 @@
 //
 // The ICP twin of flow 97, on the native ICP ledger row (currency 8, no minter):
 //   * (2) A merchant creates an 8-decimal ICP request IN THE APP (Receive tab → 1.00000001):
-//         the encoded request carries exactly ICP's currency id and the exact raw units
-//         (100000001) to the merchant's account — byte-checked via decodeRequest.
+//         the screen headlines the typed price, and the encoded request carries exactly ICP's
+//         currency id and the NETTED wire raw units (99990001 = 100000001 price − 10000 fee,
+//         founder rule 2026-09-12: the customer pays exactly the price, the payee nets the fee)
+//         to the merchant's account — byte-checked via decodeRequest, fee line on-screen.
 //   * (6) Receiver-side exact-memo reconciliation reaches Received ONLY on the exact row: a
 //         harness-signed transfer with the WRONG memo settles on the rail (merchant's ICP
-//         balance grows) but the open request does NOT flip to Received; the SAME transfer
-//         with the request's exact memo nonce flips it to "Received 1.00000001 ICP" with the
-//         payer's short principal. The memo nonce binds the confirmation to THIS request.
+//         balance grows by the wire) but the open request does NOT flip to Received; the SAME
+//         transfer with the request's exact memo nonce flips it to "Received 1.00000001 ICP"
+//         (the typed price) with the payer's short principal. The memo nonce binds the
+//         confirmation to THIS request.
 //   * The settlement rail is ICP's exact ledger principal ryjl3-tyaaa-aaaaa-aaaba-cai and the
-//         sender pays the 10000 fee; the merchant's DEMO balance (and every other currency)
-//         is untouched.
-//   * (7) The merchant's Ledger shows the incoming row: "+1.00000001 ICP" + payer short key.
+//         sender pays the 10000 fee on top of the wire (one leg debits the payer exactly the
+//         price); the merchant's DEMO balance (and every other currency) is untouched.
+//   * (7) The merchant's Ledger shows the incoming row: "+0.99990001 ICP" (the received wire)
+//         + payer short key.
 //
 // The VCHF twin is flow 97; the payer-side journeys are flows 95/96.
 import {
@@ -27,9 +31,10 @@ import { parsePayLink } from '../harness/paylink.mjs';
 
 const CURRENCY = 8; // ICP
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
-const PAYER_SEED = 300000000; // 3.00000000 ICP — covers two (pay + fee) legs
-const PAY = 100000001; // 1.00000001 ICP
-const FEE = 10000; // ICP catalog fee, charged to the sender (harness-signed legs pay it too)
+const PAYER_SEED = 300000000; // 3.00000000 ICP — covers two price legs (wire + fee each)
+const PAY = 100000001; // 1.00000001 ICP — the PRICE the customer pays per leg, exactly
+const FEE = 10000; // ICP catalog fee — the payee's cost, netted out of the quoted wire
+const WIRE = PAY - FEE; // 99990001 — the netted wire the in-app request carries (price − fee)
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -39,7 +44,7 @@ export const meta = {
   name: 'icp-merchant-reconcile',
   journey: 'pay',
   covers: ['icp', 'icp-mainnet', 'merchant-request', '8-decimals', 'signed-envelope', 'ledger-target', 'exact-memo', 'reconciliation', 'fail-closed-confirm', 'ledger-row'],
-  verifies: 'A merchant creates a 1.00000001 ICP request in-app (exact raw units 100000001); a wrong-memo transfer to the ICP ledger settles on the rail but does NOT flip the request to Received; the exact-memo transfer flips it. Sender pays the 10000 fee; no other currency moves; merchant Ledger shows +1.00000001 ICP from the payer short key.',
+  verifies: 'A merchant creates a 1.00000001 ICP request in-app; the request headlines the typed price with the fee/receives line and encodes the netted wire 99990001 (price − fee, founder rule). A wrong-memo wire transfer to the ICP ledger settles on the rail but does NOT flip the request to Received; the exact-memo wire transfer flips it (Received shows the typed price). Each leg debits the payer exactly the price (wire + fee); no other currency moves; merchant Ledger shows +0.99990001 ICP (the received wire) from the payer short key.',
   timeoutMs: 60_000, // two confirm polls (wrong leg burns the ~4.5s proof budget before failing) + settle polls.
   // 2026-08-28: raised 35s → 60s + widened the two reconcile waits to 20s to match flow 97 —
   // identical structure, same contention exposure (97 failed in-suite 2× at the old 8s wait).
@@ -77,7 +82,8 @@ export async function run() {
     await driver.type('amount-input', '1.00000001', { timeoutMs: 4_000 });
     await driver.click('btn-request', { timeoutMs: 4_000 });
     await driver.findByTestID('request-qr', { timeoutMs: 6_000 });
-    assertIncludes(await driver.bodyText(), '1.00000001 ICP', 'request screen shows exact ICP amount');
+    assertIncludes(await driver.bodyText(), '1.00000001 ICP', 'request screen headlines the typed price');
+    assertIncludes(await driver.bodyText(), 'you receive 0.99990001 ICP', 'request screen fee line names the netted wire the payee receives (fee is the payee\'s cost)');
     const requestQR = await driver.eval(() => window.__DPAY_QR_LAST);
     assert(requestQR != null, 'request QR seam exposed the payment link');
     // Founder 2026-09-12: the QR is the payment LINK — payable facts on the link, byte-exact wire
@@ -86,7 +92,7 @@ export async function run() {
     assert(link != null, 'request QR parses as the payment link');
     assertEq(link.asset, 'ICP', 'link names the requested asset');
     assertEq(link.network, 'internet-computer', 'link names the settlement network');
-    assertEq(link.amount, '1.00000001', 'link carries the exact 8-decimal amount');
+    assertEq(link.amount, '0.99990001', 'link carries the netted 8-decimal wire (price − fee)');
     assertEq(link.recipient, await railPrincipalText(merchant.publicHex), 'link payee = merchant principal');
     assert(/^[0-9a-f]{32}$/.test(link.ref ?? ''), 'link ref = the 16-byte request nonce');
     const nonceHex = link.ref;
@@ -99,7 +105,7 @@ export async function run() {
     assert(readerHex != null, 'NFC reader armed with the 132-byte wire request');
     const req = decodeRequestHex(readerHex);
     assertEq(req.currency, CURRENCY, 'encoded wire currency id (ICP)');
-    assertEq(req.amount, String(PAY), 'encoded wire exact raw units (8-decimal tail)');
+    assertEq(req.amount, String(WIRE), 'encoded wire exact raw units = the netted wire (8-decimal tail)');
     assertEq(req.toHex, merchant.publicHex, 'encoded wire payee = merchant account');
 
     const merchantBefore = {};
@@ -110,7 +116,7 @@ export async function run() {
     console.log('[98-icp-merchant-reconcile] wrong-memo transfer (settles on rail, must NOT confirm)…');
     const hexBytes = (hex) => Uint8Array.from(hex.match(/../g).map((h) => parseInt(h, 16)));
     const envelope = async (memoHex) => {
-      const arg = icpTransferArgBytes(icpPrincipalBytes(merchant.publicHex), BigInt(PAY), {
+      const arg = icpTransferArgBytes(icpPrincipalBytes(merchant.publicHex), BigInt(WIRE), {
         fee: BigInt(desc.fee),
         memoHex,
       });
@@ -129,7 +135,7 @@ export async function run() {
     assert((await driver.findByTestID('request-qr', { timeoutMs: 2_000 })) != null, 'request QR stays open after the wrong-memo scan');
 
     // The rail settled anyway — the memo is what binds the CONFIRMATION, not the credit.
-    assertEq(String(await getBalance(relayBaseURL, merchant.publicHex, CURRENCY)), String(PAY), 'rail credited the wrong-memo transfer (UI must not confirm)');
+    assertEq(String(await getBalance(relayBaseURL, merchant.publicHex, CURRENCY)), String(WIRE), 'rail credited the wrong-memo wire transfer (UI must not confirm)');
 
     // --- (6) EXACT-memo leg: flips the open request to Received --------------------------------
     console.log('[98-icp-merchant-reconcile] exact-memo transfer (must confirm)…');
@@ -140,8 +146,8 @@ export async function run() {
 
     // --- Balances: exact credits/debits, sibling isolation --------------------------------------
     console.log('[98-icp-merchant-reconcile] assert exact balances + sibling isolation…');
-    assertEq(String(await getBalance(relayBaseURL, merchant.publicHex, CURRENCY)), String(PAY * 2), 'merchant credited BOTH rail transfers (2 × 1.00000001 ICP)');
-    assertEq(String(await getBalance(relayBaseURL, payer.publicHex, CURRENCY)), String(PAYER_SEED - 2 * (PAY + FEE)), 'payer debited 2 × (amount + fee)');
+    assertEq(String(await getBalance(relayBaseURL, merchant.publicHex, CURRENCY)), String(WIRE * 2), 'merchant credited BOTH wire transfers (2 × 0.99990001 ICP — the fee is the merchant\'s cost)');
+    assertEq(String(await getBalance(relayBaseURL, payer.publicHex, CURRENCY)), String(PAYER_SEED - 2 * PAY), 'payer debited 2 × EXACTLY the price (wire + fee per leg, founder rule)');
     for (let c = 0; c <= 8; c++) {
       if (c !== CURRENCY) {
         assertEq(String(await getBalance(relayBaseURL, merchant.publicHex, c)), merchantBefore[c], `merchant sibling currency ${c} unchanged`);
@@ -157,7 +163,7 @@ export async function run() {
     const named = await driver.waitForText(shortPayer, { timeoutMs: 10_000 });
     const histBody = await driver.bodyText();
     assert(named, `merchant history row names the payer (short principal ${shortPayer}). history:\n${histBody.slice(0, 500)}`);
-    assertIncludes(histBody, '+1.00000001 ICP', 'merchant history incoming row amount (+ prefix, exact units)');
+    assertIncludes(histBody, '+0.99990001 ICP', 'merchant history incoming row amount (+ prefix, the received wire in exact units)');
     assert(!histBody.includes(payer.publicHex), 'history must not dump the payer full hex');
 
     await driver.screenshot('98-icp-merchant-reconcile');

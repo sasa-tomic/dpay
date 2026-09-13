@@ -15,7 +15,9 @@
 //                 IMMEDIATELY → exchanging. No review card, no Approve click — the SOL
 //                 offline-settlement note rides the read-only status while the sign fires.
 //   - exchanging: "Communicating…" + "Hold the phones together to send" (decode solreq:v2 →
-//                 offline sign → approveSolCard, all on arrival)
+//                 offline sign → approveSolCard, all on arrival). The read-only amount rides the
+//                 status line as the TOTAL debit — netted wire + fee = the typed price (founder
+//                 rule 2026-09-12: the customer pays exactly the price, the payee nets the fee).
 //   - receipt   : "Paid ✓"  (status=0 SETTLED, rid match, sig match → decideSolPayerReceiptV2 → success)
 //
 // Selector contract: `asset-sol-select`, `sol-pay-scan`, `sol-nfc-status`, `__DPAY_SOL_NFC_LAST`.
@@ -26,12 +28,13 @@ export const meta = {
   name: 'sol-nfc',
   journey: 'nfc',
   covers: ['sol-nfc', 'sol-v2-receipt', 'event-bus', 'auto-sign'],
-  verifies: 'SOL v2 NFC tap: arm card → request AUTO-SIGNS (one-press rule → offline sign) → receipt (rid+sig match) → Paid ✓',
+  verifies: 'SOL v2 NFC tap on a NETTED request (wire 0.000995 for a 0.001 price — the customer pays exactly the price, the payee nets the fee): arm card → request AUTO-SIGNS (one-press rule → offline sign) → receipt (rid+sig match) → Paid ✓',
   timeoutMs: 25000,
 };
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
-const PAY_LAMPORTS = '1000000'; // 0.001 SOL
+const PRICE_LAMPORTS = '1000000'; // 0.001 SOL — the PRICE the customer pays, exactly
+const WIRE_LAMPORTS = '995000'; // 0.000995 SOL — the netted wire a dpay payee quotes (price − 5000 fee)
 const REQ_RID = 'c'.repeat(32);
 
 // Minimal base58 encoder (avoids a bs58 dependency in the e2e node_modules).
@@ -62,7 +65,7 @@ function buildSolReq() {
     bh: 'FzFAtwLSSzxhug4sEvUeusLxFdjAS3ByYqgseUYkFpkN',
     lvh: 300_000_000, slot: 250_000_000,
     iat, exp: iat + 90,
-    to: MERCHANT_ADDR, amt: PAY_LAMPORTS, cur: 'SOL',
+    to: MERCHANT_ADDR, amt: WIRE_LAMPORTS, cur: 'SOL',
     mint: null, toAta: null, name: 'merchant', memo: '',
   };
   return 'solreq:v2?' + Buffer.from(JSON.stringify(obj)).toString('base64url');
@@ -112,7 +115,7 @@ export async function run() {
       const body = await driver.bodyText();
       assert(body.includes('Hold the phones together to send'),
         'the exchanging card-role hint should ask the payer to hold the phones together');
-      assert(body.includes('Paying 0.001005 SOL'), 'the read-only amount should ride the status line');
+      assert(body.includes('Paying 0.001 SOL'), 'the read-only total should ride the status line — netted wire 0.000995 + 5000 fee = the price (customer pays exactly the price)');
       assert(!(await driver.isPresent('btn-nfc-approve')), 'no Approve button exists (one press already spent at "Pay Now")');
     }
     console.log('[47-sol-nfc] ✓ request → auto-sign → "Communicating…" (sign + approveSolCard fired)');

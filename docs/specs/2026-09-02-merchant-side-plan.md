@@ -100,8 +100,15 @@ The shape, in design voice throughout — no bullet below is a claim about what 
     sender, and the customer is debited exactly CHF 10 while the shop receives CHF 9.9999. The
     mechanism, and why subtraction is the only lever ICRC-2 offers, is `LEDGER_FEE_RAW` in
     `crates/dpay-relay/src/till.rs`; proven end to end on both channels by e2e flows 114 (scan) and
-    117 (tap). **The same question is open for every OTHER payee-quoted amount in dpay** — payment
-    requests, payment links, NFC requests — and is filed in `OPEN_ISSUES.md`, not decided here.
+    117 (tap). **Extended 2026-09-14 (`b68ebe8`): every OTHER payee-quoted amount in dpay now
+    carries the netted wire too** — the Receive-tab request link `amount=` and the NFC 132-byte
+    wire (`nettedWireRaw`, `app/lib/amount.ts`: live `icrc1_fee` → catalog fallback → verbatim
+    when the fee is unknown; refused when the fee covers the price), and the SOL native
+    `solreq:v2`/derived pay link (`netSolWireLamports`, `app/solana/spl.ts`). The payee screens
+    headline the typed price with a fee/receives line; the payer's total debit is exactly the
+    price. Documented exceptions: SPL-token requests stay verbatim (a token transfer charges no
+    fee in the token itself — nothing to net), and OpenCryptoPay providers still quote gross —
+    their wire is outside dpay's control.
 - **The provider endpoint is HOSTED ON THE RELAY**, not on the merchant's device. The payer's wallet
   must be able to *reach* the provider over https, and a shop phone behind NAT with no certificate
   cannot be reached — that is the whole reason, and it survives the corrected premise above intact

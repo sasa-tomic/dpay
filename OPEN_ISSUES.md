@@ -87,24 +87,6 @@
 
 ## NEXT SESSION — work order
 
-**0. The payee pays the ledger fee — everywhere, not just at the till [value 8, effort M].** Founder
-rule, 2026-09-12: *"if price of something is $1, then customer should pay exactly $1… The merchant
-pays the fees. This is standard practice and we should follow it."* **DONE for the till** (the
-amendment in
-[`docs/specs/2026-09-02-merchant-side-plan.md`](docs/specs/2026-09-02-merchant-side-plan.md);
-mechanism `LEDGER_FEE_RAW`, `crates/dpay-relay/src/till.rs`; flows 114 + 117 prove a customer's
-account moves by exactly the price on both scan and tap). The payer-facing DISPLAY side is now
-honest too (2026-09-13): every review/paid/hand-off screen shows the TOTAL DEBIT (amount + ledger
-fee) in the compact form — at a till that IS the shelf price ("10.00 VCHF"), elsewhere the price
-plus the fee ("1.00010001 VCHF"); fee fetched live via `icrc1_fee` (falls back to the amount when
-offline), SOL rail adds `SOL_FEE_LAMPORTS` for native SOL. **OPEN for every other payee-quoted
-amount**, where the payer is still silently charged the price PLUS the fee: the Receive-tab request
-QR, the `…/wallet/pay/…` payment link's `amount=`, and the NFC request the request screen arms.
-Each is a different wire with its own goldens, which is why it was not bundled into the till change.
-The rule to apply is the same one, and the open question the founder should settle with it is
-whether a person-to-person request is a *price* at all — asking a friend for CHF 10 and receiving
-CHF 9.9999 may be the wrong default even though asking a customer for CHF 10 is not.
-
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
 
@@ -327,6 +309,10 @@ single RED alone before believing it.
   nobody can check. The first-run landing one is the sharp edge: it narrows a standing `CLAUDE.md`
   decision. Also open: the two forks in
   [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md) §1.
+- **Whether a person-to-person request is a *price* at all** — asking a friend for CHF 10 and
+  receiving CHF 9.9999 may be the wrong default even though asking a customer for CHF 10 is not
+  (since 2026-09-14 every payee-quoted wire nets the fee; the flip seam is the
+  `nettedWireRaw`/`netSolWireLamports` callers in `ReceiveMode`/`SolReceiveMode`).
 
 ## Solana rails — the dead key is REPLACED and SHIPPED (2026-09-09)
 

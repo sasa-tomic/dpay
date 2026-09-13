@@ -5,19 +5,23 @@
 //   * (1) The VCHF mainnet row appears in the shared asset selector (the accounts route) with the exact
 //         unit + network ("VCHF · Internet Computer") and NO ramp actions — no "Add money" /
 //         "Cash out" anywhere, and the only btn-topup in the accounts list is DEMO's faucet button.
-//   * (3) The payer opens a VCHF payment link, sees the exact unit + amount
-//         ("Pay 1.00010001 VCHF" — the total debit: amount + ledger fee), the payee short key + merchant name — and the request does NOT
+//   * (3) The payer opens a VCHF payment link whose `amount=` is the NETTED wire a dpay payee now
+//         quotes (typed price − ledger fee, founder rule 2026-09-12: the customer pays exactly the
+//         price; the payee nets the fee), sees the exact unit + price-total
+//         ("Pay 1.00000001 VCHF" — the total debit: netted wire + ledger fee = the price), the
+//         payee short key + merchant name — and the request does NOT
 //         auto-sign: the deeplink entry keeps the full review card with a single explicit Approve.
 //   * (4) The app signs an icrc1_transfer whose ONLY canister target is VCHF's exact ledger
 //         principal ly36x-wiaaa-aaaai-aqj7q-cai (asserted via a fetch recorder installed over
 //         window.fetch BEFORE approving — every /api/v2/canister/<id>/call the app makes is
 //         checked against the expected principal).
-//   * (5) The transfer settles in fake-IC: payee is credited the exact raw amount, payer is debited
-//         amount + fee (VCHF fee 10000, charged to the sender like ckUSDC), both in-app balances
-//         refresh by the exact amount, and NO other currency changes (full 0..8 balance snapshot
-//         compared pre/post for both sides).
-//   * (7) The payer's Ledger shows the outgoing row: "−1.00000001 VCHF" (U+2212) + the payee's
-//         short principal as counterparty.
+//   * (5) The transfer settles in fake-IC exactly per the founder rule: payee is credited the
+//         netted wire (99990001 — the fee is the payee's cost, not the payer's), payer is debited
+//         EXACTLY the price (100000001 = wire + fee, VCHF fee 10000 charged on top of the wire),
+//         both in-app balances refresh by the exact amount, and NO other currency changes (full
+//         0..8 balance snapshot compared pre/post for both sides).
+//   * (7) The payer's Ledger shows the outgoing row: "−0.99990001 VCHF" (U+2212, the transferred
+//         wire) + the payee's short principal as counterparty.
 //   * Fund-first honesty + real instructions: an UNFUNDED VCHF selection parks the Pay tab on the
 //         fund panel ("No VCHF available" + the practical "first receive VCHF at your address"
 //         instruction
@@ -34,9 +38,10 @@ import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 const CURRENCY = 7; // VCHF
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
-const SEED = 210000001; // 2.10000001 VCHF — covers pay + fee
-const PAY = 100000001; // 1.00000001 VCHF — 8-decimal exactness (odd raw tail)
-const FEE = 10000; // VCHF catalog fee, charged to the sender
+const SEED = 210000001; // 2.10000001 VCHF — covers the price
+const PAY = 100000001; // 1.00000001 VCHF — the PRICE the customer pays, exactly (8-decimal exactness, odd raw tail)
+const FEE = 10000; // VCHF catalog fee — the payee's cost, netted out of the quoted wire
+const WIRE = PAY - FEE; // 99990001 — the netted wire the payee's link carries (price − fee)
 
 /** Snapshot every fake-catalog currency balance (0..8) for one account. */
 async function snapBalances(relayBaseURL, accountHex) {
@@ -53,7 +58,7 @@ export const meta = {
   name: 'vchf-pay',
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'asset-selector', 'no-ramp', 'deeplink', 'explicit-approve', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a 1.00000001 VCHF deeplink request reviews with the total debit (amount + ledger fee, compact) in exact unit and signs ONLY against the VCHF ledger; the transfer settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 VCHF to the payee short key.',
+  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a netted 1.00000001 VCHF price deeplink (amount=0.99990001, the wire a dpay payee quotes after fee-netting) reviews with the total debit = the typed price exactly (netted wire + ledger fee, compact) in exact unit and signs ONLY against the VCHF ledger; the transfer settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger shows −0.99990001 VCHF to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + deeplink reload + settle polls
 };
 
@@ -122,12 +127,14 @@ export async function run() {
     // --- Payment link: exact unit/amount review, explicit approve, exact ledger target --------
     //     The link names VCHF on the Internet Computer explicitly, so the 8-decimal amount is
     //     converted at VCHF's own precision — the odd raw tail below proves no rounding anywhere.
-    console.log('[95-vchf-pay] open the VCHF payment link (1.00000001 VCHF → Bob)…');
+    //     The link quotes the NETTED wire (price − fee) exactly as the app's Receive tab now
+    //     builds it (nettedWireRaw): the payer's total debit comes out at the typed price.
+    console.log('[95-vchf-pay] open the VCHF payment link (price 1.00000001 VCHF, wire 0.99990001 → Bob)…');
     const nonce = randNonceHex();
     const bobPrincipal = await railPrincipalText(bob.publicHex);
     await driver.navigate(
       webBaseURL,
-      `/wallet/pay/${bobPrincipal}?asset=VCHF&network=internet-computer&amount=1.00000001&label=Bob&ref=${nonce}`
+      `/wallet/pay/${bobPrincipal}?asset=VCHF&network=internet-computer&amount=0.99990001&label=Bob&ref=${nonce}`
         + `&relay=${encodeURIComponent(relayBaseURL)}`,
       { waitUntil: 'domcontentloaded', timeoutMs: 8_000 },
     );
@@ -135,8 +142,8 @@ export async function run() {
 
     const payAmount = await driver.findByTestID('pay-amount', { timeoutMs: 6_000 });
     assert(payAmount != null, 'the payment link reaches the review card');
-    await driver.waitForText('Pay 1.00010001 VCHF', { timeoutMs: 6_000 });
-    assertIncludes(await driver.readText('pay-amount'), 'Pay 1.00010001 VCHF', 'review shows the total debit — exact unit, amount + ledger fee, compact');
+    await driver.waitForText('Pay 1.00000001 VCHF', { timeoutMs: 6_000 });
+    assertIncludes(await driver.readText('pay-amount'), 'Pay 1.00000001 VCHF', 'review shows the total debit — exact unit, netted wire + ledger fee = the typed price, compact');
     assertEq(await driver.readText('review-payee'), bobPrincipal, 'review shows the full destination account');
     assertIncludes(await driver.bodyText(), 'Bob', 'review shows the label the link carried');
     assert(!(await driver.bodyText()).match(/\bPaid\b/), 'a payment link must NOT auto-sign (no Paid before Approve)');
@@ -157,7 +164,7 @@ export async function run() {
     console.log('[95-vchf-pay] approve…');
     await driver.click('btn-approve', { timeoutMs: 5_000 });
     await driver.waitForText('Paid', { timeoutMs: 12_000 });
-    assertIncludes(await driver.bodyText(), '1.00010001 VCHF', 'paid screen shows the total debited (amount + ledger fee), compact');
+    assertIncludes(await driver.bodyText(), '1.00000001 VCHF', 'paid screen shows the total debited — exactly the typed price (netted wire + fee), compact');
 
     // (4) Every canister call the app made targets VCHF's exact ledger principal.
     const seen = (await driver.eval(() => window.__E2E_CANISTER_CALLS ?? [])) || [];
@@ -174,8 +181,8 @@ export async function run() {
     console.log('[95-vchf-pay] assert exact settlement + sibling isolation…');
     const aliceAfter = await snapBalances(relayBaseURL, account.publicHex);
     const bobAfter = await snapBalances(relayBaseURL, bob.publicHex);
-    assertEq(bobAfter[CURRENCY], String(PAY), 'payee credited exact VCHF amount (no fee for receiver)');
-    assertEq(aliceAfter[CURRENCY], String(SEED - PAY - FEE), 'payer debited amount + fee (fee charged to sender)');
+    assertEq(bobAfter[CURRENCY], String(WIRE), 'payee credited the netted wire (fee is the payee\'s cost, founder rule)');
+    assertEq(aliceAfter[CURRENCY], String(SEED - PAY), 'payer debited EXACTLY the price (wire + fee; the customer never moves more than the price)');
     for (const c of Object.keys(aliceBefore)) {
       if (c !== String(CURRENCY)) {
         assertEq(aliceAfter[c], aliceBefore[c], `payer sibling currency ${c} unchanged`);
@@ -187,11 +194,11 @@ export async function run() {
       }
     }
 
-    // In-app refresh by the exact amount: header shows the post-fee remainder, payee row in the accounts list.
-    await driver.waitForText('1.0999 VCHF', { timeoutMs: 10_000 });
+    // In-app refresh by the exact amount: header shows the price-debited remainder, payee row in the accounts list.
+    await driver.waitForText('1.10 VCHF', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('asset-vchf'), '1.0999 VCHF', 'accounts-list VCHF row refreshed to post-pay amount');
+    assertIncludes(await driver.readText('asset-vchf'), '1.10 VCHF', 'accounts-list VCHF row refreshed to post-pay amount');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the accounts list');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 
@@ -202,7 +209,7 @@ export async function run() {
     const named = await driver.waitForText('to Bob', { timeoutMs: 10_000 });
     const bodyText = await driver.bodyText();
     assert(named, `ledger row names the payee via the link-label annotation ("to Bob"). ledger:\n${bodyText.slice(0, 500)}`);
-    assertIncludes(bodyText, '\u22121.00000001 VCHF', 'ledger outgoing row amount (U+2212 minus + exact units)');
+    assertIncludes(bodyText, '\u22120.99990001 VCHF', 'ledger outgoing row amount (U+2212 minus + the transferred wire, exact units)');
     assert(!bodyText.includes(bobPrincipal), 'ledger row never dumps the full principal');
     assert(!bodyText.includes(bob.publicHex), 'ledger row shows only the annotation name, never the full hex');
 

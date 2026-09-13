@@ -35,12 +35,13 @@ export const meta = {
   name: 'paylink-camera-loop',
   journey: 'pay',
   covers: ['request-qr', 'pay-link', 'camera-scan', 'pay-review', 'memo-reconcile', 'sol-send', 'rail-parity'],
-  verifies: 'The request QR is the payment LINK: camera-scanning the exact QR string opens the payer flow on each rail — IC review+Approve settles with ref-as-memo and the open request auto-confirms Received; SOL pre-fills Send-to-address and broadcasts (screen does not auto-confirm).',
+  verifies: 'The request QR is the payment LINK: camera-scanning the exact QR string opens the payer flow on each rail — IC review+Approve settles with ref-as-memo and the open request auto-confirms Received (DEMO fee=null → verbatim amount); SOL pre-fills Send-to-address with the NETTED wire (typed 0.02 − fee → 0.019995; customer pays exactly the price) and broadcasts (screen does not auto-confirm).',
   timeoutMs: 60_000,
 };
 
 const IC_AMOUNT = '3.50';
-const SOL_AMOUNT = '0.02';
+const SOL_AMOUNT = '0.02'; // the typed PRICE
+const SOL_NETTED = '0.019995'; // 0.02 price − 5000-lamport fee — the netted wire netSolWireLamports quotes
 
 export async function run() {
   const start = Date.now();
@@ -153,10 +154,10 @@ export async function run() {
     assert(solLink.href.startsWith(`${webBaseURL}/wallet/pay/`), `the SOL link must live on the wallet origin, got ${solLink.href}`);
     assertEq(solLink.asset, 'SOL', 'the SOL link names the asset');
     assertEq(solLink.network, 'solana', 'the SOL link names the network');
-    assertEq(solLink.amount, SOL_AMOUNT, 'the SOL link carries the amount');
+    assertEq(solLink.amount, SOL_NETTED, 'the SOL link carries the NETTED wire (typed price − 5000-lamport fee; the customer pays exactly the price)');
     assert(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(solLink.recipient), `the SOL link pays a base58 address, got "${solLink.recipient}"`);
     assert(solLink.ref == null, 'the SOL link carries NO ref — the rail attaches no reconciliation memo');
-    console.log(`[176-paylink-camera-loop] ✓ SOL QR is the link: ${SOL_AMOUNT} SOL → ${solLink.recipient.slice(0, 8)}… (ref=null)`);
+    console.log(`[176-paylink-camera-loop] ✓ SOL QR is the link: ${SOL_NETTED} SOL netted (price ${SOL_AMOUNT}) → ${solLink.recipient.slice(0, 8)}… (ref=null)`);
 
     // --- Camera-scan the exact string on the payer phone → the SOL rail's own confirm
     //     surface, pre-filled (stub installed above).
@@ -167,7 +168,7 @@ export async function run() {
     const addr = await payer.eval((id) => document.querySelector(`[data-testid="${id}"]`)?.value ?? '', 'sol-send-address-input');
     assertEq(addr, solLink.recipient, 'the send form carries the link\'s destination address');
     const amt = await payer.eval((id) => document.querySelector(`[data-testid="${id}"]`)?.value ?? '', 'sol-send-amount-input');
-    assertEq(amt, SOL_AMOUNT, 'the send form carries the link\'s amount');
+    assertEq(amt, SOL_NETTED, 'the send form carries the link\'s netted wire amount');
     console.log('[176-paylink-camera-loop] ✓ camera scan → SOL send form pre-filled');
 
     // --- Confirm → the REAL send path (local sign + broadcast through the stub).

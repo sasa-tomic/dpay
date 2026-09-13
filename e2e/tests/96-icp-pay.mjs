@@ -5,16 +5,21 @@
 //   * (1) The ICP mainnet row appears in the shared asset selector (the accounts route) with the exact
 //         unit + network ("ICP · Internet Computer") and NO ramp actions — no "Add money" /
 //         "Cash out" anywhere, and the only btn-topup in the accounts list is DEMO's faucet button.
-//   * (3) The payer scans the merchant's request QR, sees the exact unit + amount on the sign
-//         surface and the Paid screen ("1.00010001 ICP" — the total debited: amount + ledger fee), and the payment completes end-to-end.
+//   * (3) The payer scans the merchant's request QR — built with the NETTED wire a dpay payee now
+//         quotes (typed price − ledger fee, founder rule 2026-09-12: the customer pays exactly the
+//         price; the payee nets the fee) — sees the exact unit + price-total on the sign surface
+//         and the Paid screen ("1.00000001 ICP" — the total debited: netted wire + ledger fee =
+//         the price), and the payment completes end-to-end.
 //   * (4) The app signs an icrc1_transfer whose ONLY canister target is ICP's exact ledger
 //         principal ryjl3-tyaaa-aaaaa-aaaba-cai (fetch recorder over window.fetch, installed
 //         before the scan; every /api/v2/canister/<id>/call checked).
-//   * (5) The transfer settles in fake-IC: payee credited the exact raw amount, payer debited
-//         amount + fee (ICP fee 10000, sender-charged), both in-app balances refresh by the exact
-//         amount, and NO other currency changes (full 0..8 snapshot pre/post both sides).
-//   * (7) The payer's Ledger shows the outgoing row: "−1.00000001 ICP" (U+2212) + the payee's
-//         short principal as counterparty.
+//   * (5) The transfer settles in fake-IC exactly per the founder rule: payee credited the netted
+//         wire (99990001 — the fee is the payee's cost), payer debited EXACTLY the price
+//         (100000001 = wire + fee, ICP fee 10000 charged on top of the wire), both in-app
+//         balances refresh by the exact amount, and NO other currency changes (full 0..8
+//         snapshot pre/post both sides).
+//   * (7) The payer's Ledger shows the outgoing row: "−0.99990001 ICP" (U+2212, the transferred
+//         wire) + the payee's short principal as counterparty.
 //   * Fund-first honesty + real instructions: an UNFUNDED ICP selection parks the Pay tab on the
 //         fund panel ("No ICP available" + the practical "first receive ICP at your address" instruction
 //         with a primary that opens the ICRC receive-address surface — the wallet's own ICRC-1
@@ -29,9 +34,10 @@ import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '..
 
 const CURRENCY = 8; // ICP
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
-const SEED = 210000001; // 2.10000001 ICP — covers pay + fee
-const PAY = 100000001; // 1.00000001 ICP — 8-decimal exactness (odd raw tail)
-const FEE = 10000; // ICP catalog fee, charged to the sender
+const SEED = 210000001; // 2.10000001 ICP — covers the price
+const PAY = 100000001; // 1.00000001 ICP — the PRICE the customer pays, exactly (8-decimal exactness, odd raw tail)
+const FEE = 10000; // ICP catalog fee — the payee's cost, netted out of the quoted wire
+const WIRE = PAY - FEE; // 99990001 — the netted wire the payee's request QR carries (price − fee)
 
 /** Snapshot every fake-catalog currency balance (0..8) for one account. */
 async function snapBalances(relayBaseURL, accountHex) {
@@ -48,7 +54,7 @@ export const meta = {
   name: 'icp-pay',
   journey: 'pay',
   covers: ['icp', 'icp-mainnet', 'asset-selector', 'no-ramp', 'camera-scan', 'auto-sign', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send ICP to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a scanned 1.00000001 ICP request signs ONLY against the ICP ledger and settles exactly (payee +amount, payer −amount−fee, no other currency moves); the payer Ledger shows −1.00000001 ICP to the payee short key.',
+  verifies: 'ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send ICP to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a scanned netted 1.00000001 ICP request (wire 99990001, what a dpay payee quotes after fee-netting) signs ONLY against the ICP ledger and settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger shows −0.99990001 ICP to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + scan + settle polls
 };
 
@@ -122,18 +128,18 @@ export async function run() {
     });
 
     // --- (3) Camera-scan request: exact unit/amount, auto-sign, Paid --------------------------
-    console.log('[96-icp-pay] scan merchant request (1.00000001 ICP → Bob)…');
+    console.log('[96-icp-pay] scan merchant request (price 1.00000001 ICP, wire 0.99990001 → Bob)…');
     const nonce = randNonceHex();
     const expiry = Math.floor(Date.now() / 1000) + 600;
-    const requestQR = buildRequestQR(bob.publicHex, PAY, nonce, expiry, CURRENCY, 'Bob');
+    const requestQR = buildRequestQR(bob.publicHex, WIRE, nonce, expiry, CURRENCY, 'Bob');
     const decoded = decodeRequest(requestQR);
     assertEq(decoded.currency, CURRENCY, 'request QR carries ICP currency id');
-    assertEq(decoded.amount, String(PAY), 'request QR carries exact raw ICP units');
+    assertEq(decoded.amount, String(WIRE), 'request QR carries the netted wire (price − fee) in exact raw ICP units');
 
     await armPayScan(driver); // no-op when already armed
     await driver.eval((qr) => { if (typeof window.__DPAY_TEST_SCAN === 'function') window.__DPAY_TEST_SCAN(qr); }, requestQR);
     await driver.waitForText('Paid', { timeoutMs: 12_000 }); // camera path auto-signs (one-press rule)
-    assertIncludes(await driver.bodyText(), '1.00010001 ICP', 'paid screen shows the total debited (amount + ledger fee), compact');
+    assertIncludes(await driver.bodyText(), '1.00000001 ICP', 'paid screen shows the total debited — exactly the typed price (netted wire + fee), compact');
 
     // (4) Every canister call the app made targets ICP's exact ledger principal.
     const seen = (await driver.eval(() => window.__E2E_CANISTER_CALLS ?? [])) || [];
@@ -150,8 +156,8 @@ export async function run() {
     console.log('[96-icp-pay] assert exact settlement + sibling isolation…');
     const aliceAfter = await snapBalances(relayBaseURL, account.publicHex);
     const bobAfter = await snapBalances(relayBaseURL, bob.publicHex);
-    assertEq(bobAfter[CURRENCY], String(PAY), 'payee credited exact ICP amount (no fee for receiver)');
-    assertEq(aliceAfter[CURRENCY], String(SEED - PAY - FEE), 'payer debited amount + fee (fee charged to sender)');
+    assertEq(bobAfter[CURRENCY], String(WIRE), 'payee credited the netted wire (fee is the payee\'s cost, founder rule)');
+    assertEq(aliceAfter[CURRENCY], String(SEED - PAY), 'payer debited EXACTLY the price (wire + fee; the customer never moves more than the price)');
     for (const c of Object.keys(aliceBefore)) {
       if (c !== String(CURRENCY)) assertEq(aliceAfter[c], aliceBefore[c], `payer sibling currency ${c} unchanged`);
     }
@@ -159,11 +165,11 @@ export async function run() {
       if (c !== String(CURRENCY)) assertEq(bobAfter[c], bobBefore[c], `payee sibling currency ${c} unchanged`);
     }
 
-    // In-app refresh by the exact amount: header shows the post-fee remainder.
-    await driver.waitForText('1.0999 ICP', { timeoutMs: 10_000 });
+    // In-app refresh by the exact amount: header shows the price-debited remainder.
+    await driver.waitForText('1.10 ICP', { timeoutMs: 10_000 });
     await driver.click('btn-new', { timeoutMs: 5_000 }); // dismiss Paid → header is clickable again
     await openBalances(driver);
-    assertIncludes(await driver.readText('asset-icp'), '1.0999 ICP', 'Home accounts ICP row refreshed to post-pay amount');
+    assertIncludes(await driver.readText('asset-icp'), '1.1 ICP', 'Home accounts ICP row refreshed to post-pay amount');
     assertIncludes(await driver.readText('asset-demo'), '∂100.00', 'DEMO row unchanged in the accounts list');
     await driver.click('tab-pay', { timeoutMs: 4_000 });
 
@@ -175,7 +181,7 @@ export async function run() {
     const named = await driver.waitForText('to Bob', { timeoutMs: 10_000 });
     const bodyText = await driver.bodyText();
     assert(named, `ledger row names the payee via the request-QR annotation ("to Bob"). ledger:\n${bodyText.slice(0, 500)}`);
-    assertIncludes(bodyText, '\u22121.00000001 ICP', 'ledger outgoing row amount (U+2212 minus + exact units)');
+    assertIncludes(bodyText, '\u22120.99990001 ICP', 'ledger outgoing row amount (U+2212 minus + the transferred wire, exact units)');
     assert(!bodyText.includes(bobPrincipal), 'ledger row never dumps the full principal');
     assert(!bodyText.includes(bob.publicHex), 'ledger row shows only the annotation name, never the full hex');
 
