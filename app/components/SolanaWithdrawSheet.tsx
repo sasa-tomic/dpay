@@ -298,13 +298,13 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
                   the fee is always real and paid in SOL; a TOTAL only exists for native-SOL sends
                   (a token amount and its SOL fee do not sum into one honest number). */}
               <View style={S.reviewRow}>
-                <Text>{M.withdraw.send.feeLine('')}</Text>
-                <Text testID="sol-send-review-fee">{fmtAssetCompact(String(SOL_FEE_LAMPORTS), SOL_DECIMALS, SOL_UNIT)}</Text>
+                <Text style={S.reviewRowLabel}>{M.withdraw.send.feeLine('')}</Text>
+                <Text testID="sol-send-review-fee" style={S.reviewRowValue}>{fmtAssetCompact(String(SOL_FEE_LAMPORTS), SOL_DECIMALS, SOL_UNIT)}</Text>
               </View>
               {!isSpl ? (
                 <View style={S.reviewRow}>
-                  <Text>{M.withdraw.send.totalLine('')}</Text>
-                  <Text testID="sol-send-review-total">{fmtAssetCompact((BigInt(raw) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT)}</Text>
+                  <Text style={S.reviewRowLabel}>{M.withdraw.send.totalLine('')}</Text>
+                  <Text testID="sol-send-review-total" style={S.reviewRowValue}>{fmtAssetCompact((BigInt(raw) + SOL_FEE_LAMPORTS).toString(), SOL_DECIMALS, SOL_UNIT)}</Text>
                 </View>
               ) : null}
               {notedDestination != null ? (
