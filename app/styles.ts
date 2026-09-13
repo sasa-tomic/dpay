@@ -229,7 +229,7 @@ function buildStyles(p: Palette) {
   // SafeAreaView owns the bottom safe-area inset (web env() inset; native MainActivity's API-35
   // content-frame reservation). Card surface + top hairline + soft lift so it reads as chrome
   // floating over content; the full-screen sheets still cover it (their overlay runs elevation 10
-  // vs the bar's 1). Three `flex:1` tabs split the full 390px row — no wrap needed.
+  // vs the bar's 1). Four `flex:1` tabs split the full 390px row — no wrap needed.
   bottomNav: {flexDirection: 'row', alignItems: 'stretch', backgroundColor: p.card, borderTopWidth: 1, borderTopColor: p.line2, paddingHorizontal: 8, paddingVertical: 6, ...LIFT_SM},
   // TripStrip (UX hardening 2026-08-23) — the home-surface readiness line: one slim pill row
   // between the header and the tabs. 4 stamp-dots (filled = brand ring + deterministic tilt,
@@ -249,8 +249,8 @@ function buildStyles(p: Palette) {
   // 390px phone; minHeight 56 clears the 44pt touch floor with comfortable thumb room. Active
   // keeps the old pill language (tangerine fill + brandInk) so primary nav stays the loudest
   // level. Labels are 11px single-line-safe: FOUR tabs share the bar since O4 slice 1 (Home +
-  // Pay + Receive + Transactions, ~86px each), and the longest locale label ("Movimientos", es
-  // ≈ 67px at 11px) still fits without truncation, so no numberOfLines clamp is needed.
+  // Pay + Receive + Transactions, ~86px each), and the longest locale label ("Transactions",
+  // en/fr ≈ 73–79px at 11px) still fits without truncation, so no numberOfLines clamp is needed.
   bottomTab: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 8, minHeight: 56, borderRadius: 12},
   bottomTabActive: {backgroundColor: p.brand, ...LIFT},
   bottomTabText: {color: p.sub, fontWeight: '600', fontSize: 11, fontFamily: FONT.sansMedium},
@@ -720,10 +720,6 @@ function buildStyles(p: Palette) {
   // when tap-to-pay is ready, red with a tappable "NFC not available" link + reason popup otherwise.
   nfcStatusRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14},
   nfcStatusLabel: {fontSize: 18, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold},
-  // NFC review countdown chip (approve-before-pay, 2026-08-23): advisory only — the payer's
-  // clock is offline/untrusted, so it never promises validity; sign-time gates are authoritative.
-  nfcCountdownChip: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', marginTop: 10, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.panel2},
-  nfcCountdownText: {fontFamily: FONT.mono, fontSize: 11, fontWeight: '600', letterSpacing: 1, color: p.sub, textTransform: 'uppercase'},
   // Receive QR hint — a small NFC mark leading the "or let them tap" label when the reader is armed.
   nfcHintRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 10},
   nfcHintLabel: {fontSize: 15, color: p.sub, textAlign: 'center', fontFamily: FONT.sans},
@@ -830,7 +826,9 @@ function buildStyles(p: Palette) {
   // scene's illustration occupies the same stage (visual continuity across the pager).
   walkStage: {alignSelf: 'stretch', backgroundColor: p.panel, borderRadius: 22, borderWidth: 1, borderColor: p.line2, overflow: 'hidden', marginTop: 26, aspectRatio: 1.32, ...LIFT_SM},
   // Corner marker on the plate — the travel-document detail ("01 — SIGNAL"): mono, top-right.
-  walkStageTag: {position: 'absolute', top: 12, right: 16, fontSize: 10, fontWeight: '600', color: p.brandText, letterSpacing: 1.4, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, transform: [{rotate: '3deg'}], opacity: 0.9},
+  // zIndex keeps it above the scene illustration (scene 1's breathing arcs cross the corner and,
+  // as later siblings, would otherwise paint over the tag).
+  walkStageTag: {position: 'absolute', top: 12, right: 16, zIndex: 1, fontSize: 10, fontWeight: '600', color: p.brandText, letterSpacing: 1.4, fontFamily: FONT.mono, borderWidth: 1, borderColor: p.line2, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, transform: [{rotate: '3deg'}], opacity: 0.9},
   walkFooter: {paddingHorizontal: 22, paddingBottom: 14, paddingTop: 18},
   // Dots row: relative so the Back link can sit absolutely at the left while the dots center.
   walkNavRow: {position: 'relative', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, minHeight: 34},

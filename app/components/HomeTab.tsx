@@ -103,7 +103,9 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
           the wallet cannot know. The eyebrow owns that sentence; the amount owns its unit. */}
       <View testID="home-headline" style={S.homeHeadline}>
         <Text testID="home-headline-label" style={S.homeEyebrow}>{eyebrow}</Text>
-        <Text testID="home-headline-amount" style={S.homeAmount}>{amount}</Text>
+        {/* Single-line clamp: at Android fontScale 1.3 the 16-char offline form (~437px) would
+            wrap and break the header hierarchy; at normal scale the amount always fits one line. */}
+        <Text testID="home-headline-amount" style={S.homeAmount} numberOfLines={1}>{amount}</Text>
       </View>
       {/* An UNREADABLE headline is not a dash. The accounts route has said so since flow 147; the
           landing screen — where the home rail's number is the largest thing on the phone — printed
