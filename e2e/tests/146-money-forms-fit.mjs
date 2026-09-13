@@ -105,15 +105,17 @@ function assertFits(m, painted, where) {
     `${where}: the page scrolls horizontally (${m.documentScrollW}px of content in a ${m.viewportW}px viewport) — ${shown}`);
 }
 
-/** Receive ▸ Request payment ▸ the till checkbox. The code-form choice persists, so the checkbox
- *  is a no-op on the second visit — clicking it blindly would flip BACK to the dpay code. */
+/** Receive ▸ Request payment ▸ the till checkbox. The code-form choice persists across visits and
+ *  the checkbox TOGGLES (unlike the Send form's segmented toggle, whose click SETS), so a blind
+ *  click on the second visit would flip BACK to the dpay code — guard on the form being up. */
 async function openRingUpForm(driver) {
   await driver.click('tab-receive', {timeoutMs: 5_000});
-  if (await driver.isPresent('btn-code-till')) await driver.click('btn-code-till', {timeoutMs: 5_000});
+  if (!(await driver.isPresent('btn-till-ring-up'))) await driver.click('btn-code-till', {timeoutMs: 5_000});
   await driver.findByTestID('btn-till-ring-up', {timeoutMs: 8_000});
 }
 
-/** Pay ▸ Send to address — same persistence rule as the code form. */
+/** Pay ▸ Send to address — the segmented toggle SETS its value, so the blind click is a no-op when
+ *  the send form is already the active segment. */
 async function openSendForm(driver) {
   await driver.click('tab-pay', {timeoutMs: 5_000});
   if (await driver.isPresent('btn-pay-send')) await driver.click('btn-pay-send', {timeoutMs: 5_000});
