@@ -534,9 +534,18 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
   in-font-glyph precedent), in `AssetGlyph.tsx` (chips) and `SolReceiveMode.tsx` (amount prefix);
   tests and prose updated, and the web woff2 set needed no change (`•` was already kept, `◎` was
   never in a cmap).
-- **Deploy-script candid-literal drift (ops-only)** — `dfx-deploy.sh`'s ICRC init args literal is
+- ~~**Deploy-script candid-literal drift (ops-only)** — `dfx-deploy.sh`'s ICRC init args literal is
   not factored the way staging's is (3 genuinely incompatible per-script strategies). Both scripts
-  byte-faithful today; low priority, no runtime impact.
+  byte-faithful today; low priority, no runtime impact.~~ **RESOLVED (2026-09-14):** the ICRC-ledger
+  + facade init literals now live ONCE as parameterized builders in `deploy/dfx-lib.sh`
+  (`icrc_ledger_init_arg`, `facade_init_arg`), called by `scripts/dfx-deploy.sh` (local) and
+  `scripts/dfx-deploy-ic-staging.sh` (staging; its differing whitespace is an explicit indent
+  param); mainnet (`scripts/dfx-deploy-ic.sh`) deliberately keeps its distinct strategy — the
+  tracked `dfx/args/init.arg` via dpay-fixture + the demo_ledger-vs-canister_ids.json sanity gate —
+  with a cross-reference comment at its deploy call. Byte-identity of the refactor is proven and
+  re-checkable offline: `just dfx-arg-parity` (`deploy/tests/literal-parity.sh`) replays both
+  scripts against a mock dfx and diffs the emitted install arguments against the committed
+  pre-refactor captures in `deploy/tests/fixtures/` — zero delta.
 - **Doc-rot**: living docs verified clean 2026-09-06 (the 2026-09-04 six-agent audit + the
   session landings since); `docs/specs/` session reports remain historical records, not re-audited.
 

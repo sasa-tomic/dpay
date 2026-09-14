@@ -184,6 +184,11 @@ echo "== deploy to $NETWORK as '$IDENT' (it becomes/keeps the controller; spends
 # when run non-interactively. Setting DPAY_DEPLOY_MODE=reinstall above IS that explicit confirmation.
 # The argument file feeds init on a FRESH install; on upgrade dfx type-checks it against the .did
 # and the canister ignores it (no post_upgrade — init never re-runs).
+# The OTHER two deploy surfaces (scripts/dfx-deploy.sh local replica, dfx-deploy-ic-staging.sh
+# staging) build their init args inline via the shared builders in deploy/dfx-lib.sh
+# (facade_init_arg / icrc_ledger_init_arg); mainnet deliberately stays on this TRACKED fixture
+# file + the demo_ledger sanity gate above. Changing the facade init shape means dpay-fixture
+# HERE and the shared builder THERE (then re-capture: bash deploy/tests/literal-parity.sh regen).
 dfx_i deploy "$CANISTER" --network "$NETWORK" --mode "$MODE" --yes --argument-file dfx/args/init.arg
 
 CID=$(dfx_i canister id "$CANISTER" --network "$NETWORK")

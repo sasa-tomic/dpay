@@ -16,6 +16,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 ROOT="$PWD"
 export CARGO_HOME="$ROOT/.dev/cargo" RUSTUP_HOME="$ROOT/.dev/rustup"
 export PATH="$ROOT/.dev/cargo/bin:$HOME/.local/share/dfx/bin:$PATH"
+# shared deploy helpers — the ICRC-ledger init-arg literal lives there, ONE copy for every surface
+source deploy/dfx-lib.sh
 
 PORT="${DPAY_RELAY_PORT:-8787}"
 LEDGER_WASM=third_party/ic-icrc1-ledger/ic-icrc1-ledger.wasm
@@ -51,29 +53,17 @@ LEDGER_ID="$(dfx canister id icrc_ledger)"
 # so the faucet's controller-gated mint passes the canister's admin gate on first try.
 RELAY_PID_TEXT="$(DPAY_CONTROLLER_SEED="$DEMO_SEED" "$RELAY_BIN" --print-controller-principal)"
 
-# The REAL ic-icrc1-ledger, minting account owned by the facade (same shape as scripts/dfx-deploy.sh
-# and the PocketIC faucet tests — archives never spawn at these thresholds).
+# The REAL ic-icrc1-ledger, minting account owned by the facade — the SHARED icrc_ledger_init_arg
+# builder (deploy/dfx-lib.sh), the same literal scripts/dfx-deploy.sh installs on its replica
+# (archives never spawn at these thresholds).
 dfx build icrc_ledger >/dev/null
-dfx canister install icrc_ledger --argument "(variant { Init = record {
-  minting_account = record { owner = principal \"$CID\" };
-  transfer_fee = 0 : nat;
-  decimals = opt (2 : nat8);
-  token_symbol = \"DUSD\";
-  token_name = \"dpay demo USD\";
-  metadata = vec {};
-  initial_balances = vec {};
-  feature_flags = opt record { icrc2 = true; icrc152 = false };
-  archive_options = record {
-    num_blocks_to_archive = 10_000 : nat64;
-    trigger_threshold = 10_000_000 : nat64;
-    controller_id = principal \"$CID\";
-  };
-  index_principal = null;
-} })" >/tmp/dfx-deploy-demo.log 2>&1
+dfx canister install icrc_ledger --argument "$(icrc_ledger_init_arg "$CID" 0 2 DUSD "dpay demo USD")" >/tmp/dfx-deploy-demo.log 2>&1
 
 # Facade wired to THIS replica's ledger, admin gate locked to the relay identity from birth (the
 # tracked dfx/args/init.arg bakes the MAINNET td2nx ledger — F1's root cause — so the init arg is
-# built inline instead; the ledger id is only known now).
+# built inline instead; the ledger id is only known now). Deliberately NOT the shared
+# facade_init_arg builder (deploy/dfx-lib.sh): this variant's controller is the relay identity from
+# birth, not null → set_controller like the deploy scripts.
 dfx build dpay_canister >/dev/null
 dfx canister install dpay_canister --argument \
   "(record { demo_ledger = principal \"$LEDGER_ID\"; per_tx_cap = ${CAP} : nat64; controller = opt principal \"$RELAY_PID_TEXT\" })" >>/tmp/dfx-deploy-demo.log 2>&1

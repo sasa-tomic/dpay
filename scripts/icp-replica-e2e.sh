@@ -61,23 +61,10 @@ DFX_PID=$(dfx identity get-principal)
 LEDGER_ID=$(dfx canister id icrc_ledger)
 echo "   ledger: $LEDGER_ID  (minting account $DFX_PID)"
 dfx build icrc_ledger >/dev/null
-# Cost-tuned archive_options: trigger_threshold=10M => archives never spawn in a demo/pilot.
-dfx canister install icrc_ledger --argument "(variant { Init = record {
-  minting_account = record { owner = principal \"$DFX_PID\" };
-  transfer_fee = 0 : nat;
-  decimals = opt (2 : nat8);
-  token_symbol = \"DUSD\";
-  token_name = \"dpay replica e2e DUSD\";
-  metadata = vec {};
-  initial_balances = vec {};
-  feature_flags = opt record { icrc2 = true; icrc152 = false };
-  archive_options = record {
-    num_blocks_to_archive = 10_000 : nat64;
-    trigger_threshold = 10_000_000 : nat64;
-    controller_id = principal \"$DFX_PID\";
-  };
-  index_principal = null;
-} })"
+# Cost-tuned archive_options: trigger_threshold=10M => archives never spawn in a demo/pilot. The
+# literal is the SHARED icrc_ledger_init_arg builder (deploy/dfx-lib.sh) — the same record every
+# deploy surface installs; only this owner (default identity) + token_name differ here.
+dfx canister install icrc_ledger --argument "$(icrc_ledger_init_arg "$DFX_PID" 0 2 DUSD "dpay replica e2e DUSD")"
 
 echo "== fund device principal P1 from the minting account (ICRC-1 mint path) =="
 P1_PID=$(cargo run -q -p dpay-icp-e2e --bin dev-principal -- "$P1_SEED_HEX")

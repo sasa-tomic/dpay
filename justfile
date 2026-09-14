@@ -190,6 +190,17 @@ deploy-ic:
 deploy-ic-staging:
     DPAY_DFX_NETWORK=local bash scripts/dfx-deploy-ic-staging.sh
 
+# dfx install-arg BYTE parity: run the REAL dfx-deploy.sh + the staging local rehearsal against the
+# mock dfx (deploy/tests/mock-dfx.sh) and assert the Candid install arguments they emit are
+# byte-identical to the committed captures in deploy/tests/fixtures/ — the net that keeps the shared
+# literal builders in deploy/dfx-lib.sh (icrc_ledger_init_arg / facade_init_arg) from changing an
+# install argument by one byte (the demo/staging candid-literal fork risk). Offline: dfx mocked,
+# cargo real (warm seconds — the same builds `just deploy` does), so it stands alone rather than on
+# check/verify. Regen ONLY on an intentional literal change and commit the new fixtures with it
+# (like the e2e visual baselines): bash deploy/tests/literal-parity.sh regen.
+dfx-arg-parity:
+    bash deploy/tests/literal-parity.sh
+
 # OFFLINE dfx-replica proof for the user-principal IC rail (~30-60s): boots a clean replica, installs
 # the REAL ic-icrc1-ledger, funds the deterministic device principal P1, and drives the dpay-icp
 # signed envelopes through /api/v2 (202 → read_state poll → replied; signed query; bad-sig/expired

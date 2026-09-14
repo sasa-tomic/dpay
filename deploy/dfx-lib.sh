@@ -66,3 +66,47 @@ load_identity() {
   fi
   rm -f "$_iderr"
 }
+
+# icrc_ledger_init_arg OWNER FEE DECIMALS SYMBOL NAME [BASE_INDENT]  — the Candid
+# `variant { Init = record { … } }` argument BOTH inline-ledger deploys install the REAL
+# ic-icrc1-ledger with: scripts/dfx-deploy.sh (local replica, owner = the facade) and
+# scripts/dfx-deploy-ic-staging.sh (staging DUSD ledger, owner = the staging facade). ONE literal,
+# so a field added or retuned here reaches demo + staging together and can never fork their init
+# args. Parameterized exactly where the callers differ (owner/controller principal, fee, decimals,
+# symbol, token name); the fixed shape is policy: empty metadata/initial_balances, icrc2 on,
+# icrc152 off, cost-tuned archive_options (trigger_threshold 10M => archives never spawn in a
+# demo/pilot). BASE_INDENT (default: none) is the continuation-line indent baked into the OUTPUT
+# string — it exists only so each caller's emitted bytes stay identical to its pre-builder literal
+# (byte-parity pinned against deploy/tests/fixtures/ by `just dfx-arg-parity`); Candid ignores
+# whitespace, but the parity fixtures do not.
+icrc_ledger_init_arg() {
+  local owner="$1" fee="$2" dec="$3" sym="$4" name="$5" ind="${6:-}"
+  printf '(variant { Init = record {\n'
+  printf '%s  minting_account = record { owner = principal "%s" };\n' "$ind" "$owner"
+  printf '%s  transfer_fee = %s : nat;\n' "$ind" "$fee"
+  printf '%s  decimals = opt (%s : nat8);\n' "$ind" "$dec"
+  printf '%s  token_symbol = "%s";\n' "$ind" "$sym"
+  printf '%s  token_name = "%s";\n' "$ind" "$name"
+  printf '%s  metadata = vec {};\n' "$ind"
+  printf '%s  initial_balances = vec {};\n' "$ind"
+  printf '%s  feature_flags = opt record { icrc2 = true; icrc152 = false };\n' "$ind"
+  printf '%s  archive_options = record {\n' "$ind"
+  printf '%s    num_blocks_to_archive = 10_000 : nat64;\n' "$ind"
+  printf '%s    trigger_threshold = 10_000_000 : nat64;\n' "$ind"
+  printf '%s    controller_id = principal "%s";\n' "$ind" "$owner"
+  printf '%s  };\n' "$ind"
+  printf '%s  index_principal = null;\n' "$ind"
+  printf '%s} })' "$ind"
+}
+
+# facade_init_arg DEMO_LEDGER PER_TX_CAP  — the facade canister's Candid init argument
+# `record { demo_ledger; per_tx_cap; controller }` as BOTH inline-arg deploys install it:
+# scripts/dfx-deploy.sh (this replica's DUSD ledger; cap from dpay-fixture's expect.env) and
+# scripts/dfx-deploy-ic-staging.sh (the staging DUSD ledger; fixed 100_000). PER_TX_CAP passes
+# through VERBATIM (nat64 literal text — `100000` and `100_000` both stay as written).
+# controller=null = open-demo mode, locked by set_controller immediately after install.
+# (scripts/dfx-deploy-ic.sh — mainnet — deliberately does NOT use this builder: its init arg comes
+# from the tracked dfx/args/init.arg via dpay-fixture + the demo_ledger-vs-canister_ids.json gate.)
+facade_init_arg() {
+  printf '(record { demo_ledger = principal "%s"; per_tx_cap = %s : nat64; controller = null })' "$1" "$2"
+}

@@ -141,8 +141,8 @@ else
   MODE=upgrade
   echo "== upgrade facade wasm in $STAGING_CID (state preserved; init arg ignored on upgrade) =="
 fi
-dfx_i deploy "$CANISTER" --network "$NETWORK" --mode "$MODE" --yes --argument \
-  "(record { demo_ledger = principal \"$DUSD_LEDGER_CID\"; per_tx_cap = 100_000 : nat64; controller = null })"
+dfx_i deploy "$CANISTER" --network "$NETWORK" --mode "$MODE" --yes \
+  --argument "$(facade_init_arg "$DUSD_LEDGER_CID" 100_000)"
 
 echo "== install the staging DUSD ICRC ledger (minting_account.owner = staging facade) =="
 # The staging facade MUST own the DUSD ledger's minting account (the faucet mints via icrc1_transfer
@@ -150,22 +150,13 @@ echo "== install the staging DUSD ICRC ledger (minting_account.owner = staging f
 # staging facade cannot mint from it. decimals=2, fee=0, symbol="DUSD" (the DEMO play-money shape).
 _install_ledger() { # $1=decimals  $2=fee  $3=symbol  $4=token_name
   local dec="$1" fee="$2" sym="$3" name="$4"
-  local init_arg="(variant { Init = record {
-      minting_account = record { owner = principal \"$STAGING_CID\" };
-      transfer_fee = ${fee} : nat;
-      decimals = opt (${dec} : nat8);
-      token_symbol = \"${sym}\";
-      token_name = \"${name}\";
-      metadata = vec {};
-      initial_balances = vec {};
-      feature_flags = opt record { icrc2 = true; icrc152 = false };
-      archive_options = record {
-        num_blocks_to_archive = 10_000 : nat64;
-        trigger_threshold = 10_000_000 : nat64;
-        controller_id = principal \"$STAGING_CID\";
-      };
-      index_principal = null;
-    } })"
+  # SHARED literal (deploy/dfx-lib.sh icrc_ledger_init_arg) — the same record scripts/dfx-deploy.sh
+  # installs on the local replica, parameterized where staging differs (owner/controller = the
+  # staging facade; fee/decimals/symbol/name via the args below). The trailing 4-space BASE_INDENT
+  # arg is baked into the emitted string so it stays byte-identical to this script's pre-builder
+  # literal — pinned against deploy/tests/fixtures/ by `just dfx-arg-parity`.
+  local init_arg
+  init_arg="$(icrc_ledger_init_arg "$STAGING_CID" "$fee" "$dec" "$sym" "$name" "    ")"
   # A freshly-created canister has no code → --mode install (the first call). A re-run against an
   # already-installed ledger → --mode reinstall (replaces with a fresh init). Surface any real error
   # (a swallowed install failure leaves the canister codeless → every DEMO ledger call rejects with

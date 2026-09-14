@@ -59,24 +59,12 @@ echo "   facade:  $CID"
 echo "   ledger:  $LEDGER_ID"
 
 echo "== install the REAL ic-icrc1-ledger (minting account owned by the facade) =="
-# Cost-tuned archive_options: trigger_threshold=10M => archives never spawn in a demo/pilot.
+# Cost-tuned archive_options: trigger_threshold=10M => archives never spawn in a demo/pilot. The
+# literal is the SHARED icrc_ledger_init_arg builder (deploy/dfx-lib.sh) — one copy for this local
+# replica + the staging deploy, so a field edit can never fork their init args; byte-parity against
+# the captured baseline is pinned by `just dfx-arg-parity` (deploy/tests/fixtures/).
 dfx build icrc_ledger >/dev/null
-dfx canister install icrc_ledger --argument "(variant { Init = record {
-  minting_account = record { owner = principal \"$CID\" };
-  transfer_fee = 0 : nat;
-  decimals = opt (2 : nat8);
-  token_symbol = \"DUSD\";
-  token_name = \"dpay demo USD\";
-  metadata = vec {};
-  initial_balances = vec {};
-  feature_flags = opt record { icrc2 = true; icrc152 = false };
-  archive_options = record {
-    num_blocks_to_archive = 10_000 : nat64;
-    trigger_threshold = 10_000_000 : nat64;
-    controller_id = principal \"$CID\";
-  };
-  index_principal = null;
-} })"
+dfx canister install icrc_ledger --argument "$(icrc_ledger_init_arg "$CID" 0 2 DUSD "dpay demo USD")"
 
 echo "== install the facade (demo_ledger = this replica's DUSD ledger; cap from dpay-fixture; open controller) =="
 dfx build "$CANISTER" >/dev/null
@@ -84,8 +72,7 @@ dfx build "$CANISTER" >/dev/null
 # only known now, so the init arg is built inline. init merely STORES the principal (no cross-
 # canister validation), and the ledger above already has code. controller=null = open demo mode;
 # set_controller below locks the admin gate to the deploy identity.
-dfx canister install "$CANISTER" --argument \
-  "(record { demo_ledger = principal \"$LEDGER_ID\"; per_tx_cap = ${CAP} : nat64; controller = null })"
+dfx canister install "$CANISTER" --argument "$(facade_init_arg "$LEDGER_ID" "$CAP")"
 
 echo "== lock the admin gate: set_controller(deploy identity) (open→locked; enables controller-gated mint) =="
 # init.arg seeds controller=null (open-demo mode). set_controller is the ONE admin op callable in
