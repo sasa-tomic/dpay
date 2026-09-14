@@ -118,6 +118,7 @@ export const walletFr: WalletMessages = {
     filter: label => `Filtrer ${label}`,
     to: who => `à ${who}`,
     from: who => `de ${who}`,
+    fees: fee => `− ${fee} de frais`,
     mintCounterparty: 'la démo',
     failed: 'Échec — seuls les frais de réseau ont été prélevés',
     dropped: count => count === 1

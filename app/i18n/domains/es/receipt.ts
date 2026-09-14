@@ -18,6 +18,7 @@ export const receiptEs: ReceiptMessages = {
   referenceLabel: 'Referencia',
   peer: 'Contraparte',
   note: 'Nota',
+  fees: 'Comisionas',
   blockLabel: 'Bloque de la red',
   signatureLabel: 'Firma de la transacción',
 

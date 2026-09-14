@@ -523,6 +523,10 @@ function buildStyles(p: Palette) {
   // the flexible left column, which is what pins the amount: see `histAmt`.
   histSubRow: {flexDirection: 'row', alignItems: 'baseline', marginTop: 2},
   histMemo: {fontSize: 12, color: p.sub2, fontStyle: 'italic', fontFamily: FONT.sans, marginLeft: 6, flexShrink: 1},
+  // The fee annotation beside the memo (founder rule 2026-09-14: fees ride the log row ONLY as
+  // this line — "0.0001 VCHF fees" — never inside the headline amount). Not italic: it is a
+  // money figure, not display prose.
+  histFee: {fontSize: 12, color: p.sub2, fontFamily: FONT.sans, marginLeft: 6, flexShrink: 1},
   // The amount is the LAST item on the row, and that is a correctness rule rather than a taste one.
   // The timestamp is the only element here whose width changes on its own — `fmtTime`'s clock crosses
   // 1↔2 hour digits every day at ten o'clock, one monospace character, 7.2 px. While the time sat to

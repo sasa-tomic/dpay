@@ -34,11 +34,16 @@ export type TxNote = {
   readonly k: string; // join key, lowercase (IC memo/nonce hex, or a SOL signature)
   readonly who?: string; // peer name known at payment time ('' never stored)
   readonly msg?: string; // human message known at payment time ('' never stored)
+  // The GROSS headline + the FEE, both raw digit strings in the row's own asset units (founder
+  // rule 2026-09-14: a netted request payment displays the typed price on BOTH devices; the fee
+  // rides along ONLY as the log row's annotation line). '' never stored.
+  readonly gross?: string;
+  readonly fee?: string;
   readonly at: number; // caller's nowMs — the sole ordering/eviction key
 };
 
 /** What the read side resolves for one row — a note's display half, address-book label included. */
-export type TxAnnotation = {readonly who?: string; readonly msg?: string};
+export type TxAnnotation = {readonly who?: string; readonly msg?: string; readonly gross?: string; readonly fee?: string};
 
 /** How many annotations one identity keeps. Beyond this the oldest (by `at`) is evicted. */
 export const MAX_TX_NOTES = 500;
@@ -55,6 +60,10 @@ export function normalizeJoinKey(key: string): string {
 
 const detail = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/** Digit strings only: gross/fee are raw amounts in the row's own units — anything else (an
+ *  already-formatted string, a decimal, a sign) is a producer bug, dropped at the shape gate. */
+const isRawDigits = (v: unknown): v is string => typeof v === 'string' && /^\d+$/.test(v) && v !== '';
+
 /** Shape check for one stored entry. */
 export function isTxNote(value: unknown): value is TxNote {
   if (!value || typeof value !== 'object') return false;
@@ -62,6 +71,8 @@ export function isTxNote(value: unknown): value is TxNote {
   if (typeof e.k !== 'string' || e.k === '' || typeof e.at !== 'number' || !Number.isFinite(e.at)) return false;
   if (e.who !== undefined && (typeof e.who !== 'string' || e.who === '')) return false;
   if (e.msg !== undefined && (typeof e.msg !== 'string' || e.msg === '')) return false;
+  if (e.gross !== undefined && !isRawDigits(e.gross)) return false;
+  if (e.fee !== undefined && !isRawDigits(e.fee)) return false;
   return true;
 }
 
@@ -122,7 +133,11 @@ export function annotateTxn(
   const label = labels.get(t.assetId)?.get(t.counterparty);
   const who = note?.who || label;
   const msg = note?.msg;
-  return who !== undefined || msg !== undefined ? {who, msg} : undefined;
+  const gross = note?.gross;
+  const fee = note?.fee;
+  return who !== undefined || msg !== undefined || gross !== undefined || fee !== undefined
+    ? {who, msg, gross, fee}
+    : undefined;
 }
 
 // A tiny module-level emitter: `saveTxNote` announces which identity's store changed so a mounted
@@ -156,22 +171,26 @@ export async function loadTxNotes(publicHex: string): Promise<TxNote[]> {
 }
 
 /**
- * Record one annotation. Empty `who`/`msg` are dropped; if NEITHER survives there is nothing to
- * annotate and the call is a no-op (an annotation without displayable content would only evict a
- * real note). Never throws at the caller: load/persist failures are caught and logged.
+ * Record one annotation. Empty `who`/`msg` are dropped; `gross`/`fee` survive only as raw digit
+ * strings (anything else is dropped too — the renderer must never receive a formatted string
+ * where an amount belongs). If NOTHING survives there is no annotation and the call is a no-op
+ * (an annotation without displayable content would only evict a real note). Never throws at the
+ * caller: load/persist failures are caught and logged.
  */
 export async function saveTxNote(
   publicHex: string,
-  input: {k: string; who?: string; msg?: string},
+  input: {k: string; who?: string; msg?: string; gross?: string; fee?: string},
   nowMs: number,
 ): Promise<void> {
   try {
     const k = normalizeJoinKey(input.k);
     const who = input.who?.trim() || undefined;
     const msg = input.msg?.trim() || undefined;
-    if (k === '' || (who === undefined && msg === undefined)) return;
+    const gross = isRawDigits(input.gross) ? input.gross : undefined;
+    const fee = isRawDigits(input.fee) ? input.fee : undefined;
+    if (k === '' || (who === undefined && msg === undefined && gross === undefined && fee === undefined)) return;
     const entries = await loadTxNotes(publicHex);
-    const next = mergeTxNote(entries, {k, who, msg, at: nowMs});
+    const next = mergeTxNote(entries, {k, who, msg, gross, fee, at: nowMs});
     await AsyncStorage.setItem(txNotesKey(publicHex), JSON.stringify(next));
     notify(publicHex);
   } catch (e) {

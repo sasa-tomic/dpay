@@ -36,6 +36,9 @@ export type ReceiptMessages = {
   /** The human MESSAGE this device saved when the payment was made (the on-chain memo is the
    *  nonce — this is the request/link/spay text, device-side only). Rendered only when one exists. */
   note: string;
+  /** The FEE beside the gross headline (founder rule 2026-09-14: a netted request payment
+   *  headlines the typed price; the fee renders only as this line, only when known). */
+  fees: string;
   /** The IC ledger's own index for this transfer. */
   blockLabel: string;
   /** The Solana transaction's own id. */
@@ -71,6 +74,7 @@ export const receiptEn: ReceiptMessages = {
   referenceLabel: 'Reference',
   peer: 'Peer',
   note: 'Note',
+  fees: 'Fees',
   blockLabel: 'Ledger block',
   signatureLabel: 'Transaction signature',
 

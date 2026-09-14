@@ -205,6 +205,11 @@ export type WalletMessages = {
     to: (who: string) => string;
     from: (who: string) => string;
     /**
+     * The fee annotation on a log row whose payment netted a fee in (founder rule 2026-09-14):
+     * fees ride the row ONLY as this line beside the GROSS headline — hidden when unknown/zero.
+     */
+    fees: (fee: string) => string;
+    /**
      * The counterparty on a gateway mint row, which carries no name of its own. Deliberately NOT
      * `balances.demoFunds`: that one names the faucet BUTTON. These two collide in English only —
      * a locale is free to render "who paid you" and "get test money" differently, and sharing the
@@ -365,6 +370,7 @@ export const walletEn: WalletMessages = {
     filter: label => `Filter ${label}`,
     to: who => `to ${who}`,
     from: who => `from ${who}`,
+    fees: fee => `− ${fee} fees`,
     mintCounterparty: 'Demo funds',
     failed: 'Failed — only the network fee was charged',
     dropped: count => count === 1

@@ -18,6 +18,7 @@ export const receiptFr: ReceiptMessages = {
   referenceLabel: 'Référence',
   peer: 'Correspondant',
   note: 'Note',
+  fees: 'Frais',
   blockLabel: 'Bloc du registre',
   signatureLabel: 'Signature de la transaction',
 

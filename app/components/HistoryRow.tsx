@@ -21,27 +21,48 @@ import type {TxAnnotation} from '../services/txNotes';
 // the only place those facts exist for that rail. A row
 // whose asset is not in the visible list (a testnet asset hidden mid-poll, a disabled rail) fails
 // closed to the SAME sentinel rather than guessing a unit.
-export function fmtRowAmount(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[]): string {
+export function fmtRowAmount(t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[], note?: TxAnnotation): string {
   const asset = assets.find(a => a.id === t.assetId);
   if (!asset) return M.wallet.asset.unsupported;
   // The direction sign goes THROUGH the formatter (never concatenated here) so it lands inside a
   // truncation marker — "≈ −0.039922 ETH", not "−≈ 0.039922 ETH". See fmtAssetCompact.
+  // Founder rule 2026-09-14: when the device saved the payment's GROSS (a netted request payment),
+  // the row HEADLINES it — the typed price, not the wire the ledger recorded.
+  const raw = note?.gross ?? t.amount;
   const sign = t.dir === 'out' ? '−' : '+';
   return asset.protocol === 'ic'
-    ? fmtCurrencyAmountCompact(catalog, asset.currency, t.amount, sign)
-    : fmtAssetCompact(t.amount, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
+    ? fmtCurrencyAmountCompact(catalog, asset.currency, raw, sign)
+    : fmtAssetCompact(raw, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
+}
+
+// The fee a note carried, formatted in the row's own units (the founder example: "0.01 VCHF −
+// 0.0001 VCHF fees"). Optional `sign` goes THROUGH the formatter like every amount sign. Null
+// when the note carried no fee, a zero fee (nothing to annotate — a DEMO/fee-0 cell), or the
+// asset is unknown (no honest unit to format it in).
+function fmtNoteFee(
+  t: Txn, catalog: CurrencyDescriptor[], assets: SelectableAsset[], note?: TxAnnotation, sign?: string,
+): string | null {
+  const fee = note?.fee;
+  if (fee === undefined || fee === '0') return null;
+  const asset = assets.find(a => a.id === t.assetId);
+  if (!asset) return null;
+  return asset.protocol === 'ic'
+    ? fmtCurrencyAmountCompact(catalog, asset.currency, fee, sign)
+    : fmtAssetCompact(fee, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
 }
 
 // The RECEIPT's amount — the same dispatch, through the same COMPACT formatters as the row
 // (founder rule 2026-09-13: every glanceable money surface shows the best-effort rounded amount;
 // the padded exact form survives only where a string round-trips through the amount parser).
 // The sign goes THROUGH the formatter so it lands inside a truncation marker, same as the row.
-function fmtReceiptAmount(t: Txn, catalog: CurrencyDescriptor[], asset: SelectableAsset | undefined): string {
+// Same gross-over-wire precedence as the row (founder rule 2026-09-14).
+function fmtReceiptAmount(t: Txn, catalog: CurrencyDescriptor[], asset: SelectableAsset | undefined, note?: TxAnnotation): string {
   if (!asset) return M.wallet.asset.unsupported;
+  const raw = note?.gross ?? t.amount;
   const sign = t.dir === 'out' ? '−' : '+';
   return asset.protocol === 'ic'
-    ? fmtCurrencyAmountCompact(catalog, asset.currency, t.amount, sign)
-    : fmtAssetCompact(t.amount, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
+    ? fmtCurrencyAmountCompact(catalog, asset.currency, raw, sign)
+    : fmtAssetCompact(raw, asset.decimals, asset.symbol, undefined, asset.minFractionDigits, sign);
 }
 
 // One transaction row — the shared renderer extracted verbatim from Ledger's list map so the Home
@@ -61,11 +82,14 @@ function fmtReceiptAmount(t: Txn, catalog: CurrencyDescriptor[], asset: Selectab
 // and the receipt still shows the full principal and the hex reference whatever the note says. A
 // note-less row renders exactly as before this prop existed.
 export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress, note}: {t: Txn; i: number; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; testPrefix?: string; onPress: (t: Txn) => void; note?: TxAnnotation}) {
-  const amtTxt = fmtRowAmount(t, catalog, assets);
+  const amtTxt = fmtRowAmount(t, catalog, assets, note);
   // `''`/absent never override: the store never saves an empty who/msg, but the fallback chain
   // stays total for any caller-assembled annotation.
   const whoTxt = note?.who || t.who || '—';
   const memoTxt = note?.msg || t.memo;
+  // Founder rule 2026-09-14: the fee rides the row ONLY as this annotation line, never in the
+  // headline. Hidden when the fee is unknown or zero.
+  const feeTxt = fmtNoteFee(t, catalog, assets, note);
   return (
     <Pressable
       testID={`${testPrefix}-row-${i}`}
@@ -92,6 +116,7 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress,
         <View style={S.histSubRow}>
           <Text style={S.histTime} testID={`${testPrefix}-time-${i}`}>{t.time}</Text>
           {memoTxt ? <Text style={S.histMemo} testID={`${testPrefix}-memo-${i}`}>{memoTxt}</Text> : null}
+          {feeTxt != null ? <Text style={S.histFee} testID={`${testPrefix}-fee-${i}`}>{M.wallet.ledger.fees(feeTxt)}</Text> : null}
         </View>
       </View>
       <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]} testID={`${testPrefix}-amt-${i}`}>{amtTxt}</Text>
@@ -124,7 +149,11 @@ function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: Selectable
   const solana = asset?.protocol === 'solana';
   return {
     solana,
-    amount: fmtReceiptAmount(t, catalog, asset),
+    amount: fmtReceiptAmount(t, catalog, asset, note),
+    // The fee with its minus sign THROUGH the formatter (same truncation rule as every amount):
+    // the founder example reads "0.01 VCHF − 0.0001 VCHF fees". Null when unknown/zero — no label
+    // over an absent value.
+    fee: fmtNoteFee(t, catalog, assets, note, '−'),
     assetLine: asset?.networkLabel ?? M.wallet.asset.unsupported,
     partyLabel: t.dir === 'out' ? M.receipt.toLabel : M.receipt.fromLabel,
     // The FULL account, never the row's truncated display label — a truncated principal proves
@@ -160,6 +189,7 @@ export function receiptText(t: Txn, catalog: CurrencyDescriptor[], assets: Selec
     `${f.partyLabel}: ${f.account}`,
   ];
   // Annotated lines only when the device actually knows them — the same render rule as the sheet.
+  if (f.fee != null) lines.push(`${M.receipt.fees}: ${f.fee}`);
   if (f.peer) lines.push(`${M.receipt.peer}: ${f.peer}`);
   if (f.noteText) lines.push(`${M.receipt.note}: ${f.noteText}`);
   lines.push(`${M.receipt.whenLabel}: ${t.time}`, `${M.receipt.referenceLabel}: ${f.reference}`, `${f.proofLabel}: ${f.proof}`);
@@ -201,6 +231,9 @@ export function TxnReceipt({t, catalog, assets, onClose, note}: {t: Txn; catalog
           <Text testID="txn-receipt-amount" style={[S.receiptAmount, {color: t.dir === 'out' ? C.ink : C.ok}]}>{f.amount}</Text>
           <Text testID="txn-receipt-asset" style={S.receiptAsset}>{f.assetLine}</Text>
           {f.status ? <Text testID="txn-receipt-status" style={S.receiptNote}>{f.status}</Text> : null}
+          {/* The fee line (founder rule 2026-09-14): the receipt headlines the GROSS and shows the
+              fee BESIDE it — only when the device knew the fee. */}
+          {f.fee != null ? <Field label={M.receipt.fees} value={f.fee} testID="txn-receipt-fees" /> : null}
           <ScrollView style={S.pickScroll}>
             <Field label={f.partyLabel} value={f.account} testID="txn-receipt-account" note={!t.counterparty} />
             {/* Peer/Note render ONLY when the device-saved annotation exists (the receipt's own
@@ -213,8 +246,9 @@ export function TxnReceipt({t, catalog, assets, onClose, note}: {t: Txn; catalog
             <Field label={f.proofLabel} value={f.proof} testID="txn-receipt-proof" />
             {/* The source line is CONDITIONAL now that annotations exist: it claims every value
                 came from the ledger, which is only true when nothing above was device-saved. An
-                annotated receipt says so instead — the same honesty rule, extended. */}
-            <Text style={S.receiptSource}>{f.peer || f.noteText ? M.receipt.sourceAnnotated : M.receipt.source}</Text>
+                annotated receipt says so instead — the same honesty rule, extended (the fee and
+                the gross headline are device-saved facts too). */}
+            <Text style={S.receiptSource}>{f.peer || f.noteText || f.fee != null ? M.receipt.sourceAnnotated : M.receipt.source}</Text>
           </ScrollView>
           <Pressable
             testID="btn-txn-receipt-copy"
