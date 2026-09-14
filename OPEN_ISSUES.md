@@ -205,13 +205,15 @@ DO-NOT-NAG set.
   is the operator opt-out). What remains of it is the two-handset tap (below). The cashier page
   (`8805027`), the OCP tx-id fix and the bearer-token revisit are done and recorded below/inline.
 
-## PROD STATE (checked, never asserted — floor `4727a57`)
+## PROD STATE (checked, never asserted — floor `e2b3002`)
 
-Re-measured 2026-09-10, HEAD `4727a57`:
+Re-measured 2026-09-14, HEAD `e2b3002`:
 
-- `just verify-relay` → **MATCH at HEAD** (`4727a57a40…`, clean — no `-dirty`; commit_date
-  2026-09-10T17:43:36+02:00). Everything is shipped, incl. the R2 Solana-relay cutover and the
-  till default flip.
+- Live version → **`e2b3002…` = HEAD, clean** (no `-dirty`; commit_date 2026-09-14T02:06:54+02:00;
+  measured via `curl /api/v1/version`). Everything is shipped through the fee-netted
+  request-payment cell pin.
+- `GET /api/v1/integrity` → **MATCH** on `e537056e…` (facade unchanged since the 2026-09-08 row;
+  pin recorded in `docs/UPGRADES.md`). (Previous match at this hash: 2026-09-10.)
 - `just integrity-check` → **MATCH** on `e537056e…` (facade unchanged since the 2026-09-07 upgrade;
   pin recorded in `docs/UPGRADES.md`).
 - **Solana rail is configured in prod** — `POST https://dpay.kalaj.org/api/v1/solana/rpc` with
@@ -224,19 +226,19 @@ Re-measured 2026-09-10, HEAD `4727a57`:
 - `just swap-venue-probe` → **PASS** — the live route still derives swap direction from the venue's
   own metadata (token1→token0 100000000 → 231342577, ratio 0.996998 vs the pool's implied price).
 - **The till IS served in production** — `curl -s https://dpay.kalaj.org/api/v1/capabilities` →
-  `{"till":true,"demo_faucet":true}` (measured 2026-09-10): the 2026-09-10 relay deploy carried
-  `d15b596` and the default flip is live. (The pre-deploy "till NOT yet served" note is retired.)
+  `{"till":true,"demo_faucet":true}` (re-measured 2026-09-14 at `e2b3002`): the till + demo faucet
+  flags are live. (The pre-deploy "till NOT yet served" note is retired.)
 
-**Verified-clean floor for the next session's review: `157b6ea`** — full `just verify` GREEN
-(e2e **162/162 GREEN** in one pass at load ×1.20, check phase incl. typecheck + bridge/aid parity
-+ wasm + relay lean-build gate), **`just app` device self-check GREEN on REAL hardware**
-(DPAY_SELFCHECK + DPAY_SOL_SELFCHECK + DPAY_INTL_SELFCHECK PASS, locale=de-DE, Xiaomi M2102J20SG),
-and **`just ondevice` instrumented suite GREEN** on the emulator (launched ad-hoc; note the
-physical Xiaomi refuses test-APK installs with MIUI `INSTALL_FAILED_USER_RESTRICTED`, so
-instrumented runs need the AVD). This floor carries the multi-venue gap-closure (`63f966d`),
-the transaction-log names/messages feature (`52fde41` + flow flips `157b6ea`), and the flow-40
-light baselines (`a431f46`). `just apk` was NOT re-run this session — the last apk-proven floor
-remains `eaaa60e`. Start the next sweep from `157b6ea`.
+**Verified-clean floor for the next session's review: `e2b3002`** — founder-run `just verify`
+2026-09-14 with ONE RED: `test-canister`'s
+`reconcile_walks_backwards_pages_and_repairs_orphan_older_than_one_page` panicked inside Pocket-IC
+itself (HTTP `IncompleteMessage` on the `await_ingress_message` hop — a transport failure, not an
+assertion). Re-run GREEN in isolation (32 s) AND as the full suite (`cargo nextest run -p
+dpay-canister-tests` → 61/61 GREEN, 117 s) — classified a one-off Pocket-IC load flake, not a code
+bug. What that run did NOT re-prove (it aborted at `test-canister`): e2e (last full-green 162/162
+at `157b6ea`, load ×1.20) and the device gates `just app` / `just ondevice` (last hardware
+self-check GREEN at `157b6ea`; apk-proven floor remains `eaaa60e`). Start the next sweep from
+`e2b3002`.
 
 **One thing to know before running the suite:** `DPAY_E2E_NO_FAILFAST=1` is a trap on this box. It
 keeps launching flows past the first RED, oversubscribes the host, and turns one flake into sixteen
@@ -464,12 +466,10 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
   replaced with the real online-path evidence).
 - **OCP tx-id fix is prod-proven, both spellings** (`a913c6d` live, measured 2026-09-05;
   physical-device orders: `2609` native ICP block `38190401`, `2610` VCHF block `81062` submitted
-  prefixed — both accepted by DFX). Tripwires: `just ocp-ledger-probe` + flow 113. DFX still owes
-  the CHF 1 — do not write it off or count it recovered until it lands. Re-measured 2026-09-07:
-  `just ocp-ledger-probe` — the tx-spelling/ledger-selection rule still holds live;
-  `just live-ocp` GREEN (CHF-1 till quote → review, nothing signed); the CHF 1 has STILL not
-  landed (`just agent-history`: only the rotation transfer in; float VCHF exactly the rotation
-  remainder `0.00089881`).
+  prefixed — both accepted by DFX). Tripwires: `just ocp-ledger-probe` + flow 113. Re-measured
+  2026-09-07: the tx-spelling/ledger-selection rule still holds live; `just live-ocp` GREEN
+  (CHF-1 till quote → review, nothing signed). The old "DFX still owes the CHF 1" residual was
+  written off by the founder 2026-09-14 — no longer tracked.
 - **No third-party wallet can settle an Internet Computer asset** (re-measured 2026-09-05): Oisy's
   IC OpenCryptoPay payer is Option-A (`icrc2_approve` + sender report; no tx id, no memo), DFX's
   wallet list names none. Source-only detail:
