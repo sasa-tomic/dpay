@@ -5,6 +5,7 @@ import {type CurrencyDescriptor, type NfcDisclosure, isPayableAsset, resolveNfcD
 import type {NfcEvent, Identity} from '../lib/types';
 import {
   confirmIncomingTransfer,
+  fetchLedgerFee,
   prepareNfcTransfer,
   submitNfcTransfer,
   type RailPrepared,
@@ -52,7 +53,11 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   identity: Identity;
   relayUrl?: string;
   requestHex?: string;
-  reqInfo?: {amount: string; nonce: string; who: string; currency: number};
+  // `amount` is the WIRE the incoming NFC request actually moves (the ledger-match and
+  // account-deduction truth — never touched by display rules). `displayAmount` is the GROSS the
+  // payee's screen shows (founder rule 2026-09-14: both devices read the typed price; the wire
+  // stays netted underneath). Optional because wire-only callers keep their current readout.
+  reqInfo?: {amount: string; displayAmount?: string; nonce: string; who: string; currency: number};
   catalog: CurrencyDescriptor[];
   onSettled?: () => void;
   onOfflinePaid?: (amount: string, currency: number) => void;
@@ -64,6 +69,14 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   onConfirmed?: () => void;
 }) {
   const [disclosure, setDisclosure] = useState<NfcDisclosure | null>(null);
+  // Founder rule 2026-09-14 — the payer's tap screen reads the TOTAL DEBIT (wire + fee), never
+  // the netted wire alone. `cardReq`/`cardFee` hold the request + the best-effort live fee for
+  // that readout; `feePromiseRef` is the same query's promise, consumed by the note save so the
+  // log row gets the gross too. DEMO play money has no fee; offline the query simply fails and
+  // every surface falls back to the wire — honest, never a guess.
+  const [cardReq, setCardReq] = useState<{currency: number; amount: string} | null>(null);
+  const [cardFee, setCardFee] = useState<string | null>(null);
+  const feePromiseRef = useRef<Promise<string | null> | null>(null);
   // Trip-prep auto-detection (founder rule 2026-08-24): an NFC-settled payment must tick
   // FIRST PAYMENT (+ the flowUnderstood co-award) exactly like the QR rails. journeyRef keeps a
   // fresh snapshot for the idempotent award call inside async callbacks.
@@ -190,12 +203,26 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
         return;
       }
       setDisclosure(disc); // drives the read-only "Paying <amt> on <network>" status line
+      // Kick the fee query the readout + the note both consume (founder rule 2026-09-14). It is
+      // best-effort by design: a failure leaves `cardFee` null and the displays show the wire.
+      setCardReq({currency: req.currency, amount: req.amount});
+      setCardFee(null);
+      const ledger = catalog.find(c => c.currency === req.currency)?.ledger;
+      if (req.currency !== 0 && ledger) {
+        const p = fetchLedgerFee(identity.secretHex, ledger).catch(() => null);
+        feePromiseRef.current = p;
+        void p.then(fee => {
+          if (fee != null) setCardFee(fee);
+        });
+      } else {
+        feePromiseRef.current = null;
+      }
       await approveRef.current(req, ctx);
     } catch (e: unknown) {
       console.warn('NfcTap request validation failed:', e instanceof Error ? e.message : String(e));
       await failClosed(M.errors.tap.couldntReadRequest);
     }
-  }, [catalog]);
+  }, [catalog, identity.secretHex]);
 
   const onSettling = useCallback(() => {
     const prepared = preparedRef.current;
@@ -266,8 +293,15 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     advance('exchanging');
     // Payer-side annotation (services/txNotes), same seam as PayMode.approve: the tap's request
     // carries the payee's claimed name + human memo, recorded before signing so a crash after
-    // provideWire still leaves the note. Join key = nonceHex = the on-chain memo.
-    void saveTxNote(identity.publicHex, {k: req.nonceHex, who: req.toName || undefined, msg: req.memo || undefined}, Date.now());
+    // provideWire still leaves the note. Join key = nonceHex = the on-chain memo. Founder rule
+    // 2026-09-14: the note also carries the gross (wire + fee = the exact total debit) + the fee
+    // when the fee query answered — the log row then headlines the price; unknown fee saves
+    // neither, no guess. Fire-and-forget beside the offline sign; the query's own transport
+    // timeout bounds it.
+    void (async () => {
+      const fee = await feePromiseRef.current;
+      saveTxNote(identity.publicHex, {k: req.nonceHex, who: req.toName || undefined, msg: req.memo || undefined, ...(fee != null ? {gross: (BigInt(req.amount) + BigInt(fee)).toString(), fee} : {})}, Date.now());
+    })().catch(() => {});
     try {
       const prepared = await prepareNfcTransfer(identity.secretHex, {currencies: catalog}, req);
       if (!ctx.isCurrent()) return;
@@ -284,9 +318,15 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
 
   if (phase === 'listening' && !activeRef.current) return null;
 
+  // Founder rule 2026-09-14 — BOTH roles read the GROSS here. Card: the total debit (wire + fee
+  // when the fee query answered, the wire alone when it could not — `disclosure` itself still
+  // gates payability above, but its `formattedAmount` is the netted wire and is never shown).
+  // Reader: `displayAmount` (the payee's typed price) with the wire as the legacy fallback.
   const formattedAmt = role === 'card'
-    ? disclosure?.formattedAmount ?? null
-    : reqInfo ? fmtCurrencyAmountCompact(catalog, reqInfo.currency, reqInfo.amount) : null;
+    ? (disclosure != null && cardReq != null
+      ? fmtCurrencyAmountCompact(catalog, cardReq.currency, cardFee != null ? (BigInt(cardReq.amount) + BigInt(cardFee)).toString() : cardReq.amount)
+      : null)
+    : reqInfo ? fmtCurrencyAmountCompact(catalog, reqInfo.currency, reqInfo.displayAmount ?? reqInfo.amount) : null;
   const networkLabel = role === 'card' ? disclosure?.networkLabel ?? null : null;
   return (
     <NfcTapView

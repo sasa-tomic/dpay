@@ -18,7 +18,7 @@ import {icStampExpiry} from '../services/icp';
 import {preparePull, submitTransfer} from '../services/rail';
 import {saveTxNote} from '../services/txNotes';
 import {
-  TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillRawUnits,
+  TILL_OFFER, cancelTillCharge, chfCents, openTillCharge, tillChargeStatus, tillPriceUnits, tillRawUnits,
   type TillCharge as Charge, type TillOpenOutcome, type TillSettled, type TillVoidOutcome,
 } from '../services/till';
 import {useReportLock} from '../hooks/useReportLock';
@@ -83,8 +83,10 @@ const noteInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, m
 type EndReason = 'expired' | 'cancelled' | 'superseded' | 'gone';
 
 /** The armed reader, built from a live charge. `expiry` is the request's own certified deadline —
- *  held beside the hex because it is what decides whether a NEW tap can still start. */
-type Tap = {requestHex: string; reqInfo: {amount: string; nonce: string; who: string; currency: number}; expiry: number};
+ *  held beside the hex because it is what decides whether a NEW tap can still start. `reqInfo.amount`
+ *  stays the settlement wire; `displayAmount` is the rung price the readout headlines (founder rule
+ *  2026-09-14). */
+type Tap = {requestHex: string; reqInfo: {amount: string; displayAmount?: string; nonce: string; who: string; currency: number}; expiry: number};
 
 /** The counter's state machine. Every one of these tells the cashier what to do next; that is the
  *  founder rule (2026-08-29) applied to a surface whose whole job is dead ends. */
@@ -323,7 +325,9 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
       );
       return {
         requestHex,
-        reqInfo: {amount: amountRaw, nonce: charge.reference, who: M.receive.payer, currency: row.currency},
+        // `displayAmount` is the rung price (founder rule 2026-09-14): the merchant's tap readout
+        // headlines it while `amount` stays the settlement wire the ledger-match uses.
+        reqInfo: {amount: amountRaw, displayAmount: tillPriceUnits(charge.cents, row.decimals), nonce: charge.reference, who: M.receive.payer, currency: row.currency},
         expiry,
       };
     } catch (e) {
@@ -355,11 +359,13 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     setPhase({k: 'opening'});
     const outcome = await openTillCharge(relayUrl, identity, parsed.cents, tillRow.decimals, tillFeeRaw, noteVal);
     if (outcome.kind !== 'open') { setPhase({k: 'failed', outcome}); return; }
-    // The payee-side annotation, the same save the dpay form makes for its memo: keyed by the
-    // charge's reference — the memo the incoming transfer carries, so the history row this sale
-    // settles into shows what it was for. No `who`: whoever pays is exactly what a till does not
-    // know at ring-up time.
-    if (noteVal) void saveTxNote(identity.publicHex, {k: outcome.charge.reference, msg: noteVal}, Date.now());
+    // The payee-side annotation, the same save the dpay form makes: keyed by the charge's
+    // reference — the memo the incoming transfer carries, so the history row this sale settles
+    // into shows what it was for. No `who`: whoever pays is exactly what a till does not know at
+    // ring-up time. Founder rule 2026-09-14: the note carries the GROSS (the rung price — the row
+    // headlines it) + the fee (its annotation line); the wire stays the ledger truth. The till's
+    // fee gate above makes both non-null here — the save always carries them.
+    void saveTxNote(identity.publicHex, {k: outcome.charge.reference, msg: noteVal || undefined, gross: tillPriceUnits(parsed.cents, tillRow.decimals), fee: tillFeeRaw}, Date.now());
     setNow(nowSecs());
     setPhase({k: 'showing', charge: outcome.charge});
     // The code goes up FIRST and the reader is armed after it: building the request needs a

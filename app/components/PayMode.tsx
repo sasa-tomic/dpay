@@ -191,6 +191,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // guessed 0. Keyed on `intent` only: review/qr/paid all hold the same intent (only `reset()`
   // clears it), so one fetch serves the whole journey.
   const [feeRaw, setFeeRaw] = useState<string | null>(null);
+  // The in-flight fee query, if any — the price note below awaits it so the camera path (which
+  // signs the instant a request decodes, often before the fee lands in `feeRaw`) still records the
+  // price, not whatever the state happened to hold at sign time. Null = no query for this intent.
+  const feePromiseRef = useRef<Promise<string | null> | null>(null);
   // No fee fetch while the review cannot be approved (online + insufficient): a doomed payment
   // must touch NOTHING on the network (flow 101's zero-canister-call invariant — a read-only
   // icrc1_fee query included), and offline the fetch could not succeed anyway. The headline
@@ -200,6 +204,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     && (() => { const b = balanceOfRequested(intent.currency); return b != null && cmpRaw(intent.amount, b) > 0; })();
   useEffect(() => {
     setFeeRaw(null);
+    feePromiseRef.current = null;
   }, [intent]);
   useEffect(() => {
     const cur = intent?.currency ?? null;
@@ -210,20 +215,40 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // lands (the account just moved) and the paid screen still needs the fee for its total.
     if (reviewBlocked) return;
     let alive = true;
-    void (async () => {
-      try {
-        const fee = await fetchLedgerFee(identity.secretHex, ledger);
-        if (alive) setFeeRaw(fee);
-      } catch (e: unknown) {
-        console.warn('review fee fetch failed (total falls back to the amount):', e instanceof Error ? e.message : String(e));
-      }
-    })();
+    // Promise.resolve: the boundary is also a jest mock — an un-configured one returns undefined,
+    // and the displays' honesty must not depend on the mock's return shape.
+    const query = Promise.resolve(fetchLedgerFee(identity.secretHex, ledger)).catch((e: unknown) => {
+      console.warn('review fee fetch failed (total falls back to the amount):', e instanceof Error ? e.message : String(e));
+      return null;
+    });
+    feePromiseRef.current = query;
+    void query.then(fee => {
+      if (alive && fee != null) setFeeRaw(fee);
+    });
     return () => { alive = false; };
   }, [intent, catalog, identity.secretHex, reviewBlocked]);
   // The total debit a payer-facing amount on this journey renders: amount + fee when the fee is
   // known, the amount alone when it is not. The signed envelope is NEVER built from this — it stays
   // display-side only (`intent.amount` remains the wire amount everywhere money moves).
   const totalOf = (raw: string): string => (feeRaw != null ? (BigInt(raw) + BigInt(feeRaw)).toString() : raw);
+  // The same fact as note metadata (founder rule 2026-09-14): the tx-log row headlines the GROSS
+  // (= wire + fee = the payer's exact total debit) with the fee as its annotation line. Unknown
+  // fee → neither field: the row keeps its ledger truth (the wire) rather than a guess. The camera
+  // path signs in the same breath as setIntent — before the review-fee effect has started its
+  // query — so if none is in flight the note starts its own (same guards: DEMO and a ledger-less
+  // row have no honest fee and save nothing extra). Fire-and-forget: the sign is never delayed.
+  const savePriceNote = (r: PayIntent): void => {
+    void (async () => {
+      let query = feePromiseRef.current;
+      if (query == null) {
+        const ledger = r.currency === 0 ? null : catalog.find(c => c.currency === r.currency)?.ledger ?? null;
+        query = ledger == null ? null : Promise.resolve(fetchLedgerFee(identity.secretHex, ledger)).catch(() => null);
+        feePromiseRef.current = query;
+      }
+      const fee = await query;
+      saveTxNote(identity.publicHex, {k: r.nonceHex, who: r.toName || undefined, msg: r.memo || undefined, ...(fee != null ? {gross: (BigInt(r.amount) + BigInt(fee)).toString(), fee} : {})}, Date.now());
+    })().catch(() => {});
+  };
 
   // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
   // (the paid-screen receipt link + the offline-QR auth code — mutually exclusive phases, so one
@@ -576,8 +601,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // Same annotation as the wire/link path in `approve`, at the same last-point-before-signing
     // seam: for a till the name is the provider's claimedMerchantName (intent.toName), the msg is
     // the provider's claimedNote (intent.memo — display text set by `landOcp`), and the join key
-    // is the reference the till will reconcile by (intent.nonceHex = on-chain memo).
-    void saveTxNote(identity.publicHex, {k: r.nonceHex, who: r.toName || undefined, msg: r.memo || undefined}, Date.now());
+    // is the reference the till will reconcile by (intent.nonceHex = on-chain memo). Founder rule
+    // 2026-09-14: the row headlines the gross (wire + fee = the paid price), fee as annotation.
+    savePriceNote(r);
     setBusy(true);
     setErr(null);
     try {
@@ -707,7 +733,9 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     // the last point before signing — so a crash between submit and settle still leaves the note
     // for the row that will land. Join key = nonceHex = the on-chain memo the relay echoes back.
     // No-op when the intent carries neither (a bare wire request with empty toName/memo).
-    void saveTxNote(identity.publicHex, {k: r.nonceHex, who: r.toName || undefined, msg: r.memo || undefined}, Date.now());
+    // Founder rule 2026-09-14: carry the gross (wire + fee = the payer's exact debit) + the fee so
+    // the log row headlines the price; wire-only (fee unknown) saves neither — no guessed fee.
+    savePriceNote(r);
     setBusy(true);
     try {
       // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (the intent
@@ -962,7 +990,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     return (
       <View style={S.center}>
         <Text style={S.label}>{M.pay.paying}</Text>
-        <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmountCompact(catalog, intent.currency, intent.amount))}</Text>
+        {/* Founder rule 2026-09-14: every payer-facing amount shows the TOTAL DEBIT — wire + fee
+            when known (totalOf), the wire alone when not. This camera-entry surface used to render
+            the bare `intent.amount` (the wire), the one review screen that still could show the
+            netted number the founder measured as 0.0099 for a 0.01 request. */}
+        <Text testID="pay-amount" style={S.reviewAmount}>{M.pay.payAmount(fmtCurrencyAmountCompact(catalog, intent.currency, totalOf(intent.amount)))}</Text>
         <PayeeLine intent={intent} isSelf={isSelf} />
         {insufficient ? (
           <Text testID="review-lowbal" style={S.warnNote}>{blockApprove

@@ -157,9 +157,11 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
   }, [reqQr, result]);
   // Stable across renders (NfcTap's effect depends on it) — only changes when the request does.
   // `amount` is the WIRE raw (what lands on the ledger), the same netted number the till's
-  // reader advertises — the payer's tap-confirm matches ledger history against it.
+  // reader advertises — the payer's tap-confirm matches ledger history against it. Founder rule
+  // 2026-09-14 adds `displayAmount`: the payee's tap readout headlines the TYPED PRICE (the
+  // gross), with the wire untouched as the ledger/reconciliation truth below it.
   const readerReqInfo = useMemo(
-    () => (reqQr ? {amount: reqQr.wireRaw, nonce: reqQr.nonce, who: M.receive.payer, currency: reqQr.currency} : undefined),
+    () => (reqQr ? {amount: reqQr.wireRaw, displayAmount: reqQr.priceRaw, nonce: reqQr.nonce, who: M.receive.payer, currency: reqQr.currency} : undefined),
     [reqQr],
   );
 
@@ -262,11 +264,15 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         }
       }
       setReqQr({link, priceRaw, wireRaw, feeRaw: feeKnown, currency: selectedCurrency, nonce, nfcHex, nfcExpiry, expiry});
-      // Payee-side annotation (services/txNotes): when the payee typed a memo for this request,
-      // save it keyed by the request nonce (= the on-chain memo) so the INCOMING row can show the
-      // message the moment it settles. Deliberately NO `who` — the counterparty is the payer, and
-      // the IC rail carries no payer name; the row keeps the payer's principal prefix (honest).
-      if (memoVal) void saveTxNote(identity.publicHex, {k: nonce, msg: memoVal}, Date.now());
+      // Payee-side annotation (services/txNotes): the note for the INCOMING row this request will
+      // land, keyed by the request nonce (= the on-chain memo). The memo rides when the payee
+      // typed one; the gross/fee ride ALWAYS (founder rule 2026-09-14): the row headlines the
+      // TYPED PRICE with the fee as its annotation line, while the wire stays the ledger/
+      // reconciliation truth everywhere else. Deliberately NO `who` — the counterparty is the
+      // payer, and the IC rail carries no payer name; the row keeps the payer's principal prefix
+      // (honest). A note with neither memo nor fee (fee unknown, wire = price) is the no-op the
+      // store makes it — nothing to annotate, the ledger row is already the whole truth.
+      void saveTxNote(identity.publicHex, {k: nonce, msg: memoVal || undefined, gross: priceRaw, ...(feeKnown != null ? {fee: feeKnown} : {})}, Date.now());
       setResult(null); setErr(null);
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); }
   }

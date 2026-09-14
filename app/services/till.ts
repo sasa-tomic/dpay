@@ -192,6 +192,21 @@ export function tillRawUnits(cents: string, decimals: number, feeRaw: string): s
   return settles.toString(10);
 }
 
+/**
+ * The rung PRICE in raw units — the same scaling as `tillRawUnits` with NO fee netted out. This is
+ * the GROSS the till's displays headline (founder rule 2026-09-14: both devices read the typed
+ * price; the fee rides only the log row's annotation line). The wire (`tillRawUnits`) remains the
+ * settlement truth everywhere money moves.
+ */
+export function tillPriceUnits(cents: string, decimals: number): string {
+  if (!Number.isInteger(decimals) || decimals < CHF_DECIMALS) {
+    throw new Error(`till: an asset with ${decimals} decimals cannot express a CHF rappen`);
+  }
+  let scale = 1n;
+  for (let i = CHF_DECIMALS; i < decimals; i++) scale *= 10n;
+  return (BigInt(cents) * scale).toString(10);
+}
+
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
