@@ -15,7 +15,7 @@
 //   (d) the send form's contextual manage link (`send-manage`) reaches the SAME route while the
 //       book is populated, and Back returns to the form it came from (the route never strands the
 //       user — where you came from is where you go back to).
-import { setup, assert, assertIncludes, onboardWallet, selectDemoAsset, openPaySend, railPrincipalText, isDisabled, assertDisabled } from '../harness/lib.mjs';
+import { setup, assert, assertIncludes, onboardWallet, accountOf, faucetAccount, openBalances, selectCurrency, openPaySend, railPrincipalText, isDisabled, assertDisabled } from '../harness/lib.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -38,6 +38,13 @@ export async function run() {
 
     console.log('[178-address-book] onboarding…');
     await onboardWallet(driver, 'e2e-addrbook');
+    // The shared preamble ends on the Pay scanner (selectDemoAsset establishes it); this flow is
+    // about chrome reachable from a settled wallet, so land on Home the way a cold start does —
+    // the reload pattern flow 133 uses for its landing assertions.
+    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`,
+      { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    await driver.waitReady({ timeoutMs: 10_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 10_000 });
 
     // A principal-shaped destination the fake-IC rail accepts (the same fixture family flow 104
     // sends to). The saved copy is the CANONICAL owner text, which is what the row testIDs key on.
@@ -70,12 +77,13 @@ export async function run() {
     await driver.waitGone('addresses-add-form', { timeoutMs: 5_000 });
     console.log('[178-address-book] ✓ invalid destination refused, Save gated');
 
-    // (b′) Add form again: pick the DEMO rail explicitly (the chips ARE the honesty mechanism — a
-    //     destination only exists on its own chain), type a valid principal, wait for the resolver
-    //     to clear the gate (the IC check is debounced), name it, save.
+    // (b′) Add form again: pick the VCHF rail explicitly (the chips ARE the honesty mechanism — a
+    //     destination only exists on its own chain; VCHF rather than the practice rail because the
+    //     send-form leg below needs a rail with a send path), type a valid principal, wait for the
+    //     resolver to clear the gate (the IC check is debounced), name it, save.
     await driver.click('btn-addresses-add', { timeoutMs: 5_000 });
     await driver.findByTestID('addresses-add-form', { timeoutMs: 5_000 });
-    await driver.click('addr-add-asset-demo', { timeoutMs: 5_000 });
+    await driver.click('addr-add-asset-vchf', { timeoutMs: 5_000 });
     await driver.type('addr-add-address-input', principal, { timeoutMs: 5_000 });
     const gateDeadline = Date.now() + 6_000;
     for (;;) {
@@ -86,29 +94,38 @@ export async function run() {
     await driver.type('addr-add-name-input', 'Landlord', { timeoutMs: 5_000 });
     await driver.click('btn-addresses-save', { timeoutMs: 5_000 });
     await driver.waitGone('addresses-add-form', { timeoutMs: 5_000 });
-    const rowID = `addr-row-demo-${addr8}`;
+    const rowID = `addr-row-vchf-${addr8}`;
     const rowText = await driver.readText(rowID, { timeoutMs: 5_000 });
     assertIncludes(rowText, 'Landlord', 'the saved entry shows its label');
     assertIncludes(rowText, principal.slice(0, 5), 'the saved entry shows its address');
     console.log('[178-address-book] ✓ valid destination saved under its rail, named');
 
     // (c) Rename in place: the label is editable without re-entering the address.
-    await driver.click(`addr-rename-demo-${addr8}`, { timeoutMs: 5_000 });
-    await driver.type('addr-rename-input-demo', 'Canteen', { timeoutMs: 5_000 });
-    await driver.click('addr-rename-save-demo', { timeoutMs: 5_000 });
-    await driver.waitGone('addr-rename-input-demo', { timeoutMs: 5_000 });
+    await driver.click(`addr-rename-vchf-${addr8}`, { timeoutMs: 5_000 });
+    await driver.type('addr-rename-input-vchf', 'Canteen', { timeoutMs: 5_000 });
+    await driver.click('addr-rename-save-vchf', { timeoutMs: 5_000 });
+    await driver.waitGone('addr-rename-input-vchf', { timeoutMs: 5_000 });
     assertIncludes(await driver.readText(rowID, { timeoutMs: 5_000 }), 'Canteen', 'the renamed label replaced the old one');
     console.log('[178-address-book] ✓ entry renamed in place');
 
     // (d) The send form's contextual entry: leave the route first (Back returns to Home, the tab
-    //     the settings door was covering — and the way OUT of Home to accounts here is the
-    //     tappable balance itself, which selectDemoAsset exercises on our behalf), put the wallet
-    //     on the DEMO rail, open the send form: with a saved destination on that rail the saved
-    //     list shows a manage link that opens the same route, and Back returns to the form — the
-    //     route never strands the traveller.
+    //     the settings door was covering — and the way OUT of Home to accounts is the tappable
+    //     balance itself since 2026-09-14, which this leg exercises). The shared onboard preamble
+    //     leaves DEMO as the PERSISTED selection (practice rail — no send path), so re-select the
+    //     VCHF rail our entry lives on (flow 104's selector contract) and FUND it (the send form
+    //     is balance-gated: an empty wallet sees "No VCHF available", not the form), then open
+    //     the send form: its saved list shows a manage link that opens the same route, and Back
+    //     returns to the form — the route never strands the traveller.
     await driver.click('btn-addresses-back', { timeoutMs: 5_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
-    await selectDemoAsset(driver);
+    const identity = await accountOf(driver);
+    const accountHex = identity?.publicHex;
+    assert(typeof accountHex === 'string' && accountHex.length === 64, 'wallet account must be a 32-byte hex pubkey');
+    const fund = await faucetAccount(env.relayBaseURL, accountHex, 500_000_000, { currency: 7 });
+    assert(fund.ok, `faucet funding must succeed, got HTTP ${fund.status}`);
+    await openBalances(driver);
+    await selectCurrency(driver, 'vchf');
+    await driver.waitForText('5.00 VCHF', { timeoutMs: 8_000 });
     await openPaySend(driver);
     await driver.findByTestID('send-saved', { timeoutMs: 5_000 });
     await driver.click('send-manage', { timeoutMs: 5_000 });
@@ -123,7 +140,7 @@ export async function run() {
     await driver.findByTestID('btn-settings-address-book', { timeoutMs: 5_000 });
     await driver.click('btn-settings-address-book', { timeoutMs: 5_000 });
     await driver.findByTestID(rowID, { timeoutMs: 5_000 });
-    await driver.click(`addr-forget-demo-${addr8}`, { timeoutMs: 5_000 });
+    await driver.click(`addr-forget-vchf-${addr8}`, { timeoutMs: 5_000 });
     await driver.waitGone(rowID, { timeoutMs: 5_000 });
     assertIncludes(await driver.readText('addresses-empty', { timeoutMs: 5_000 }), 'No saved addresses yet', 'the book is empty again and says so');
     console.log('[178-address-book] ✓ entry removed, empty line restored');
@@ -132,6 +149,6 @@ export async function run() {
     await driver.screenshot('178-address-book');
     return { passed: true, meta, durationMs: Date.now() - start };
   } finally {
-    await env.close();
+    await env.stop();
   }
 }
