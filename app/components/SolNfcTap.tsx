@@ -132,8 +132,10 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
         return;
       }
       // The amount/cur are known from the merchant's own request (the v2 SolPay carries only rid+tx).
+      // Founder rule 2026-09-14: the payee's readout headlines the GROSS — for a netted native-SOL
+      // request that is wire + fee (the typed price); SPL requests never net, so `amt` already is.
       const {decimals, unit} = solUnit(req.cur);
-      setAmtText(fmtAssetCompact(req.amt, decimals, unit));
+      setAmtText(fmtAssetCompact(req.cur === 'SOL' ? (BigInt(req.amt) + SOL_FEE_LAMPORTS).toString() : req.amt, decimals, unit));
       const receipt = await broadcastSolPayment(req, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
         try { await DpaySolNfc.confirmSolReceipt(RECEIPT_SETTLED, receipt.rid, receipt.sig); } catch (e: unknown) { console.warn('DpaySolNfc.confirmSolReceipt failed (settled)', e); }
@@ -249,7 +251,10 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       // Device-saved annotation (services/txNotes): the tap request's claimed name + human memo
       // ride nowhere else — record them against the signature just captured (the SOL join key; the
       // settling row will carry it), same seam as SolPayMode's QR sign. Best-effort by contract.
-      void saveTxNote(identity.publicHex, {k: expectedSigRef.current, who: sanitiseDisplayText(decoded.name) || undefined, msg: sanitiseDisplayText(decoded.memo) || undefined}, Date.now());
+      // Founder rule 2026-09-14: a netted native-SOL request also carries the gross (wire + fee =
+      // the payer's exact debit) + the fee, so the log row headlines the price; SPL requests never
+      // net (their fee is separate-asset SOL gas) — nothing to annotate there.
+      void saveTxNote(identity.publicHex, {k: expectedSigRef.current, who: sanitiseDisplayText(decoded.name) || undefined, msg: sanitiseDisplayText(decoded.memo) || undefined, ...(decoded.cur === 'SOL' ? {gross: (BigInt(decoded.amt) + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
       const solpayUri = encodeSolPay(solpay);
       await DpaySolNfc.approveSolCard(solpayUri);
     } catch (e: unknown) {

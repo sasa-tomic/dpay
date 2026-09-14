@@ -511,8 +511,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       // place the association exists. Never re-derived on read: parsing on-chain memos for
       // incoming rows would re-fetch every transaction per history tick (flow 160's forbidden
       // path). `message` is the human text the payer saw; `memo` is the same text when the URI
-      // carried only the on-chain memo — one message is saved, never both.
-      void saveTxNote(identity.publicHex, {k: sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined}, Date.now());
+      // carried only the on-chain memo — one message is saved, never both. Founder rule
+      // 2026-09-14: native SOL also carries the gross (amount + fee = the exact total debit) +
+      // the fee so the log row headlines what the done screen showed; SPL rows are their own
+      // token truth (the fee is separate-asset gas) — nothing to annotate.
+      void saveTxNote(identity.publicHex, {k: sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined, ...(isSol ? {gross: (rawAmount + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
       // Refresh the account that actually moved — the REQUEST's mint, not the selection's.
       if (isSol) onSent(); else onSentToken(request.splToken);
       setSpayDone({amount, who, signature: sig, note: null});
@@ -523,7 +526,8 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       if (broadcast.sig !== null) {
         // The network accepted the transaction; only the confirmation is missing. Definitively
         // NOT-sent is off the table, so this is the honest pending screen with the signature.
-        void saveTxNote(identity.publicHex, {k: broadcast.sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined}, Date.now());
+        // Same gross/fee carry as the settled save above (founder rule 2026-09-14).
+        void saveTxNote(identity.publicHex, {k: broadcast.sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined, ...(isSol ? {gross: (rawAmount + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
         if (isSol) onSent(); else onSentToken(request.splToken);
         setSpayDone({amount, who, signature: broadcast.sig, note: M.pay.spay.pendingNote});
         setPhase('spay-done');
@@ -637,7 +641,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       // Same payer-side annotation as approveSpay, keyed by the signature (this rail signs no
       // memo to key by): a till's claimed name AND claimed note are the context the rail-side
       // send still has at hand — the IC seam saves the same pair keyed by the on-chain memo.
-      void saveTxNote(identity.publicHex, {k: sig, who: target.details.claimedMerchantName || undefined, msg: target.details.claimedNote || undefined}, Date.now());
+      // Founder rule 2026-09-14: the gross (amount + fee = the payer's exact debit) + the fee
+      // ride along so the log row headlines the price the review showed.
+      void saveTxNote(identity.publicHex, {k: sig, who: target.details.claimedMerchantName || undefined, msg: target.details.claimedNote || undefined, gross: (BigInt(target.rawAmount) + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()}, Date.now());
       return {kind: 'settled', txId: sig, reference: M.pay.ocp.ref.solTransaction(sig)};
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -700,8 +706,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       // the signature this device just produced (the SOL key the settling row will carry),
       // extracted exactly as SolNfcTap binds its receipt. Sanitised for display only — the signed
       // bytes above stay canonical (the merchant re-derives the request to verify the payment).
+      // Founder rule 2026-09-14: a netted native-SOL request carries the gross (wire + fee = the
+      // payer's exact debit, the same sum the hand-off screen shows) + the fee; SPL requests
+      // never net (separate-asset gas) — nothing to annotate.
       const parts = extractSignedTxParts(solpay.tx);
-      void saveTxNote(identity.publicHex, {k: parts != null ? bs58.encode(parts.signature) : '', who: sanitiseDisplayText(r.name) || undefined, msg: sanitiseDisplayText(r.memo) || undefined}, Date.now());
+      void saveTxNote(identity.publicHex, {k: parts != null ? bs58.encode(parts.signature) : '', who: sanitiseDisplayText(r.name) || undefined, msg: sanitiseDisplayText(r.memo) || undefined, ...(r.cur === 'SOL' ? {gross: (BigInt(r.amt) + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
       setSolpayUri(encodeSolPay(solpay));
       setPhase('qr');
     } catch (e: unknown) {

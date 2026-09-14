@@ -22,6 +22,7 @@ import {extractSignedTxParts} from '../solana/tx';
 import {createSolPaymentRequest, broadcastSolPayment, isSolanaRpcAvailable, type SolanaReadFailure} from '../solana';
 import {friendlySolError} from '../solana/errors';
 import {loadSolMerchantState, saveSolMerchantState, clearSolMerchantState} from '../services/solMerchantPersist';
+import {saveTxNote} from '../services/txNotes';
 import {type SolTokenStatus} from '../hooks/useSolanaBalances';
 import {DpaySolNfc} from '../services/native';
 import {withTimeout} from '../lib/timeout';
@@ -51,6 +52,14 @@ import {M} from '../i18n';
 // A FUNCTION, not a const: `C` is mutated in place on a theme flip, so a module-level style
 // object froze the light theme's white field + near-black ink into the dark theme's memo input.
 const memoInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
+
+// Founder rule 2026-09-14: the payee's settled readout headlines the GROSS — for a netted
+// native-SOL request that is wire + fee (the typed price; the same sum the reqQr headline and the
+// payer's total display make). SPL wires ride verbatim (no netting), so their gross IS the wire.
+// Display-only: the wire stays the settlement/reconciliation truth everywhere money moves.
+function solGrossOf(cur: string, amt: string): string {
+  return cur === 'SOL' ? (BigInt(amt) + SOL_FEE_LAMPORTS).toString() : amt;
+}
 
 /**
  * SolReceiveMode — the merchant-side payment component for the v2 recent-blockhash SOL rail.
@@ -349,7 +358,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       await saveSolMerchantState(identity.publicHex, {req: reqSnapshot, uri: reqUri, acceptedSignature: acceptedSig, acceptedTx: acceptedTxStr, outcome: 'broadcasting'});
       const receipt = await broadcastSolPayment(reqSnapshot, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
-        setResult({amount: reqSnapshot.amt, cur: reqSnapshot.cur, sig: receipt.sig});
+        setResult({amount: solGrossOf(reqSnapshot.cur, reqSnapshot.amt), cur: reqSnapshot.cur, sig: receipt.sig});
+        noteSettledGross(receipt.sig, reqSnapshot.cur, reqSnapshot.amt);
         awardPaymentTested(journeyRef.current);
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
@@ -382,11 +392,22 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
   // NFC reader success — same handling as onSignedQr SETTLED path.
   function onNfcResult(r: {amount: string; cur: string; sig: string} | null) {
     if (!r) return;
-    setResult({amount: r.amount, cur: r.cur, sig: r.sig});
+    setResult({amount: solGrossOf(r.cur, r.amount), cur: r.cur, sig: r.sig});
+    noteSettledGross(r.sig, r.cur, r.amount);
     awardPaymentTested(journeyRef.current);
     setReconcile(null);
     clearSolMerchantState(identity.publicHex);
     setPhase('result');
+  }
+
+  // Founder rule 2026-09-14: the INCOMING log row headlines the gross too — a settled native-SOL
+  // request saves {gross, fee} keyed by the tx signature (the SOL join key; the settling row will
+  // carry it). SPL settles save nothing: their wire already IS the price (separate-asset gas).
+  // Deliberately no `who`/`msg`: the SOL rail carries no payer name, and the payee's own memo rode
+  // the request bytes, not the settlement.
+  function noteSettledGross(sig: string, cur: string, wireAmt: string) {
+    if (cur !== 'SOL' || sig === '') return;
+    void saveTxNote(identity.publicHex, {k: sig, gross: solGrossOf(cur, wireAmt), fee: SOL_FEE_LAMPORTS.toString()}, Date.now());
   }
 
   // Rebroadcast a previously-accepted tx after an interrupted broadcast (reconciliation).
@@ -400,7 +421,8 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       const solpay: SolPayV2 = {v: 2, rid: reqSnapshot.rid, tx: txBytes};
       const receipt = await broadcastSolPayment(reqSnapshot, reqUri, solpay, signal);
       if (receipt.status === RECEIPT_SETTLED) {
-        setResult({amount: reqSnapshot.amt, cur: reqSnapshot.cur, sig: receipt.sig});
+        setResult({amount: solGrossOf(reqSnapshot.cur, reqSnapshot.amt), cur: reqSnapshot.cur, sig: receipt.sig});
+        noteSettledGross(receipt.sig, reqSnapshot.cur, reqSnapshot.amt);
         awardPaymentTested(journeyRef.current);
         await clearSolMerchantState(identity.publicHex);
         setReconcile(null);
