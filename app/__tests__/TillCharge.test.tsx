@@ -1,7 +1,7 @@
 /**
  * The counter (`components/TillCharge.tsx`) — the merchant's own OpenCryptoPay charge, rendered
- * inside Receive ▸ Request payment beside the till-code CHECKBOX: the amount row is the parent's,
- * shared with the dpay-code form, and arrives here as a prop.
+ * inside Receive ▸ Request payment beside the till-code CHECKBOX: the amount row and the message
+ * row are the parent's, shared with the dpay-code form, and arrive here as props.
  *
  * WHAT THIS SUITE OWNS. The client's outcomes are `till.test.ts`'s business and the signed bytes are
  * `tillOpenSignature.test.ts`'s; the three routes are mocked at their module boundary here so what
@@ -22,7 +22,11 @@
  *
  * The NOTE cases pin the merchant half of the signed note: what the cashier typed is what was
  * signed, sent, shown on the payer's tap and saved against the charge's reference — one spelling
- * everywhere. How the payer READS the note back is the payer's suites, off the same golden.
+ * everywhere. The typing itself is the PARENT's now (the ONE message box shared by both code
+ * forms, founder 2026-09-14): the note arrives here as a prop, exactly like the amount, and
+ * `ReceiveMode.test.tsx` owns the box — that it is one input, in one place, whose text survives
+ * the till-checkbox toggle. How the payer READS the note back is the payer's suites, off the same
+ * golden.
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
@@ -165,6 +169,10 @@ function mount(
   catalog: CurrencyDescriptor[] = CATALOG,
   /** What the PARENT's shared amount row holds — the price the cashier typed there. */
   amount = '10.50',
+  /** What the PARENT's shared message row holds — the ONE box, in the same place, whether or not
+   *  the till checkbox is checked (founder 2026-09-14). What this counter DOES with the text is
+   *  this suite's business; that the box itself never moves or resets is ReceiveMode's. */
+  note = '',
 ) {
   let tree!: renderer.ReactTestRenderer;
   act(() => {
@@ -178,6 +186,7 @@ function mount(
         nfcStatus={nfcStatus}
         onSelectAsset={onSelectAsset}
         amount={amount}
+        note={note}
       />,
     );
   });
@@ -321,21 +330,10 @@ describe('ringing up', () => {
 describe('the note — what this charge is for', () => {
   const NOTE = '2× Kafi, Tisch 4';
 
-  test('offers the optional field under the shared amount row, on a words keyboard', () => {
-    const tree = mount(VCHF);
-    const field = node(tree, 'till-note-input');
-    expect(field).toBeDefined();
-    expect(field.props.placeholder).toBe(M.receive.till.notePlaceholder);
-    expect(field.props.maxLength).toBe(32);
-    // The amount above this field is the decimal-pad's job; a note is words, and a pad here would
-    // make "2× Kafi, Tisch 4" literally untypeable.
-    expect(field.props.keyboardType).toBeUndefined();
-    act(() => { tree.unmount(); });
-  });
-
   test('rides the ring-up trimmed — signed, displayed on the tap, and saved against the reference', async () => {
-    const tree = mount(VCHF);
-    act(() => { node(tree, 'till-note-input').props.onChangeText(`  ${NOTE}  `); });
+    // The note is the PARENT's shared message row (founder 2026-09-14): it arrives as a prop, so
+    // the whitespace is asserted to be trimmed HERE — at the counter's edge — not at the input's.
+    const tree = mount(VCHF, () => {}, 'ready', CATALOG, '10.50', `  ${NOTE}  `);
     await ringUp(tree);
     // The whitespace is the cashier's, not the payer's: ONE trimmed spelling travels everywhere.
     expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, NOTE);
@@ -362,8 +360,7 @@ describe('the note — what this charge is for', () => {
   });
 
   test('whitespace the cashier typed is not a note — the price annotation still lands', async () => {
-    const tree = mount(VCHF);
-    act(() => { node(tree, 'till-note-input').props.onChangeText('   '); });
+    const tree = mount(VCHF, () => {}, 'ready', CATALOG, '10.50', '   ');
     await ringUp(tree);
     expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
     expect(mockSaveTxNote).toHaveBeenCalledWith(IDENTITY.publicHex, {k: REFERENCE, msg: undefined, gross: PRICE_RAW, fee: VCHF_FEE_RAW}, expect.any(Number));
@@ -371,16 +368,17 @@ describe('the note — what this charge is for', () => {
   });
 
   test('a refused ring-up keeps the note for the re-ring, like the amount above it', async () => {
-    // The counter's reset contract: a refused total is usually rung up again for the same thing,
-    // so the note survives the round trip exactly as the parent's amount does.
+    // The note is the PARENT's prop (the shared message row above), so it survives the counter's
+    // reset by construction — what this pins is the behaviour that follows: the re-ring signs the
+    // SAME words again, exactly like it re-uses the same price.
     jest.mocked(openTillCharge).mockResolvedValue({kind: 'refused', said: 'Re-sync the device clock', status: 401});
-    const tree = mount(VCHF);
-    act(() => { node(tree, 'till-note-input').props.onChangeText(NOTE); });
+    const tree = mount(VCHF, () => {}, 'ready', CATALOG, '10.50', NOTE);
     await ringUp(tree);
     expect(has(tree, 'till-failed')).toBe(true);
     await act(async () => { node(tree, 'till-failed-go').props.onPress(); await flush(); });
-    expect(has(tree, 'till-note-input')).toBe(true);
-    expect(node(tree, 'till-note-input').props.value).toBe(NOTE);
+    expect(has(tree, 'btn-till-ring-up')).toBe(true);
+    await ringUp(tree);
+    expect(openTillCharge).toHaveBeenLastCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, NOTE);
     act(() => { tree.unmount(); });
   });
 });

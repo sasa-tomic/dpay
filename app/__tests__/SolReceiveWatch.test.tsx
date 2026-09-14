@@ -65,28 +65,32 @@ afterEach(() => {
   jest.clearAllMocks();
 });
 
-function mount(over: {subMode?: 'request' | 'address'; selectedToken?: string; onRefreshSol?: () => void; onRefreshToken?: () => void} = {}) {
+function solReceiveProps(over: {subMode?: 'request' | 'address'; selectedToken?: string; onRefreshSol?: () => void; onRefreshToken?: () => void; codeForm?: 'dpay' | 'till'; tillAvailable?: boolean} = {}): Parameters<typeof SolReceiveMode>[0] {
+  return {
+    identity: IDENTITY,
+    relayUrl: 'http://relay.test',
+    nfcStatus: 'unsupported',
+    solAddress: SOL_ADDRESS,
+    subMode: over.subMode ?? 'address',
+    onSubModeChange: jest.fn(),
+    codeForm: over.codeForm ?? 'dpay',
+    onCodeFormChange: jest.fn(),
+    tillAvailable: over.tillAvailable ?? false,
+    catalog: CATALOG,
+    selectedToken: over.selectedToken ?? 'SOL',
+    assets: ASSETS,
+    selectedAssetId: 'solana:SOL' as AssetId,
+    balances: {} as Record<AssetId, BalanceView>,
+    onSelectAsset: jest.fn(),
+    onRefreshSol: over.onRefreshSol,
+    onRefreshToken: over.onRefreshToken,
+  };
+}
+
+function mount(over: Parameters<typeof solReceiveProps>[0] = {}) {
   act(() => {
     tree = renderer.create(
-      <SolReceiveMode
-        identity={IDENTITY}
-        relayUrl="http://relay.test"
-        nfcStatus="unsupported"
-        solAddress={SOL_ADDRESS}
-        subMode={over.subMode ?? 'address'}
-        onSubModeChange={jest.fn()}
-        codeForm="dpay"
-        onCodeFormChange={jest.fn()}
-        tillAvailable={false}
-        catalog={CATALOG}
-        selectedToken={over.selectedToken ?? 'SOL'}
-        assets={ASSETS}
-        selectedAssetId={'solana:SOL' as AssetId}
-        balances={{} as Record<AssetId, BalanceView>}
-        onSelectAsset={jest.fn()}
-        onRefreshSol={over.onRefreshSol}
-        onRefreshToken={over.onRefreshToken}
-      />,
+      <SolReceiveMode {...solReceiveProps(over)} />,
     );
   });
   return tree!;
@@ -130,5 +134,42 @@ describe('SolReceiveMode — the address screen keeps the rail on its fast caden
     act(() => { t.unmount(); });
     act(() => { jest.advanceTimersByTime(SOL_ACTIVE_POLL_WINDOW_MS * 5); });
     expect(refreshSol).toHaveBeenCalledTimes(2);
+  });
+});
+
+// --- ONE message box, both code forms (founder 2026-09-14) ----------------------------------------
+// The same truth `ReceiveMode.test.tsx` pins on the IC rail, stated on this rail too because the
+// same-surfaces hard rule cuts both ways: if the SOL form were allowed to move or reset the
+// message box on the till-checkbox toggle, the two Receive forms would disagree about one box.
+// The rail cannot ring up a charge (the checkbox leads to the honest refusal), so what is pinned
+// here is the BOX — mounted, positioned, text-preserving — not the counter. e2e flow 115 drives
+// the same toggle through the real app on this rail.
+describe('SolReceiveMode — the message box is one box, whatever the code form', () => {
+  const NOTE = '2x Kafi, Tisch 4';
+  const TILL_ON = {subMode: 'request' as const, codeForm: 'till' as const, tillAvailable: true};
+  const TILL_OFF = {subMode: 'request' as const, codeForm: 'dpay' as const, tillAvailable: true};
+
+  function memoBox(t: renderer.ReactTestRenderer) {
+    return t.root.findAll(n => n.props && n.props.testID === 'sol-req-memo-input')[0];
+  }
+
+  test('the same input stays mounted with the checkbox checked, and its text survives the toggle both ways', () => {
+    const t = mount(TILL_OFF);
+    expect(memoBox(t)).toBeDefined();                       // the dpay form's box
+    act(() => { memoBox(t).props.onChangeText(NOTE); });
+
+    // Checked: the SAME box keeps its place and its text — no till-owned twin input appears (on
+    // this rail the till branch is the honest refusal, and the box is still the form's own). NB:
+    // RN mirrors a `testID` across several host nodes (every Pressable in this tree matches 3×),
+    // so "one box" is asserted by presence + the twin id's ABSENCE, not by match count.
+    act(() => { t.update(<SolReceiveMode {...solReceiveProps(TILL_ON)} />); });
+    expect(memoBox(t)).toBeDefined();
+    expect(memoBox(t).props.value).toBe(NOTE);
+    expect(t.root.findAll(n => n.props && n.props.testID === 'till-note-input')).toHaveLength(0);
+    expect(t.root.findAll(n => n.props && n.props.testID === 'till-refused').length).toBeGreaterThan(0);
+
+    // Unchecked again: the dpay SOL request form, text intact — the other direction.
+    act(() => { t.update(<SolReceiveMode {...solReceiveProps(TILL_OFF)} />); });
+    expect(memoBox(t).props.value).toBe(NOTE);
   });
 });
