@@ -24,7 +24,7 @@ import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {AddressesTab} from '../components/AddressesTab';
-import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
+import {buildSelectableAssets} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {M} from '../i18n';
 import {loadAddressBook, rememberAddress} from '../services/addressBook';

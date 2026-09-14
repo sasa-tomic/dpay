@@ -106,7 +106,10 @@ export function AddressesTab({
       // selfPrincipal is null: this screen has no in-flight self-send to warn about, and a user
       // saving their OWN address (a deposit target) is legitimate — the resolver skips the
       // own-subaccount check rather than refusing (same contract SendSheet passes null for).
-      if (desc === null) { if (alive) setIcStatus(M.withdraw.send.refuseUnrecognised); return; }
+      // Uninvoked-template fix: this key is a `(asset) => string` message — every other caller
+      // (SendSheet, SolanaWithdrawSheet) names the asset; the branch's own comment already chose
+      // this string as the honest verdict when the catalog cannot even name the rail.
+      if (desc === null) { if (alive) setIcStatus(M.withdraw.send.refuseUnrecognised(asset.symbol)); return; }
       resolveDestination(text, desc, null).then(res => {
         if (alive) setIcStatus(res.ok ? null : res.message);
       });
