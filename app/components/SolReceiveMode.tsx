@@ -611,12 +611,12 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           per-rail special case, and the merchant would be left guessing whether their phone can do
           it at all. What gates it is the RELAY and not the rail: a relay that serves no till shows
           the checkbox on neither rail. Where it does show, checking it keeps the shared amount row
-          and swaps the button for the till's own — which lands on the honest closed branch (a till
-          code is paid in VCHF on the Internet Computer, and this request is on Solana) with the one
-           tap that fixes it. The memo is the dpay form's own and hides when the box is checked (the
-           till's note is the counter's own signed field, rendered there). No
-           `onHoldsForm`: a charge can never go live from this rail, so a held-form reporter would be
-           dead code. */}
+          AND the shared message row (one box, both modes, text surviving the toggle — founder
+          2026-09-14, exactly the IC rail's) and swaps the button for the till's own — which lands
+          on the honest closed branch (a till code is paid in VCHF on the Internet Computer, and
+          this request is on Solana) with the one tap that fixes it. No
+          `onHoldsForm`: a charge can never go live from this rail, so a held-form reporter would be
+          dead code. */}
       {!tillAvailable || codeForm !== 'till' ? <CoachTip tipKey="receiveRequest" /> : null}
       <Text style={S.label}>{M.receive.amountToReceive}</Text>
       <View style={S.amountRow}>
@@ -642,18 +642,20 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           accessibilityLabel={M.receive.amountToReceive}
         />
       </View>
-      {!tillAvailable || codeForm !== 'till' ? (
-        <TextInput
-          testID="sol-req-memo-input"
-          style={memoInputStyle()}
-          value={memo}
-          onChangeText={setMemo}
-          placeholder={M.receive.memoPlaceholder}
-          placeholderTextColor={C.sub}
-          accessibilityLabel={M.receive.memo}
-          maxLength={32}
-        />
-      ) : null}
+      {/* The ONE message box, both code forms (founder 2026-09-14) — same component, same place
+          under the shared amount row, same text across the till-checkbox toggle. dpay form: the
+          link's memo. Till form: the charge's signed note (handed to TillCharge below). The IC
+          rail's box is identical in role — the same-surfaces rule. */}
+      <TextInput
+        testID="sol-req-memo-input"
+        style={memoInputStyle()}
+        value={memo}
+        onChangeText={setMemo}
+        placeholder={M.receive.memoPlaceholder}
+        placeholderTextColor={C.sub}
+        accessibilityLabel={M.receive.memo}
+        maxLength={32}
+      />
       {tillAvailable ? (
         <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
           <Pressable
@@ -680,6 +682,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           nfcStatus={nfcStatus}
           onSelectAsset={onSelectAsset}
           amount={amount}
+          note={memo}
         />
       ) : (
         <>

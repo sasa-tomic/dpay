@@ -292,8 +292,6 @@ export const receiveFr: ReceiveMessages = {
     tillCode: 'Code de caisse (OpenCryptoPay)',
 
     chargeHint: 'Affiché en francs, payé en VCHF — un franc, un VCHF, sans conversion.',
-    noteLabel: 'Note',
-    notePlaceholder: 'À quoi correspond ce montant (facultatif)',
     ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code qu’il peut payer',
     badAmount: reason =>
       reason === 'too-precise'

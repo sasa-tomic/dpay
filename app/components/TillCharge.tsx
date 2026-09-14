@@ -1,11 +1,11 @@
 import {useEffect, useState} from 'react';
-import {View, Text, Pressable, TextInput, ActivityIndicator, Platform, type TextStyle} from 'react-native';
+import {View, Text, Pressable, ActivityIndicator, Platform} from 'react-native';
 import {QrCode} from './QrCode';
 import {InstructionPanel} from './InstructionPanel';
 import {NfcTap} from './NfcTap';
 import {NfcStatusRow} from './NfcStatusRow';
 import {NfcIcon} from './NfcIcon';
-import {C, FONT} from '../config/palette';
+import {C} from '../config/palette';
 import {S} from '../styles';
 import {NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET, QR_SIZE} from '../config/constants';
 import {fmtAsset, fmtAssetCompact, nowSecs, short} from '../lib/format';
@@ -30,20 +30,16 @@ import {M} from '../i18n';
  *  own amount formatter (`fmtAsset`), never by string concatenation. */
 const CHF = 'CHF';
 
-// The till's optional note input — the same secondary-field idiom as the dpay form's memo field
-// (`memoInputStyle`, ReceiveMode): white field + hairline line2 border + Space Grotesk, 44pt-min,
-// full-width so it lines up with the shared amount row above and the ring-up button below. A
-// FUNCTION for the same reason that one is: `C` is mutated in place on a theme flip, so a
-// module-level style object would freeze one theme's field into the other.
-const noteInputStyle = (): TextStyle => ({alignSelf: 'stretch', marginTop: 14, minHeight: 44, backgroundColor: C.card, borderWidth: 1, borderColor: C.line2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, color: C.ink, fontFamily: FONT.sans});
-
 /**
  * The counter: a cashier rings up a price in francs, shows a code, and watches it be paid.
  *
  * WHERE THIS LIVES, AND WHY IT IS NOT A TAB. A till charge is not a third kind of receiving — it is
  * the SAME request with a wider audience — so it sits inside Receive ▸ Request payment beside the
- * till-code CHECKBOX: the amount row is the dpay-code form's own, shared, and the checkbox is what
- * flips the single button from building a dpay payment link to ringing up a till charge. The
+ * till-code CHECKBOX: the amount row and the message row are the dpay-code form's own, shared, and
+ * the checkbox is what flips the single button from building a dpay payment link to ringing up a
+ * till charge. The message row is the ONE box in both modes (founder 2026-09-14): same input, same
+ * place, same text whether or not the checkbox is checked — in till mode its text is the signed
+ * note, and it arrives here as a prop exactly like the amount does. The
  * `[ Request payment | My address ]` toggle is structurally two-segment and widening it would assert
  * a distinction that does not exist. Two QR payloads cannot share one frame, which is the only
  * reason there is a checkbox at all: the request screen already runs QR and NFC reader mode at the
@@ -105,7 +101,7 @@ type Phase =
    *  failed — the four causes send the merchant to do four different things. */
   | {k: 'failed'; outcome: Exclude<TillOpenOutcome, {kind: 'open'}>};
 
-export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatus, onSelectAsset, amount, onHoldsForm}: {
+export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatus, onSelectAsset, amount, note, onHoldsForm}: {
   identity: Identity;
   relayUrl: string;
   /** The asset the wallet is currently on — the one the whole Receive tab is about. */
@@ -123,6 +119,12 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
    *  owns what a till charge does with it). In francs, like every till input — parsed here by the
    *  till's own 2-decimal rule, never by the parent's per-asset one. */
   amount: string;
+  /** The message typed into the SHARED message row above — the ONE box that stays mounted, in the
+   *  same place, whether or not the till checkbox is checked (founder 2026-09-14: the box must not
+   *  move, restyle or reset on the toggle; the parent owns input + state, this component owns what
+   *  a till charge does with it). It is the charge's signed note: what the payer sees on review,
+   *  trimmed here, and kept across a re-ring for the same reason the amount is. */
+  note: string;
   /** Fires from the first ring-up attempt until the cashier presses "next customer" — every phase
    *  that is not the entry tail — so the parent can hide the shared amount row and the checkbox and
    *  lock the asset selection. Flipping away from a live code would leave a payable charge on
@@ -131,10 +133,6 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   onHoldsForm?: (held: boolean) => void;
 }) {
   const [phase, setPhase] = useState<Phase>({k: 'entering'});
-  /** What this charge is for, the cashier's own typing ("2× Kafi, Tisch 4") — signed with the
-   *  price, shown to the payer on review, and kept across a reset like the amount is: a refused
-   *  ring-up is usually re-rung for the same thing. */
-  const [note, setNote] = useState('');
   /** The price the last ring-up ATTEMPTED, in cents — what a failure panel quotes back. Kept beside
    *  the charge rather than re-parsed from the input, so the number in the message is the number
    *  that was actually signed and sent. */
@@ -385,9 +383,9 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     setErr(cancelRefusal(outcome));
   }
 
-  /** Back to an empty counter. The amount is the PARENT's and is kept untouched — a mis-keyed
-   *  total is retyped, a refused one is usually rung up again unchanged. The note is this form's
-   *  own and is kept the same way: a re-ring is almost always for the same thing. */
+  /** Back to an empty counter. The amount and the note are the PARENT's (the shared rows above)
+   *  and are kept untouched — a mis-keyed total is retyped, a refused one is usually rung up
+   *  again unchanged, and a re-ring is almost always for the same thing. */
   function reset() {
     setPhase({k: 'entering'});
     setUnchecked(null);
@@ -577,27 +575,17 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     );
   }
 
-  // phase 'entering' / 'opening' — the counter's entry tail. The amount row above this is the
-  // PARENT's, shared with the dpay-code form; this component takes the typed price from there and
-  // parses it with the TILL's own rule (`chfCents` — two decimals, a third is refused rather than
+  // phase 'entering' / 'opening' — the counter's entry tail. The amount row and the message row
+  // above this are the PARENT's, shared with the dpay-code form (one box, both modes — founder
+  // 2026-09-14); this component takes the typed price and the typed note from there and parses the
+  // price with the TILL's own rule (`chfCents` — two decimals, a third is refused rather than
   // rounded, because a rounded price is a misprice). The franc/VCHF equivalence is said out loud
-  // by the hint, not left as an unstated conversion. The note is the till's own field, under the
-  // shared amount row where the dpay form's memo sits — a plain keyboard (words, not a price), and
-  // no submit-on-Enter: a ring-up is signed, so the button stays the only thing that does it.
+  // by the hint, not left as an unstated conversion. No submit-on-Enter from the shared rows: a
+  // ring-up is signed, so the button stays the only thing that does it.
   const opening = phase.k === 'opening';
   return (
     <View style={S.centerTop}>
       <Text style={S.dim2}>{M.receive.till.chargeHint}</Text>
-      <TextInput
-        testID="till-note-input"
-        style={noteInputStyle()}
-        value={note}
-        onChangeText={setNote}
-        placeholder={M.receive.till.notePlaceholder}
-        placeholderTextColor={C.sub}
-        accessibilityLabel={M.receive.till.noteLabel}
-        maxLength={32}
-      />
       {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
       {opening ? <ActivityIndicator color={C.brandText} /> : null}
       <Pressable

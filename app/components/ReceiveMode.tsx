@@ -37,7 +37,9 @@ import {CoachTip} from './CoachTip';
 import {IconCheck, IconChevronDown, IconClock, IconQr, IconShare, IconWifiOff} from './icons';
 import {M} from '../i18n';
 
-// The optional merchant memo input — a real secondary field (not a bare text link), mirroring the
+// The optional merchant memo input — the ONE message box for BOTH code forms (dpay link memo in
+// one, the till's signed note in the other; founder 2026-09-14: same box, same place, same text
+// across the till-checkbox toggle) — a real secondary field (not a bare text link), mirroring the
 // paste-button affordance pattern (44pt-min touch target + a visible border). Inline (Group E owns
 // styles.ts as ONE block): Traveler Paper input idiom — white field + hairline line2 border +
 // Space Grotesk, matching usernameInput/withdrawAddrInput (the old dark-theme transparent-bg +
@@ -676,16 +678,18 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         />
       ) : null}
       {/* WHICH CODE, i.e. who can pay it — the same request, two audiences. A dpay code is this
-           wallet's payment link: any phone camera opens it — dpay on a dpay phone, the web wallet
-           otherwise (founder decision 2026-09-12); a till code is this merchant's own
-           OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
-           It is a CHECKBOX and not a second form because the request is one request: the amount row
-           above is shared, the memo is the dpay form's own (the till takes a NOTE — a different,
-           signed "what is this for" the counter renders itself — so the dpay memo would be silently
-           ignored and the field hides instead), and the box flips the single button below between
-           the two payloads. Unchecked — the dpay code — is the default. Hidden while TillCharge
-           holds the form, exactly as the toggle above is while a request QR is up: flipping away
-           would abandon a code a customer can still pay. */}
+            wallet's payment link: any phone camera opens it — dpay on a dpay phone, the web wallet
+            otherwise (founder decision 2026-09-12); a till code is this merchant's own
+            OpenCryptoPay charge, which any wallet that speaks the standard could in principle scan.
+            It is a CHECKBOX and not a second form because the request is one request: the amount
+            row above is shared, and so is the MESSAGE row — one box, the same component in the same
+            place whether or not the box is checked, and its text survives the toggle in both
+            directions (founder 2026-09-14: the box must not move, restyle or reset). The text is
+            the dpay link's memo in one mode and the till's signed note in the other — the same
+            "what is this for" either way — and the box flips the single button below between the
+            two payloads. Unchecked — the dpay code — is the default. Hidden while TillCharge
+            holds the form, exactly as the toggle above is while a request QR is up: flipping away
+            would abandon a code a customer can still pay. */}
       {/* The capability flag gates ENTRY to this form; it never un-mounts a HELD one. If the
           relay is retargeted or drops mid-charge, `tillAvailable` flips false but `tillHeld` keeps
           TillCharge mounted — its own poll then says "Can't check this charge right now", which is
@@ -716,21 +720,25 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 checkbox is checked — the till's own button is the one that rings up. */}
             <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} onSubmitEditing={(tillAvailable || tillHeld) && codeForm === 'till' ? undefined : makeRequest} returnKeyType="done" />
           </View>
-          {((tillAvailable || tillHeld) && codeForm === 'till') ? null : (
-            <TextInput
-              testID="memo-input"
-              style={memoInputStyle()}
-              value={memo}
-              onChangeText={setMemo}
-              placeholder={M.receive.memoPlaceholder}
-              placeholderTextColor={C.sub}
-              accessibilityLabel={M.receive.memo}
-              accessibilityHint={M.receive.memoHint}
-              maxLength={32}
-              onSubmitEditing={makeRequest}
-              returnKeyType="done"
-            />
-          )}
+          {/* The ONE message box — mounted in BOTH code forms (founder 2026-09-14): same component,
+              same place under the shared amount row, same text across the till-checkbox toggle. In
+              the dpay form its text rides the payment link as the memo; in the till form it is the
+              charge's signed note (passed to TillCharge below). Submit-on-Enter is the DPAY form's
+              only — the shared amount row above says why (a ring-up is signed; the till's own
+              button is the one that rings up). */}
+          <TextInput
+            testID="memo-input"
+            style={memoInputStyle()}
+            value={memo}
+            onChangeText={setMemo}
+            placeholder={M.receive.memoPlaceholder}
+            placeholderTextColor={C.sub}
+            accessibilityLabel={M.receive.memo}
+            accessibilityHint={M.receive.memoHint}
+            maxLength={32}
+            onSubmitEditing={((tillAvailable || tillHeld) && codeForm === 'till') ? undefined : makeRequest}
+            returnKeyType="done"
+          />
           {tillAvailable ? (
             <View testID="receive-code-form" style={{alignSelf: 'stretch'}}>
               <Pressable
@@ -759,6 +767,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
           nfcStatus={nfcStatus}
           onSelectAsset={onSelectAsset}
           amount={amount}
+          note={memo}
           onHoldsForm={setTillHeld}
         />
       ) : (
