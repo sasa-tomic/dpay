@@ -14,6 +14,7 @@
 //    double-pay guard and must not be read as one — dpay sends no `created_at_time`, and without
 //    it a DFINITY ledger runs no duplicate check at all (`icp_transfer_arg` in dpay-ffi).
 import {DpayCore} from './native';
+import {rememberLedgerFee} from './ledgerFees';
 import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS, INGRESS_AHEAD_S} from './icp';
 import {hexToBytes, bytesToHex, base, short} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
@@ -425,11 +426,18 @@ const EMPTY_DIDL_ARG_HEX = '4449444c0000';
  * rejected with BadFee, exactly like a transfer), and the send screen quotes it to the user rather
  * than repeating a catalog value that may be stale — or, worse, printing 0 for a row that simply
  * registers no fee. Throws when the ledger cannot be reached: an unknown fee is stated as unknown,
- * never defaulted. */
+ * never defaulted.
+ *
+ * Every SUCCESSFUL answer is also written through to the display cache (`services/ledgerFees`) so
+ * an offline payer's gross readout can still quote the fee the ledger itself last gave (founder
+ * rule 2026-09-14). The cache is display-only: signing paths use THIS return only — a cached or
+ * catalog fee must never flow into a signature. */
 export async function fetchLedgerFee(secretHex: string, ledger: string): Promise<string> {
   const reply = await icQuery(secretHex, ledger, 'icrc1_fee', EMPTY_DIDL_ARG_HEX);
   if (reply == null) throw new Error(M.errors.ic.feeUnavailable);
-  return await DpayCore.icpDecodeInt(reply);
+  const fee = await DpayCore.icpDecodeInt(reply);
+  void rememberLedgerFee(ledger, fee); // display-cache write-through; never throws, never awaited
+  return fee;
 }
 
 /** ckBTC offramp: approve(spender=minter, amount) on the ckBTC ledger, then retrieve from the minter. */

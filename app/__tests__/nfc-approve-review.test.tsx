@@ -23,16 +23,19 @@
  * testIDs (e2e matches them by textContent) — tests here match them by rendered text.
  */
 import React from 'react';
-import {describe, it, expect, jest, afterEach} from '@jest/globals';
+import {describe, it, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import Renderer, {act} from 'react-test-renderer';
 import bs58 from 'bs58';
 import {DeviceEventEmitter} from 'react-native';
 import type {CurrencyDescriptor} from '../config/catalog';
+import {icpCatalogOf, fmtCurrencyAmountCompact, BUNDLED_NETWORKS} from '../config/catalog';
 import {encodeSolReq} from '../solana/qr';
 import {NfcTap} from '../components/NfcTap';
 import {SolNfcTap} from '../components/SolNfcTap';
 import {DpayNfc, DpaySolNfc} from '../services/native';
-import {prepareNfcTransfer} from '../services/rail';
+import {prepareNfcTransfer, fetchLedgerFee} from '../services/rail';
+import {rememberLedgerFee} from '../services/ledgerFees';
+import * as txNotes from '../services/txNotes';
 import {signSolPayment, signSplPayment} from '../solana';
 import {USDC_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 import type {SolMintStates} from '../config/assets';
@@ -78,6 +81,10 @@ jest.mock('../services/rail', () => ({
   })),
   submitNfcTransfer: jest.fn(async () => ({kind: 'unknown'})),
   confirmIncomingTransfer: jest.fn(async () => false),
+  // The live icrc1_fee query behind the gross readout (founder rule 2026-09-14). The fixture
+  // catalog below carries NO ledger, so the auto-sign tests never reach it; the offline-display
+  // describe configures it per test.
+  fetchLedgerFee: jest.fn(),
 }));
 
 jest.mock('../solana', () => {
@@ -214,6 +221,71 @@ describe('NfcTap (IC) auto-sign (one-press rule)', () => {
     expect(DpayNfc.approveCard).not.toHaveBeenCalled();
     expect(DpayNfc.declineCard).toHaveBeenCalledWith('ab'.repeat(16));
     expect(hasText('Couldn’t authorize payment — try again')).toBe(true);
+  });
+});
+
+describe("NfcTap (IC) offline fee display — the payer still reads the price (founder rule 2026-09-14)", () => {
+  // The offline half of the rule: the payer taps with NO network, the live icrc1_fee query
+  // fails — yet the readout must still headline the TYPED PRICE (wire + fee), not the netted
+  // wire the request carries. The chain falls back to the fee this very ledger last answered
+  // (services/ledgerFees, persisted by every successful query) and then the catalog row's
+  // drift-alarmed fee. The catalog fixture is the REAL bundled VCHF row (fee '10000' raw = the
+  // 0.0001 VCHF the founder's 1.00-price example nets out); ckBTC/DEMO register no fee anywhere
+  // and keep the honest wire-only readout (the ckBTC tests above pin that surface).
+  const VCHF_CATALOG: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS).filter(c => c.currency === 7);
+  const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
+  const REQ_VCHF = {currency: 7, amount: '99990000'}; // price 1.00 → wire 0.9999 (fee netted out)
+
+  beforeEach(() => {
+    // The offline default: the live query rejects, exactly as it does with no network. The
+    // suite-level afterEach clears calls (implementations persist), so each test re-arms this.
+    jest.mocked(fetchLedgerFee).mockReset().mockRejectedValue(new Error('offline'));
+  });
+
+  async function mountVchfCard() {
+    await act(async () => {
+      tree = Renderer.create(
+        <NfcTap role="card" identity={IDENTITY} catalog={VCHF_CATALOG} onClose={() => {}} />,
+      );
+    });
+  }
+
+  it('persisted ledger fee carries the price — "Paying 1.00 VCHF", not the 0.9999 wire', async () => {
+    await rememberLedgerFee(VCHF_LEDGER, '10000'); // what the ledger answered on some earlier online day
+    await mountVchfCard();
+    await emitIc(icRequest(REQ_VCHF));
+    expect(fetchLedgerFee).toHaveBeenCalledTimes(1); // the live query WAS attempted first — and lost
+    expect(hasText(M.nfc.paying(fmtCurrencyAmountCompact(VCHF_CATALOG, 7, '100000000'), 'Internet Computer'))).toBe(true);
+    expect(hasText(M.nfc.paying(fmtCurrencyAmountCompact(VCHF_CATALOG, 7, '99990000'), 'Internet Computer'))).toBe(false); // the wire never headlines
+  });
+
+  it('no cache: the bundled catalog row stands in (drift-alarmed display metadata)', async () => {
+    await mountVchfCard(); // afterEach cleared AsyncStorage — no persisted answer
+    await emitIc(icRequest(REQ_VCHF));
+    expect(hasText(M.nfc.paying(fmtCurrencyAmountCompact(VCHF_CATALOG, 7, '100000000'), 'Internet Computer'))).toBe(true);
+  });
+
+  it('a stale cache never beats a live answer — the ledger stays authoritative', async () => {
+    await rememberLedgerFee(VCHF_LEDGER, '20000'); // stale
+    jest.mocked(fetchLedgerFee).mockResolvedValue('10000'); // live wins
+    await mountVchfCard();
+    await emitIc(icRequest(REQ_VCHF));
+    expect(hasText(M.nfc.paying(fmtCurrencyAmountCompact(VCHF_CATALOG, 7, '100000000'), 'Internet Computer'))).toBe(true); // 1.00, never the 1.0001 the stale cache would give
+  });
+
+  it('the offline note still records the price — {gross: wire+fee, fee} from the fallback', async () => {
+    await rememberLedgerFee(VCHF_LEDGER, '10000');
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    await mountVchfCard();
+    await emitIc(icRequest(REQ_VCHF));
+    await act(async () => {}); // flush the chained fee promise into the note save
+    expect(noteSpy).toHaveBeenCalledTimes(1);
+    const [who, note] = noteSpy.mock.calls[0];
+    expect(who).toBe(IDENTITY.publicHex);
+    expect(note.k).toBe('ab'.repeat(16)); // the request nonce — the on-chain reconciliation key
+    expect(note.gross).toBe('100000000'); // the price, not the 99990000 wire
+    expect(note.fee).toBe('10000');
+    noteSpy.mockRestore();
   });
 });
 

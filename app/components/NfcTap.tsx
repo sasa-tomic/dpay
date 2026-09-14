@@ -12,6 +12,7 @@ import {
 } from '../services/rail';
 import {DpayNfc} from '../services/native';
 import {saveTxNote} from '../services/txNotes';
+import {fallbackLedgerFee} from '../services/ledgerFees';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
 import {M} from '../i18n';
@@ -70,10 +71,15 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
 }) {
   const [disclosure, setDisclosure] = useState<NfcDisclosure | null>(null);
   // Founder rule 2026-09-14 — the payer's tap screen reads the TOTAL DEBIT (wire + fee), never
-  // the netted wire alone. `cardReq`/`cardFee` hold the request + the best-effort live fee for
-  // that readout; `feePromiseRef` is the same query's promise, consumed by the note save so the
-  // log row gets the gross too. DEMO play money has no fee; offline the query simply fails and
-  // every surface falls back to the wire — honest, never a guess.
+  // the netted wire alone. `cardReq`/`cardFee` hold the request + the display fee for that
+  // readout; `feePromiseRef` is the same query's promise, consumed by the note save so the log
+  // row gets the gross too. The fee is LIVE-first (`fetchLedgerFee` — the ledger stays
+  // authoritative whenever it can be asked) with local fallbacks for the offline payer, which
+  // is this rail's signature use case: the fee the ledger itself last answered
+  // (`services/ledgerFees`, written through by every successful query), then the bundled
+  // catalog row's drift-alarmed fee. Both are the ledger's own fact by another road, never a
+  // guess, so an offline tap still reads the typed price; `cardFee` stays null (wire-only
+  // display) only when no source knows (DEMO play money has no fee; ckBTC registers none).
   const [cardReq, setCardReq] = useState<{currency: number; amount: string} | null>(null);
   const [cardFee, setCardFee] = useState<string | null>(null);
   const feePromiseRef = useRef<Promise<string | null> | null>(null);
@@ -203,13 +209,16 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
         return;
       }
       setDisclosure(disc); // drives the read-only "Paying <amt> on <network>" status line
-      // Kick the fee query the readout + the note both consume (founder rule 2026-09-14). It is
-      // best-effort by design: a failure leaves `cardFee` null and the displays show the wire.
+      // Kick the fee query the readout + the note both consume (founder rule 2026-09-14). LIVE
+      // first; offline (this rail's own use case) the chain falls back to the persisted answer
+      // of this very ledger, then the catalog row — `cardFee` stays null only when no local
+      // answer exists either, and the displays then show the wire.
       setCardReq({currency: req.currency, amount: req.amount});
       setCardFee(null);
       const ledger = catalog.find(c => c.currency === req.currency)?.ledger;
       if (req.currency !== 0 && ledger) {
-        const p = fetchLedgerFee(identity.secretHex, ledger).catch(() => null);
+        const p = fetchLedgerFee(identity.secretHex, ledger)
+          .catch(() => fallbackLedgerFee(ledger, catalog, req.currency));
         feePromiseRef.current = p;
         void p.then(fee => {
           if (fee != null) setCardFee(fee);
@@ -295,7 +304,8 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     // carries the payee's claimed name + human memo, recorded before signing so a crash after
     // provideWire still leaves the note. Join key = nonceHex = the on-chain memo. Founder rule
     // 2026-09-14: the note also carries the gross (wire + fee = the exact total debit) + the fee
-    // when the fee query answered — the log row then headlines the price; unknown fee saves
+    // when the fee chain answered — live, or the persisted/catalog fee when the payer is offline
+    // (the ref holds the same chained promise the readout uses). No answer anywhere saves
     // neither, no guess. Fire-and-forget beside the offline sign; the query's own transport
     // timeout bounds it.
     void (async () => {
@@ -319,8 +329,9 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   if (phase === 'listening' && !activeRef.current) return null;
 
   // Founder rule 2026-09-14 — BOTH roles read the GROSS here. Card: the total debit (wire + fee
-  // when the fee query answered, the wire alone when it could not — `disclosure` itself still
-  // gates payability above, but its `formattedAmount` is the netted wire and is never shown).
+  // when the fee chain answered — live, or the persisted/catalog fee offline — and the wire
+  // alone when no source knows; `disclosure` itself still gates payability above, but its
+  // `formattedAmount` is the netted wire and is never shown).
   // Reader: `displayAmount` (the payee's typed price) with the wire as the legacy fallback.
   const formattedAmt = role === 'card'
     ? (disclosure != null && cardReq != null

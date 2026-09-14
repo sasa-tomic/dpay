@@ -77,6 +77,8 @@ import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '
 // Spied (not mocked) in the till-note tests: the store's own write behaviour is txNotes.test.ts's
 // to pin; here only the SEAM's arguments matter, and the real write keeps the rest honest.
 import * as txNotes from '../services/txNotes';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {rememberLedgerFee} from '../services/ledgerFees';
 import {PayMode} from '../components/PayMode';
 import {BUNDLED_NETWORKS, icpCatalogOf, fmtCurrencyAmountCompact} from '../config/catalog';
 import {buildSelectableAssets} from '../config/assets';
@@ -367,6 +369,87 @@ describe('PayMode — the payer reads the TOTAL DEBIT, never the bare wire (foun
       tree.unmount();
     });
     noteSpy.mockRestore();
+  });
+});
+
+describe("PayMode — offline, the total falls back to the ledger's own past answers (2026-09-14)", () => {
+  // The OFFLINE half of the same founder rule: the live icrc1_fee query is exactly what an
+  // offline payer cannot run — and signature NFC/QR IS the offline use case, so while every
+  // online path read 0.01, the offline payer's screen and saved note regressed to the bare
+  // 0.0099 wire. The display chain now falls back to the fee the ledger ITSELF last answered
+  // (services/ledgerFees — persisted per ledger by rail's write-through) and then the bundled
+  // catalog row; both local reads, both the ledger's own fact by another road, never a guess.
+  // The signed envelope is untouched (prepareTransfer still gets the wire), and a LIVE answer
+  // still beats a stale cache.
+  const CATALOG_V = icpCatalogOf(BUNDLED_NETWORKS);
+  const VCHF_ASSET = buildSelectableAssets(CATALOG_V, {showTestnet: false, solanaEnabled: false}).filter(a => a.id === 'ic:7');
+  const REQ_VCHF: Req = {...REQ, amount: '99990000', currency: 7};
+  const mountVchf = () => mountPay({catalog: CATALOG_V, assets: VCHF_ASSET});
+
+  beforeEach(async () => {
+    await AsyncStorage.clear(); // the fee cache is shared in-memory state between these tests
+  });
+  afterEach(async () => {
+    await AsyncStorage.clear(); // never leak a seeded fee into later suites' mounts
+  });
+
+  test('live query REJECTS (offline): the catalog fee stands in — the review still reads 1.00 VCHF', async () => {
+    jest.mocked(fetchLedgerFee).mockRejectedValue(new Error('offline'));
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {})); // keep the signing surface put
+    const tree = mountVchf();
+    await scanToSign(tree, REQ_VCHF);
+    await act(async () => {}); // flush the rejected query → the local fallback → feeRaw
+    expect(jest.mocked(fetchLedgerFee).mock.calls.length).toBeGreaterThan(0); // live WAS attempted first — and lost
+    expect(textByTestID(tree, 'pay-amount')).toBe(M.pay.payAmount(fmtCurrencyAmountCompact(CATALOG_V, 7, '100000000')));
+    expect(textByTestID(tree, 'pay-amount')).not.toContain('0.9999'); // the netted wire never headlines offline either
+    expect(jest.mocked(prepareTransfer).mock.calls[0][2]?.amount).toBe('99990000'); // the envelope stays the WIRE
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('offline note still records the price — {gross, fee} from the catalog fallback', async () => {
+    jest.mocked(fetchLedgerFee).mockRejectedValue(new Error('offline'));
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    const tree = mountVchf();
+    await scanToSign(tree, REQ_VCHF); // auto-sign runs to the qr phase; the note saved pre-prepare
+    expect(noteSpy).toHaveBeenCalledTimes(1);
+    const [who, note] = noteSpy.mock.calls[0];
+    expect(who).toBe(IDENTITY.publicHex);
+    expect(note.k).toBe(REQ_VCHF.nonceHex);
+    expect(note.gross).toBe('100000000'); // the price, not the 99990000 wire
+    expect(note.fee).toBe('10000'); // the catalog row's fee — the ledger's registered answer
+    act(() => {
+      tree.unmount();
+    });
+    noteSpy.mockRestore();
+  });
+
+  test('the persisted ledger fee beats the catalog row (a fresher word from the same ledger)', async () => {
+    await rememberLedgerFee(VCHF_LEDGER, '20000'); // what this ledger last answered online
+    jest.mocked(fetchLedgerFee).mockRejectedValue(new Error('offline'));
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {}));
+    const tree = mountVchf();
+    await scanToSign(tree, REQ_VCHF);
+    await act(async () => {});
+    expect(textByTestID(tree, 'pay-amount')).toBe(M.pay.payAmount(fmtCurrencyAmountCompact(CATALOG_V, 7, '100010000')));
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('a LIVE answer beats the stale cache — the ledger is authoritative whenever it can be asked', async () => {
+    await rememberLedgerFee(VCHF_LEDGER, '20000'); // stale
+    jest.mocked(fetchLedgerFee).mockResolvedValue('10000'); // live wins
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {}));
+    const tree = mountVchf();
+    await scanToSign(tree, REQ_VCHF);
+    await act(async () => {});
+    expect(textByTestID(tree, 'pay-amount')).toBe(M.pay.payAmount(fmtCurrencyAmountCompact(CATALOG_V, 7, '100000000')));
+    expect(textByTestID(tree, 'pay-amount')).not.toContain('1.0001'); // the stale cache's total never shows
+    act(() => {
+      tree.unmount();
+    });
   });
 });
 

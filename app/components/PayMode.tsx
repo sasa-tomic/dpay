@@ -18,6 +18,7 @@ import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurre
 import type {AssetId, Identity, PayIntent, NfcStatus} from '../lib/types';
 import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, fetchLedgerFee, type RailOutcome, type RailPrepared} from '../services/rail';
 import {saveTxNote} from '../services/txNotes';
+import {fallbackLedgerFee} from '../services/ledgerFees';
 import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
 import {NfcTap} from './NfcTap';
@@ -182,24 +183,29 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // the next, so without this two ticks could both reach a settled transfer and both report it.
   const ocpChecking = useRef(false);
 
-  // The LEDGER FEE for the payment under review, live from the paying ledger (the same
-  // `fetchLedgerFee` SendSheet uses; the catalog's `fee` field is display metadata). The review,
-  // the paid screen and the offline QR hand-off all render the TOTAL DEBIT — amount + fee — so the
-  // payer reads the number their account actually moves (founder rule 2026-09-13: at a till that
-  // total IS the shelf price, because the fee was priced in). Unknown (offline, DEMO play money, or
-  // the query failed) stays null and every display falls back to the amount alone — never a
-  // guessed 0. Keyed on `intent` only: review/qr/paid all hold the same intent (only `reset()`
-  // clears it), so one fetch serves the whole journey.
+  // The LEDGER FEE for the payment under review. LIVE-first (`fetchLedgerFee`, the same query
+  // SendSheet uses — the ledger stays authoritative and a stale cache never wins while it can be
+  // asked), then two LOCAL answers when the payer is offline, which is exactly the signature
+  // NFC/QR use case: the fee this very ledger last answered (`services/ledgerFees`, written
+  // through by every successful query) and then the bundled catalog row's drift-alarmed fee.
+  // Both are the ledger's own fact by another road, never a guess. The review, the paid screen
+  // and the offline QR hand-off all render the TOTAL DEBIT — amount + fee — so the payer reads
+  // the number their account actually moves (founder rule 2026-09-13: at a till that total IS
+  // the shelf price, because the fee was priced in; 2026-09-14: the OFFLINE payer reads the
+  // same price, not the 0.0099 wire). Only when no source knows (DEMO play money, a row that
+  // registers no fee anywhere) does the display fall back to the amount alone — never a guessed
+  // 0. Keyed on `intent` only: review/qr/paid all hold the same intent (only `reset()` clears
+  // it), so one fetch serves the whole journey.
   const [feeRaw, setFeeRaw] = useState<string | null>(null);
   // The in-flight fee query, if any — the price note below awaits it so the camera path (which
   // signs the instant a request decodes, often before the fee lands in `feeRaw`) still records the
   // price, not whatever the state happened to hold at sign time. Null = no query for this intent.
   const feePromiseRef = useRef<Promise<string | null> | null>(null);
-  // No fee fetch while the review cannot be approved (online + insufficient): a doomed payment
-  // must touch NOTHING on the network (flow 101's zero-canister-call invariant — a read-only
-  // icrc1_fee query included), and offline the fetch could not succeed anyway. The headline
-  // falls back to the amount alone on such reviews — honest either way, for a payment that can
-  // never leave the screen.
+  // No LIVE fee fetch while the review cannot be approved (online + insufficient): a doomed
+  // payment must touch NOTHING on the network (flow 101's zero-canister-call invariant — a
+  // read-only icrc1_fee query included), and offline the fetch could not succeed anyway. The
+  // LOCAL fee answers are not network reads, so a blocked review may still resolve its honest
+  // total from them (see the effect below).
   const reviewBlocked = intent != null && online
     && (() => { const b = balanceOfRequested(intent.currency); return b != null && cmpRaw(intent.amount, b) > 0; })();
   useEffect(() => {
@@ -211,15 +217,24 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     if (cur == null || cur === 0) return; // DEMO is play money — no honest fee to add
     const ledger = catalog.find(c => c.currency === cur)?.ledger;
     if (!ledger) return;
-    // Keep any fee this journey already fetched: `reviewBlocked` flips true AFTER a payment
-    // lands (the account just moved) and the paid screen still needs the fee for its total.
-    if (reviewBlocked) return;
     let alive = true;
+    // Keep any fee this journey already fetched: `reviewBlocked` flips true AFTER a payment
+    // lands (the account just moved) and the paid screen still needs the fee for its total — a
+    // live answer outranks anything local, so it is left to land undisturbed.
+    if (reviewBlocked) {
+      if (feePromiseRef.current != null) return;
+      // Local-only chain (a cache/catalog read is not a network read): the blocked review still
+      // gets its honest total; the wire-alone fallback needs every source to be empty.
+      void fallbackLedgerFee(ledger, catalog, cur).then(fee => {
+        if (alive && fee != null) setFeeRaw(fee);
+      });
+      return () => { alive = false; };
+    }
     // Promise.resolve: the boundary is also a jest mock — an un-configured one returns undefined,
     // and the displays' honesty must not depend on the mock's return shape.
     const query = Promise.resolve(fetchLedgerFee(identity.secretHex, ledger)).catch((e: unknown) => {
-      console.warn('review fee fetch failed (total falls back to the amount):', e instanceof Error ? e.message : String(e));
-      return null;
+      console.warn('review fee fetch failed (total falls back to the local fee answers):', e instanceof Error ? e.message : String(e));
+      return fallbackLedgerFee(ledger, catalog, cur);
     });
     feePromiseRef.current = query;
     void query.then(fee => {
@@ -232,17 +247,20 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // display-side only (`intent.amount` remains the wire amount everywhere money moves).
   const totalOf = (raw: string): string => (feeRaw != null ? (BigInt(raw) + BigInt(feeRaw)).toString() : raw);
   // The same fact as note metadata (founder rule 2026-09-14): the tx-log row headlines the GROSS
-  // (= wire + fee = the payer's exact total debit) with the fee as its annotation line. Unknown
-  // fee → neither field: the row keeps its ledger truth (the wire) rather than a guess. The camera
-  // path signs in the same breath as setIntent — before the review-fee effect has started its
-  // query — so if none is in flight the note starts its own (same guards: DEMO and a ledger-less
-  // row have no honest fee and save nothing extra). Fire-and-forget: the sign is never delayed.
+  // (= wire + fee = the payer's exact total debit) with the fee as its annotation line. No fee
+  // answer anywhere → neither field: the row keeps its ledger truth (the wire) rather than a
+  // guess. The camera path signs in the same breath as setIntent — before the review-fee effect
+  // has started its query — so if none is in flight the note starts its own, with the SAME
+  // live→cache→catalog chain (an offline payer's log row must not regress to the wire either;
+  // same guards: DEMO and a ledger-less row have no honest fee and save nothing extra).
+  // Fire-and-forget: the sign is never delayed.
   const savePriceNote = (r: PayIntent): void => {
     void (async () => {
       let query = feePromiseRef.current;
       if (query == null) {
         const ledger = r.currency === 0 ? null : catalog.find(c => c.currency === r.currency)?.ledger ?? null;
-        query = ledger == null ? null : Promise.resolve(fetchLedgerFee(identity.secretHex, ledger)).catch(() => null);
+        query = ledger == null ? null : Promise.resolve(fetchLedgerFee(identity.secretHex, ledger))
+          .catch(() => fallbackLedgerFee(ledger, catalog, r.currency));
         feePromiseRef.current = query;
       }
       const fee = await query;
