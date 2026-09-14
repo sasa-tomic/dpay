@@ -39,6 +39,9 @@ jest.mock('../services/rail', () => ({
   submitTransfer: jest.fn(),
   pollTransfer: jest.fn(),
   envelopeToQrPayload: jest.fn(),
+  // The review-time fee query behind the total-debit display (founder rules 2026-09-13/-14). Each
+  // total-display test pins its own answer; DEMO mounts never ask.
+  fetchLedgerFee: jest.fn(),
   // The wire→intent conversion is exercised for real in rail.test.ts; here it is stubbed so this
   // suite stays a pure component test (no DpayCore principal derivation on the scan path).
   wireRequestToIntent: jest.fn(),
@@ -69,13 +72,13 @@ jest.mock('../services/opencryptopay', () => ({
 }));
 
 import {DpayCore} from '../services/native';
-import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, wireRequestToIntent, type RailPrepared} from '../services/rail';
+import {prepareTransfer, submitTransfer, pollTransfer, envelopeToQrPayload, fetchLedgerFee, wireRequestToIntent, type RailPrepared} from '../services/rail';
 import {payAndReport, resolveOcpScan, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 // Spied (not mocked) in the till-note tests: the store's own write behaviour is txNotes.test.ts's
 // to pin; here only the SEAM's arguments matter, and the real write keeps the rest honest.
 import * as txNotes from '../services/txNotes';
 import {PayMode} from '../components/PayMode';
-import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
+import {BUNDLED_NETWORKS, icpCatalogOf, fmtCurrencyAmountCompact} from '../config/catalog';
 import {buildSelectableAssets} from '../config/assets';
 import {POLL} from '../config/constants';
 import {IC_READ_STATE_TIMEOUT_MS, IC_SUBMIT_TIMEOUT_MS} from '../services/icp';
@@ -242,6 +245,9 @@ beforeEach(() => {
   // Honest pending by default. Reset here rather than only where it is exercised: a value left over
   // from a previous test would silently settle the NEXT test's hand-off out from under it.
   jest.mocked(pollTransfer).mockReset().mockResolvedValue({kind: 'unknown'});
+  // Same discipline for the fee query: a value left over from a previous test would quietly
+  // answer the NEXT test's review.
+  jest.mocked(fetchLedgerFee).mockReset();
   jest.mocked(envelopeToQrPayload).mockReset().mockImplementation((hex: string) => `QR:${hex.slice(0, 8)}`);
 });
 
@@ -288,6 +294,79 @@ describe('PayMode — sign-status short pubkey (U-F5)', () => {
     act(() => {
       tree.unmount();
     });
+  });
+});
+
+// The payer's amount is the TOTAL DEBIT (founder rule 2026-09-14): a netted request payment is
+// not a "price" in display terms — EVERY payer-facing amount shows wire + fee when the fee is
+// known, the wire alone when it is not (never a guessed number). This suite pins the camera-entry
+// review surface, the one that used to render the bare wire: the founder asked for 0.01 VCHF and
+// both devices read 0.0099. The signed envelope is unchanged — `prepareTransfer` still gets the
+// wire, exactly as the auto-sign tests above assert.
+describe('PayMode — the payer reads the TOTAL DEBIT, never the bare wire (founder rule 2026-09-14)', () => {
+  const CATALOG_V = icpCatalogOf(BUNDLED_NETWORKS);
+  const VCHF_ASSET = buildSelectableAssets(CATALOG_V, {showTestnet: false, solanaEnabled: false}).filter(a => a.id === 'ic:7');
+  // The founder's numbers: price 1.00 VCHF → wire 0.9999 (fee 0.0001 nets out of the request).
+  const REQ_VCHF: Req = {...REQ, amount: '99990000', currency: 7};
+  /** Mount on VCHF (offline: the classic hand-off, no review block). */
+  const mountVchf = () => mountPay({catalog: CATALOG_V, assets: VCHF_ASSET});
+
+  test('camera-entry review headlines wire + fee — 1.00 VCHF, not the 0.9999 wire', async () => {
+    jest.mocked(fetchLedgerFee).mockResolvedValue('10000');
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {})); // keep the signing surface put
+    const tree = mountVchf();
+    await scanToSign(tree, REQ_VCHF);
+    await act(async () => {}); // flush the fee fetch into feeRaw
+    expect(textByTestID(tree, 'pay-amount')).toBe(M.pay.payAmount(fmtCurrencyAmountCompact(CATALOG_V, 7, '100000000')));
+    expect(textByTestID(tree, 'pay-amount')).not.toContain('0.9999'); // the wire never headlines
+    // The envelope stays honest: what is signed is the WIRE — the fee is never added to the money
+    // the rail moves, only to the number the payer reads.
+    expect(jest.mocked(prepareTransfer).mock.calls[0][2]?.amount).toBe('99990000');
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('unknown fee (DEMO, no ledger): the review falls back to the wire alone — no guessed total', async () => {
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {}));
+    const tree = mountPay(); // DEMO (currency 0) is the default fixture; its fee never fetches
+    await scanToSign(tree, REQ);
+    expect(fetchLedgerFee).not.toHaveBeenCalled(); // play money has no honest fee to add
+    expect(textByTestID(tree, 'pay-amount')).toBe(M.pay.payAmount(fmtCurrencyAmountCompact(icpCatalogOf(BUNDLED_NETWORKS), 0, '2500')));
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('the signed note carries the price — {gross: wire+fee, fee} rides the join key (the log row headlines it)', async () => {
+    jest.mocked(fetchLedgerFee).mockResolvedValue('10000');
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    const tree = mountVchf();
+    await scanToSign(tree, REQ_VCHF); // auto-sign runs to the qr phase; the note saved pre-prepare
+    expect(noteSpy).toHaveBeenCalledTimes(1);
+    const [who, note] = noteSpy.mock.calls[0];
+    expect(who).toBe(IDENTITY.publicHex);
+    expect(note.k).toBe(REQ_VCHF.nonceHex);
+    expect(note.who).toBe('Cafe');
+    expect(note.gross).toBe('100000000'); // the price, not the 99990000 wire
+    expect(note.fee).toBe('10000');
+    act(() => {
+      tree.unmount();
+    });
+    noteSpy.mockRestore();
+  });
+
+  test('DEMO wire note stays wire-shaped: fee unknown → neither gross nor fee is saved (no guessed numbers)', async () => {
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    const tree = mountPay();
+    await scanToSign(tree, REQ);
+    const note = noteSpy.mock.calls[0]?.[1];
+    expect(note.gross).toBeUndefined();
+    expect(note.fee).toBeUndefined();
+    act(() => {
+      tree.unmount();
+    });
+    noteSpy.mockRestore();
   });
 });
 

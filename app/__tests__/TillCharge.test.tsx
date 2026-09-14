@@ -32,7 +32,7 @@ import {StyleSheet, Text, View} from 'react-native';
 jest.mock('../services/till', () => {
   const actual = jest.requireActual('../services/till') as Record<string, unknown>;
   return {
-    ...actual, // TILL_OFFER / chfCents / tillRawUnits stay REAL — they are pure and are the rules
+    ...actual, // TILL_OFFER / chfCents / tillRawUnits / tillPriceUnits stay REAL — they are pure and are the rules
     openTillCharge: jest.fn(),
     tillChargeStatus: jest.fn(),
     cancelTillCharge: jest.fn(),
@@ -81,7 +81,7 @@ const mockSaveTxNote = jest.fn(async (..._a: unknown[]) => undefined);
 jest.mock('../services/txNotes', () => ({saveTxNote: (...a: unknown[]) => mockSaveTxNote(...a)}));
 
 import {TillCharge} from '../components/TillCharge';
-import {openTillCharge, tillChargeStatus, cancelTillCharge, tillRawUnits, type TillStatus} from '../services/till';
+import {openTillCharge, tillChargeStatus, cancelTillCharge, tillRawUnits, tillPriceUnits, type TillStatus} from '../services/till';
 import {buildSelectableAssets, type SelectableAsset} from '../config/assets';
 import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from '../config/catalog';
 import {NFC_UPDATE_AHEAD_S, POLL, PROOF_POLL_BUDGET} from '../config/constants';
@@ -125,6 +125,9 @@ const VCHF_FEE_RAW = (() => {
  *  ledger fee. The customer's wallet moves this PLUS that fee — i.e. exactly CHF 10.50, which is
  *  the whole point of the subtraction (`tillRawUnits`, services/till.ts). */
 const PAY_RAW = tillRawUnits('1050', 8, VCHF_FEE_RAW);
+// The rung price BEFORE netting — what the displays headline and the annotation records as the
+// gross (founder rule 2026-09-14): wire = price − fee stays the settlement truth.
+const PRICE_RAW = tillPriceUnits('1050', 8);
 
 /** A status body as the relay would answer for the charge above. */
 function status(over: Partial<TillStatus> = {}): TillStatus {
@@ -341,26 +344,29 @@ describe('the note — what this charge is for', () => {
     expect(mockBuildRequest.mock.calls[0][6]).toBe(NOTE);
     // …and the payee-side annotation is keyed by the one thing the incoming transfer carries: the
     // charge's reference, which is the ICRC-1 memo the relay credits the sale on — so the history
-    // row this sale settles into already says what it was for.
-    expect(mockSaveTxNote).toHaveBeenCalledWith(IDENTITY.publicHex, {k: REFERENCE, msg: NOTE}, expect.any(Number));
+    // row this sale settles into already says what it was for. The gross + fee ride along (founder
+    // rule 2026-09-14): the row headlines the rung price with the fee as its annotation line.
+    expect(mockSaveTxNote).toHaveBeenCalledWith(IDENTITY.publicHex, {k: REFERENCE, msg: NOTE, gross: PRICE_RAW, fee: VCHF_FEE_RAW}, expect.any(Number));
     act(() => { tree.unmount(); });
   });
 
-  test('no note typed: v1 ring-up, nothing annotated, no display memo', async () => {
+  test('no note typed: v1 ring-up, no display memo — but the price annotation still lands', async () => {
     const tree = mount(VCHF);
     await ringUp(tree);
     expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
     expect(mockBuildRequest.mock.calls[0][6]).toBe('');
-    expect(mockSaveTxNote).not.toHaveBeenCalled();
+    // Founder rule 2026-09-14: even noteless, the ring-up records {gross, fee} against the
+    // reference — the settled row headlines the price, not the netted wire.
+    expect(mockSaveTxNote).toHaveBeenCalledWith(IDENTITY.publicHex, {k: REFERENCE, msg: undefined, gross: PRICE_RAW, fee: VCHF_FEE_RAW}, expect.any(Number));
     act(() => { tree.unmount(); });
   });
 
-  test('whitespace the cashier typed is not a note', async () => {
+  test('whitespace the cashier typed is not a note — the price annotation still lands', async () => {
     const tree = mount(VCHF);
     act(() => { node(tree, 'till-note-input').props.onChangeText('   '); });
     await ringUp(tree);
     expect(openTillCharge).toHaveBeenCalledWith(RELAY, IDENTITY, '1050', VCHF.decimals, VCHF_FEE_RAW, '');
-    expect(mockSaveTxNote).not.toHaveBeenCalled();
+    expect(mockSaveTxNote).toHaveBeenCalledWith(IDENTITY.publicHex, {k: REFERENCE, msg: undefined, gross: PRICE_RAW, fee: VCHF_FEE_RAW}, expect.any(Number));
     act(() => { tree.unmount(); });
   });
 
@@ -400,10 +406,11 @@ describe('a customer who taps instead of scanning', () => {
     expect(mockStampExpiry).toHaveBeenCalledWith(IDENTITY.secretHex, NFC_UPDATE_AHEAD_S);
 
     // …and the reader is mounted with exactly that request, told the same amount/nonce/currency it
-    // will later match ledger history on.
+    // will later match ledger history on. The DISPLAY amount is the rung price — the readout
+    // headlines the gross, `amount` stays the settlement wire (founder rule 2026-09-14).
     expect(mockTap.props?.role).toBe('reader');
     expect(mockTap.props?.requestHex).toBe(await mockBuildRequest.mock.results[0].value);
-    expect(mockTap.props?.reqInfo).toMatchObject({amount: PAY_RAW, nonce: REFERENCE, currency: 7});
+    expect(mockTap.props?.reqInfo).toMatchObject({amount: PAY_RAW, displayAmount: PRICE_RAW, nonce: REFERENCE, currency: 7});
     // NO `onSettled`: nothing the radio does may turn the paid light green — only the relay's poll.
     expect(mockTap.props?.onSettled).toBeUndefined();
 

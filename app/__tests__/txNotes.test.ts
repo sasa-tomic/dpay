@@ -253,3 +253,39 @@ describe('annotateTxn (the row resolver — precedence is the contract)', () => 
     expect(annotateTxn(icRow, txNoteIndex([]), labels)).toBeUndefined();
   });
 });
+
+describe('gross + fee (the price annotation — founder rule 2026-09-14)', () => {
+  // The display contract: a netted request's row headlines the GROSS (typed price = wire + fee on
+  // the payer side, the requested price on the payee side) with the fee as its annotation line.
+  // Both ride the SAME device-saved note as who/msg — raw digit strings in the row's own asset
+  // units, because that is the only representation the renderer can format without re-deriving
+  // decimals or the netting decision.
+
+  it('saves and reloads gross + fee verbatim, alongside who/msg', async () => {
+    await saveTxNote(ALICE, {k: NONCE, who: 'Bob', gross: '1050000000', fee: '10000'}, T0);
+    expect(await loadTxNotes(ALICE)).toEqual([{k: NONCE, who: 'Bob', gross: '1050000000', fee: '10000', at: T0}]);
+  });
+
+  it('a note that carries ONLY gross + fee is worth saving (the noteless payee request)', async () => {
+    // The IC payee seam now always saves {k, gross, fee}: the row must headline the typed price
+    // even when the request carried no memo and no name.
+    await saveTxNote(ALICE, {k: NONCE, gross: '1000000', fee: '10000'}, T0);
+    expect(await loadTxNotes(ALICE)).toEqual([{k: NONCE, gross: '1000000', fee: '10000', at: T0}]);
+  });
+
+  it('normalizes away non-digit gross/fee rather than persisting junk (a guessed number is worse than none)', async () => {
+    await saveTxNote(ALICE, {k: NONCE, gross: '-5', fee: '0.0001'}, T0);
+    expect(await loadTxNotes(ALICE)).toEqual([]); // neither survived → nothing else to save → no-op
+  });
+
+  it('annotateTxn hands gross + fee to the row, joined like who/msg', () => {
+    const notes = txNoteIndex([{k: NONCE, gross: '1050000000', fee: '10000', at: T0}]);
+    expect(annotateTxn({assetId: 'ic:0', memo: NONCE, nonce: '', counterparty: 'p'} as never, notes, new Map()))
+      .toEqual({gross: '1050000000', fee: '10000'});
+  });
+
+  it('a corrupted non-digit gross drops its row on load (same honesty as a non-string who)', () => {
+    const good: TxNote = {k: NONCE, gross: '1050000000', fee: '10000', at: T0};
+    expect(salvageTxNotes([good, {k: 'bb', gross: '1e7', at: T0 + 1}])).toEqual([good]);
+  });
+});

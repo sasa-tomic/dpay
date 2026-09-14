@@ -44,6 +44,9 @@ jest.mock('../components/NfcTap', () => ({NfcTap: jest.fn(() => null)}));
 import {DpayCore, DpayNfc} from '../services/native';
 import {icStampExpiry} from '../services/icp';
 import {confirmIncomingTransfer, fetchLedgerFee} from '../services/rail';
+// Spied (not mocked): the store's own write behaviour is txNotes.test.ts's to pin; here only the
+// SEAM's arguments matter, and the real write keeps the rest honest.
+import * as txNotes from '../services/txNotes';
 import {ReceiveMode} from '../components/ReceiveMode';
 import {NfcTap} from '../components/NfcTap';
 import {receiptShareBlob, parsePayLink} from '../lib/deepLink';
@@ -649,5 +652,58 @@ describe('ReceiveMode — payee-quoted fee netting (exact-price rule, 2026-09-12
     expect(fetchLedgerFee).not.toHaveBeenCalled(); // play money has no honest fee to net
     expect(linkAmountOf(tree)).toBe('25'); // the typed decimal, verbatim
     expect(hasTestID(tree, 'request-fee-line')).toBe(false);
+  });
+
+  // --- The price annotation (founder rule 2026-09-14) ----------------------------------------------
+  // The payee's tx-log row headlines the TYPED PRICE with the fee as its annotation line, so the
+  // request itself must save {gross: priceRaw, fee} against the nonce (the memo the settling row
+  // joins on) the moment the request exists — and the NFC reader readout must be told the same
+  // gross, while `amount` stays the wire it will match ledger history on.
+  test('the request saves the PRICE as the row note — {gross, fee} against the nonce, reader told the gross', async () => {
+    jest.mocked(fetchLedgerFee).mockResolvedValue('10000');
+    const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+    const tree = await mountVchf();
+    await makeRequest(tree, '1');
+    expect(noteSpy).toHaveBeenCalledTimes(1);
+    const [who, note] = noteSpy.mock.calls[0];
+    expect(who).toBe(IDENTITY.publicHex);
+    expect(note.k).toMatch(/^[0-9a-f]{32}$/); // the request nonce = the settling row's memo
+    expect(note.msg).toBeUndefined();         // no memo typed in this fixture
+    expect(note.gross).toBe('100000000');     // the typed price — NOT the 99990000 wire
+    expect(note.fee).toBe('10000');
+    // The NFC reader is handed BOTH truths: displayAmount (what its readout says) vs amount (what
+    // it matches the incoming ledger transfer on).
+    const reader = jest.mocked(NfcTap).mock.calls.at(-1)?.[0];
+    expect(reader?.reqInfo).toMatchObject({amount: '99990000', displayAmount: '100000000'});
+    act(() => {
+      tree.unmount();
+    });
+    noteSpy.mockRestore();
+  });
+
+  test('unknown fee: the note saves the gross alone (a guessed fee is worse than none)', async () => {
+    jest.mocked(fetchLedgerFee).mockRejectedValue(new Error('offline'));
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const noteSpy = jest.spyOn(txNotes, 'saveTxNote');
+      const CKBTC_ASSET: SelectableAsset = {
+        id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'ckBTC', linkToken: 'ckBTC',
+        networkLabel: 'Internet Computer', network: null, decimals: 8, minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'ckbtc',
+      };
+      const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 1, assets: [CKBTC_ASSET], selectedAssetId: 'ic:1', nfcStatus: 'ready'});
+      await act(async () => {});
+      await makeRequest(tree, '25');
+      const note = noteSpy.mock.calls.at(-1)![1];
+      expect(note.gross).toBe('2500000000'); // the typed price, verbatim raw
+      expect(note.fee).toBeUndefined();      // nothing was invented
+      const reader = jest.mocked(NfcTap).mock.calls.at(-1)?.[0];
+      expect(reader?.reqInfo).toMatchObject({amount: '2500000000', displayAmount: '2500000000'}); // wire = price
+      act(() => {
+        tree.unmount();
+      });
+      noteSpy.mockRestore();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

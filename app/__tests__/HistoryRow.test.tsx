@@ -57,16 +57,16 @@ function mount(t: Txn, i = 0, testPrefix?: string, onPress: (t: Txn) => void = (
   return tree;
 }
 
-function mountReceipt(t: Txn, note?: {who?: string; msg?: string}): renderer.ReactTestRenderer {
+function mountReceipt(t: Txn, note?: {who?: string; msg?: string; gross?: string; fee?: string}): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
   act(() => { tree = renderer.create(<TxnReceipt t={t} catalog={CATALOG} assets={ASSETS} note={note} onClose={() => {}} />); });
   return tree;
 }
 
 /** Mount a ROW with a device-saved annotation (the Wallet root resolves it; the row only renders). */
-function mountNoted(t: Txn, note: {who?: string; msg?: string}, i = 0): renderer.ReactTestRenderer {
+function mountNoted(t: Txn, note: {who?: string; msg?: string; gross?: string; fee?: string}, i = 0, testPrefix?: string): renderer.ReactTestRenderer {
   let tree!: renderer.ReactTestRenderer;
-  act(() => { tree = renderer.create(<HistoryRow t={t} i={i} catalog={CATALOG} assets={ASSETS} note={note} onPress={() => {}} />); });
+  act(() => { tree = renderer.create(<HistoryRow t={t} i={i} catalog={CATALOG} assets={ASSETS} testPrefix={testPrefix} note={note} onPress={() => {}} />); });
   return tree;
 }
 
@@ -315,6 +315,107 @@ describe('TxnReceipt — Peer and Note lines are ADDITIVE to the checkable ledge
     // And the checkable truth is still in the copied text, not just on the screen.
     expect(text).toContain(FULL_PRINCIPAL);
     expect(text).toContain(NONCE_HEX);
+    for (const line of text.split('\n')) expect(line).not.toMatch(/:\s*$/);
+  });
+});
+
+// ── The price annotation: gross + fee (founder rule 2026-09-14) ────────────────────────────────
+// A netted request payment is NOT a "price" in display terms: the row HEADLINES the gross (typed
+// price; payer side = wire + fee = the exact total debit) and the fee appears only as this row's
+// annotation line — hidden when it is 0 or unknown. The ledger's own amount (the wire) stays the
+// receipt's checkable truth for the reference/balance columns, but the money headline is the price.
+describe('HistoryRow — the gross headline and its fee annotation', () => {
+  // The founder's own numbers (2026-09-14) on VCHF's precision (8dp, fee 10000): asked 1.00, the
+  // ledger row carries the 0.9999 wire, the display must headline 1.00 with "− 0.0001 VCHF fees".
+  const WIRE = '99990000';
+  const GROSS = '100000000';
+  const FEE = '10000';
+
+  test('note.gross replaces the WIRE as the headline; the fee renders as the row\'s annotation line', () => {
+    const tree = mountNoted(txn('ic:7', WIRE, TS_NEW, {who: PRINCIPAL_PREFIX, memo: NONCE_HEX}), {gross: GROSS, fee: FEE}, 5);
+    const all = texts(tree);
+    expect(all).toContain('−1.00 VCHF');    // the price, not the ledger's −0.9999
+    expect(all).not.toContain('−0.9999 VCHF');
+    expect(all).toContain(M.wallet.ledger.fees('0.0001 VCHF')); // '− 0.0001 VCHF fees'
+    expect(all).toContain('Aug 24');        // the row's own anchors survive the extra line
+    act(() => { tree.unmount(); });
+  });
+
+  test('fee 0 (DEMO play money / a no-fee rail): NO annotation line — the wire already IS the price', () => {
+    const tree = mountNoted(txn('ic:7', GROSS, TS_NEW, {memo: NONCE_HEX}), {gross: GROSS, fee: '0'}, 6);
+    const all = texts(tree);
+    expect(all).toContain('−1.00 VCHF');
+    expect(all.filter(s => s.includes('fees'))).toHaveLength(0); // nothing fee-shaped renders
+    const ids = [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
+    expect(ids).not.toContain('hist-fee-6');
+    act(() => { tree.unmount(); });
+  });
+
+  test('unknown fee (honesty path): a gross-only note still headlines the price, with NO fee line', () => {
+    const tree = mountNoted(txn('ic:7', WIRE, TS_NEW, {memo: NONCE_HEX}), {gross: GROSS}, 7);
+    expect(texts(tree)).toContain('−1.00 VCHF');
+    expect(texts(tree)).not.toContain('−0.9999 VCHF');
+    const ids = [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
+    expect(ids).not.toContain('hist-fee-7');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the SOL twin: lamports gross + the constant SOL fee, same row shape', () => {
+    // price 0.01 SOL = 10_000_000 lamports; wire = price − 5_000 fee = 9_995_000.
+    const tree = mountNoted(
+      txn('solana:SOL', '9995000', TS_NEW, {dir: 'in', memo: ''}),
+      {gross: '10000000', fee: '5000'}, 8,
+    );
+    const all = texts(tree);
+    expect(all).toContain('+0.01 SOL'); // trimmed by fmtAssetCompact, as every SOL row is
+    expect(all).toContain(M.wallet.ledger.fees('0.000005 SOL'));
+    act(() => { tree.unmount(); });
+  });
+
+  test('without a note the row keeps its ledger truth (no gross, no fee line — unchanged)', () => {
+    const tree = mount(txn('ic:7', WIRE, TS_NEW, {memo: NONCE_HEX}));
+    expect(texts(tree)).toContain('−0.9999 VCHF');
+    expect(texts(tree).filter(s => s.includes('fees'))).toHaveLength(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('the fee anchor carries the row index and the testPrefix (home-hist-fee-*, like memo/time)', () => {
+    const tree = mountNoted(txn('ic:7', WIRE, TS_NEW, {memo: NONCE_HEX}), {gross: GROSS, fee: FEE}, 2, 'home-hist');
+    const ids = [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
+    expect(ids).toContain('home-hist-fee-2');
+    expect(ids.some(id => id.startsWith('hist-'))).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+});
+
+describe('TxnReceipt — the fee rides beside the gross, and flips the source footer', () => {
+  const noted = () => txn('ic:7', '99990000', TS_NEW, {
+    dir: 'in', who: 'Demo funds', memo: NONCE_HEX, counterparty: FULL_PRINCIPAL, ledgerRef: '81062',
+  });
+
+  test('a fee-bearing note renders the Fees field and the annotated source footer', () => {
+    const tree = mountReceipt(noted(), {gross: '100000000', fee: '10000'});
+    const all = texts(tree);
+    expect(all).toContain('+1.00 VCHF');                  // the receipt headlines the price too
+    expect(all).not.toContain('+0.9999 VCHF');
+    const ids = [...new Set(tree.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
+    expect(ids).toContain('txn-receipt-fees');
+    expect(all).toContain('−0.0001 VCHF');                // the signed fee, its own value line
+    expect(all).toContain(M.receipt.sourceAnnotated);     // device-saved numbers say so
+    expect(all).not.toContain(M.receipt.source);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a fee of 0 renders NO Fees field (no label over an absent value)', () => {
+    const tree = mountReceipt(noted(), {gross: '100000000', fee: '0'});
+    expect(tree.root.findAllByProps({testID: 'txn-receipt-fees'})).toHaveLength(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('receiptText carries the Fees line — what a merchant pastes matches the sheet', () => {
+    const text = receiptText(noted(), CATALOG, ASSETS, {gross: '100000000', fee: '10000'});
+    expect(text).toContain('+1.00 VCHF');
+    expect(text).toContain(`${M.receipt.fees}: −0.0001 VCHF`);
     for (const line of text.split('\n')) expect(line).not.toMatch(/:\s*$/);
   });
 });
