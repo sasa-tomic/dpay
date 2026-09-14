@@ -311,10 +311,18 @@ single RED alone before believing it.
   nobody can check. The first-run landing one is the sharp edge: it narrows a standing `CLAUDE.md`
   decision. Also open: the two forks in
   [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md) §1.
-- **Whether a person-to-person request is a *price* at all** — asking a friend for CHF 10 and
+- ~~**Whether a person-to-person request is a *price* at all** — asking a friend for CHF 10 and
   receiving CHF 9.9999 may be the wrong default even though asking a customer for CHF 10 is not
   (since 2026-09-14 every payee-quoted wire nets the fee; the flip seam is the
-  `nettedWireRaw`/`netSolWireLamports` callers in `ReceiveMode`/`SolReceiveMode`).
+  `nettedWireRaw`/`netSolWireLamports` callers in `ReceiveMode`/`SolReceiveMode`).~~
+  **RESOLVED by founder decision (2026-09-14):** a person-to-person request IS a price in display
+  terms. Every user-facing amount for a netted request payment shows the GROSS (the typed price;
+  payer side = wire + fee = the exact total debit) on both devices — review, paid, request-tracking,
+  result, home activity, and the tx-log rows' headline. Fees appear ONLY as a per-transaction
+  annotation in the log ("received 0.01 VCHF − 0.0001 VCHF fees"), hidden when the fee is 0 or
+  unknown. The WIRE stays netted exactly as before (`nettedWireRaw`/`netSolWireLamports` and
+  everything signed/sent is unchanged); the gross/fee ride along as device-saved note metadata
+  (`services/txNotes.ts`) that the log rows render.
 
 ## Solana rails — the dead key is REPLACED and SHIPPED (2026-09-09)
 
