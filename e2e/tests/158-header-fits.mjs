@@ -107,7 +107,8 @@ export async function run() {
     // DIFFERENT one — the headline names the HOME CURRENCY while the chip names the SELECTION, and
     // the two are deliberately independent (flow 133: choosing an account must not rewrite the home
     // currency). Rendered together they put two accounts and two labels in one viewport with
-    // nothing saying which is which. Home's own labelled "Accounts · N" pill is the switcher, and
+    // nothing saying which is which. Since 2026-09-14 the headline block itself is the switcher
+    // (`btn-home-accounts` rides the tappable balance; the old "Accounts · N" pill is gone), and
     // it is the only one — the chip's chevron was a second, unlabelled route to the same place.
     await driver.click('tab-home', { timeoutMs: 5_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });

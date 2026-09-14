@@ -560,10 +560,12 @@ export async function waitForWallet(driver, opts = {}) {
 
 export async function openBalances(driver, opts = {}) {
   // TWO affordances reach the ONE accounts route, and which one exists depends on the screen the
-  // caller happens to be on. Home has `btn-home-accounts` (its labelled "Accounts · N" pill) and
-  // deliberately has NO header chip: the chip names the SELECTED account while Home's headline
-  // names the HOME CURRENCY, and rendering both put two different accounts in one viewport
-  // (founder, 2026-09-09). Every other screen has the chip and not the pill.
+  // caller happens to be on. Home has `btn-home-accounts` — since 2026-09-14 that is the HEADLINE
+  // BLOCK ITSELF (founder: "if the user clicks on the balance, they should be taken to the
+  // accounts and balances"; the old "Accounts · N" pill is gone) — and deliberately has NO header
+  // chip: the chip names the SELECTED account while Home's headline names the HOME CURRENCY, and
+  // rendering both put two different accounts in one viewport (founder, 2026-09-09). Every other
+  // screen has the chip and not the tappable balance.
   //
   // This is a lookup, not a fallback: neither present is a hard failure with both names, because
   // the accounts route being unreachable from the current screen is exactly the regression the
@@ -573,7 +575,7 @@ export async function openBalances(driver, opts = {}) {
     ? 'balance'
     : (await driver.isPresent('btn-home-accounts')) ? 'btn-home-accounts' : null;
   if (affordance === null) {
-    throw new Error('openBalances: this screen offers neither the header chip (`balance`) nor Home\'s `btn-home-accounts` — the accounts route is unreachable from here');
+    throw new Error('openBalances: this screen offers neither the header chip (`balance`) nor Home\'s tappable headline (`btn-home-accounts`) — the accounts route is unreachable from here');
   }
   await driver.click(affordance, { timeoutMs });
   await driver.findByTestID('asset-demo-select', { timeoutMs });

@@ -59,10 +59,11 @@ const SURFACES = {
   // Wallet home (Pay tab) — only chrome is interactive (the scan card's QR scanner is a viewport,
   // not a Pressable; the pay-scan DIV is informational).
   home: [],
-  // Home tab — the LANDING surface (2026-09-08): the primary Scan button, the two secondary
-  // action-row buttons (Receive navigates; Add money funds the HOME rail), the accounts
-  // affordance, and the activity feed's See-all link. The headline block itself is informational.
-  homeTab: ['btn-home-scan', 'btn-home-receive', 'btn-home-add-money', 'btn-home-accounts',
+  // Home tab — the LANDING surface (2026-09-08): since 2026-09-14 the action row is three EQUAL
+  // cards (Pay — honestly named, the screen behind it scans/taps/beams; Receive navigates; Add
+  // money funds the HOME rail), the accounts affordance is the HEADLINE BLOCK ITSELF (the balance
+  // is the button — founder 2026-09-14), and the activity feed's See-all link closes it out.
+  homeTab: ['btn-home-pay', 'btn-home-receive', 'btn-home-add-money', 'btn-home-accounts',
             'btn-home-activity-all'],
   // The ACCOUNTS route — the retired Balances sheet's body, its own surface since 2026-09-08.
   // btn-accounts-back leaves the route; btn-topup is the practice row's faucet; `asset-*-select`
@@ -88,7 +89,13 @@ const SURFACES = {
   // is covered inline by the Backup flow's own census path; settingsRestoreConfirm below). The theme
   // control is the Wave-8 three-way segmented control (Light / Dark / Auto radio segments).
   // Trip Ready J5b: `btn-trip-readiness` (Learn section — the passport archive modal).
-  settings: ['btn-settings-close', 'btn-theme-auto', 'btn-theme-light', 'btn-theme-dark', 'settings-relay', 'btn-relay-apply', 'btn-backup', 'btn-reset', 'btn-settings-restore', 'privacy-policy', 'btn-trip-readiness'],
+  // Address book (2026-09-14): `btn-settings-address-book` — the door to the addresses ROUTE
+  // (Wallet closes this sheet and opens it; the row is census-gated like every other entry).
+  settings: ['btn-settings-close', 'btn-theme-auto', 'btn-theme-light', 'btn-theme-dark', 'settings-relay', 'btn-relay-apply', 'btn-backup', 'btn-reset', 'btn-settings-restore', 'btn-settings-address-book', 'privacy-policy', 'btn-trip-readiness'],
+  // The ADDRESSES route — the saved-destination book (2026-09-14): back leaves the route;
+  // btn-addresses-add opens the inline add form (its Save/Cancel/chips are form-state children,
+  // censused by the dedicated address-book flow, not this empty-book pass).
+  addresses: ['btn-addresses-back', 'btn-addresses-add'],
   // Settings → Reset confirmation (btn-reset was tapped). Surface = the dialog above.
   settingsResetConfirm: ['btn-reset-confirm', 'btn-reset-cancel'],
   // Settings → Restore confirmation (btn-settings-restore was tapped). Surface = the inline seed
@@ -259,7 +266,16 @@ export async function run() {
     await census('settingsRestoreConfirm');
     console.log('[41-a11y-census] ✓ census: settings restore confirmation');
     await driver.click('btn-settings-restore-cancel', { timeoutMs: 4_000 });
-    await driver.click('btn-settings-close', { timeoutMs: 4_000 });
+
+    // 3d. Settings → Address book (2026-09-14). The entry row closes this sheet and opens the
+    //     addresses ROUTE — the sheet's own close button is therefore NOT clicked afterwards (the
+    //     door already shut it). Back returns to the tab the sheet was covering. Fresh wallet:
+    //     the book is empty, so only the two chrome controls are present to census.
+    await driver.click('btn-settings-address-book', { timeoutMs: 4_000 });
+    await driver.findByTestID('addresses-list', { timeoutMs: 5_000 });
+    await census('addresses');
+    console.log('[41-a11y-census] ✓ census: addresses route (empty book)');
+    await driver.click('btn-addresses-back', { timeoutMs: 4_000 });
 
     // 4. Transactions tab (empty for a fresh wallet).
     await driver.click('tab-transactions', { timeoutMs: 4_000 });

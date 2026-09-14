@@ -8,9 +8,12 @@
 //       the Pay scanner is NOT;
 //   (b) the headline is the HOME CURRENCY's, in the home rail's OWN token unit under the "· Main"
 //       eyebrow — never a converted figure, and never the transient selection (X4);
-//   (c) Scan is one tap to a live camera, and it lands the SCAN sub-mode even when the Pay tab was
-//       last left on "Send to address" — the returning traveller's till gesture stays one tap;
+//   (c) Pay (2026-09-14: honestly named — the screen behind it scans, taps and beams; the oversized
+//       "Scan to pay" button is gone and the action row is three EQUAL cards) is one tap to a live
+//       camera, and it lands the SCAN sub-mode even when the Pay tab was last left on
+//       "Send to address" — the returning traveller's till gesture stays one tap;
 //   (d) Home carries the accounts AFFORDANCE and not the accounts LIST (that is flow 136's route);
+//       since 2026-09-14 the affordance IS the headline — tapping the balance opens accounts;
 //   (e) Receive still opens the request form.
 // (The add-money dispatch is flow 134's contract; the activity feed is flow 135's.)
 import { setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, openPaySend, selectCurrency } from '../harness/lib.mjs';
@@ -58,11 +61,19 @@ export async function run() {
     assert(!headline.includes('∂'), `the practice balance must never reach the headline. Got: ${JSON.stringify(headline)}`);
     console.log(`[133-home-surface] ✓ headline: Swiss francs · Main / ${headline}`);
 
-    // (d) The accounts AFFORDANCE is here; the LIST is not.
+    // (d) The accounts AFFORDANCE is here — since 2026-09-14 it IS the headline (the balance is
+    //     the button; the "Accounts · N" pill is gone); the LIST is not.
     await driver.findByTestID('btn-home-accounts', { timeoutMs: 4_000 });
     assert(!(await driver.isPresent('accounts-list')), 'the accounts list must NOT render on Home — it is its own route');
     assert(!(await driver.isPresent('asset-demo-select')), 'no account row renders on Home');
-    console.log('[133-home-surface] ✓ Home carries the accounts affordance, not the list');
+    console.log('[133-home-surface] ✓ Home carries the accounts affordance (the tappable balance), not the list');
+
+    // (d′) Tapping the balance opens the accounts route — the founder's 2026-09-14 directive.
+    await driver.click('btn-home-accounts', { timeoutMs: 4_000 });
+    await driver.findByTestID('accounts-list', { timeoutMs: 5_000 });
+    await driver.click('btn-accounts-back', { timeoutMs: 4_000 });
+    await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
+    console.log('[133-home-surface] ✓ tapping the balance opens accounts and Back returns');
 
     // (b′) X4's regression pin: choosing another ACCOUNT must not rewrite the home currency. Pick
     //      ckBTC — the header chip follows it, the headline does not.
@@ -75,16 +86,17 @@ export async function run() {
       'an account tap must NOT rewrite the home currency the headline states (X4)');
     console.log('[133-home-surface] ✓ selecting ckBTC left the home headline in francs');
 
-    // (c) Leave the Pay tab on "Send to address", come back to Home, and tap Scan: the camera must
+    // (c) Leave the Pay tab on "Send to address", come back to Home, and tap Pay: the camera must
     //     be live. Without the sub-mode pin this is two taps, which is the regression the primary
-    //     Scan button exists to prevent.
+    //     Pay card exists to prevent (the card is honestly named "Pay" since 2026-09-14 — the
+    //     screen behind it scans, taps and beams).
     await openPaySend(driver);
     await driver.findByTestID('btn-pay-send', { timeoutMs: 4_000 });
     await driver.click('tab-home', { timeoutMs: 4_000 });
     await driver.findByTestID('home-headline-amount', { timeoutMs: 5_000 });
-    await driver.click('btn-home-scan', { timeoutMs: 4_000 });
+    await driver.click('btn-home-pay', { timeoutMs: 4_000 });
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
-    console.log('[133-home-surface] ✓ Scan reached a live scanner in ONE tap from Home');
+    console.log('[133-home-surface] ✓ Pay reached a live scanner in ONE tap from Home');
 
     // (e) Receive still opens the request form.
     await driver.click('tab-home', { timeoutMs: 4_000 });
