@@ -3,8 +3,9 @@
 // The VCHF+ICP twin of flow 32's nfc-disclosure, asserting obligation (8) for BOTH assets in one
 // session: before any tap-to-pay signs, the NFC status surface identifies the asset and the exact
 // amount —
-//   * "Paying 1.00000001 VCHF on Internet Computer" / "Paying 1.00000001 ICP on Internet Computer"
-//     (exact 8-decimal units + the shared IC network label, NOT the DEMO ∂ formatter leak), and
+//   * "Paying 1.00010001 VCHF on Internet Computer" / "Paying 1.00010001 ICP on Internet Computer"
+//     (the payer's TOTAL DEBIT = the requested wire + the live ledger fee, founder rule 2026-09-14;
+//     exact 8-decimal units + the shared IC network label, NOT the DEMO ∂ formatter leak), and
 //     the disclosure is READ-ONLY: no nfc-pay-amount input, no btn-nfc-approve button — the card
 //     role cannot edit or approve what the terminal requested.
 //   * The app DOES sign the wire after the one-press auto-approve: __DPAY_TEST_NFC_APPROVED_WIRE
@@ -26,7 +27,7 @@ export const meta = {
   name: 'nfc-native-assets',
   journey: 'nfc',
   covers: ['nfc', 'vchf', 'icp', 'icp-mainnet', 'disclosure', 'read-only', 'one-press', '8-decimals'],
-  verifies: 'NFC tap-to-pay discloses "Paying 1.00000001 VCHF/ICP on Internet Computer" (exact units + network, no ∂ formatter leak) with NO amount input and NO approve button on the card surface, for both native assets, before the auto-signed wire is stashed.',
+  verifies: 'NFC tap-to-pay discloses "Paying 1.00010001 VCHF/ICP on Internet Computer" (the payer\'s total debit = request amount + live ledger fee, founder rule 2026-09-14; exact units + network, no ∂ formatter leak) with NO amount input and NO approve button on the card surface, for both native assets, before the auto-signed wire is stashed.',
   timeoutMs: 30000, // two NFC legs + an inter-leg reload (disclosure + wire stash + declined cleanup)
 };
 
@@ -87,10 +88,13 @@ export async function run() {
 
       await driver.findByTestID('nfc-status', { timeoutMs: 5_000 });
       assert(await driver.waitForText('Communicating', { timeoutMs: 6_000 }), `${leg.tag}: NFC session reaches the status surface`);
+      // WAITED FOR, not sampled: the total-debit disclosure waits on the live icrc1_fee query
+      // (the wire shows alone until it lands — the fee==null honesty path).
+      assert(await driver.waitForText(`Paying 1.00010001 ${leg.tag} on Internet Computer`, { timeoutMs: 8_000 }),
+        `${leg.tag} disclosure names asset + the payer's total debit (wire + fee, founder rule 2026-09-14) + network`);
       const body = await driver.bodyText();
-      assertIncludes(body, `Paying 1.00000001 ${leg.tag} on Internet Computer`, `${leg.tag} disclosure names asset + exact amount + network`);
       assert(body.includes('Hold the phones together to send'), `${leg.tag}: status surface shows the tap hint`);
-      assert(!/∂1\.00000001/.test(body), `${leg.tag}: no DEMO ∂ formatter leak into the disclosure`);
+      assert(!/∂1\.00010001/.test(body), `${leg.tag}: no DEMO ∂ formatter leak into the disclosure`);
       assert(!(await driver.isPresent('nfc-pay-amount')), `${leg.tag}: no amount input on the read-only disclosure`);
       assert(!(await driver.isPresent('btn-nfc-approve')), `${leg.tag}: no approve button on the card surface`);
 

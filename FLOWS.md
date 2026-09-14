@@ -193,7 +193,7 @@ wire (1) · onboard (23) · pay (46) · offline (12) · deposit (13) · withdraw
 | 86 | nfc-unknown-reconcile | Offline payer supplies update + signed read_state; receiver alone settles, exact-history binds success, and queues the returned result. | nfc, settle, history, reconcile |
 | 87 | nfc-payer-settle | Offline card review-parks, Approve prepares update+read_state (never submits), and only a nonce/rid-bound merchant result resolves Paid. | nfc, payer, offline, returned-result, exact-once, approve-before-pay |
 | 93 | tap-motion | every NFC phase renders its pinned textContent + its own motion beat (breath/segments/ellipsis/shake); card awaitingApproval maps straight to exchanging (auto-sign); pending carries no settled mark and no campaign line (honesty); no dpay stamp ring exists anywhere | nfc-phases, event-bus, delight-motion, honesty-guard, auto-sign |
-| 99 | nfc-native-assets | NFC tap-to-pay discloses "Paying 1.00000001 VCHF/ICP on Internet Computer" (exact units + network, no ∂ formatter leak) with NO amount input and NO approve button on the card surface, for both native assets, before the auto-signed wire is stashed. | nfc, vchf, icp, icp-mainnet, disclosure, read-only, one-press, 8-decimals |
+| 99 | nfc-native-assets | NFC tap-to-pay discloses "Paying 1.00010001 VCHF/ICP on Internet Computer" (the payer's total debit = request amount + live ledger fee, founder rule 2026-09-14; exact units + network, no ∂ formatter leak) with NO amount input and NO approve button on the card surface, for both native assets, before the auto-signed wire is stashed. | nfc, vchf, icp, icp-mainnet, disclosure, read-only, one-press, 8-decimals |
 
 ### Settings & system
 

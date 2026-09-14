@@ -126,10 +126,13 @@ export const meta = {
   journey: 'system',
   covers: ['a11y', 'accessibility', 'aria'],
   verifies: 'Every interactive element (btn-*/tab-*/inputs/picker rows) carries a non-empty aria-label + role on every primary surface.',
-  timeoutMs: 30000, // 12.4s standalone census of 8 surfaces vs 20s was too tight: mid-run host-load
+  timeoutMs: 45000, // 12.4s standalone census of 8 surfaces vs 20s was too tight: mid-run host-load
   // spikes (parallel pool contention) are NOT compensated by the one-shot load factor measured at
   // run start, so a spike after the factor is fixed false-fires the backstop. 30s keeps the
-  // hang-backstop meaningfully above the real (load-inflated) census cost.
+  // hang-backstop meaningfully above the real (load-inflated) census cost. 2026-09-14: raised
+  // 30s → 45s — on a shared 5-user host (load ~8-9) a SERIAL run died one leg from the end
+  // (pay-send-resolve's 58-char type + resolution round trip) at the 30s wall with every census
+  // leg green; the backstop was no longer above the load-inflated cost.
 };
 
 export async function run() {
