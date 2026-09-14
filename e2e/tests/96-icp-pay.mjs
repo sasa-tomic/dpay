@@ -18,8 +18,9 @@
 //         (100000001 = wire + fee, ICP fee 10000 charged on top of the wire), both in-app
 //         balances refresh by the exact amount, and NO other currency changes (full 0..8
 //         snapshot pre/post both sides).
-//   * (7) The payer's Ledger shows the outgoing row: "−0.99990001 ICP" (U+2212, the transferred
-//         wire) + the payee's short principal as counterparty.
+//   * (7) The payer's Ledger headlines the GROSS: "−1.00000001 ICP" (U+2212 — the typed price,
+//         wire + fee, founder rule 2026-09-14) with a "− 0.0001 ICP fees" annotation line +
+//         the payee's short principal as counterparty. The rail itself still moved the wire.
 //   * Fund-first honesty + real instructions: an UNFUNDED ICP selection parks the Pay tab on the
 //         fund panel ("No ICP available" + the practical "first receive ICP at your address" instruction
 //         with a primary that opens the ICRC receive-address surface — the wallet's own ICRC-1
@@ -54,7 +55,7 @@ export const meta = {
   name: 'icp-pay',
   journey: 'pay',
   covers: ['icp', 'icp-mainnet', 'asset-selector', 'no-ramp', 'camera-scan', 'auto-sign', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send ICP to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a scanned netted 1.00000001 ICP request (wire 99990001, what a dpay payee quotes after fee-netting) signs ONLY against the ICP ledger and settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger shows −0.99990001 ICP to the payee short key.',
+  verifies: 'ICP (currency 8, ledger ryjl3…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "Send ICP to your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a scanned netted 1.00000001 ICP request (wire 99990001, what a dpay payee quotes after fee-netting) signs ONLY against the ICP ledger and settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger headlines the gross −1.00000001 ICP (= the typed price, founder rule 2026-09-14) with a "− 0.0001 ICP fees" annotation line, to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + scan + settle polls
 };
 
@@ -181,7 +182,8 @@ export async function run() {
     const named = await driver.waitForText('to Bob', { timeoutMs: 10_000 });
     const bodyText = await driver.bodyText();
     assert(named, `ledger row names the payee via the request-QR annotation ("to Bob"). ledger:\n${bodyText.slice(0, 500)}`);
-    assertIncludes(bodyText, '\u22120.99990001 ICP', 'ledger outgoing row amount (U+2212 minus + the transferred wire, exact units)');
+    assertIncludes(bodyText, '\u22121.00000001 ICP', 'ledger outgoing row headlines the GROSS (U+2212 minus + the typed price = wire + fee, founder rule 2026-09-14)');
+    assertIncludes(bodyText, '\u2212 0.0001 ICP fees', 'ledger row carries the fee as its annotation line — never inside the headline');
     assert(!bodyText.includes(bobPrincipal), 'ledger row never dumps the full principal');
     assert(!bodyText.includes(bob.publicHex), 'ledger row shows only the annotation name, never the full hex');
 

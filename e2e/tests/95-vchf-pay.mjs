@@ -20,8 +20,9 @@
 //         EXACTLY the price (100000001 = wire + fee, VCHF fee 10000 charged on top of the wire),
 //         both in-app balances refresh by the exact amount, and NO other currency changes (full
 //         0..8 balance snapshot compared pre/post for both sides).
-//   * (7) The payer's Ledger shows the outgoing row: "−0.99990001 VCHF" (U+2212, the transferred
-//         wire) + the payee's short principal as counterparty.
+//   * (7) The payer's Ledger headlines the GROSS: "−1.00000001 VCHF" (U+2212 — the typed price,
+//         wire + fee, founder rule 2026-09-14) with a "− 0.0001 VCHF fees" annotation line +
+//         the payee's short principal as counterparty. The rail itself still moved the wire.
 //   * Fund-first honesty + real instructions: an UNFUNDED VCHF selection parks the Pay tab on the
 //         fund panel ("No VCHF available" + the practical "first receive VCHF at your address"
 //         instruction
@@ -58,7 +59,7 @@ export const meta = {
   name: 'vchf-pay',
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'asset-selector', 'no-ramp', 'deeplink', 'explicit-approve', 'icrc1-transfer', 'ledger-target', 'settle', 'balance-refresh', 'sibling-isolation', 'ledger-row'],
-  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a netted 1.00000001 VCHF price deeplink (amount=0.99990001, the wire a dpay payee quotes after fee-netting) reviews with the total debit = the typed price exactly (netted wire + ledger fee, compact) in exact unit and signs ONLY against the VCHF ledger; the transfer settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger shows −0.99990001 VCHF to the payee short key.',
+  verifies: 'VCHF (currency 7, ledger ly36x…) appears in the shared selector with exact unit/network and no ramp actions; an unfunded selection parks on the fund panel with the real "first receive VCHF at your address" instruction and a primary that opens the ICRC receive-address surface (the wallet\'s own ICRC-1 principal); a netted 1.00000001 VCHF price deeplink (amount=0.99990001, the wire a dpay payee quotes after fee-netting) reviews with the total debit = the typed price exactly (netted wire + ledger fee, compact) in exact unit and signs ONLY against the VCHF ledger; the transfer settles exactly per the founder rule (payee +wire 0.99990001, payer −100000001 = exactly the price, no other currency moves); the payer Ledger headlines the gross −1.00000001 VCHF (= the typed price, founder rule 2026-09-14) with a "− 0.0001 VCHF fees" annotation line, to the payee short key.',
   timeoutMs: 25000, // full-suite parallel load: onboard + 2 snapshots ×2 actors + deeplink reload + settle polls
 };
 
@@ -209,7 +210,8 @@ export async function run() {
     const named = await driver.waitForText('to Bob', { timeoutMs: 10_000 });
     const bodyText = await driver.bodyText();
     assert(named, `ledger row names the payee via the link-label annotation ("to Bob"). ledger:\n${bodyText.slice(0, 500)}`);
-    assertIncludes(bodyText, '\u22120.99990001 VCHF', 'ledger outgoing row amount (U+2212 minus + the transferred wire, exact units)');
+    assertIncludes(bodyText, '\u22121.00000001 VCHF', 'ledger outgoing row headlines the GROSS (U+2212 minus + the typed price = wire + fee, founder rule 2026-09-14)');
+    assertIncludes(bodyText, '\u2212 0.0001 VCHF fees', 'ledger row carries the fee as its annotation line — never inside the headline');
     assert(!bodyText.includes(bobPrincipal), 'ledger row never dumps the full principal');
     assert(!bodyText.includes(bob.publicHex), 'ledger row shows only the annotation name, never the full hex');
 

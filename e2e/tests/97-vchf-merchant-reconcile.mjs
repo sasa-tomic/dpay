@@ -15,8 +15,10 @@
 //   * The settlement rail is VCHF's exact ledger principal ly36x-wiaaa-aaaai-aqj7q-cai and the
 //         sender pays the 10000 fee on top of the wire (one leg debits the payer exactly the
 //         price); the merchant's DEMO balance (and every other currency) is untouched.
-//   * (7) The merchant's Ledger shows the incoming row: "+0.99990001 VCHF" (the received wire)
-//         + payer short key.
+//   * (7) The merchant's Ledger headlines the GROSS on the memo-matched row: "+1.00000001 VCHF"
+//         (the typed price, founder rule 2026-09-14) with a "− 0.0001 VCHF fees" annotation;
+//         the wrong-memo row keeps its bare wire amount (no note joins it — honest display).
+//         + payer short key. The rail itself credited the wire on both legs.
 //
 // The ICP twin is flow 98; the payer-side journeys are flows 95/96.
 import {
@@ -44,7 +46,7 @@ export const meta = {
   name: 'vchf-merchant-reconcile',
   journey: 'pay',
   covers: ['vchf', 'icp-mainnet', 'merchant-request', '8-decimals', 'signed-envelope', 'ledger-target', 'exact-memo', 'reconciliation', 'fail-closed-confirm', 'ledger-row'],
-  verifies: 'A merchant creates a 1.00000001 VCHF request in-app; the request headlines the typed price with the fee/receives line and encodes the netted wire 99990001 (price − fee, founder rule). A wrong-memo wire transfer to the VCHF ledger settles on the rail but does NOT flip the request to Received; the exact-memo wire transfer flips it (Received shows the typed price). Each leg debits the payer exactly the price (wire + fee); no other currency moves; merchant Ledger shows +0.99990001 VCHF (the received wire) from the payer short key.',
+  verifies: 'A merchant creates a 1.00000001 VCHF request in-app; the request headlines the typed price with the fee/receives line and encodes the netted wire 99990001 (price − fee, founder rule). A wrong-memo wire transfer to the VCHF ledger settles on the rail but does NOT flip the request to Received; the exact-memo wire transfer flips it (Received shows the typed price). Each leg debits the payer exactly the price (wire + fee); no other currency moves; merchant Ledger headlines the gross +1.00000001 VCHF on the memo-matched row (the typed price, with a "\u2212 0.0001 VCHF fees" annotation — founder rule 2026-09-14; the wrong-memo row keeps its bare wire amount) from the payer short key.',
   timeoutMs: 60_000, // two confirm polls (wrong leg burns the ~4.5s proof budget before failing) + settle polls.
   // 2026-08-28: raised 35s → 60s + widened the two reconcile waits to 20s — under full-suite
   // contention on the shared host the ~4.5s poll exhaust + render outran the old 8s wait
@@ -164,7 +166,9 @@ export async function run() {
     const named = await driver.waitForText(shortPayer, { timeoutMs: 10_000 });
     const histBody = await driver.bodyText();
     assert(named, `merchant history row names the payer (short principal ${shortPayer}). history:\n${histBody.slice(0, 500)}`);
-    assertIncludes(histBody, '+0.99990001 VCHF', 'merchant history incoming row amount (+ prefix, the received wire in exact units)');
+    assertIncludes(histBody, '+1.00000001 VCHF', 'memo-matched history row headlines the GROSS (+ prefix, the typed price = wire + fee — founder rule 2026-09-14)');
+    assertIncludes(histBody, '\u2212 0.0001 VCHF fees', 'memo-matched row carries the fee as its annotation line');
+    assertIncludes(histBody, '+0.99990001 VCHF', 'wrong-memo row keeps the bare received wire — nothing joins it, so nothing is invented');
     assert(!histBody.includes(payer.publicHex), 'history must not dump the payer full hex');
 
     await driver.screenshot('97-vchf-merchant-reconcile');
