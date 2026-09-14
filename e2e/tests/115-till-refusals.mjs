@@ -19,17 +19,17 @@
 // the point: every one of these is decided on the device, with the money nowhere near it.
 //
 // Selector contract: `receive-code-form`, `btn-code-till`, `till-refused`, `till-refused-go`,
-// `amount-input`, `btn-till-ring-up`, `till-err`, `till-qr`.
+// `amount-input`, `btn-till-ring-up`, `till-err`, `till-qr`, `sol-req-memo-input`, `btn-sol-req-make`.
 import {
-  setup, assert, assertIncludes, onboardWallet, openBalances, selectCurrency,
+  setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
 } from '../harness/lib.mjs';
 
 export const meta = {
   id: '115',
   name: 'till-refusals',
   journey: 'pay',
-  covers: ['till', 'merchant-till', 'rail-parity', 'same-surfaces', 'fail-closed', 'honest-instructions', 'asset-switch'],
-  verifies: 'The till-code checkbox renders for EVERY asset on BOTH Receive rails and fails closed by name where a charge cannot be rung up: with ckBTC selected it names the asset and its chain, says a till code is paid in VCHF, and offers one tap that switches — after which the counter is open with the checkbox still checked (the code form is wallet-owned, so it survives the rail re-mount). With SOL selected the same checkbox renders on the Solana Receive form and refuses naming SOL on Solana. A price finer than a rappen is refused on the device with the correction spelled out, and nothing is signed or sent.',
+  covers: ['till', 'merchant-till', 'rail-parity', 'same-surfaces', 'fail-closed', 'honest-instructions', 'asset-switch', 'shared-message-box'],
+  verifies: 'The till-code checkbox renders for EVERY asset on BOTH Receive rails and fails closed by name where a charge cannot be rung up: with ckBTC selected it names the asset and its chain, says a till code is paid in VCHF, and offers one tap that switches — after which the counter is open with the checkbox still checked (the code form is wallet-owned, so it survives the rail re-mount). With SOL selected the same checkbox renders on the Solana Receive form and refuses naming SOL on Solana — and the message box there is the ONE box both code forms share (its text survives the checkbox toggle in both directions). A price finer than a rappen is refused on the device with the correction spelled out, and nothing is signed or sent.',
   timeoutMs: 45_000,
 };
 
@@ -77,6 +77,18 @@ export async function run() {
     assertIncludes(refusedSol, 'Solana', 'and the rail it settles on');
     assertIncludes(refusedSol, 'Internet Computer', 'and where a till code settles instead');
     await driver.screenshot('115-till-refused-sol');
+    // The ONE message box on the SOL rail too (founder 2026-09-14): present with the till checkbox
+    // checked, and its text survives the toggle in both directions — the same-surfaces rule cuts
+    // both ways, so this rail's box behaves exactly like the IC one flow 114 pins.
+    const SOL_NOTE = 'SOL-side note';
+    await driver.type('sol-req-memo-input', SOL_NOTE, { timeoutMs: 4_000 });
+    await driver.click('btn-code-till', { timeoutMs: 4_000 }); // uncheck → the dpay SOL request form
+    assertEq(await driver.readInputValue('sol-req-memo-input'), SOL_NOTE, 'the SOL message text survives unchecking the till checkbox');
+    assert(await driver.isPresent('btn-sol-req-make'), 'the dpay SOL request form is back');
+    await driver.click('btn-code-till', { timeoutMs: 4_000 }); // check again → the refusal returns
+    assert(await driver.isPresent('sol-req-memo-input'), 'the SOL message box stays mounted with the till checkbox checked');
+    assertEq(await driver.readInputValue('sol-req-memo-input'), SOL_NOTE, 'the SOL message text survives checking the till checkbox again');
+    await driver.findByTestID('till-refused', { timeoutMs: 5_000 });
     // …and the same one tap crosses the rail.
     await driver.click('till-refused-go', { timeoutMs: 4_000 });
     await driver.findByTestID('btn-till-ring-up', { timeoutMs: 6_000 });

@@ -16,12 +16,17 @@
 // gateway exactly as flows 97/98 pay a merchant request.
 //
 // THE ONE TEST-ONLY SEAM is `observeTillOpens`, which wraps `window.fetch` to KEEP a copy of the
-// ring-up's answer while passing every request through untouched. It changes no behaviour; it exists
-// because the payment-link id lives inside a bech32 LNURL on screen, and decoding it here would put
-// a third implementation of LUD-01 in this repo (the relay encodes, the app decodes — see
-// `e2e/harness/lnurl.mjs`, which says exactly this).
+// ring-up's request and answer while passing every request through untouched. It changes no
+// behaviour; it exists because the payment-link id lives inside a bech32 LNURL on screen, and
+// decoding it here would put a third implementation of LUD-01 in this repo (the relay encodes, the
+// app decodes — see `e2e/harness/lnurl.mjs`, which says exactly this). The kept request body pays
+// for itself: it is how the flow asserts the shared message box's text rode the ring-up as `note`.
 //
-// Selector contract: `btn-code-till`, `amount-input`, `btn-till-ring-up`, `till-qr`,
+// THE ONE BOX (founder 2026-09-14): the message box is the SAME input in the same place whether or
+// not the till checkbox is checked, and its text survives the toggle in both directions — asserted
+// here through a full off→on round trip before the ring-up, and again after "Next customer".
+//
+// Selector contract: `btn-code-till`, `amount-input`, `memo-input`, `btn-till-ring-up`, `till-qr`,
 // `till-amount`, `till-status`, `till-paid`, `till-paid-block`, `btn-till-new`, `receive-code-form`.
 import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
@@ -43,12 +48,14 @@ export const meta = {
   id: '114',
   name: 'till-ring-up',
   journey: 'pay',
-  covers: ['till', 'merchant-till', 'opencryptopay', 'signed-ring-up', 'vchf', 'observed-settlement', 'charge-reference', 'honest-instructions', 'settle'],
-  verifies: 'A shop rings up CHF 10.50 on its own dpay wallet: the Receive tab’s till-code checkbox switches the shared amount row’s button to the till counter, the app signs the ring-up with its own key, and the relay answers with a real charge — the screen shows the code, the franc price, what settles in VCHF, and an honest "waiting" that never claims the customer scanned anything. A payer then resolves that code through the till’s own OpenCryptoPay routes (which name the MERCHANT’s account, not dpay’s) and pays the exact VCHF carrying the charge’s `ref` as the on-chain memo; the merchant’s screen flips to Paid with the ledger block that paid, and the money is on the ledger (the customer’s account moves by exactly CHF 10.50 — the shop absorbs the ledger fee, so it receives 10.4999). "Next customer" returns to the shared form.',
+  covers: ['till', 'merchant-till', 'opencryptopay', 'signed-ring-up', 'vchf', 'observed-settlement', 'charge-reference', 'honest-instructions', 'settle', 'shared-message-box'],
+  verifies: 'A shop rings up CHF 10.50 on its own dpay wallet: the Receive tab’s till-code checkbox switches the shared amount row’s button to the till counter — and the message box is ONE box for both code forms (founder 2026-09-14): the same input in the same place whether or not the checkbox is checked, its text surviving the toggle in both directions and riding the ring-up as the signed `note`. The app signs the ring-up with its own key, and the relay answers with a real charge — the screen shows the code, the franc price, what settles in VCHF, and an honest "waiting" that never claims the customer scanned anything. A payer then resolves that code through the till’s own OpenCryptoPay routes (which name the MERCHANT’s account, not dpay’s) and pays the exact VCHF carrying the charge’s `ref` as the on-chain memo; the merchant’s screen flips to Paid with the ledger block that paid, and the money is on the ledger (the customer’s account moves by exactly CHF 10.50 — the shop absorbs the ledger fee, so it receives 10.4999). "Next customer" returns to the shared form with the note kept, like the price.',
   timeoutMs: 60_000, // ring-up + a 4-call provider walk + a real IC settlement + the merchant poll
 };
 
-/** Keep a copy of every ring-up answer the app receives, without changing what it receives. */
+/** Keep a copy of every ring-up REQUEST and ANSWER, without changing what the app receives. The
+ *  request body is kept because the founder's one-box rule (2026-09-14) is pinned here end to end:
+ *  the message typed into the SHARED message box must ride the signed ring-up as `note`. */
 async function observeTillOpens(driver) {
   await driver.eval(() => {
     window.__TILL_OPENS = [];
@@ -57,10 +64,12 @@ async function observeTillOpens(driver) {
       const response = await real(input, init);
       const url = typeof input === 'string' ? input : (input && input.url) || '';
       if (/\/api\/v1\/till$/.test(url) && response.ok) {
+        let body = null;
+        try { body = init && typeof init.body === 'string' ? JSON.parse(init.body) : null; } catch (e) { body = { unparsed: String(init && init.body) }; }
         try {
-          window.__TILL_OPENS.push(await response.clone().json());
+          window.__TILL_OPENS.push({ body, answer: await response.clone().json() });
         } catch (e) {
-          window.__TILL_OPENS.push({ observerError: String(e) });
+          window.__TILL_OPENS.push({ body, observerError: String(e) });
         }
       }
       return response;
@@ -128,6 +137,21 @@ export async function run() {
     assert(await driver.isPresent('receive-code-form'), 'the till-code checkbox must render on the Receive form');
     await observeTillOpens(driver);
     await driver.click('btn-code-till', { timeoutMs: 4_000 });
+
+    // --- ONE message box, both code forms (founder 2026-09-14) ---------------------------------
+    // The message box is the SAME input in the same place whether or not the till checkbox is
+    // checked, and its text survives the toggle in both directions. Type it in the TILL form…
+    const NOTE = '2x Kafi, Tisch 4';
+    await driver.type('memo-input', NOTE, { timeoutMs: 4_000 });
+    // …toggle OFF (back to the dpay form): same box, same place, same text…
+    await driver.click('btn-code-till', { timeoutMs: 4_000 });
+    assert(await driver.isPresent('memo-input'), 'the message box stays mounted when the till checkbox is unchecked');
+    assertEq(await driver.readInputValue('memo-input'), NOTE, 'the message text survives unchecking the till checkbox');
+    // …and ON again: still the same box with the same text — the BUTTON is what flips, not the box.
+    await driver.click('btn-code-till', { timeoutMs: 4_000 });
+    assert(await driver.isPresent('memo-input'), 'the message box stays mounted when the till checkbox is checked');
+    assertEq(await driver.readInputValue('memo-input'), NOTE, 'the message text survives checking the till checkbox again');
+
     await driver.type('amount-input', PRICE, { timeoutMs: 4_000 });
     await driver.click('btn-till-ring-up', { timeoutMs: 4_000 });
 
@@ -146,7 +170,10 @@ export async function run() {
     // --- what the relay actually opened --------------------------------------------------------
     const opens = await driver.eval(() => window.__TILL_OPENS);
     assertEq(opens.length, 1, 'exactly one ring-up was sent');
-    const open = opens[0];
+    const open = opens[0].answer;
+    // The one-box seam, on the wire: the text typed into the SHARED message box rode the ring-up
+    // as the signed `note` (the observer kept the request body for exactly this assertion).
+    assertEq(opens[0].body.note, NOTE, 'the shared message box’s text rides the ring-up as the signed note');
     assertEq(open.asset, 'VCHF', 'a dpay till quotes VCHF and nothing else');
     // NO CUSTODY, asserted rather than promised: the destination is the SHOP's own account, derived
     // from the key the app signed with — the relay never holds it.
@@ -181,6 +208,9 @@ export async function run() {
     await driver.click('btn-till-new', { timeoutMs: 4_000 });
     await driver.findByTestID('btn-till-ring-up', { timeoutMs: 4_000 });
     assert(await driver.isPresent('receive-code-form'), 'the checkbox returns once nothing is live');
+    // The note is the shared box's (the parent's), so "Next customer" keeps it exactly as it keeps
+    // the price — a re-ring is almost always for the same thing, and the cashier edits, not retypes.
+    assertEq(await driver.readInputValue('memo-input'), NOTE, 'the shared message box keeps its text for the next customer');
 
     console.log(`[114-till-ring-up] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
