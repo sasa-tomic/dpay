@@ -55,7 +55,7 @@ const SOL_NETWORK = 'Solana';
  * Bitcoin address pasted into the wrong wallet, and which offered neither a scanner nor an address
  * book that the IC surface had. CLAUDE.md's same-surfaces rule calls that divergence a bug.
  */
-export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onSent, onClose}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onSent: () => void; onClose: () => void}) {
+export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decimals: decimalsProp, balance, ataAbsent = false, solBalance = null, solChecking = false, ataSetupBusy = false, ataSetupErr = null, onCreateAta, onShowSolAddress, prefill = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose}: {identity: Identity; token: string; mint?: string | null; symbol?: string; decimals?: number; balance: string; ataAbsent?: boolean; solBalance?: string | null; solChecking?: boolean; ataSetupBusy?: boolean; ataSetupErr?: string | null; onCreateAta?: () => void; onShowSolAddress?: () => void; prefill?: {address: string; amount: string; label?: string; memo?: string} | null; onPrefillConsumed?: () => void; onOpenAddressBook?: () => void; onSent: () => void; onClose: () => void}) {
   const [address, setAddress] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done' | 'error'>('form');
@@ -255,6 +255,7 @@ export function SolanaWithdrawSheet({identity, token, mint = null, symbol, decim
             saved={saved}
             onPickSaved={setAddress}
             onForgetSaved={a => { void forgetAddress(assetKey, a).then(setSaved); }}
+            onManageSaved={onOpenAddressBook}
             testIDPrefix="sol-send"
           />
 

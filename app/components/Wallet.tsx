@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useCallback, useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {AppState, BackHandler, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {C} from '../config/palette';
@@ -42,6 +42,7 @@ import {Ledger} from './Ledger';
 import {TxnReceipt} from './HistoryRow';
 import {HomeTab} from './HomeTab';
 import {AccountsTab} from './AccountsTab';
+import {AddressesTab} from './AddressesTab';
 import {ConvertMode} from './ConvertMode';
 import {SolPayMode} from './SolPayMode';
 import {SolReceiveMode} from './SolReceiveMode';
@@ -61,14 +62,14 @@ import {useWalletHistory} from '../hooks/useWalletHistory';
 export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGateway, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; /** Apply + persist the IC gateway override (App.tsx, F2 — demos/testing against a local replica). THROWS on a refusal — Settings renders it. */ setIcGateway: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   const relayUrl = relayUrls[0];
   // The wallet's surfaces. Four are TABS (home/pay/receive/ledger — the bottom bar switches
-  // between them and each is a destination); two are ROUTES (accounts/convert — entered from a
-  // control, left by Back, never a bottom-bar destination).
+  // between them and each is a destination); three are ROUTES (accounts/convert/addresses —
+  // entered from a control, left by Back, never a bottom-bar destination).
   //
   // The app OPENS on 'home' (founder decision 2026-09-08, docs/specs/2026-09-08-first-run-redesign
   // §1 F2). This repealed the standing "the scanner stays the landing screen" rule: greeting a new
   // user with a payment-request surface is what read as a scam. The cost — one extra tap on the
-  // returning traveller's most frequent action — is paid back by Home's primary Scan button, which
-  // lands the camera in exactly one tap.
+  // returning traveller's most frequent action — is paid back by Home's Pay card, which lands the
+  // camera in exactly one tap.
   // The Mode vocabulary lives in `lib/walletRoute.ts` beside the URL vocabulary it translates to
   // (X11): the two differ in exactly one word ('ledger' ↔ 'transactions'), which is the kind of
   // difference that rots when it is declared in two files.
@@ -85,6 +86,24 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     });
   }, []);
   const closeAccounts = useCallback(() => setMode(accountsFrom.current), []);
+  // The address-book route follows the accounts pattern verbatim (founder, 2026-09-14: "the
+  // address book needs to be shown somewhere in the UI" — it had been only send-form autocomplete
+  // chips). Entered from Settings and from the send form's saved list; Back returns to whichever
+  // of those opened it, which matters for the send form because its sub-mode and half-typed
+  // destination survive underneath the route.
+  const addressesFrom = useRef<Mode>('home');
+  const openAddresses = useCallback(() => {
+    setMode(prev => {
+      if (prev !== 'addresses') addressesFrom.current = prev;
+      return 'addresses';
+    });
+  }, []);
+  const closeAddresses = useCallback(() => setMode(addressesFrom.current), []);
+  // Editing the book from the route must also refresh what the history rows and receipts call
+  // those counterparties (the addrLabels effect below reads the book). History arrays re-run the
+  // effect on their own; a rename with an UNCHANGED history does not, so the route bumps this
+  // revision counter on every successful mutation.
+  const [addrBookRev, bumpAddrBook] = useReducer(x => x + 1, 0);
   // A shared payment link that has been PARSED but not yet resolved against the catalog (which
   // loads async). Held here until the resolve effect below turns it into a concrete asset + amount,
   // or into an honest on-screen refusal.
@@ -233,10 +252,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     ...(settingsOpen ? {settings: true as const} : {}),
   };
   const applyRoute = useCallback((r: WalletRoute) => {
-    // `accounts` goes through openAccounts so the route remembers where it was entered from and
-    // its own Back control still returns there — a URL-driven entry is an entry like any other.
+    // `accounts` and `addresses` go through their open functions so the routes remember where they
+    // were entered from and their own Back control still returns there — a URL-driven entry is an
+    // entry like any other.
     if (r.screen === 'accounts') {
       openAccounts();
+    } else if (r.screen === 'addresses') {
+      openAddresses();
     } else {
       setMode(modeForScreen(r.screen));
     }
@@ -248,7 +270,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     // carries the deep-link flags); a route without it closes through the ONE funnel, so web
     // Back resets the deep-link flags exactly like the sheet's own close does.
     if (r.settings === true) setSettingsOpen(true); else closeSettings();
-  }, [openAccounts, closeSettings]);
+  }, [openAccounts, openAddresses, closeSettings]);
   useWalletHistory(route, applyRoute);
 
   // Passport deep-link: an unfilled "SAW THE FLOW" stamp opens the walkthrough replay here —
@@ -399,7 +421,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
       });
     })();
     return () => { alive = false; };
-  }, [histAssetIds, ledgerHistory]);
+  }, [histAssetIds, ledgerHistory, addrBookRev]);
   // The ONE resolver both history surfaces and the receipt share (the pure precedence lives in
   // services/txNotes.ts#annotateTxn — unit-tested there). Name precedence: the payment-time note
   // first (what the user SAW when they paid), then the saved-address label; a row with neither
@@ -948,8 +970,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   const leaveRoute = useCallback((): boolean => {
     if (mode === 'accounts') { closeAccounts(); return true; }
     if (mode === 'convert') { openAccounts(); return true; }
+    if (mode === 'addresses') { closeAddresses(); return true; }
     return false;
-  }, [mode, closeAccounts, openAccounts]);
+  }, [mode, closeAccounts, openAccounts, closeAddresses]);
 
   // Escape carries NO input guard, deliberately: dismissing the surface you are on must work while
   // a field is focused, which is the universal dialog behaviour `useEscapeToClose` already relies
@@ -1144,7 +1167,9 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
             nothing saying which is which ("DEMO balance" over "Swiss francs · Main · 0.00 VCHF").
             X8 had already noticed half of this and hidden the AMOUNT here on Home; what was left
             was a label that could contradict the headline and a chevron that duplicated Home's own
-            `btn-home-accounts` pill. Both are gone, and Home keeps the labelled affordance.
+            accounts affordance. Both are gone — and since 2026-09-14 that affordance is the
+            headline block itself: the founder's "if the user clicks on the balance, they should be
+            taken to the accounts and balances", so `btn-home-accounts` rides the balance.
             Everywhere else the chip is the only statement of the selection, so it stays. */}
         {mode === 'home' ? null : (
           <Pressable
@@ -1220,11 +1245,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               online={online}
               history={ledgerHistory}
               noteFor={noteFor}
-              // Scan pins the sub-mode, so the camera is live in ONE tap from a cold start whatever
-              // the Pay tab was last left showing (a `send` sub-mode left over from a previous
-              // session would otherwise make the till gesture two taps — the exact regression the
-              // primary Scan button exists to prevent).
-              onScan={() => { setPaySubMode('scan'); setMode('pay'); }}
+              // Pay pins the SCAN sub-mode, so the camera is live in ONE tap from a cold start
+              // whatever the Pay tab was last left showing (a `send` sub-mode left over from a
+              // previous session would otherwise make the till gesture two taps — the exact
+              // regression the primary Pay card exists to prevent).
+              onPay={() => { setPaySubMode('scan'); setMode('pay'); }}
               onReceive={() => setMode('receive')}
               onDeposit={goToDeposit}
               onOpenAccounts={openAccounts}
@@ -1251,9 +1276,18 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               onConvert={() => setMode('convert')}
               onOpenSettings={openSettingsFromOutage}
             />
+           : mode === 'addresses'
+           ? <AddressesTab
+               assets={assets}
+               catalog={catalog}
+               onBack={closeAddresses}
+              // Every successful mutation refreshes the history/receipt annotations (addrLabels)
+              // even when the history array itself has not changed.
+              onBookChanged={bumpAddrBook}
+            />
           : mode === 'pay'
           ? (activeSol && solAddress
-              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingTill} onPrefillScanConsumed={() => setPendingTill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} />
+              ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingTill} onPrefillScanConsumed={() => setPendingTill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
                   onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
@@ -1271,6 +1305,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
                   prefillScan={pendingTill} onPrefillScanConsumed={() => setPendingTill(null)}
                   onScannedLink={handleUrl}
                   onLockChange={setSelectionLocked}
+                  onOpenAddressBook={openAddresses}
                 />
           )
           : mode === 'receive'
@@ -1409,7 +1444,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
             openBackup={settingsOpenBackup}
             openAdvanced={settingsAdvanced}
             onOpenStep={goToPassportStep}
-         />
+            // The route entry (founder 2026-09-14): the sheet CLOSES and the address-book route
+            // opens over the surface the sheet was covering — Back from the route returns there.
+            onOpenAddressBook={() => { closeSettings(); openAddresses(); }}
+          />
       ) : null}
       {passportOpen ? (
         <AppModal onRequestClose={() => setPassportOpen(false)}>

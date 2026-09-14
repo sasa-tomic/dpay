@@ -57,8 +57,8 @@ export const walletEs: WalletMessages = {
 
   home: {
     actions: {
-      scan: 'Escanear y pagar',
-      scanHint: 'Abre la cámara y escanea el código de la tienda',
+      pay: 'Pagar',
+      payHint: 'Escanea un código o paga tocando el teléfono',
       receive: 'Recibir',
       receiveHint: 'Pide un pago o muestra tu dirección',
       addMoney: 'Añadir dinero',
@@ -71,7 +71,7 @@ export const walletEs: WalletMessages = {
       empty: 'Aún no hay pagos.',
     },
     accounts: {
-      open: count => `Cuentas · ${count}`,
+      openLabel: 'Abrir cuentas',
       openHint: 'Ver todas las cuentas que esta cartera puede guardar',
     },
   },
@@ -83,6 +83,27 @@ export const walletEs: WalletMessages = {
     backHint: 'Volver a donde estabas',
     practice: 'Dinero de práctica: solo funciona dentro de dpay y ninguna tienda lo acepta.',
     convertHint: 'Convertir el saldo de esta cuenta en un servicio externo que firmas tú mismo',
+  },
+
+  addressBook: {
+    title: 'Libreta de direcciones',
+    intro: 'Todas las direcciones a las que has enviado, la más usada primero — guardadas solo en este dispositivo.',
+    back: 'Atrás',
+    backHint: 'Volver a donde estabas',
+    empty: 'Aún no hay direcciones guardadas. Cada dirección a la que envías se guarda aquí automáticamente — o añade una ahora.',
+    addEntry: 'Añadir una dirección',
+    addEntryHint: 'Guarda una dirección a la que envías a menudo',
+    assetLabel: 'Para',
+    addressLabel: 'Dirección',
+    addressPlaceholder: 'Pega la dirección de destino',
+    addressHint: 'La dirección exactamente como la usarías para enviar',
+    nameLabel: 'Nombre',
+    namePlaceholder: 'p. ej. Alice (opcional)',
+    nameHint: 'Cómo llamas a esta dirección — opcional',
+    save: 'Guardar dirección',
+    saveHint: 'Añade esta dirección a la libreta de direcciones',
+    rename: 'Renombrar',
+    renameHint: who => `Renombrar ${who}`,
   },
 
   backToPaying: asset => `Volver a pagar con ${asset}`,

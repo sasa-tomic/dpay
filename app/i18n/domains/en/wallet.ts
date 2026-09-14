@@ -126,12 +126,12 @@ export type WalletMessages = {
    * always ONE rail's own balance in its own token unit, never a portfolio sum.
    */
   home: {
-    /** The action row. `scan` is the PRIMARY one — Home is the landing screen since 2026-09-08, so
-     *  the till gesture has to stay one tap from a cold start (the mitigation the UX swarm's
-     *  dissenter named). The rest are capability-dispatched, one chrome for every asset. */
+    /** The action row — three EQUAL cards since 2026-09-14, when the founder killed the oversized
+     *  "Scan to pay" button for naming one gesture the screen behind it surpasses. `pay` is
+     *  honestly named: scanning, tapping and beaming all live behind it. */
     actions: {
-      scan: string;
-      scanHint: string;
+      pay: string;
+      payHint: string;
       receive: string;
       receiveHint: string;
       addMoney: string;
@@ -144,10 +144,11 @@ export type WalletMessages = {
       seeAllHint: string;
       empty: string;
     };
-    /** The affordance that opens the ACCOUNTS route (the list itself lives in `accounts` below).
-     *  Carries the count so the user knows how much is behind it before tapping. */
+    /** The headline block IS the affordance that opens the ACCOUNTS route (founder, 2026-09-14:
+     *  tapping the balance goes to the accounts and balances). `openLabel` names the ACTION for
+     *  the screen reader — never a second copy of the eyebrow sentence, which would drift. */
     accounts: {
-      open: (count: number) => string;
+      openLabel: string;
       openHint: string;
     };
   };
@@ -165,6 +166,37 @@ export type WalletMessages = {
     practice: string;
     /** The per-asset Convert action, shown on the SELECTED row only. */
     convertHint: string;
+  };
+
+  /** The ADDRESS BOOK route — the browse/manage surface over the per-asset saved destinations
+   *  (services/addressBook.ts, previously reachable only as send-form autocomplete chips).
+   *  Addresses render through the SAME shared vocabulary as the chips (`M.withdraw.send.unnamed`,
+   *  `M.withdraw.send.forgetLabel`) so the book and the form can never disagree on what an
+   *  unnamed or removed entry is called. */
+  addressBook: {
+    title: string;
+    /** The one-line orientation under the title. Names the device-local scope (no account, no
+     *  sync) — the same honesty the custody statement makes. */
+    intro: string;
+    back: string;
+    backHint: string;
+    /** The honest empty line + its way out (founder rule: every state says what to do next). */
+    empty: string;
+    addEntry: string;
+    addEntryHint: string;
+    /** The add form's asset chooser heading. */
+    assetLabel: string;
+    addressLabel: string;
+    addressPlaceholder: string;
+    addressHint: string;
+    nameLabel: string;
+    namePlaceholder: string;
+    nameHint: string;
+    save: string;
+    saveHint: string;
+    rename: string;
+    /** `who` is the entry's current label, or its short address when unnamed. */
+    renameHint: (who: string) => string;
   };
 
   /** The fund-funnel resume link on Receive → My address. */
@@ -310,8 +342,8 @@ export const walletEn: WalletMessages = {
 
   home: {
     actions: {
-      scan: 'Scan to pay',
-      scanHint: 'Open the camera and scan a shop’s code',
+      pay: 'Pay',
+      payHint: 'Scan a code or tap a phone to pay',
       receive: 'Receive',
       receiveHint: 'Request a payment or show your address',
       addMoney: 'Add money',
@@ -324,7 +356,7 @@ export const walletEn: WalletMessages = {
       empty: 'No payments yet.',
     },
     accounts: {
-      open: count => `Accounts · ${count}`,
+      openLabel: 'Open accounts',
       openHint: 'See every account this wallet can hold',
     },
   },
@@ -336,6 +368,27 @@ export const walletEn: WalletMessages = {
     backHint: 'Return to where you were',
     practice: 'Practice money — it only works inside dpay, and no shop will take it.',
     convertHint: 'Convert this account’s balance at an outside venue you sign with yourself',
+  },
+
+  addressBook: {
+    title: 'Address book',
+    intro: 'Every destination you have sent to, most recently used first — saved on this device only.',
+    back: 'Back',
+    backHint: 'Return to where you were',
+    empty: 'No saved addresses yet. Every address you send to is saved here automatically — or add one now.',
+    addEntry: 'Add an address',
+    addEntryHint: 'Save a destination you send to often',
+    assetLabel: 'For',
+    addressLabel: 'Address',
+    addressPlaceholder: 'Paste the destination address',
+    addressHint: 'The destination exactly as you would send to it',
+    nameLabel: 'Name',
+    namePlaceholder: 'e.g. Alice (optional)',
+    nameHint: 'What you call this destination — optional',
+    save: 'Save address',
+    saveHint: 'Adds this address to the address book',
+    rename: 'Rename',
+    renameHint: who => `Rename ${who}`,
   },
 
   backToPaying: asset => `Back to paying ${asset}`,

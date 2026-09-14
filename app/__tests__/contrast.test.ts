@@ -302,7 +302,6 @@ describe('3. THE FILLS — every label printed on a saturated fill', () => {
     ['applyBtn', 'applyBtnText'],
     ['tabActive', 'tabTextActive'],
     ['bottomTabActive', 'bottomTabTextActive'],
-    ['homeScanBtn', 'homeScanLabel'],
     ['filterChipActive', 'filterChipTextActive'],
     ['convertSlippageChipOn', 'convertSlippageChipTextOn'],
     ['paidBtn', 'paidBtnText'],

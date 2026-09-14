@@ -82,6 +82,12 @@ export const settingsDe: SettingsMessages = {
     howItWorksHint: 'Spielt die drei Szenen noch einmal ab, die zeigen, wie dpay bezahlt',
   },
 
+  addressBook: {
+    label: 'Adressbuch',
+    entry: 'Gespeicherte Adressen…',
+    entryHint: 'Adressen, an die du gesendet hast, anzeigen, benennen und entfernen',
+  },
+
   theme: {
     label: 'Design',
     light: 'Hell',

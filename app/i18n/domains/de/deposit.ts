@@ -325,6 +325,8 @@ export const withdrawDe: WithdrawMessages = {
     saveNamePlaceholder: 'Name vergeben (optional)',
     forgetLabel: address => `Gespeicherte Adresse ${address} entfernen`,
     unnamed: 'Ohne Namen',
+    manage: 'Adressbuch',
+    manageHint: 'Gespeicherte Adressen anzeigen, benennen und entfernen',
 
     reviewTitle: 'Prüfen',
     networkRow: 'Netzwerk',

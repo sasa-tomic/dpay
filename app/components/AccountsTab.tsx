@@ -16,7 +16,8 @@ import type {BalanceView} from '../lib/assetBalances';
 // The ACCOUNTS route (2026-09-08) — every account this wallet can hold, one row per rail.
 //
 // It is a ROUTE, not a tab and not a modal: it is entered from the header balance chip (on every
-// screen, including the Pay scanner), from the `btn-home-accounts` affordance on Home, from the
+// screen, including the Pay scanner), from tapping the HOME HEADLINE (the balance itself, since
+// 2026-09-14 — `btn-home-accounts` rides the headline block), from the
 // `a` hotkey, and from the passport's FUNDS LOADED step; it is left by its own Back control or by
 // the hardware back button, which return the user to the surface they came from. The list itself
 // is the retired Balances sheet's body, moved here VERBATIM from the Home tab (O4 S3 → this):

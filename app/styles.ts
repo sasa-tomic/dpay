@@ -257,22 +257,18 @@ function buildStyles(p: Palette) {
   bottomTabTextActive: {color: p.brandInk, fontFamily: FONT.sansBold},
   // ── The Home tab (O4) — the balance-first home surface ────────────────────────────────────
   // Headline: ONE asset's OWN balance (never a portfolio sum), eyebrow + big number stacked and
-  // centered like the review/paid moments. The action row is three uniform card buttons (icon
-  // over label) — capability-dispatched, one chrome for every asset. The activity feed reuses the
-  // Ledger's histRow grammar (via the shared HistoryRow), capped at 3 rows under a mono eyebrow.
+  // centered like the review/paid moments — and the whole block IS the accounts affordance since
+  // 2026-09-14 (the founder's balance-tap directive); the chevron beside the number carries X7's
+  // "a ⌄ beside a balance opens the account list" grammar. The action row is three EQUAL card
+  // buttons (icon over label): the oversized "Scan to pay" button died 2026-09-14 for naming a
+  // gesture the screen behind it surpasses — Pay / Receive / Add money, one grammar, no lie. The
+  // activity feed reuses the Ledger's histRow grammar (via the shared HistoryRow).
   homeHeadline: {alignSelf: 'stretch', alignItems: 'center', marginTop: 10, marginBottom: 2},
+  homeEyebrowRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   homeEyebrow: {fontSize: 13, color: p.sub, marginBottom: 8, fontFamily: FONT.sansMedium},
-  homeAmount: {fontSize: 40, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -1},
-  // The accounts affordance under the headline: a quiet pill naming the count, the ONE thing on
-  // Home that opens the accounts route. Quiet on purpose — it must not compete with Scan.
-  homeAccountsBtn: {alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 44},
-  homeAccountsBtnText: {fontSize: 13, color: p.sub, fontFamily: FONT.sansMedium},
-  // Scan is the PRIMARY action on the landing screen (2026-09-08): a full-width brand button, so
-  // the till gesture stays one unmistakable tap from a cold start. The two secondary actions keep
-  // the old card-button grammar underneath it.
-  homeScanBtn: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginTop: 18, paddingVertical: 16, borderRadius: 16, backgroundColor: p.brand, minHeight: 56, ...LIFT},
-  homeScanLabel: {fontSize: 16, color: p.brandInk, fontFamily: FONT.sansBold},
-  homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 10},
+  homeAmountRow: {flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%'},
+  homeAmount: {fontSize: 40, fontWeight: '700', color: p.ink, fontFamily: FONT.sansBold, letterSpacing: -1, flexShrink: 1},
+  homeActionRow: {flexDirection: 'row', gap: 10, marginTop: 14},
   homeActionBtn: {flex: 1, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14, borderRadius: 16, borderWidth: 1, borderColor: p.line2, backgroundColor: p.card, minHeight: 72},
   homeActionLabel: {fontSize: 13, color: p.ink, fontFamily: FONT.sansMedium},
   homeActivity: {alignSelf: 'stretch', marginTop: 24},
@@ -791,6 +787,11 @@ function buildStyles(p: Palette) {
   savedRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   savedAddrLabel: {fontSize: 13, fontWeight: '600', color: p.ink, fontFamily: FONT.sansMedium},
   savedForget: {width: 44, height: 44, alignItems: 'center', justifyContent: 'center'},
+  // Address-book route (2026-09-14): the text column of one saved row (label over elided address,
+  // sharing width with the rename/remove controls) and the inline rename input that replaces the
+  // label while a rename is in flight — both reuse the saved-list visual language, no new one.
+  savedAddrCol: {flex: 1, justifyContent: 'center'},
+  renameInput: {flex: 1, minHeight: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: p.line2, backgroundColor: p.field, color: p.ink, fontSize: 14, fontFamily: FONT.sans},
   // Amount row with the inline Max button.
   amtRow: {alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 8},
   maxBtn: {paddingHorizontal: 16, minHeight: 56, borderRadius: 14, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, alignItems: 'center', justifyContent: 'center'},

@@ -56,8 +56,8 @@ export const walletDe: WalletMessages = {
 
   home: {
     actions: {
-      scan: 'Scannen und zahlen',
-      scanHint: 'Kamera öffnen und den Code des Geschäfts scannen',
+      pay: 'Bezahlen',
+      payHint: 'Code scannen oder mit dem Telefon bezahlen',
       receive: 'Empfangen',
       receiveHint: 'Zahlung anfordern oder eigene Adresse anzeigen',
       addMoney: 'Geld hinzufügen',
@@ -70,7 +70,7 @@ export const walletDe: WalletMessages = {
       empty: 'Noch keine Zahlungen.',
     },
     accounts: {
-      open: count => `Konten · ${count}`,
+      openLabel: 'Konten öffnen',
       openHint: 'Alle Konten anzeigen, die dieses Wallet halten kann',
     },
   },
@@ -82,6 +82,27 @@ export const walletDe: WalletMessages = {
     backHint: 'Zurück zur vorherigen Ansicht',
     practice: 'Übungsgeld — es funktioniert nur in dpay, kein Geschäft nimmt es an.',
     convertHint: 'Das Guthaben dieses Kontos bei einem externen Handelsplatz tauschen, den du selbst signierst',
+  },
+
+  addressBook: {
+    title: 'Adressbuch',
+    intro: 'Alle Adressen, an die du gesendet hast, zuletzt verwendete zuerst — nur auf diesem Gerät gespeichert.',
+    back: 'Zurück',
+    backHint: 'Zurück zur vorherigen Ansicht',
+    empty: 'Noch keine gespeicherten Adressen. Jede Adresse, an die du sendest, wird hier automatisch gespeichert — oder füge jetzt eine hinzu.',
+    addEntry: 'Adresse hinzufügen',
+    addEntryHint: 'Eine Adresse speichern, an die du oft sendest',
+    assetLabel: 'Für',
+    addressLabel: 'Adresse',
+    addressPlaceholder: 'Zieladresse einfügen',
+    addressHint: 'Die Adresse genau so, wie du an sie senden würdest',
+    nameLabel: 'Name',
+    namePlaceholder: 'z. B. Alice (optional)',
+    nameHint: 'Wie du diese Adresse nennst — optional',
+    save: 'Adresse speichern',
+    saveHint: 'Fügt diese Adresse zum Adressbuch hinzu',
+    rename: 'Umbenennen',
+    renameHint: who => `${who} umbenennen`,
   },
 
   backToPaying: asset => `Zurück zum Bezahlen mit ${asset}`,

@@ -46,7 +46,7 @@ import {relayBuildDrift} from '../services/relay';
  *    the action opens a confirmation dialog (the destructive gate stays in place). Visually distinct
  *    from the "Privacy policy" link above it (which previously shared the same link chrome).
  */
-export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, setIcGateway, onIcGatewayApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep}: {
+export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRpcApplied, setIcGateway, onIcGatewayApplied, onClose, onReset, onRestore, secretHex, username, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency, assets, openBackup, openAdvanced, onOpenStep, onOpenAddressBook}: {
   // R1: the operator's ordered relay address list (first = preferred). The editor below is a
   // LIST editor — one address per line — but it keeps the relay row's old draft/Apply contract:
   // nothing applies on keystroke, and an empty draft is a VALUE (it restores the addresses baked
@@ -113,6 +113,10 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
   // Pay) up to Wallet's routing map after this sheet closes itself. Optional — Settings-hosted
   // archive instances without it fall back to closing both surfaces.
   onOpenStep?: (key: ReadinessKey) => void;
+  // Address-book route entry (2026-09-14, founder: "the address book needs to be shown somewhere
+  // in the UI"). The browse/edit surface lives OUTSIDE this sheet (it is a route, not a setting)
+  // — this is only the door. Wallet closes the sheet and opens the route; Back returns here.
+  onOpenAddressBook?: () => void;
 }) {
   // Esc closes the sheet — EXCEPT while the "How dpay works" replay Modal is open, when the
   // Modal's own Walkthrough escape handler owns the key (otherwise one Esc would close both).
@@ -559,11 +563,36 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                 </Pressable>
               </View>
             ) : (
-              <Pressable testID="btn-reset" style={S.resetEntryBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel={M.settings.reset.action} accessibilityHint={M.settings.reset.entryHint} accessibilityState={{disabled: false}}>
-                <Text style={S.resetEntryText}>{M.settings.reset.entry}</Text>
-              </Pressable>
-            )}
+            <Pressable testID="btn-reset" style={S.resetEntryBtn} onPress={() => setConfirmReset(true)} accessibilityRole="button" accessibilityLabel={M.settings.reset.action} accessibilityHint={M.settings.reset.entryHint} accessibilityState={{disabled: false}}>
+              <Text style={S.resetEntryText}>{M.settings.reset.entry}</Text>
+            </Pressable>
+          )}
           </View>
+
+          {/* Address book (2026-09-14, founder: "the address book needs to be shown somewhere in
+              the UI"). The saved destinations the send forms auto-keep, made browsable and
+              editable: this row is the door to the ROUTE (Wallet closes this sheet and opens
+              `addresses`; Back returns here). Sits AFTER the wallet-management trio and BEFORE
+              Learn — wallet data, not wallet risk. Neutral `secondaryBtn` chrome (same as
+              Restore's entry): it navigates, it neither protects nor destroys anything.
+              Rendered only when the door is wired — a sheet instance without the route (tests)
+              gets no dead row. */}
+          {onOpenAddressBook ? (
+          <View style={S.settingsSection}>
+            <Text style={S.inputLabel}>{M.settings.addressBook.label}</Text>
+            <Pressable
+              testID="btn-settings-address-book"
+              style={S.secondaryBtn}
+              onPress={onOpenAddressBook}
+              accessibilityRole="button"
+              accessibilityLabel={M.settings.addressBook.label}
+              accessibilityHint={M.settings.addressBook.entryHint}
+              accessibilityState={{disabled: false}}>
+              <Text style={S.secondaryBtnText}>{M.settings.addressBook.entry}</Text>
+            </Pressable>
+          </View>
+          ) : null}
+
 
           {/* Trip Ready J1 + J5b — LEARN (UX hardening 2026-08-23: moved ABOVE About — at 390×844
               both rows sat below the fold, which is exactly how the new surfaces went "missing").

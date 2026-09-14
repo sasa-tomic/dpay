@@ -24,7 +24,7 @@ import {M} from '../i18n';
  * so there is nothing to strip and inventing a parser would only create a way to misread one.
  */
 export function AddressField({
-  value, onChange, status, saved, onPickSaved, onForgetSaved, testIDPrefix,
+  value, onChange, status, saved, onPickSaved, onForgetSaved, onManageSaved, testIDPrefix,
 }: {
   value: string;
   onChange: (text: string) => void;
@@ -33,6 +33,10 @@ export function AddressField({
   saved: SavedAddress[];
   onPickSaved: (address: string) => void;
   onForgetSaved: (address: string) => void;
+  /** Optional escape to the address-book route (2026-09-14). Rendered only with the saved list —
+   *  the link is CONTEXTUAL (the user is looking at destinations right now), and the book has its
+   *  own browse/edit entry in Settings for every other moment. */
+  onManageSaved?: () => void;
   testIDPrefix: string;
 }) {
   const [scanOpen, setScanOpen] = useState(false);
@@ -85,6 +89,18 @@ export function AddressField({
       {saved.length > 0 && value.trim().length === 0 ? (
         <View testID={`${testIDPrefix}-saved`} style={S.savedList}>
           <Text style={S.dim2}>{M.withdraw.send.savedTitle}</Text>
+          {onManageSaved ? (
+            <Pressable
+              testID={`${testIDPrefix}-manage`}
+              style={S.linkBtn}
+              onPress={onManageSaved}
+              accessibilityRole="button"
+              accessibilityLabel={M.withdraw.send.manage}
+              accessibilityHint={M.withdraw.send.manageHint}
+              accessibilityState={{disabled: false}}>
+              <Text style={S.linkTextMuted}>{M.withdraw.send.manage}</Text>
+            </Pressable>
+          ) : null}
           {saved.map(entry => (
             <View key={entry.address} style={S.savedRow}>
               <Pressable

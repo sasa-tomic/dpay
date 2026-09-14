@@ -43,6 +43,7 @@ describe('routeQuery', () => {
     expect(routeQuery({screen: 'transactions'})).toBe('?screen=transactions');
     expect(routeQuery({screen: 'accounts'})).toBe('?screen=accounts');
     expect(routeQuery({screen: 'convert'})).toBe('?screen=convert');
+    expect(routeQuery({screen: 'addresses'})).toBe('?screen=addresses');
   });
 
   test('a sub-mode is carried only where it exists', () => {
@@ -177,7 +178,7 @@ describe('foreign query parameters survive navigation', () => {
 });
 
 describe('mode ↔ screen', () => {
-  const ALL_MODES: WalletMode[] = ['home', 'pay', 'receive', 'ledger', 'accounts', 'convert'];
+  const ALL_MODES: WalletMode[] = ['home', 'pay', 'receive', 'ledger', 'accounts', 'convert', 'addresses'];
 
   test('the map is TOTAL in both directions — every mode has a screen and every screen a mode', () => {
     // This is the assertion that makes `modeForScreen`'s throw unreachable. A screen added to one

@@ -54,7 +54,7 @@ const IC_NETWORK = 'Internet Computer';
  */
 export function SendSheet({
   identity, catalog, desc, balance, family, display, tokenContract,
-  homeRail = null, prefillAddress = null, onPrefillConsumed, onSent, onClose,
+  homeRail = null, prefillAddress = null, onPrefillConsumed, onOpenAddressBook, onSent, onClose,
 }: {
   identity: Identity;
   catalog: CurrencyDescriptor[];
@@ -75,6 +75,9 @@ export function SendSheet({
    *  the address is typed by hand. */
   prefillAddress?: string | null;
   onPrefillConsumed?: () => void;
+  /** Escape to the address-book route from the saved list (2026-09-14). Optional so narrow
+   *  mounts (tests) keep working; the Pay tab always passes it. */
+  onOpenAddressBook?: () => void;
   onSent: () => void;
   onClose: () => void;
 }) {
@@ -371,6 +374,7 @@ export function SendSheet({
         saved={saved}
         onPickSaved={setAddress}
         onForgetSaved={a => { void forgetAddress(assetKey, a).then(setSaved); }}
+        onManageSaved={onOpenAddressBook}
         testIDPrefix="send"
       />
 

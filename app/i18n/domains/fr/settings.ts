@@ -83,6 +83,12 @@ export const settingsFr: SettingsMessages = {
     howItWorksHint: 'Rejoue la présentation en trois scènes du paiement dpay',
   },
 
+  addressBook: {
+    label: 'Carnet d’adresses',
+    entry: 'Adresses enregistrées…',
+    entryHint: 'Parcourir, nommer, ajouter et supprimer les adresses auxquelles vous avez envoyé',
+  },
+
   theme: {
     label: 'Thème',
     light: 'Clair',

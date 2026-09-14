@@ -58,8 +58,8 @@ export const walletFr: WalletMessages = {
 
   home: {
     actions: {
-      scan: 'Scanner et payer',
-      scanHint: 'Ouvrir l’appareil photo et scanner le code du commerce',
+      pay: 'Payer',
+      payHint: 'Scanner un code ou payer en touchant le téléphone',
       receive: 'Recevoir',
       receiveHint: 'Demander un paiement ou afficher votre adresse',
       addMoney: 'Ajouter de l’argent',
@@ -72,7 +72,7 @@ export const walletFr: WalletMessages = {
       empty: 'Aucun paiement pour l’instant.',
     },
     accounts: {
-      open: count => `Comptes · ${count}`,
+      openLabel: 'Ouvrir les comptes',
       openHint: 'Voir tous les comptes que ce portefeuille peut détenir',
     },
   },
@@ -84,6 +84,27 @@ export const walletFr: WalletMessages = {
     backHint: 'Revenir là où vous étiez',
     practice: 'Argent d’entraînement — il ne fonctionne que dans dpay et aucun commerce ne l’accepte.',
     convertHint: 'Convertir le solde de ce compte auprès d’une plateforme externe que vous signez vous-même',
+  },
+
+  addressBook: {
+    title: 'Carnet d’adresses',
+    intro: 'Toutes les adresses auxquelles vous avez envoyé, les plus récemment utilisées en premier — enregistrées sur cet appareil uniquement.',
+    back: 'Retour',
+    backHint: 'Revenir là où vous étiez',
+    empty: 'Aucune adresse enregistrée pour l’instant. Chaque adresse à laquelle vous envoyez est enregistrée ici automatiquement — ou ajoutez-en une maintenant.',
+    addEntry: 'Ajouter une adresse',
+    addEntryHint: 'Enregistrer une adresse à laquelle vous envoyez souvent',
+    assetLabel: 'Pour',
+    addressLabel: 'Adresse',
+    addressPlaceholder: 'Collez l’adresse de destination',
+    addressHint: 'L’adresse exactement comme vous lui enverriez',
+    nameLabel: 'Nom',
+    namePlaceholder: 'p. ex. Alice (facultatif)',
+    nameHint: 'Comment vous appelez cette adresse — facultatif',
+    save: 'Enregistrer l’adresse',
+    saveHint: 'Ajoute cette adresse au carnet d’adresses',
+    rename: 'Renommer',
+    renameHint: who => `Renommer ${who}`,
   },
 
   backToPaying: asset => `Retour au paiement en ${asset}`,

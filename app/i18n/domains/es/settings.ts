@@ -81,6 +81,12 @@ export const settingsEs: SettingsMessages = {
     howItWorksHint: 'Vuelve a mostrar las tres escenas sobre cómo se paga con dpay',
   },
 
+  addressBook: {
+    label: 'Libreta de direcciones',
+    entry: 'Direcciones guardadas…',
+    entryHint: 'Ver, nombrar, añadir y eliminar las direcciones a las que has enviado',
+  },
+
   theme: {
     label: 'Tema',
     light: 'Claro',

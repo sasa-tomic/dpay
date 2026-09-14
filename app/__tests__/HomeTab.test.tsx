@@ -6,11 +6,14 @@
  *     label — naming the currency changes the NAME, never the online/offline distinction. What it
  *     does NOT do is follow the transient selection: that was X4, where any account tap or rail
  *     toggle silently rewrote the setting onboarding exists to establish.
- *   • SCAN is the primary action and lands the camera; Receive navigates; Add money acts on the
- *     HOME RAIL — the account the screen is showing — so nothing on Home moves money in or out of
- *     an account the screen is not naming.
- *   • The accounts LIST is not here (it is the accounts route — HomeAccounts.test.tsx); Home
- *     carries only the affordance that opens it, labelled with the count.
+ *   • The action row is three EQUAL cards since 2026-09-14 (founder killed the oversized "Scan to
+ *     pay" button): Pay is honestly named — the screen behind it scans, taps and beams — and lands
+ *     the camera; Receive navigates; Add money acts on the HOME RAIL — the account the screen is
+ *     showing — so nothing on Home moves money in or out of an account the screen is not naming.
+ *   • The accounts LIST is not here (it is the accounts route — HomeAccounts.test.tsx); the
+ *     AFFORDANCE is the headline block itself since 2026-09-14 (founder: "if the user clicks on
+ *     the balance, they should be taken to the accounts and balances") — the whole eyebrow+amount
+ *     block is the button, carrying `btn-home-accounts`.
  *
  * The activity feed is capped at ACTIVITY_ROWS rows of the merged ledger, rendered through the
  * same HistoryRow as the Transactions tab but under its OWN home-hist-* testIDs.
@@ -105,7 +108,7 @@ function mountHome(props: Partial<Parameters<typeof HomeTab>[0]> = {}): renderer
         homeAsset={HOME_RAIL}
         online={true}
         history={[]}
-        onScan={jest.fn()}
+        onPay={jest.fn()}
         onReceive={jest.fn()}
         onDeposit={jest.fn()}
         onOpenAccounts={jest.fn()}
@@ -206,14 +209,19 @@ describe('HomeTab — an UNREADABLE home rail says so (M2)', () => {
   });
 });
 
-describe('HomeTab — the accounts affordance', () => {
-  test('names the account COUNT and opens the accounts route', () => {
+describe('HomeTab — the accounts affordance IS the headline (2026-09-14)', () => {
+  test('the balance block opens the accounts route — labelled with the ACTION, never a re-read of the balance', () => {
     const onOpenAccounts = jest.fn();
     const tree = mountHome({onOpenAccounts});
-    // Both the rendered label and the accessible name carry the count — one string, one source.
+    // The whole eyebrow+amount block is the button; its accessible name states what the tap DOES
+    // (a second copy of the balance would be an announcement with no action attached to it).
     const btn = tree.root.findAll(n => n.props?.testID === 'btn-home-accounts')[0]!;
-    expect(btn.findAllByType(Text).map(n => String(n.props.children)).join(' ')).toContain(String(ASSETS.length));
-    expect(String(btn.props.accessibilityLabel)).toContain(String(ASSETS.length));
+    expect(String(btn.props.accessibilityLabel)).toBe(M.wallet.home.accounts.openLabel);
+    expect(String(btn.props.accessibilityHint)).toBe(M.wallet.home.accounts.openHint);
+    // The amount stays inside the tappable — the founder's rule was that TAPPING THE BALANCE is
+    // the gesture, so shrinking the target to the pill again would quietly undo it. (findAll
+    // counts the Text wrapper AND its host instance — presence, not count, is the contract.)
+    expect(btn.findAll(n => n.props?.testID === 'home-headline-amount').length).toBeGreaterThan(0);
     act(() => { pressable(tree, 'btn-home-accounts').props.onPress(); });
     expect(onOpenAccounts).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
@@ -227,12 +235,16 @@ describe('HomeTab — the accounts affordance', () => {
   });
 });
 
-describe('HomeTab — the action row', () => {
-  test('Scan is present and hands off to the scanner (the one-tap till gesture)', () => {
-    const onScan = jest.fn();
-    const tree = mountHome({onScan});
-    act(() => { pressable(tree, 'btn-home-scan').props.onPress(); });
-    expect(onScan).toHaveBeenCalledTimes(1);
+describe('HomeTab — the action row is three EQUAL cards (2026-09-14)', () => {
+  test('Pay is honestly named and hands off to the pay screen (the one-tap till gesture)', () => {
+    const onPay = jest.fn();
+    const tree = mountHome({onPay});
+    const btn = pressable(tree, 'btn-home-pay');
+    // The label is "Pay", never "Scan to pay" — the screen behind it scans, taps and beams.
+    expect(String(btn.props.accessibilityLabel)).toBe(M.wallet.home.actions.pay);
+    expect(M.wallet.home.actions.pay).not.toContain('Scan');
+    act(() => { btn.props.onPress(); });
+    expect(onPay).toHaveBeenCalledTimes(1);
     act(() => { tree.unmount(); });
   });
 

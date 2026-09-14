@@ -110,6 +110,14 @@ export type SettingsMessages = {
     howItWorksHint: string;
   };
 
+  /** The address-book route entry — browse, name, add and remove the saved destinations
+   *  (services/addressBook.ts, rendered by AddressesTab). */
+  addressBook: {
+    label: string;
+    entry: string;
+    entryHint: string;
+  };
+
   /** Light / Dark / Auto. Also the source for config/theme.ts's label helpers. */
   theme: {
     /** The section heading AND the radiogroup's accessibilityLabel. */
@@ -249,6 +257,12 @@ export const settingsEn: SettingsMessages = {
     passportHint: 'Shows your trip readiness passport — the four capability stamps',
     passportCount: filled => `${filled}/4`,
     howItWorksHint: 'Replays the three-scene walkthrough of how dpay pays',
+  },
+
+  addressBook: {
+    label: 'Address book',
+    entry: 'Saved addresses…',
+    entryHint: 'Browse, name, add and remove the destinations you have sent to',
   },
 
   theme: {

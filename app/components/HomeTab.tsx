@@ -15,8 +15,8 @@ import type {BalanceView} from '../lib/assetBalances';
 
 // The HOME tab — the LANDING screen since 2026-09-08 (founder decision, recorded in
 // docs/specs/2026-09-08-first-run-redesign.md §1 F2, repealing the standing "the scanner stays the
-// landing screen" rule). It has to be worth landing on, so it is an overview: a headline, one
-// affordance into the accounts, an action row, and the activity feed as the BODY of the screen.
+// landing screen" rule). It has to be worth landing on, so it is an overview: a headline, an
+// action row, and the activity feed as the BODY of the screen.
 //
 // ── The two pieces of state this screen distinguishes, and why (X4) ─────────────────────────────
 // HOME CURRENCY is the persisted setting the whole onboarding exists to establish (Settings can
@@ -34,15 +34,21 @@ import type {BalanceView} from '../lib/assetBalances';
 // the screen is not naming. Pay and Receive are navigation: they open tabs, which work on the
 // selected asset, and the header chip states which one that is on every screen.
 //
-// ── Scan is primary ─────────────────────────────────────────────────────────────────────────────
-// Landing on Home costs the returning traveller one tap on the app's most frequent action; the UX
-// swarm's dissenter named the mitigation that made him withdraw the objection, and this is it. The
-// button lands the Pay tab in SCAN sub-mode specifically, so the camera is live in exactly one tap
-// from a cold start whatever sub-mode the Pay tab was last left in.
+// ── The action row is three EQUAL cards (2026-09-14) ────────────────────────────────────────────
+// The founder killed the oversized "Scan to pay" button: the label lied (the screen behind it taps
+// and beams as well as scans), and a full-width brand button over two small cards said "the other
+// two barely matter". The row is now three equal cards — Pay, Receive, Add money — because a
+// payments app's landing screen still needs its most frequent action visible at a glance, and
+// because each card states a relation the bottom tab bar cannot: Pay pins the SCAN sub-mode (the
+// camera is live in exactly one tap whatever sub-mode the Pay tab was last left in), and Add money
+// funds the home rail the headline above it names. The redundancy with the tab bar is the price of
+// that, and it is paid once, in small cards.
 //
-// The accounts list is NOT here — it is the `accounts` route (AccountsTab), reachable from this
-// screen's `btn-home-accounts`, from the header chip on every screen, from the `a` hotkey and from
-// the passport. Reasons and the ordering policy live in that file; do not restate them here.
+// The accounts list is NOT here — it is the `accounts` route (AccountsTab), reachable by tapping
+// this screen's headline (the balance IS the affordance since 2026-09-14: the founder's "if the
+// user clicks on the balance, they should be taken to the accounts and balances"), from the header
+// chip on every other screen, from the `a` hotkey and from the passport. Reasons and the ordering
+// policy live in that file; do not restate them here.
 //
 // The activity feed shows the newest ledger rows through the SAME HistoryRow the Transactions tab
 // renders (own token units per row), capped at ACTIVITY_ROWS with a See-all link into the full
@@ -52,7 +58,7 @@ import type {BalanceView} from '../lib/assetBalances';
  *  Activity is the body of the screen rather than a footer under it. */
 export const ACTIVITY_ROWS = 5;
 
-export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, noteFor, onScan, onReceive, onDeposit, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings}: {
+export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, online, history, noteFor, onPay, onReceive, onDeposit, onOpenAccounts, onSeeAll, onOpenReceipt, onOpenSettings}: {
   assets: SelectableAsset[];
   homeCurrency: HomeCurrency;
   /** The home currency's preferred rail — the account this screen IS. Null only when the catalog
@@ -69,7 +75,7 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
   /** The demo faucet's last failure, if any. The faucet BUTTON lives on the practice row in the
    *  accounts route, but the `T` hotkey fires it from anywhere — so its failure has to be visible
    *  on the screen the user is actually looking at, or the hotkey fails silently. */
-  onScan: () => void;
+  onPay: () => void;
   onReceive: () => void;
   onDeposit: (id: AssetId) => void;
   onOpenAccounts: () => void;
@@ -96,49 +102,50 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
   const rows = history.slice(0, ACTIVITY_ROWS);
   return (
     <View>
-      {/* No hand-built accessible name here: the block is not interactive, so a screen reader
-          reads the two lines it renders. The name it used to carry was a SECOND copy of the
-          eyebrow sentence and had already drifted from it — it said "balance" where the screen
-          says "· Main" and dropped the offline "~ approx." marker, announcing a confident figure
-          the wallet cannot know. The eyebrow owns that sentence; the amount owns its unit. */}
-      <View testID="home-headline" style={S.homeHeadline}>
-        <Text testID="home-headline-label" style={S.homeEyebrow}>{eyebrow}</Text>
-        {/* Single-line clamp: at Android fontScale 1.3 the 16-char offline form (~437px) would
-            wrap and break the header hierarchy; at normal scale the amount always fits one line. */}
-        <Text testID="home-headline-amount" style={S.homeAmount} numberOfLines={1}>{amount}</Text>
-      </View>
-      {/* An UNREADABLE headline is not a dash. The accounts route has said so since flow 147; the
-          landing screen — where the home rail's number is the largest thing on the phone — printed
-          the same bare "—" a first poll in flight prints. Same fact, same renderer, same words. */}
-      {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} failure={homeBalance?.failure} onOpenSettings={onOpenSettings} /> : null}
+      {/* The headline block IS the accounts affordance (2026-09-14) — the founder's directive that
+          tapping the balance opens the accounts. As an interactive element it now needs a
+          hand-built accessible name, and that name states the ACTION ("Open accounts"), never a
+          second copy of the eyebrow sentence: the pre-2026-09-14 name had already drifted from the
+          text it paraphrased (it said "balance" where the screen says "· Main" and dropped the
+          offline "~ approx." marker). The visible lines still own what they say; the label owns
+          what the tap does. The `a` shortcut's badge rides the eyebrow row — the badge belongs on
+          the affordance Home does have, otherwise the shortcut is undiscoverable here. */}
       <Pressable
         testID="btn-home-accounts"
-        style={S.homeAccountsBtn}
+        style={S.homeHeadline}
         onPress={onOpenAccounts}
         accessibilityRole="button"
-        accessibilityLabel={M.wallet.home.accounts.open(assets.length)}
+        accessibilityLabel={M.wallet.home.accounts.openLabel}
         accessibilityHint={M.wallet.home.accounts.openHint}
         accessibilityState={{disabled: false}}>
-        <Text style={S.homeAccountsBtnText}>{M.wallet.home.accounts.open(assets.length)}</Text>
-        {/* The `a` shortcut's badge. It rides the header chip on every other screen; Home has no
-            chip (it would name a different account than the headline above), so the badge belongs
-            on the affordance Home does have — otherwise the shortcut is undiscoverable here. */}
-        <HotkeyHint k="A" />
-        <IconChevronDown size={14} color={C.sub2} />
+        <View testID="home-headline" style={S.homeEyebrowRow}>
+          <Text testID="home-headline-label" style={S.homeEyebrow}>{eyebrow}</Text>
+          <HotkeyHint k="A" />
+        </View>
+        <View style={S.homeAmountRow}>
+          {/* Single-line clamp: at Android fontScale 1.3 the 16-char offline form (~437px) would
+              wrap and break the header hierarchy; at normal scale the amount always fits one line.
+              flexShrink lets it yield to the chevron instead of overflowing the row. */}
+          <Text testID="home-headline-amount" style={S.homeAmount} numberOfLines={1}>{amount}</Text>
+          {/* A `⌄` beside a balance means "opens the account list" in every wallet (X7's grammar);
+              without it the big number reads as a label, not a control. */}
+          <IconChevronDown size={20} color={C.sub2} />
+        </View>
       </Pressable>
-      <Pressable
-        testID="btn-home-scan"
-        style={S.homeScanBtn}
-        onPress={onScan}
-        accessibilityRole="button"
-        accessibilityLabel={M.wallet.home.actions.scan}
-        accessibilityHint={M.wallet.home.actions.scanHint}
-        accessibilityState={{disabled: false}}>
-        <IconScan size={22} color={C.brandInk} />
-        <Text style={S.homeScanLabel}>{M.wallet.home.actions.scan}</Text>
-      </Pressable>
+      {/* An UNREADABLE headline is not a dash. The accounts route has said so since flow 147; the
+          landing screen — where the home rail's number is the largest thing on the phone — printed
+          the same bare "—" a first poll in flight prints. Same fact, same renderer, same words. It
+          sits OUTSIDE the tappable headline: it carries its own Settings escape, and one Pressable
+          must never nest another. */}
+      {homeAsset !== null && railUnreadable(homeBalance) ? <RailUnreadableNote asset={homeAsset} failure={homeBalance?.failure} onOpenSettings={onOpenSettings} /> : null}
       <View style={S.homeActionRow}>
-        <Pressable testID="btn-home-receive" style={S.homeActionBtn} onPress={onReceive} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.receive} accessibilityHint={M.wallet.home.actions.receiveHint}>
+        {/* Pay — honestly named: the screen behind it scans, taps and beams. It pins the SCAN
+            sub-mode so the camera is live in one tap whatever the Pay tab was last left on. */}
+        <Pressable testID="btn-home-pay" style={S.homeActionBtn} onPress={onPay} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.pay} accessibilityHint={M.wallet.home.actions.payHint} accessibilityState={{disabled: false}}>
+          <IconScan size={22} color={C.brandText} />
+          <Text style={S.homeActionLabel}>{M.wallet.home.actions.pay}</Text>
+        </Pressable>
+        <Pressable testID="btn-home-receive" style={S.homeActionBtn} onPress={onReceive} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.receive} accessibilityHint={M.wallet.home.actions.receiveHint} accessibilityState={{disabled: false}}>
           <IconArrowDownLeft size={22} color={C.brandText} />
           <Text style={S.homeActionLabel}>{M.wallet.home.actions.receive}</Text>
         </Pressable>
