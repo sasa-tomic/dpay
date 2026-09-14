@@ -201,11 +201,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
   // signs the instant a request decodes, often before the fee lands in `feeRaw`) still records the
   // price, not whatever the state happened to hold at sign time. Null = no query for this intent.
   const feePromiseRef = useRef<Promise<string | null> | null>(null);
-  // No LIVE fee fetch while the review cannot be approved (online + insufficient): a doomed
+  // No fee resolution while the review cannot be approved (online + insufficient): a doomed
   // payment must touch NOTHING on the network (flow 101's zero-canister-call invariant — a
   // read-only icrc1_fee query included), and offline the fetch could not succeed anyway. The
-  // LOCAL fee answers are not network reads, so a blocked review may still resolve its honest
-  // total from them (see the effect below).
+  // headline also keeps the EXACT requested amount on such reviews (e2e flow 101 pins it):
+  // even the local fee answers are withheld — nothing will move, so there is no total debit
+  // to read yet; the fee display matters for money that can actually leave the screen.
   const reviewBlocked = intent != null && online
     && (() => { const b = balanceOfRequested(intent.currency); return b != null && cmpRaw(intent.amount, b) > 0; })();
   useEffect(() => {
@@ -217,19 +218,10 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
     if (cur == null || cur === 0) return; // DEMO is play money — no honest fee to add
     const ledger = catalog.find(c => c.currency === cur)?.ledger;
     if (!ledger) return;
-    let alive = true;
     // Keep any fee this journey already fetched: `reviewBlocked` flips true AFTER a payment
-    // lands (the account just moved) and the paid screen still needs the fee for its total — a
-    // live answer outranks anything local, so it is left to land undisturbed.
-    if (reviewBlocked) {
-      if (feePromiseRef.current != null) return;
-      // Local-only chain (a cache/catalog read is not a network read): the blocked review still
-      // gets its honest total; the wire-alone fallback needs every source to be empty.
-      void fallbackLedgerFee(ledger, catalog, cur).then(fee => {
-        if (alive && fee != null) setFeeRaw(fee);
-      });
-      return () => { alive = false; };
-    }
+    // lands (the account just moved) and the paid screen still needs the fee for its total.
+    if (reviewBlocked) return;
+    let alive = true;
     // Promise.resolve: the boundary is also a jest mock — an un-configured one returns undefined,
     // and the displays' honesty must not depend on the mock's return shape.
     const query = Promise.resolve(fetchLedgerFee(identity.secretHex, ledger)).catch((e: unknown) => {
