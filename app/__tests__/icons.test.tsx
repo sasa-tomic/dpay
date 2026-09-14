@@ -85,8 +85,8 @@ describe('glyphFor', () => {
     expect(glyphFor(ASSETS[2]).glyph).toBe('◊');
     expect(glyphFor(ASSETS[3]).glyph).toBe('$');
   });
-  test('SOL → ◎ purple, SOL-USDC → $ blue (token drives the family, not protocol alone)', () => {
-    expect(glyphFor(ASSETS[4]).glyph).toBe('◎');
+  test('SOL → • purple, SOL-USDC → $ blue (token drives the family, not protocol alone)', () => {
+    expect(glyphFor(ASSETS[4]).glyph).toBe('•');
     expect(glyphFor(ASSETS[5]).glyph).toBe('$');
   });
   test('unknown IC symbol falls back to first letter on brand hue', () => {
@@ -97,7 +97,7 @@ describe('glyphFor', () => {
 
   // A home-currency rail wears its CURRENCY's mark, never its rail's. The chooser and the accounts
   // list both render this one chip, so the rule is pinned here rather than in either surface.
-  // Before this rule, EURC-on-Solana wore ◎ (the Solana mark — it looked like a SOL row) and VCHF
+  // Before this rule, EURC-on-Solana wore the SOL mark (it looked like a SOL row) and VCHF
   // fell through to the first-letter fallback 'V'.
   describe('home-currency rails carry the currency mark, not the rail token mark', () => {
     const byId = (id: string) => ASSETS.find(a => a.id === id)!;
@@ -122,7 +122,7 @@ describe('glyphFor', () => {
     test('an asset OUTSIDE the home-currency model keeps its own family mark', () => {
       // Native SOL is held and spent, but it is not a currency the wallet is "in".
       expect(currencyOfAsset(byId('solana:SOL'))).toBeNull();
-      expect(glyphFor(byId('solana:SOL')).glyph).toBe('◎');
+      expect(glyphFor(byId('solana:SOL')).glyph).toBe('•');
     });
 
     test('every offerable currency has a distinct mark and hue (no two currencies look alike)', () => {

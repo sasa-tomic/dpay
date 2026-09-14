@@ -591,7 +591,7 @@ function buildStyles(p: Palette) {
   assetActionText: {color: p.sub, fontWeight: '600', fontSize: 13, fontFamily: FONT.sansMedium},
   assetCardZero: {color: p.sub2},
   // AssetGlyph monogram chips (AssetGlyph.tsx) — family-hued rounded squares carrying the native
-  // symbol ($ ₿ Ξ ◎ ∂). Size comes in via inline style (width/height/radius/fontSize scale
+  // symbol ($ ₿ ◊ • ∂). Size comes in via inline style (width/height/radius/fontSize scale
   // together); the base classes only pin the shared chrome (center, subtle ring) so chips stay
   // crisp at any size. Ring is warm-ink (light theme).
   assetGlyph: {alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: p.glyphBorder},

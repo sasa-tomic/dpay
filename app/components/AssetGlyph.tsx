@@ -1,5 +1,5 @@
 /**
- * AssetGlyph — per-family asset monogram chips (CHF $ € ₿ ◊ ◎ ∂).
+ * AssetGlyph — per-family asset monogram chips (CHF $ € ₿ ◊ • ∂).
  * Design (2026-08-16 visual overhaul): every asset row/picker/balance surface shows a rounded
  * chip tinted with the family hue + the family's NATIVE SYMBOL as text. Symbols are currency
  * language (never icons — see icons.tsx), so they render as Text for exact font metrics.
@@ -43,7 +43,11 @@ const FAMILIES: Record<string, {glyph: string; light: string; dark: string}> = {
   // is in none — MIUI fallback drew three disconnected "hamburger" bars on device, 2026-08-23).
   eth: {glyph: '◊', light: '#4338CA', dark: '#8B93F8'},
   usdc: {glyph: '$', light: '#1D4ED8', dark: '#6E9BFF'},
-  sol: {glyph: '◎', light: '#7E22CE', dark: '#BC81F5'},
+  // • bullet (U+2022): no bundled face carries the Solana mark — ◎ U+25CE, and also ○ U+25CB /
+  // ● U+25CF (fonttools cmap-verified 2026-09-14, all four faces), so the old "swap to ○/●"
+  // remedy was impossible. • is in EVERY face — the ◊ precedent: an in-font glyph the app's own
+  // type can paint, never a system-fallback hope (2026-08-23 Ξ lesson).
+  sol: {glyph: '•', light: '#7E22CE', dark: '#BC81F5'},
   // The two home currencies whose mark is not already a family above (USD reuses `usdc`'s $).
   // CHF has no single-character sign every bundled font carries — the franc sign ₣ (U+20A3) is the
   // Ξ mistake again (2026-08-23: MIUI drew Ξ as three loose bars), so the mark is the three ASCII
@@ -79,7 +83,8 @@ const CURRENCY_FAMILY: Record<HomeCurrency, keyof typeof FAMILIES> = {CHF: 'chf'
 function familyKey(asset: SelectableAsset): keyof typeof FAMILIES | 'demo' | 'fallback' {
   // FIRST: does this asset settle a home currency? Then it wears the CURRENCY's mark, on every
   // surface that renders a chip — the chooser row (a currency), the accounts row (a rail of one).
-  // Without this, the mark came from the rail: EURC-on-Solana wore ◎ and read as a SOL row, and
+  // Without this, the mark came from the rail: EURC-on-Solana wore the SOL mark and read as a SOL
+  // row, and
   // VCHF fell through to the first-letter fallback 'V'. `currencyOfAsset` is the ONE definition of
   // which currency a rail settles (config/currency.ts CURRENCY_RAILS), so a new rail of an existing
   // currency inherits the mark with no change here.

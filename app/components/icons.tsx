@@ -11,7 +11,7 @@
  *     a dependency via react-native-qrcode-svg — no new native deps).
  *
  * This file REPLACES the text-glyph icons ('⚙' '✕' '✓' '+' 'ⓘ' '▾' as iconography). Currency
- * SYMBOLS ($, ₿, Ξ, ◎, ∂) are NOT icons — they stay Text (see AssetGlyph for the monogram chips).
+ * SYMBOLS ($, ₿, ◊, •, ∂) are NOT icons — they stay Text (see AssetGlyph for the monogram chips).
  */
 import React from 'react';
 import Svg, {Circle, Line, Path, Polyline, Rect} from 'react-native-svg';

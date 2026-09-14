@@ -15,7 +15,7 @@
  * this object wholesale: anything captured at module load would keep rendering the old language.
  *
  * Conventions are the catalog's (see i18n/keys.ts): interpolation is a typed FUNCTION, never a
- * '{{placeholder}}'; no pluralization machinery; no fallbacks. Currency glyphs (∂ $ ₿ Ξ ◎), asset
+ * '{{placeholder}}'; no pluralization machinery; no fallbacks. Currency glyphs (∂ $ ₿ ◊ •), asset
  * symbols (DEMO/BTC/USDC/SOL) and network names (Bitcoin/Ethereum/Solana) are locale-invariant
  * product identity and are NOT in this catalog.
  */

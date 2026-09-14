@@ -20,10 +20,12 @@ Two transforms, in this order:
 
 The GATE (`verify`, run on every invocation and by `just fonts`) is an EQUIVALENCE, not a guess:
 for every codepoint in the audit set, coverage in the subset must EQUAL coverage in the source
-font. A codepoint the source never had (this repo has a history here — `◎` U+25CE and `Ξ` U+039E
-are absent from all four faces and already reach the user through system fallback) must still be
-absent; a codepoint the source had must still be present. Anything else fails LOUD and writes
-nothing.
+font. A codepoint the source never had must still be absent; a codepoint the source had must
+still be present. Anything else fails LOUD and writes nothing. (This repo has a history here:
+`Ξ` U+039E is absent from all four faces and reaches the user through system fallback. `◎`
+U+25CE was in that class until 2026-09-14, when the SOL glyph became the in-font `•` U+2022 —
+already inside the kept 0x2000-0x2070 range and never present in any TTF cmap, so that swap
+changed neither keep_set nor the committed woff2 output.)
 
 Run: `just fonts` (or `python3 scripts/subset-web-fonts.py`). Needs fontTools + brotli; it is NOT
 on the inner loop — the generated .woff2 files are committed, exactly as the .ttf files were.

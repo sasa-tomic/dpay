@@ -223,8 +223,8 @@ describe('currencySymbol — no BTC glyph fallback for unknown families', () => 
     expect(currencySymbol(UNKNOWN_CATALOG, 99)).toBe('?');
   });
   it('returns the short symbol when an unknown family carries a single-char glyph', () => {
-    const sol: CurrencyDescriptor = {...CKSOL_DESC, symbol: '◎'};
-    expect(currencySymbol([sol], 99)).toBe('◎');
+    const sol: CurrencyDescriptor = {...CKSOL_DESC, symbol: '•'};
+    expect(currencySymbol([sol], 99)).toBe('•');
   });
   it('returns the exact unit text "VCHF"/"ICP" for the complete bundled direct-ICRC rows (not "?")', () => {
     // U2 (2026-08-28): a complete trusted no-minter row renders its EXACT payment-unit text — the

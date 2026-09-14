@@ -525,9 +525,15 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
   **REVERSED by the founder 2026-09-08**: the app opens on Home, Home is a real overview, Pay is one
   tap away. Reasoning: [`docs/specs/2026-09-08-first-run-redesign.md`](docs/specs/2026-09-08-first-run-redesign.md)
   §1 F2. Tracked as item 4c; the flows that pin the old landing change with it.
-- **SOL glyph `◎` relies on system font fallback** (U+25CE absent from every bundled font —
+- ~~**SOL glyph `◎` relies on system font fallback** (U+25CE absent from every bundled font —
   fontTools cmap-verified; renders acceptably on MIUI/Android today). If a device ever shows a
-  fallback artifact, swap to an in-font covered glyph (`○`/`●`). Low, visual-only.
+  fallback artifact, swap to an in-font covered glyph (`○`/`●`). Low, visual-only.~~
+  **RESOLVED (2026-09-14):** swapped to an in-font glyph — but NOT the recorded remedy, which was
+  impossible: `○` U+25CB and `●` U+25CF are absent from every bundled face too (same fonttools
+  audit). The SOL mark is now `•` U+2022, covered by ALL four faces (the 2026-08-23 Ξ→◊
+  in-font-glyph precedent), in `AssetGlyph.tsx` (chips) and `SolReceiveMode.tsx` (amount prefix);
+  tests and prose updated, and the web woff2 set needed no change (`•` was already kept, `◎` was
+  never in a cmap).
 - **Deploy-script candid-literal drift (ops-only)** — `dfx-deploy.sh`'s ICRC init args literal is
   not factored the way staging's is (3 genuinely incompatible per-script strategies). Both scripts
   byte-faithful today; low priority, no runtime impact.

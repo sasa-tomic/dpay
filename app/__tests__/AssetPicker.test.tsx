@@ -42,7 +42,7 @@ const ASSETS: SelectableAsset[] = [
 const BALANCES: Record<AssetId, BalanceView> = {
   'ic:0': {displayText: '∂100.00', status: 'ok', failure: null},
   'ic:2': {displayText: '$0.00', status: 'zero', failure: null},
-  'solana:SOL': {displayText: '◎0.025', status: 'ok', failure: null},
+  'solana:SOL': {displayText: '•0.025', status: 'ok', failure: null},
   'solana:USDC': {displayText: '—', status: 'absent', failure: null},
 };
 
@@ -197,7 +197,7 @@ describe('AssetPicker', () => {
       );
     });
     const solRow = tree.root.find(node => node.props && node.props.testId === 'req-pick-sol');
-    expect(solRow.props.amount).toBe('◎0.025');
+    expect(solRow.props.amount).toBe('•0.025');
     act(() => { tree.unmount(); });
   });
 

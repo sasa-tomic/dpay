@@ -628,7 +628,9 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           accessibilityLabel={M.receive.receiveIn(selectedToken)}
           accessibilityHint={M.receive.chooseAssetHint}
           accessibilityState={{disabled: false}}>
-          <Text style={S.currency}>{isNativeSol ? '◎' : selectedToken === 'EURC' ? '€' : selectedToken === 'USDC' ? '$' : '¤'}</Text>
+          {/* • not ◎: no bundled face carries U+25CE (fonttools 2026-09-14) — the amount prefix
+              must be a glyph the app's own fonts paint (AssetGlyph's sol family uses the same •). */}
+          <Text style={S.currency}>{isNativeSol ? '•' : selectedToken === 'EURC' ? '€' : selectedToken === 'USDC' ? '$' : '¤'}</Text>
           <IconChevronDown size={20} color={C.sub}/>
         </Pressable>
         <TextInput

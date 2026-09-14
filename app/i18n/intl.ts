@@ -76,7 +76,7 @@ function probe(tag: string): Omit<Conventions, 'tag' | 'clock' | 'monthDay' | 'm
   const minDigits = nf.formatToParts(1000).some(p => p.type === 'group') ? 1 : 2;
 
   // Placement is read from a real currency format. The CODE is irrelevant — dpay renders its own
-  // glyphs (∂/₿/◎ and the backing symbols) — only the side and the joining space are wanted.
+  // glyphs (∂/₿/• and the backing symbols) — only the side and the joining space are wanted.
   const cparts = new Intl.NumberFormat(tag, {style: 'currency', currency: 'USD'}).formatToParts(1);
   const ci = cparts.findIndex(p => p.type === 'currency');
   const ni = cparts.findIndex(p => p.type === 'integer');

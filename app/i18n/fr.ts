@@ -9,7 +9,7 @@
  * `;` `?` `!` — it is a real character in these strings, not an ordinary space; keep it when you
  * edit a line. Product identity is NOT translated: dpay, Bitcoin, Ethereum, Solana, Internet
  * Computer, USDC, ckBTC/ckETH/ckUSDC, SOL, ETH, BTC, NFC, QR, testnet, devnet, mainnet, and every
- * glyph (∂ $ € ₿ ◎ ✓ · — ~ ≈).
+ * glyph (∂ $ € ₿ • ✓ · — ~ ≈).
  *
  * GLOSSARY — one French term per concept, applied with zero variation. A future translator inherits
  * these; change one only by changing every site.
