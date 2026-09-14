@@ -199,6 +199,10 @@ describe('nettedWireRaw — payee-quoted fee netting (exact-price rule, 2026-09-
     expect(nettedWireRaw('100000000', '10000')).toEqual({ok: true, wireRaw: '99990000'});
   });
 
+  test('fee 0 → wire = price unchanged (a zero-fee ledger never alters the quote)', () => {
+    expect(nettedWireRaw('2500', '0')).toEqual({ok: true, wireRaw: '2500'});
+  });
+
   test('fee ≥ price → refused — no zero/negative wire can exist', () => {
     expect(nettedWireRaw('10000', '10000')).toEqual({ok: false, err: 'fee_covers_price'});
     expect(nettedWireRaw('9999', '10000')).toEqual({ok: false, err: 'fee_covers_price'});
