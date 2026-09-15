@@ -973,13 +973,17 @@ describe('multihop — the composed destination is an explicit, gated opt-in', (
   const ROUTE_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2';
   const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
 
-  test('the picker lists the direct pair (the standing default) plus the route row, with the one-route honesty line', async () => {
+  test('the picker lists the direct pair (the standing default) plus every composed route; the one-route honesty line only speaks when it is literally true', async () => {
     const tree = await mountConvert('250000000', '1');
     expect(present(tree, 'convert-dest')).toBe(true);
     expect(present(tree, 'convert-dest-direct')).toBe(true);
     expect(present(tree, ROUTE_ROW)).toBe(true);
-    // exactly one route exists, and the copy says so instead of offering a chooser
-    expect(textOf(tree, 'convert-route-note')).toBe(convertEn.multihop.routeNote);
+    // The ckUSDC hop composes THREE routes today (A burn-withdraw, B +CCTP, C +CCTP+Jupiter —
+    // the 2026-09-16 cross-rail widening) — all three are explicit picks, none preselected.
+    expect(present(tree, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp')).toBe(true);
+    expect(present(tree, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter')).toBe(true);
+    // Three routes ⇒ the "One route is registered…" line would lie; it stays hidden.
+    expect(present(tree, 'convert-route-note')).toBe(false);
     // the default surface is UNCHANGED: the direct pair's own checklist, no route census
     expect(present(tree, 'convert-min-out')).toBe(true);
     expect(present(tree, 'convert-route-min')).toBe(false);

@@ -35,7 +35,7 @@
 // mounts once per session, V6) — this screen only RENDERS records (a view onto the engine: it
 // subscribes for updates and hands freshly-prepared records to it, never running a private copy).
 import {useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, Pressable, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, Linking, Pressable, Text, TextInput, View} from 'react-native';
 import {isValidDestinationAddress, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {
@@ -45,9 +45,11 @@ import {
 } from '../config/convert';
 import {BUNDLED_VENUES, venueDisplayName, venueEndpointOf, venueOfId, venuesForPair, type VenueEntry} from '../config/venues';
 import {
+  buildCctpHandoff,
   convertRecordMinOut,
   deriveConvertMath,
   fetchConvertQuote,
+  fetchCctpBurnFee,
   isQuoteStale,
   isTerminalConvertStep,
   loadVenueRegistry,
@@ -63,17 +65,22 @@ import {
 import {
   acknowledgeStuckRecord,
   adoptConvertRecord,
+  attachCctpBurnTx,
+  confirmCrossRailSolLeg,
   convertResumeSnapshot,
+  declineCctpHandoff,
   subscribeConvertRecords,
 } from '../convertResume';
+import {cctpMaxFee, cctpMintFloor} from '../cctp';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {multihopRoutesFrom} from '../routes';
 import {solanaAmmVenueForMint} from '../config/venues';
-import {SOLANA_TOKENS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
+import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount} from '../lib/format';
+import {copyToClipboard} from '../lib/clipboard';
 import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
 import {S} from '../styles';
@@ -190,6 +197,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // fresh inside prepare at confirm (the signed number is never this cached one).
   const [routeGas, setRouteGas] = useState<{feeWei: string; gasLedgerFee: string} | null>(null);
   const [routeGasErr, setRouteGasErr] = useState<string | null>(null);
+  // Circle's OWN published fee for the crossing (fees API, med forward fee + fast bps) —
+  // shown in the census as the venue's own number; prepare re-fetches live at confirm.
+  const [crossFee, setCrossFee] = useState<{maxFee: string; floor: string} | null>(null);
+  const [crossFeeErr, setCrossFeeErr] = useState<string | null>(null);
   // --- the venue chooser (multi-venue readiness V5). RED LINES, structural by construction:
   //     (1) rows render in REGISTRY order — `venuesForPair` never sorts by output; (2) nothing
   //     is ever preselected — `selectedVenueId` starts null and only a USER tap sets it (no
@@ -521,6 +532,40 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRoute?.routeId, relayUrl, record != null && isLiveRecord(record)]);
 
+  // --- the CROSS-RAIL fee census (Routes B/C): Circle's own published number for the burn
+  //     (fast finality, med forward fee, 20% buffer) + the honest external-gas line naming
+  //     WHO pays the Ethereum side. prepare re-fetches and freezes maxFee on the record;
+  //     this copy is for review. Fail-closed: no fee → no confirm (same rule as route gas).
+  useEffect(() => {
+    if (activeRoute == null || activeRoute.crossRail == null || math == null || isLiveRecord(record)) {
+      setCrossFee(null);
+      setCrossFeeErr(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const fee = await fetchCctpBurnFee();
+        const amount = BigInt(math.minOut);
+        const maxFee = cctpMaxFee(amount, fee);
+        if (!cancelled && mountedRef.current) {
+          setCrossFee({maxFee: maxFee.toString(), floor: cctpMintFloor(amount, maxFee).toString()});
+          setCrossFeeErr(null);
+        }
+      } catch {
+        // Collapsed to the localized fee-unavailable line — never a partial census.
+        if (!cancelled && mountedRef.current) {
+          setCrossFee(null);
+          setCrossFeeErr(M.convert.errors.cctpFeeUnavailable);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoute?.routeId, math?.minOut, record != null && isLiveRecord(record)]);
+
   const onConfirm = async () => {
     if (legs == null || activeQuote == null || math == null || confirmBusy) return;
     // Chooser mode: the confirm executes through the PICKED row's venue — the fresh quote, the
@@ -602,6 +647,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
 
   if (legs == null) return <UnavailablePanel selectedAsset={selectedAsset} onBack={onBack} />;
   if (record != null && (isLiveRecord(record) || TERMINAL_CONVERT_STEPS.has(record.step))) {
+    // A CROSS-RAIL record has its own surface — the IC leg list PLUS the handoff / crossing /
+    // final-Solana phases. Checked before the plain planned panel: a cross-rail record always
+    // carries a legPlan too, so the order matters.
+    if (record.crossRail != null) {
+      return <CrossRailStatePanel record={record} secretHex={identity.secretHex} solLamports={solana?.sol ?? null} onBack={onBack} />;
+    }
     // A PLANNED record renders its own per-leg surface — the route's leg list IS the progress UI.
     return record.legPlan != null
       ? <RouteStatePanel record={record} onBack={onBack} />
@@ -682,6 +733,14 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
 /** One planned leg's label — the kind + the leg's own canister decide the copy, never the
  *  position alone (the two asset approves differ by WHICH asset they unlock). */
 function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string): string {
+  if (lp.kind === 'sol_swap') {
+    // The final Jupiter leg names ITS own venue (the cross-rail record's venueId is the IC
+    // swap venue — the sol venue id is frozen on the crossRail block at prepare).
+    return M.convert.crossrail.legSolSwap(venueDisplayName(record.crossRail?.solVenueId ?? record.venueId), record.destSymbol ?? record.outSymbol);
+  }
+  if (lp.kind === 'cctp_burn') {
+    return M.convert.crossrail.legCctpBurn(record.hopSymbol ?? record.outSymbol, record.destNetwork ?? '');
+  }
   if (lp.kind === 'swap') {
     return M.convert.multihop.legSwap(venueName, record.inSymbol, record.hopSymbol ?? record.outSymbol);
   }
@@ -698,8 +757,21 @@ function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string
 
 /** A leg's own fee, formatted in the FEE'S ledger's units (approve legs pay their ledger's
  *  fee; the swap leg's cost is the pool tier, shown in the census, not here; the withdraw leg
- *  charges none — its cost is the gas leg above it). */
+ *  charges none — its cost is the gas leg above it). The EXTERNAL legs pay no IC fee: the
+ *  cctp_burn leg's own cost is Circle's published fee (frozen on the record at prepare) and
+ *  the sol_swap leg's is the Solana message fee (frozen when the leg was signed). */
 function plannedLegFee(record: ConvertRecord, lp: LegPlan, legCanister: string): string | null {
+  if (lp.kind === 'cctp_burn') {
+    const maxFee = record.crossRail?.maxFeeSubunits;
+    return maxFee != null
+      ? fmtAssetCompact(maxFee, record.hopDecimals ?? record.outDecimals ?? 6, record.hopSymbol ?? record.outSymbol)
+      : null;
+  }
+  if (lp.kind === 'sol_swap') {
+    return record.solFeeLamports != null
+      ? fmtAssetCompact(record.solFeeLamports, SOLANA_TOKENS.SOL.decimals, WRAPPED_SOL_TOKEN)
+      : null;
+  }
   if (lp.fee === '') return null;
   if (lp.kind === 'approve') {
     return legCanister === record.inLedger
@@ -861,6 +933,454 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
   );
 }
 
+/** The cross-rail record surface (Routes B/C, 2026-09-16): everything after the five IC legs.
+ *  The IC phases render exactly like RouteStatePanel's; then the surface splits —
+ *  awaiting_external hands the user's OWN wallet the two exact Ethereum transactions (dpay
+ *  holds no EVM key and signs nothing here), crossing watches Circle's own status feed until
+ *  the mint lands AND is corroborated on-chain at the ATA, and sol_ready offers the final
+ *  Jupiter leg on a fresh quote. Every dead-end names where the funds sit (in-wallet ckUSDC,
+ *  USDC at the user's own EVM address, or USDC(SOL) at their ATA) and the way out. */
+function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
+  record: ConvertRecord;
+  secretHex: string;
+  solLamports: string | null;
+  onBack: () => void;
+}) {
+  const cross = record.crossRail;
+  const [, forceTick] = useState(0);
+  const [handoff, setHandoff] = useState<Awaited<ReturnType<typeof buildCctpHandoff>> | null>(null);
+  const [handoffErr, setHandoffErr] = useState<string | null>(null);
+  const [burnTxText, setBurnTxText] = useState('');
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachErr, setAttachErr] = useState<string | null>(null);
+  const [copiedWhich, setCopiedWhich] = useState<'approve' | 'burn' | null>(null);
+  const [solQuote, setSolQuote] = useState<JupiterQuote | null>(null);
+  const [solQuoteErr, setSolQuoteErr] = useState<string | null>(null);
+  const [crossAmtStr, setCrossAmtStr] = useState('');
+  // A tether for async setState after unmount (the same mountedRef discipline the form uses).
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+
+  const inDecimals = record.inDecimals ?? 8;
+  const hopDecimals = record.hopDecimals ?? record.outDecimals ?? 8;
+  const hopSymbol = record.hopSymbol ?? record.outSymbol;
+  const destSymbol = record.destSymbol ?? record.outSymbol;
+  const venueName = venueDisplayName(record.venueId);
+  const solVenueName = venueDisplayName(cross?.solVenueId ?? record.venueId);
+  const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.createdAtMs;
+  const legStateText = (s: LegPlan['state']) =>
+    s === 'pending' ? M.convert.multihop.legStatePending
+    : s === 'sent' ? M.convert.multihop.legStateSent
+    : s === 'confirmed' ? M.convert.multihop.legStateConfirmed
+    : M.convert.multihop.legStateFailed;
+
+  // The long-haul views (crossing, hop watch) stay honest about elapsed time — a 30 s tick.
+  useEffect(() => {
+    if (record.step !== 'stuck' && record.step !== 'pending_withdrawal' && record.step !== 'crossing') return;
+    const id = setInterval(() => forceTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [record.step]);
+
+  // The crossing amount for the intro line — the AUTHORITATIVE floor (convertRecordMinOut,
+  // the same function the executor's numbers come from), never a hand-rolled mirror of it.
+  useEffect(() => {
+    let live = true;
+    convertRecordMinOut(record)
+      .then((v) => { if (live && mountedRef.current) setCrossAmtStr(v); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [record.id, record.expectedGross, record.slippageBps]);
+
+  // The handoff bytes: built + fee re-fetched LIVE the moment the surface opens (never a
+  // cached copy — the number the user reads is the number the wallet will be asked to sign),
+  // and the mint recipient is re-derived and matched against the frozen record first.
+  useEffect(() => {
+    if (record.step !== 'awaiting_external') return;
+    let live = true;
+    buildCctpHandoff(secretHex, record)
+      .then((h) => { if (live && mountedRef.current) { setHandoff(h); setHandoffErr(null); } })
+      .catch((e) => { if (live && mountedRef.current) setHandoffErr(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [record.step, record.id, secretHex]);
+
+  // The final leg's offer: a FRESH Jupiter quote on the minted amount (never the prepare-time
+  // number — minutes may have passed), refreshed whenever the offer surface (re)mounts.
+  useEffect(() => {
+    if (record.step !== 'sol_ready' || cross == null || cross.mintSubunits == null || cross.solVenueId == null) return;
+    const venue = venueOfId(cross.solVenueId);
+    if (venue == null) return;
+    let live = true;
+    fetchJupiterQuote(venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, record.slippageBps)
+      .then((q) => {
+        if (!live || !mountedRef.current) return;
+        if (q.ok) { setSolQuote(q.quote); setSolQuoteErr(null); }
+        else if (q.code === 'refused') setSolQuoteErr(M.convert.errors.quoteRefused(solVenueName));
+        else setSolQuoteErr(M.convert.errors.quoteUnavailable(q.code));
+      })
+      .catch(() => { if (live && mountedRef.current) setSolQuoteErr(M.convert.errors.quoteUnreachable(solVenueName)); });
+    return () => { live = false; };
+  }, [record.step, record.id, cross?.mintSubunits, cross?.solVenueId, record.slippageBps]);
+
+  // The attach gesture. Production: the hash the user pasted back from their wallet. Under
+  // e2e: if the harness installed a wallet double (__DPAY_TEST_EVM_SIGN), asking IT to sign
+  // IS the simulated gesture — the returned hash is what the paste field would have held, and
+  // the double also records WHAT dpay asked the wallet to sign (to, calldata, per tx).
+  const onAttach = async () => {
+    if (attachBusy) return;
+    setAttachBusy(true);
+    setAttachErr(null);
+    try {
+      let hash = burnTxText.trim();
+      const seam = (globalThis as unknown as Record<string, unknown>).__DPAY_TEST_EVM_SIGN;
+      if (typeof seam === 'function' && handoff != null) {
+        const signed = await (seam as (txs: unknown) => Promise<string>)({
+          approveTo: handoff.burnToken,
+          approveCalldata: handoff.approveCalldata,
+          burnTo: handoff.tokenMessenger,
+          burnCalldata: handoff.burnCalldata,
+          amountSubunits: handoff.amountSubunits,
+        });
+        hash = String(signed).trim();
+        if (mountedRef.current) setBurnTxText(hash);
+      }
+      await attachCctpBurnTx(record.id, hash);
+    } catch (e) {
+      if (mountedRef.current) setAttachErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (mountedRef.current) setAttachBusy(false);
+    }
+  };
+
+  if (cross == null) return null; // the render fork only reaches here with a crossRail record
+
+  const solFeeKnown = record.solFeeLamports != null && BigInt(record.solFeeLamports) > 0n;
+  const solShort = solLamports != null && solLamports.length > 0 && BigInt(solLamports) <= 0n
+    && record.step !== 'done' && record.step !== 'failed_refunded' && record.step !== 'failed_leg';
+  const amountStr = fmtAssetCompact(record.outAmountNet ?? '0',
+    cross.kind === 'cctp_sol' ? SOLANA_TOKENS.SOL.decimals : hopDecimals, destSymbol);
+
+  return (
+    <View testID="convert-crossrail" style={S.convertWrap}>
+      <ConvertHeader
+        title={M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '')}
+        onBack={onBack}
+      />
+
+      {/* The IC phases render exactly as Route A does — same copy, same leg list below. */}
+      {record.step === 'approving' ? (
+        <View testID="convert-approving">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.multihop.executingTitle}</Text>
+          <Text style={S.convertStateBody}>
+            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(legExpiryMs)))}
+          </Text>
+        </View>
+      ) : null}
+
+      {record.step === 'pending_withdrawal' ? (
+        <View testID="convert-pending">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.pendingBody(hopSymbol, venueEndpointOf(record.venueId), formatClock(new Date(record.createdAtMs)))}</Text>
+          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+          <Text testID="convert-expiry" style={S.convertStateMeta}>
+            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+          </Text>
+        </View>
+      ) : null}
+
+      {/* THE HANDOFF (spec §3, cross-rail widening): the user's own wallet signs; dpay renders
+          the exact bytes, copyable, with the fee re-fetched live and the recipient re-derived. */}
+      {record.step === 'awaiting_external' ? (
+        <View testID="crossrail-handoff">
+          <Text style={S.convertStateTitle}>{M.convert.crossrail.heading}</Text>
+          <Text style={S.convertStateBody}>
+            {M.convert.crossrail.handoffIntro(fmtAssetCompact(crossAmtStr, hopDecimals, hopSymbol), hopSymbol)}
+          </Text>
+          {handoff != null ? (
+            <>
+              <Text testID="crossrail-handoff-amount" style={S.convertChecklistLine}>
+                {M.convert.crossrail.txAmountLabel}: {fmtAssetCompact(handoff.amountSubunits, hopDecimals, hopSymbol)}
+              </Text>
+              <Text style={S.convertChecklistWarn}>{M.convert.crossrail.whatSigning}</Text>
+              <Text style={S.convertSlippageLabel}>{M.convert.crossrail.stepApproveLabel}</Text>
+              <Text style={S.convertPrincipal}>{handoff.burnToken}</Text>
+              <Text testID="crossrail-approve-calldata" style={S.convertCalldata} selectable>{handoff.approveCalldata}</Text>
+              <Pressable
+                testID="btn-crossrail-copy-approve"
+                style={S.linkBtn}
+                onPress={() => {
+                  setCopiedWhich(null);
+                  void copyToClipboard(handoff.approveCalldata).then(() => setCopiedWhich('approve'));
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.crossrail.copy}>
+                <Text style={S.linkText}>{copiedWhich === 'approve' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
+              </Pressable>
+              <Text style={S.convertChecklistLine}>{M.convert.crossrail.approveHint}</Text>
+              <Text style={S.convertSlippageLabel}>{M.convert.crossrail.stepBurnLabel}</Text>
+              <Text style={S.convertPrincipal}>{handoff.tokenMessenger}</Text>
+              <Text testID="crossrail-burn-calldata" style={S.convertCalldata} selectable>{handoff.burnCalldata}</Text>
+              <Pressable
+                testID="btn-crossrail-copy-burn"
+                style={S.linkBtn}
+                onPress={() => {
+                  setCopiedWhich(null);
+                  void copyToClipboard(handoff.burnCalldata).then(() => setCopiedWhich('burn'));
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.crossrail.copy}>
+                <Text style={S.linkText}>{copiedWhich === 'burn' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
+              </Pressable>
+              <Text style={S.convertChecklistLine}>{M.convert.crossrail.burnHint}</Text>
+              <Text testID="crossrail-circle-fee" style={S.convertChecklistLine}>
+                {M.convert.crossrail.circleFeeLine(fmtAssetCompact(handoff.maxFeeSubunits, hopDecimals, hopSymbol))}
+              </Text>
+              <Text style={S.convertChecklistLine}>
+                {M.convert.crossrail.mintFloorLine(fmtAssetCompact(handoff.mintFloorSubunits, hopDecimals, hopSymbol))}
+              </Text>
+              <Text style={S.convertChecklistLine}>{M.convert.crossrail.timingNote}</Text>
+              <Text testID="crossrail-external-gas" style={S.convertChecklistLine}>{M.convert.crossrail.externalGasLine}</Text>
+            </>
+          ) : handoffErr != null ? (
+            <Text testID="crossrail-handoff-err" style={S.err}>{handoffErr}</Text>
+          ) : (
+            <ActivityIndicator color={C.sub} />
+          )}
+          {handoff != null ? (
+            <>
+              <Text style={S.convertAmountLabel}>{M.convert.crossrail.burnTxLabel}</Text>
+              <View style={S.amountRow}>
+                <TextInput
+                  testID="crossrail-burn-tx"
+                  style={S.amountInput}
+                  value={burnTxText}
+                  onChangeText={setBurnTxText}
+                  autoCorrect={false}
+                  autoCapitalize="characters"
+                  placeholder={M.convert.crossrail.burnTxPlaceholder}
+                  placeholderTextColor={C.sub}
+                />
+              </View>
+              <Pressable
+                testID="btn-crossrail-attach"
+                style={[S.primary, (attachBusy || burnTxText.trim().length === 0) && S.disabledFlat]}
+                onPress={() => void onAttach()}
+                disabled={attachBusy || burnTxText.trim().length === 0}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.crossrail.attachButton}>
+                <Text style={S.primaryText}>{M.convert.crossrail.attachButton}</Text>
+              </Pressable>
+              {attachErr != null ? <Text style={S.err}>{M.convert.crossrail.burnTxInvalid}</Text> : null}
+              <Pressable
+                testID="btn-crossrail-decline"
+                style={S.linkBtn}
+                onPress={() => void declineCctpHandoff(record.id)}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.crossrail.declineButton}>
+                <Text style={S.linkText}>{M.convert.crossrail.declineButton}</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* THE CROSSING: Circle's own status feed, watched by burn tx hash. Pending is PENDING —
+          never rendered as failure — and the two links make the wait independently checkable. */}
+      {record.step === 'crossing' ? (
+        <View testID="crossrail-crossing">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.crossrail.crossingTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.crossrail.crossingBody}</Text>
+          <Text testID="crossrail-still" style={S.convertStateMeta}>{M.convert.crossrail.stillCrossing}</Text>
+          {cross.burnTxHash != null ? (
+            <>
+              <Text testID="crossrail-burn-hash" style={S.convertPrincipal} selectable>{cross.burnTxHash}</Text>
+              <LinkRow testID="btn-crossrail-view-burn" label={M.convert.crossrail.viewBurnTx} href={`https://etherscan.io/tx/${cross.burnTxHash}`} />
+            </>
+          ) : null}
+          <LinkRow testID="btn-crossrail-view-circle" label={M.convert.crossrail.viewCircle} href="https://cctp.cash/" />
+        </View>
+      ) : null}
+
+      {/* THE FINAL LEG'S OFFER: USDC verified at the ATA; Jupiter re-quoted fresh; keeping the
+          USDC is named as an equal outcome, not a consolation. */}
+      {record.step === 'sol_ready' ? (
+        <View testID="crossrail-sol-ready">
+          <Text style={S.convertStateTitle}>{M.convert.crossrail.solReadyTitle}</Text>
+          <Text style={S.convertStateBody}>
+            {M.convert.crossrail.solReadyBody(fmtAssetCompact(cross.mintSubunits ?? '0', hopDecimals, hopSymbol), cross.mintRecipientAta)}
+          </Text>
+          {solQuote != null ? (
+            <>
+              <Text testID="crossrail-sol-quote" style={S.convertChecklistLine}>
+                {M.convert.crossrail.solQuoteLabel}
+              </Text>
+              <Text testID="crossrail-sol-out" style={S.convertHeadlineAmount}>
+                {fmtAssetCompact(solQuote.outAmount, SOLANA_TOKENS.SOL.decimals, destSymbol)}
+              </Text>
+              <Text style={S.convertChecklistLine}>
+                {M.convert.crossrail.solMinLine(fmtAssetCompact(solQuote.otherAmountThreshold, SOLANA_TOKENS.SOL.decimals, destSymbol))}
+              </Text>
+              <Text style={S.convertChecklistLine}>{M.convert.dpayFeeLine}</Text>
+            </>
+          ) : solQuoteErr != null ? (
+            <Text testID="crossrail-sol-quote-err" style={S.err}>{solQuoteErr}</Text>
+          ) : (
+            <ActivityIndicator color={C.sub} />
+          )}
+          {solShort ? (
+            <View testID="crossrail-sol-preflight">
+              <Text style={S.convertChecklistWarn}>{M.convert.crossrail.solPreflightTitle}</Text>
+              <Text style={S.convertChecklistLine}>{M.convert.crossrail.solPreflightBody(fmtAssetCompact('5000', SOLANA_TOKENS.SOL.decimals, destSymbol))}</Text>
+            </View>
+          ) : null}
+          <Pressable
+            testID="btn-crossrail-sol-confirm"
+            style={[S.primary, solQuote == null && S.disabledFlat]}
+            onPress={() => void confirmCrossRailSolLeg(record.id)}
+            disabled={solQuote == null}
+            accessibilityRole="button"
+            accessibilityLabel={M.convert.crossrail.solConfirmButton}>
+            <Text style={S.primaryText}>{M.convert.crossrail.solConfirmButton}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {/* The final leg running / landing: the device signature exists; the leg list below is
+          the progress. */}
+      {record.step === 'swapping' || record.step === 'settling' ? (
+        <View testID="crossrail-sol-swap">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.multihop.executingTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.crossrail.legSolSwap(solVenueName, destSymbol)}</Text>
+          {solFeeKnown ? (
+            <Text testID="crossrail-sol-fee" style={S.convertChecklistLine}>
+              {M.convert.crossrail.solFeeLine(fmtAssetCompact(record.solFeeLamports!, SOLANA_TOKENS.SOL.decimals, destSymbol))}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {record.step === 'done' ? (
+        <View testID="convert-done">
+          <Text style={S.convertStateTitle}>{M.convert.crossrail.doneTitle}</Text>
+          <Text style={S.convertStateBody}>
+            {M.convert.crossrail.doneBody(amountStr, destSymbol, cross.solAddress)}
+          </Text>
+          {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
+        </View>
+      ) : null}
+
+      {record.step === 'failed_refunded' ? (
+        <View testID="convert-failed">
+          {record.solanaLeg != null ? (
+            /* The SOL leg refused: the USDC ALREADY crossed — the dead-end copy must say so. */
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.crossrail.solFailedTitle}</Text>
+              <Text style={S.convertStateBody}>{M.convert.crossrail.solFailedBody(cross.mintRecipientAta, solVenueName)}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
+              {record.failureCode === 'approve_refused' ? (
+                <Text style={S.convertStateBody}>{M.convert.failedApproveBody(record.inSymbol)}</Text>
+              ) : (
+                <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
+              )}
+              <Text testID="convert-expiry" style={S.convertStateMeta}>
+                {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+              </Text>
+            </>
+          )}
+        </View>
+      ) : null}
+
+      {record.step === 'failed_leg' ? (
+        <View testID="convert-failed-leg">
+          {record.failureCode === 'external_declined' ? (
+            /* The user walked away from the wallet step: nothing crossed; the USDC is at
+                their OWN Ethereum address — an address they control, not a dead end. */
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.crossrail.declinedTitle}</Text>
+              <Text style={S.convertStateBody}>{M.convert.crossrail.declinedBody(record.destAddress ?? '')}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={S.convertStateTitle}>{M.convert.multihop.failedLegTitle}</Text>
+              <Text style={S.convertStateBody}>{M.convert.multihop.failedLegBody(hopSymbol, record.failureDetail ?? '')}</Text>
+              <Text style={S.convertChecklistWarn}>{M.convert.multihop.failedLegExit}</Text>
+            </>
+          )}
+        </View>
+      ) : null}
+
+      {record.step === 'stuck' ? (
+        <View testID="convert-stuck">
+          <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.multihop.stuckRouteBody}</Text>
+          <Text testID="convert-expiry" style={S.convertStateMeta}>
+            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+          </Text>
+          {record.acknowledgedStuckAtMs == null ? (
+            <>
+              <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
+              <Pressable
+                testID="btn-convert-stuck-ack"
+                style={S.linkBtn}
+                onPress={() => { void acknowledgeStuckRecord(record.id); }}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.stuckAcknowledge}
+                accessibilityState={{disabled: false}}
+              >
+                <Text style={S.linkText}>{M.convert.stuckAcknowledge}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Text style={S.convertStateMeta}>{M.convert.stuckAcknowledged}</Text>
+          )}
+        </View>
+      ) : null}
+
+      {/* The leg list — same shape as Route A's, extended with the two cross-rail kinds. */}
+      <View testID="convert-crossrail-legs" style={S.convertChecklistCard}>
+        {(record.legPlan ?? []).map((lp, i) => {
+          const leg = record.legs[i];
+          const canister = leg?.canister ?? lp.canister;
+          const fee = plannedLegFee(record, lp, canister);
+          return (
+            <View key={i} testID={`convert-leg-${i}`}>
+              <Text style={S.convertChecklistLine}>{plannedLegLabel(record, lp, canister, venueName)}</Text>
+              <Text
+                testID={`convert-leg-${i}-state`}
+                style={lp.state === 'failed' ? S.err : S.convertStateMeta}>
+                {fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+      <View style={S.convertFooting}>
+        <IconSwap size={20} color={C.sub} />
+      </View>
+    </View>
+  );
+}
+
+/** A plain external link row (Etherscan / Circle status) — Linking.openURL is the same OS
+ *  path Settings' privacy link and the Trust fund button already use; inert nowhere. */
+function LinkRow({testID, label, href}: {testID: string; label: string; href: string}) {
+  return (
+    <Pressable
+      testID={testID}
+      style={S.linkBtn}
+      onPress={() => { Linking.openURL(href).catch(() => undefined); }}
+      accessibilityRole="link"
+      accessibilityLabel={label}>
+      <Text style={S.linkText}>{label}</Text>
+    </Pressable>
+  );
+}
 
   // In chooser mode this also withholds the confirm until a row is picked (activeQuote is null
   // without a selection — the none-preselected red line, expressed as data, not as a flag).
@@ -875,7 +1395,9 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
     ? fmtAssetCompact(gasNeededN.toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
     : null;
   const canConfirm = activeQuote != null && math != null && !quoteBusy && !confirmBusy && !insufficient
-    && (!routeMode || (destValid && routeGas != null && routeGasErr == null && !gasShort));
+    && (!routeMode || (destValid && routeGas != null && routeGasErr == null && !gasShort))
+    // Cross-rail routes also need Circle's fee on the table before confirm (fail-closed).
+    && (activeRoute == null || activeRoute.crossRail == null || crossFee != null);
   // Route-mode quote-derived figures describe the HOP asset (ckUSDC), not the direct pair's
   // other side — the destination's own figure is the min-you'll-receive line in the checklist.
   const dispOutSym = activeRoute != null ? activeRoute.hop.symbol : outSym;
@@ -959,8 +1481,12 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               </Pressable>
             );
           })}
-          {/* One-route honesty (spec §7): no chooser, and the copy says exactly that. */}
-          <Text testID="convert-route-note" style={S.convertMetaLine}>{M.convert.multihop.routeNote}</Text>
+          {/* One-route honesty (spec §7): no chooser, and the copy says exactly that.
+              Cross-rail widened this to a per-pair route LIST — the honesty line only
+              speaks when there is literally one route (B/C pairs render three today). */}
+          {routes.length === 1 ? (
+            <Text testID="convert-route-note" style={S.convertMetaLine}>{M.convert.multihop.routeNote}</Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -982,6 +1508,11 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           </View>
           {destAddress.length > 0 && !isValidDestinationAddress('CkEthErc20', destAddress) ? (
             <Text testID="convert-dest-address-invalid" style={S.err}>{M.convert.multihop.destAddressInvalid}</Text>
+          ) : null}
+          {/* Cross-rail routes (B/C): the SAME address is also the signer of the crossing —
+              the user must paste one they control, not an exchange deposit address. */}
+          {activeRoute?.crossRail != null ? (
+            <Text testID="convert-dest-cross-note" style={S.convertMetaLine}>{M.convert.crossrail.destAddressCrossNote}</Text>
           ) : null}
         </View>
       ) : null}
@@ -1163,7 +1694,12 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         {math != null && routeMode && activeRoute != null ? (
           <View testID="convert-route-min">
             <Text style={S.convertMinOutLine}>
-              {M.convert.multihop.routeMinLine(fmtAssetCompact(math.minOut, dispOutDecimals, activeRoute.dest.symbol), formatBps(slippageBps))}
+              {/* Cross-rail honesty: the burn amount is denominated in the HOP asset (USDC) —
+                  Route C's dest.symbol is SOL and must not label this number. */}
+              {M.convert.multihop.routeMinLine(
+                fmtAssetCompact(math.minOut, dispOutDecimals, activeRoute.crossRail != null ? dispOutSym : activeRoute.dest.symbol),
+                formatBps(slippageBps),
+              )}
             </Text>
             <Text style={S.convertChecklistLine}>{M.convert.multihop.routeSurplusNote(dispOutSym)}</Text>
             {routeGas != null ? (
@@ -1172,6 +1708,28 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               </Text>
             ) : routeGasErr != null ? (
               <Text testID="convert-gas-note" style={S.err}>{routeGasErr}</Text>
+            ) : null}
+            {activeRoute.crossRail != null ? (
+              <View testID="convert-crossrail-fees">
+                {/* Fee census honesty for the crossing: the EVM gas is the USER's wallet's ETH
+                    (dpay can neither pay nor quote it); Circle's mint fee is Circle's own
+                    published number, deducted from the amount — never a dpay fee. */}
+                <Text testID="crossrail-external-gas" style={S.convertChecklistLine}>
+                  {M.convert.crossrail.externalGasLine}
+                </Text>
+                {crossFee != null ? (
+                  <>
+                    <Text testID="crossrail-circle-fee" style={S.convertChecklistLine}>
+                      {M.convert.crossrail.circleFeeLine(fmtAssetCompact(crossFee.maxFee, dispOutDecimals, dispOutSym))}
+                    </Text>
+                    <Text testID="crossrail-mint-floor" style={S.convertChecklistLine}>
+                      {M.convert.crossrail.mintFloorLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, dispOutSym))}
+                    </Text>
+                  </>
+                ) : crossFeeErr != null ? (
+                  <Text testID="crossrail-circle-fee" style={S.err}>{crossFeeErr}</Text>
+                ) : null}
+              </View>
             ) : null}
           </View>
         ) : math != null ? (

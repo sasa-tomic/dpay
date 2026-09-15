@@ -1109,6 +1109,36 @@ export async function prepareMultihopConvertRecord(args: {
   const amountIn = quote.amountIn;
   const pool = quote.pool;
   const burnAmount = math.minOut;
+
+  // The CROSS-RAIL WIDENING (2026-09-16, Routes B/C): when the route composes a CCTP leg,
+  // the five IC legs land USDC at the user's EVM address and the record EXTENDS with the
+  // external-signature burn leg (+ Route C's final Jupiter leg). Nothing here signs: the
+  // burn is the USER's own EVM wallet's transaction — dpay only freezes the facts (the
+  // device-derived SOL address, its USDC ATA as the mint recipient) and prices the census
+  // with Circle's live fee. The calldata itself is built at handoff time from this record.
+  // FEE-BEFORE-SIGNING (honest order): the fee is fetched BEFORE any leg is signed, so an
+  // unreachable Circle census leaves NOTHING signed — same fail-closed rule as route gas.
+  let crossRail: CrossRailInfo | undefined;
+  if (route.crossRail != null) {
+    if (route.crossRail.cctp.finalityThreshold !== CCTP_FINALITY_FAST) {
+      // The fee fetch below is pinned to FAST; an unknown finality shape is a registry
+      // this build did not compose — refuse rather than mis-price.
+      throw new Error(M.convert.errors.cctpFeeUnavailable);
+    }
+    const kp = deriveSolanaKeypair(secretHex);
+    const ataB58 = bs58.encode(deriveAta(kp.address, USDC_MINT_ADDRESS));
+    const fee = await fetchCctpBurnFee();
+    const maxFee = cctpMaxFee(BigInt(burnAmount), fee);
+    crossRail = {
+      kind: route.crossRail.sol != null ? 'cctp_sol' : 'cctp',
+      solAddress: kp.address,
+      mintRecipientAta: ataB58,
+      maxFeeSubunits: maxFee.toString(),
+      mintFloorSubunits: cctpMintFloor(BigInt(burnAmount), maxFee).toString(),
+      ...(route.crossRail.sol != null ? {solVenueId: route.crossRail.sol.venueId} : {}),
+    };
+  }
+
   const approveAmount = (BigInt(amountIn) + BigInt(math.inFee)).toString();
   const allowanceExpiryNs = await icStampExpiry(secretHex, CONVERT_APPROVE_LIFETIME_S);
   const envExpiry = await icStampExpiry(secretHex);
@@ -1136,33 +1166,6 @@ export async function prepareMultihopConvertRecord(args: {
   const approveGasSigned = await DpayCore.icpSignUpdate(secretHex, route.burn.gasLedger, 'icrc2_approve', approveGasArgHex, envExpiry);
   const withdrawArgHex = await DpayCore.icpWithdrawErc20Arg(burnAmount, route.hop.ledger, destAddress, '', '');
   const withdrawSigned = await DpayCore.icpSignUpdate(secretHex, route.burn.minter, 'withdraw_erc20', withdrawArgHex, envExpiry);
-
-  // The CROSS-RAIL WIDENING (2026-09-16, Routes B/C): when the route composes a CCTP leg,
-  // the five IC legs land USDC at the user's EVM address and the record EXTENDS with the
-  // external-signature burn leg (+ Route C's final Jupiter leg). Nothing here signs: the
-  // burn is the USER's own EVM wallet's transaction — dpay only freezes the facts (the
-  // device-derived SOL address, its USDC ATA as the mint recipient) and prices the census
-  // with Circle's live fee. The calldata itself is built at handoff time from this record.
-  let crossRail: CrossRailInfo | undefined;
-  if (route.crossRail != null) {
-    if (route.crossRail.cctp.finalityThreshold !== CCTP_FINALITY_FAST) {
-      // The fee fetch below is pinned to FAST; an unknown finality shape is a registry
-      // this build did not compose — refuse rather than mis-price.
-      throw new Error(M.convert.errors.cctpFeeUnavailable);
-    }
-    const kp = deriveSolanaKeypair(secretHex);
-    const ataB58 = bs58.encode(deriveAta(kp.address, USDC_MINT_ADDRESS));
-    const fee = await fetchCctpBurnFee();
-    const maxFee = cctpMaxFee(BigInt(burnAmount), fee);
-    crossRail = {
-      kind: route.crossRail.sol != null ? 'cctp_sol' : 'cctp',
-      solAddress: kp.address,
-      mintRecipientAta: ataB58,
-      maxFeeSubunits: maxFee.toString(),
-      mintFloorSubunits: cctpMintFloor(BigInt(burnAmount), maxFee).toString(),
-      ...(route.crossRail.sol != null ? {solVenueId: route.crossRail.sol.venueId} : {}),
-    };
-  }
 
   return {
     id: randNonceHex(),
@@ -1333,7 +1336,9 @@ export async function buildCctpHandoff(secretHex: string, rec: ConvertRecord): P
  *  seam behind it). */
 export function attachCctpBurnTx(rec: ConvertRecord, burnTxHash: string): ConvertRecord {
   if (rec.crossRail == null || rec.step !== 'awaiting_external') return rec;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(burnTxHash)) return rec;
+  // A malformed hash is a caller bug (the UI gates the button on non-empty input and the
+  // engine wrapper surfaces this message) — throw, never silently no-op the user's report.
+  if (!/^0x[0-9a-fA-F]{64}$/.test(burnTxHash)) throw new Error(M.convert.crossrail.burnTxInvalid);
   const planIdx = rec.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
   const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'sent' as const} : p));
   return {...rec, step: 'crossing', legPlan, crossRail: {...rec.crossRail, burnTxHash}};

@@ -307,6 +307,10 @@ function buildStyles(p: Palette) {
   // The pool principal on its own line: 27 hyphenated characters inside a paragraph wrap
   // mid-token (browsers break at '-'), so it gets the receipt voice and a line of its own.
   convertPrincipal: {fontSize: 12, color: p.ink, lineHeight: 18, marginBottom: 9, fontFamily: FONT.mono},
+  // The cross-rail handoff's calldata box: a full EVM payload (~388 bytes of hex) the user
+  // pastes into their OWN wallet verbatim — receipt voice, wrapped, selectable, boxed so it
+  // reads as one copyable artifact rather than prose.
+  convertCalldata: {fontSize: 11, color: p.ink, lineHeight: 16, fontFamily: FONT.mono, backgroundColor: p.panel2, borderWidth: 1, borderColor: p.line2, borderRadius: 10, padding: 10, marginBottom: 6, flexWrap: 'wrap'},
   convertSlippageLabel: {fontSize: 11, fontWeight: '600', color: p.sub2, textTransform: 'uppercase', letterSpacing: 1.4, fontFamily: FONT.mono, marginBottom: 6},
   // The minimum is a term, but it is the term that bounds the trade — one weight above its siblings.
   convertMinOutLine: {fontSize: 14, color: p.ink, lineHeight: 20, marginBottom: 9, fontFamily: FONT.sansMedium},
