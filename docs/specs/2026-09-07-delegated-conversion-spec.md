@@ -165,9 +165,11 @@ one `StyleSheet.create` block.
 
 ## 7. Non-goals (do not build)
 
-CeFi venue integration (DFX swap etc. — user-direct handoff later), Solana/Jupiter, multi-hop,
-auto-convert rules, per-pair venue choice UI, any dpay fee, catalog migration, revoke tx,
-payer-side mid-payment conversion, debit of the payment review flow in any way.
+CeFi venue integration (DFX swap etc. — user-direct handoff later), Solana/Jupiter, multi-hop
+(auto-convert rules, per-pair venue choice UI, any dpay fee, catalog migration, revoke tx,
+payer-side mid-payment conversion, debit of the payment review flow in any way). [2026-09-14:
+`multi-hop` is no longer a non-goal — superseded by `docs/specs/2026-09-14-multihop-conversion-spec.md`
+per the founder decision of 2026-09-14; every other item in this list stands.]
 
 ## 8. After the PoC (founder-run, recorded here so it is not lost)
 
