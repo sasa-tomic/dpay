@@ -183,6 +183,11 @@ export const convertFr: ConvertMessages = {
     depositAmountLabel: 'Montant exact à déposer',
     depositMemoLabel: 'Memo (obligatoire)',
     depositExpiryLine: at => `L'ordre expire ${at}`,
+    counterparty: venue =>
+      `Exécuté par ${venue} — un service d'échange automatisé, pas un prestataire agréé et pas dpay.`,
+    checklistSigns:
+      'Rien n\'est signé sur ce téléphone — après confirmation, c\'est toi qui envoies le dépôt à l\'adresse du service.',
+    payoutAt: address => `Payé sur ta propre adresse : ${address}`,
     depositNote: (venue, sym) =>
       `Envoie ${sym} depuis ton portefeuille vers l'adresse de dépôt de ${venue} ci-dessus — exactement le montant indiqué. ${venue} est un service d'échange automatisé : il détient ton ${sym} pendant l'échange, puis paie vers ton adresse. dpay n'est pas partie à cet échange et ne touche rien.`,
   },

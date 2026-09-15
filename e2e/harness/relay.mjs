@@ -239,6 +239,14 @@ async function spawnOnce(opts = {}) {
     // above carries toolchain vars (PATH/CARGO_*), while every DPAY_* knob is set HERE,
     // deliberately, per spawn.
     DPAY_SOLANA_RPC_URL: `http://127.0.0.1:${port}/api/v1/test/solana-upstream`,
+    // Flow 187 (2026-09-15): the SideShift partner-key proxy's upstream — the relay's own
+    // test-helpers stub on this same server, plus FAKE credentials (the shape is exercised;
+    // no partner account exists — signing up is a founder step). Same deliberate-per-spawn
+    // rule as DPAY_SOLANA_RPC_URL above: named HERE so a shell-exported DPAY_SIDESHIFT_*
+    // can never leak a real secret into the harness relay.
+    DPAY_SIDESHIFT_SECRET: 'e2e-stub-partner-secret',
+    DPAY_SIDESHIFT_AFFILIATE_ID: 'e2e-stub-affiliate-id',
+    DPAY_SIDESHIFT_API_BASE: `http://127.0.0.1:${port}/api/v1/test/sideshift-upstream`,
     // Clamp noisy logs (the binary's banner is enough).
     RUST_LOG: process.env.RUST_LOG ?? 'warn',
   };

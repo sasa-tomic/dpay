@@ -1313,16 +1313,27 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
             standing disclosure names the one registered venue; attribution follows the quote —
             or, under a chooser pick, the PICKED venue (counterVenueId above). */}
         <View testID="convert-counterparty">
-          <Text style={S.convertChecklistLine}>{M.convert.counterparty(venueDisplayName(counterVenueId))}</Text>
+          {/* The ic_amm sentence ("autonomous on-chain contract") is FALSE for a CeFi venue —
+              an exchange service is a company, not a contract; the cefi block says what it is. */}
+          <Text style={S.convertChecklistLine}>
+            {cefiMode
+              ? M.convert.cefi.counterparty(venueDisplayName(counterVenueId))
+              : M.convert.counterparty(venueDisplayName(counterVenueId))}
+          </Text>
           {/* The pool principal renders only when THIS venue's own number stands behind it: the
               quote's pool echo once one arrives, or the standing single-venue disclosure. Under a
               chooser pick whose quote has not settled (or errored) NO principal renders — the
               picked venue is still named above, but an execution fact is never asserted without
-              its quote, and another venue's principal is never borrowed. */}
+              its quote, and another venue's principal is never borrowed. (For a cefi venue this
+              line is the venue's https API base — where the relay carries the partner key.) */}
           {activeQuote != null || !chooserMode ? (
             <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
           ) : null}
-          <Text style={S.convertChecklistLine}>{M.convert.counterpartySigns}</Text>
+          {/* "Your phone signs" is likewise false for CeFi: the phone signs NOTHING — the user
+              sends the deposit to the venue's own address. */}
+          <Text style={S.convertChecklistLine}>
+            {cefiMode ? M.convert.cefi.checklistSigns : M.convert.counterpartySigns}
+          </Text>
           {/* A route names its SECOND counterparty too: the ckETH minter that executes the
               burn — its principal is an execution fact, shown as plainly as the pool's. */}
           {routeMode && activeRoute != null ? (
@@ -2120,6 +2131,15 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
         <View testID="convert-done">
           <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.doneBody(fmtAssetCompact(record.outAmountNet ?? '0', outDecimals, outSymbol))}</Text>
+          {/* A cross-rail payout (the CeFi settle) lands at a destination address on ANOTHER
+              rail — the completed panel says which one. Only the cefi provider record carries
+              destAddress through THIS panel (planned routes render via RouteStatePanel, cctp
+              handoffs via CrossRailStatePanel), so the line fires for exactly that shape. */}
+          {record.destAddress != null ? (
+            <Text testID="convert-payout-address" style={S.convertStateMeta}>
+              {M.convert.cefi.payoutAt(record.destAddress)}
+            </Text>
+          ) : null}
           {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
       ) : null}

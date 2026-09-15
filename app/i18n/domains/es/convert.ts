@@ -183,6 +183,11 @@ export const convertEs: ConvertMessages = {
     depositAmountLabel: 'Cantidad exacta a depositar',
     depositMemoLabel: 'Memo (obligatorio)',
     depositExpiryLine: at => `La orden caduca ${at}`,
+    counterparty: venue =>
+      `Ejecutado por ${venue}: un servicio de intercambio automatizado, no un proveedor con licencia y no dpay.`,
+    checklistSigns:
+      'No se firma nada en este teléfono: tras confirmar, tú mismo envías el depósito a la dirección del servicio.',
+    payoutAt: address => `Pagado a tu propia dirección: ${address}`,
     depositNote: (venue, sym) =>
       `Envía ${sym} desde tu monedero a la dirección de depósito de ${venue} arriba — exactamente la cantidad indicada. ${venue} es un servicio de intercambio automatizado: retiene tu ${sym} durante el intercambio y luego paga a tu dirección. dpay no es parte de este intercambio y no cobra nada.`,
   },

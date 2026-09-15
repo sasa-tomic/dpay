@@ -1076,6 +1076,20 @@ static SIDESHIFT_STUB_BARE_CALLS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 #[cfg(feature = "test-helpers")]
 static SIDESHIFT_STUB_LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The depositAmount of the most recently served QUOTE. The relay's shift-creation body
+/// carries {quoteId, settleAddress, …} — no amount — and a real venue binds the order to
+/// the QUOTE's amount, so the shift stub echoes this (never a hard-coded default).
+#[cfg(feature = "test-helpers")]
+static SIDESHIFT_STUB_LAST_DEPOSIT: std::sync::Mutex<String> =
+    std::sync::Mutex::new(String::new());
+/// Per-route arrival counts — the e2e flow's proof that an order is never RE-created
+/// across a reload (shiftCalls must not move) while quotes legitimately re-fetch.
+#[cfg(feature = "test-helpers")]
+static SIDESHIFT_STUB_QUOTE_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static SIDESHIFT_STUB_SHIFT_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 /// Record one stub arrival: classify by credential-header presence, remember the body.
 #[cfg(feature = "test-helpers")]
@@ -1095,10 +1109,16 @@ fn sideshift_stub_record(headers: &axum::http::HeaderMap, body: &str) {
 #[cfg(feature = "test-helpers")]
 async fn sideshift_stub_quotes(headers: axum::http::HeaderMap, body: axum::body::Bytes) -> Response {
     sideshift_stub_record(&headers, &String::from_utf8_lossy(&body));
+    SIDESHIFT_STUB_QUOTE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let req: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
     };
+    if let Some(amount) = req.get("depositAmount").and_then(|v| v.as_str()) {
+        if let Ok(mut slot) = SIDESHIFT_STUB_LAST_DEPOSIT.lock() {
+            *slot = amount.to_string();
+        }
+    }
     (
         StatusCode::CREATED,
         Json(serde_json::json!({
@@ -1123,10 +1143,17 @@ async fn sideshift_stub_shift_fixed(
     body: axum::body::Bytes,
 ) -> Response {
     sideshift_stub_record(&headers, &String::from_utf8_lossy(&body));
+    SIDESHIFT_STUB_SHIFT_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let req: serde_json::Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
     };
+    // The quoted depositAmount, not a constant: the order is bound to its quote (the app's
+    // prepare red line refuses an order whose amount differs from the reviewed quote).
+    let quoted_deposit = SIDESHIFT_STUB_LAST_DEPOSIT
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
     (
         StatusCode::CREATED,
         Json(serde_json::json!({
@@ -1135,7 +1162,8 @@ async fn sideshift_stub_shift_fixed(
             "settleCoin": req.get("settleCoin").cloned().unwrap_or(serde_json::json!("SOL")),
             "depositAddress": "e2e-deposit-address-01",
             "settleAddress": req.get("settleAddress").cloned().unwrap_or(serde_json::json!("")),
-            "depositAmount": req.get("depositAmount").cloned().unwrap_or(serde_json::json!("2")),
+            "depositAmount": req.get("depositAmount").cloned()
+                .unwrap_or_else(|| serde_json::json!(if quoted_deposit.is_empty() { "2" } else { &quoted_deposit })),
             "settleAmount": "0.0495",
             "expiresAt": "2026-09-16T00:00:00.000Z",
         })),
@@ -1145,7 +1173,9 @@ async fn sideshift_stub_shift_fixed(
 
 /// `GET /api/v1/test/sideshift-upstream/hits` — how many credentialed vs bare calls the
 /// stub has served (bare should stay ZERO for every flow: the proxy always attaches the
-/// secret — a bare hit means a path reached the stub without the relay's key).
+/// secret — a bare hit means a path reached the stub without the relay's key), plus
+/// per-route counts so the e2e flow can prove an order was NEVER re-created across a
+/// reload (shiftCalls must not move) while quotes legitimately re-fetch.
 #[cfg(feature = "test-helpers")]
 async fn sideshift_stub_hits() -> Response {
     use std::sync::atomic::Ordering;
@@ -1154,6 +1184,8 @@ async fn sideshift_stub_hits() -> Response {
         Json(serde_json::json!({
             "secretCalls": SIDESHIFT_STUB_SECRET_CALLS.load(Ordering::Relaxed),
             "bareCalls": SIDESHIFT_STUB_BARE_CALLS.load(Ordering::Relaxed),
+            "quoteCalls": SIDESHIFT_STUB_QUOTE_CALLS.load(Ordering::Relaxed),
+            "shiftCalls": SIDESHIFT_STUB_SHIFT_CALLS.load(Ordering::Relaxed),
         })),
     )
         .into_response()

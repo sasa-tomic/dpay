@@ -184,6 +184,11 @@ export const convertDe: ConvertMessages = {
     depositAmountLabel: 'Genauer Einzahlungsbetrag',
     depositMemoLabel: 'Memo (erforderlich)',
     depositExpiryLine: at => `Bestellung läuft ab ${at}`,
+    counterparty: venue =>
+      `Ausgeführt von ${venue} — ein automatisierter Tauschdienst, kein lizenzierter Anbieter und nicht dpay.`,
+    checklistSigns:
+      'Auf diesem Telefon wird nichts signiert — nach der Bestätigung sendest du die Einzahlung selbst an die Adresse des Anbieters.',
+    payoutAt: address => `Ausgezahlt auf deine eigene Adresse: ${address}`,
     depositNote: (venue, sym) =>
       `Sende ${sym} aus deiner Wallet an die Einzahlungs-Adresse von ${venue} oben — genau den Einzahlungsbetrag. ${venue} ist ein automatisierter Tauschdienst: Er hält dein ${sym} während des Tauschs und zahlt dann an deine Adresse aus. dpay ist keine Partei dieses Tauschs und wird nicht bezahlt.`,
   },

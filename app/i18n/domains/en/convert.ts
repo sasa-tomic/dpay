@@ -236,6 +236,14 @@ export type ConvertMessages = {
     depositAddressLabel: string;
     depositAmountLabel: string;
     depositMemoLabel: string;
+    /** The CeFi counterparty line for the pre-confirm checklist — the ic_amm "autonomous
+     *  on-chain contract" sentence is FALSE for an exchange service; this one is not. */
+    counterparty: (venue: string) => string;
+    /** Same slot as counterpartySigns, cefi truth: the phone signs NOTHING — the user sends
+     *  the deposit to the venue's own address themselves. */
+    checklistSigns: string;
+    /** Where a completed cross-rail payout landed (the user's own address on the other rail). */
+    payoutAt: (address: string) => string;
     depositExpiryLine: (at: string) => string;
     /** The CeFi fact itself: the user sends to the VENUE's address; the venue holds mid-trade. */
     depositNote: (venue: string, sym: string) => string;
@@ -475,6 +483,11 @@ export const convertEn: ConvertMessages = {
     depositAddressLabel: 'Deposit address',
     depositAmountLabel: 'Exact deposit amount',
     depositMemoLabel: 'Memo (required)',
+    counterparty: venue =>
+      `Executed by ${venue} — an automated exchange service, not a licensed provider and not dpay.`,
+    checklistSigns:
+      'Nothing is signed on this phone — after you confirm, you send the deposit to the venue\'s own address yourself.',
+    payoutAt: address => `Paid out to your own address: ${address}`,
     depositExpiryLine: at => `Order expires ${at}`,
     depositNote: (venue, sym) =>
       `Send ${sym} from your wallet to ${venue}\u2019s deposit address above — exactly the deposit amount. ${venue} is an automated exchange service: it holds your ${sym} mid-trade, then pays out to your address. dpay is not a party to this trade and is paid nothing.`,
