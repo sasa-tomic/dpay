@@ -100,6 +100,19 @@
         "token1_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai",
         "fee_millionths": 3000
       }
+    },
+    {
+      "_doc": "The FIRST SOLANA venue (registered 2026-09-15, multi-venue readiness V11 — 'a Solana venue cannot reach the screen'): Jupiter, the autonomous on-chain Solana aggregator, for the rail-local pair SOL ↔ USDC(Solana). IDENTIFIER SEMANTICS for a solana_amm row: `pair_ledgers` are Solana MINTS in base58 (the eurc_mint precedent for base58 identifiers in this file), NOT IC ledger principals — the SOL side is identified by the WRAPPED-SOL mint So111…12 because that is the stable string id a venue route carries for native SOL (a registry row needs an identifier per side; 'null', the payment rail's marker for native SOL, is not one). `endpoint` is an https ORIGIN, not a principal: the quote is a keyless device-direct GET and the swap is Jupiter's serialized unsigned transaction, signed on-device — the relay's role for this row is REGISTRY ONLY (served in /api/v1/venues with kind solana_amm; never resolvable through venue_of_endpoint, the IC quote allowlist). NO FIXTURE by rule: fixtures are the ic_amm offline-fake-IC seeding and are ic_amm-only — the offline Jupiter stand-in lives app-side (the e2e window.fetch stub on this origin), so this row carries no fixture block at all. Measured live 2026-09-14 (docs/specs/2026-09-14-swap-venue-feasibility.md): lite-api.jup.ag quote/swap are keyless, no KYC, platformFee null (no integrator fee).",
+      "venue_id": "jupiter",
+      "display_name": "Jupiter",
+      "kind": "solana_amm",
+      "endpoint": "https://lite-api.jup.ag",
+      "pair_ledgers": [
+        "So11111111111111111111111111111111111111112",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+      ],
+      "testnet": false,
+      "disclosure_key": "jupiter"
     }
    ]
 }

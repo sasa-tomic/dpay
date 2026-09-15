@@ -5357,15 +5357,15 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     let served = body["venues"].as_array().expect("venues is an array");
     assert_eq!(
         served.len(),
-        3,
-        "exactly three real venues are served today (one per pair)"
+        4,
+        "exactly four real venues are served today (three IC pools + Jupiter, one per pair)"
     );
     assert_eq!(
         served
             .iter()
             .map(|v| v["venue_id"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh"],
+        vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh", "jupiter"],
         "registry order is the stable wire order"
     );
     let v = &served[0];
@@ -5393,6 +5393,31 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
         !body.to_string().contains(FIXTURE_POOL),
         "an invented fixture venue must never appear in a served list un-asked-for"
     );
+    // The Solana row (2026-09-15, V11): served like any real venue — same row shape — but its
+    // identifier semantics differ by KIND: kind solana_amm, an https endpoint, and MINTS in
+    // pair_ledgers. It is listed (the app's SOL convert gate reads exactly this surface) and is
+    // NEVER quotable through the IC rail (`venue_of_endpoint` is ic_amm-only — pinned in
+    // catalog.rs venue_truth_tests).
+    let jup = &served[3];
+    assert_eq!(jup["venue_id"], "jupiter");
+    assert_eq!(jup["display_name"], "Jupiter");
+    assert_eq!(jup["kind"], "solana_amm");
+    assert_eq!(jup["endpoint"], "https://lite-api.jup.ag");
+    assert_eq!(jup["testnet"], false);
+    assert_eq!(jup["disclosure_key"], "jupiter");
+    let mut jup_pair: Vec<&str> = jup["pair_ledgers"]
+        .as_array()
+        .expect("pair_ledgers is an array")
+        .iter()
+        .map(|p| p.as_str().expect("mint"))
+        .collect();
+    jup_pair.sort_unstable();
+    let mut jup_want = [
+        "So11111111111111111111111111111111111111112",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    ];
+    jup_want.sort_unstable();
+    assert_eq!(jup_pair, jup_want, "the pair as an unordered MINT set");
 }
 
 /// `POST /api/v1/test/venue` — the multi-venue V5 knob: `/api/v1/venues` serves the fixture
@@ -5406,12 +5431,12 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
 async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;
 
-    // Default (nothing armed): exactly the three real venues, one per pair.
+    // Default (nothing armed): exactly the four real venues (three IC pools + Jupiter).
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body["venues"].as_array().map(Vec::len),
-        Some(3),
+        Some(4),
         "the default experience is one venue per PAIR, like prod"
     );
 
@@ -5436,8 +5461,8 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let venues = body["venues"].as_array().expect("venues is an array");
     assert_eq!(
         venues.len(),
-        4,
-        "four served rows with the knob armed: three real + the fixture on its pair"
+        5,
+        "five served rows with the knob armed: three real IC + Jupiter + the fixture on its pair"
     );
     // The served list is REGISTRY order (the stable wire order) with the knob arming the
     // fixture venue into it — the fixture row sits where the registry puts it, second.
@@ -5446,7 +5471,7 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
             .iter()
             .map(|v| v["venue_id"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        vec!["icpswap", "icpswap-fixture-b", "icpswap-ckusdc", "icpswap-cketh"],
+        vec!["icpswap", "icpswap-fixture-b", "icpswap-ckusdc", "icpswap-cketh", "jupiter"],
         "registry order is the stable wire order"
     );
     assert_eq!(venues[1]["endpoint"], FIXTURE_POOL);
@@ -5456,13 +5481,13 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
         "the fixture venue is labelled the invented stand-in it is"
     );
 
-    // Disarm: back to the three-real-venue default (teardown parity — e2e flows share one relay).
+    // Disarm: back to the four-real-venue default (teardown parity — e2e flows share one relay).
     let (status, body) = call(&state, post_venue(false, "icpswap-fixture-b")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["served"], false);
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["venues"].as_array().map(Vec::len), Some(3));
+    assert_eq!(body["venues"].as_array().map(Vec::len), Some(4));
     assert!(!body.to_string().contains(FIXTURE_POOL));
 
     // The knob can neither gate a REAL venue nor invent an unknown one — routing is a

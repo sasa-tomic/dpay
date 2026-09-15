@@ -134,7 +134,12 @@ pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 /// A conversion venue's kind. Extensible by construction: a later Solana venue kind is a new
 /// variant (or a string on the wire), never a schema break — `cefi` is already reserved and is
 /// deliberately NOT an IC-pool shape (the `Ledger` trait takes no CeFi method; CeFi lives
-/// device-side, `app/services/opencryptopay.ts` shape).
+/// device-side, `app/services/opencryptopay.ts` shape). `solana_amm` (2026-09-15, Jupiter —
+/// multi-venue readiness V11) is likewise NOT an IC-pool shape: its quote and swap round-trip
+/// device-direct over keyless https (never the relay's `/api/v1/swap_quote`, never an IC
+/// update), its `endpoint` is an https origin (not a principal), and its `pair_ledgers` are
+/// Solana MINTS. `venue_of_endpoint` — the IC quote allowlist — stays `IcAmm`-only: a
+/// solana_amm row must never resolve as a pool there, and the fake-IC seeding skips it.
 #[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VenueKind {
@@ -145,6 +150,13 @@ pub(crate) enum VenueKind {
     /// already speaks it so adding the first CeFi venue is data, not a schema change.
     #[allow(dead_code)]
     Cefi,
+    /// A Solana on-chain aggregator the device talks to DIRECTLY over keyless https (Jupiter
+    /// today): the quote is fetched device-side, the returned unsigned transaction is verified
+    /// (fee payer = the user) and signed on-device, then submitted through the same Solana
+    /// JSON-RPC proxy path SOL payments use. `fixture` is None for this kind — the offline
+    /// stand-in lives app-side (e2e window.fetch stub), not in the fake-IC gateway.
+    #[allow(dead_code)]
+    SolanaAmm,
 }
 
 /// The offline stub seed for one ic_amm venue's fake-IC pool (`ic_gateway.rs`). The pair ORDER
@@ -305,6 +317,29 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
                 reserve0_e8s: 1_131_191_262_612,
                 reserve1_e8s: 5_162_709_386_182_754_830,
             }),
+        },
+        VenueEntry {
+            // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter,
+            // the on-chain aggregator. Everything the IC rows do through the relay happens
+            // device-direct here — the quote is a keyless https GET the phone issues itself, and
+            // the swap is Jupiter's serialized UNSIGNED transaction, verified (fee payer = the
+            // user) and signed on-device, then submitted through the same Solana JSON-RPC proxy
+            // path SOL payments use. The relay's role for this row is REGISTRY ONLY: it serves
+            // the row in `/api/v1/venues` (kind solana_amm) and never quotes or executes it.
+            // `endpoint` is therefore an https ORIGIN, not a canister principal, and
+            // `pair_ledgers` are Solana MINTS (wrapped SOL + USDC — identifier semantics
+            // documented in dfx/catalog_truth.json venues[] _doc). `fixture` is None: fixtures
+            // are the ic_amm offline-fake-IC seeding and are ic_amm-only by rule; the offline
+            // Jupiter stand-in lives app-side (e2e window.fetch stub on this origin).
+            venue_id: "jupiter",
+            display_name: "Jupiter",
+            kind: VenueKind::SolanaAmm,
+            endpoint: "https://lite-api.jup.ag",
+            pair_ledgers: [WRAPPED_SOL_MINT, SOLANA_USDC_MINT],
+            testnet: false,
+            disclosure_key: "jupiter",
+            test_helpers_served: false,
+            fixture: None,
         },
     ]
 }
@@ -681,8 +716,16 @@ fn is_testnet_row(d: &CurrencyDescriptor) -> bool {
 
 /// The mainnet USDC mint — mirrors `USDC_MINT_ADDRESS` (app/solana/spl.ts) verbatim; cross-checked
 /// against `dfx/catalog_truth.json` is NOT done for this one (the truth file pins the EUR pair
-/// only — see [`SOLANA_EURC_MINT`]).
+/// only — see [`SOLANA_EURC_MINT`]). It doubles as one side of the FIRST venue pair whose
+/// `pair_ledgers` are mints (the Jupiter row — see [`WRAPPED_SOL_MINT`]).
 const SOLANA_USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+/// The wrapped-SOL mint (`So111…12`, Mantle/SPL token account of native SOL) — the identifier a
+/// SOLANA venue row carries for the NATIVE side of a pair: Jupiter routes native SOL through its
+/// wrapped form, and a registry row needs a stable string id for each side, so the wrapped mint
+/// IS "SOL" in venue `pair_ledgers` (mirrors `WRAPPED_SOL_MINT_ADDRESS`, app/solana/tokens.ts;
+/// pinned against `dfx/catalog_truth.json` venues[].pair_ledgers by `venue_truth_tests`).
+const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 
 /// The mainnet EURC mint — `HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr` (Circle's native
 /// EURC on solana mainnet, 6 decimals). The solana half of the EUR dual-rail (Stage 1,
@@ -1761,9 +1804,25 @@ mod venue_truth_tests {
             let expected_kind = match kind {
                 "ic_amm" => VenueKind::IcAmm,
                 "cefi" => VenueKind::Cefi,
+                "solana_amm" => VenueKind::SolanaAmm,
                 other => panic!("unknown venue kind in the truth file: {other}"),
             };
             assert_eq!(v.kind, expected_kind);
+            // A solana_amm row carries MINTS in pair_ledgers (base58 — the eurc_mint precedent)
+            // and MUST NOT carry a fixture: fixtures are the ic_amm offline-fake-IC seeding.
+            // Pinned here so a future solana row cannot smuggle an IC fixture in by accident.
+            if v.kind == VenueKind::SolanaAmm {
+                assert!(
+                    v.fixture.is_none(),
+                    "{}: a solana_amm venue is ic-fixture-free by rule (fixture is ic_amm-only)",
+                    v.venue_id
+                );
+                assert!(
+                    v.endpoint.starts_with("https://"),
+                    "{}: a solana_amm endpoint is an https origin (device-direct, keyless)",
+                    v.venue_id
+                );
+            }
             // The pair is an UNORDERED set: sort both sides before comparing, so neither the
             // truth file nor the registry can smuggle an ORDER back in unnoticed.
             let mut truth_pair: Vec<&str> = t["pair_ledgers"]
@@ -1849,23 +1908,34 @@ mod venue_truth_tests {
         // principal text, and a typo'd fixture id would fail far from its cause.
         dpay_icp::principal::Principal::from_text("6st72-zyqce-jbgfa-vcylr-qgi2d-mob2h-q7")
             .expect("the fixture-only venue's invented principal parses");
+        // A SOLANA venue is never an IC quote target: `venue_of_endpoint` — the allowlist — is
+        // ic_amm-only, so Jupiter's https origin (and its mints) resolve to NOTHING here even
+        // though the row is registry-served. This is the load-bearing half of the kind guard:
+        // `/api/v1/swap_quote` consults exactly this function, so a solana_amm row can never be
+        // quoted through the IC rail by mistake (and its mints could never collide with a
+        // principal anyway — but the guard is asserted, not assumed).
+        assert!(venue_of_endpoint("https://lite-api.jup.ag").is_none());
+        assert!(venue_of_endpoint(WRAPPED_SOL_MINT).is_none());
+        assert!(venue_of_endpoint(SOLANA_USDC_MINT).is_none());
         // SERVED-by-default (the knob un-armed — the agent build's permanent state, and every
-        // build's state before a test opts in): never a fixture venue.
+        // build's state before a test opts in): never a fixture venue. Jupiter IS served — it is
+        // a real venue (kind solana_amm), just not an IC-servable one: the count includes it and
+        // the IC-quote allowlist above excludes it, by design.
         let served: Vec<_> = venues()
             .into_iter()
             .filter(|v| venue_servable(v, false))
             .collect();
         assert_eq!(
             served.len(),
-            3,
-            "exactly three real venues are served today (one per pair)"
+            4,
+            "exactly four real venues are served today (three IC pools + Jupiter, one per pair)"
         );
         assert_eq!(
             served
                 .iter()
                 .map(|v| v.venue_id)
                 .collect::<Vec<_>>(),
-            vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh"],
+            vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh", "jupiter"],
             "registry order is the stable wire order"
         );
         assert!(served.iter().all(|v| !v.test_helpers_served));

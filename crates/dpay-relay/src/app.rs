@@ -1361,6 +1361,7 @@ async fn venues(State(state): State<AppState>) -> Response {
                 kind: match v.kind {
                     crate::catalog::VenueKind::IcAmm => "ic_amm".to_string(),
                     crate::catalog::VenueKind::Cefi => "cefi".to_string(),
+                    crate::catalog::VenueKind::SolanaAmm => "solana_amm".to_string(),
                 },
                 endpoint: v.endpoint.to_string(),
                 pair_ledgers: v.pair_ledgers.iter().map(|p| p.to_string()).collect(),

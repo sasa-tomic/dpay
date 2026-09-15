@@ -140,10 +140,14 @@ fn venues_truth() -> Vec<Value> {
         .clone()
 }
 
-/// Every REAL venue, one at a time. `test_helpers_served` entries are pinned fixture-truth
-/// with an explicit NOT-A-REAL-VENUE marker precisely so this loop can skip them: an invented
-/// principal must never be probed on mainnet (and the agent-build allowlist would refuse it
-/// anyway — the knob that serves it offline does not exist in this build).
+/// Every REAL venue, one at a time. Two skip rules, both load-bearing:
+///   - `test_helpers_served` entries are pinned fixture-truth with an explicit NOT-A-REAL-VENUE
+///     marker precisely so this loop can skip them: an invented principal must never be probed
+///     on mainnet (and the agent-build allowlist would refuse it anyway).
+///   - non-`ic_amm` kinds (the solana_amm row, 2026-09-15) have NO IC pool to walk: their
+///     endpoint is an https origin, their `fixture` is None, and `ledger_decimals` would panic
+///     on a mint — this probe speaks IC canisters only. The Jupiter row's own liveness gate is
+///     the app-side e2e fake (deterministic) plus the founder's device flow, never this walker.
 #[test]
 fn venues_mainnet_pair_and_fee_still_match_the_measured_truth() {
     if std::env::var("DPAY_IC_MAINNET").is_err() {
@@ -159,6 +163,14 @@ fn venues_mainnet_pair_and_fee_still_match_the_measured_truth() {
             .get("test_helpers_served")
             .is_some_and(|f| f.as_bool().unwrap())
         {
+            continue;
+        }
+        if venue["kind"].as_str() != Some("ic_amm") {
+            eprintln!(
+                "skipped: venue {} is kind {} — not an IC pool, nothing for this probe to walk",
+                venue["venue_id"].as_str().unwrap_or("?"),
+                venue["kind"].as_str().unwrap_or("?")
+            );
             continue;
         }
         probe_real_venue(venue);
