@@ -27,6 +27,7 @@ import {
   openBalances, selectCurrency, railPrincipalText,
 } from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
+import { startRelay } from '../harness/relay.mjs';
 
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
@@ -65,10 +66,18 @@ export const meta = {
 
 export async function run() {
   const start = Date.now();
-  console.log('[140-convert-happy-path] setup (relay + web + browser)…');
+  console.log('[140-convert-happy-path] setup (own relay + shared web + browser)…');
   const env = await setup();
+  // Own fake-IC gateway: the shared pool's constant-product reserves are mutated by sibling
+  // convert flows running in parallel (flow 143's comment names the class), which raced this
+  // flow's flow-side quote oracle against the screen's own fetch (~2e-6 relative). A private
+  // relay makes the 1-ICP happy path deterministic end to end.
+  const r2 = await startRelay();
   try {
-    const { relayBaseURL, webBaseURL, driver } = env;
+    const { webBaseURL, driver } = env;
+    const relayBaseURL = r2.baseURL;
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
+    await driver.waitReady({ timeoutMs: 8_000 });
 
     // --- Onboard, then the §0.6 red line FIRST: the payment review offers NO conversion ---------
     console.log('[140-convert-happy-path] onboarding + payment-review no-Convert red line…');
@@ -247,6 +256,7 @@ export async function run() {
     console.log(`[140-convert-happy-path] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
     await env.stop();
+    await r2.stop();
   }
 }
 

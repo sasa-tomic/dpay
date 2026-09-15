@@ -153,7 +153,43 @@ GREEN on the same tree. V11 stays a documented BOUNDARY, not a gap: the `kind` e
 Solana venue but none is registered, and the Convert screen stays IC-gated until one is.
 Registering a REAL second venue (a CeFi provider, or Jupiter) is venue onboarding with its own
 provider surface — not an architecture gap; `app/services/opencryptopay.ts` remains the
-device-to-provider shape to copy.
+device-to-provider shape to copy. *(Superseded 2026-09-15: Jupiter IS registered, V11 is
+RESOLVED — see item 3b.)*
+
+**3b. Swap-venue expansion — DONE (2026-09-15): feasibility → four venue/route waves, all
+offline-gated green.** Authority: [`docs/specs/2026-09-14-swap-venue-feasibility.md`] (deep
+pass + founder decisions 2026-09-14: DFX register-only-after-DEX-PoC; SINGLE multi-hop intent
+— supersedes the 2026-09-07 spec's multi-hop non-goal, see
+[`docs/specs/2026-09-14-multihop-conversion-spec.md`]; relay-held provably-non-withdrawal
+partner keys allowed, switch to pure read-only the day a venue offers one). Shipped:
+
+- **ICPSwap ICP↔ckUSDC + ICP↔ckETH registered** (`9ceee43`; live-probed both pools,
+  per-venue decimal scaling in the probe).
+- **Route A multi-hop: ICP→ckUSDC→USDC(Ethereum)** as ONE intent — 5 device-signed IC legs
+  (swap + dual-approve + `withdraw_erc20`), per-leg recovery, ckETH-gas preflight
+  (`01ac9ba`,`925c5ec`; flow 184).
+- **Jupiter = first `solana_amm` venue** (SOL↔USDC(SOL), rail-local): V11 RESOLVED — Convert
+  reaches Solana wallets; pre-sign beneficiary check on the venue's own tx bytes
+  (`56acda4`,`75da767`; flow 185).
+- **Cross-rail Route B/C: ICP→USDC(Solana)→SOL** as ONE intent — adds the CCTP V2
+  `depositForBurnWithHook` calldata leg (EVM handoff: user's own wallet signs, dpay holds no
+  EVM keys; Circle-attestation watch; SOL leg device-signed) (`9a756ed`..`308c2fa`; flow 186,
+  incl. reload-mid-crossing recovery). Offline-proven end-to-end; real-value run is
+  founder-outer-loop.
+- **SideShift CeFi adapter + relay-held partner-key infrastructure** (the SOL-RPC env
+  pattern; quotes+orders proxied because SideShift's account IS the integration;
+  keyless status device-direct; `commissionRate` pinned `0`; routes answer 503 naming the
+  env vars until the founder's key exists) (`80c4279`..`9466777`; flow 187; keyless mainnet
+  tripwire live: pair icp/sol).
+- Two UX-expert passes over the new surfaces (`407cb63`..`d12d545`, `7b3f240`..`4873586`);
+  flow 140's shared-pool sibling-swap race fixed (private relay).
+
+Gates at close: full `just verify` GREEN (**177/177** e2e incl. visual flows), `just app`
+self-check PASS on real hardware, `just swap-venue-probe` walks 3 IC venues + the SideShift
+tripwire. Founder-owned from here (DO NOT NAG): relay deploy of the wave (floor `d2f3bde`,
+wave unshipped above it), SideShift signup → `DPAY_SIDESHIFT_SECRET`/`DPAY_SIDESHIFT_AFFILIATE_ID`
+in `deploy/.env`, live Route-C value run, DFX B2B revisit (its own precondition — offline
+DEX-route PoC — is now met), WC in-session signing + EVM deep-link design (spec §10 notes).
 
 **5. Funding — DONE on all six deposit surfaces, and the note that said it was nearly done was
 wrong.** Founder direction 2026-09-09: name several providers unranked with their own published
