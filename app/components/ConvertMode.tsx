@@ -30,7 +30,7 @@
 // subscribes for updates and hands freshly-prepared records to it, never running a private copy).
 import {useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, Pressable, Text, TextInput, View} from 'react-native';
-import type {CurrencyDescriptor} from '../config/catalog';
+import {isValidDestinationAddress, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {
   CONVERT_SLIPPAGE_BPS_DEFAULT,
@@ -46,10 +46,12 @@ import {
   isTerminalConvertStep,
   loadVenueRegistry,
   prepareConvertRecord,
+  prepareMultihopConvertRecord,
   TERMINAL_CONVERT_STEPS,
   type ConvertMath,
   type ConvertQuote,
   type ConvertRecord,
+  type LegPlan,
 } from '../convert';
 import {
   acknowledgeStuckRecord,
@@ -57,6 +59,8 @@ import {
   convertResumeSnapshot,
   subscribeConvertRecords,
 } from '../convertResume';
+import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
+import {multihopRoutesFrom} from '../routes';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount} from '../lib/format';
@@ -147,6 +151,15 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
   const [record, setRecord] = useState<ConvertRecord | null>(null);
+  // --- multi-hop destinations (2026-09-14 spec §7): the direct pair stays the standing
+  //     default; every composed route is an EXPLICIT opt-in row — never preselected, never
+  //     auto-chosen (a route chooser arrives with a second route, under the V5 rules).
+  const [destRouteId, setDestRouteId] = useState<string | null>(null);
+  const [destAddress, setDestAddress] = useState('');
+  // The minter's live gas quote for the census + preflight — refreshed per route, re-queried
+  // fresh inside prepare at confirm (the signed number is never this cached one).
+  const [routeGas, setRouteGas] = useState<{feeWei: string; gasLedgerFee: string} | null>(null);
+  const [routeGasErr, setRouteGasErr] = useState<string | null>(null);
   // --- the venue chooser (multi-venue readiness V5). RED LINES, structural by construction:
   //     (1) rows render in REGISTRY order — `venuesForPair` never sorts by output; (2) nothing
   //     is ever preselected — `selectedVenueId` starts null and only a USER tap sets it (no
@@ -169,7 +182,13 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // `chooserMode` (2+ rows) switches the screen to the chooser layout; ONE row = today's screen.
   const pairVenues = legs != null ? venuesForPair(legs.inDesc.ledger, legs.outDesc.ledger) : [];
   const chooserVenues = pairVenues.length > 1 ? pairVenues : null;
-  const chooserMode = chooserVenues != null;
+  // Composed routes out of this asset (app/routes.ts — pure registry walk). The venue chooser
+  // never coexists with a route pick: a route IS a destination choice, and its swap hop runs
+  // through the route's own single registered venue.
+  const routes = legs != null ? multihopRoutesFrom(catalog, legs.inDesc.currency) : [];
+  const activeRoute = destRouteId != null ? routes.find(r => r.routeId === destRouteId) ?? null : null;
+  const routeMode = activeRoute != null;
+  const chooserMode = !routeMode && chooserVenues != null;
   // The user's pick, re-resolved against the CURRENT rows every render — if the venue it named
   // stops serving the pair, the selection silently becomes "none" (never re-picks for the user).
   const selectedVenue = selectedVenueId != null
@@ -185,7 +204,8 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // in flight, errored into venueQuoteErrs, or cleared by a re-key — the PICKED venue is the
   // honest attribution: falling back to the registered default here used to name venue A (and
   // its pool) under a venue B pick, misattributing the pre-sign disclosure.
-  const counterVenueId = activeQuote?.venueId ?? selectedVenue?.venue_id ?? REGISTERED_VENUE_ID;
+  const counterVenueId = activeQuote?.venueId ?? selectedVenue?.venue_id
+    ?? (activeRoute != null ? activeRoute.swapVenueId : REGISTERED_VENUE_ID);
 
   // --- the engine view (V6): pick the record to render, then follow it. The resume engine
   //     (hooks/useConvertResumeEngine, mounted from Wallet) drives EVERY live record from wallet
@@ -248,6 +268,33 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       setVenueQuoteErrs({});
       return;
     }
+    if (activeRoute != null) {
+      // ROUTE MODE: one quote for the SWAP HOP, through the route's OWN registered venue —
+      // the composed destination is not a quoteable pair and never pretends to be one; the
+      // destination's own figure is the min-you'll-receive line derived from this hop quote.
+      let cancelled = false;
+      setQuoteBusy(true);
+      setQuoteErr(null);
+      void (async () => {
+        try {
+          const q = await fetchConvertQuote(
+            relayUrl, legs.inDesc.ledger, activeRoute.hop.ledger, parsed.raw,
+            {venue: venueOfId(activeRoute.swapVenueId) ?? undefined},
+          );
+          if (!cancelled && mountedRef.current) setQuote(q);
+        } catch (e) {
+          if (!cancelled && mountedRef.current) {
+            setQuote(null);
+            setQuoteErr(e instanceof Error ? e.message : String(e));
+          }
+        } finally {
+          if (!cancelled && mountedRef.current) setQuoteBusy(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }
     const rows = venuesForPair(legs.inDesc.ledger, legs.outDesc.ledger);
     if (rows.length > 1) {
       // CHOOSER MODE: one quote PER venue, fetched in parallel — each row owns its venue's own
@@ -299,9 +346,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     };
     // slippageBps deliberately NOT a dependency: it changes the minimum, not the quote.
     // `venueList` IS one: when the relay's served registry lands (e.g. the offline two-venue
-    // world) the rows re-fetch per venue.
+    // world) the rows re-fetch per venue. The route's own hop ledger likewise re-keys the
+    // fetch when a destination row is picked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amountText, legs?.inDesc.ledger, legs?.outDesc.ledger, relayUrl, record != null && isLiveRecord(record), venueList]);
+  }, [amountText, legs?.inDesc.ledger, legs?.outDesc.ledger, relayUrl, record != null && isLiveRecord(record), venueList, activeRoute?.routeId, activeRoute?.hop.ledger]);
 
   // --- stale refresh: >30 s old (test-seam overridable via __DPAY_TEST_CONVERT_STALE_MS) → fetch
   //     a fresh quote in place; a moved amount is surfaced as a review line, never silently kept.
@@ -313,7 +361,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       setStaleRefreshing(true);
       void (async () => {
         try {
-          const fresh = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, legs.outDesc.ledger, quote.amountIn);
+          const fresh = await fetchConvertQuote(
+            relayUrl, legs.inDesc.ledger,
+            activeRoute != null ? activeRoute.hop.ledger : legs.outDesc.ledger,
+            quote.amountIn,
+            activeRoute != null ? {venue: venueOfId(activeRoute.swapVenueId) ?? undefined} : {},
+          );
           if (mountedRef.current && fresh.amountOutGross !== quote.amountOutGross) {
             setQuoteChanged({oldAmt: quote.amountOutGross, newAmt: fresh.amountOutGross});
           }
@@ -328,7 +381,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode]);
+  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, activeRoute?.routeId, activeRoute?.hop.ledger]);
 
   // --- stale refresh, CHOOSER MODE: every stale row refreshes its OWN quote (row order and the
   //     user's selection are inputs here, never outputs). A moved SELECTED quote is surfaced as
@@ -383,7 +436,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     let cancelled = false;
     void (async () => {
       try {
-        const m = await deriveConvertMath(activeQuote, legs.inFee, legs.outFee, slippageBps);
+        // In route mode the "output fee" of the hop math is the HOP ledger's own fee (the
+        // ckUSDC the burn side pays its approve with) — the direct pair's output fee never
+        // enters a composed quote's arithmetic.
+        const m = await deriveConvertMath(activeQuote, legs.inFee, activeRoute != null ? activeRoute.hop.fee : legs.outFee, slippageBps);
         if (!cancelled && mountedRef.current) setMath(m);
       } catch (e) {
         // The min-out is the compiled core's arithmetic: if it cannot run, the screen has no
@@ -400,7 +456,40 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeQuote?.venueId, activeQuote?.fetchedAtMs, activeQuote?.amountOutGross, slippageBps, legs?.inDesc.ledger]);
+  }, [activeQuote?.venueId, activeQuote?.fetchedAtMs, activeQuote?.amountOutGross, slippageBps, legs?.inDesc.ledger, activeRoute?.routeId]);
+
+  // --- the route's live gas quote (2026-09-14 spec §5/§6): the minter's OWN eip-1559 figure,
+  //     fetched through the same service the standalone Withdraw flow uses — shown as its own
+  //     census line and preflighted against the wallet's ckETH balance BEFORE anything is
+  //     signed. prepare re-queries at confirm; this copy is for review, never for signing.
+  useEffect(() => {
+    if (activeRoute == null || isLiveRecord(record)) {
+      setRouteGas(null);
+      setRouteGasErr(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const feeWei = await fetchGasFeeWei(identity.secretHex, activeRoute.burn.minter, activeRoute.hop.ledger);
+        if (feeWei == null) throw new Error(M.convert.errors.gasUnavailable);
+        const gasLedgerFee = await fetchLedgerFee(identity.secretHex, activeRoute.burn.gasLedger);
+        if (!cancelled && mountedRef.current) {
+          setRouteGas({feeWei, gasLedgerFee});
+          setRouteGasErr(null);
+        }
+      } catch (e) {
+        if (!cancelled && mountedRef.current) {
+          setRouteGas(null);
+          setRouteGasErr(e instanceof Error ? e.message : String(e));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoute?.routeId, relayUrl, record != null && isLiveRecord(record)]);
 
   const onConfirm = async () => {
     if (legs == null || activeQuote == null || math == null || confirmBusy) return;
@@ -408,6 +497,43 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // record's venueId and the signed legs all follow that one pick (Wave-1 pool-keyed legs).
     const venueOpt = chooserMode ? {venue: selectedVenue ?? undefined} : {};
     const reviewed = activeQuote;
+    // Route mode: the destination address is part of the intent — never signed unvalidated.
+    if (activeRoute != null && !isValidDestinationAddress('CkEthErc20', destAddress)) return;
+    if (activeRoute != null) {
+      setConfirmBusy(true);
+      setConfirmErr(null);
+      setQuoteChanged(null);
+      try {
+        // Same re-quote-at-confirm discipline, on the SWAP HOP: a moved market is reviewed,
+        // never silently submitted. prepare re-queries the minter's gas FRESH — the number
+        // signed is never the review copy fetched above.
+        const fresh = await fetchConvertQuote(
+          relayUrl, legs.inDesc.ledger, activeRoute.hop.ledger, reviewed.amountIn,
+          {venue: venueOfId(activeRoute.swapVenueId) ?? undefined},
+        );
+        if (fresh.amountOutGross !== reviewed.amountOutGross) {
+          setQuote(fresh);
+          setQuoteChanged({oldAmt: reviewed.amountOutGross, newAmt: fresh.amountOutGross});
+          return;
+        }
+        const rec = await prepareMultihopConvertRecord({
+          secretHex: identity.secretHex,
+          quote: fresh,
+          math,
+          route: activeRoute,
+          destAddress,
+        });
+        if (!mountedRef.current) return;
+        recordIdRef.current = rec.id;
+        setRecord(rec);
+        await adoptConvertRecord(rec);
+      } catch (e) {
+        if (mountedRef.current) setConfirmErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (mountedRef.current) setConfirmBusy(false);
+      }
+      return;
+    }
     setConfirmBusy(true);
     setConfirmErr(null);
     setQuoteChanged(null);
@@ -446,7 +572,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
 
   if (legs == null) return <UnavailablePanel selectedAsset={selectedAsset} onBack={onBack} />;
   if (record != null && (isLiveRecord(record) || TERMINAL_CONVERT_STEPS.has(record.step))) {
-    return <StatePanel record={record} onBack={onBack} />;
+    // A PLANNED record renders its own per-leg surface — the route's leg list IS the progress UI.
+    return record.legPlan != null
+      ? <RouteStatePanel record={record} onBack={onBack} />
+      : <StatePanel record={record} onBack={onBack} />;
   }
 
   const {inSym, outSym, inDecimals, outDecimals} = legs;
@@ -513,17 +642,208 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             ) : null}
           </View>
         ) : null}
-        <View style={S.convertFooting}>
-          <IconSwap size={20} color={C.sub} />
-        </View>
+      <View style={S.convertFooting}>
+        <IconSwap size={20} color={C.sub} />
       </View>
-    );
+    </View>
+  );
+}
+
+/** One planned leg's label — the kind + the leg's own canister decide the copy, never the
+ *  position alone (the two asset approves differ by WHICH asset they unlock). */
+function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string): string {
+  if (lp.kind === 'swap') {
+    return M.convert.multihop.legSwap(venueName, record.inSymbol, record.hopSymbol ?? record.outSymbol);
   }
+  if (lp.kind === 'approve') {
+    return legCanister === record.inLedger
+      ? M.convert.multihop.legApprovePull(record.inSymbol)
+      : M.convert.multihop.legApproveBurn(record.hopSymbol ?? record.outSymbol);
+  }
+  if (lp.kind === 'approve_gas') {
+    return M.convert.multihop.legApproveGas(record.gasSymbol ?? 'ckETH');
+  }
+  return M.convert.multihop.legWithdraw(record.hopSymbol ?? record.outSymbol, record.destSymbol ?? record.outSymbol, record.destNetwork ?? '');
+}
+
+/** A leg's own fee, formatted in the FEE'S ledger's units (approve legs pay their ledger's
+ *  fee; the swap leg's cost is the pool tier, shown in the census, not here; the withdraw leg
+ *  charges none — its cost is the gas leg above it). */
+function plannedLegFee(record: ConvertRecord, lp: LegPlan, legCanister: string): string | null {
+  if (lp.fee === '') return null;
+  if (lp.kind === 'approve') {
+    return legCanister === record.inLedger
+      ? fmtAssetCompact(lp.fee, record.inDecimals ?? 8, record.inSymbol)
+      : fmtAssetCompact(lp.fee, record.hopDecimals ?? record.outDecimals ?? 8, record.hopSymbol ?? record.outSymbol);
+  }
+  if (lp.kind === 'approve_gas') {
+    return fmtAssetCompact(lp.fee, record.gasDecimals ?? 18, record.gasSymbol ?? 'ckETH');
+  }
+  return null;
+}
+
+/** The planned-record state surface (2026-09-14 spec §7): the leg list IS the progress UI —
+ *  every leg carries its own pending/sent/confirmed/refused state and its own fee, and the
+ *  step copy above it names what is running and, on every dead-end, exactly what the user
+ *  holds and which door is the way out. */
+function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
+  const [, forceTick] = useState(0);
+  // stuck/pending states show when the leg envelopes expire — a 30 s tick keeps that honest.
+  useEffect(() => {
+    if (record.step !== 'stuck' && record.step !== 'pending_withdrawal') return;
+    const id = setInterval(() => forceTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [record.step]);
+  const inDecimals = record.inDecimals ?? 8;
+  const hopDecimals = record.hopDecimals ?? record.outDecimals ?? 8;
+  const hopSymbol = record.hopSymbol ?? record.outSymbol;
+  const destSymbol = record.destSymbol ?? record.outSymbol;
+  const venueName = venueDisplayName(record.venueId);
+  const venuePool = venueEndpointOf(record.venueId);
+  const legExpiryMs = record.legs[0]?.expiresAtMs ?? record.createdAtMs;
+  const legStateText = (s: LegPlan['state']) =>
+    s === 'pending' ? M.convert.multihop.legStatePending
+    : s === 'sent' ? M.convert.multihop.legStateSent
+    : s === 'confirmed' ? M.convert.multihop.legStateConfirmed
+    : M.convert.multihop.legStateFailed;
+  return (
+    <View testID="convert-state" style={S.convertWrap}>
+      <ConvertHeader title={M.convert.heading(record.inSymbol, record.outSymbol)} onBack={onBack} />
+
+      {record.step === 'approving' ? (
+        <View testID="convert-approving">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.multihop.executingTitle}</Text>
+          <Text style={S.convertStateBody}>
+            {M.convert.approvingBody(fmtAssetCompact(record.amountIn, inDecimals, record.inSymbol), formatClock(new Date(legExpiryMs)))}
+          </Text>
+        </View>
+      ) : null}
+
+      {record.step === 'pending_withdrawal' ? (
+        <View testID="convert-pending">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.pendingBody(hopSymbol, venuePool, formatClock(new Date(record.createdAtMs)))}</Text>
+          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+          <Text testID="convert-expiry" style={S.convertStateMeta}>
+            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+          </Text>
+        </View>
+      ) : null}
+
+      {record.step === 'done' ? (
+        <View testID="convert-done">
+          <Text style={S.convertStateTitle}>{M.convert.multihop.doneRouteTitle}</Text>
+          <Text style={S.convertStateBody}>
+            {M.convert.multihop.doneRouteBody(fmtAssetCompact(record.outAmountNet ?? '0', hopDecimals, destSymbol), record.destAddress ?? '')}
+          </Text>
+          {/* Delivery on Ethereum is asynchronous and unwitnessable from IC (spec §4): the
+              honest terminal says ON ITS WAY and what evidence exists — never "received". */}
+          <Text style={S.convertStateMeta}>{M.convert.multihop.doneOnItsWay}</Text>
+          {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
+        </View>
+      ) : null}
+
+      {record.step === 'failed_refunded' ? (
+        <View testID="convert-failed">
+          <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
+          {record.failureCode === 'approve_refused' ? (
+            <Text style={S.convertStateBody}>{M.convert.failedApproveBody(record.inSymbol)}</Text>
+          ) : (
+            <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
+          )}
+          <Text testID="convert-expiry" style={S.convertStateMeta}>
+            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+          </Text>
+        </View>
+      ) : null}
+
+      {record.step === 'failed_leg' ? (
+        <View testID="convert-failed-leg">
+          <Text style={S.convertStateTitle}>{M.convert.multihop.failedLegTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.multihop.failedLegBody(hopSymbol, record.failureDetail ?? '')}</Text>
+          {/* The actionable exit (spec §4): the funds are NOT lost — they are the hop asset,
+              in this wallet, and the standalone Withdraw is the door out. */}
+          <Text style={S.convertChecklistWarn}>{M.convert.multihop.failedLegExit}</Text>
+        </View>
+      ) : null}
+
+      {record.step === 'stuck' ? (
+        <View testID="convert-stuck">
+          <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.multihop.stuckRouteBody}</Text>
+          <Text testID="convert-expiry" style={S.convertStateMeta}>
+            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
+          </Text>
+          {record.acknowledgedStuckAtMs == null ? (
+            <>
+              <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
+              <Pressable
+                testID="btn-convert-stuck-ack"
+                style={S.linkBtn}
+                onPress={() => {
+                  void acknowledgeStuckRecord(record.id);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.stuckAcknowledge}
+                accessibilityState={{disabled: false}}
+              >
+                <Text style={S.linkText}>{M.convert.stuckAcknowledge}</Text>
+              </Pressable>
+            </>
+          ) : (
+            <Text style={S.convertStateMeta}>{M.convert.stuckAcknowledged}</Text>
+          )}
+        </View>
+      ) : null}
+
+      {/* THE leg list — every leg, its own state, its own fee; the leg that stopped names
+          itself by its refusal state. This list is the progress UI the route promised. */}
+      <View testID="convert-route-legs" style={S.convertChecklistCard}>
+        {(record.legPlan ?? []).map((lp, i) => {
+          const leg = record.legs[i];
+          const canister = leg?.canister ?? lp.canister;
+          const fee = plannedLegFee(record, lp, canister);
+          return (
+            <View key={i} testID={`convert-leg-${i}`}>
+              <Text style={S.convertChecklistLine}>{plannedLegLabel(record, lp, canister, venueName)}</Text>
+              <Text
+                testID={`convert-leg-${i}-state`}
+                style={lp.state === 'failed' ? S.err : S.convertStateMeta}>
+                {fee != null ? `${legStateText(lp.state)} · ${fee}` : legStateText(lp.state)}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+      <View style={S.convertFooting}>
+        <IconSwap size={20} color={C.sub} />
+      </View>
+    </View>
+  );
+}
+
 
   // In chooser mode this also withholds the confirm until a row is picked (activeQuote is null
   // without a selection — the none-preselected red line, expressed as data, not as a flag).
-  const canConfirm = activeQuote != null && math != null && !quoteBusy && !confirmBusy && !insufficient;
-  const netStr = math != null ? fmtAssetCompact(math.netOut, outDecimals, outSym) : null;
+  // In route mode the confirm additionally requires a validated destination address, the gas
+  // census to be complete, and — when the wallet's ckETH balance is KNOWN — to cover the gas
+  // (an unknown balance stays fail-open, per spec §6; prepare re-queries everything anyway).
+  const destValid = isValidDestinationAddress('CkEthErc20', destAddress);
+  const gasBalRaw = activeRoute != null ? assetBalances[activeRoute.burn.gasCurrency] : undefined;
+  const gasNeededN = routeGas != null ? BigInt(routeGas.feeWei) + BigInt(routeGas.gasLedgerFee) : null;
+  const gasShort = activeRoute != null && gasNeededN != null && gasBalRaw != null && gasBalRaw.length > 0 && BigInt(gasBalRaw) < gasNeededN;
+  const gasNeededStr = gasNeededN != null && activeRoute != null
+    ? fmtAssetCompact(gasNeededN.toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
+    : null;
+  const canConfirm = activeQuote != null && math != null && !quoteBusy && !confirmBusy && !insufficient
+    && (!routeMode || (destValid && routeGas != null && routeGasErr == null && !gasShort));
+  // Route-mode quote-derived figures describe the HOP asset (ckUSDC), not the direct pair's
+  // other side — the destination's own figure is the min-you'll-receive line in the checklist.
+  const dispOutSym = activeRoute != null ? activeRoute.hop.symbol : outSym;
+  const dispOutDecimals = activeRoute != null ? activeRoute.hop.decimals : outDecimals;
+  const netStr = math != null ? fmtAssetCompact(math.netOut, dispOutDecimals, dispOutSym) : null;
   return (
     <View testID="convert-screen" style={S.convertWrap}>
       <ConvertHeader title={M.convert.heading(inSym, outSym)} onBack={onBack} />
@@ -552,12 +872,91 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         </Text>
       ) : null}
 
+      {/* The destination picker (multi-hop, 2026-09-14 spec §7): the direct pair as the
+          standing default row, plus every composed route the registry walks out of this asset.
+          A destination is a decision of the same rank as a venue, so the rows use the venue
+          chooser's own visual language — and the same red lines: registry order, explicit pick,
+          never chosen for the user. */}
+      {routes.length > 0 ? (
+        <View testID="convert-dest">
+          <Text style={S.convertSlippageLabel}>{M.convert.multihop.destLabel}</Text>
+          <Pressable
+            testID="convert-dest-direct"
+            style={[S.convertVenueRow, !routeMode && S.convertVenueRowOn]}
+            onPress={() => {
+              setDestRouteId(null);
+              setQuoteChanged(null);
+            }}
+            accessibilityRole="radio"
+            accessibilityState={{checked: !routeMode}}
+            accessibilityLabel={M.convert.multihop.destDirect(outSym)}>
+            <View style={[S.convertVenueRadio, !routeMode && S.convertVenueRadioOn]}>
+              {!routeMode ? <View style={S.convertVenueRadioDot} /> : null}
+            </View>
+            <View style={S.convertVenueRowText}>
+              <Text style={[S.convertVenueName, !routeMode && S.convertVenueNameOn]}>{M.convert.multihop.destDirect(outSym)}</Text>
+            </View>
+          </Pressable>
+          {routes.map(r => {
+            const on = activeRoute?.routeId === r.routeId;
+            return (
+              <Pressable
+                key={r.routeId}
+                testID={`convert-dest-route-${r.routeId}`}
+                style={[S.convertVenueRow, on && S.convertVenueRowOn]}
+                onPress={() => {
+                  setDestRouteId(r.routeId);
+                  setQuoteChanged(null);
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{checked: on}}
+                accessibilityLabel={M.convert.multihop.destRoute(r.dest.symbol, r.dest.network)}>
+                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
+                  {on ? <View style={S.convertVenueRadioDot} /> : null}
+                </View>
+                <View style={S.convertVenueRowText}>
+                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>
+                    {M.convert.multihop.destRoute(r.dest.symbol, r.dest.network)}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+          {/* One-route honesty (spec §7): no chooser, and the copy says exactly that. */}
+          <Text testID="convert-route-note" style={S.convertMetaLine}>{M.convert.multihop.routeNote}</Text>
+        </View>
+      ) : null}
+
+      {/* The route's destination address — a required input, validated live (the Withdraw
+          destination's own rule: an address is never signed unvalidated). */}
+      {routeMode ? (
+        <View>
+          <Text style={S.convertAmountLabel}>{M.convert.multihop.destAddressLabel}</Text>
+          <View style={S.amountRow}>
+            <TextInput
+              testID="convert-dest-address"
+              style={S.amountInput}
+              value={destAddress}
+              onChangeText={setDestAddress}
+              autoCorrect={false}
+              autoCapitalize="characters"
+              placeholderTextColor={C.sub}
+            />
+          </View>
+          {destAddress.length > 0 && !isValidDestinationAddress('CkEthErc20', destAddress) ? (
+            <Text testID="convert-dest-address-invalid" style={S.err}>{M.convert.multihop.destAddressInvalid}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* The venue chooser (multi-venue readiness V5): N rows in REGISTRY order — the relay's
           own row order, rendered verbatim and NEVER ranked or sorted by output. Each row shows
           its OWN quote, attributed + timestamped; nothing is preselected and the checklist +
           confirm below stay gated on an explicit pick. Renders only when the pair has 2+ venues
-          — with one venue this whole block is absent and the screen is exactly today's. */}
-      {chooserVenues != null ? (
+          — with one venue this whole block is absent and the screen is exactly today's.
+          A route pick suppresses it entirely: the route's swap hop runs through its own single
+          registered venue, and a second venue list would read as a route choice we never make. */}
+      {!routeMode && chooserVenues != null ? (
         <View testID="convert-venues">
           <Text style={S.convertSlippageLabel}>{M.convert.venueChooserLabel}</Text>
           {chooserVenues.map((v) => {
@@ -619,8 +1018,8 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           <Text style={S.convertHeadlineLabel}>{M.convert.receiveHeadline}</Text>
           <Text style={S.convertHeadlineAmount}>{netStr}</Text>
           <View testID="convert-rate" style={S.convertRateRow}>
-            <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, outSym)}</Text>
-            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, outDecimals), outDecimals, outSym)}</Text>
+            <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, dispOutSym)}</Text>
+            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, dispOutDecimals), dispOutDecimals, dispOutSym)}</Text>
           </View>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
@@ -656,6 +1055,11 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
           ) : null}
           <Text style={S.convertChecklistLine}>{M.convert.counterpartySigns}</Text>
+          {/* A route names its SECOND counterparty too: the ckETH minter that executes the
+              burn — its principal is an execution fact, shown as plainly as the pool's. */}
+          {routeMode && activeRoute != null ? (
+            <Text testID="convert-minter-principal" style={S.convertPrincipal}>{activeRoute.burn.minter}</Text>
+          ) : null}
         </View>
         {/* The per-venue disclosure sentence (the registry's own `disclosure_key` picks the
             copy; an unknown key falls back to honest generic copy — fail closed). Checklist
@@ -676,7 +1080,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         ) : null}
         {math != null ? (
           <Text testID="convert-out-fee" style={S.convertChecklistLine}>
-            {M.convert.outputFeeLine(fmtAssetCompact(math.outFee, outDecimals, outSym))}
+            {M.convert.outputFeeLine(fmtAssetCompact(math.outFee, dispOutDecimals, dispOutSym))}
           </Text>
         ) : null}
         {math != null ? (
@@ -710,7 +1114,25 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             </View>
           </View>
         ) : null}
-        {math != null ? (
+        {/* The minimum line is where route mode and direct mode part ways: a route's floor is
+            the DESTINATION's floor (the burn amount is the swap's min-you'll-receive — spec
+            §5), any swap surplus stays in the wallet as the hop asset, and the route's gas
+            joins the census as its own itemized line. The direct min-you'll-receive stays. */}
+        {math != null && routeMode && activeRoute != null ? (
+          <View testID="convert-route-min">
+            <Text style={S.convertMinOutLine}>
+              {M.convert.multihop.routeMinLine(fmtAssetCompact(math.minOut, dispOutDecimals, activeRoute.dest.symbol), formatBps(slippageBps))}
+            </Text>
+            <Text style={S.convertChecklistLine}>{M.convert.multihop.routeSurplusNote(dispOutSym)}</Text>
+            {routeGas != null ? (
+              <Text testID="convert-gas-note" style={S.convertChecklistLine}>
+                {M.convert.multihop.gasFeeLine(fmtAssetCompact(routeGas.feeWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol))}
+              </Text>
+            ) : routeGasErr != null ? (
+              <Text testID="convert-gas-note" style={S.err}>{routeGasErr}</Text>
+            ) : null}
+          </View>
+        ) : math != null ? (
           <Text testID="convert-min-out" style={S.convertMinOutLine}>
             {M.convert.minReceiveLine(fmtAssetCompact(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
           </Text>
@@ -720,7 +1142,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             {M.convert.refusalLine(inSym)}
           </Text>
         ) : null}
-        {math != null && netStr != null ? (
+        {/* In route mode the END state is the destination floor above (routeMinLine) — a second
+            net line naming the hop asset would read as a second promise. */}
+        {math != null && netStr != null && !routeMode ? (
           <Text testID="convert-net" style={S.convertChecklistLine}>
             {M.convert.netEndStateLine(netStr)}
           </Text>
@@ -728,8 +1152,8 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         {quoteChanged != null ? (
           <Text testID="convert-quote-changed" style={S.convertChecklistWarn}>
             {M.convert.quoteChanged(
-              fmtAssetCompact(quoteChanged.oldAmt, outDecimals, outSym),
-              fmtAssetCompact(quoteChanged.newAmt, outDecimals, outSym),
+              fmtAssetCompact(quoteChanged.oldAmt, dispOutDecimals, dispOutSym),
+              fmtAssetCompact(quoteChanged.newAmt, dispOutDecimals, dispOutSym),
             )}
           </Text>
         ) : null}
@@ -745,6 +1169,17 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         <Text testID="convert-confirm-err" style={S.err}>
           {confirmErr}
         </Text>
+      ) : null}
+
+      {/* ckETH-gas preflight (spec §6): with a KNOWN shortfall the intent form says so BEFORE
+          anything is signed — the requirement, the minimum, and the honest path (this build
+          cannot buy the slice for you). An unknown balance never blocks: the number is re-checked
+          against the minter's live quote at confirm, and prepare refuses if it still fails. */}
+      {routeMode && gasShort && gasNeededStr != null ? (
+        <View testID="convert-gas-preflight">
+          <Text style={S.convertChecklistWarn}>{M.convert.multihop.gasPreflightTitle}</Text>
+          <Text style={S.convertChecklistLine}>{M.convert.multihop.gasPreflightBody(gasNeededStr)}</Text>
+        </View>
       ) : null}
 
       <Pressable

@@ -52,10 +52,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {DpayCore} from './services/native';
 import {relayFetch} from './services/relay';
-import {submitTransfer as railSubmitTransfer} from './services/rail';
+import {submitTransfer as railSubmitTransfer, fetchGasFeeWei, fetchLedgerFee} from './services/rail';
 import {icStampExpiry} from './services/icp';
 import {randNonceHex} from './lib/format';
-import type {CurrencyDescriptor} from './config/catalog';
+import {isValidDestinationAddress, type CurrencyDescriptor} from './config/catalog';
+import type {MultihopRoute} from './routes';
 import {
   CONVERT_APPROVE_LIFETIME_S,
   CONVERT_LEGACY_STORAGE_KEY,
@@ -276,7 +277,7 @@ export function isQuoteStale(quote: ConvertQuote, nowMs: number = Date.now()): b
 
 export type ConvertStep =
   | 'quote' | 'confirming' | 'approving' | 'approved' | 'swapping' | 'settling'
-  | 'done' | 'pending_withdrawal' | 'failed_refunded' | 'stuck'
+  | 'done' | 'pending_withdrawal' | 'failed_refunded' | 'failed_leg' | 'stuck'
   // CeFi-shaped states (multi-venue readiness V2): round-tripped by hydration today; the
   // drivers that move a record INTO them arrive with the CeFi wave. Kept snake_case like the
   // rest of the persisted vocabulary.
@@ -325,6 +326,29 @@ export type ConvertRecord = {
   outFee: string;
   slippageBps: number;
   legs: SignedLeg[]; // the signed updates, in submission order; EMPTY for a CeFi-shaped record
+  /** The multi-hop widening (2026-09-14 spec §3): a parallel per-leg plan, ADDITIVE — direct
+   *  2-leg records carry none and keep their exact historical bytes and behavior. Present
+   *  iff the record was prepared as a route; same length as `legs`. */
+  legPlan?: LegPlan[];
+  /** Route facts a failure/done screen must name (spec §4): the destination address the
+   *  burn leg signed, the symbol + network that arrive there, and the hop asset the user
+   *  holds in-wallet if the route dies mid-way. */
+  destAddress?: string;
+  destSymbol?: string;
+  destNetwork?: string;
+  hopLedger?: string;
+  hopSymbol?: string;
+  hopCurrency?: number;
+  hopDecimals?: number;
+  gasSymbol?: string; // the gas token's display symbol (ckETH) — the gas leg's census units
+  gasDecimals?: number;
+  /** The minter's live gas quote the approve_gas leg signed, plus the swap hop's venue fee
+   *  tier (echoed verbatim from the quote — the leg census renders it as the swap leg's fee). */
+  gasFeeWei?: string;
+  feeMillionths?: number;
+  /** Durable identity of the hop-ledger payout row that confirmed the swap leg (the
+   *  ledger-watch evidence — never the #ok alone, spec §4). Set when the row is SEEN. */
+  hopTx?: string;
   providerRef?: ProviderRef; // required when legs is empty; ignored otherwise
   outAmountNet?: string; // actually-received amount (from the ledger row) when done
   outTx?: string; // durable identifier of the incoming output-ledger row when done
@@ -336,13 +360,35 @@ export type ConvertRecord = {
    *  user has read the instructions, and the background watch may stop. Until it is set, an
    *  expired-unconfirmed stuck record keeps being probed at the engine's slow cadence. */
   acknowledgedStuckAtMs?: number;
-  failureCode?: 'approve_refused' | 'swap_refused' | 'refunded' | 'unknown';
+  failureCode?: 'approve_refused' | 'swap_refused' | 'refunded' | 'withdraw_refused' | 'unknown';
   failureDetail?: string;
+};
+
+/** What one leg of a route DOES (the label key for copy + the executor's decode dispatch).
+ *  Wave-1 vocabulary (docs/specs/2026-09-14-multihop-conversion-spec.md §1): the two approve
+ *  kinds share 'approve' — which asset is being approved for whom is the leg's canister +
+ *  position, never a third kind. */
+export type LegKind = 'approve' | 'swap' | 'approve_gas' | 'withdraw_erc20';
+
+/** One leg's completion state. `sent` ≠ `pending` only in what the USER sees — both resume
+ *  by re-submitting the identical envelope bytes (request_id dedup makes that safe); the
+ *  split exists so the progress list can show "sent, waiting" honestly. */
+export type LegState = 'pending' | 'sent' | 'confirmed' | 'failed';
+
+/** The executor's parallel per-leg view of a multi-hop record: same length and order as
+ *  `legs`, one entry per signed update. `fee` is the leg's OWN transaction fee on its own
+ *  ledger (the approve fees; '' where none is charged — the swap's pool tier lives on the
+ *  record as `feeMillionths`, the withdraw itself charges nothing). */
+export type LegPlan = {
+  kind: LegKind;
+  canister: string;
+  fee: string;
+  state: LegState;
 };
 
 const CONVERT_STEPS: ConvertStep[] = [
   'quote', 'confirming', 'approving', 'approved', 'swapping', 'settling',
-  'done', 'pending_withdrawal', 'failed_refunded', 'stuck',
+  'done', 'pending_withdrawal', 'failed_refunded', 'failed_leg', 'stuck',
   'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
   'quote_expired', 'provider_refunded',
 ];
@@ -448,7 +494,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   if (typeof r.acknowledgedStuckAtMs === 'number') rec.acknowledgedStuckAtMs = r.acknowledgedStuckAtMs;
   if (typeof r.inDecimals === 'number') rec.inDecimals = r.inDecimals;
   if (typeof r.outDecimals === 'number') rec.outDecimals = r.outDecimals;
-  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'unknown'].includes(r.failureCode as string)) return null;
+  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown'].includes(r.failureCode as string)) return null;
   if (r.failureCode != null) rec.failureCode = r.failureCode as ConvertRecord['failureCode'];
   // The legs: every signed update must be complete. An EMPTY legs list is the CeFi shape and
   // requires a providerRef with an orderId — a legless, providerless record is meaningless.
@@ -470,9 +516,50 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // The IC-AMM shape the executor drives is exactly TWO legs — the icrc2_approve on the input
   // ledger, then the venue's depositFromAndSwap. A record with legs but fewer than two cannot be
   // resumed by any driver this build ships, so it fails hydration rather than crash mid-retry.
-  // (More legs than two is a later wave's multi-hop shape; when it ships, this is the line it
-  // widens — deliberately, not by silence.)
-  if (legs.length > 0 && legs.length !== 2) return null;
+  // THE MULTI-HOP WIDENING (2026-09-14 spec §3, the line the old comment promised would widen):
+  // a PLANNED record carries `legPlan`, a parallel array — one entry per leg, same length,
+  // ≥2 — and is driven leg-by-leg by the planned executor. The direct 2-leg shape (legPlan
+  // absent) is untouched: same bytes, same behavior, same hydration verdicts as always.
+  let legPlan: LegPlan[] | undefined;
+  if (r.legPlan != null) {
+    if (!Array.isArray(r.legPlan)) return null;
+    const kinds: LegKind[] = ['approve', 'swap', 'approve_gas', 'withdraw_erc20'];
+    const states: LegState[] = ['pending', 'sent', 'confirmed', 'failed'];
+    const parsed: LegPlan[] = [];
+    for (const p of r.legPlan) {
+      if (!p || typeof p !== 'object') return null;
+      const q = p as Record<string, unknown>;
+      if (typeof q.kind !== 'string' || !kinds.includes(q.kind as LegKind)) return null;
+      if (typeof q.state !== 'string' || !states.includes(q.state as LegState)) return null;
+      if (typeof q.canister !== 'string' || !q.canister) return null;
+      if (typeof q.fee !== 'string') return null;
+      parsed.push({kind: q.kind as LegKind, state: q.state as LegState, canister: q.canister, fee: q.fee});
+    }
+    if (parsed.length !== legs.length || parsed.length < 2) return null;
+    // A planned record must be able to name its destination and its hop asset — every state
+    // screen it can ever render keys off those facts (spec §4: name what the user holds,
+    // where the exit is). A plan that cannot be NAMED fails hydration, like every other
+    // shape that would render a nameless screen.
+    const hopStr = (k: 'destAddress' | 'destSymbol' | 'destNetwork' | 'hopLedger' | 'hopSymbol'): string | null =>
+      typeof r[k] === 'string' && (r[k] as string).length > 0 ? r[k] as string : null;
+    if (hopStr('destAddress') == null || hopStr('destSymbol') == null || hopStr('destNetwork') == null
+      || hopStr('hopLedger') == null || hopStr('hopSymbol') == null) return null;
+    if (typeof r.hopCurrency !== 'number' || typeof r.hopDecimals !== 'number') return null;
+    legPlan = parsed;
+    rec.legPlan = legPlan;
+    rec.destAddress = hopStr('destAddress') ?? undefined;
+    rec.destSymbol = hopStr('destSymbol') ?? undefined;
+    rec.destNetwork = hopStr('destNetwork') ?? undefined;
+    rec.hopLedger = hopStr('hopLedger') ?? undefined;
+    rec.hopSymbol = hopStr('hopSymbol') ?? undefined;
+    rec.hopCurrency = r.hopCurrency;
+    rec.hopDecimals = r.hopDecimals;
+    if (typeof r.gasFeeWei === 'string') rec.gasFeeWei = r.gasFeeWei;
+    if (typeof r.gasSymbol === 'string') rec.gasSymbol = r.gasSymbol;
+    if (typeof r.gasDecimals === 'number') rec.gasDecimals = r.gasDecimals;
+    if (typeof r.hopTx === 'string') rec.hopTx = r.hopTx;
+    if (typeof r.feeMillionths === 'number') rec.feeMillionths = r.feeMillionths;
+  } else if (legs.length > 0 && legs.length !== 2) return null;
   // A legs>0 record parked at `quote`/`confirming` is a shape no driver can advance: the
   // executor only knows approving→approved→swapping→settling→pending_withdrawal, so the resume
   // engine would re-arm a no-op drive forever with no escape (the unreachable-by-construction
@@ -551,12 +638,15 @@ function salvageRawStore(raw: string): SalvagedStore {
   return salvageConvertStore(parsed);
 }
 
-/** The step a driver never touches again: done, failed_refunded, stuck, quote_expired,
- *  provider_refunded (V6 — the terminal provider states join the terminal set). The stuck
- *  nuance lives in the ENGINE, not the step: an unacknowledged expired-unconfirmed stuck
- *  record is still slow-watched; this set says only that no STATE transitions remain. */
+/** The step a driver never touches again: done, failed_refunded, failed_leg, stuck,
+ *  quote_expired, provider_refunded (V6 — the terminal provider states join the terminal
+ *  set). The stuck nuance lives in the ENGINE, not the step: an unacknowledged
+ *  expired-unconfirmed stuck record is still slow-watched; this set says only that no STATE
+ *  transitions remain. `failed_leg` is the multi-hop dead-end (2026-09-14 spec §4): a burn
+ *  leg refused after the swap confirmed — the hop asset is in-wallet, the exit is the
+ *  standalone Withdraw flow, so no driver ever re-enters either. */
 export const TERMINAL_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
-  'done', 'failed_refunded', 'stuck', 'quote_expired', 'provider_refunded',
+  'done', 'failed_refunded', 'failed_leg', 'stuck', 'quote_expired', 'provider_refunded',
 ]);
 
 export function isTerminalConvertStep(step: ConvertStep): boolean {
@@ -739,6 +829,133 @@ export async function prepareConvertRecord(args: {
   };
 }
 
+/** Prepare ONE multi-hop intent as a single signed record (2026-09-14 spec §1/§3): ALL legs
+ *  are signed here, up front, with the freshest live facts — the re-quoted swap hop, and the
+ *  minter's LIVE gas price queried at confirm time (the same `fetchGasFeeWei` the standalone
+ *  Withdraw flow uses; never a cached figure, never a dpay number). Every arg builder is the
+ *  exact one the single-swap record or the Withdraw flow already signs — zero new signing
+ *  surface, the mandate's red line.
+ *
+ *  The BURN amount is the swap's min-you'll-receive (`math.minOut`, spec §5): a route that
+ *  cannot deliver its floor should refuse at its own leg, not fail designed-to-fail at the
+ *  burn. Any surplus above the floor stays in-wallet as the hop asset — the confirm screen
+ *  says so before anything is signed. */
+export async function prepareMultihopConvertRecord(args: {
+  secretHex: string;
+  /** The re-quoted SWAP-hop quote (input ledger → hop ledger), verbatim from the venue. */
+  quote: ConvertQuote;
+  /** Swap-hop math; `minOut` doubles as the burn amount (see above). */
+  math: ConvertMath;
+  route: MultihopRoute;
+  /** The user's own self-custodial destination address (validated — never signed blind). */
+  destAddress: string;
+}): Promise<ConvertRecord> {
+  const {secretHex, quote, math, route, destAddress} = args;
+  // Same signing-boundary red lines as the direct record, extended to EVERY leg target this
+  // intent will sign against (the phone is the enforcement point because the phone signs):
+  // the quote's own venue must be registered with its endpoint AS the quoted pool, AND the
+  // quote must be FOR this route (in/out ledgers match the route's composition), AND no
+  // dpay-owned canister may appear anywhere in the leg target set.
+  if (quote.zeroForOne == null) throw new Error(M.convert.errors.quoteUnavailable('direction'));
+  const venue = venueOfId(quote.venueId);
+  if (venue == null || venue.endpoint !== quote.pool || quote.pool !== route.pool) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  if (quote.tokenInLedger !== route.from.ledger || quote.tokenOutLedger !== route.hop.ledger) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  for (const target of [route.from.ledger, route.pool, route.hop.ledger, route.burn.gasLedger, route.burn.minter]) {
+    if (DPAY_CANISTER_PRINCIPALS.includes(target)) {
+      throw new Error(M.convert.errors.quoteUnavailable('venue'));
+    }
+  }
+  if (!isValidDestinationAddress('CkEthErc20', destAddress)) {
+    throw new Error(M.convert.multihop.destAddressInvalid);
+  }
+  // The minter's live gas quote at confirm time — the number the approve_gas leg signs and
+  // the census shows. Unreachable minter → the intent cannot be priced honestly → refuse.
+  const gasFeeWei = await fetchGasFeeWei(secretHex, route.burn.minter, route.hop.ledger);
+  if (gasFeeWei == null) throw new Error(M.convert.errors.gasUnavailable);
+  const gasLedgerFee = await fetchLedgerFee(secretHex, route.burn.gasLedger);
+
+  const amountIn = quote.amountIn;
+  const pool = quote.pool;
+  const burnAmount = math.minOut;
+  const approveAmount = (BigInt(amountIn) + BigInt(math.inFee)).toString();
+  const allowanceExpiryNs = await icStampExpiry(secretHex, CONVERT_APPROVE_LIFETIME_S);
+  const envExpiry = await icStampExpiry(secretHex);
+  const expiresAtMs = Number(BigInt(envExpiry) / 1_000_000n);
+
+  // Legs 1–2: the direct flow's exact approve+swap pair (spender/pull semantics identical).
+  const approveInArgHex = await DpayCore.icpApproveArg(
+    pool, '', '', approveAmount, approveAmount, allowanceExpiryNs, '', math.inFee,
+  );
+  const approveInSigned = await DpayCore.icpSignUpdate(secretHex, route.from.ledger, 'icrc2_approve', approveInArgHex, envExpiry);
+  const swapArgHex = await DpayCore.icpDepositAndSwapArg(
+    amountIn, burnAmount, math.inFee, route.hop.fee, quote.zeroForOne,
+  );
+  const swapSigned = await DpayCore.icpSignUpdate(secretHex, pool, 'depositFromAndSwap', swapArgHex, envExpiry);
+  // Legs 3–5: the Withdraw flow's exact burn triple (rail.prepareErc20Withdrawal, not forked):
+  // minter-shape approves (no expected allowance, no allowance expiry — single-use burns)
+  // then the minter's withdraw_erc20 carrying the user's own destination.
+  const approveHopArgHex = await DpayCore.icpApproveArg(
+    route.burn.minter, '', '', burnAmount, '', '', '', route.hop.fee,
+  );
+  const approveHopSigned = await DpayCore.icpSignUpdate(secretHex, route.hop.ledger, 'icrc2_approve', approveHopArgHex, envExpiry);
+  const approveGasArgHex = await DpayCore.icpApproveArg(
+    route.burn.minter, '', '', gasFeeWei, '', '', '', gasLedgerFee,
+  );
+  const approveGasSigned = await DpayCore.icpSignUpdate(secretHex, route.burn.gasLedger, 'icrc2_approve', approveGasArgHex, envExpiry);
+  const withdrawArgHex = await DpayCore.icpWithdrawErc20Arg(burnAmount, route.hop.ledger, destAddress, '', '');
+  const withdrawSigned = await DpayCore.icpSignUpdate(secretHex, route.burn.minter, 'withdraw_erc20', withdrawArgHex, envExpiry);
+
+  return {
+    id: randNonceHex(),
+    createdAtMs: Date.now(),
+    step: 'approving',
+    venueId: quote.venueId,
+    inCurrency: route.from.currency,
+    outCurrency: route.hop.currency,
+    inLedger: route.from.ledger,
+    outLedger: route.hop.ledger,
+    inSymbol: route.from.symbol,
+    outSymbol: route.hop.symbol,
+    inDecimals: route.from.decimals,
+    outDecimals: route.hop.decimals,
+    amountIn,
+    expectedGross: quote.amountOutGross,
+    expectedNet: math.netOut,
+    inFee: math.inFee,
+    outFee: route.hop.fee,
+    slippageBps: math.slippageBps,
+    legs: [
+      {canister: route.from.ledger, method: 'icrc2_approve', argHex: approveInArgHex, envelopeHex: approveInSigned.envelopeHex, requestIdHex: approveInSigned.requestIdHex, expiresAtMs},
+      {canister: pool, method: 'depositFromAndSwap', argHex: swapArgHex, envelopeHex: swapSigned.envelopeHex, requestIdHex: swapSigned.requestIdHex, expiresAtMs},
+      {canister: route.hop.ledger, method: 'icrc2_approve', argHex: approveHopArgHex, envelopeHex: approveHopSigned.envelopeHex, requestIdHex: approveHopSigned.requestIdHex, expiresAtMs},
+      {canister: route.burn.gasLedger, method: 'icrc2_approve', argHex: approveGasArgHex, envelopeHex: approveGasSigned.envelopeHex, requestIdHex: approveGasSigned.requestIdHex, expiresAtMs},
+      {canister: route.burn.minter, method: 'withdraw_erc20', argHex: withdrawArgHex, envelopeHex: withdrawSigned.envelopeHex, requestIdHex: withdrawSigned.requestIdHex, expiresAtMs},
+    ],
+    legPlan: [
+      {kind: 'approve', canister: route.from.ledger, fee: math.inFee, state: 'pending'},
+      {kind: 'swap', canister: pool, fee: '', state: 'pending'},
+      {kind: 'approve', canister: route.hop.ledger, fee: route.hop.fee, state: 'pending'},
+      {kind: 'approve_gas', canister: route.burn.gasLedger, fee: gasLedgerFee, state: 'pending'},
+      {kind: 'withdraw_erc20', canister: route.burn.minter, fee: '', state: 'pending'},
+    ],
+    destAddress,
+    destSymbol: route.dest.symbol,
+    destNetwork: route.dest.network,
+    hopLedger: route.hop.ledger,
+    hopSymbol: route.hop.symbol,
+    hopCurrency: route.hop.currency,
+    hopDecimals: route.hop.decimals,
+    gasSymbol: route.burn.gasSymbol,
+    gasDecimals: route.burn.gasDecimals,
+    gasFeeWei,
+    feeMillionths: quote.feeMillionths,
+  };
+}
+
 // --- execute: submit the persisted bytes, watch the output ledger (never trust #ok alone) ---------
 
 export type ConvertExecutorDeps = {
@@ -878,6 +1095,195 @@ export async function probeConvertSettlement(args: {
   return null;
 }
 
+/** The HOP-ledger payout probe (multi-hop twin of the settlement probe): the swap leg of a
+ *  route pays ck<HOP> to the user's principal FROM THE POOL — that row is the swap leg's
+ *  CONFIRMATION (spec §4: never the #ok alone). Range = [minOut .. expectedGross] — the burn
+ *  amount is the min-you'll-receive, so anything the pool actually paid lands inside; the
+ *  SEEN amount is recorded, never the expected one. Returns null on no-match or any failure
+ *  (an unreadable ledger proves nothing either way). */
+export async function probeHopPayout(args: {
+  relayUrl: string;
+  publicHex: string;
+  myPrincipalLower: string;
+  record: ConvertRecord;
+  excludeOutTx?: ReadonlySet<string>;
+}): Promise<{amount: string; tx: string} | null> {
+  const {relayUrl, publicHex, myPrincipalLower, record} = args;
+  const exclude = args.excludeOutTx ?? new Set<string>();
+  try {
+    const minOut = await convertRecordMinOut(record);
+    const lo = BigInt(minOut);
+    const hi = BigInt(record.expectedGross);
+    const r = await relayFetch(
+      relayUrl,
+      `/api/v1/transactions/${publicHex}?currency=${record.outCurrency}&limit=${CONVERT_PROBE_WINDOW_ROWS}`,
+      undefined,
+      6000,
+    );
+    if (!r.ok) return null;
+    const body = await r.json().catch(() => null) as {transactions?: TransactionsRowLike[]} | null;
+    const pool = venueEndpointOf(record.venueId).toLowerCase();
+    for (const row of body?.transactions ?? []) {
+      const tx = rowIdentity(row);
+      const n = row.amount == null ? null : BigInt(row.amount);
+      if (row.currency === record.outCurrency
+        && row.to?.toLowerCase() === myPrincipalLower
+        && row.from?.toLowerCase() === pool
+        && n != null && (n === lo || n === hi || (n >= lo && n <= hi))
+        && !exclude.has(tx)) {
+        return {amount: row.amount ?? '', tx};
+      }
+    }
+  } catch (e) {
+    console.warn('hop payout probe failed:', e instanceof Error ? e.message : String(e));
+  }
+  return null;
+}
+
+/** The submit closure's contract, shared by both executors (module-level so the planned
+ *  executor can be driven under the direct executor's own machinery in tests). */
+type SubmitEnvelopeFn = (
+  ledger: string, envelopeHex: string, requestIdHex: string,
+  decodeReply?: (replyArgHex: string) => Promise<{ok: boolean; errVariant?: string; errDetail?: string}>,
+) => Promise<'settled' | {rejected: {variant?: string; detail?: string}} | 'unknown'>;
+
+/** A record copy with legPlan[i]'s state replaced (the plan array is treated immutably —
+ *  every other leg's state rides along untouched). */
+function withLegState(rec: ConvertRecord, i: number, state: LegState, patch: Partial<ConvertRecord> = {}): ConvertRecord {
+  const legPlan = (rec.legPlan ?? []).map((l, idx) => (idx === i ? {...l, state} : l));
+  return {...rec, legPlan, ...patch};
+}
+
+/** Drive ONE planned (multi-hop) record leg-by-leg to a terminal or honest parking state
+ *  (2026-09-14 spec §4). Resumable: the first leg whose plan state is not `confirmed` is
+ *  where a resumed run picks up — confirmed legs are NEVER re-signed and never re-submitted;
+ *  `sent` and `pending` both resume by re-submitting the identical envelope bytes (request_id
+ *  dedup makes that safe on the boundary node and the fake gateway alike).
+ *
+ *  - swap leg: `#ok` parks the record on `pending_withdrawal` — the leg confirms only when
+ *    the hop payout ROW is seen (probeHopPayout); a resume parked there resolves the row
+ *    before touching any burn leg.
+ *  - withdraw_erc20 leg: the minter's `#ok` block index is the terminal evidence → done,
+ *    with the burn amount as outAmountNet ("at least X on its way" — delivery is on Ethereum,
+ *    asynchronously; dpay cannot watch it and the copy says so).
+ *  - refusals: legs 1–2 refuse exactly like the direct flow (input never left / pool refused
+ *    atomically); legs 3–5 refuse into `failed_leg` — the hop asset is in-wallet and the
+ *    standalone Withdraw flow is the exit, which the failure screen names.
+ *  - unknown outcomes park on `stuck` (the honest unknown; the resume engine's slow watch
+ *    resolves a hop row into `failed_leg`, never done — spec §8). */
+async function executePlannedConvert(
+  start: ConvertRecord,
+  deps: ConvertExecutorDeps,
+  opts: {submitAttempts: number; poll: {attempts: number; intervalMs: number}; settleAttempts: number; settleIntervalMs: number; nowMs: number},
+  tools: {submitEnvelope: SubmitEnvelopeFn; advance: (rec: ConvertRecord) => Promise<ConvertRecord>},
+): Promise<ConvertRecord> {
+  let rec: ConvertRecord = {...start};
+  if (isTerminalConvertStep(rec.step)) return rec;
+  const myPrincipalLower = (await DpayCore.icpPrincipalFromPubkey(deps.publicHex)).toLowerCase();
+  const probeHop = (r: ConvertRecord) => probeHopPayout({
+    relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower, record: r, excludeOutTx: deps.claimedOutTx,
+  });
+  const firstIncomplete = () => (rec.legPlan ?? []).findIndex(l => l.state !== 'confirmed');
+
+  // Parked mid-route on the hop watch: resolve the row FIRST — it is the swap leg's
+  // confirmation and the gate every burn leg waits behind.
+  if (rec.step === 'pending_withdrawal') {
+    const seen = await probeHop(rec);
+    if (seen == null) {
+      if (convertLegsExpired(rec, opts.nowMs)) {
+        return tools.advance({...rec, step: 'stuck', failureCode: 'unknown'});
+      }
+      return tools.advance({...rec, step: 'pending_withdrawal'}); // still watching — re-arm and come back
+    }
+    const swapIdx = (rec.legPlan ?? []).findIndex(l => l.kind === 'swap');
+    rec = await tools.advance(withLegState(rec, swapIdx, 'confirmed', {hopTx: seen.tx}));
+  }
+
+  // V6 trichotomy arm (b), planned form: an unconfirmed leg whose signed bytes have ALL died
+  // is never resubmitted. The one thing that can still resolve is the hop payout: SEEN means
+  // the swap ran and the burn legs are dead → failed_leg (hop asset in-wallet, standalone
+  // Withdraw is the exit); UNSEEN means nothing is known → the honest unknown, stuck.
+  if (firstIncomplete() >= 0 && convertLegsExpired(rec, opts.nowMs)) {
+    const seen = await probeHop(rec);
+    return tools.advance(seen != null
+      ? {...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: seen.tx}
+      : {...rec, step: 'stuck', failureCode: 'unknown'});
+  }
+
+  for (let i = firstIncomplete(); i >= 0; i = firstIncomplete()) {
+    const leg = rec.legs[i];
+    const plan = rec.legPlan?.[i];
+    if (leg == null || plan == null) return rec; // hydration guarantees parallelism; refuse to improvise
+    rec = await tools.advance(withLegState(rec, i, 'sent'));
+    // Device-saved annotation for the swap-side legs only — the burn-side legs are the
+    // Withdraw flow's own calls and carry no venue row to name (parity with WithdrawSheet).
+    if (plan.kind === 'approve' || plan.kind === 'swap') {
+      void saveTxNote(deps.publicHex, {k: leg.requestIdHex, who: venueDisplayName(rec.venueId)}, opts.nowMs);
+    }
+    let legBlockIndex: string | null = null;
+    const decodeReply: ((replyArgHex: string) => Promise<{ok: boolean; errVariant?: string; errDetail?: string}>) | undefined =
+      plan.kind === 'swap'
+        ? (h: string) => DpayCore.icpDecodeSwapResult(h)
+        : plan.kind === 'withdraw_erc20'
+          ? async (h: string) => {
+              const out = await DpayCore.icpDecodeMinterOk(h);
+              if (out.ok && out.blockIndex != null) legBlockIndex = out.blockIndex;
+              return out;
+            }
+          : undefined;
+    const outcome = await tools.submitEnvelope(leg.canister, leg.envelopeHex, leg.requestIdHex, decodeReply);
+    if (outcome === 'unknown') {
+      // Bytes submitted, outcome unknowable: park stuck. The plan keeps the leg at `sent`
+      // (it WAS sent); the engine's slow watch can still resolve the hop row later.
+      return tools.advance({...rec, step: 'stuck', failureCode: 'unknown'});
+    }
+    if (outcome !== 'settled') {
+      const detail = outcome.rejected.detail || outcome.rejected.variant || '';
+      if (plan.kind === 'approve' && leg.canister === rec.inLedger) {
+        // The FIRST leg refused: nothing moved, no allowance exists — the direct flow's own
+        // dead-end, verbatim.
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_refunded', failureCode: 'approve_refused', failureDetail: outcome.rejected.detail}));
+      }
+      if (plan.kind === 'swap') {
+        // The pool's atomic refusal: input stays in the wallet, allowance dies at expiry.
+        return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: detail}));
+      }
+      // A burn-side leg refused (spec §4 taxonomy): the swap already confirmed, so the user
+      // holds the HOP asset in-wallet — failed_leg, and the standalone Withdraw flow is the
+      // named exit. (An approve_gas refusal after the hop approve settled is benign: the
+      // hop allowance simply dies unused at its expiry.)
+      return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'withdraw_refused', failureDetail: detail}));
+    }
+    if (plan.kind === 'swap') {
+      // #ok: input spent, hop output owed — NOT confirmed. Watch the hop ledger before any
+      // burn leg may run; exhaustion parks on pending_withdrawal (the pool DID accept).
+      let seen: {amount: string; tx: string} | null = null;
+      for (let k = 0; k < opts.settleAttempts && seen == null; k += 1) {
+        seen = await probeHop(rec);
+        if (seen == null && k < opts.settleAttempts - 1 && opts.settleIntervalMs > 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, opts.settleIntervalMs));
+        }
+      }
+      if (seen == null) return tools.advance({...rec, step: 'pending_withdrawal'});
+      rec = await tools.advance(withLegState(rec, i, 'confirmed', {hopTx: seen.tx}));
+      continue;
+    }
+    if (plan.kind === 'withdraw_erc20') {
+      // Terminal: the minter accepted the burn. outAmountNet is the BURN amount (the route's
+      // floor — "at least X on its way"); outTx is the minter's #ok block index, the durable
+      // evidence this record will ever have (delivery itself happens on Ethereum).
+      const burnAmount = await convertRecordMinOut(rec);
+      return tools.advance(withLegState(rec, i, 'confirmed', {
+        step: 'done',
+        outAmountNet: burnAmount,
+        outTx: legBlockIndex ?? undefined,
+      }));
+    }
+    rec = await tools.advance(withLegState(rec, i, 'confirmed'));
+  }
+  return rec;
+}
+
 /** Drive a persisted record to a terminal state (or a honest non-terminal one). Resumable: call
  *  again with the same record (e.g. after a restart, or while pending_withdrawal) — every submit
  *  re-uses the record's OWN envelope bytes, so a resumed run can never double-spend (request_id
@@ -952,6 +1358,14 @@ export async function executeConvert(
   };
 
   let rec: ConvertRecord = {...start};
+
+  // The multi-hop branch (2026-09-14 spec §4): a PLANNED record (legPlan present) is driven
+  // by its own leg-by-leg executor under this run's own submit/advance machinery — the same
+  // identical-bytes discipline, the same #ok-is-not-settlement rule, per-leg instead of
+  // per-step. Direct records fall through to the step machine below, untouched.
+  if (rec.legPlan != null) {
+    return executePlannedConvert(rec, deps, {submitAttempts, poll, settleAttempts, settleIntervalMs, nowMs}, {submitEnvelope, advance});
+  }
 
   // --- V6 trichotomy arm (b): unconfirmed + EXPIRED → NEVER resubmit; watch what may have run --
   // The record sits before its swap's confirmation (approving/approved/swapping) and every leg's

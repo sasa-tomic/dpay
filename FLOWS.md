@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **174 flows**
-> (173 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **175 flows**
+> (174 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (11) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (12) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -182,6 +182,7 @@ wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw
 | 169 | convert-resume-reload | A conversion parked on pending_withdrawal survives a full app reload under the identity-scoped store key, and the wallet-load resume engine (no Convert screen open) drives it to done when the venue settles — nothing re-signed, outTx recorded, VCHF credited exactly; a terminal record is not resurrected onto the reopened screen. | convert, icp, vchf, pending-withdrawal, reload, identity-scoped-store, resume-engine, unmounted-driving, no-resubmit, resolution |
 | 173 | convert-order-reverse | The chooser's order/no-preselection red lines hold in the REVERSE direction (VCHF → ICP): with both venues armed on a private relay, flooring the real pool and then flooring fixture B instead — each venue taking a turn being strictly worse — never moves the rows off registry order, never auto-selects a row (radio-dot probe), and confirm stays disabled until the user picks. | convert, venues, venue-chooser, registry-order, no-ranking, no-preselection, pool-knob, reverse-direction, vchf |
 | 183 | convert-ckusdc-pair | The pair-scoped ICPSwap venues are live on Convert: ckUSDC→ICP executes through the ckUSDC pool end-to-end (ICP payout verbatim, 6-decimal ckUSDC input math), the reverse ICP→ckUSDC quote renders a 6-decimal amount_out, and the ckETH pair is offered quote-only with an 18-decimal quote. | convert, venues, icpswap, ckusdc, cketh, decimal-pairs, 6-decimal, 18-decimal, pool-keyed-execution, venue-attribution |
+| 184 | convert-multihop-route-a | Route A converts ICP to USDC on Ethereum as one intent: the composed destination is an opt-in row beside the direct pair, the swap-hop quote renders verbatim with the min-you'll-receive and the minter's live gas fee as census lines, all five IC legs execute with per-leg status, and the done panel names the net USDC at the destination address plus the payout record. | convert, multihop, route-a, icpswap, ckusdc, withdraw_erc20, cketh-gas, burn, destination-address, fee-census, per-leg-status |
 
 ### NFC (tap-to-pay)
 

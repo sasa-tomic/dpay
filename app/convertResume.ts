@@ -40,6 +40,7 @@ import {
   isTerminalConvertStep,
   loadConvertRecords,
   probeConvertSettlement,
+  probeHopPayout,
   saveConvertRecord,
   type ConvertRecord,
   type ConvertStep,
@@ -270,6 +271,26 @@ async function commit(next: ConvertRecord): Promise<ConvertRecord> {
  *  `ctx` is the DRIVE's OWN captured context (D2): the probes await, so the engine may have
  *  re-keyed underneath — a stale probe resolves nothing (no map write, no persist, no re-arm). */
 async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<ConvertRecord> {
+  // A stuck PLANNED (multi-hop) record resolves differently (2026-09-14 spec §8): the probe
+  // that can resolve it is the HOP payout, and a seen hop row means the swap ran while the
+  // burn legs' bytes are dead or unknown — the hop asset is in-wallet, so the resolution is
+  // failed_leg (exit: standalone Withdraw), NEVER done. The engine cannot complete a route
+  // it cannot re-sign; it can only name where the funds stand.
+  if (rec.legPlan != null) {
+    const myPrincipal = (await DpayCore.icpPrincipalFromPubkey(ctx.publicHex)).toLowerCase();
+    const seen = await probeHopPayout({
+      relayUrl: ctx.relayUrl,
+      publicHex: ctx.publicHex,
+      myPrincipalLower: myPrincipal,
+      record: rec,
+      excludeOutTx: claimedOutTxFor(rec.id),
+    });
+    if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
+    if (seen != null) {
+      return commit({...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: seen.tx});
+    }
+    return rec;
+  }
   const myPrincipal = (await DpayCore.icpPrincipalFromPubkey(ctx.publicHex)).toLowerCase();
   const seen = await probeConvertSettlement({
     relayUrl: ctx.relayUrl,

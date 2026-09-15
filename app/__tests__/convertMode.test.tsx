@@ -39,6 +39,15 @@ jest.mock('../convert', () => ({
   fetchConvertQuote: jest.fn(),
   deriveConvertMath: jest.fn(),
   prepareConvertRecord: jest.fn(),
+  prepareMultihopConvertRecord: jest.fn(),
+}));
+
+// The burn-side rail services (gas quote + ledger fee): the minter's live figure is part of
+// the route census and its preflight, and must be mockable per test.
+jest.mock('../services/rail', () => ({
+  submitTransfer: jest.fn(),
+  fetchGasFeeWei: jest.fn(),
+  fetchLedgerFee: jest.fn(),
 }));
 
 // The engine (V6): the screen is a VIEW onto app/convertResume.ts — it reads the snapshot on
@@ -59,8 +68,9 @@ jest.mock('../convertResume', () => ({
 }));
 
 import {ConvertMode} from '../components/ConvertMode';
-import {convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord} from '../convert';
+import {convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord, prepareMultihopConvertRecord} from '../convert';
 import {acknowledgeStuckRecord, adoptConvertRecord, convertResumeSnapshot} from '../convertResume';
+import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import type {ConvertMath, ConvertQuote, ConvertRecord} from '../convert';
 import {buildSelectableAssets} from '../config/assets';
 import type {Identity} from '../lib/types';
@@ -159,6 +169,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(fetchConvertQuote).mockResolvedValue(QUOTE);
   jest.mocked(deriveConvertMath).mockResolvedValue(MATH);
+  jest.mocked(fetchGasFeeWei).mockResolvedValue('78000000000000'); // the fake-IC minter's 78e12 wei
+  jest.mocked(fetchLedgerFee).mockResolvedValue('2000000000000'); // ckETH ledger fee
 });
 
 describe('C1 — the unit is printed exactly once on every money line', () => {
@@ -945,5 +957,96 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     // No decimals on the record ⇒ 8 (today's IC reality), never a crash or a blank line.
     expect(textOf(tree, 'convert-stuck')).toContain('1 ICP');
     expect(textOf(tree, 'convert-stuck')).toContain('0.40782196 VCHF');
+  });
+});
+
+/**
+ * Multi-hop Route A (2026-09-14 spec): the composed destination is an explicit, gated opt-in.
+ * These pin the three gates the founder rule demands BEFORE anything is signed — the
+ * destination picker (nothing preselected, route is an explicit pick), the address input
+ * (never signed unvalidated), and the ckETH-gas preflight (a KNOWN shortfall names the
+ * requirement in copy; an unknown balance stays fail-open, per spec §6).
+ */
+describe('multihop — the composed destination is an explicit, gated opt-in', () => {
+  const ROUTE_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2';
+  const DEST = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'.toLowerCase();
+
+  test('the picker lists the direct pair (the standing default) plus the route row, with the one-route honesty line', async () => {
+    const tree = await mountConvert('250000000', '1');
+    expect(present(tree, 'convert-dest')).toBe(true);
+    expect(present(tree, 'convert-dest-direct')).toBe(true);
+    expect(present(tree, ROUTE_ROW)).toBe(true);
+    // exactly one route exists, and the copy says so instead of offering a chooser
+    expect(textOf(tree, 'convert-route-note')).toBe(convertEn.multihop.routeNote);
+    // the default surface is UNCHANGED: the direct pair's own checklist, no route census
+    expect(present(tree, 'convert-min-out')).toBe(true);
+    expect(present(tree, 'convert-route-min')).toBe(false);
+    expect(present(tree, 'convert-dest-address')).toBe(false);
+  });
+
+  test('opting in swaps the surface: route census, minter principal, gas line, address input', async () => {
+    const tree = await mountConvert('250000000', '1');
+    await act(async () => {
+      node(tree, ROUTE_ROW)!.props.onPress();
+    });
+    expect(present(tree, 'convert-dest-address')).toBe(true);
+    expect(present(tree, 'convert-route-min')).toBe(true);
+    expect(present(tree, 'convert-min-out')).toBe(false);
+    expect(present(tree, 'convert-minter-principal')).toBe(true);
+    // the gas leg carries the minter's OWN live figure as its census line
+    expect(present(tree, 'convert-gas-note')).toBe(true);
+    // a malformed address is flagged in copy, never silently signed
+    await act(async () => {
+      node(tree, 'convert-dest-address')!.props.onChangeText('0x1234');
+    });
+    expect(present(tree, 'convert-dest-address-invalid')).toBe(true);
+  });
+
+  test('a KNOWN ckETH shortfall blocks the confirm and names the requirement first', async () => {
+    const tree = await mountConvert('250000000', '1', {assetBalances: {8: '250000000', 6: '1000000000'}});
+    await act(async () => {
+      node(tree, ROUTE_ROW)!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, 'convert-dest-address')!.props.onChangeText(DEST);
+    });
+    expect(present(tree, 'convert-gas-preflight')).toBe(true);
+    expect(textOf(tree, 'convert-gas-preflight')).toBe(convertEn.multihop.gasPreflightTitle + ' ' + convertEn.multihop.gasPreflightBody('0.00008 ETH'));
+    expect(node(tree, 'btn-convert-confirm')!.props.disabled).toBe(true);
+  });
+
+  test('an unknown ckETH balance stays fail-open; a funded one offers the confirm, and confirming prepares the ROUTE record', async () => {
+    // unknown: the wallet simply has no ckETH row yet — the requirement is shown, nothing is blocked
+    const unknown = await mountConvert('250000000', '1');
+    await act(async () => {
+      node(unknown, ROUTE_ROW)!.props.onPress();
+    });
+    await act(async () => {
+      node(unknown, 'convert-dest-address')!.props.onChangeText(DEST);
+    });
+    expect(present(unknown, 'convert-gas-preflight')).toBe(false);
+    expect(node(unknown, 'btn-convert-confirm')!.props.disabled).toBe(false);
+
+    // funded: enough ckETH for gas + its approve fee → confirm proceeds to the multihop prepare
+    jest.mocked(prepareMultihopConvertRecord).mockResolvedValue({
+      id: 'route1', createdAtMs: 1, step: 'approving', venueId: 'icpswap-ckusdc',
+      inCurrency: 8, outCurrency: 2, inLedger: 'ryjl3-tyaaa-aaaaa-aaaba-cai', outLedger: 'xevnm-gaaaa-aaaar-qafnq-cai',
+      inSymbol: 'ICP', outSymbol: 'USDC', amountIn: '100000000', expectedGross: '1', expectedNet: '1',
+      inFee: '10000', outFee: '10000', slippageBps: 100, legs: [], legPlan: [],
+    } as never);
+    const tree = await mountConvert('250000000', '1', {assetBalances: {8: '250000000', 6: '100000000000000000'}});
+    await act(async () => {
+      node(tree, ROUTE_ROW)!.props.onPress();
+    });
+    await act(async () => {
+      node(tree, 'convert-dest-address')!.props.onChangeText(DEST);
+    });
+    expect(present(tree, 'convert-gas-preflight')).toBe(false);
+    await act(async () => {
+      node(tree, 'btn-convert-confirm')!.props.onPress();
+    });
+    expect(prepareMultihopConvertRecord).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(prepareMultihopConvertRecord).mock.calls[0][0]).toMatchObject({destAddress: DEST});
+    expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
   });
 });

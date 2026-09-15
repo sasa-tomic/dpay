@@ -149,11 +149,52 @@ export type ConvertMessages = {
   stuckAcknowledge: string;
   stuckAcknowledged: string;
 
+  // --- multi-hop routes (docs/specs/2026-09-14-multihop-conversion-spec.md §5–§7) ----------------
+  multihop: {
+    /** Destination picker rows: the direct pair standing default, plus each composed route. */
+    destLabel: string;
+    destDirect: (sym: string) => string;
+    destRoute: (sym: string, network: string) => string;
+    /** One route exists — the honesty line (a chooser arrives with a second route, under V5). */
+    routeNote: string;
+    destAddressLabel: string;
+    destAddressInvalid: string;
+    /** The confirm-time route summary: ordered legs, fee census per leg (INV-6 style), no dpay cut. */
+    routeHeading: (inSym: string, hopSym: string, destSym: string, network: string) => string;
+    legApprovePull: (sym: string) => string;
+    legSwap: (venue: string, inSym: string, hopSym: string) => string;
+    legApproveBurn: (sym: string) => string;
+    legApproveGas: (sym: string) => string;
+    legWithdraw: (hopSym: string, destSym: string, network: string) => string;
+    legStatePending: string;
+    legStateSent: string;
+    legStateConfirmed: string;
+    legStateFailed: string;
+    /** The minter's live gas figure at confirm time — its own census line, verbatim. */
+    gasFeeLine: (amount: string) => string;
+    /** The floor the destination is promised + where any surplus stays (spec §5). */
+    routeMinLine: (amount: string, pct: string) => string;
+    routeSurplusNote: (hopSym: string) => string;
+    /** ckETH-gas preflight (spec §6): a KNOWN-insufficient balance blocks confirm, honestly. */
+    gasPreflightTitle: string;
+    gasPreflightBody: (needed: string) => string;
+    /** Progress copy while legs execute; the hop watch reuses pendingTitle/pendingBody. */
+    executingTitle: string;
+    doneRouteTitle: string;
+    doneRouteBody: (amount: string, address: string) => string;
+    doneOnItsWay: string;
+    failedLegTitle: string;
+    failedLegBody: (sym: string, reason: string) => string;
+    failedLegExit: string;
+    stuckRouteBody: string;
+  };
+
   // --- module-thrown errors (app/convert.ts) ----------------------------------------------------
   errors: {
     quoteUnreachable: (venue: string) => string;
     quoteRefused: (venue: string) => string;
     quoteUnavailable: (code: string) => string;
+    gasUnavailable: string;
   };
 };
 
@@ -253,9 +294,44 @@ export const convertEn: ConvertMessages = {
   stuckAcknowledge: 'I understand — stop watching',
   stuckAcknowledged: 'You acknowledged this and the background watch has stopped. If funds move later, they still land at this wallet\u2019s address.',
 
+  multihop: {
+    destLabel: 'Destination',
+    destDirect: sym => `${sym} — in this wallet (direct swap)`,
+    destRoute: (sym, network) => `${sym} on ${network} — swap + cash-out route`,
+    routeNote: 'One route is registered for this pair today — shown here, never chosen for you.',
+    destAddressLabel: 'Your own address on the destination network',
+    destAddressInvalid: 'Not a valid destination address — expected 0x followed by 40 hex characters.',
+    routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} on ${network}`,
+    legApprovePull: sym => `Approve the pool to pull your ${sym}`,
+    legSwap: (venue, inSym, hopSym) => `Swap ${inSym} → ${hopSym} on ${venue}`,
+    legApproveBurn: sym => `Approve the ${sym} burn (the cash-out amount)`,
+    legApproveGas: sym => `Approve ${sym} to pay the cash-out gas`,
+    legWithdraw: (hopSym, destSym, network) => `Burn ${hopSym} — ${destSym} arrives on ${network}`,
+    legStatePending: 'Waiting',
+    legStateSent: 'Sent',
+    legStateConfirmed: 'Confirmed',
+    legStateFailed: 'Refused',
+    gasFeeLine: amount => `Cash-out gas (the minter\u2019s live quote): ${amount}`,
+    routeMinLine: (amount, pct) => `At least ${amount} at your address (slippage floor ${pct})`,
+    routeSurplusNote: hopSym => `If the swap pays above the floor, the surplus stays in this wallet as ${hopSym}.`,
+    gasPreflightTitle: 'Cash-out needs gas first',
+    gasPreflightBody: needed =>
+      `Burning to Ethereum costs gas paid in ckETH, and this wallet holds none. About ${needed} is needed (the minter\u2019s live gas quote plus its approve fee). Get ckETH into this wallet first, then come back — buying a gas slice here is future work, and dpay will not hide this cost.`,
+    executingTitle: 'Running the route',
+    doneRouteTitle: 'Cash-out under way',
+    doneRouteBody: (amount, address) => `At least ${amount} is on its way to ${address}.`,
+    doneOnItsWay: 'Delivery happens on Ethereum and can take a while — dpay cannot watch that network. Nothing further is needed from you.',
+    failedLegTitle: 'The cash-out leg refused',
+    failedLegBody: (sym, reason) =>
+      `The swap went through — your funds are ${sym} in this wallet, nothing lost and nothing stuck. The cash-out refused${reason ? `: ${reason}` : ''}.`,
+    failedLegExit: 'Use Withdraw on this wallet\u2019s balance to cash out whenever you like — same asset, any address.',
+    stuckRouteBody: 'A leg was sent but its outcome is unknown yet. dpay keeps watching the ledgers in the background; this screen flips on its own when the route resolves.',
+  },
+
   errors: {
     quoteUnreachable: venue => `Could not reach ${venue} for a quote. Check your connection and try again.`,
     quoteRefused: venue => `${venue} declined to quote this pair right now.`,
     quoteUnavailable: code => `A quote could not be shown (code ${code}).`,
+    gasUnavailable: 'The cash-out minter could not be asked for its gas price — nothing was signed. Try again.',
   },
 };
