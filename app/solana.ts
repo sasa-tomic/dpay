@@ -354,6 +354,126 @@ export async function getSolSignatureStatus(
   return status;
 }
 
+// ---------------------------------------------------------------------------
+// Convert seams (solana_amm venues — Jupiter, 2026-09-15). The submission path is EXACTLY the
+// SOL payment rail's: `sendTransaction` over `solanaRpcUrls()` (which includes the relay's pure
+// RPC proxy — an allowlisted read cache around a verbatim pipe, `solana.rs`). These functions
+// never sign anything — the signed bytes arrive from the convert record (the device signed
+// them against the venue's UNSIGNED tx before the record was written) — and they never invent
+// a verdict: the chain's own status/token-balance replies are the only inputs.
+// ---------------------------------------------------------------------------
+
+/** Submit ALREADY-SIGNED raw transaction bytes through the same RPC path SOL payments use.
+ *  Returns the node's signature (base58). Throws on refusal/transport failure — a refusal here
+ *  is definitive-unless-proven-otherwise: Solana preflight rejections are instruction errors,
+ *  but a timeout is NOT a refusal (the caller's recovery path re-reads the status, never
+ *  re-signs, and resubmits only the IDENTICAL bytes, which the chain dedups by signature). */
+export async function submitRawSolTx(raw: Uint8Array, signal?: AbortSignal): Promise<string> {
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
+  const {sendTransaction} = await import('./solana/rpc');
+  return sendTransaction(solanaRpcUrls(), raw, {signal});
+}
+
+/** The chain's current height — the death clock for a swap tx's recent-blockhash. */
+export async function getSolBlockHeight(signal?: AbortSignal): Promise<number> {
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
+  const {getBlockHeight} = await import('./solana/rpc');
+  return getBlockHeight(solanaRpcUrls(), {signal});
+}
+
+/** The realized lamport fee of an already-built (unsigned) message, for honest pre-sign
+ *  disclosure. Null when the RPC cannot compute it — the caller displays nothing rather than
+ *  an invented figure. */
+export async function quoteSolMessageFee(
+  message: Uint8Array,
+  signal?: AbortSignal,
+): Promise<bigint | null> {
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
+  const {getFeeForMessage} = await import('./solana/rpc');
+  const {bytesToBase64} = await import('./lib/base64');
+  return getFeeForMessage(solanaRpcUrls(), bytesToBase64(message), {signal});
+}
+
+/**
+ * The user's realized token delta from a CONFIRMED transaction: (post − pre) of the token
+ * balance for `mint` whose owner is `ownerAddress`. Null when the tx detail is unreadable or
+ * carries no such balance movement — the caller then falls back to the quote's floor instead
+ * of claiming the estimate as fact. Pure over the rpc reply; never throws across the boundary.
+ */
+export async function getSolTokenCredit(
+  signature: string,
+  ownerAddress: string,
+  mint: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
+  const {getTransaction} = await import('./solana/rpc');
+  let detail;
+  try {
+    detail = await getTransaction(solanaRpcUrls(), signature, {signal});
+  } catch {
+    return null;
+  }
+  const meta = detail?.meta;
+  if (meta == null) return null;
+  const keys = detail?.transaction?.message?.accountKeys;
+  if (!Array.isArray(keys)) return null;
+  const balanceOf = (
+    list: readonly {accountIndex: number; mint: string; owner?: string}[] | undefined,
+  ): bigint | null => {
+    if (!Array.isArray(list)) return null;
+    for (const b of list) {
+      if (
+        typeof b.accountIndex === 'number' &&
+        b.mint === mint &&
+        b.owner === ownerAddress &&
+        b.accountIndex < keys.length
+      ) {
+        const amt = (b as {uiTokenAmount?: {amount?: unknown}}).uiTokenAmount?.amount;
+        if (typeof amt !== 'string' || !/^\d+$/.test(amt)) return null;
+        return BigInt(amt);
+      }
+    }
+    return null;
+  };
+  const pre = balanceOf(meta.preTokenBalances);
+  const post = balanceOf(meta.postTokenBalances);
+  if (post == null) return null;
+  if (pre == null) return post.toString(10);
+  const delta = post - pre;
+  return delta < 0n ? null : delta.toString(10);
+}
+
+/**
+ * The user's realized NATIVE-SOL delta from a CONFIRMED transaction they paid for (post − pre
+ * of the fee payer's lamports — for a swap that unwraps to SOL this is payout MINUS the network
+ * fee, which is the honest realized figure, not the quote). Null when unreadable. The SOL-out
+ * analog of `getSolTokenCredit`; never throws across the boundary.
+ */
+export async function getSolNativeCredit(
+  signature: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (!solanaRpcUrl()) throw new Error(M.errors.solana.offline);
+  const {getTransaction} = await import('./solana/rpc');
+  let detail;
+  try {
+    detail = await getTransaction(solanaRpcUrls(), signature, {signal});
+  } catch {
+    return null;
+  }
+  const meta = detail?.meta;
+  if (meta == null) return null;
+  const keys = detail?.transaction?.message?.accountKeys;
+  if (!Array.isArray(keys) || keys.length < 1) return null;
+  // Account 0 is the fee payer — the user, on every tx this wallet signs.
+  const pre = meta.preBalances[0];
+  const post = meta.postBalances[0];
+  if (typeof pre !== 'number' || typeof post !== 'number') return null;
+  const delta = BigInt(post) - BigInt(pre);
+  return delta < 0n ? null : delta.toString(10);
+}
+
 /** Phase 6 — Build, sign, broadcast, and confirm an SPL Token `transfer` of `amount` raw units of
  *  the registry token `mint` (at its `decimals`) to `destAddress`. The recipient is a base58 Solana
  *  WALLET address (the same shape SOL send takes); the recipient's Associated Token Account for the

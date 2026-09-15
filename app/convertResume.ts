@@ -35,8 +35,10 @@ import {
 } from './config/convert';
 import {DpayCore} from './services/native';
 import {fetchWithTimeout} from './services/relay';
+import {deriveSolanaAddress} from './solana/identity';
 import {
   executeConvert,
+  executeSolanaConvert,
   isTerminalConvertStep,
   loadConvertRecords,
   probeConvertSettlement,
@@ -355,6 +357,28 @@ async function driveOne(id: string): Promise<void> {
         state.records.set(id, next);
         fireOnTerminalIfEnteredListed(before, next);
         notify();
+      } else if (rec.solanaLeg != null) {
+        // Solana driver (convert.ts, Jupiter 2026-09-15): the signed tx bytes are frozen in the
+        // record — the drive submits identical bytes or reads the chain's own verdict, nothing
+        // else. The user's SOL address (owner filter for realized-credit reads) derives from
+        // the SAME device secret, exactly the way the payment rail does.
+        next = await executeSolanaConvert(rec, {
+          publicHex: ctx.publicHex,
+          solAddress: deriveSolanaAddress(ctx.secretHex),
+          onUpdate: (r) => {
+            if (!mine()) return; // stale drive — B's map never receives A's record
+            fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+            state.records.set(r.id, r);
+            notify();
+          },
+        });
+        if (!mine()) return; // stale drive — no post-run write, no re-arm
+        if (next !== rec) {
+          const before = state.records.get(id)?.step;
+          state.records.set(id, next);
+          fireOnTerminalIfEnteredListed(before, next);
+          notify();
+        }
       } else if (rec.providerRef != null) {
         next = await advanceProviderRecord(rec, mine);
         if (!mine()) return; // stale drive — no post-run write, no re-arm
@@ -365,9 +389,28 @@ async function driveOne(id: string): Promise<void> {
           notify();
         }
       }
-    } else if (rec.step === 'stuck' && rec.legs.length > 0 && rec.acknowledgedStuckAtMs == null) {
+    } else if (
+      rec.step === 'stuck'
+      && (rec.legs.length > 0 || rec.solanaLeg != null)
+      && rec.acknowledgedStuckAtMs == null
+    ) {
       // The honest unknown stays watchable until the user reads it: one slow probe per window.
-      next = await probeStuckOnce(rec, ctx);
+      // (A Solana stuck record re-reads its signature status the same way — inside
+      // executeSolanaConvert's stuck entry, since the chain IS the ledger watch on that rail.)
+      if (rec.solanaLeg != null) {
+        next = await executeSolanaConvert(rec, {
+          publicHex: ctx.publicHex,
+          solAddress: deriveSolanaAddress(ctx.secretHex),
+          onUpdate: (r) => {
+            if (!mine()) return;
+            fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+            state.records.set(r.id, r);
+            notify();
+          },
+        });
+      } else {
+        next = await probeStuckOnce(rec, ctx);
+      }
     }
     if (!mine()) return; // stale drive — B's timers are never armed for A's record
     scheduleNext(id, next);
@@ -386,8 +429,14 @@ function scheduleNext(id: string, rec: ConvertRecord): void {
   if (state.ctx == null || state.stopped) return;
   let delay: number | null = null;
   if (!isTerminalConvertStep(rec.step)) {
-    delay = rec.legs.length === 0 ? state.opts.providerPollMs : state.opts.rearmMs;
-  } else if (rec.step === 'stuck' && rec.legs.length > 0 && rec.acknowledgedStuckAtMs == null) {
+    // CeFi provider records poll the provider; IC-legs and Solana records re-arm on the fast
+    // cadence (their drivers own their own bounded waits; the re-arm is the outer safety net).
+    delay = rec.legs.length === 0 && rec.solanaLeg == null ? state.opts.providerPollMs : state.opts.rearmMs;
+  } else if (
+    rec.step === 'stuck'
+    && (rec.legs.length > 0 || rec.solanaLeg != null)
+    && rec.acknowledgedStuckAtMs == null
+  ) {
     delay = state.opts.stuckWatchMs;
   }
   if (delay == null) return;

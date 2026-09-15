@@ -364,6 +364,14 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // (icp-api.io / __DPAY_TEST_IC_GATEWAY), NOT the relay — post-proxy the Solana rail path IS the
   // relay, so a relay outage must not read as "this phone is offline".
   const {sol: solState, tokens: tokenStates, freshAt: solFreshAt, refreshSol, refreshToken, refreshTokens} = useSolanaBalances(identity.secretHex, solAddress, solanaMints);
+  // The Convert surface's Solana side wants raw amounts keyed by MINT (its venue registry keys
+  // legs by mint); the hook's token states carry status+failure too, so flatten to the amount.
+  // null (unknown/absent/error) stays null — the fund gate and insufficient check fail soft.
+  const solTokenAmounts = useMemo(() => {
+    const next: Record<string, string | null> = {};
+    for (const [mint, state] of Object.entries(tokenStates)) next[mint] = state.amount;
+    return next;
+  }, [tokenStates]);
   // Defined AFTER the destructure (TDZ): manual re-poll for the fund-first "Check again" —
   // fire-and-forget polls get a self-clearing busy flag (UI affordance, not lifecycle tracking).
   const recheckSolBalances = useCallback(() => {
@@ -1514,6 +1522,10 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               catalog={catalog}
               selectedAsset={selectedAsset}
               assetBalances={displayAssetBalances}
+              // The Solana rail's own balances for the V11 convert surface (the fund gate and
+              // insufficient check read the same strings the Balances tab shows) — the IC map
+              // above is keyed by currency number and cannot carry them.
+              solana={{sol: solState.balance, tokens: solTokenAmounts}}
               // Back goes where Convert is launched FROM — the accounts route (X15 moved the
               // action onto the selected account's row). Returning to Home would drop the user
               // somewhere they never were.
@@ -1523,8 +1535,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               // No `returnTo`: that argument offers a "back to PAYING <asset>" resume once the
               // balance lands (returnFromDeposit sets mode 'pay'), and this user came from
               // Convert, not from Pay. Sending them somewhere they never were is worse than
-              // sending them nowhere.
-              onShowDepositAddress={() => goToDeposit(`ic:${selectedCurrency}`)}
+              // sending them nowhere. The asset id follows the SELECTION (ic:<n> or solana:<T>)
+              // — the gate lands the selected row's own deposit surface, whatever rail it is on.
+              onShowDepositAddress={() =>
+                goToDeposit(selectedAsset != null ? selectedAsset.id : `ic:${selectedCurrency}`)
+              }
               // The pair's other leg, switched the same way the Pay gate switches a funded rail:
               // a user gesture that respects the selection lock and leaves the tabs' sub-modes
               // alone. Withheld while locked, exactly as the Pay pointer's button is.

@@ -149,6 +149,38 @@ export type ConvertMessages = {
   stuckAcknowledge: string;
   stuckAcknowledged: string;
 
+  // --- the Solana convert surface (solana_amm venues — Jupiter, 2026-09-15) -----------------------
+  /** The rail-local pair SOL ↔ USDC(Solana), device-signed end to end. Where a fact is the SAME
+   *  fact as the IC surface — quote attribution, rate, slippage chips, the stuck discipline, the
+   *  zero-fee line — the keys above render verbatim; only genuinely Solana facts get their own
+   *  keys here (network fee paid in SOL, Jupiter's own price-impact figure, the no-route
+   *  refusal outcome). */
+  sol: {
+    heading: (inSym: string, outSym: string) => string;
+    unavailableTitle: (sym: string) => string;
+    unavailableBody: (sym: string, venue: string) => string;
+    /** Solana shape of the counterparty sentence: the venue is an AGGREGATOR that picks the route
+     *  (there is no pool here) — same "not a licensed provider, not dpay" tail as the IC line. */
+    counterparty: (venue: string) => string;
+    /** Who signs: the device signs the transaction the venue built — the Solana shape of
+     *  `counterpartySigns` (no pool pulls anything; there is no approval to spend). */
+    counterpartySigns: string;
+    /** Jupiter publishes a price-impact figure for its route — its own number, verbatim (V8). */
+    priceImpactLine: (pct: string, venue: string) => string;
+    /** Jupiter's integrator fee tier when it publishes one (measured null = the none line). */
+    platformFeeLine: (pct: string, venue: string) => string;
+    /** The realized Solana network fee for THIS swap's transaction, quoted by the chain itself
+     *  before signing — paid to Solana validators, not to the venue, not to dpay. */
+    solFeeLine: (fee: string) => string;
+    /** The refusal outcome: a Solana swap fails whole — no partial state exists to unwind. */
+    refusalLine: (sym: string) => string;
+    /** Why there is no venue-fee row: the route's fees are already inside the quoted output. */
+    quoteFeesNote: string;
+    /** Submitted-and-watching: the chain is the ledger; the screen resolves itself. */
+    pendingBody: string;
+    failedBody: (sym: string, venue: string, detail: string) => string;
+  };
+
   // --- multi-hop routes (docs/specs/2026-09-14-multihop-conversion-spec.md §5–§7) ----------------
   multihop: {
     /** Destination picker rows: the direct pair standing default, plus each composed route. */
@@ -227,6 +259,12 @@ export const convertEn: ConvertMessages = {
       // fact is WHERE the swap runs — the venue's own pool contract, user-signed, dpay not a party.
       icpswap: venue =>
         `The swap runs on ${venue}'s own pool contract. Every call is signed by you and sent directly — ${venue} executes the trade, and dpay is not a party to it.`,
+      // disclosure_key 'jupiter' (the registry's key for the Solana venue row): the venue-specific
+      // facts are WHAT Jupiter is — an autonomous on-chain aggregator — and that the quote is its
+      // own, rendered verbatim, while dpay stays outside the trade entirely. Mirrors the icpswap
+      // tone: attribute, name the signer, deny party-hood.
+      jupiter: venue =>
+        `${venue} is an autonomous on-chain aggregator on Solana — it picks the route and the route executes it. This wallet signs the transaction ${venue} builds, and the quote is ${venue}'s own, shown exactly as it publishes it. dpay is not a party to it.`,
     },
     generic: venue =>
       `This conversion is executed by ${venue}. Every call is signed by you and sent directly — dpay is not a party to it.`,
@@ -242,6 +280,26 @@ export const convertEn: ConvertMessages = {
   venueChooserLabel: 'Venue',
   venueNoneSelected: 'Select a venue to see its full quote and continue.',
   venueRowQuote: amount => `Quote: ${amount}`,
+
+  sol: {
+    heading: (inSym, outSym) => `Convert ${inSym} to ${outSym} (Solana)`,
+    unavailableTitle: sym => `${sym} cannot be converted yet`,
+    unavailableBody: (sym, venue) =>
+      `Conversions for Solana assets run through a registered Solana venue (${venue} today). No venue serves ${sym} right now — nothing was offered, nothing moved.`,
+    counterparty: venue =>
+      `Executed by ${venue} — an autonomous on-chain aggregator on Solana, not a licensed provider and not dpay.`,
+    counterpartySigns: 'Your phone signs the transaction the venue built — nobody else signs anything.',
+    priceImpactLine: (pct, venue) => `Price impact: ${pct} (${venue}'s own figure)`,
+    platformFeeLine: (pct, venue) => `${venue} integrator fee: ${pct}`,
+    solFeeLine: fee => `Solana network fee: ${fee} (paid to the network, not the venue, not dpay)`,
+    refusalLine: sym =>
+      `If the price moves past the minimum, the transaction fails on-chain, your ${sym} stays in your wallet, and nothing else was signed.`,
+    quoteFeesNote: 'Route fees are already inside the quoted output — nothing is added on top.',
+    pendingBody:
+      'The swap transaction is on the Solana network. This screen is watching the chain itself and resolves on its own — no reload, no retry needed.',
+    failedBody: (sym, venue, detail) =>
+      `${venue}'s swap transaction failed${detail ? ` (${detail})` : ''}. On Solana a failed transaction never moves funds — your ${sym} is where it was.`,
+  },
 
   fundBody: (sym, receiveTab, myAddress) =>
     `This wallet has no ${sym}. To convert ${sym}, first receive ${sym} at your address: open ${receiveTab} below and choose “${myAddress}”.`,

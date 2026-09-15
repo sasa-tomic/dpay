@@ -22,6 +22,17 @@ export const USDC_TOKEN = 'USDC';
 export const USDC_MINT_ADDRESS = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 /** USDC has 6 decimals (1 USDC = 1_000_000 raw units). */
 export const USDC_DECIMALS = 6;
+/**
+ * The WRAPPED-SOL mint (the SPL token account of native SOL). NOT a row in SOLANA_TOKENS — the
+ * wallet holds native SOL, whose registry marker is `mint: null` — this address is ONLY the
+ * stable string identifier a VENUE route (Jupiter and any later Solana aggregator) carries for
+ * the native side of a pair: an AMM route names mints, and the mint it names for SOL is the
+ * wrapped form. Pinned against `dfx/catalog_truth.json` venues[].pair_ledgers by
+ * `catalog.test.ts` (the same drift alarm that pins the EURC mint).
+ */
+export const WRAPPED_SOL_MINT_ADDRESS = 'So11111111111111111111111111111111111111112';
+/** The token a venue mint identifier resolves to for the NATIVE side (wrapped SOL ⇒ SOL). */
+export const WRAPPED_SOL_TOKEN = 'SOL';
 /** EURC (Circle's euro stablecoin on Solana mainnet, 6 decimals — the EUR dual-rail's deep half). */
 export const EURC_TOKEN = 'EURC';
 /** EURC mainnet mint (pinned to `dfx/catalog_truth.json` `eurc_mint` — see `catalog.test.ts`). */

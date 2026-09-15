@@ -12,18 +12,25 @@
 //   - fixture entries — invented offline stand-ins are never BUNDLED (they reach a wallet only
 //     when the offline test relay serves them knob-gated, V5).
 import {BUNDLED_NETWORKS, icpCatalogOf} from './catalog';
+import {
+  USDC_MINT_ADDRESS,
+  WRAPPED_SOL_MINT_ADDRESS,
+} from '../solana/tokens';
 
-// Extensible by design: a later Solana venue kind is a new value here + in the truth file,
-// not a schema break (`kind` stays a plain string on the wire).
-export type VenueKind = 'ic_amm' | 'cefi';
+// Extensible by design: each new venue kind is a new value here + in the truth file, not a
+// schema break (`kind` stays a plain string on the wire).
+export type VenueKind = 'ic_amm' | 'cefi' | 'solana_amm';
 
 export type VenueEntry = {
   readonly venue_id: string;
   readonly display_name: string;
   readonly kind: VenueKind;
-  // The venue's canister principal — for ic_amm, the update target the phone signs against.
+  // The venue's contract — for ic_amm the update target (pool canister principal) the phone
+  // signs against; for solana_amm an https ORIGIN the phone talks to device-direct (keyless).
   readonly endpoint: string;
-  // The traded pair as an UNORDERED pair of ledger principals. Never read as ordered.
+  // The traded pair as an UNORDERED pair of identifiers. IC rows: ledger principals. Solana
+  // rows: MINTS — and the native side is identified by the WRAPPED-SOL mint (an AMM route
+  // names mints; see WRAPPED_SOL_MINT_ADDRESS). Never read as ordered.
   readonly pair_ledgers: readonly string[];
   readonly testnet: boolean;
   // Key into the legal/disclosure copy (app/i18n) — locale text is never in this table.
@@ -79,6 +86,22 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     testnet: false,
     disclosure_key: 'icpswap',
   },
+  {
+    // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter, the
+    // autonomous on-chain aggregator, for the rail-local pair SOL ↔ USDC(Solana). Identifier
+    // semantics per kind: `endpoint` is an https ORIGIN (quote + unsigned swap tx, device-direct
+    // and keyless) and `pair_ledgers` are MINTS — the native side by its WRAPPED form. The mints
+    // are DERIVED from the Solana token registry (the app's one copy of each), never standalone
+    // literals. No ic fixture exists for this kind (fixtures are ic_amm-only); the offline
+    // stand-in is the e2e window.fetch stub on the endpoint origin.
+    venue_id: 'jupiter',
+    display_name: 'Jupiter',
+    kind: 'solana_amm',
+    endpoint: 'https://lite-api.jup.ag',
+    pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS],
+    testnet: false,
+    disclosure_key: 'jupiter',
+  },
 ];
 
 // The RUNTIME overlay — what THIS relay's `GET /api/v1/venues` actually serves (multi-venue
@@ -124,6 +147,26 @@ export function icAmmVenueForPair(a: string, b: string): VenueEntry | null {
   return (
     BUNDLED_VENUES.find(
       v => v.kind === 'ic_amm' && !v.testnet && samePair(v.pair_ledgers, [a, b]),
+    ) ?? null
+  );
+}
+
+// The solana_amm venues serving a mint, in REGISTRY ORDER — the SOL convert surface's candidate
+// list (the venuesForPair analog). `mint` is the venue-side identifier: callers pass the SPL
+// mint, or the WRAPPED-SOL mint for native SOL (the registry's identifier for the native side).
+// Testnet rows are kept out — the enabled gate for a real wallet is mainnet rows only.
+export function solanaVenuesForMint(mint: string): readonly VenueEntry[] {
+  return registeredVenues().filter(
+    v => v.kind === 'solana_amm' && !v.testnet && v.pair_ledgers.includes(mint),
+  );
+}
+
+// The bundled solana_amm venue trading this mint, if any — the single place "is SOL convert
+// REACHABLE for this asset" is decided (the icAmmVenueForPair analog; fail-closed by null).
+export function solanaAmmVenueForMint(mint: string): VenueEntry | null {
+  return (
+    BUNDLED_VENUES.find(
+      v => v.kind === 'solana_amm' && !v.testnet && v.pair_ledgers.includes(mint),
     ) ?? null
   );
 }

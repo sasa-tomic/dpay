@@ -34,6 +34,12 @@ export const convertEs: ConvertMessages = {
       // firmado por el usuario, dpay no es parte.
       icpswap: venue =>
         `El intercambio se ejecuta en el contrato de pool propio de ${venue}. Cada llamada la firmas tú y se envía directamente — ${venue} ejecuta el intercambio, y dpay no es parte de él.`,
+      // disclosure_key 'jupiter' (la clave del registro para la fila de la venue Solana): los
+      // hechos propios de la venue son QUÉ es Jupiter — un agregador on-chain autónomo — y que
+      // la cotización es la suya, mostrada tal como la publica, mientras dpay queda fuera del
+      // intercambio por completo. Tono espejo de icpswap: atribuir, nombrar al firmante, negar la parte.
+      jupiter: venue =>
+        `${venue} es un agregador on-chain autónomo en Solana — elige la ruta y la ruta la ejecuta. Este monedero firma la transacción que construye ${venue}, y la cotización es la propia de ${venue}, mostrada exactamente como la publica. dpay no es parte de ello.`,
     },
     generic: venue =>
       `Esta conversión la ejecuta ${venue}. Cada llamada la firmas tú y se envía directamente — dpay no es parte de ella.`,
@@ -49,6 +55,26 @@ export const convertEs: ConvertMessages = {
   venueChooserLabel: 'Sede',
   venueNoneSelected: 'Elige una sede para ver su cotización completa y continuar.',
   venueRowQuote: amount => `Cotización: ${amount}`,
+
+  sol: {
+    heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,
+    unavailableTitle: sym => `${sym} aún no se puede convertir`,
+    unavailableBody: (sym, venue) =>
+      `Las conversiones de activos Solana pasan por una venue Solana registrada (hoy ${venue}). Ninguna venue atiende ${sym} por ahora — no se ofreció nada, nada se movió.`,
+    counterparty: venue =>
+      `Ejecutado por ${venue} — un agregador on-chain autónomo en Solana, no un proveedor con licencia y no dpay.`,
+    counterpartySigns: 'Tu teléfono firma la transacción que construyó la venue — nadie más firma nada.',
+    priceImpactLine: (pct, venue) => `Impacto en el precio: ${pct} (cifra propia de ${venue})`,
+    platformFeeLine: (pct, venue) => `Comisión de integrador de ${venue}: ${pct}`,
+    solFeeLine: fee => `Comisión de red de Solana: ${fee} (pagada a la red, no a la venue, no a dpay)`,
+    refusalLine: sym =>
+      `Si el precio pasa del mínimo, la transacción falla on-chain: tu ${sym} se queda en tu monedero y no se firmó nada más.`,
+    quoteFeesNote: 'Las comisiones de la ruta ya van dentro del importe cotizado — no se añade nada encima.',
+    pendingBody:
+      'La transacción de intercambio está en la red de Solana. Esta pantalla observa la propia cadena y se resuelve sola — sin recargar, sin reintentar.',
+    failedBody: (sym, venue, detail) =>
+      `La transacción de intercambio de ${venue} falló${detail ? ` (${detail})` : ''}. En Solana una transacción fallida nunca mueve fondos — tu ${sym} sigue donde estaba.`,
+  },
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Este monedero no tiene ${sym}. Para convertir ${sym}, recibe primero ${sym} en tu dirección: abre «${receiveTab}» abajo y elige «${myAddress}».`,

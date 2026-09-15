@@ -397,3 +397,142 @@ export function verifySolPayment(
     return { ok: false, reason: 'exception' };
   }
 }
+
+// ============================================================================
+// Venue-built swap transactions (Jupiter / solana_amm venues, 2026-09-15).
+//
+// A venue does not hand the wallet a transfer to build — it hands the wallet the WHOLE
+// transaction, pre-assembled around its route, and asks for one signature. The device's job is
+// therefore not construction but VERIFICATION-then-signature, and the verification is the
+// red-line surface (multi-venue readiness V9, the Solana analog of the IC beneficiary checks):
+//
+//   1. the ONLY required signature is the user's own (sigCount === 1 — a route demanding
+//      another signer is something this wallet cannot honestly execute; refused, never partial-
+//      signed);
+//   2. the fee payer is the user (account key[0] — whoever pays fees moves value; a venue
+//      building a tx that spends someone else's fees is a mis-built or hostile tx);
+//   3. for an SPL output, the destination token account present in the tx is the USER'S OWN
+//      ATA for that mint (the beneficiary check — the swap must route the output to the user,
+//      and the venue's tx names the destination account explicitly).
+//
+// Shapes: the request to Jupiter asks for a LEGACY transaction (`asLegacyTransaction`), so every
+// account key is IN the bytes. A versioned (v0) reply is still decoded — static keys first,
+// exactly as the wire format orders them — but a v0 reply whose beneficiary is NOT resolvable
+// from the static keys is refused: this wallet does not sign what it cannot verify against the
+// bytes in hand (address-lookup-table contents are chain state the device would have to trust
+// blind). PURE module — no network, no throws across the verify path.
+// ============================================================================
+
+/** What the decoder recovered from a venue-built (unsigned) transaction. */
+export type DecodedVenueTx = {
+  /** The exact message bytes to sign (everything after the signature slots). */
+  readonly message: Uint8Array;
+  /** Offset of the single signature slot inside the ORIGINAL bytes (where the sig is written). */
+  readonly sigSlotOffset: number;
+  /** Static account keys in wire order; key[0] is the fee payer. */
+  readonly accountKeys: readonly Uint8Array[];
+  /** False ⇒ versioned (v0) message — static keys only; see the section note. */
+  readonly legacy: boolean;
+};
+
+/** Decode a venue-built unsigned transaction. Null on ANY malformed layout — pure + total. */
+export function decodeVenueSwapTx(bytes: Uint8Array): DecodedVenueTx | null {
+  const sigCountDec = decodeCompactU16(bytes, 0);
+  if (sigCountDec.value !== 1) return null;
+  const sigSlotOffset = sigCountDec.next;
+  const msgStart = sigSlotOffset + 64;
+  if (bytes.length <= msgStart) return null;
+  const message = bytes.subarray(msgStart);
+
+  let headerAt: number;
+  let legacy: boolean;
+  if ((message[0] & 0x80) !== 0) {
+    // Versioned: [version|0x80, numRequiredSignatures, numReadonlySigned, numReadonlyUnsigned].
+    if ((message[0] & 0x7f) !== 0) return null; // v0 only — later versions are not our contract
+    headerAt = 1;
+    legacy = false;
+  } else {
+    headerAt = 0;
+    legacy = true;
+  }
+  if (message[headerAt] !== 1) return null; // exactly ONE required signature: the user's own
+  if (message.length < headerAt + 3) return null;
+  const keysCountDec = decodeCompactU16(message, headerAt + 3);
+  let off = keysCountDec.next;
+  if (keysCountDec.value < 1 || keysCountDec.value > 128) return null;
+  const accountKeys: Uint8Array[] = [];
+  for (let i = 0; i < keysCountDec.value; i++) {
+    if (off + 32 > message.length) return null;
+    accountKeys.push(message.subarray(off, off + 32));
+    off += 32;
+  }
+  return {message, sigSlotOffset, accountKeys, legacy};
+}
+
+/** The beneficiary verdict for a venue swap tx — checked BEFORE the device signs anything. */
+export type VenueTxBeneficiary =
+  | { ok: true }
+  | { ok: false; reason: 'fee-payer' | 'beneficiary' };
+
+/** Red-line check (see the section note): the user is the fee payer AND — for an SPL output —
+ *  the user's own ATA for the output mint is one of the tx's static account keys. For a native
+ *  (unwrapped-SOL) output the destination IS the fee payer, so check 1 already covers it. */
+export function verifyVenueSwapTxBeneficiaries(
+  decoded: DecodedVenueTx,
+  user: { pubkey: Uint8Array; outAta: Uint8Array | null },
+): VenueTxBeneficiary {
+  if (decoded.accountKeys.length < 1) return { ok: false, reason: 'fee-payer' };
+  if (!bytesEqual(decoded.accountKeys[0], user.pubkey)) return { ok: false, reason: 'fee-payer' };
+  if (user.outAta != null) {
+    const found = decoded.accountKeys.some(k => bytesEqual(k, user.outAta as Uint8Array));
+    if (!found) return { ok: false, reason: 'beneficiary' };
+  }
+  return { ok: true };
+}
+
+/**
+ * Sign a venue-built transaction in place: the single signature slot gets the user's Ed25519
+ * signature over the (untouched) message. Returns the raw signed bytes for broadcast plus the
+ * base58 signature (the tx's on-chain identity — Solana dedups resubmission by it) and the fee
+ * payer's base58 address. The original `bytes` are never mutated.
+ */
+export function signVenueSwapTx(
+  bytes: Uint8Array,
+  seed: Uint8Array,
+): { raw: Uint8Array; signature: string; feePayer: string } | null {
+  const decoded = decodeVenueSwapTx(bytes);
+  if (decoded == null) return null;
+  const signature = ed25519.sign(decoded.message, seed);
+  const raw = new Uint8Array(bytes.length);
+  raw.set(bytes);
+  raw.set(signature, decoded.sigSlotOffset);
+  return {
+    raw,
+    signature: bs58.encode(signature),
+    feePayer: bs58.encode(decoded.accountKeys[0]),
+  };
+}
+
+/** Lowercase hex of a byte array — hand-rolled (Hermes-safe, no Buffer), the solreqMemoData
+ *  spelling factored out for reuse (the convert record stores the signed tx as hex). */
+export function bytesToHex(bytes: Uint8Array): string {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += HEX_DIGITS[bytes[i] >> 4];
+    hex += HEX_DIGITS[bytes[i] & 0x0f];
+  }
+  return hex;
+}
+
+/** Inverse of `bytesToHex` — even-length, lowercase-hex input only; null otherwise. */
+export function hexToBytes(hex: string): Uint8Array | null {
+  if (hex.length === 0 || hex.length % 2 !== 0) return null;
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    const hi = HEX_DIGITS.indexOf(hex[i * 2]);
+    const lo = HEX_DIGITS.indexOf(hex[i * 2 + 1]);
+    if (hi < 0 || lo < 0) return null;
+    out[i] = (hi << 4) | lo;
+  }
+  return out;
+}

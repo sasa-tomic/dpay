@@ -582,3 +582,209 @@ describe('Wave-3 recovery invariant — "provider transitions never move backwar
     expect(next.step).toBe(expected);
   });
 });
+
+// --- the solana_amm invariants (V11 — Jupiter, 2026-09-15) -----------------------------------------
+//
+// The same red lines, read through the Solana rail's own shape: the registry row is
+// drift-alarmed against the truth file BOTH ways; the resolver never crosses rails; the
+// venue-built transaction is beneficiary-checked BEFORE the device's signature; submission
+// goes through the SOL rail's own seam (never a relay URL); and the outcome vocabulary is the
+// chain's own (signature status), never a node's prose.
+
+jest.mock('../services/jupiter', () => ({fetchJupiterQuote: jest.fn(), fetchJupiterSwapTx: jest.fn()}));
+jest.mock('../solana', () => ({
+  submitRawSolTx: jest.fn(),
+  getSolSignatureStatus: jest.fn(),
+  getSolBlockHeight: jest.fn(),
+  getSolTokenCredit: jest.fn(),
+  getSolNativeCredit: jest.fn(),
+  quoteSolMessageFee: jest.fn(),
+}));
+
+import {fetchJupiterSwapTx} from '../services/jupiter';
+import {
+  getSolBlockHeight, getSolSignatureStatus, getSolTokenCredit, quoteSolMessageFee, submitRawSolTx,
+} from '../solana';
+import {executeSolanaConvert, prepareSolanaConvertRecord} from '../convert';
+import {solanaAmmVenueForMint, solanaVenuesForMint, icAmmVenueForPair} from '../config/venues';
+import {deriveSolanaKeypair} from '../solana/identity';
+import {deriveAta} from '../solana/spl';
+import {assembleMessage, hexToBytes} from '../solana/tx';
+import {EURC_MINT_ADDRESS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
+import type {JupiterQuote} from '../services/jupiter';
+
+describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', () => {
+  const TRUTH = JSON.parse(readFileSync(join('..', 'dfx', 'catalog_truth.json'), 'utf8')) as {
+    venues: {venue_id: string; display_name: string; kind: string; endpoint: string; pair_ledgers: string[]; testnet: boolean; disclosure_key: string}[];
+  };
+  const SECRET = '11'.repeat(32); // any 32-byte seed — the real SLIP-10 derivation runs
+  const KP = deriveSolanaKeypair(SECRET);
+  const BLOCKHASH = new Uint8Array(32).fill(7);
+  const SWAP_PROGRAM = new Uint8Array(32).fill(9);
+  const userAta = deriveAta(KP.address, USDC_MINT_ADDRESS);
+
+  /** A venue-built legacy tx in the wire shape decodeVenueSwapTx expects (one empty sig slot). */
+  const venueTx = (over: {feePayer?: Uint8Array; extraKeys?: {pubkey: Uint8Array; writable?: boolean}[]; skipUserAta?: boolean} = {}) => {
+    const keys = [{pubkey: over.feePayer ?? KP.publicKey, signer: true, writable: true}];
+    if (!over.skipUserAta) keys.push({pubkey: userAta, signer: false, writable: true});
+    for (const k of over.extraKeys ?? []) keys.push({pubkey: k.pubkey, signer: false, writable: k.writable ?? false});
+    const msg = assembleMessage(over.feePayer ?? KP.publicKey, [{programId: SWAP_PROGRAM, keys, data: new Uint8Array([1, 2, 3])}], BLOCKHASH);
+    return new Uint8Array([1, ...new Array(64).fill(0), ...msg]);
+  };
+
+  const quote = (over: Partial<JupiterQuote> = {}): JupiterQuote => ({
+    venueId: 'jupiter',
+    inputMint: WRAPPED_SOL_MINT_ADDRESS,
+    outputMint: USDC_MINT_ADDRESS,
+    inAmount: '1000000000',
+    outAmount: '10360000',
+    otherAmountThreshold: '10250000',
+    priceImpactPct: '0.003',
+    slippageBps: 100,
+    platformFeeBps: null,
+    raw: {},
+    fetchedAtMs: 1_000,
+    ...over,
+  });
+
+  const built = (bytes: Uint8Array) => ({ok: true as const, swap: {swapTransaction: bytes, lastValidBlockHeight: 300_000_000}});
+
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    jest.mocked(fetchJupiterSwapTx).mockReset();
+    jest.mocked(submitRawSolTx).mockReset();
+    jest.mocked(getSolSignatureStatus).mockReset();
+    jest.mocked(getSolBlockHeight).mockReset();
+    jest.mocked(getSolTokenCredit).mockReset();
+    jest.mocked(quoteSolMessageFee).mockReset();
+    jest.mocked(relayFetch).mockReset();
+    jest.mocked(fetchJupiterSwapTx).mockImplementation(async () => built(venueTx()));
+    jest.mocked(quoteSolMessageFee).mockResolvedValue(null);
+  });
+
+  test('the bundled solana_amm registry and the truth file agree, both ways (mints, not principals)', () => {
+    const truthSol = TRUTH.venues.filter(v => v.kind === 'solana_amm');
+    const bundledSol = BUNDLED_VENUES.filter(v => v.kind === 'solana_amm');
+    expect(truthSol.length).toBeGreaterThan(0); // V11: at least one Solana venue is registered
+    expect(bundledSol.map(v => v.venue_id).sort()).toEqual(truthSol.map(v => v.venue_id).sort());
+    for (const t of truthSol) {
+      const b = bundledSol.find(v => v.venue_id === t.venue_id)!;
+      expect(b.display_name).toBe(t.display_name);
+      expect(b.endpoint).toBe(t.endpoint);
+      expect([...b.pair_ledgers].sort()).toEqual([...t.pair_ledgers].sort());
+      expect(b.testnet).toBe(t.testnet);
+      expect(b.disclosure_key).toBe(t.disclosure_key);
+      // Identifier semantics: solana_amm pair entries are MINTS — the app's own constants, and
+      // never a dpay canister principal.
+      for (const mint of b.pair_ledgers) {
+        expect(mint).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+        expect(DPAY_CANISTER_PRINCIPALS).not.toContain(mint);
+      }
+      expect(b.endpoint).toMatch(/^https:\/\//); // an origin, never a principal
+    }
+    // The pair the founder named: wrapped SOL ↔ USDC(Solana), from the token registry itself.
+    const jup = bundledSol.find(v => v.venue_id === 'jupiter')!;
+    expect([...jup.pair_ledgers].sort()).toEqual([WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS].sort());
+  });
+
+  test('the resolver never crosses rails: solana mints resolve only the solana_amm row, IC ledgers never do', () => {
+    expect(solanaAmmVenueForMint(WRAPPED_SOL_MINT_ADDRESS)?.venue_id).toBe('jupiter');
+    expect(solanaAmmVenueForMint(USDC_MINT_ADDRESS)?.venue_id).toBe('jupiter');
+    expect(solanaAmmVenueForMint(EURC_MINT_ADDRESS)).toBeNull(); // venue-less: Convert stays gated
+    expect(solanaAmmVenueForMint('garbage')).toBeNull();
+    expect(solanaAmmVenueForMint(ICP_LEDGER)).toBeNull(); // an IC ledger is not a mint
+    expect(icAmmVenueForPair(WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS)).toBeNull(); // and vice versa
+    // A testnet solana row is as good as no row (the IC rule, carried over) — in the RUNTIME
+    // overlay (the relay-served candidate list) it never appears; the bundled enable gate
+    // (solanaAmmVenueForMint, the icAmmVenueForPair analog) stays drift-alarmed truth, so a
+    // runtime testnet-only overlay leaves the pair unreachable end to end.
+    setRuntimeVenues([{venue_id: 'jupiter-testnet', display_name: 'Jupiter (test)', kind: 'solana_amm', endpoint: 'https://t.jup.ag', pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS], testnet: true, disclosure_key: 'jupiter'}]);
+    expect(solanaVenuesForMint(WRAPPED_SOL_MINT_ADDRESS)).toEqual([]);
+    setRuntimeVenues(null);
+    expect(solanaVenuesForMint(WRAPPED_SOL_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter']);
+  });
+
+  test('INV-1/2 (Solana): a venue tx paying from or to ANYONE but the user is refused BEFORE the signature', async () => {
+    // A stranger fee payer: the tx wants someone else's key to sign — never signed by us.
+    jest.mocked(fetchJupiterSwapTx).mockResolvedValue(built(venueTx({feePayer: new Uint8Array(32).fill(3), skipUserAta: true})));
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
+    // A stranger's destination token account: proceeds would land outside the user's own ATA.
+    jest.mocked(fetchJupiterSwapTx).mockResolvedValue(built(venueTx({skipUserAta: true, extraKeys: [{pubkey: new Uint8Array(32).fill(4), writable: true}]})));
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
+    // A quote naming mints outside the registry pair: the venue may only run what it is registered for.
+    jest.mocked(fetchJupiterSwapTx).mockResolvedValue(built(venueTx()));
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote({outputMint: EURC_MINT_ADDRESS}), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'EURC', mint: EURC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/pool/);
+    // A venueId that names no solana row: never reaches https.
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote({venueId: 'no-such-venue'}), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
+    // Nothing was signed-then-abandoned along the way: no submit ever ran.
+    expect(submitRawSolTx).not.toHaveBeenCalled();
+  });
+
+  test('the happy prepare: record is Solana-shaped (legs [], one solanaLeg, venue digits verbatim)', async () => {
+    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
+    expect(rec.step).toBe('swapping');
+    expect(rec.legs).toEqual([]);
+    expect(rec.legPlan).toBeUndefined();
+    expect(rec.providerRef).toBeUndefined();
+    const leg = rec.solanaLeg!;
+    expect(leg.protocol).toBe('solana');
+    expect(leg.signedTxHex).toMatch(/^[0-9a-f]+$/); // lowercase hex, the frozen envelope
+    expect(leg.lastValidBlockHeight).toBe(300_000_000);
+    // The signature is the user's own over the venue's own message (ed25519, verified by the
+    // codec's own round-trip — a mismatch would have thrown at prepare).
+    expect(leg.signature).toMatch(/^[1-9A-HJ-NP-Za-km-z]+$/);
+    // Venue digits verbatim: the estimate and the floor are Jupiter's own strings.
+    expect(rec.amountIn).toBe('1000000000');
+    expect(rec.expectedGross).toBe('10360000');
+    expect(rec.expectedNet).toBe('10250000');
+    expect(rec.inFee).toBe('0');
+    expect(rec.outFee).toBe('0');
+    // Money has not moved at prepare: nothing was submitted.
+    expect(submitRawSolTx).not.toHaveBeenCalled();
+  });
+
+  test('INV-9 (Solana): submission goes through the SOL rail seam — the relay is never in the path', async () => {
+    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
+    const leg = rec.solanaLeg!;
+    jest.mocked(submitRawSolTx).mockResolvedValue(leg.signature);
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({confirmationStatus: 'confirmed'});
+    jest.mocked(getSolTokenCredit).mockResolvedValue('10360000');
+    const onUpdate = jest.fn((_r: ConvertRecord) => undefined);
+    const done = await executeSolanaConvert(rec, {publicHex: 'ab'.repeat(32), solAddress: KP.address, onUpdate}, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
+    // The EXACT signed bytes were submitted (identical-bytes discipline; the chain dedups).
+    expect(submitRawSolTx).toHaveBeenCalledTimes(1);
+    const submitted = jest.mocked(submitRawSolTx).mock.calls[0][0] as Uint8Array;
+    expect(Array.from(submitted)).toEqual(Array.from(hexToBytes(leg.signedTxHex)!));
+    // No relay URL anywhere in the submission args (the RPC seam takes bytes, not origins).
+    for (const call of jest.mocked(submitRawSolTx).mock.calls) {
+      expect(JSON.stringify(call)).not.toContain('http');
+    }
+    expect(relayFetch).not.toHaveBeenCalled();
+    // The honest end state: the REALIZED chain credit, not the estimate.
+    expect(done.step).toBe('done');
+    expect(done.outAmountNet).toBe('10360000');
+    expect(done.outTx).toBe(leg.signature);
+  });
+
+  test('recovery vocabulary: a node signature that is not ours parks stuck; a failed tx refunds honestly', async () => {
+    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
+    // A FOREIGN node signature: not our bytes — park, never guess, never re-sign.
+    jest.mocked(submitRawSolTx).mockResolvedValue('SomeOtherSignature1111111111111111111111111111111');
+    let next = await executeSolanaConvert(rec, {publicHex: 'ab'.repeat(32), solAddress: KP.address, onUpdate: jest.fn((_r: ConvertRecord) => undefined)}, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
+    expect(next.step).toBe('stuck');
+    expect(next.failureDetail).toBe('signature-mismatch');
+    expect(submitRawSolTx).toHaveBeenCalledTimes(1); // no second round after a mismatch
+    // The chain confirming WITH an error: the route did not run; input unmoved.
+    jest.mocked(submitRawSolTx).mockResolvedValue(rec.solanaLeg!.signature);
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({err: {InstructionError: [0, {Custom: 1}]}, confirmationStatus: 'confirmed'});
+    next = await executeSolanaConvert(rec, {publicHex: 'ab'.repeat(32), solAddress: KP.address, onUpdate: jest.fn((_r: ConvertRecord) => undefined)}, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
+    expect(next.step).toBe('failed_refunded');
+    expect(next.failureCode).toBe('swap_refused');
+    // Past the blockhash's death, unseen: the bytes can NEVER land — resolved, not parked.
+    jest.mocked(getSolSignatureStatus).mockResolvedValue(null);
+    jest.mocked(getSolBlockHeight).mockResolvedValue(300_000_001);
+    next = await executeSolanaConvert(rec, {publicHex: 'ab'.repeat(32), solAddress: KP.address, onUpdate: jest.fn((_r: ConvertRecord) => undefined)}, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
+    expect(next.step).toBe('failed_refunded');
+    expect(next.failureDetail).toBe('blockhash-expired');
+  });
+});

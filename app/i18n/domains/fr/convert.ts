@@ -34,6 +34,12 @@ export const convertFr: ConvertMessages = {
       // dpay n'est pas partie.
       icpswap: venue =>
         `L'échange s'exécute sur le propre contrat de pool de ${venue}. Chaque appel est signé par toi et envoyé directement — ${venue} exécute l'échange, et dpay n'en est pas partie.`,
+      // disclosure_key 'jupiter' (la clé du registre pour la ligne de la venue Solana) : les faits
+      // propres à la venue sont CE qu'est Jupiter — un agrégateur on-chain autonome — et que le
+      // devis est le sien, affiché tel qu'il le publie, tandis que dpay reste hors de l'échange.
+      // Ton miroir de icpswap : attribuer, nommer le signataire, nier la partie.
+      jupiter: venue =>
+        `${venue} est un agrégateur on-chain autonome sur Solana — il choisit la route et la route l'exécute. Ce portefeuille signe la transaction que ${venue} construit, et le devis est celui de ${venue}, affiché exactement comme il le publie. dpay n'en est pas partie.`,
     },
     generic: venue =>
       `Cette conversion est exécutée par ${venue}. Chaque appel est signé par toi et envoyé directement — dpay n'en est pas partie.`,
@@ -49,6 +55,26 @@ export const convertFr: ConvertMessages = {
   venueChooserLabel: 'Plateforme',
   venueNoneSelected: 'Choisis une plateforme pour voir son devis complet et continuer.',
   venueRowQuote: amount => `Devis : ${amount}`,
+
+  sol: {
+    heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,
+    unavailableTitle: sym => `${sym} ne peut pas encore être converti`,
+    unavailableBody: (sym, venue) =>
+      `Les conversions d'actifs Solana passent par une venue Solana enregistrée (${venue} aujourd'hui). Aucune venue ne sert ${sym} pour l'instant — rien n'a été proposé, rien n'a bougé.`,
+    counterparty: venue =>
+      `Exécuté par ${venue} — un agrégateur on-chain autonome sur Solana, pas un fournisseur agréé et pas dpay.`,
+    counterpartySigns: 'Ton téléphone signe la transaction que la venue a construite — personne d\u2019autre ne signe rien.',
+    priceImpactLine: (pct, venue) => `Impact sur le prix : ${pct} (chiffre propre de ${venue})`,
+    platformFeeLine: (pct, venue) => `Frais d'intégrateur ${venue} : ${pct}`,
+    solFeeLine: fee => `Frais de réseau Solana : ${fee} (payés au réseau, pas à la venue, pas à dpay)`,
+    refusalLine: sym =>
+      `Si le prix dépasse le minimum, la transaction échoue on-chain : ton ${sym} reste dans ton portefeuille et rien d'autre n'a été signé.`,
+    quoteFeesNote: 'Les frais de route sont déjà dans le montant devisé — rien ne s\u2019ajoute par-dessus.',
+    pendingBody:
+      'La transaction d\u2019échange est sur le réseau Solana. Cet écran observe la chaîne elle-même et se résout de lui-même — sans recharger, sans réessayer.',
+    failedBody: (sym, venue, detail) =>
+      `La transaction d'échange de ${venue} a échoué${detail ? ` (${detail})` : ''}. Sur Solana, une transaction échouée ne déplace jamais de fonds — ton ${sym} est là où il était.`,
+  },
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Ce portefeuille n'a pas de ${sym}. Pour convertir des ${sym}, reçois d'abord des ${sym} à ton adresse : ouvre « ${receiveTab} » en bas et choisis « ${myAddress} ».`,

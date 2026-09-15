@@ -21,6 +21,12 @@
 // showing its OWN quote, attributed + timestamped; the checklist + confirm appear only under an
 // explicit pick, and execution follows the picked venue's own pool. With exactly one venue the
 // screen is unchanged — no chooser chrome, today's layout.
+// The SOLANA surface (multi-venue readiness V11, 2026-09-15) is a sibling branch below
+// (SolConvertMode): the same entry gesture, the same pre-sign transparency checklist, the same
+// engine-driven record view — with the venue being a keyless https aggregator (Jupiter) instead
+// of a pool canister: the quote is fetched DEVICE-DIRECT (no relay hop), rendered verbatim
+// (inAmount/outAmount/priceImpact exactly as published), and what gets signed is the venue's
+// own built transaction, beneficiary-checked before the signature (see app/solana/tx.ts).
 // Venue facts (display name, pool principal) are LOOKED UP from the record's/quote's own
 // `venueId` against the registry (../config/venues) — never module constants (V1). Venue-less
 // assets fail closed with honest copy that names what exists today (ICP ↔ VCHF), and ckUSDC's
@@ -47,6 +53,7 @@ import {
   loadVenueRegistry,
   prepareConvertRecord,
   prepareMultihopConvertRecord,
+  prepareSolanaConvertRecord,
   TERMINAL_CONVERT_STEPS,
   type ConvertMath,
   type ConvertQuote,
@@ -59,8 +66,11 @@ import {
   convertResumeSnapshot,
   subscribeConvertRecords,
 } from '../convertResume';
+import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {multihopRoutesFrom} from '../routes';
+import {solanaAmmVenueForMint} from '../config/venues';
+import {SOLANA_TOKENS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
 import {fmtAssetCompact, parseUserAmount} from '../lib/format';
@@ -107,6 +117,10 @@ type Props = {
    *  survives the switch, which is the whole point of a pointer. Absent while locked, in which
    *  case the account is still NAMED and only the button is withheld (the Pay pointer's rule). */
   onSwitchAsset?: (id: AssetId) => void;
+  /** Solana-rail balances for the V11 surface (SolConvertMode): raw-unit spendable SOL
+   *  (lamports) + per-mint token amounts — the fund gate + insufficient check read these.
+   *  Absent/empty means "unknown" and the checks fail soft (no false 'insufficient'). */
+  solana?: {sol: string | null; tokens: Record<string, string | null>};
 };
 
 /** A record past 'quote'/'confirming' means signed bytes or a provider order exist — the screen
@@ -139,7 +153,23 @@ const venueDisclosure = (venueId: string): string => {
  *  non-breaking one — the words around it may still wrap, the time never does. */
 const nonBreakingClock = (d: Date): string => formatClock(d).replace(/ /g, '\u00A0');
 
-export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onShowDepositAddress, onSwitchAsset}: Props) {
+export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onShowDepositAddress, onSwitchAsset, solana}: Props) {
+  // THE V11 DISPATCH: every asset gets the same Convert gesture (uniform IA); the rail picks the
+  // surface. A Solana asset renders the Solana branch (Jupiter, device-direct https) with the
+  // same transparency rules; everything below is the IC rail unchanged. When no Solana venue
+  // serves the asset the branch itself fails closed with honest copy (never a blank form).
+  if (selectedAsset != null && selectedAsset.protocol === 'solana') {
+    return (
+      <SolConvertMode
+        identity={identity}
+        asset={selectedAsset}
+        solana={solana ?? {sol: null, tokens: {}}}
+        onBack={onBack}
+        onShowDepositAddress={onShowDepositAddress}
+        onSwitchAsset={onSwitchAsset}
+      />
+    );
+  }
   const [amountText, setAmountText] = useState('');
   const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
   const [quote, setQuote] = useState<ConvertQuote | null>(null);
@@ -1031,7 +1061,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           <Text style={S.convertHeadlineAmount}>{netStr}</Text>
           <View testID="convert-rate" style={S.convertRateRow}>
             <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, dispOutSym)}</Text>
-            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, dispOutDecimals), dispOutDecimals, dispOutSym)}</Text>
+            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, legs.inDecimals), dispOutDecimals, dispOutSym)}</Text>
           </View>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
@@ -1211,6 +1241,523 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           <Text style={[S.primaryText, !canConfirm && S.disabledText]}>{M.convert.confirmButton}</Text>
         )}
       </Pressable>
+      <View style={S.convertFooting}>
+        <IconSwap size={20} color={C.sub} />
+      </View>
+    </View>
+  );
+}
+
+// --- the SOLANA convert surface (multi-venue readiness V11, 2026-09-15) -------------------------
+// The rail-local pair SOL ↔ USDC(Solana) through the registered solana_amm venue (Jupiter). The
+// IC surface's rules carry over one-for-one: one venue today so no chooser chrome; quote fetched
+// per keystroke DEVICE-DIRECT (no relay hop — keyless https, the opencryptopay shape), rendered
+// VERBATIM (Jupiter's own outAmount/priceImpact/threshold digits, V8: no deriving, no blending);
+// the pre-sign checklist names the venue + its https endpoint + the disclosure; nothing is
+// preselected; the confirm re-quotes and shows a moved-quote review line before adopting a
+// record. What differs is the execution shape: ONE venue-built transaction, signed by the
+// device AFTER the beneficiary check (app/solana/tx.ts), submitted through the same Solana RPC
+// proxy the SOL payment rail uses — the engine (convertResume) drives the record through
+// swapping → settling → done; this component only renders it.
+
+/** Mint → {symbol, decimals} for venue-pair mints: the wrapped-SOL identifier resolves to SOL
+ *  itself (the registry's stable id for the native side), everything else reverse-looks-up the
+ *  SPL registry. Null for unknown mints — the branch fails closed on it. */
+function solAssetOfMint(mint: string): {symbol: string; decimals: number} | null {
+  if (mint === WRAPPED_SOL_MINT_ADDRESS) {
+    return {symbol: WRAPPED_SOL_TOKEN, decimals: SOLANA_TOKENS.SOL.decimals};
+  }
+  const found = Object.entries(SOLANA_TOKENS).find(([, info]) => info.mint === mint);
+  return found != null ? {symbol: found[0], decimals: found[1].decimals} : null;
+}
+
+/** The Solana analog of `resolveLegs`: the registry's own solana_amm row for this mint names the
+ *  pair; the OTHER side of `pair_ledgers` is the destination. Null when no registered venue
+ *  serves the asset (the fail-closed panel renders). */
+function resolveSolLegs(asset: Extract<SelectableAsset, {protocol: 'solana'}>): {
+  inMint: string;
+  outMint: string;
+  inSym: string;
+  outSym: string;
+  inDecimals: number;
+  outDecimals: number;
+} | null {
+  // Native SOL is mint:null in the asset model but WRAPPED-sol in the venue registry — the two
+  // identifiers for the same asset, translated here and only here.
+  const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
+  const venue = solanaAmmVenueForMint(inMint);
+  if (venue == null) return null;
+  const outMint = venue.pair_ledgers.find(m => m !== inMint);
+  if (outMint == null) return null;
+  const inTok = solAssetOfMint(inMint);
+  const outTok = solAssetOfMint(outMint);
+  if (inTok == null || outTok == null) return null;
+  return {inMint, outMint, inSym: inTok.symbol, outSym: outTok.symbol, inDecimals: inTok.decimals, outDecimals: outTok.decimals};
+}
+
+type SolConvertProps = {
+  identity: Identity;
+  asset: Extract<SelectableAsset, {protocol: 'solana'}>;
+  solana: {sol: string | null; tokens: Record<string, string | null>};
+  onBack: () => void;
+  onShowDepositAddress: () => void;
+  onSwitchAsset?: (id: AssetId) => void;
+};
+
+function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, onSwitchAsset}: SolConvertProps) {
+  const [amountText, setAmountText] = useState('');
+  const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
+  const [quote, setQuote] = useState<JupiterQuote | null>(null);
+  const [quoteErr, setQuoteErr] = useState<string | null>(null);
+  const [quoteBusy, setQuoteBusy] = useState(false);
+  const [staleRefreshing, setStaleRefreshing] = useState(false);
+  const [quoteChanged, setQuoteChanged] = useState<{oldAmt: string; newAmt: string} | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmErr, setConfirmErr] = useState<string | null>(null);
+  const [record, setRecord] = useState<ConvertRecord | null>(null);
+  const mountedRef = useRef(true);
+  const recordIdRef = useRef<string | null>(null);
+
+  const legs = resolveSolLegs(asset);
+  const venue = legs != null ? solanaAmmVenueForMint(legs.inMint) : null;
+  const venueName = venue != null ? venueDisplayName(venue.venue_id) : venueDisplayName('jupiter');
+  const balanceRaw = legs == null ? null : legs.inMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.inMint] ?? null;
+  const outHeldRaw = legs == null ? null : legs.outMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.outMint] ?? null;
+
+  // --- engine view (the same shape as the IC surface: newest live/unacknowledged-stuck record,
+  // honored-record lock, subscribe for updates — this screen never runs a private executor).
+  useEffect(() => {
+    mountedRef.current = true;
+    const pick = (records: Record<string, ConvertRecord>) => {
+      const id = recordIdRef.current;
+      if (id != null) {
+        setRecord(records[id] ?? null);
+        return;
+      }
+      const live = Object.values(records)
+        .filter(r => isLiveRecord(r) || (r.step === 'stuck' && r.acknowledgedStuckAtMs == null))
+        .sort((a, b) => b.createdAtMs - a.createdAtMs)[0] ?? null;
+      if (live != null) recordIdRef.current = live.id;
+      setRecord(live);
+    };
+    pick(convertResumeSnapshot());
+    const unsub = subscribeConvertRecords((records) => {
+      if (mountedRef.current) pick(records);
+    });
+    return () => {
+      unsub();
+      mountedRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const liveRecord = record != null && isLiveRecord(record);
+  const showRecord = record != null && (liveRecord || record.step === 'stuck' || isTerminalConvertStep(record.step));
+
+  // --- the quote: device-direct per keystroke. Slippage IS a dep here (unlike IC): Jupiter's
+  // route + threshold are computed against it, so a changed chip must re-ask the venue.
+  useEffect(() => {
+    if (legs == null || venue == null || showRecord) return;
+    const parsed = parseUserAmount(amountText, legs.inDecimals);
+    if (!parsed.ok || parsed.raw === '0') {
+      setQuote(null); setQuoteErr(null); setQuoteBusy(false); setQuoteChanged(null);
+      return;
+    }
+    let cancelled = false;
+    setQuoteBusy(true);
+    fetchJupiterQuote(venue, legs.inMint, legs.outMint, parsed.raw, slippageBps)
+      .then(res => {
+        if (cancelled) return;
+        if (res.ok) {
+          setQuote(res.quote); setQuoteErr(null);
+        } else {
+          setQuote(null);
+          setQuoteErr(res.code === 'refused' ? M.convert.errors.quoteRefused(venueName) : M.convert.errors.quoteUnreachable(venueName));
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setQuote(null);
+        setQuoteErr(M.convert.errors.quoteUnreachable(venueName));
+      })
+      .finally(() => {
+        if (!cancelled) setQuoteBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amountText, legs?.inMint, legs?.outMint, slippageBps, showRecord]);
+
+  // --- stale refresh (same 30s clock + test seam as IC; keeps the OLD quote on failure).
+  useEffect(() => {
+    if (legs == null || venue == null || quote == null || showRecord) return;
+    const tick = setInterval(() => {
+      if (!isQuoteStale(quote)) return;
+      setStaleRefreshing(true);
+      fetchJupiterQuote(venue, legs.inMint, legs.outMint, quote.inAmount, slippageBps)
+        .then(res => {
+          if (res.ok && mountedRef.current) {
+            setQuote(res.quote);
+            if (res.quote.outAmount !== quote.outAmount) {
+              setQuoteChanged({oldAmt: quote.outAmount, newAmt: res.quote.outAmount});
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (mountedRef.current) setStaleRefreshing(false);
+        });
+    }, 1000);
+    return () => clearInterval(tick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote, slippageBps, showRecord]);
+
+  const parsedAmount = parseUserAmount(amountText, legs != null ? legs.inDecimals : 0);
+  const amountRaw = parsedAmount.ok ? parsedAmount.raw : null;
+  const balanceN = balanceRaw != null && /^\d+$/.test(balanceRaw) ? BigInt(balanceRaw) : null;
+  const amountN = amountRaw != null && /^\d+$/.test(amountRaw) ? BigInt(amountRaw) : 0n;
+  // The venue tx's network fee is paid in SOL on top of the swapped amount — when SOL is the
+  // INPUT the honest available figure is the balance itself (the fee lives under the same SOL;
+  // a dust edge fails on-chain and lands in the honest failure state, never a false pass).
+  const insufficient = legs != null && amountN > 0n && balanceN != null && amountN > balanceN;
+  const canConfirm = legs != null && quote != null && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n;
+
+  const onConfirm = async () => {
+    if (legs == null || venue == null || amountRaw == null) return;
+    setConfirmBusy(true); setConfirmErr(null);
+    try {
+      // Re-quote at the confirm gesture (the IC rule): a moved output gets a review line, never
+      // a silent submit on stale digits.
+      const fresh = await fetchJupiterQuote(venue, legs.inMint, legs.outMint, amountRaw, slippageBps);
+      if (!fresh.ok) {
+        setConfirmErr(M.convert.errors.quoteUnreachable(venueName));
+        return;
+      }
+      if (quote != null && fresh.quote.outAmount !== quote.outAmount) {
+        setQuote(fresh.quote);
+        setQuoteChanged({oldAmt: quote.outAmount, newAmt: fresh.quote.outAmount});
+        return;
+      }
+      const rec = await prepareSolanaConvertRecord({
+        secretHex: identity.secretHex,
+        quote: fresh.quote,
+        inAsset: {symbol: legs.inSym, mint: legs.inMint, decimals: legs.inDecimals},
+        outAsset: {symbol: legs.outSym, mint: legs.outMint, decimals: legs.outDecimals},
+      });
+      recordIdRef.current = rec.id;
+      setRecord(rec);
+      await adoptConvertRecord(rec);
+    } catch (e) {
+      setConfirmErr(e instanceof Error ? e.message : M.convert.errors.quoteUnavailable('unknown'));
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
+
+  // The zero-balance fund gate, Solana side: the SAME shape + copy family as IC — land the
+  // asset's own deposit surface (Receive ▸ My address works for Solana rows too), or point at
+  // the OTHER leg when the user already holds it there (the pair's other side is the only
+  // account that could ever help — the same argument as the IC gate).
+  if (legs != null && balanceN === 0n) {
+    const otherHeld = outHeldRaw != null && /^\d+$/.test(outHeldRaw) && BigInt(outHeldRaw) > 0n
+      ? fmtAssetCompact(outHeldRaw, legs.outDecimals, legs.outSym)
+      : null;
+    return (
+      <View testID="convert-screen" style={S.convertWrap}>
+        <ConvertHeader title={M.convert.sol.heading(legs.inSym, legs.outSym)} onBack={onBack} />
+        <InstructionPanel
+          testID="convert-fund"
+          title={M.pay.fundTitle(legs.inSym)}
+          body={M.convert.fundBody(legs.inSym, M.wallet.tab.receive, M.receive.myAddress)}
+          primaryLabel={M.pay.showMyAddress(legs.inSym)}
+          onPrimary={onShowDepositAddress}
+        />
+        {otherHeld != null ? (
+          <View testID="convert-fund-other">
+            <Text testID="convert-fund-other-holds" style={S.convertMetaLine}>
+              {M.convert.fundOtherHolds(otherHeld, legs.inSym)}
+            </Text>
+            {onSwitchAsset ? (
+              <Pressable
+                testID="btn-convert-fund-other"
+                style={S.linkBtn}
+                onPress={() => onSwitchAsset(`solana:${legs.outSym}`)}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.fundOtherSwitch(legs.outSym)}
+                accessibilityState={{disabled: false}}
+              >
+                <Text style={S.linkText}>{M.convert.fundOtherSwitch(legs.outSym)}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+        <View style={S.convertFooting}>
+          <IconSwap size={20} color={C.sub} />
+        </View>
+      </View>
+    );
+  }
+
+  if (legs == null || venue == null) {
+    return (
+      <View testID="convert-unavailable" style={S.convertWrap}>
+        <ConvertHeader title={M.convert.actionConvert} onBack={onBack} />
+        <Text testID="convert-unavailable-title" style={S.convertUnavailableTitle}>
+          {M.convert.sol.unavailableTitle(asset.symbol)}
+        </Text>
+        <Text testID="convert-unavailable-body" style={S.convertUnavailableBody}>
+          {M.convert.sol.unavailableBody(asset.symbol, venueName)}
+        </Text>
+        <View style={S.convertFooting}>
+          <IconSwap size={20} color={C.sub} />
+        </View>
+      </View>
+    );
+  }
+
+  if (showRecord && record != null) {
+    return <SolStatePanel record={record} onBack={onBack} />;
+  }
+
+  const fmtIn = (raw: string) => fmtAssetCompact(raw, legs.inDecimals, legs.inSym);
+  const fmtOut = (raw: string) => fmtAssetCompact(raw, legs.outDecimals, legs.outSym);
+  const impact = quote?.priceImpactPct ?? null;
+  const outEstimate = quote != null ? fmtOut(quote.outAmount) : null;
+  const outFloor = quote != null ? fmtOut(quote.otherAmountThreshold) : null;
+
+  return (
+    <View testID="convert-screen" style={S.convertWrap}>
+      <ConvertHeader title={M.convert.sol.heading(legs.inSym, legs.outSym)} onBack={onBack} />
+
+      <Text style={S.convertAmountLabel}>{M.convert.amountLabel(legs.inSym)}</Text>
+      <View style={S.amountRow}>
+        <TextInput
+          testID="convert-amount"
+          style={S.amountInput}
+          value={amountText}
+          onChangeText={setAmountText}
+          keyboardType="decimal-pad"
+          autoCorrect={false}
+          autoCapitalize="none"
+          placeholderTextColor={C.sub}
+        />
+      </View>
+      {balanceRaw != null ? (
+        <Text testID="convert-balance" style={S.convertMetaLine}>{M.convert.balanceLine(fmtIn(balanceRaw))}</Text>
+      ) : null}
+      {insufficient && balanceN != null ? (
+        <Text testID="convert-insufficient" style={S.err}>
+          {M.convert.insufficientLine(fmtIn(amountN.toString()), fmtIn(balanceN.toString()))}
+        </Text>
+      ) : null}
+
+      {/* The decision number + attribution — the IC headline card's exact shape, carrying
+          Jupiter's OWN digits (outAmount verbatim; the rate is the only derived figure, the
+          same BigInt division the IC card does). */}
+      {quote != null ? (
+        <View testID="convert-headline" style={S.convertHeadlineCard}>
+          <Text style={S.convertHeadlineLabel}>{M.convert.receiveHeadline}</Text>
+          <Text style={S.convertHeadlineAmount}>{outEstimate}</Text>
+          <View testID="convert-rate" style={S.convertRateRow}>
+            <Text style={S.convertRateLabel}>{M.convert.rateLabel(legs.inSym, legs.outSym)}</Text>
+            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(quote.outAmount, quote.inAmount, legs.inDecimals), legs.outDecimals, legs.outSym)}</Text>
+          </View>
+          <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
+            {M.convert.quoteSource(nonBreakingClock(new Date(quote.fetchedAtMs)), venueName)}
+          </Text>
+          {staleRefreshing ? (
+            <Text testID="convert-stale" style={S.convertHeadlineMeta}>{M.convert.staleRefreshing}</Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* The pre-sign checklist: same rules as IC. The V8 impact exception flips HERE — Jupiter
+          DOES publish a price-impact figure, so it renders verbatim (its absence on IC is
+          because the IC venues publish none, not a blanket rule). */}
+      <View style={S.convertChecklistCard}>
+        <View testID="convert-counterparty">
+          <Text style={S.convertChecklistLine}>{M.convert.sol.counterparty(venueName)}</Text>
+          <Text testID="convert-pool-principal" style={S.convertPrincipal}>{venue.endpoint}</Text>
+          <Text style={S.convertChecklistLine}>{M.convert.sol.counterpartySigns}</Text>
+        </View>
+        <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
+          {venueDisclosure(venue.venue_id)}
+        </Text>
+        {impact != null ? (
+          <Text testID="convert-sol-impact" style={S.convertChecklistLine}>
+            {M.convert.sol.priceImpactLine(impact, venueName)}
+          </Text>
+        ) : null}
+        {/* Fee census, Solana side: the ROUTE's fees are inside the quoted output (Jupiter
+            publishes no separate tier through this keyless integration — platformFee null,
+            measured 2026-09-14), the network fee is quoted per-tx at prepare and shows on the
+            record panels, and dpay's line is the same line everywhere. */}
+        <Text testID="convert-sol-fees-note" style={S.convertChecklistLine}>{M.convert.sol.quoteFeesNote}</Text>
+        <Text testID="convert-dpay-fee" style={S.convertChecklistLine}>{M.convert.dpayFeeLine}</Text>
+        <View testID="convert-slippage">
+          <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
+          <View
+            testID="convert-slippage-chips"
+            style={S.convertSlippageRow}
+            accessibilityRole="radiogroup"
+            accessibilityLabel={M.convert.slippageLabel}>
+            {CONVERT_SLIPPAGE_BPS_OPTIONS.map((bps) => (
+              <Pressable
+                key={bps}
+                testID={`convert-bps-${bps}`}
+                style={[S.convertSlippageChip, slippageBps === bps && S.convertSlippageChipOn]}
+                onPress={() => setSlippageBps(bps)}
+                accessibilityRole="radio"
+                accessibilityState={{selected: slippageBps === bps}}
+                accessibilityLabel={formatBps(bps)}>
+                <Text style={[S.convertSlippageChipText, slippageBps === bps && S.convertSlippageChipTextOn]}>{formatBps(bps)}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+        {/* The floor is the VENUE'S OWN otherAmountThreshold — Jupiter computed it against the
+            chosen slippage; dpay derives nothing here (V8). */}
+        <Text testID="convert-min-out" style={S.convertMinOutLine}>
+          {M.convert.minReceiveLine(outFloor ?? '', formatBps(slippageBps))}
+        </Text>
+        <Text testID="convert-refusal" style={S.convertChecklistLine}>
+          {M.convert.sol.refusalLine(legs.inSym)}
+        </Text>
+        <Text testID="convert-net" style={S.convertChecklistLine}>
+          {M.convert.netEndStateLine(outEstimate ?? '')}
+        </Text>
+        {quoteChanged != null ? (
+          <Text testID="convert-quote-changed" style={S.convertChecklistWarn}>
+            {M.convert.quoteChanged(fmtOut(quoteChanged.oldAmt), fmtOut(quoteChanged.newAmt))}
+          </Text>
+        ) : null}
+      </View>
+
+      {quoteErr != null ? (
+        <Text testID="convert-quote-err" style={S.err}>{quoteErr}</Text>
+      ) : null}
+      {confirmErr != null ? (
+        <Text testID="convert-confirm-err" style={S.err}>{confirmErr}</Text>
+      ) : null}
+
+      <Pressable
+        testID="btn-convert-confirm"
+        style={[S.primary, !canConfirm && S.disabledFlat]}
+        onPress={() => void onConfirm()}
+        disabled={!canConfirm}
+        accessibilityRole="button"
+        accessibilityState={{disabled: !canConfirm}}
+        accessibilityLabel={M.convert.confirmButton}>
+        {confirmBusy || quoteBusy ? (
+          <View style={S.convertBtnBusyRow}>
+            <ActivityIndicator color={C.card} />
+            <Text style={S.primaryText}>{M.convert.confirmButton}</Text>
+          </View>
+        ) : (
+          <Text style={[S.primaryText, !canConfirm && S.disabledText]}>{M.convert.confirmButton}</Text>
+        )}
+      </Pressable>
+      <View style={S.convertFooting}>
+        <IconSwap size={20} color={C.sub} />
+      </View>
+    </View>
+  );
+}
+
+/** The Solana record view: the §4 machine's Solana-shaped states only (swapping → settling →
+ *  done, with pending_withdrawal/failed_refunded/stuck for the honest edges). Same rules as
+ *  StatePanel: it renders the engine's record — the numbers are the venue's own digits, the
+ *  payout shown on done is the REALIZED chain credit (never the estimate). */
+function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (record.step === 'stuck' || record.step === 'pending_withdrawal') {
+      const t = setInterval(() => forceTick(n => n + 1), 30_000);
+      return () => clearInterval(t);
+    }
+    return;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record.step]);
+
+  const venueName = venueDisplayName(record.venueId);
+  const outDec = record.outDecimals ?? 8;
+  const fmtOut = (raw: string) => fmtAssetCompact(raw, outDec, record.outSymbol);
+  const fmtIn = (raw: string) => fmtAssetCompact(raw, record.inDecimals ?? 8, record.inSymbol);
+  const solFeeLine = record.solFeeLamports != null
+    ? M.convert.sol.solFeeLine(fmtAssetCompact(record.solFeeLamports, SOLANA_TOKENS.SOL.decimals, WRAPPED_SOL_TOKEN))
+    : null;
+
+  return (
+    <View testID="convert-state" style={S.convertWrap}>
+      <ConvertHeader title={M.convert.sol.heading(record.inSymbol, record.outSymbol)} onBack={onBack} />
+
+      {record.step === 'swapping' ? (
+        <View testID="convert-swapping">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.swappingTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.swappingBody(venueName)}</Text>
+        </View>
+      ) : null}
+      {record.step === 'settling' ? (
+        <View testID="convert-settling">
+          <ActivityIndicator size="large" color={C.brandText} />
+          <Text style={S.convertStateTitle}>{M.convert.settlingTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.settlingBody(record.outSymbol)}</Text>
+        </View>
+      ) : null}
+      {record.step === 'done' ? (
+        <View testID="convert-done">
+          <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
+          {/* The realized chain credit — the record's outAmountNet (filled by the driver from
+              the transaction's own token-balance delta), the venue floor only as the fallback. */}
+          <Text style={S.convertStateBody}>{M.convert.doneBody(fmtOut(record.outAmountNet ?? record.expectedNet))}</Text>
+          {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
+        </View>
+      ) : null}
+      {record.step === 'pending_withdrawal' ? (
+        <View testID="convert-pending">
+          <Text style={S.convertStateTitle}>{M.convert.pendingTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.sol.pendingBody}</Text>
+          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+        </View>
+      ) : null}
+      {record.step === 'failed_refunded' ? (
+        <View testID="convert-failed">
+          <Text style={S.convertStateTitle}>{M.convert.failedTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.sol.failedBody(record.inSymbol, venueName, record.failureDetail ?? '')}</Text>
+        </View>
+      ) : null}
+      {record.step === 'stuck' ? (
+        <View testID="convert-stuck">
+          <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
+          <Text style={S.convertStateBody}>{M.convert.stuckBody}</Text>
+          {/* What was signed, restated: the amount in and the VENUE'S own floor (expectedNet is
+              Jupiter's otherAmountThreshold frozen at prepare — not a re-derived figure). */}
+          <Text style={S.convertStateBody}>{M.convert.stuckSigned(fmtIn(record.amountIn), fmtOut(record.expectedNet), venueName)}</Text>
+          <Text style={S.convertStateMeta}>{M.convert.stuckWatching}</Text>
+          {record.acknowledgedStuckAtMs == null ? (
+            <Pressable
+                testID="btn-convert-stuck-ack"
+                style={S.primary}
+                onPress={() => {
+                  acknowledgeStuckRecord(record.id);
+                }}
+                accessibilityRole="button"
+              >
+                <Text style={S.primaryText}>{M.convert.stuckAcknowledge}</Text>
+              </Pressable>
+            ) : (
+              <Text style={S.convertStateMeta}>{M.convert.stuckAcknowledged}</Text>
+            )}
+        </View>
+      ) : null}
+      {/* The fee census on every state panel (the IC stuck panel's rule): the realized network
+          fee quoted by the chain before signing, and dpay's nothing. */}
+      {solFeeLine != null ? (
+        <Text testID="convert-sol-fee" style={S.convertMetaLine}>{solFeeLine}</Text>
+      ) : null}
+      <Text testID="convert-dpay-fee" style={S.convertMetaLine}>{M.convert.dpayFeeLine}</Text>
       <View style={S.convertFooting}>
         <IconSwap size={20} color={C.sub} />
       </View>
@@ -1451,13 +1998,16 @@ function resolveLegs(catalog: CurrencyDescriptor[], asset: Extract<SelectableAss
   };
 }
 
-/** price(out) per 1 unit of in, scaled to the OUTPUT ledger's own decimals via BigInt (exact,
- *  floor) — the scale is threaded in from the catalog row, never a hardcoded 8. */
-function scaledRate(outGross: string, amountIn: string, outDecimals: number): string {
+/** price(out) per 1 DISPLAY unit of in, as raw units at the OUTPUT ledger's own scale, via BigInt
+ *  (exact, floor): (out_raw / in_raw) × 10^inDecimals. The caller renders it with
+ *  fmtAssetCompact(…, outDecimals, outSym). With equal decimals (every IC pair, 8/8) this is the
+ *  plain ratio the IC card always had; 9→6 (SOL→USDC) needs the IN scale named — a one-scale
+ *  formula reads 1000× off on cross-decimal pairs. */
+function scaledRate(outGross: string, amountIn: string, inDecimals: number): string {
   const out = BigInt(outGross);
   const inn = BigInt(amountIn);
   if (inn <= 0n) return '0';
-  return ((out * 10n ** BigInt(outDecimals)) / inn).toString();
+  return ((out * 10n ** BigInt(inDecimals)) / inn).toString();
 }
 
 /** The venue's own fee tier, in ITS unit (millionths of the trade: 3000 = 0.30%), rendered as a

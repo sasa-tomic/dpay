@@ -35,6 +35,12 @@ export const convertDe: ConvertMessages = {
       // vom Nutzer signiert, dpay nicht Partei.
       icpswap: venue =>
         `Der Tausch läuft auf dem eigenen Pool-Vertrag von ${venue} ab. Jeder Aufruf wird von dir signiert und direkt übermittelt — ${venue} führt den Tausch aus, und dpay ist nicht daran beteiligt.`,
+      // disclosure_key 'jupiter' (der Key der Registry für die Solana-Venue-Zeile): die
+      // venue-spezifischen Fakten sind, WAS Jupiter ist — ein autonomer On-Chain-Aggregator —
+      // und dass der Kurs der eigene ist, unverändert angezeigt, während dpay ganz außerhalb
+      // des Tauschs bleibt. Ton wie bei icpswap: benennen, Signer nennen, Parteischeidung.
+      jupiter: venue =>
+        `${venue} ist ein autonomer On-Chain-Aggregator auf Solana — er wählt die Route, und die Route führt sie aus. Diese Wallet signiert die von ${venue} gebaute Transaktion, und der Kurs ist der eigene von ${venue}, unverändert so angezeigt, wie er ihn veröffentlicht. dpay ist nicht daran beteiligt.`,
     },
     generic: venue =>
       `Diese Umwandlung wird von ${venue} ausgeführt. Jeder Aufruf wird von dir signiert und direkt übermittelt — dpay ist nicht daran beteiligt.`,
@@ -50,6 +56,26 @@ export const convertDe: ConvertMessages = {
   venueChooserLabel: 'Handelsplatz',
   venueNoneSelected: 'Wähle einen Handelsplatz, um seinen vollständigen Kurs zu sehen und fortzufahren.',
   venueRowQuote: amount => `Kurs: ${amount}`,
+
+  sol: {
+    heading: (inSym, outSym) => `${inSym} in ${outSym} umwandeln (Solana)`,
+    unavailableTitle: sym => `${sym} kann noch nicht umgewandelt werden`,
+    unavailableBody: (sym, venue) =>
+      `Umwandlungen für Solana-Assets laufen über eine registrierte Solana-Venue (heute ${venue}). Keine Venue bedient derzeit ${sym} — nichts wurde angeboten, nichts hat sich bewegt.`,
+    counterparty: venue =>
+      `Ausgeführt von ${venue} — ein autonomer On-Chain-Aggregator auf Solana, kein lizenzierter Anbieter und nicht dpay.`,
+    counterpartySigns: 'Dein Telefon signiert die Transaktion, die die Venue gebaut hat — niemand sonst signiert irgendetwas.',
+    priceImpactLine: (pct, venue) => `Preisauswirkung: ${pct} (eigene Angabe von ${venue})`,
+    platformFeeLine: (pct, venue) => `${venue}-Integratorgebühr: ${pct}`,
+    solFeeLine: fee => `Solana-Netzwerkgebühr: ${fee} (an das Netzwerk gezahlt, nicht an die Venue, nicht an dpay)`,
+    refusalLine: sym =>
+      `Wenn der Preis über das Minimum hinaus wandert, scheitert die Transaktion on-chain: Dein ${sym} bleibt in deiner Wallet, und nichts anderes wurde signiert.`,
+    quoteFeesNote: 'Die Routen-Gebühren stecken bereits im angebotenen Ausgabebetrag — oben kommt nichts hinzu.',
+    pendingBody:
+      'Die Swap-Transaktion liegt im Solana-Netzwerk. Dieser Bildschirm beobachtet die Chain selbst und löst sich von allein auf — kein Neuladen, kein erneuter Versuch nötig.',
+    failedBody: (sym, venue, detail) =>
+      `${venue}s Swap-Transaktion ist gescheitert${detail ? ` (${detail})` : ''}. Auf Solana bewegt eine gescheiterte Transaktion niemals Gelder — dein ${sym} liegt, wo es lag.`,
+  },
 
   fundBody: (sym, receiveTab, myAddress) =>
     `Diese Wallet hat kein ${sym}. Um ${sym} umzutauschen, empfange zuerst ${sym} an deiner Adresse: öffne unten „${receiveTab}“ und wähle „${myAddress}“.`,

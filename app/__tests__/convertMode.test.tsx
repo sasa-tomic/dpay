@@ -922,12 +922,14 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
 
   test('the rate line scales to the OUTPUT ledger\'s own decimals — 6 here, not a hardcoded 8', async () => {
     const tree = await mountConvert('250000000', '1', {catalog: CATALOG6});
-    // 41194138 gross for 100000000 in, scaled at the output ledger's SIX decimals:
-    // (41194138 × 10^6) / 10^8 = 411941 raw ⇒ "0.411941 VCHF". A literal-8 scaling instead
-    // yields 41194138 raw, which at this catalog's 6 decimals renders "41.194138 VCHF".
-    const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 6n) / BigInt(QUOTE.amountIn);
+    // 41194138 gross for 100000000 in (= 1.0 ICP at 8 decimals): the rate is out-per-display-in,
+    // so the IN scale normalizes the raw ratio — (41194138 × 10^8) / 10^8 = 41194138 raw ⇒
+    // "41.194138 VCHF" rendered at the output ledger's SIX decimals. A literal-8 RENDERING
+    // instead yields "0.41194138 VCHF", and an OUT-scale normalization (the pre-2026-09-15
+    // latent form, exposed by the first cross-decimal pair SOL 9 → USDC 6) reads 1000× off.
+    const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 8n) / BigInt(QUOTE.amountIn);
     expect(textOf(tree, 'convert-rate')).toContain(fmtAssetCompact(scaled.toString(), 6, 'VCHF'));
-    expect(textOf(tree, 'convert-rate')).toContain('0.411941 VCHF');
+    expect(textOf(tree, 'convert-rate')).toContain('41.194138 VCHF');
   });
 
   test('a record with frozen decimals renders its state money at THEM (approving, input side)', async () => {

@@ -77,6 +77,25 @@ import {
   type VenueEntry,
 } from './config/venues';
 import {saveTxNote} from './services/txNotes';
+import {fetchJupiterSwapTx, type JupiterQuote} from './services/jupiter';
+import {deriveSolanaKeypair} from './solana/identity';
+import {deriveAta} from './solana/spl';
+import {
+  bytesToHex,
+  decodeVenueSwapTx,
+  hexToBytes,
+  signVenueSwapTx,
+  verifyVenueSwapTxBeneficiaries,
+} from './solana/tx';
+import {WRAPPED_SOL_MINT_ADDRESS} from './solana/tokens';
+import {
+  getSolBlockHeight,
+  getSolNativeCredit,
+  getSolSignatureStatus,
+  getSolTokenCredit,
+  quoteSolMessageFee,
+  submitRawSolTx,
+} from './solana';
 import {M} from './i18n';
 
 /** The bundled registry's mainnet IC-AMM venue id — DERIVED, never a literal, so this module
@@ -210,7 +229,7 @@ export async function loadVenueRegistry(
             v != null && typeof v === 'object'
               && typeof (v as VenueEntry).venue_id === 'string'
               && typeof (v as VenueEntry).display_name === 'string'
-              && ((v as VenueEntry).kind === 'ic_amm' || (v as VenueEntry).kind === 'cefi')
+              && ((v as VenueEntry).kind === 'ic_amm' || (v as VenueEntry).kind === 'cefi' || (v as VenueEntry).kind === 'solana_amm')
               && typeof (v as VenueEntry).endpoint === 'string'
               && Array.isArray((v as VenueEntry).pair_ledgers)
               && (v as VenueEntry).pair_ledgers.length === 2
@@ -267,7 +286,9 @@ export async function deriveConvertMath(
 
 /** Is the quote stale (auto-refresh trigger, spec §5: >30s)? Test-shrinkable via
  *  `__DPAY_TEST_CONVERT_STALE_MS` (the e2e flow must not sleep 30 real seconds). */
-export function isQuoteStale(quote: ConvertQuote, nowMs: number = Date.now()): boolean {
+/** Staleness is a property of the ATTRIBUTION INSTANT, whatever the venue — the param is the
+ *  structural minimum so the Solana surface (JupiterQuote) reuses the same clock + test seam. */
+export function isQuoteStale(quote: {fetchedAtMs: number}, nowMs: number = Date.now()): boolean {
   const seam = (globalThis as unknown as {__DPAY_TEST_CONVERT_STALE_MS?: number}).__DPAY_TEST_CONVERT_STALE_MS;
   const threshold = seam ?? CONVERT_STALE_MS;
   return nowMs - quote.fetchedAtMs > threshold;
@@ -301,13 +322,36 @@ export type ProviderRef = {
   statusUrl?: string;
 };
 
+/** ONE signed Solana transaction — the Solana rail's widening of the leg vocabulary (Jupiter,
+ *  2026-09-15; the per-leg protocol discriminator design: ONE record shape, per-leg protocol).
+ *  A Solana venue does not hand the wallet two update calls to sign — it hands it ONE
+ *  pre-assembled transaction around its route, so ONE leg is the whole truth. Field-for-field
+ *  the SignedLeg analogs: `signedTxHex` is the envelopeHex (the only bytes retries re-submit —
+ *  identical, chain-deduped), `signature` is the requestIdHex (the on-chain identity), and
+ *  `lastValidBlockHeight` is the expiresAtMs (the venue-declared death of the tx's
+ *  recent-blockhash: past that height the bytes can never land, and recovery NEVER resubmits
+ *  them — it only watches). */
+export type SolanaSwapLeg = {
+  protocol: 'solana';
+  /** The SIGNED transaction bytes, lowercase hex. Frozen at prepare; never re-signed. */
+  signedTxHex: string;
+  /** The transaction's base58 signature — its on-chain identity and dedup key. */
+  signature: string;
+  /** The last block height at which the tx's blockhash is still valid (Jupiter's own figure). */
+  lastValidBlockHeight: number;
+};
+
 export type ConvertRecord = {
   id: string;
   createdAtMs: number;
   step: ConvertStep;
   venueId: string; // WHICH venue executes (registry key — facts are looked up, never assumed)
-  inCurrency: number;
-  outCurrency: number;
+  /** IC-catalog currency ids of the in/out assets. Absent on a Solana-shaped record
+   *  (`solanaLeg`): the Solana rail has no numeric catalog currency — `inLedger`/`outLedger`
+   *  carry the MINTS and the symbols carry the display. */
+  inCurrency?: number;
+  outCurrency?: number;
+  /** IC records: ledger principals. Solana records: MINTS (wrapped-SOL for native SOL). */
   inLedger: string;
   outLedger: string;
   inSymbol: string; // backing native symbol for copy ("which asset the user holds")
@@ -319,13 +363,21 @@ export type ConvertRecord = {
    *  registry serves today is 8-decimal anyway). */
   inDecimals?: number;
   outDecimals?: number;
-  amountIn: string; // raw e8s the venue pulls
+  amountIn: string; // raw e8s the venue pulls (raw in-units for Solana — lamports for SOL)
   expectedGross: string; // venue quote at confirm (gross)
-  expectedNet: string; // gross − output fee (the end-state line)
+  expectedNet: string; // gross − output fee (the end-state line); on Solana: the venue's own min-out floor
   inFee: string;
   outFee: string;
   slippageBps: number;
   legs: SignedLeg[]; // the signed updates, in submission order; EMPTY for a CeFi-shaped record
+  /** The Solana widening (2026-09-15): ONE signed Solana swap transaction, present iff the
+   *  record is Solana-shaped (mutually exclusive with legs>0, legPlan, and providerRef —
+   *  hydration pins all three). `inFee`/`outFee` are '0' on this shape (no ledger fees); the
+   *  Solana network fee is a separate fact (`solFeeLamports`, paid in SOL by the fee payer). */
+  solanaLeg?: SolanaSwapLeg;
+  /** The realized Solana network fee quote for the swap tx (lamports, SOL-paid), frozen at
+   *  prepare — the honest fee line on the Solana done/failure screens. */
+  solFeeLamports?: string;
   /** The multi-hop widening (2026-09-14 spec §3): a parallel per-leg plan, ADDITIVE — direct
    *  2-leg records carry none and keep their exact historical bytes and behavior. Present
    *  iff the record was prepared as a route; same length as `legs`. */
@@ -410,6 +462,15 @@ const PROVIDER_ONLY_STEPS: ReadonlySet<ConvertStep> = new Set([
   'quote_expired', 'provider_refunded',
 ]);
 
+/** The steps a Solana-shaped record (`solanaLeg`) may sit at: the Solana driver's own
+ *  vocabulary, start to terminal. There is no approve state (nothing to approve — the venue's
+ *  tx is the whole route) and no provider states. Prepare lands at `swapping` with the leg
+ *  already signed; anything else driverless fails hydration, same rule as the other two
+ *  vocabularies. */
+const SOLANA_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
+  'swapping', 'settling', 'done', 'pending_withdrawal', 'failed_refunded', 'stuck',
+]);
+
 /** The min-out a record's swap leg signed, re-derived from the record's OWN frozen quote and
  *  slippage through the compiled core — deterministic, so this is the same figure
  *  `prepareConvertRecord` baked into the arg, not a new opinion. */
@@ -484,9 +545,14 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   };
   if (typeof r.createdAtMs !== 'number') return null;
   rec.createdAtMs = r.createdAtMs;
-  if (typeof r.inCurrency !== 'number' || typeof r.outCurrency !== 'number') return null;
-  rec.inCurrency = r.inCurrency;
-  rec.outCurrency = r.outCurrency;
+  // IC records carry numeric catalog currency ids; a Solana-shaped record has none to carry
+  // (the Solana rail keys assets by mint + symbol). Parsed when present, REQUIRED below for
+  // the IC shapes — the discriminator is `solanaLeg`, parsed after the legs.
+  if (r.inCurrency != null || r.outCurrency != null) {
+    if (typeof r.inCurrency !== 'number' || typeof r.outCurrency !== 'number') return null;
+    rec.inCurrency = r.inCurrency;
+    rec.outCurrency = r.outCurrency;
+  }
   if (typeof r.slippageBps !== 'number') return null;
   rec.slippageBps = r.slippageBps;
   if (!CONVERT_STEPS.includes(r.step as ConvertStep)) return null;
@@ -560,6 +626,30 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     if (typeof r.hopTx === 'string') rec.hopTx = r.hopTx;
     if (typeof r.feeMillionths === 'number') rec.feeMillionths = r.feeMillionths;
   } else if (legs.length > 0 && legs.length !== 2) return null;
+  // The SOLANA WIDENING (2026-09-15): `solanaLeg` — ONE signed Solana transaction. Mutually
+  // exclusive with legs>0, legPlan, and providerRef (a record is exactly ONE of the three
+  // shapes); when present, `legs` must be empty and the step must be in the Solana driver's
+  // vocabulary, or the resume engine would arm a poll no driver can advance.
+  let solanaLeg: SolanaSwapLeg | undefined;
+  if (r.solanaLeg != null) {
+    if (legs.length > 0 || legPlan != null) return null;
+    const s = r.solanaLeg as Record<string, unknown>;
+    if (!s || typeof s !== 'object' || s.protocol !== 'solana') return null;
+    if (typeof s.signedTxHex !== 'string' || s.signedTxHex.length === 0) return null;
+    if (typeof s.signature !== 'string' || s.signature.length === 0) return null;
+    if (typeof s.lastValidBlockHeight !== 'number' || !Number.isSafeInteger(s.lastValidBlockHeight) || s.lastValidBlockHeight <= 0) return null;
+    if (!SOLANA_CONVERT_STEPS.has(rec.step)) return null;
+    solanaLeg = {
+      protocol: 'solana',
+      signedTxHex: s.signedTxHex,
+      signature: s.signature,
+      lastValidBlockHeight: s.lastValidBlockHeight,
+    };
+    rec.solanaLeg = solanaLeg;
+    if (typeof r.solFeeLamports === 'string' && /^\d+$/.test(r.solFeeLamports)) {
+      rec.solFeeLamports = r.solFeeLamports;
+    }
+  }
   // A legs>0 record parked at `quote`/`confirming` is a shape no driver can advance: the
   // executor only knows approving→approved→swapping→settling→pending_withdrawal, so the resume
   // engine would re-arm a no-op drive forever with no escape (the unreachable-by-construction
@@ -571,7 +661,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // executor's transition set never visits those steps and the provider driver never picks a
   // record with legs — so the same eternal no-op poll would arm. Refuse it the same way.
   if (legs.length > 0 && PROVIDER_ONLY_STEPS.has(rec.step)) return null;
-  if (legs.length === 0) {
+  if (legs.length === 0 && solanaLeg == null) {
     const pr = r.providerRef;
     if (!pr || typeof pr !== 'object' || typeof (pr as Record<string, unknown>).orderId !== 'string') return null;
     const statusUrl = (pr as Record<string, unknown>).statusUrl;
@@ -590,6 +680,11 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     'expectedGross', 'expectedNet', 'inFee', 'outFee'] as const) {
     if (rec[k] == null) return null;
   }
+  // The IC shapes (legs>0 or providerRef) name their assets by numeric catalog currency — the
+  // ledger-watch probes key on those ids. A Solana record is exempt (mint + symbol are its
+  // identifiers); every legacy/historical IC record always carried them, so this cannot orphan
+  // real history.
+  if (solanaLeg == null && (rec.inCurrency == null || rec.outCurrency == null)) return null;
   if (rec.id !== id) return null;
   const full = rec as ConvertRecord;
   out[id] = full;
@@ -1028,6 +1123,10 @@ export async function probeConvertSettlement(args: {
   excludeRefundTx?: ReadonlySet<string>;
 }): Promise<SettleWatch> {
   const {relayUrl, publicHex, myPrincipalLower, record} = args;
+  // Solana-shaped records have no numeric catalog currency to key the ledger watch on (and
+  // their settlement is the chain's own signature status, watched by the Solana driver). The
+  // IC probes fail closed here rather than query a `currency=undefined` window.
+  if (record.outCurrency == null || record.inCurrency == null) return null;
   const exclude = args.excludeOutTx ?? new Set<string>();
   const excludeRefund = args.excludeRefundTx ?? new Set<string>();
   try {
@@ -1109,6 +1208,8 @@ export async function probeHopPayout(args: {
   excludeOutTx?: ReadonlySet<string>;
 }): Promise<{amount: string; tx: string} | null> {
   const {relayUrl, publicHex, myPrincipalLower, record} = args;
+  // Same fail-closed guard as probeConvertSettlement: no numeric currency, no IC ledger window.
+  if (record.outCurrency == null) return null;
   const exclude = args.excludeOutTx ?? new Set<string>();
   try {
     const minOut = await convertRecordMinOut(record);
@@ -1438,5 +1539,285 @@ export async function executeConvert(
     return watchLedgers(rec, settleAttempts, settleIntervalMs, 'pending_withdrawal');
   }
 
+  return rec;
+}
+
+// --- the Solana driver (solana_amm venues — Jupiter, 2026-09-15) -----------------------------------
+//
+// The ONE record shape with a per-leg protocol discriminator (design decision, 2026-09-15): a
+// Solana record is a ConvertRecord with `solanaLeg` set and `legs: []` — no canister/method/
+// argHex theater over a tx that has none. Submission goes through the SAME RPC path SOL
+// payments use (`app/solana.ts` seams over solanaRpcUrls(), which includes the relay's pure
+// RPC proxy — never a bespoke convert submit), and the only authority on outcome is the
+// chain's own signature status, read history-aware so a late confirmation is still found.
+
+export type SolanaConvertPrepareArgs = {
+  secretHex: string;
+  quote: JupiterQuote; // the device-direct verbatim read (services/jupiter)
+  inAsset: {symbol: string; mint: string; decimals: number}; // mint: WRAPPED form for native SOL
+  outAsset: {symbol: string; mint: string; decimals: number};
+};
+
+/** Build + verify + sign the Solana swap and park the record at `swapping` (money has NOT
+ *  moved — the only irreversible act so far was quoting). Red lines enforced BEFORE the
+ *  signature: the venue row exists and is a mainnet solana_amm; the quote names the pair the
+ *  registry says the venue trades; Jupiter's tx is decodable, requires EXACTLY the user's
+ *  signature, pays fees from the USER's key, and — for an SPL output — routes the proceeds to
+ *  the user's OWN ATA for that mint. Any violation fails closed with the IC prepare's own
+ *  error vocabulary; nothing is signed, no record is written. */
+export async function prepareSolanaConvertRecord(args: SolanaConvertPrepareArgs): Promise<ConvertRecord> {
+  const {secretHex, quote, inAsset, outAsset} = args;
+  // Red line 1: the venue row, from the registry — a stored/roaming venueId that names no row
+  // (or a non-Solana row) never reaches https.
+  const venue = venueOfId(quote.venueId);
+  if (venue == null || venue.kind !== 'solana_amm' || venue.testnet) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  // Red line 2: the quote's mints are the pair the REGISTRY says this venue trades (the
+  // 'pool' check's mint analog — the venue may only execute what it is registered for).
+  const pair = venue.pair_ledgers;
+  if (
+    quote.inputMint !== inAsset.mint || quote.outputMint !== outAsset.mint
+    || !pair.includes(inAsset.mint) || !pair.includes(outAsset.mint)
+    || inAsset.mint === outAsset.mint
+  ) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  // Who the user is on this rail: the SOL key derived from the same device secret (SLIP-10).
+  const kp = deriveSolanaKeypair(secretHex);
+  const built = await fetchJupiterSwapTx(venue, quote, kp.address);
+  if (!built.ok) {
+    if (built.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
+    throw new Error(M.convert.errors.quoteUnavailable(built.code));
+  }
+  const decoded = decodeVenueSwapTx(built.swap.swapTransaction);
+  if (decoded == null) {
+    throw new Error(M.convert.errors.quoteUnavailable('shape'));
+  }
+  // Red line 3 (the beneficiary check — INV-2's Solana analog): the user is the fee payer and
+  // the output's destination is the user's OWN ATA (native-SOL output needs no ATA: unwrap
+  // lands on the fee payer). Verified against the bytes in hand, before the signature.
+  const outIsNativeSol = outAsset.mint === WRAPPED_SOL_MINT_ADDRESS;
+  const outAta = outIsNativeSol ? null : deriveAta(kp.address, outAsset.mint);
+  const beneficiary = verifyVenueSwapTxBeneficiaries(
+    decoded,
+    {pubkey: kp.publicKey, outAta},
+  );
+  if (!beneficiary.ok) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  // The honest fee line, frozen now: the chain's own quote for THIS tx's message. Null (RPC
+  // could not compute it) stays absent — no invented figure ever renders.
+  let solFeeLamports: string | undefined;
+  try {
+    const fee = await quoteSolMessageFee(decoded.message);
+    if (fee != null) solFeeLamports = fee.toString(10);
+  } catch {
+    // offline/unreadable fee is not a refusal — the swap can still run; the line just stays absent
+  }
+  // The signature — the ONLY irreversible-bytes act, over the venue's own message, by the user.
+  const signed = signVenueSwapTx(built.swap.swapTransaction, kp.seed);
+  if (signed == null || signed.feePayer !== kp.address) {
+    throw new Error(M.convert.errors.quoteUnavailable('shape'));
+  }
+  return {
+    id: randNonceHex(),
+    createdAtMs: Date.now(),
+    step: 'swapping',
+    venueId: venue.venue_id,
+    // No numeric catalog currency on this shape — mints + symbols are the identifiers.
+    inLedger: inAsset.mint,
+    outLedger: outAsset.mint,
+    inSymbol: inAsset.symbol,
+    outSymbol: outAsset.symbol,
+    inDecimals: inAsset.decimals,
+    outDecimals: outAsset.decimals,
+    amountIn: quote.inAmount,
+    expectedGross: quote.outAmount, // the venue's estimate, verbatim
+    expectedNet: quote.otherAmountThreshold, // the venue's OWN min-out floor for the chosen slippage
+    inFee: '0',
+    outFee: '0',
+    slippageBps: quote.slippageBps,
+    legs: [],
+    solanaLeg: {
+      protocol: 'solana',
+      signedTxHex: bytesToHex(signed.raw),
+      signature: signed.signature,
+      lastValidBlockHeight: built.swap.lastValidBlockHeight,
+    },
+    ...(solFeeLamports != null ? {solFeeLamports} : {}),
+  };
+}
+
+export type SolanaExecutorDeps = {
+  publicHex: string; // the IC identity (store scope + annotations), same as the IC driver
+  /** The user's SOL address — the owner filter for realized token-credit reads. */
+  solAddress: string;
+  onUpdate: (record: ConvertRecord) => void | Promise<void>;
+};
+
+export type SolanaExecutorOpts = {
+  /** Submit rounds for the identical bytes (Solana dedups by signature — a repeat is a no-op). */
+  submitAttempts?: number;
+  /** Confirmation polls before parking `stuck` (the engine's slow watch then takes over). */
+  confirmAttempts?: number;
+  pollIntervalMs?: number;
+  nowMs?: () => number;
+};
+
+type SolWatchOutcome =
+  | {kind: 'confirmed'}
+  | {kind: 'failed'; detail: string}
+  | {kind: 'dead'} // blockhash expired with the tx unseen — it can NEVER land
+  | {kind: 'unknown'};
+
+/** The chain is the only oracle: poll the signature status (history-aware) and the block
+ *  height until one of the four truths holds. Never re-signs; never re-builds. */
+async function watchSolTx(
+  leg: SolanaSwapLeg,
+  attempts: number,
+  intervalMs: number,
+): Promise<SolWatchOutcome> {
+  for (let i = 0; i < attempts; i++) {
+    let status = null;
+    try {
+      status = await getSolSignatureStatus(leg.signature);
+    } catch {
+      status = null; // an unreadable status proves nothing either way
+    }
+    if (status != null && status.err != null) {
+      return {kind: 'failed', detail: JSON.stringify(status.err).slice(0, 120)};
+    }
+    if (status != null && status.confirmationStatus != null) {
+      return {kind: 'confirmed'};
+    }
+    let height: number | null = null;
+    try {
+      height = await getSolBlockHeight();
+    } catch {
+      height = null;
+    }
+    if (height != null && height > leg.lastValidBlockHeight) {
+      return {kind: 'dead'};
+    }
+    if (i < attempts - 1) await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return {kind: 'unknown'};
+}
+
+/** The realized payout for the done line — never the estimate dressed as fact. Token output:
+ *  the user's own post−pre token delta; native-SOL output: the fee payer's post−pre lamports
+ *  (payout minus the network fee). Null ⇒ the caller falls back to the venue's own floor. */
+async function realizedSolPayout(rec: ConvertRecord, solAddress: string): Promise<string | null> {
+  if (rec.outLedger === WRAPPED_SOL_MINT_ADDRESS) {
+    return getSolNativeCredit(rec.solanaLeg?.signature ?? '');
+  }
+  return getSolTokenCredit(rec.solanaLeg?.signature ?? '', solAddress, rec.outLedger);
+}
+
+/** Drive a Solana-shaped record one state forward (or to its honest park). The engine calls
+ *  this for every non-terminal Solana record and for unacknowledged `stuck` ones — the same
+ *  cadence contract the IC executor has. */
+export async function executeSolanaConvert(
+  start: ConvertRecord,
+  deps: SolanaExecutorDeps,
+  opts: SolanaExecutorOpts = {},
+): Promise<ConvertRecord> {
+  const submitAttempts = opts.submitAttempts ?? 2;
+  const confirmAttempts = opts.confirmAttempts ?? 12;
+  const intervalMs = opts.pollIntervalMs ?? 400;
+  let rec = start;
+  const leg = rec.solanaLeg;
+  if (leg == null) return rec; // not a Solana record — nothing to drive (hydration prevents this)
+  const advance = async (patch: Partial<ConvertRecord>): Promise<ConvertRecord> => {
+    rec = {...rec, ...patch};
+    await saveConvertRecord(deps.publicHex, rec);
+    await deps.onUpdate(rec);
+    return rec;
+  };
+  const settle = async (): Promise<ConvertRecord> => {
+    const outcome = await watchSolTx(leg, confirmAttempts, intervalMs);
+    if (outcome.kind === 'confirmed') {
+      const realized = await realizedSolPayout(rec, deps.solAddress).catch(() => null);
+      // Honest end state: the REALIZED credit when the chain could be read, else the venue's
+      // own min-out floor (a guarantee, not a guess). outTx is the tx signature.
+      return advance({
+        step: 'done',
+        outAmountNet: realized ?? rec.expectedNet,
+        outTx: leg.signature,
+        ...(realized == null ? {failureDetail: 'payout-floor'} : {}),
+      });
+    }
+    if (outcome.kind === 'failed') {
+      // The chain confirmed the tx WITH an error: the route did not run; the input never left
+      // the wallet (a failed Solana tx moves nothing but its fee).
+      return advance({step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: outcome.detail});
+    }
+    if (outcome.kind === 'dead') {
+      // Unseen + past the blockhash's death: the bytes can never execute. Input unmoved.
+      return advance({step: 'failed_refunded', failureCode: 'unknown', failureDetail: 'blockhash-expired'});
+    }
+    // Unknown after the full window: park honestly; the engine's stuck-watch keeps re-reading
+    // the status (a late confirmation is found via history-aware reads; expiry eventually
+    // resolves the other way). Never resubmit NEW bytes past this point — identical bytes only.
+    return advance({step: 'stuck', failureCode: 'unknown'});
+  };
+
+  // --- stuck (the slow-watch entry): re-read, don't resubmit unless the bytes are still live --
+  if (rec.step === 'stuck') {
+    const outcome = await watchSolTx(leg, 1, 0);
+    if (outcome.kind === 'confirmed') {
+      rec = await advance({step: 'settling'});
+    } else if (outcome.kind === 'failed') {
+      return advance({step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: outcome.detail});
+    } else if (outcome.kind === 'dead') {
+      return advance({step: 'failed_refunded', failureCode: 'unknown', failureDetail: 'blockhash-expired'});
+    } else {
+      return rec; // still genuinely unknown — stays stuck until acknowledged or resolved
+    }
+  }
+
+  // --- swapping: submit the signed bytes (identical on every retry — the chain dedups them) --
+  if (rec.step === 'swapping') {
+    const raw = hexToBytes(leg.signedTxHex);
+    if (raw == null) {
+      return advance({step: 'stuck', failureCode: 'unknown', failureDetail: 'unreadable-signed-bytes'});
+    }
+    void saveTxNote(deps.publicHex, {k: leg.signature, who: venueDisplayName(rec.venueId)}, Date.now());
+    let submitted = false;
+    let lastErr: unknown = null;
+    for (let i = 0; i < submitAttempts && !submitted; i++) {
+      try {
+        const nodeSig = await submitRawSolTx(raw);
+        // The single-signer tx's identity IS the signature we recorded; anything else means
+        // we are not looking at our own bytes — park, never guess.
+        submitted = nodeSig === leg.signature;
+        if (!submitted) return advance({step: 'stuck', failureCode: 'unknown', failureDetail: 'signature-mismatch'});
+      } catch (e) {
+        lastErr = e;
+        // A throw is NOT a refusal verdict: the tx may already be in flight (or the error was
+        // a timeout). Ask the chain before retrying — identical bytes only, never a rebuild.
+        const probe = await watchSolTx(leg, 1, 0);
+        if (probe.kind === 'confirmed') {
+          submitted = true;
+        } else if (probe.kind === 'failed') {
+          return advance({step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: probe.detail});
+        } else if (probe.kind === 'dead') {
+          return advance({step: 'failed_refunded', failureCode: 'unknown', failureDetail: 'blockhash-expired'});
+        }
+      }
+    }
+    if (!submitted) {
+      // Exhausted identical-byte rounds with no chain answer: honest unknown (lastErr kept in
+      // the console only — provider prose never reaches a screen).
+      if (lastErr != null) console.warn('solana convert submit: no verdict after retries', lastErr);
+      return advance({step: 'stuck', failureCode: 'unknown'});
+    }
+    rec = await advance({step: 'settling'});
+  }
+
+  if (rec.step === 'settling') {
+    return settle();
+  }
   return rec;
 }
