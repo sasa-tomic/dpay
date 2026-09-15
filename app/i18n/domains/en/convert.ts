@@ -242,11 +242,20 @@ export type ConvertMessages = {
     /** Same slot as counterpartySigns, cefi truth: the phone signs NOTHING — the user sends
      *  the deposit to the venue's own address themselves. */
     checklistSigns: string;
+    /** Same slot as the pool trades' refusalLine, cefi truth: the only way this "fails" before
+     *  the deposit is sent is expiry — the order lapses, nothing moved, funds never left. */
+    refusalLine: (sym: string) => string;
+    /** Same slot as insufficientLine, cefi truth: ONE input-ledger fee (the deposit transfer),
+     *  not the pool's approve+pull pair. */
+    insufficientLine: (needed: string, balance: string) => string;
     /** Where a completed cross-rail payout landed (the user's own address on the other rail). */
     payoutAt: (address: string) => string;
     depositExpiryLine: (at: string) => string;
     /** The CeFi fact itself: the user sends to the VENUE's address; the venue holds mid-trade. */
     depositNote: (venue: string, sym: string) => string;
+    /** The awaiting_deposit tail line: watches the DEPOSIT (the payout lines belong to the
+     *  states after the venue has the money). */
+    stillWaitingDeposit: string;
   };
 
   // --- the cross-rail family (Routes B/C, 2026-09-16): the CCTP handoff (the USER's own
@@ -281,12 +290,13 @@ export type ConvertMessages = {
     stillCrossing: string;
     solReadyTitle: string;
     solReadyBody: (credit: string, ata: string) => string;
-    solQuoteLabel: string;
+    solQuoteLabel: (venue: string) => string;
     solMinLine: (min: string) => string;
     solConfirmButton: string;
     solFeeLine: (fee: string) => string;
     solPreflightTitle: string;
-    solPreflightBody: (needed: string) => string;
+    /** Rendered only when the measured SOL balance is exactly zero — plain fact, no figure. */
+    solPreflightBody: string;
     doneTitle: string;
     doneBody: (amount: string, sym: string, address: string) => string;
     declinedTitle: string;
@@ -487,10 +497,15 @@ export const convertEn: ConvertMessages = {
       `Executed by ${venue} — an automated exchange service, not a licensed provider and not dpay.`,
     checklistSigns:
       'Nothing is signed on this phone — after you confirm, you send the deposit to the venue\'s own address yourself.',
+    refusalLine: sym =>
+      `If the deposit never arrives, the order expires — nothing moves, and your ${sym} stays in your wallet.`,
+    insufficientLine: (needed, balance) =>
+      `This deposit needs ${needed} — the amount plus one transfer fee — and this wallet holds ${balance}. Lower the amount, or receive more first.`,
     payoutAt: address => `Paid out to your own address: ${address}`,
     depositExpiryLine: at => `Order expires ${at}`,
     depositNote: (venue, sym) =>
       `Send ${sym} from your wallet to ${venue}\u2019s deposit address above — exactly the deposit amount. ${venue} is an automated exchange service: it holds your ${sym} mid-trade, then pays out to your address. dpay is not a party to this trade and is paid nothing.`,
+    stillWaitingDeposit: 'Still watching for your deposit — this page updates on its own.',
   },
 
   /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —
@@ -527,13 +542,13 @@ export const convertEn: ConvertMessages = {
     stillCrossing: 'Attestation is not finished yet. This stays pending — it is not failed. On the fast path it is seconds to minutes; if Ethereum is congested, longer.',
     solReadyTitle: 'USDC landed on Solana',
     solReadyBody: (credit, ata) => `${credit} USDC is at ${ata}, verified on-chain. Finish the route, or leave the USDC there — it is yours either way.`,
-    solQuoteLabel: 'Jupiter quote (fresh)',
+    solQuoteLabel: venue => `${venue} quote (fresh)`,
     solMinLine: min => `At least ${min} SOL at your address`,
     solConfirmButton: 'Swap to SOL',
     solFeeLine: fee => `Solana transaction fee: ${fee}`,
     solPreflightTitle: 'A little SOL is needed for the fee',
-    solPreflightBody: needed =>
-      `The swap\u2019s network fee is paid in SOL and this wallet holds under ${needed}. Get a little SOL into this wallet first — the USDC stays put meanwhile.`,
+    solPreflightBody:
+      'The swap\u2019s network fee is paid in SOL and this wallet holds no SOL. Get a little SOL into this wallet first — the USDC stays put meanwhile.',
     doneTitle: 'Converted',
     doneBody: (amount, sym, address) => `${amount} ${sym} is at your Solana address ${address} — verified on-chain.`,
     declinedTitle: 'Handoff cancelled',

@@ -813,12 +813,16 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const balanceStr = balanceRaw != null ? fmtAssetCompact(balanceRaw, inDecimals, inSym) : null;
 
   // Fail closed BEFORE the confirm, never after it (2026-09-08: the button was live on a wallet
-  // holding nothing — a confirm that can only be refused by the ledger). A conversion costs the
-  // amount PLUS TWO input-ledger fees: the icrc2_approve, and the pool's own pull — which is
-  // exactly why `prepareConvertRecord` approves `amountIn + inFee`. A null balance (not yet read)
-  // fails OPEN, matching the Pay tab's gate: a balance nobody has measured is not a zero.
+  // holding nothing — a confirm that can only be refused by the ledger). A pool conversion costs
+  // the amount PLUS TWO input-ledger fees: the icrc2_approve, and the pool's own pull — which is
+  // exactly why `prepareConvertRecord` approves `amountIn + inFee`. A CeFi order costs ONE: the
+  // user's own deposit transfer (the phone approves nothing — nothing is signed). A null balance
+  // (not yet read) fails OPEN, matching the Pay tab's fund-gate: a balance nobody has measured
+  // is not a zero.
   const parsedIn = parseUserAmount(amountText, inDecimals);
-  const neededN = parsedIn.ok && parsedIn.raw !== '0' ? BigInt(parsedIn.raw) + 2n * BigInt(legs.inFee) : null;
+  const neededN = parsedIn.ok && parsedIn.raw !== '0'
+    ? BigInt(parsedIn.raw) + (cefiMode ? 1n : 2n) * BigInt(legs.inFee)
+    : null;
   const insufficient = balanceN != null && neededN != null && neededN > balanceN;
 
   // Nothing to convert at all: the Pay tab's fund-gate shape, pointed at the ONE surface that can
@@ -1075,7 +1079,9 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
       ) : null}
       {insufficient ? (
         <Text testID="convert-insufficient" style={S.err}>
-          {M.convert.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)}
+          {cefiMode
+            ? M.convert.cefi.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)
+            : M.convert.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)}
         </Text>
       ) : null}
 
@@ -1207,7 +1213,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
       {cefiMode && cefiSettleAddress != null ? (
         <View>
           <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
-          <Text testID="convert-settle-address" style={S.convertMetaLine}>{cefiSettleAddress}</Text>
+          <Text testID="convert-settle-address" style={S.convertMetaLine} selectable>{cefiSettleAddress}</Text>
         </View>
       ) : null}
 
@@ -1324,9 +1330,10 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               quote's pool echo once one arrives, or the standing single-venue disclosure. Under a
               chooser pick whose quote has not settled (or errored) NO principal renders — the
               picked venue is still named above, but an execution fact is never asserted without
-              its quote, and another venue's principal is never borrowed. (For a cefi venue this
-              line is the venue's https API base — where the relay carries the partner key.) */}
-          {activeQuote != null || !chooserMode ? (
+              its quote, and another venue's principal is never borrowed. A CeFi venue renders NO
+              principal line either: its https API base is where the relay carries the partner
+              key — not a fact a depositor can check, so it earns no place on this checklist. */}
+          {!cefiMode && (activeQuote != null || !chooserMode) ? (
             <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
           ) : null}
           {/* "Your phone signs" is likewise false for CeFi: the phone signs NOTHING — the user
@@ -1445,9 +1452,12 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
             {M.convert.minReceiveLine(fmtAssetCompact(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
           </Text>
         ) : null}
+        {/* The refusal line names THIS trade's failure mode. A pool trade fails on price (the
+            pool/approval language); a CeFi deposit-order fails by never being sent — the order
+            expires and nothing moved. Same slot, same rank: what happens if it goes wrong. */}
         {math != null ? (
           <Text testID="convert-refusal" style={S.convertChecklistLine}>
-            {M.convert.refusalLine(inSym)}
+            {cefiMode ? M.convert.cefi.refusalLine(inSym) : M.convert.refusalLine(inSym)}
           </Text>
         ) : null}
         {/* In route mode the END state is the destination floor above (routeMinLine) — a second
@@ -2069,6 +2079,9 @@ function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: SelectableAss
 /** Renders the §4 state-machine record — every non-done state carries practical instructions. */
 function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void}) {
   const [, forceTick] = useState(0);
+  // Which deposit fact was last copied ('address' | 'memo') — the transient "Copied" label on
+  // the CeFi handoff's copy buttons, same pattern as the cross-rail calldata buttons.
+  const [copiedDeposit, setCopiedDeposit] = useState<'address' | 'memo' | null>(null);
   // The stuck screen restates what was signed, including the minimum bound. The record no
   // longer persists that figure (V2): it is re-derived by the compiled core from the record's
   // own frozen quote + slippage — the same deterministic arithmetic that computed it at prepare.
@@ -2227,16 +2240,44 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
             <View testID="convert-deposit-handoff">
               <Text style={S.convertStateMeta}>{M.convert.cefi.depositNote(venueName, inSymbol)}</Text>
               <Text style={S.convertStateMeta}>{M.convert.cefi.depositAddressLabel}:</Text>
-              <Text testID="convert-deposit-address" style={S.convertStateMeta}>
+              {/* The address is the ONE thing the user must move verbatim into another wallet —
+                  it gets the same machine-data treatment as the cross-rail calldata blocks
+                  (mono, boxed), not prose styling. The memo equally: a fixed shift settles only
+                  the exact (address, amount, memo) triple. */}
+              <Text testID="convert-deposit-address" style={S.convertCalldata} selectable>
                 {record.providerDeposit.depositAddress}
               </Text>
+              <Pressable
+                testID="btn-convert-copy-deposit-address"
+                style={S.linkBtn}
+                onPress={() => {
+                  setCopiedDeposit(null);
+                  void copyToClipboard(record.providerDeposit!.depositAddress).then(() => setCopiedDeposit('address'));
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={M.convert.crossrail.copy}>
+                <Text style={S.linkText}>{copiedDeposit === 'address' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
+              </Pressable>
               <Text testID="convert-deposit-amount" style={S.convertStateMeta}>
                 {M.convert.cefi.depositAmountLabel}: {record.providerDeposit.depositAmount} {inSymbol}
               </Text>
               {record.providerDeposit.depositMemo != null ? (
-                <Text testID="convert-deposit-memo" style={S.convertStateMeta}>
-                  {M.convert.cefi.depositMemoLabel}: {record.providerDeposit.depositMemo}
-                </Text>
+                <>
+                  <Text testID="convert-deposit-memo" style={S.convertCalldata} selectable>
+                    {M.convert.cefi.depositMemoLabel}: {record.providerDeposit.depositMemo}
+                  </Text>
+                  <Pressable
+                    testID="btn-convert-copy-deposit-memo"
+                    style={S.linkBtn}
+                    onPress={() => {
+                      setCopiedDeposit(null);
+                      void copyToClipboard(record.providerDeposit!.depositMemo!).then(() => setCopiedDeposit('memo'));
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={M.convert.crossrail.copy}>
+                    <Text style={S.linkText}>{copiedDeposit === 'memo' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
+                  </Pressable>
+                </>
               ) : null}
               {record.providerDeposit.expiresAtMs != null ? (
                 <Text style={S.convertStateMeta}>
@@ -2245,7 +2286,10 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
               ) : null}
             </View>
           ) : null}
-          <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
+          {/* Deposit context says "deposit", never "payout" — the generic watching line belongs
+              to the states past the deposit (processing/settling), where a payout is what is
+              being watched for. */}
+          <Text style={S.convertStateMeta}>{M.convert.cefi.stillWaitingDeposit}</Text>
         </View>
       ) : null}
       {record.step === 'provider_processing' ? (
@@ -2624,7 +2668,10 @@ function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
                 accessibilityLabel={M.convert.crossrail.attachButton}>
                 <Text style={S.primaryText}>{M.convert.crossrail.attachButton}</Text>
               </Pressable>
-              {attachErr != null ? <Text style={S.err}>{M.convert.crossrail.burnTxInvalid}</Text> : null}
+              {/* attachErr carries the thrown validation's own message (today that is only the
+                  burn-tx hash shape check) — rendered verbatim, never re-labeled: a future error
+                  must not wear the hash-error's clothes. */}
+              {attachErr != null ? <Text style={S.err}>{attachErr}</Text> : null}
               <Pressable
                 testID="btn-crossrail-decline"
                 style={S.linkBtn}
@@ -2667,7 +2714,10 @@ function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
           {solQuote != null ? (
             <>
               <Text testID="crossrail-sol-quote" style={S.convertChecklistLine}>
-                {M.convert.crossrail.solQuoteLabel}
+                {/* Venue name comes from the RECORD's own frozen registry key (solVenueId, with
+                    the record's venue as the type-level fallback), never a hardcoded string — the
+                    same locale-invariant attribution rule as every other number on this screen. */}
+                {M.convert.crossrail.solQuoteLabel(venueDisplayName(cross.solVenueId ?? record.venueId))}
               </Text>
               <Text testID="crossrail-sol-out" style={S.convertHeadlineAmount}>
                 {fmtAssetCompact(solQuote.outAmount, SOLANA_TOKENS.SOL.decimals, destSymbol)}
@@ -2685,7 +2735,10 @@ function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
           {solShort ? (
             <View testID="crossrail-sol-preflight">
               <Text style={S.convertChecklistWarn}>{M.convert.crossrail.solPreflightTitle}</Text>
-              <Text style={S.convertChecklistLine}>{M.convert.crossrail.solPreflightBody(fmtAssetCompact('5000', SOLANA_TOKENS.SOL.decimals, destSymbol))}</Text>
+              {/* The panel only renders this block when the wallet's measured SOL balance is
+                  exactly zero — so it SAYS that, rather than fabricating a dust figure the
+                  wallet was never quoted. */}
+              <Text style={S.convertChecklistLine}>{M.convert.crossrail.solPreflightBody}</Text>
             </View>
           ) : null}
           <Pressable

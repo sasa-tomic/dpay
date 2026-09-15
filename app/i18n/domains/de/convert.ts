@@ -183,14 +183,19 @@ export const convertDe: ConvertMessages = {
     depositAddressLabel: 'Einzahlungs-Adresse',
     depositAmountLabel: 'Genauer Einzahlungsbetrag',
     depositMemoLabel: 'Memo (erforderlich)',
-    depositExpiryLine: at => `Bestellung läuft ab ${at}`,
+    depositExpiryLine: at => `Bestellung läuft um ${at} ab`,
     counterparty: venue =>
       `Ausgeführt von ${venue} — ein automatisierter Tauschdienst, kein lizenzierter Anbieter und nicht dpay.`,
     checklistSigns:
-      'Auf diesem Telefon wird nichts signiert — nach der Bestätigung sendest du die Einzahlung selbst an die Adresse des Anbieters.',
+      'Auf diesem Telefon wird nichts signiert — nach der Bestätigung sendest du die Einzahlung selbst an die Adresse des Tauschdiensts.',
+    refusalLine: sym =>
+      `Wenn die Einzahlung nicht ankommt, läuft die Bestellung ab — nichts wird bewegt und dein ${sym} bleibt in deiner Wallet.`,
+    insufficientLine: (needed, balance) =>
+      `Diese Einzahlung braucht ${needed} — der Betrag plus eine Transfergebühr — und diese Wallet hält ${balance}. Reduziere den Betrag oder empfange zuerst mehr.`,
     payoutAt: address => `Ausgezahlt auf deine eigene Adresse: ${address}`,
     depositNote: (venue, sym) =>
       `Sende ${sym} aus deiner Wallet an die Einzahlungs-Adresse von ${venue} oben — genau den Einzahlungsbetrag. ${venue} ist ein automatisierter Tauschdienst: Er hält dein ${sym} während des Tauschs und zahlt dann an deine Adresse aus. dpay ist keine Partei dieses Tauschs und wird nicht bezahlt.`,
+    stillWaitingDeposit: 'Weitere Beobachtung deiner Einzahlung — diese Seite aktualisiert sich von selbst.',
   },
 
   /** Die Cross-Rail-Familie (Routen B/C, 2026-09-16): alles nach den fünf IC-Beinen —
@@ -228,13 +233,13 @@ export const convertDe: ConvertMessages = {
     stillCrossing: 'Die Attestierung ist noch nicht fertig. Das bleibt offen — es ist nicht fehlgeschlagen. Auf dem schnellen Pfad sind es Sekunden bis Minuten; bei Stau auf Ethereum länger.',
     solReadyTitle: 'USDC sind auf Solana angekommen',
     solReadyBody: (credit, ata) => `${credit} USDC liegen bei ${ata}, on-chain verifiziert. Schließe die Route ab — oder lass die USDC dort, sie sind in beiden Fällen deine.`,
-    solQuoteLabel: 'Jupiter-Kurs (frisch)',
+    solQuoteLabel: venue => `${venue}-Kurs (frisch)`,
     solMinLine: min => `Mindestens ${min} SOL an deiner Adresse`,
     solConfirmButton: 'Zu SOL tauschen',
     solFeeLine: fee => `Solana-Transaktionsgebühr: ${fee}`,
     solPreflightTitle: 'Etwas SOL ist nötig für die Gebühr',
-    solPreflightBody: needed =>
-      `Die Netzwerkgebühr des Tauschs wird in SOL gezahlt, und diese Wallet hält weniger als ${needed}. Hol zuerst etwas SOL in diese Wallet — die USDC bleiben derweil sicher liegen.`,
+    solPreflightBody:
+      'Die Netzwerkgebühr des Tauschs wird in SOL gezahlt, und diese Wallet hält kein SOL. Hol zuerst etwas SOL in diese Wallet — die USDC bleiben derweil sicher liegen.',
     doneTitle: 'Umgetauscht',
     doneBody: (amount, sym, address) => `${amount} ${sym} liegen an deiner Solana-Adresse ${address} — on-chain verifiziert.`,
     declinedTitle: 'Handoff abgebrochen',

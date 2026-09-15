@@ -187,9 +187,14 @@ export const convertFr: ConvertMessages = {
       `Exécuté par ${venue} — un service d'échange automatisé, pas un prestataire agréé et pas dpay.`,
     checklistSigns:
       'Rien n\'est signé sur ce téléphone — après confirmation, c\'est toi qui envoies le dépôt à l\'adresse du service.',
+    refusalLine: sym =>
+      `Si le dépôt n'arrive pas, l'ordre expire — rien ne bouge et ton ${sym} reste dans ton portefeuille.`,
+    insufficientLine: (needed, balance) =>
+      `Ce dépôt exige ${needed} — le montant plus un seul frais de transfert — et ce portefeuille détient ${balance}. Réduis le montant ou reçois d'abord davantage.`,
     payoutAt: address => `Payé sur ta propre adresse : ${address}`,
     depositNote: (venue, sym) =>
       `Envoie ${sym} depuis ton portefeuille vers l'adresse de dépôt de ${venue} ci-dessus — exactement le montant indiqué. ${venue} est un service d'échange automatisé : il détient ton ${sym} pendant l'échange, puis paie vers ton adresse. dpay n'est pas partie à cet échange et ne touche rien.`,
+    stillWaitingDeposit: 'Toujours en attente de ton dépôt — cet écran se met à jour tout seul.',
   },
 
   /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —
@@ -227,13 +232,13 @@ export const convertFr: ConvertMessages = {
     stillCrossing: 'L\u2019attestation n\u2019est pas encore prête. Cela reste en attente — ce n\u2019est pas un échec. Sur la voie rapide, comptes des secondes à des minutes ; Ethereum congestionné, plus longtemps.',
     solReadyTitle: 'Les USDC sont arrivés sur Solana',
     solReadyBody: (credit, ata) => `${credit} USDC sont à ${ata}, vérifié on-chain. Termine la route — ou laisse les USDC là, ils sont à toi dans les deux cas.`,
-    solQuoteLabel: 'Devis Júpiter (frais)',
+    solQuoteLabel: venue => `Devis ${venue} (en direct)`,
     solMinLine: min => `Au moins ${min} SOL à ton adresse`,
     solConfirmButton: 'Échanger contre du SOL',
     solFeeLine: fee => `Frais de transaction Solana : ${fee}`,
     solPreflightTitle: 'Un peu de SOL est nécessaire pour les frais',
-    solPreflightBody: needed =>
-      `Les frais réseau de l\u2019échange se paient en SOL et ce portefeuille détient moins de ${needed}. Procure-toi d\u2019abord un peu de SOL — les USDC restent en sécurité entre-temps.`,
+    solPreflightBody:
+      'Les frais réseau de l\u2019échange se paient en SOL et ce portefeuille ne détient pas de SOL. Procure-toi d\u2019abord un peu de SOL dans ce portefeuille — les USDC restent en sécurité entre-temps.',
     doneTitle: 'Converti',
     doneBody: (amount, sym, address) => `${amount} ${sym} sont à ton adresse Solana ${address} — vérifié on-chain.`,
     declinedTitle: 'Remise annulée',

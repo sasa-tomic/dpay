@@ -187,9 +187,14 @@ export const convertEs: ConvertMessages = {
       `Ejecutado por ${venue}: un servicio de intercambio automatizado, no un proveedor con licencia y no dpay.`,
     checklistSigns:
       'No se firma nada en este teléfono: tras confirmar, tú mismo envías el depósito a la dirección del servicio.',
+    refusalLine: sym =>
+      `Si el depósito no llega, la orden caduca: no se mueve nada y tu ${sym} sigue en tu monedero.`,
+    insufficientLine: (needed, balance) =>
+      `Este depósito necesita ${needed} — el importe más una comisión de transferencia — y este monedero tiene ${balance}. Baja el importe o recibe más primero.`,
     payoutAt: address => `Pagado a tu propia dirección: ${address}`,
     depositNote: (venue, sym) =>
       `Envía ${sym} desde tu monedero a la dirección de depósito de ${venue} arriba — exactamente la cantidad indicada. ${venue} es un servicio de intercambio automatizado: retiene tu ${sym} durante el intercambio y luego paga a tu dirección. dpay no es parte de este intercambio y no cobra nada.`,
+    stillWaitingDeposit: 'Siguiendo con la espera de tu depósito — esta página se actualiza sola.',
   },
 
   /** La familia cross-rail (rutas B/C, 2026-09-16): todo lo que sigue a las cinco piernas IC —
@@ -227,13 +232,13 @@ export const convertEs: ConvertMessages = {
     stillCrossing: 'La atestación todavía no está lista. Esto queda pendiente — no es un fallo. Por la vía rápida son segundos o minutos; con Ethereum congestionado, más.',
     solReadyTitle: 'Los USDC ya están en Solana',
     solReadyBody: (credit, ata) => `${credit} USDC están en ${ata}, verificado on-chain. Termina la ruta — o deja ahí los USDC; son tuyos en cualquier caso.`,
-    solQuoteLabel: 'Cotización de Júpiter (reciente)',
+    solQuoteLabel: venue => `Cotización de ${venue} (reciente)`,
     solMinLine: min => `Como mínimo ${min} SOL a tu dirección`,
     solConfirmButton: 'Cambiar a SOL',
     solFeeLine: fee => `Comisión de la transacción Solana: ${fee}`,
     solPreflightTitle: 'Hace falta algo de SOL para la comisión',
-    solPreflightBody: needed =>
-      `La comisión de red del cambio se paga en SOL y esta cartera mantiene menos de ${needed}. Consigue primero algo de SOL — los USDC quedan seguros mientras tanto.`,
+    solPreflightBody:
+      'La comisión de red del cambio se paga en SOL y esta cartera no tiene SOL. Consigue primero algo de SOL en esta cartera — los USDC quedan seguros mientras tanto.',
     doneTitle: 'Convertido',
     doneBody: (amount, sym, address) => `${amount} ${sym} están en tu dirección Solana ${address} — verificado on-chain.`,
     declinedTitle: 'Handoff cancelado',
