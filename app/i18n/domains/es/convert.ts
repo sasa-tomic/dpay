@@ -112,6 +112,7 @@ export const convertEs: ConvertMessages = {
     destAddressLabel: 'Tu propia dirección en la red de destino',
     destAddressInvalid: 'Dirección de destino no válida — se espera 0x seguido de 40 caracteres hexadecimales.',
     routeHeading: (inSym, hopSym, destSym, network) => `Ruta: ${inSym} → ${hopSym} → ${destSym} en ${network}`,
+    swapPaysLabel: 'El canje paga dentro de esta cartera',
     legApprovePull: sym => `Autorizar al pool a tomar tus ${sym}`,
     legSwap: (venue, inSym, hopSym) => `Canjear ${inSym} → ${hopSym} en ${venue}`,
     legApproveBurn: sym => `Autorizar la quema de ${sym} (el monto del retiro)`,
@@ -126,7 +127,7 @@ export const convertEs: ConvertMessages = {
     routeSurplusNote: hopSym => `Si el canje paga por encima del piso, el excedente queda en esta cartera como ${hopSym}.`,
     gasPreflightTitle: 'El retiro necesita gas primero',
     gasPreflightBody: needed =>
-      `Quemar hacia Ethereum cuesta un gas pagado en ckETH, y esta cartera no tiene ninguno. Se necesita aproximadamente ${needed} (la cotización de gas en vivo del minter más su comisión de autorización). Consigue ckETH en esta cartera primero y vuelve — comprar una porción de gas aquí es trabajo futuro, y dpay no te esconderá este costo.`,
+      `Quemar hacia Ethereum cuesta un gas pagado en ckETH, y esta cartera no tiene suficiente. Se necesita aproximadamente ${needed} (la cotización de gas en vivo del minter más su comisión de autorización). Consigue ckETH en esta cartera primero y vuelve — comprar una porción de gas aquí es trabajo futuro, y dpay no te esconderá este costo.`,
     executingTitle: 'Ejecutando la ruta',
     doneRouteTitle: 'Retiro en camino',
     doneRouteBody: (amount, address) => `Al menos ${amount} va en camino a ${address}.`,
@@ -134,7 +135,7 @@ export const convertEs: ConvertMessages = {
     failedLegTitle: 'El tramo del retiro fue rechazado',
     failedLegBody: (sym, reason) =>
       `El canje se completó — tus fondos están en ${sym} en esta cartera, nada perdido ni bloqueado. El retiro fue rechazado${reason ? `: ${reason}` : ''}.`,
-    failedLegExit: 'Usa Retirar sobre el saldo de esta cartera cuando quieras — el mismo activo, cualquier dirección.',
+    failedLegExit: 'Para retirar, abre Pagar, elige Enviar a dirección y pega cualquier dirección de destino — el paso de retiro corre desde ahí.',
     stuckRouteBody: 'Se envió un tramo pero su resultado aún se desconoce. dpay sigue vigilando los libros en segundo plano; esta pantalla cambiará sola cuando la ruta se resuelva.',
   },
 

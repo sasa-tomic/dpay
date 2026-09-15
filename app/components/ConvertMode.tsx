@@ -708,7 +708,14 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
     : M.convert.multihop.legStateFailed;
   return (
     <View testID="convert-state" style={S.convertWrap}>
-      <ConvertHeader title={M.convert.heading(record.inSymbol, record.outSymbol)} onBack={onBack} />
+      {/* Planned records ARE the composed route — the header must name it (ICP → USDC → USDC on
+          Ethereum), never the direct pair the screen was opened from (UX pass 2026-09-15). */}
+      <ConvertHeader
+        title={record.legPlan != null
+          ? M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '')
+          : M.convert.heading(record.inSymbol, record.outSymbol)}
+        onBack={onBack}
+      />
 
       {record.step === 'approving' ? (
         <View testID="convert-approving">
@@ -1015,7 +1022,12 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           and whose quote it is. Everything the user is agreeing TO lives below, in the checklist. */}
       {math != null && activeQuote != null ? (
         <View testID="convert-headline" style={S.convertHeadlineCard}>
-          <Text style={S.convertHeadlineLabel}>{M.convert.receiveHeadline}</Text>
+          {/* Route mode: the quoted number is the HOP payout landing in THIS wallet, not the
+              at-address amount (that promise is convert-route-min) — label it so (UX pass
+              2026-09-15). Direct mode keeps "You'll receive". */}
+          <Text style={S.convertHeadlineLabel}>
+            {routeMode ? M.convert.multihop.swapPaysLabel : M.convert.receiveHeadline}
+          </Text>
           <Text style={S.convertHeadlineAmount}>{netStr}</Text>
           <View testID="convert-rate" style={S.convertRateRow}>
             <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, dispOutSym)}</Text>

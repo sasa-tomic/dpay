@@ -112,6 +112,7 @@ export const convertFr: ConvertMessages = {
     destAddressLabel: 'Ta propre adresse sur le réseau de destination',
     destAddressInvalid: 'Adresse de destination invalide — attendu : 0x suivi de 40 caractères hexadécimaux.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route : ${inSym} → ${hopSym} → ${destSym} sur ${network}`,
+    swapPaysLabel: 'L\u2019échange paie dans ce portefeuille',
     legApprovePull: sym => `Autoriser le pool à prendre tes ${sym}`,
     legSwap: (venue, inSym, hopSym) => `Échanger ${inSym} → ${hopSym} sur ${venue}`,
     legApproveBurn: sym => `Autoriser la combustion de ${sym} (le montant du retrait)`,
@@ -126,7 +127,7 @@ export const convertFr: ConvertMessages = {
     routeSurplusNote: hopSym => `Si l\u2019échange paie au-dessus du plancher, l\u2019excédent reste dans ce portefeuille en ${hopSym}.`,
     gasPreflightTitle: 'Le retrait exige du gaz d\u2019abord',
     gasPreflightBody: needed =>
-      `Brûler vers Ethereum coûte un gaz payé en ckETH, et ce portefeuille n\u2019en a pas. Il en faut environ ${needed} (le devis de gaz en direct du minter plus ses frais d\u2019autorisation). Procure-toi du ckETH dans ce portefeuille d\u2019abord, puis reviens — acheter une part de gaz ici est un travail futur, et dpay ne te cachera pas ce coût.`,
+      `Brûler vers Ethereum coûte un gaz payé en ckETH, et ce portefeuille n\u2019en a pas assez. Il en faut environ ${needed} (le devis de gaz en direct du minter plus ses frais d\u2019autorisation). Procure-toi du ckETH dans ce portefeuille d\u2019abord, puis reviens — acheter une part de gaz ici est un travail futur, et dpay ne te cachera pas ce coût.`,
     executingTitle: 'Route en cours',
     doneRouteTitle: 'Retrait en route',
     doneRouteBody: (amount, address) => `Au moins ${amount} est en route vers ${address}.`,
@@ -134,7 +135,7 @@ export const convertFr: ConvertMessages = {
     failedLegTitle: 'L\u2019étape du retrait a été refusée',
     failedLegBody: (sym, reason) =>
       `L\u2019échange a bien eu lieu — tes fonds sont en ${sym} dans ce portefeuille, rien de perdu ni de bloqué. Le retrait a été refusé${reason ? ` : ${reason}` : ''}.`,
-    failedLegExit: 'Utilise Retirer sur le solde de ce portefeuille quand tu veux — même actif, n\u2019importe quelle adresse.',
+    failedLegExit: 'Pour retirer, ouvre Payer, choisis Vers une adresse et colle n\u2019importe quelle adresse de destination — l\u2019étape de retrait part de là.',
     stuckRouteBody: 'Une étape a été envoyée mais son issue reste inconnue. dpay continue de surveiller les registres en arrière-plan ; cet écran changera tout seul quand la route se résout.',
   },
 

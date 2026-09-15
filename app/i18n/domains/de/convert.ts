@@ -113,6 +113,7 @@ export const convertDe: ConvertMessages = {
     destAddressLabel: 'Deine eigene Adresse im Zielnetzwerk',
     destAddressInvalid: 'Keine gültige Zieladresse — erwartet: 0x gefolgt von 40 Hex-Zeichen.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} auf ${network}`,
+    swapPaysLabel: 'Der Tausch zahlt in diese Wallet',
     legApprovePull: sym => `Den Pool ermächtigen, deine ${sym} abzuziehen`,
     legSwap: (venue, inSym, hopSym) => `${inSym} → ${hopSym} auf ${venue} tauschen`,
     legApproveBurn: sym => `Das Verbrennen von ${sym} ermächtigen (der Auszahlungsbetrag)`,
@@ -127,7 +128,7 @@ export const convertDe: ConvertMessages = {
     routeSurplusNote: hopSym => `Zahlt der Tausch über der Untergrenze, bleibt der Überschuss als ${hopSym} in dieser Wallet.`,
     gasPreflightTitle: 'Die Auszahlung braucht erst Gas',
     gasPreflightBody: needed =>
-      `Das Verbrennen nach Ethereum kostet Gas in ckETH — und diese Wallet hat keins. Es braucht etwa ${needed} (das Live-Gas-Angebot des Minters plus seine Ermächtigungsgebühr). Hol zuerst ckETH in diese Wallet und komm dann zurück — einen Gas-Anteil hier zu kaufen ist Zukunftarbeit, und dpay versteckt dir diesen Kosten nicht.`,
+      `Das Verbrennen nach Ethereum kostet Gas in ckETH — und diese Wallet hat nicht genug davon. Es braucht etwa ${needed} (das Live-Gas-Angebot des Minters plus seine Ermächtigungsgebühr). Hol zuerst ckETH in diese Wallet und komm dann zurück — einen Gas-Anteil hier zu kaufen ist Zukunftarbeit, und dpay versteckt dir diese Kosten nicht.`,
     executingTitle: 'Route läuft',
     doneRouteTitle: 'Auszahlung läuft',
     doneRouteBody: (amount, address) => `Mindestens ${amount} ist unterwegs zu ${address}.`,
@@ -135,7 +136,7 @@ export const convertDe: ConvertMessages = {
     failedLegTitle: 'Der Auszahlungsschritt wurde abgelehnt',
     failedLegBody: (sym, reason) =>
       `Der Tausch ist durch — deine Mittel liegen als ${sym} in dieser Wallet, nichts verloren und nichts blockiert. Die Auszahlung wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
-    failedLegExit: 'Nutze Abheben auf dem Guthaben dieser Wallet, wann immer du willst — dasselbe Asset, jede Adresse.',
+    failedLegExit: 'Zum Auszahlen öffne Bezahlen, wähle An Adresse senden und füge eine beliebige Ziel-Adresse ein — der Auszahlungsschritt läuft von dort.',
     stuckRouteBody: 'Ein Schritt wurde gesendet, aber sein Ergebnis ist noch unbekannt. dpay beobachtet die Ledgers weiter im Hintergrund; dieser Bildschirm wechselt von selbst, sobald die Route sich auflöst.',
   },
 

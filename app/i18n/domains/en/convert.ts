@@ -161,6 +161,9 @@ export type ConvertMessages = {
     destAddressInvalid: string;
     /** The confirm-time route summary: ordered legs, fee census per leg (INV-6 style), no dpay cut. */
     routeHeading: (inSym: string, hopSym: string, destSym: string, network: string) => string;
+    /** Route-mode headline label: names where the quoted number LANDS (in-wallet hop asset),
+     *  so it can never be misread as the at-address amount (that promise is routeMinLine). */
+    swapPaysLabel: string;
     legApprovePull: (sym: string) => string;
     legSwap: (venue: string, inSym: string, hopSym: string) => string;
     legApproveBurn: (sym: string) => string;
@@ -302,6 +305,7 @@ export const convertEn: ConvertMessages = {
     destAddressLabel: 'Your own address on the destination network',
     destAddressInvalid: 'Not a valid destination address — expected 0x followed by 40 hex characters.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} on ${network}`,
+    swapPaysLabel: 'The swap pays into this wallet',
     legApprovePull: sym => `Approve the pool to pull your ${sym}`,
     legSwap: (venue, inSym, hopSym) => `Swap ${inSym} → ${hopSym} on ${venue}`,
     legApproveBurn: sym => `Approve the ${sym} burn (the cash-out amount)`,
@@ -316,7 +320,7 @@ export const convertEn: ConvertMessages = {
     routeSurplusNote: hopSym => `If the swap pays above the floor, the surplus stays in this wallet as ${hopSym}.`,
     gasPreflightTitle: 'Cash-out needs gas first',
     gasPreflightBody: needed =>
-      `Burning to Ethereum costs gas paid in ckETH, and this wallet holds none. About ${needed} is needed (the minter\u2019s live gas quote plus its approve fee). Get ckETH into this wallet first, then come back — buying a gas slice here is future work, and dpay will not hide this cost.`,
+      `Burning to Ethereum costs gas paid in ckETH, and this wallet does not hold enough. About ${needed} is needed (the minter\u2019s live gas quote plus its approve fee). Get ckETH into this wallet first, then come back — buying a gas slice here is future work, and dpay will not hide this cost.`,
     executingTitle: 'Running the route',
     doneRouteTitle: 'Cash-out under way',
     doneRouteBody: (amount, address) => `At least ${amount} is on its way to ${address}.`,
@@ -324,7 +328,7 @@ export const convertEn: ConvertMessages = {
     failedLegTitle: 'The cash-out leg refused',
     failedLegBody: (sym, reason) =>
       `The swap went through — your funds are ${sym} in this wallet, nothing lost and nothing stuck. The cash-out refused${reason ? `: ${reason}` : ''}.`,
-    failedLegExit: 'Use Withdraw on this wallet\u2019s balance to cash out whenever you like — same asset, any address.',
+    failedLegExit: 'To cash out, open Pay, choose Send to address, and paste any destination address — the withdrawal step runs from there.',
     stuckRouteBody: 'A leg was sent but its outcome is unknown yet. dpay keeps watching the ledgers in the background; this screen flips on its own when the route resolves.',
   },
 
