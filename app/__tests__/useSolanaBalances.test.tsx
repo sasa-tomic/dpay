@@ -361,7 +361,7 @@ describe('useSolanaBalances — per-mint fact persistence (OPEN_ISSUES 6(a))', (
     act(() => { tree.unmount(); });
   });
 
-  test('a degraded poll NEVER writes a fact', async () => {
+  test('a degraded poll NEVER writes a fact (the confirmed SOL half still caches)', async () => {
     const setSpy = jest.spyOn(AsyncStorage, 'setItem');
     mockedRead.mockResolvedValueOnce(read(lamports('1'), {[USDC_MINT_ADDRESS]: {kind: 'error', failure: 'refused'}}));
     mockedRead.mockResolvedValueOnce(read(lamports('1'), {[USDC_MINT_ADDRESS]: {kind: 'offline'}}));
@@ -370,8 +370,20 @@ describe('useSolanaBalances — per-mint fact persistence (OPEN_ISSUES 6(a))', (
     expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('error');
     await act(async () => { jest.advanceTimersByTime(POLL.balance); await flushMicrotasks(); });
     expect(apiRef.current!.tokens[USDC_MINT_ADDRESS].status).toBe('unavailable');
-    expect(setSpy).not.toHaveBeenCalled();
+    // A degraded token read observes NOTHING: no write may touch the per-mint FACT store (the sign
+    // gate's safety). Scoped by key since 2026-09-15 — the rails are independent, and the
+    // native-SOL half of these same reads CONFIRMED lamports, which the cross-restart cache
+    // (dpay.solbalance.v1, founder requirement #3) legitimately persists below.
+    const factWrites = setSpy.mock.calls.filter(([k]) => k === STORE_KEY);
+    expect(factWrites).toEqual([]);
     expect(await AsyncStorage.getItem(STORE_KEY)).toBeNull();
+    // The intended new behavior, pinned positively: two polls, two confirmed lamports reads, two
+    // SOL-cache writes — one degraded mint must not blank the SOL rail's own cache.
+    const solWrites = setSpy.mock.calls.filter(([k]) => k.startsWith('dpay.solbalance.v1.'));
+    expect(solWrites).toHaveLength(2);
+    for (const v of solWrites.map(([, v]) => v)) {
+      expect(JSON.parse(v)).toEqual({at: expect.any(Number), balance: '1'});
+    }
     setSpy.mockRestore();
     act(() => { tree.unmount(); });
   });
