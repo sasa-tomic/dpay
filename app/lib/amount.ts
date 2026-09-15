@@ -125,10 +125,10 @@ export function cmpRaw(a: string, b: string): -1 | 0 | 1 {
 }
 
 /**
- * Apply the per-currency offline deduction to a polled balance (MC5 — currency-keyed). The wallet's
- * offline QR/NFC hand-off (`markOfflinePaid(amount, currency)`) debits a local per-currency map so
- * the payer's displayed balance honestly reflects an in-flight offline payment BEFORE the next
- * online poll reconciles. This helper is the pure display-side read of that map.
+ * Apply the per-currency offline deduction to a polled balance (MC5 — currency-keyed). The map is
+ * DERIVED (Wallet sums the pending-outbox records' gross per currency — see `pendingPays.ts`), so
+ * the payer's displayed balance honestly reflects in-flight offline payments BEFORE the next online
+ * poll reconciles. This helper is the pure display-side read of that derived map.
  *
  * - `balance == null` ⇒ `null` (an unknown balance stays unknown — never fabricate a number).
  * - `offlineMap[currency]` missing ⇒ `balance` unchanged (no deduction recorded for this asset).

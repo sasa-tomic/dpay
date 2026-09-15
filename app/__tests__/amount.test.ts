@@ -95,12 +95,13 @@ describe('cmpRaw — BigInt compare (no lexicographic trap)', () => {
   });
 });
 
-// MC5 — currency-keyed offline deduction. The offline QR/NFC hand-off debits the LOCAL view of the
-// payer's balance per-currency (a ckBTC offline pay must reduce the ckBTC displayed balance, NOT the
-// DEMO ∂ balance). `applyOffline` is the pure helper Wallet uses to render every shown balance: it
-// subtracts the per-currency raw-u64 `offlineSpent[currency]` from the polled balance, guarded by
-// cmpRaw so it never goes below 0 (the wayward refund case can over-subtract; the guard catches it).
-// Keys NOT in the map ⇒ '0' spent ⇒ balance unchanged. A null balance stays null (unknown).
+// MC5 — currency-keyed offline deduction. The offline QR/NFC hand-off persists a pending-payment
+// record (a ckBTC offline pay must reduce the ckBTC displayed balance, NOT the DEMO ∂ balance);
+// Wallet derives the per-currency map by summing those records' gross. `applyOffline` is the pure
+// helper Wallet uses to render every shown balance: it subtracts the per-currency raw-u64
+// deduction from the polled balance, guarded by cmpRaw so it never goes below 0 (a wayward
+// over-subtraction never renders negative). Keys NOT in the map ⇒ '0' spent ⇒ balance unchanged.
+// A null balance stays null (unknown).
 describe('applyOffline — currency-keyed offline deduction (MC5)', () => {
   test('null balance stays null (unknown stays unknown)', () => {
     expect(applyOffline(null, {}, 0)).toBeNull();
@@ -126,16 +127,16 @@ describe('applyOffline — currency-keyed offline deduction (MC5)', () => {
   test('deducts a currency-2 entry from a currency-2 balance (ckUSDC)', () => {
     expect(applyOffline('5000000', {2: '2500000'}, 2)).toBe('2500000');
   });
-  test('cmpRaw-guarded: never goes below 0 (the refund-over-subtract case)', () => {
-    // If the map somehow exceeds the balance (e.g. a refund that overshot via the reducer), the
-    // display clamps at 0 rather than rendering a negative raw string. Mirrors the DEMO shownBalance
-    // guard that existed pre-MC5.
+  test('cmpRaw-guarded: never goes below 0 (an over-subtraction case)', () => {
+    // If the derived deduction somehow exceeds the balance, the display clamps at 0 rather than
+    // rendering a negative raw string. Mirrors the DEMO shownBalance guard that existed pre-MC5.
     expect(applyOffline('100', {0: '5000'}, 0)).toBe('0');
     expect(applyOffline('100', {1: '999999'}, 1)).toBe('0');
   });
-  test('refund restored: an entry reduced by a negative markOfflinePaid restores the balance', () => {
-    // The reducer sums BigInt(amount) under the key, so a refund ("-50000") reduces the entry. Here
-    // we simulate the post-refund map state and confirm the balance comes back.
+  test('refund restored: a refunded pending record stops deducting (its key leaves the map)', () => {
+    // A rejected NFC hand-off removes the pending record (or a SOL discard retracts it), so its
+    // gross no longer sums into the derived map. Here we simulate the post-refund map state and
+    // confirm the balance comes back.
     const afterRefund = {1: '0'}; // 50000 spent, then -50000 refund → 0
     expect(applyOffline('60000', afterRefund, 1)).toBe('60000');
   });
