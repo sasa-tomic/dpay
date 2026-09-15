@@ -175,6 +175,64 @@ threshold-KYC by law — hence "register after DEX PoC" decision below.
    venue offers them. Amends constraint 3's grey area; withdrawal-capable keys remain
    absolute no.
 
+## Partner-key infrastructure (2026-09-15, SideShift first adapter)
+
+Decision 3 built, as the pattern said it should be — one canonical shape, SideShift as the
+first credential it carries.
+
+**The pattern (canonical, `crates/dpay-relay/src/solana.rs` shape):**
+- env `DPAY_<VENUE>_<CREDENTIAL>` via `non_empty()` → `Option` in `Config`; unset is LEGAL —
+  the route registers on every build and answers **503 naming the missing variable** (`503`,
+  never 404: an unconfigured surface is a fact to report, not a hole to hide). Error paths name
+  the VARIABLE; the value is never logged, echoed, or committed.
+- the relay attaches the credential server-side (`x-sideshift-secret`); the device never sees
+  it. Upstream HTTP errors pass through verbatim; relay-originated failures carry the
+  `{"dpayRelayError": …}` marker body (same contract as the Solana RPC proxy).
+- partner-key routes are query/order-surface only — no value ever moves through the relay.
+
+**SideShift specifics (verified live 2026-09-15, not from cached posts):**
+- Host `https://sideshift.ai/api/v2/` (the OLD `api.sideshift.ai` is NXDOMAIN — the doc's
+  original finding, confirmed). V2 strongly advised; V1 deprecated.
+- Auth split, decisive for the design: **account = the integration, not the user** (their
+  create-account docs say so) — there is NO per-user session to put on a device, so BOTH the
+  quote (POST /quotes) and the fixed order (POST /shifts/fixed) go through the relay proxy.
+  **Shift status (GET /shifts/{id}) is KEYLESS** (probed live with a real 2021 shift id) — the
+  resume engine polls it device-direct, so the relay is not in the status path at all.
+- `x-user-ip` must be forwarded on server-sent requests (their no-proxying rule) — the relay
+  forwards the connecting client IP, omitted when not visible, never fabricated.
+- Monetization: commission 0.5% default, 0–2% configurable, INSIDE the rate. The relay pins
+  `commissionRate: "0"` — at 0% the user gets a *better* rate than the website's — so dpay is
+  paid nothing and the no-dpay-cut red line holds by construction.
+- Status vocabulary (`waiting`, `multiple`, `settled`, `refund`, `refunded`, `expired`,
+  camelCase `settleAmount`/`settleHash`) mapped additively onto `PROVIDER_STATUS_MAP` in
+  `app/convertResume.ts` — the declared adapter contract.
+
+**The cefi pair schema decision:** `dfx/catalog_truth.json` cefi rows key `pair_ledgers` as
+**rail-canonical identifiers** — the IC side's ledger principal and the Solana side's mint
+(wrapped-SOL for native, per the Jupiter precedent), exactly the cross-rail ids the survey
+treated. Unordered like every row. The relay owns the rail-id → venue coin/network code
+mapping (`icp`→`ICP`/`icp`, wrapped-SOL mint →`SOL`/`solana`); the device speaks rail ids only.
+
+**The founder boundary, restated as built:** the key on the relay is the partner account's
+secret — SideShift offers NO read-only key today. It is non-withdrawal-capable by the decision's
+own test: the account will hold NO funds (deposits go to per-shift addresses; settlement pays
+the USER's address directly), so there is nothing the secret could withdraw. **Switching to a
+pure read-only key the day SideShift offers one is mandatory, not optional.** Withdrawal-capable
+credentials remain an absolute no. The founder-owned live gate: **signing up at sideshift.ai is
+a founder step** (one account for the whole integration, per their docs) — until it happens the
+routes answer 503 naming the variables, which is the designed honest state.
+
+**Where it lives:** relay module `crates/dpay-relay/src/sideshift.rs` (routes
+`POST /api/v1/sideshift/quotes` + `/sideshift/shifts/fixed`, always registered); device client
+`app/services/sideshift.ts` (quote/order via relay, status device-direct); registry row
+`kind: "cefi"`, `venue_id: "sideshift"` (bundled `app/config/venues.ts` + compiled relay catalog
++ truth file, drift-alarmed both sides); offline stand-ins: relay test stub
+`/api/v1/test/sideshift-upstream` + e2e page-stub `e2e/harness/sideshift.mjs` (cefi rows are
+ic-fixture-free by rule); flow 187 drives quote → deposit handoff → status lifecycle →
+reload-resume → dead-ends. Opt-in keyless mainnet tripwire:
+`sideshift_keyless_quote_surface_still_answers` in `crates/dpay-relay/tests/swap_venue_mainnet.rs`
+(runs with `just swap-venue-probe`). Env vars documented in `docs/OPS.md` §3.
+
 ## Work order (updated after the 2026-09-14 registrations)
 
 1. ~~Register ICPSwap ICP↔ckUSDC and ICP↔ckETH~~ — **DONE, commit `9ceee43`** (probe
@@ -182,7 +240,9 @@ threshold-KYC by law — hence "register after DEX PoC" decision below.
 2. Multi-hop orchestration: single intent, per-leg status/recovery (widens
    `app/convert.ts` legs shape + Convert UX; extends the record schema).
 3. CCTP v2 + Jupiter legs (Routes B/C) on the EVM-calldata-build/user-wallet-signs pattern.
-4. Relay-held partner-key infrastructure (SOL-RPC-key pattern; SideShift first candidate).
+4. ~~Relay-held partner-key infrastructure (SOL-RPC-key pattern; SideShift first candidate)~~ —
+   **DONE, 2026-09-15: commits `80c4279` (relay) + `714dcf5` (app) + `fd6502e` (e2e flow 187);
+   founder key signup is the only remaining step** (see Partner-key infrastructure above).
 5. DFX registration decision after (2)–(3) proven live (founder B2B contact gates it).
 6. ckBTC registration only on depth improvement; ckSOL watch (`icrc1_name` on
    `la34w-haaaa-aaaar-qb5na-cai`); KongSwap rejected with evidence above.

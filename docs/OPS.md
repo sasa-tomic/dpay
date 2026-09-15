@@ -149,6 +149,17 @@ tree's relay with exactly this env — a build whose rail is dark does not ship)
 `DPAY_SOLANA_TIMEOUT_MS` (default 10000). See `deploy/.env.example` and
 `crates/dpay-relay/src/solana.rs`.
 
+**SideShift partner-key env** (2026-09-15, first relay-held venue credential): `DPAY_SIDESHIFT_SECRET`
++ `DPAY_SIDESHIFT_AFFILIATE_ID` in `deploy/.env` — the partner account's secret and public id
+(the signup at sideshift.ai is a FOUNDER step; one account for the whole integration, per their
+docs). SECRET, never logged/echoed/committed. EITHER unset is LEGAL — the
+`POST /api/v1/sideshift/*` routes still register and answer 503 naming the missing variable(s);
+the app fails closed with "not set up on this relay" copy. Optional `DPAY_SIDESHIFT_API_BASE`
+(default `https://sideshift.ai/api/v2`, verified live 2026-09-15 — the old `api.sideshift.ai`
+host is NXDOMAIN; set-but-malformed fails startup). See
+`docs/specs/2026-09-14-swap-venue-feasibility.md` §"Partner-key infrastructure" and
+`crates/dpay-relay/src/sideshift.rs`.
+
 **The Solana probe targets the tree, not prod (2026-09-10, founder friction call).** Every
 shipping build stages the relay THIS TREE builds on loopback, hands it `DPAY_SOLANA_RPC_URL`
 from `deploy/.env`, and runs the strict probe against that

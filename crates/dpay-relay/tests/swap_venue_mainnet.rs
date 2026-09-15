@@ -36,6 +36,16 @@
 //!      (`sqrtPriceX96`). That comparison is market-independent — it uses the venue's own
 //!      current price, not a number anyone pinned — and an inverted direction misses it by the
 //!      square of the price (the 2026-09-07 build was off by ~5.9x).
+//!
+//! SIDE SHIFT (2026-09-15, founder decision 3): the cefi row is SKIPPED by the walker below
+//! (no IC pool to walk), but the venue still gets ONE opt-in keyless check —
+//! `sideshift_keyless_quote_surface_still_answers`. SideShift's keyless surfaces were verified
+//! live on 2026-09-15 (GET /pair/{from}/{to}, GET /coins, GET /shifts/{id}); the check pins the
+//! one the quote path depends on. The CREDENTIALED halves (POST /quotes, POST /shifts/fixed)
+//! are deliberately NOT probed here: they need the founder-owned partner account, and inventing
+//! or echoing a key is exactly what this probe must never do. The live gate for those halves is
+//! the founder's account signup (docs/specs/2026-09-14-swap-venue-feasibility.md, Partner-key
+//! infrastructure).
 
 #![cfg(feature = "agent")]
 
@@ -177,6 +187,68 @@ fn venues_mainnet_pair_and_fee_still_match_the_measured_truth() {
         probed += 1;
     }
     assert!(probed > 0, "the registry must hold at least one real venue");
+}
+
+/// SideShift's KEYLESS pair surface — the one this repo can touch without the founder-owned
+/// partner account. `GET /api/v2/pair/icp/sol` answered anonymously on 2026-09-15 with
+/// {min, max, rate, depositCoin, settleCoin, depositNetwork, settleNetwork}; the relay's quote
+/// proxy maps the cefi row's rail ids onto exactly these coin/network codes, so this check
+/// notices the venue renaming a coin, moving hosts, or walling the surface behind auth — any of
+/// which would silently break every quote while the offline suite stays green (the same
+/// false-confidence shape the pool walker exists for).
+///
+/// Read-only, anonymous, no identity, no funds, no key. Opt-in with the same DPAY_IC_MAINNET=1
+/// flag (network required) — never part of check/verify.
+#[test]
+fn sideshift_keyless_quote_surface_still_answers() {
+    if std::env::var("DPAY_IC_MAINNET").is_err() {
+        eprintln!("skipped: set DPAY_IC_MAINNET=1 (opt-in mainnet probe, needs network)");
+        return;
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("probe client builds");
+        let resp = client
+            .get("https://sideshift.ai/api/v2/pair/icp/sol")
+            .send()
+            .await
+            .expect("the CURRENT SideShift host answers (the old api.sideshift.ai is NXDOMAIN)");
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "the keyless pair surface must answer 200 anonymously — auth-walling it breaks the quote path"
+        );
+        let body: Value = resp.json().await.expect("the pair reply is JSON");
+        eprintln!(
+            "swap-venue mainnet probe [sideshift]: pair icp/sol rate={} min={} max={}",
+            body["rate"].as_str().unwrap_or("?"),
+            body["min"].as_str().unwrap_or("?"),
+            body["max"].as_str().unwrap_or("?"),
+        );
+        assert_eq!(body["depositCoin"].as_str(), Some("ICP"), "coin codes the relay maps to: {body}");
+        assert_eq!(body["settleCoin"].as_str(), Some("SOL"), "coin codes the relay maps to: {body}");
+        assert_eq!(body["depositNetwork"].as_str(), Some("icp"), "network codes the relay maps to: {body}");
+        assert_eq!(body["settleNetwork"].as_str(), Some("solana"), "network codes the relay maps to: {body}");
+        let rate: f64 = body["rate"]
+            .as_str()
+            .and_then(|r| r.parse().ok())
+            .expect("rate is a positive decimal string");
+        assert!(rate.is_finite() && rate > 0.0, "a live pair publishes a positive rate: {body}");
+        for bound in ["min", "max"] {
+            let v: f64 = body[bound]
+                .as_str()
+                .and_then(|r| r.parse().ok())
+                 .unwrap_or_else(|| panic!("{bound} is a positive decimal string: {body}"));
+             assert!(v.is_finite() && v > 0.0, "{bound} must be positive: {body}");
+         }
+     });
 }
 
 fn probe_real_venue(venue: &Value) {
