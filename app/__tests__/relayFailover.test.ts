@@ -25,6 +25,7 @@ import {RelayBuildDriftError, relayBuildDrift, relayFetch, resetRelayBuildStateF
 import {resetRelayAddressesForTest, setRelayAddresses} from '../services/relayAddresses';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {POLL} from '../config/constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const realFetch = globalThis.fetch;
 const requests: string[] = [];
@@ -73,10 +74,15 @@ function serve(handlers: Record<string, Record<string, Entry>>) {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetRelayBuildStateForTest();
   resetRelayAddressesForTest();
   requests.length = 0;
+  // The balance-poll hook persists its last good read (dpay.balances.v1.<hex>, the cross-restart
+  // cache) and HYDRATES it on mount — without this clear, one test's successful poll leaks its
+  // balance into the next test's mount through the in-memory AsyncStorage mock (the two-poll
+  // test below saw '123' where it asserted null). Every test starts with a cold identity store.
+  await AsyncStorage.clear();
 });
 afterEach(() => {
   (globalThis as unknown as {fetch: unknown}).fetch = realFetch;
