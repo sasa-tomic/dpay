@@ -3,6 +3,7 @@
 // pinned here, zero network. The live-verification trail (2026-09-15, publicnode mainnet
 // eth_call staging) is documented in the module header; these tests pin the ENCODER so it
 // cannot drift from the bytes that were verified live.
+import {describe, expect, test} from '@jest/globals';
 import {
   TOKEN_MESSENGER_V2_ADDRESS,
   USDC_ERC20_ADDRESS,

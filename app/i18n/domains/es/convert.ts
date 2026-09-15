@@ -165,10 +165,66 @@ export const convertEs: ConvertMessages = {
     stuckRouteBody: 'Se envió un tramo pero su resultado aún se desconoce. dpay sigue vigilando los libros en segundo plano; esta pantalla cambiará sola cuando la ruta se resuelva.',
   },
 
+  /** La familia cross-rail (rutas B/C, 2026-09-16): todo lo que sigue a las cinco piernas IC —
+   *  el handoff CCTP (dpay muestra las transacciones exactas, las firma la cartera Ethereum
+   *  PROPIA del usuario; dpay nunca retiene claves EVM), la espera de la atestación de Circle
+   *  y la oferta final de Júpiter en la ruta C. Cada callejón sin salida dice dónde están
+   *  los fondos y cuál es la salida. */
+  crossrail: {
+    heading: 'Firmar en tu cartera Ethereum',
+    handoffIntro: (amount, sym) =>
+      `La parte de Internet Computer está hecha: ${amount} ${sym} está en tu dirección Ethereum. Tu cartera ahora lo envía al otro lado — dpay jamás toca tus claves Ethereum.`,
+    stepApproveLabel: 'Paso 1 — permitir que el contrato de Circle mueva los USDC',
+    stepBurnLabel: 'Paso 2 — quemar los USDC para el transfer a Solana',
+    txToLabel: 'Para',
+    txAmountLabel: 'Importe',
+    txCalldataLabel: 'Datos de la transacción',
+    copy: 'Copiar',
+    copied: 'Copiado',
+    approveHint: 'Permite que el TokenMessenger de Circle mueva exactamente los USDC enviados — nada más.',
+    burnHint: 'Esto bloquea los USDC en Ethereum. El puente de Circle acuña los mismos USDC en tu dirección Solana — no es un token envuelto; Circle ejecuta la llegada por ti.',
+    timingNote: 'Por la vía rápida la llegada suele tardar de segundos a pocos minutos (en nuestra prueba real ~20 s). Si Ethereum está congestionado puede tardar más — esta pantalla se actualiza sola.',
+    externalGasLine: 'El gas Ethereum de estas dos transacciones lo paga el ETH de tu propia cartera. dpay no puede pagarlo ni cotizarlo con exactitud.',
+    circleFeeLine: fee => `Comisión del puente de Circle (su propia cifra, descontada del importe): como máximo ${fee}`,
+    mintFloorLine: floor => `Llegan como mínimo ${floor} a tu dirección Solana`,
+    burnTxLabel: 'Hash de la transacción de burn',
+    burnTxPlaceholder: '0x… (de tu cartera, tras firmar)',
+    attachButton: 'Ya lo firmé — vigilar el cruce',
+    burnTxInvalid: 'Eso no parece un hash de transacción Ethereum.',
+    declineButton: 'No voy a firmar esto',
+    whatSigning: 'Firmas dos transacciones Ethereum completamente normales en tu propia cartera: una aprobación y luego el burn. En el lado de dpay no se firma nada en este paso.',
+    crossingTitle: 'Cruzando a Solana',
+    crossingBody: 'Circle atestigua el burn y acuña los USDC en tu dirección Solana. dpay vigila el propio feed de estado de Circle — esta pantalla cambiará sola.',
+    viewBurnTx: 'Ver la transacción de burn',
+    viewCircle: 'Página de estado de Circle',
+    stillCrossing: 'La atestación todavía no está lista. Esto queda pendiente — no es un fallo. Por la vía rápida son segundos o minutos; con Ethereum congestionado, más.',
+    solReadyTitle: 'Los USDC ya están en Solana',
+    solReadyBody: (credit, ata) => `${credit} USDC están en ${ata}, verificado on-chain. Termina la ruta — o deja ahí los USDC; son tuyos en cualquier caso.`,
+    solQuoteLabel: 'Cotización de Júpiter (reciente)',
+    solMinLine: min => `Como mínimo ${min} SOL a tu dirección`,
+    solConfirmButton: 'Cambiar a SOL',
+    solFeeLine: fee => `Comisión de la transacción Solana: ${fee}`,
+    solPreflightTitle: 'Hace falta algo de SOL para la comisión',
+    solPreflightBody: needed =>
+      `La comisión de red del cambio se paga en SOL y esta cartera mantiene menos de ${needed}. Consigue primero algo de SOL — los USDC quedan seguros mientras tanto.`,
+    doneTitle: 'Convertido',
+    doneBody: (amount, sym, address) => `${amount} ${sym} están en tu dirección Solana ${address} — verificado on-chain.`,
+    declinedTitle: 'Handoff cancelado',
+    declinedBody: address =>
+      `No cruzó nada. Tus USDC están en tu propia dirección Ethereum ${address} — envíalos donde quieras desde tu cartera o repite esta ruta más tarde.`,
+    solFailedTitle: 'El cambio en Solana no salió',
+    solFailedBody: (ata, venue) =>
+      `Los USDC ya cruzaron sin problema y están en tu dirección Solana ${ata}. ${venue} rechazó el cambio final — reinténtalo aquí en un momento o quédate con los USDC.`,
+    legCctpBurn: (sym, network) => `Llevar ${sym} a ${network} vía Circle (esto lo firmas en tu cartera)`,
+    legSolSwap: (venue, sym) => `Cambiar a ${sym} en ${venue}`,
+    destAddressCrossNote: 'Esta dirección Ethereum es también la cartera que firma el cruce — pega una dirección que controles.',
+  },
+
   errors: {
     quoteUnreachable: venue => `No se pudo alcanzar la cotización de ${venue} — el relay no responde. Revisa tu conexión y vuelve a intentarlo.`,
     quoteRefused: venue => `${venue} se negó a cotizar este par ahora mismo.`,
     quoteUnavailable: code => `Cotización no disponible (${code}).`,
     gasUnavailable: 'No se pudo consultar el precio del gas al minter de retiro — no se firmó nada. Inténtalo de nuevo.',
+    cctpFeeUnavailable: 'No se pudo consultar la comisión del puente de Circle — no se firmó nada. Revisa tu conexión y vuelve a intentarlo.',
   },
 };

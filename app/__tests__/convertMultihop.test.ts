@@ -127,9 +127,9 @@ async function plannedRecord(over: Partial<ConvertRecord> = {}): Promise<Convert
 }
 
 describe('multihopRoutesFrom — the pure registry walk', () => {
-  test('ICP walks to exactly ONE route: the ckUSDC burn-withdraw (pool + minter + gas from the catalog rows)', () => {
+  test('ICP walks to exactly THREE routes: A (ckUSDC burn-withdraw), B (+CCTP), C (+CCTP+Jupiter)', () => {
     const routes = multihopRoutesFrom(BUNDLED, 8);
-    expect(routes).toHaveLength(1);
+    expect(routes).toHaveLength(3);
     const r = routes[0];
     expect(r.swapVenueId).toBe(VENUE_ID);
     expect(r.pool).toBe(POOL);
@@ -139,6 +139,37 @@ describe('multihopRoutesFrom — the pure registry walk', () => {
     expect(r.burn.gasLedger).toBe(CKETH_LEDGER);
     expect(r.burn.gasCurrency).toBe(6);
     expect(r.dest).toEqual({symbol: 'USDC', network: 'Ethereum'});
+    expect(r.crossRail).toBeUndefined(); // Route A: nothing beyond the EVM address
+    // Route B: the same IC machinery + the CCTP burn to Solana (domain 5, fast finality).
+    const b = routes[1];
+    expect(b.routeId).toBe('multihop:icpswap-ckusdc:2:cctp');
+    expect(b.crossRail).toEqual({
+      cctp: {
+        tokenContract: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        destinationDomain: 5,
+        finalityThreshold: 1000,
+      },
+    });
+    expect(b.crossRail!.sol).toBeUndefined();
+    expect(b.dest).toEqual({symbol: 'USDC', network: 'Solana'});
+    // Route C: B + the registered Jupiter leg USDC(SOL) → SOL at the device's own address.
+    const c = routes[2];
+    expect(c.routeId).toBe('multihop:icpswap-ckusdc:2:cctp:jupiter');
+    expect(c.crossRail!.cctp).toEqual(b.crossRail!.cctp);
+    expect(c.crossRail!.sol).toEqual({
+      venueId: 'jupiter',
+      outMint: 'So11111111111111111111111111111111111111112',
+      outSymbol: 'SOL',
+      outDecimals: 9,
+    });
+    expect(c.dest).toEqual({symbol: 'SOL', network: 'Solana'});
+    // The IC facts are identical across the three — cross-rail routes EXTEND A, never fork it.
+    for (const x of routes.slice(1)) {
+      expect(x.from).toEqual(r.from);
+      expect(x.hop).toEqual(r.hop);
+      expect(x.burn).toEqual(r.burn);
+      expect(x.pool).toBe(r.pool);
+    }
   });
 
   test('ckETH itself is NOT a route hop (native-ETH withdraw is a different rail — token_contract null)', () => {

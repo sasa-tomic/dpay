@@ -165,10 +165,66 @@ export const convertFr: ConvertMessages = {
     stuckRouteBody: 'Une étape a été envoyée mais son issue reste inconnue. dpay continue de surveiller les registres en arrière-plan ; cet écran changera tout seul quand la route se résout.',
   },
 
+  /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —
+   *  la remise CCTP (dpay affiche les transactions exactes, c\u2019est le portefeuille Ethereum
+   *  PROPRE de l\u2019utilisateur qui signe ; dpay ne détient jamais de clé EVM), l\u2019attente de
+   *  l\u2019attestation de Circle et l\u2019offre finale de Jupiter en route C. Chaque impasse nomme
+   *  où se trouvent les fonds et la sortie. */
+  crossrail: {
+    heading: 'Signer dans ton portefeuille Ethereum',
+    handoffIntro: (amount, sym) =>
+      `La partie Internet Computer est faite : ${amount} ${sym} est arrivé à ton adresse Ethereum. Ton portefeuille l\u2019envoie maintenant de l\u2019autre côté — dpay ne touche jamais à tes clés Ethereum.`,
+    stepApproveLabel: 'Étape 1 — autoriser le contrat de Circle à déplacer les USDC',
+    stepBurnLabel: 'Étape 2 — brûler les USDC pour le transfer vers Solana',
+    txToLabel: 'Vers',
+    txAmountLabel: 'Montant',
+    txCalldataLabel: 'Données de la transaction',
+    copy: 'Copier',
+    copied: 'Copié',
+    approveHint: 'Cela autorise le TokenMessenger de Circle à déplacer exactement les USDC envoyés — rien de plus.',
+    burnHint: 'Cela verrouille les USDC sur Ethereum. Le pont de Circle frappe ensuite ces mêmes USDC à ton adresse Solana — pas de jeton enveloppé, Circle exécute l\u2019arrivée pour toi.',
+    timingNote: 'Sur la voie rapide, l\u2019arrivée prend typiquement de quelques secondes à quelques minutes (~20 s lors de notre vérification en direct). Si Ethereum est chargé, cela peut durer plus longtemps — cet écran se met à jour tout seul.',
+    externalGasLine: 'Le gaz Ethereum de ces deux transactions est payé par l\u2019ETH de ton propre portefeuille. dpay ne peut ni le payer ni le chiffrer exactement.',
+    circleFeeLine: fee => `Frais du pont de Circle (son propre chiffre, déduit du montant) : au plus ${fee}`,
+    mintFloorLine: floor => `Au moins ${floor} arrivent à ton adresse Solana`,
+    burnTxLabel: 'Hash de la transaction de burn',
+    burnTxPlaceholder: '0x… (de ton portefeuille, après signature)',
+    attachButton: 'Je l\u2019ai signé — surveiller la traversée',
+    burnTxInvalid: 'Ça ne ressemble pas à un hash de transaction Ethereum.',
+    declineButton: 'Je ne signe pas ça',
+    whatSigning: 'Tu signes deux transactions Ethereum tout à fait ordinaires dans ton propre portefeuille : une approbation, puis le burn. Rien n\u2019est signé côté dpay à cette étape.',
+    crossingTitle: 'Traversée vers Solana',
+    crossingBody: 'Circle atteste le burn et frappe les USDC à ton adresse Solana. dpay surveille le propre flux d\u2019état de Circle — cet écran changera tout seul.',
+    viewBurnTx: 'Voir la transaction de burn',
+    viewCircle: 'Page d\u2019état de Circle',
+    stillCrossing: 'L\u2019attestation n\u2019est pas encore prête. Cela reste en attente — ce n\u2019est pas un échec. Sur la voie rapide, comptes des secondes à des minutes ; Ethereum congestionné, plus longtemps.',
+    solReadyTitle: 'Les USDC sont arrivés sur Solana',
+    solReadyBody: (credit, ata) => `${credit} USDC sont à ${ata}, vérifié on-chain. Termine la route — ou laisse les USDC là, ils sont à toi dans les deux cas.`,
+    solQuoteLabel: 'Devis Júpiter (frais)',
+    solMinLine: min => `Au moins ${min} SOL à ton adresse`,
+    solConfirmButton: 'Échanger contre du SOL',
+    solFeeLine: fee => `Frais de transaction Solana : ${fee}`,
+    solPreflightTitle: 'Un peu de SOL est nécessaire pour les frais',
+    solPreflightBody: needed =>
+      `Les frais réseau de l\u2019échange se paient en SOL et ce portefeuille détient moins de ${needed}. Procure-toi d\u2019abord un peu de SOL — les USDC restent en sécurité entre-temps.`,
+    doneTitle: 'Converti',
+    doneBody: (amount, sym, address) => `${amount} ${sym} sont à ton adresse Solana ${address} — vérifié on-chain.`,
+    declinedTitle: 'Remise annulée',
+    declinedBody: address =>
+      `Rien n\u2019a traversé. Tes USDC se trouvent à ta propre adresse Ethereum ${address} — envoie-les où tu veux depuis ton portefeuille ou relance cette route plus tard.`,
+    solFailedTitle: 'L\u2019échange Solana n\u2019a pas abouti',
+    solFailedBody: (ata, venue) =>
+      `Les USDC ont déjà traversé sans problème et sont à ton adresse Solana ${ata}. ${venue} a refusé l\u2019échange final — réessaie ici dans un instant ou garde les USDC.`,
+    legCctpBurn: (sym, network) => `Emmener ${sym} vers ${network} via Circle (tu signes ça dans ton portefeuille)`,
+    legSolSwap: (venue, sym) => `Échanger contre ${sym} sur ${venue}`,
+    destAddressCrossNote: 'Cette adresse Ethereum est aussi le portefeuille qui signe la traversée — colle une adresse que tu contrôles.',
+  },
+
   errors: {
     quoteUnreachable: venue => `Impossible d'obtenir le devis de ${venue} — le relay ne répond pas. Vérifie ta connexion et réessaie.`,
     quoteRefused: venue => `${venue} a refusé d'établir un devis pour cette paire pour l'instant.`,
     quoteUnavailable: code => `Devis indisponible (${code}).`,
     gasUnavailable: 'Le prix du gaz du minter de retrait n\u2019a pas pu être demandé — rien n\u2019a été signé. Réessaie.',
+    cctpFeeUnavailable: 'Les frais du pont de Circle n\u2019ont pas pu être récupérés — rien n\u2019a été signé. Vérifie ta connexion et réessaie.',
   },
 };

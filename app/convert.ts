@@ -77,7 +77,7 @@ import {
   type VenueEntry,
 } from './config/venues';
 import {saveTxNote} from './services/txNotes';
-import {fetchJupiterSwapTx, type JupiterQuote} from './services/jupiter';
+import {fetchJupiterQuote, fetchJupiterSwapTx, type JupiterQuote} from './services/jupiter';
 import {deriveSolanaKeypair} from './solana/identity';
 import {deriveAta} from './solana/spl';
 import {
@@ -87,7 +87,23 @@ import {
   signVenueSwapTx,
   verifyVenueSwapTxBeneficiaries,
 } from './solana/tx';
-import {WRAPPED_SOL_MINT_ADDRESS} from './solana/tokens';
+import {USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from './solana/tokens';
+import bs58 from 'bs58';
+import {encodeApprove as encodeErc20Approve} from './cketh';
+import {
+  CCTP_DOMAIN_SOLANA,
+  CCTP_FINALITY_FAST,
+  TOKEN_MESSENGER_V2_ADDRESS,
+  USDC_ERC20_ADDRESS,
+  buildForwardHookData,
+  cctpMaxFee,
+  cctpMintFloor,
+  encodeDepositForBurnWithHook,
+  parseCctpBurnFees,
+  parseCctpMessageStatus,
+  type CctpBurnFee,
+  type CctpMessageStatus,
+} from './cctp';
 import {
   getSolBlockHeight,
   getSolNativeCredit,
@@ -300,10 +316,17 @@ export type ConvertStep =
   | 'quote' | 'confirming' | 'approving' | 'approved' | 'swapping' | 'settling'
   | 'done' | 'pending_withdrawal' | 'failed_refunded' | 'failed_leg' | 'stuck'
   // CeFi-shaped states (multi-venue readiness V2): round-tripped by hydration today; the
-  // drivers that move a record INTO them arrive with the CeFi wave. Kept snake_case like the
-  // rest of the persisted vocabulary.
+  // drivers that move a record INTO them arrive with the CeFi wave. Kept snake_case like
+  // the rest of the persisted vocabulary.
   | 'awaiting_user_authorization' | 'awaiting_deposit' | 'provider_processing'
-  | 'quote_expired' | 'provider_refunded';
+  | 'quote_expired' | 'provider_refunded'
+  // The cross-rail widening (2026-09-16, Routes B/C): the CCTP phases that follow the
+  // five IC legs. `awaiting_external` = the user's own EVM wallet must sign approve+burn
+  // (dpay never holds EVM keys — the record waits on USER action, no driver advances it);
+  // `crossing` = the burn tx hash is known and Circle's attestation/mint is being watched;
+  // `sol_ready` = the USDC mint landed and is verified at the ATA, and the final Jupiter
+  // leg is OFFERED for the user to confirm on a fresh quote (Route C only).
+  | 'awaiting_external' | 'crossing' | 'sol_ready';
 
 /** ONE signed IC update, frozen at prepare time. The executor only ever re-submits the
  *  envelope bytes; `argHex` is kept for audit/recovery, not re-signing. */
@@ -339,6 +362,42 @@ export type SolanaSwapLeg = {
   signature: string;
   /** The last block height at which the tx's blockhash is still valid (Jupiter's own figure). */
   lastValidBlockHeight: number;
+};
+
+/** The cross-rail widening (2026-09-16, Routes B/C of the feasibility doc): what the
+ *  record knows about the CCTP leg that follows the five IC legs. dpay builds the burn
+ *  calldata and renders it for the USER's own EVM wallet to sign — no EVM key ever lives
+ *  in dpay (the module header's non-negotiable). Durable facts only; everything else is
+ *  re-derived from the record's own frozen numbers or fetched live:
+ *  - the burn AMOUNT is the IC route's minOut (convertRecordMinOut — deterministic);
+ *  - the mint RECIPIENT is deriveAta(solAddress, USDC mint), re-derived and re-verified
+ *    at every handoff render;
+ *  - Circle's fee is fetched live (at confirm for the census, again at handoff for the
+ *    signed maxFee — the census copy says both). */
+export type CrossRailInfo = {
+  /** 'cctp' = Route B (ends at USDC on Solana); 'cctp_sol' = Route C (+ the Jupiter leg). */
+  kind: 'cctp' | 'cctp_sol';
+  /** The device-derived Solana address — the owner whose USDC ATA receives the mint. */
+  solAddress: string;
+  /** The USDC ATA (base58) the burn names as its mint recipient (display + the credit
+   *  verification's account). Frozen at prepare; re-derivation must match or the handoff
+   *  refuses to render. */
+  mintRecipientAta: string;
+  /** Circle's fee census AT CONFIRM (maxFee incl. the 20% buffer, USDC base units) and
+   *  the honest mint floor it implies. The signed maxFee is re-fetched live at handoff. */
+  maxFeeSubunits?: string;
+  mintFloorSubunits?: string;
+  /** The Ethereum burn tx hash once the user's wallet has signed (the status-watch key). */
+  burnTxHash?: string;
+  /** Circle's destination forward tx (a Solana signature) once the mint executed. */
+  forwardTxHash?: string;
+  /** The VERIFIED USDC credit at the ATA when the mint landed (SOL-rail read). */
+  mintSubunits?: string;
+  /** Route C's final leg: the registered Jupiter venue id (frozen at prepare from the
+   *  route — the record's own `venueId` stays the IC venue the five legs traded on). */
+  solVenueId?: string;
+  /** The Jupiter leg's own min-out floor (lamports), frozen when the leg is signed. */
+  solExpectedLamports?: string;
 };
 
 export type ConvertRecord = {
@@ -380,7 +439,8 @@ export type ConvertRecord = {
   solFeeLamports?: string;
   /** The multi-hop widening (2026-09-14 spec §3): a parallel per-leg plan, ADDITIVE — direct
    *  2-leg records carry none and keep their exact historical bytes and behavior. Present
-   *  iff the record was prepared as a route; same length as `legs`. */
+   *  iff the record was prepared as a route; same length as `legs` on an IC-only route
+   *  (Route A), or `legs` + the cctp_burn (+ sol_swap) entries on a cross-rail route. */
   legPlan?: LegPlan[];
   /** Route facts a failure/done screen must name (spec §4): the destination address the
    *  burn leg signed, the symbol + network that arrive there, and the hop asset the user
@@ -412,15 +472,26 @@ export type ConvertRecord = {
    *  user has read the instructions, and the background watch may stop. Until it is set, an
    *  expired-unconfirmed stuck record keeps being probed at the engine's slow cadence. */
   acknowledgedStuckAtMs?: number;
-  failureCode?: 'approve_refused' | 'swap_refused' | 'refunded' | 'withdraw_refused' | 'unknown';
+  /** The cross-rail block (Routes B/C): present iff the record was prepared on a route with
+   *  a CCTP leg; extends the five IC legs with the external-signature burn and (Route C)
+   *  the final Jupiter leg. */
+  crossRail?: CrossRailInfo;
+  failureCode?: 'approve_refused' | 'swap_refused' | 'refunded' | 'withdraw_refused' | 'unknown'
+    // The cross-rail additions: the user declined/abandoned the external signing step
+    // (funds sit as USDC at their OWN EVM address — the copy names it).
+    | 'external_declined';
   failureDetail?: string;
 };
 
 /** What one leg of a route DOES (the label key for copy + the executor's decode dispatch).
  *  Wave-1 vocabulary (docs/specs/2026-09-14-multihop-conversion-spec.md §1): the two approve
  *  kinds share 'approve' — which asset is being approved for whom is the leg's canister +
- *  position, never a third kind. */
-export type LegKind = 'approve' | 'swap' | 'approve_gas' | 'withdraw_erc20';
+ *  position, never a third kind. The cross-rail widening (2026-09-16): `cctp_burn` is an
+ *  EXTERNAL-signature leg (no device signature — it tracks the user's own EVM wallet tx,
+ *  its hash, and Circle's mint status; `canister` is '' because no IC canister is called)
+ *  and `sol_swap` is the final device-signed Jupiter leg (same shape the standalone Solana
+ *  convert signs — `canister` '' likewise). */
+export type LegKind = 'approve' | 'swap' | 'approve_gas' | 'withdraw_erc20' | 'cctp_burn' | 'sol_swap';
 
 /** One leg's completion state. `sent` ≠ `pending` only in what the USER sees — both resume
  *  by re-submitting the identical envelope bytes (request_id dedup makes that safe); the
@@ -443,7 +514,17 @@ const CONVERT_STEPS: ConvertStep[] = [
   'done', 'pending_withdrawal', 'failed_refunded', 'failed_leg', 'stuck',
   'awaiting_user_authorization', 'awaiting_deposit', 'provider_processing',
   'quote_expired', 'provider_refunded',
+  'awaiting_external', 'crossing', 'sol_ready',
 ];
+
+/** The steps a cross-rail record (`crossRail`) may sit at: the IC phases (driven by the
+ *  planned executor as always), the three cross-rail phases, the shared Solana-swap
+ *  phases (Route C's final leg reuses `swapping`/`settling` once `solanaLeg` is set), and
+ *  the shared terminals. Hydration pins a crossRail-bearing record to this vocabulary. */
+const CROSSRAIL_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
+  'approving', 'pending_withdrawal', 'awaiting_external', 'crossing', 'sol_ready',
+  'swapping', 'settling', 'done', 'failed_refunded', 'failed_leg', 'stuck',
+]);
 
 /** The steps a legs==0 (CeFi-shaped) record may sit at: the provider driver's own vocabulary,
  *  start to terminal. Every OTHER step is an IC-legs step — a legless record there is
@@ -560,7 +641,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   if (typeof r.acknowledgedStuckAtMs === 'number') rec.acknowledgedStuckAtMs = r.acknowledgedStuckAtMs;
   if (typeof r.inDecimals === 'number') rec.inDecimals = r.inDecimals;
   if (typeof r.outDecimals === 'number') rec.outDecimals = r.outDecimals;
-  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown'].includes(r.failureCode as string)) return null;
+  if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined'].includes(r.failureCode as string)) return null;
   if (r.failureCode != null) rec.failureCode = r.failureCode as ConvertRecord['failureCode'];
   // The legs: every signed update must be complete. An EMPTY legs list is the CeFi shape and
   // requires a providerRef with an orderId — a legless, providerless record is meaningless.
@@ -579,6 +660,37 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     legs.push({canister, method, argHex, envelopeHex, requestIdHex, expiresAtMs});
   }
   rec.legs = legs;
+  // The CROSS-RAIL block (2026-09-16, Routes B/C): present iff the route composed a CCTP
+  // leg. Parsed before the plan so the plan/legs parallelism check can key on its shape.
+  // Durable facts only — kind, the two frozen addresses, and the observed tx hashes /
+  // verified credit as they arrive. A record carrying it must live in the cross-rail
+  // vocabulary (the IC phases + the three cross-rail phases + the shared terminals), or
+  // the resume engine would arm a poll no driver can advance — the same rule every other
+  // widening applies.
+  let crossRail: CrossRailInfo | undefined;
+  if (r.crossRail != null) {
+    const c = r.crossRail as Record<string, unknown>;
+    if (!c || typeof c !== 'object') return null;
+    if (c.kind !== 'cctp' && c.kind !== 'cctp_sol') return null;
+    if (typeof c.solAddress !== 'string' || c.solAddress.length === 0) return null;
+    if (typeof c.mintRecipientAta !== 'string' || c.mintRecipientAta.length === 0) return null;
+    const optStr = (k: string): string | undefined =>
+      (typeof c[k] === 'string' && (c[k] as string).length > 0 ? c[k] as string : undefined);
+    if (!CROSSRAIL_CONVERT_STEPS.has(rec.step)) return null;
+    crossRail = {
+      kind: c.kind,
+      solAddress: c.solAddress,
+      mintRecipientAta: c.mintRecipientAta,
+      maxFeeSubunits: optStr('maxFeeSubunits'),
+      mintFloorSubunits: optStr('mintFloorSubunits'),
+      burnTxHash: optStr('burnTxHash'),
+      forwardTxHash: optStr('forwardTxHash'),
+      mintSubunits: optStr('mintSubunits'),
+      solVenueId: optStr('solVenueId'),
+      solExpectedLamports: optStr('solExpectedLamports'),
+    };
+    rec.crossRail = crossRail;
+  }
   // The IC-AMM shape the executor drives is exactly TWO legs — the icrc2_approve on the input
   // ledger, then the venue's depositFromAndSwap. A record with legs but fewer than two cannot be
   // resumed by any driver this build ships, so it fails hydration rather than crash mid-retry.
@@ -589,7 +701,7 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   let legPlan: LegPlan[] | undefined;
   if (r.legPlan != null) {
     if (!Array.isArray(r.legPlan)) return null;
-    const kinds: LegKind[] = ['approve', 'swap', 'approve_gas', 'withdraw_erc20'];
+    const kinds: LegKind[] = ['approve', 'swap', 'approve_gas', 'withdraw_erc20', 'cctp_burn', 'sol_swap'];
     const states: LegState[] = ['pending', 'sent', 'confirmed', 'failed'];
     const parsed: LegPlan[] = [];
     for (const p of r.legPlan) {
@@ -597,11 +709,26 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       const q = p as Record<string, unknown>;
       if (typeof q.kind !== 'string' || !kinds.includes(q.kind as LegKind)) return null;
       if (typeof q.state !== 'string' || !states.includes(q.state as LegState)) return null;
-      if (typeof q.canister !== 'string' || !q.canister) return null;
+      // The IC kinds target an IC canister (non-empty). The cross-rail kinds call NO IC
+      // canister — the external-signature leg's "target" is the user's own wallet — so
+      // their canister is '' by construction; anything else is a shape this build never
+      // wrote.
+      const externalKind = q.kind === 'cctp_burn' || q.kind === 'sol_swap';
+      if (externalKind ? q.canister !== '' : (typeof q.canister !== 'string' || !q.canister)) return null;
       if (typeof q.fee !== 'string') return null;
-      parsed.push({kind: q.kind as LegKind, state: q.state as LegState, canister: q.canister, fee: q.fee});
+      parsed.push({kind: q.kind as LegKind, state: q.state as LegState, canister: q.canister as string, fee: q.fee});
     }
-    if (parsed.length !== legs.length || parsed.length < 2) return null;
+    // The cross-rail block is parsed ABOVE so the plan/legs parallelism can key on
+    // its shape: an IC-only plan is exactly parallel to `legs` (same length, ≥2); a
+    // cross-rail plan extends it by one cctp_burn entry and (Route C) one sol_swap entry,
+    // in that order, after the withdraw_erc20. Any other length pairing is corrupt.
+    if (crossRail != null) {
+      const expected = legs.length + 1 + (crossRail.kind === 'cctp_sol' ? 1 : 0);
+      if (parsed.length !== expected || parsed.length < 3) return null;
+      const tail = parsed.slice(legs.length).map(p => p.kind);
+      if (tail[0] !== 'cctp_burn') return null;
+      if (crossRail.kind === 'cctp_sol' && tail[1] !== 'sol_swap') return null;
+    } else if (parsed.length !== legs.length || parsed.length < 2) return null;
     // A planned record must be able to name its destination and its hop asset — every state
     // screen it can ever render keys off those facts (spec §4: name what the user holds,
     // where the exit is). A plan that cannot be NAMED fails hydration, like every other
@@ -630,15 +757,21 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // exclusive with legs>0, legPlan, and providerRef (a record is exactly ONE of the three
   // shapes); when present, `legs` must be empty and the step must be in the Solana driver's
   // vocabulary, or the resume engine would arm a poll no driver can advance.
+  // The CROSS-RAIL exception (2026-09-16, Route C): the record's five IC legs are all
+  // confirmed when the final Jupiter leg is signed, so `solanaLeg` coexists WITH legs and
+  // the plan — exactly on a crossRail-bearing record (never on Route A, whose terminal is
+  // done, and never standalone). The step then lives in the cross-rail vocabulary.
   let solanaLeg: SolanaSwapLeg | undefined;
   if (r.solanaLeg != null) {
-    if (legs.length > 0 || legPlan != null) return null;
+    if (legs.length > 0 || legPlan != null) {
+      if (crossRail == null) return null;
+    }
     const s = r.solanaLeg as Record<string, unknown>;
     if (!s || typeof s !== 'object' || s.protocol !== 'solana') return null;
     if (typeof s.signedTxHex !== 'string' || s.signedTxHex.length === 0) return null;
     if (typeof s.signature !== 'string' || s.signature.length === 0) return null;
     if (typeof s.lastValidBlockHeight !== 'number' || !Number.isSafeInteger(s.lastValidBlockHeight) || s.lastValidBlockHeight <= 0) return null;
-    if (!SOLANA_CONVERT_STEPS.has(rec.step)) return null;
+    if (crossRail == null && !SOLANA_CONVERT_STEPS.has(rec.step)) return null;
     solanaLeg = {
       protocol: 'solana',
       signedTxHex: s.signedTxHex,
@@ -683,8 +816,8 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // The IC shapes (legs>0 or providerRef) name their assets by numeric catalog currency — the
   // ledger-watch probes key on those ids. A Solana record is exempt (mint + symbol are its
   // identifiers); every legacy/historical IC record always carried them, so this cannot orphan
-  // real history.
-  if (solanaLeg == null && (rec.inCurrency == null || rec.outCurrency == null)) return null;
+  // real history. A cross-rail record carries IC legs too — it always names both currencies.
+  if ((solanaLeg == null || crossRail != null) && (rec.inCurrency == null || rec.outCurrency == null)) return null;
   if (rec.id !== id) return null;
   const full = rec as ConvertRecord;
   out[id] = full;
@@ -1004,6 +1137,33 @@ export async function prepareMultihopConvertRecord(args: {
   const withdrawArgHex = await DpayCore.icpWithdrawErc20Arg(burnAmount, route.hop.ledger, destAddress, '', '');
   const withdrawSigned = await DpayCore.icpSignUpdate(secretHex, route.burn.minter, 'withdraw_erc20', withdrawArgHex, envExpiry);
 
+  // The CROSS-RAIL WIDENING (2026-09-16, Routes B/C): when the route composes a CCTP leg,
+  // the five IC legs land USDC at the user's EVM address and the record EXTENDS with the
+  // external-signature burn leg (+ Route C's final Jupiter leg). Nothing here signs: the
+  // burn is the USER's own EVM wallet's transaction — dpay only freezes the facts (the
+  // device-derived SOL address, its USDC ATA as the mint recipient) and prices the census
+  // with Circle's live fee. The calldata itself is built at handoff time from this record.
+  let crossRail: CrossRailInfo | undefined;
+  if (route.crossRail != null) {
+    if (route.crossRail.cctp.finalityThreshold !== CCTP_FINALITY_FAST) {
+      // The fee fetch below is pinned to FAST; an unknown finality shape is a registry
+      // this build did not compose — refuse rather than mis-price.
+      throw new Error(M.convert.errors.cctpFeeUnavailable);
+    }
+    const kp = deriveSolanaKeypair(secretHex);
+    const ataB58 = bs58.encode(deriveAta(kp.address, USDC_MINT_ADDRESS));
+    const fee = await fetchCctpBurnFee();
+    const maxFee = cctpMaxFee(BigInt(burnAmount), fee);
+    crossRail = {
+      kind: route.crossRail.sol != null ? 'cctp_sol' : 'cctp',
+      solAddress: kp.address,
+      mintRecipientAta: ataB58,
+      maxFeeSubunits: maxFee.toString(),
+      mintFloorSubunits: cctpMintFloor(BigInt(burnAmount), maxFee).toString(),
+      ...(route.crossRail.sol != null ? {solVenueId: route.crossRail.sol.venueId} : {}),
+    };
+  }
+
   return {
     id: randNonceHex(),
     createdAtMs: Date.now(),
@@ -1036,6 +1196,11 @@ export async function prepareMultihopConvertRecord(args: {
       {kind: 'approve', canister: route.hop.ledger, fee: route.hop.fee, state: 'pending'},
       {kind: 'approve_gas', canister: route.burn.gasLedger, fee: gasLedgerFee, state: 'pending'},
       {kind: 'withdraw_erc20', canister: route.burn.minter, fee: '', state: 'pending'},
+      // The cross-rail tail: the external-signature burn (no IC canister — the user's own
+      // wallet is the counterparty) and, on Route C, the final device-signed Jupiter leg.
+      // Both start pending; the executor never submits them via the IC rail.
+      ...(crossRail != null ? [{kind: 'cctp_burn' as const, canister: '', fee: '', state: 'pending' as const}] : []),
+      ...(crossRail?.kind === 'cctp_sol' ? [{kind: 'sol_swap' as const, canister: '', fee: '', state: 'pending' as const}] : []),
     ],
     destAddress,
     destSymbol: route.dest.symbol,
@@ -1048,6 +1213,144 @@ export async function prepareMultihopConvertRecord(args: {
     gasDecimals: route.burn.gasDecimals,
     gasFeeWei,
     feeMillionths: quote.feeMillionths,
+    ...(crossRail != null ? {crossRail} : {}),
+  };
+}
+
+// --- the CCTP leg: build the burn for the USER's wallet, then watch Circle attest and mint ---
+
+/** Circle's published fee endpoints (CCTP V2). The burn lane is fixed by the route: USDC
+ *  from Ethereum (domain 0) to Solana (domain 5), FAST finality, Forwarding Service ON
+ *  with recipient setup included — so the URL is composed once, here, not per call. */
+const CCTP_BURN_FEES_URL =
+  'https://iris-api.circle.com/v2/burn/USDC/fees/0/5?forward=true&includeRecipientSetup=true';
+const CCTP_MESSAGES_BASE_URL = 'https://iris-api.circle.com/v2/messages/0?transactionHash=';
+
+/** Circle's live fee numbers for the USDC Ethereum→Solana burn at FAST finality: the
+ *  protocol bps plus the Forwarding Service's fee (med) — the census's own numbers and
+ *  the base of the signed maxFee. Fail-closed, exactly like the minter's gas quote: an
+ *  unreachable fee API means the cross-rail intent cannot be priced honestly, so prepare
+ *  and the handoff both refuse rather than sign a stale guess. */
+export async function fetchCctpBurnFee(timeoutMs = 8000): Promise<CctpBurnFee> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(CCTP_BURN_FEES_URL, {signal: ctl.signal});
+    if (!res.ok) throw new Error(M.convert.errors.cctpFeeUnavailable);
+    const fee = parseCctpBurnFees(await res.json(), CCTP_FINALITY_FAST);
+    if (fee == null) throw new Error(M.convert.errors.cctpFeeUnavailable);
+    return fee;
+  } catch {
+    throw new Error(M.convert.errors.cctpFeeUnavailable);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Circle's CCTP V2 message status, keyed by the BURN tx hash (the watch the mission spec
+ *  names). A 404 is Circle's "not attested yet" — a PENDING, never a failure. Only a
+ *  transport-class error throws; the caller parks and retries at the engine's cadence. */
+export async function fetchCctpMessageStatus(burnTxHash: string, timeoutMs = 8000): Promise<CctpMessageStatus> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const res = await fetch(CCTP_MESSAGES_BASE_URL + encodeURIComponent(burnTxHash), {signal: ctl.signal});
+    if (res.status === 404) return {state: 'pending'};
+    if (!res.ok) throw new Error('cctp status unreachable');
+    return parseCctpMessageStatus(await res.json());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Everything the handoff screen renders and the user's EVM wallet needs: the two exact
+ *  transactions (USDC approve → TokenMessengerV2, then depositForBurnWithHook to it), the
+ *  honest fee numbers behind them, and the frozen destination facts for the copy. The fee
+ *  is fetched LIVE (again) — the confirm-time census is display history by now; what is
+ *  signed is what Circle charges right now. */
+export type CctpHandoff = {
+  /** The token the approve pulls and the burn burns: canonical mainnet USDC. */
+  burnToken: string;
+  /** The spender of BOTH txs: TokenMessengerV2. */
+  tokenMessenger: string;
+  approveCalldata: string;
+  burnCalldata: string;
+  /** The burn amount in USDC base units — the record's own minOut, deterministic. */
+  amountSubunits: string;
+  /** Circle's live fee numbers at handoff (the maxFee is what the burn signs). */
+  minimumFeeBps: string;
+  maxFeeSubunits: string;
+  mintFloorSubunits: string;
+  mintRecipientAta: string;
+  destinationDomain: number;
+  minFinalityThreshold: number;
+};
+
+/** Build the handoff for a record parked at `awaiting_external`. Refuses (never renders a
+ *  stale screen) if the record is not in the handoff phase, or if the re-derived mint
+ *  recipient does not match the one frozen at prepare — the derivation changing is a
+ *  refuse-and-rebuild situation, not a render-what-we-can. */
+export async function buildCctpHandoff(secretHex: string, rec: ConvertRecord): Promise<CctpHandoff> {
+  if (rec.crossRail == null || rec.step !== 'awaiting_external') {
+    throw new Error('record is not awaiting the external signature');
+  }
+  const burnAmount = BigInt(await convertRecordMinOut(rec));
+  const kp = deriveSolanaKeypair(secretHex);
+  const ata = deriveAta(kp.address, USDC_MINT_ADDRESS);
+  if (bs58.encode(ata) !== rec.crossRail.mintRecipientAta || kp.address !== rec.crossRail.solAddress) {
+    // Deterministic derivation drifted from the frozen facts — do not offer a burn whose
+    // recipient this build cannot vouch for. Honest refusal; the user re-prepares.
+    throw new Error('cross-rail destination derivation mismatch');
+  }
+  const fee = await fetchCctpBurnFee();
+  const maxFee = cctpMaxFee(burnAmount, fee);
+  return {
+    burnToken: USDC_ERC20_ADDRESS,
+    tokenMessenger: TOKEN_MESSENGER_V2_ADDRESS,
+    approveCalldata: encodeErc20Approve(TOKEN_MESSENGER_V2_ADDRESS, burnAmount),
+    burnCalldata: encodeDepositForBurnWithHook({
+      amount: burnAmount,
+      destinationDomain: CCTP_DOMAIN_SOLANA,
+      mintRecipientHex64: bytesToHex(ata),
+      burnToken: USDC_ERC20_ADDRESS,
+      maxFee,
+      minFinalityThreshold: CCTP_FINALITY_FAST,
+      hookDataHex: buildForwardHookData(bytesToHex(kp.publicKey)),
+    }),
+    amountSubunits: burnAmount.toString(),
+    minimumFeeBps: fee.minimumFeeBps.toString(),
+    maxFeeSubunits: maxFee.toString(),
+    mintFloorSubunits: cctpMintFloor(burnAmount, maxFee).toString(),
+    mintRecipientAta: bs58.encode(ata),
+    destinationDomain: CCTP_DOMAIN_SOLANA,
+    minFinalityThreshold: CCTP_FINALITY_FAST,
+  };
+}
+
+/** The user's wallet signed and reported the burn tx hash: freeze it, mark the cctp_burn
+ *  leg sent, and move to `crossing` — the mint-watch state. Pure store mutation; the
+ *  resume engine picks the record up from here. Exported for the handoff UI (and the e2e
+ *  seam behind it). */
+export function attachCctpBurnTx(rec: ConvertRecord, burnTxHash: string): ConvertRecord {
+  if (rec.crossRail == null || rec.step !== 'awaiting_external') return rec;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(burnTxHash)) return rec;
+  const planIdx = rec.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
+  const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'sent' as const} : p));
+  return {...rec, step: 'crossing', legPlan, crossRail: {...rec.crossRail, burnTxHash}};
+}
+
+/** The user declines to sign in their wallet: an honest DEAD-END, not a failure of the
+ *  chain — the five IC legs completed, so the funds sit as USDC AT THE USER'S OWN EVM
+ *  ADDRESS, spendable by that wallet. The copy names exactly that. */
+export function declineCctpHandoff(rec: ConvertRecord): ConvertRecord {
+  if (rec.crossRail == null || rec.step !== 'awaiting_external') return rec;
+  const planIdx = rec.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
+  const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'failed' as const} : p));
+  return {
+    ...rec,
+    step: 'failed_leg',
+    legPlan,
+    failureCode: 'external_declined',
   };
 }
 
@@ -1284,7 +1587,10 @@ async function executePlannedConvert(
   const probeHop = (r: ConvertRecord) => probeHopPayout({
     relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower, record: r, excludeOutTx: deps.claimedOutTx,
   });
-  const firstIncomplete = () => (rec.legPlan ?? []).findIndex(l => l.state !== 'confirmed');
+  // The resume cursor counts IC legs ONLY — the cctp_burn/sol_swap tail entries are driven
+  // by the cross-rail drivers, never by this loop, so a cross-rail record whose IC legs are
+  // all confirmed reads as complete here (the loop body never indexes past `legs`).
+  const firstIncomplete = () => (rec.legPlan ?? []).findIndex(l => l.state !== 'confirmed' && l.kind !== 'cctp_burn' && l.kind !== 'sol_swap');
 
   // Parked mid-route on the hop watch: resolve the row FIRST — it is the swap leg's
   // confirmation and the gate every burn leg waits behind.
@@ -1370,6 +1676,18 @@ async function executePlannedConvert(
       continue;
     }
     if (plan.kind === 'withdraw_erc20') {
+      if (rec.crossRail != null) {
+        // The CROSS-RAIL fork (2026-09-16, Routes B/C): the minter accepted the burn, so
+        // USDC is on its way to the user's EVM address — but the intent does NOT end here.
+        // The record parks on `awaiting_external`: the CCTP burn transaction must be signed
+        // BY THE USER'S OWN EVM WALLET (dpay never holds EVM keys — the module header's
+        // red line). outAmountNet stays unset until the Solana mint is verified; outTx
+        // records the minter's #ok block index as the IC-side evidence.
+        return tools.advance(withLegState(rec, i, 'confirmed', {
+          step: 'awaiting_external',
+          outTx: legBlockIndex ?? undefined,
+        }));
+      }
       // Terminal: the minter accepted the burn. outAmountNet is the BURN amount (the route's
       // floor — "at least X on its way"); outTx is the minter's #ok block index, the durable
       // evidence this record will ever have (delivery itself happens on Ethereum).
@@ -1816,6 +2134,255 @@ export async function executeSolanaConvert(
     rec = await advance({step: 'settling'});
   }
 
+  if (rec.step === 'settling') {
+    return settle();
+  }
+  return rec;
+}
+
+// --- the cross-rail drivers (Routes B/C, 2026-09-16) -------------------------------------------------
+//
+// Everything past the five IC legs. The signing boundary is the design: the CCTP burn is
+// the USER's own EVM wallet's transaction (dpay builds the calldata, renders it, and never
+// holds an EVM key), so `awaiting_external` advances only on USER action (attach or
+// decline); the mint watch keys on Circle's own status API by the burn hash and NEVER
+// manufactures a failure (a stall stays a pending with the Circle/Etherscan links); and
+// Route C's final Jupiter leg re-uses the wave-3a machine verbatim (fresh quote, verify
+// beneficiaries, device signature) — only its payout reads key on the cross-rail facts.
+
+export type CrossRailDeps = {
+  secretHex: string;
+  publicHex: string;
+  onUpdate: (record: ConvertRecord) => void | Promise<void>;
+};
+
+export type CrossRailOpts = {
+  /** How many status polls one drive performs before parking back on `crossing`. */
+  watchAttempts?: number;
+  watchIntervalMs?: number;
+};
+
+/** Drive the `crossing` phase: poll Circle's message status by the burn hash; when Circle
+ *  says complete (the forward tx executed the Solana mint), corroborate the credit at the
+ *  user's USDC ATA through the SOL rail before anything downstream is offered. A pending
+ *  or attested-but-unminted message parks back on `crossing` — an attestation stall is a
+ *  PENDING with links (the mission's rule: never a false failure). A transport error also
+ *  parks: the engine re-arms at its cadence. */
+export async function executeCrossRailConvert(
+  start: ConvertRecord,
+  deps: CrossRailDeps,
+  opts: CrossRailOpts = {},
+): Promise<ConvertRecord> {
+  const watchAttempts = opts.watchAttempts ?? 1;
+  const watchIntervalMs = opts.watchIntervalMs ?? 0;
+  let rec = start;
+  const cross = rec.crossRail;
+  if (cross == null || rec.step !== 'crossing' || cross.burnTxHash == null) return rec;
+  const advance = async (patch: Partial<ConvertRecord>, crossPatch?: Partial<CrossRailInfo>): Promise<ConvertRecord> => {
+    rec = {...rec, ...patch, ...(crossPatch != null ? {crossRail: {...(rec.crossRail as CrossRailInfo), ...crossPatch}} : {})};
+    await saveConvertRecord(deps.publicHex, rec);
+    await deps.onUpdate(rec);
+    return rec;
+  };
+
+  let status: CctpMessageStatus | null = null;
+  for (let i = 0; i < watchAttempts; i++) {
+    try {
+      status = await fetchCctpMessageStatus(cross.burnTxHash);
+    } catch {
+      status = null; // transport-class: proves nothing either way — park, retry next cadence
+    }
+    if (status != null && status.state === 'complete') break;
+    if (i < watchAttempts - 1 && watchIntervalMs > 0) await new Promise(r => setTimeout(r, watchIntervalMs));
+  }
+  if (status == null || status.state !== 'complete') {
+    return rec; // still attesting/minting — the pending-with-links screen stays up
+  }
+  // Circle executed the destination mint. Corroborate through the SOL rail before the
+  // record claims a credit: the forward tx's USDC token delta AT THE USER'S ATA.
+  let credit: string | null = null;
+  try {
+    credit = await getSolTokenCredit(status.forwardTxHash, cross.solAddress, USDC_MINT_ADDRESS);
+  } catch {
+    credit = null;
+  }
+  if (credit == null) {
+    // forwardTxHash present but the rail read did not corroborate YET — freeze the hash,
+    // park on crossing, and let the next cadence retry the read. Never claim unverified.
+    return advance({}, {forwardTxHash: status.forwardTxHash});
+  }
+  const planIdx = rec.legPlan?.findIndex(p => p.kind === 'cctp_burn') ?? -1;
+  const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'confirmed' as const} : p));
+  if (cross.kind === 'cctp') {
+    // Route B terminal: USDC at the user's own ATA, verified. outAmountNet is the REALIZED
+    // credit; outTx is Circle's forward signature (the durable Solana-side evidence).
+    return advance({step: 'done', outAmountNet: credit, outTx: status.forwardTxHash, legPlan},
+      {forwardTxHash: status.forwardTxHash, mintSubunits: credit});
+  }
+  // Route C: the swap offer unlocks — the user confirms the final leg on a FRESH quote.
+  return advance({step: 'sol_ready', legPlan}, {forwardTxHash: status.forwardTxHash, mintSubunits: credit});
+}
+
+/** Build + verify + sign Route C's final Jupiter leg and move `sol_ready` → `swapping`.
+ *  The wave-3a red lines verbatim: the venue row is a registered mainnet solana_amm; the
+ *  fresh quote names the registry pair (USDC mint → wrapped SOL); the venue's tx is
+ *  decodable, fee-payer IS the user, and the native-SOL proceeds land on the fee payer
+ *  (no ATA needed); the message fee is quoted honestly; the device signs. The input is
+ *  the VERIFIED mint credit — never an estimate. */
+export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertRecord): Promise<ConvertRecord> {
+  const cross = rec.crossRail;
+  if (cross == null || rec.step !== 'sol_ready' || cross.kind !== 'cctp_sol') {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  if (cross.mintSubunits == null || cross.solVenueId == null) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  const venue = venueOfId(cross.solVenueId);
+  if (venue == null || venue.kind !== 'solana_amm' || venue.testnet) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  if (!venue.pair_ledgers.includes(USDC_MINT_ADDRESS) || !venue.pair_ledgers.includes(WRAPPED_SOL_MINT_ADDRESS)) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  const kp = deriveSolanaKeypair(secretHex);
+  if (kp.address !== cross.solAddress) {
+    // The derivation no longer matches the frozen recipient — refuse, never re-target.
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  const quoted = await fetchJupiterQuote(venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, rec.slippageBps);
+  if (!quoted.ok) {
+    if (quoted.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
+    throw new Error(M.convert.errors.quoteUnavailable(quoted.code));
+  }
+  const built = await fetchJupiterSwapTx(venue, quoted.quote, kp.address);
+  if (!built.ok) {
+    if (built.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
+    throw new Error(M.convert.errors.quoteUnavailable(built.code));
+  }
+  const decoded = decodeVenueSwapTx(built.swap.swapTransaction);
+  if (decoded == null) {
+    throw new Error(M.convert.errors.quoteUnavailable('shape'));
+  }
+  // Native-SOL output: unwrap lands on the fee payer — no SPL destination to pin.
+  const beneficiary = verifyVenueSwapTxBeneficiaries(decoded, {pubkey: kp.publicKey, outAta: null});
+  if (!beneficiary.ok) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  let solFeeLamports: string | undefined;
+  try {
+    const fee = await quoteSolMessageFee(decoded.message);
+    if (fee != null) solFeeLamports = fee.toString(10);
+  } catch {
+    // offline/unreadable fee is not a refusal — the line stays absent
+  }
+  const signed = signVenueSwapTx(built.swap.swapTransaction, kp.seed);
+  if (signed == null || signed.feePayer !== kp.address) {
+    throw new Error(M.convert.errors.quoteUnavailable('shape'));
+  }
+  const planIdx = rec.legPlan?.findIndex(p => p.kind === 'sol_swap') ?? -1;
+  const legPlan = rec.legPlan?.map((p, i) => (i === planIdx ? {...p, state: 'sent' as const} : p));
+  return {
+    ...rec,
+    step: 'swapping',
+    legPlan,
+    solanaLeg: {
+      protocol: 'solana',
+      signedTxHex: bytesToHex(signed.raw),
+      signature: signed.signature,
+      lastValidBlockHeight: built.swap.lastValidBlockHeight,
+    },
+    ...(solFeeLamports != null ? {solFeeLamports} : {}),
+    crossRail: {...cross, solExpectedLamports: quoted.quote.otherAmountThreshold},
+  };
+}
+
+/** Drive the cross-rail Jupiter leg (`swapping`/`settling`/its `stuck`): the wave-3a
+ *  machine's exact transitions, with the payout reads keyed on the cross-rail facts (the
+ *  output is native SOL, so the realized credit is the fee payer's lamports delta on the
+ *  swap signature; the fallback floor is the leg's own signed min-out, NOT the record's
+ *  IC-hop figures — different asset, different units). A refusal leaves the USDC(SOL)
+ *  AT THE USER'S ATA — the failed copy names it and the exit (a standalone Solana
+ *  convert, or holding the USDC). */
+export async function executeCrossRailSolSwap(
+  start: ConvertRecord,
+  deps: CrossRailDeps,
+  opts: SolanaExecutorOpts = {},
+): Promise<ConvertRecord> {
+  const submitAttempts = opts.submitAttempts ?? 2;
+  const confirmAttempts = opts.confirmAttempts ?? 12;
+  const intervalMs = opts.pollIntervalMs ?? 400;
+  let rec = start;
+  const leg = rec.solanaLeg;
+  const cross = rec.crossRail;
+  if (leg == null || cross == null) return rec;
+  const advance = async (patch: Partial<ConvertRecord>): Promise<ConvertRecord> => {
+    rec = {...rec, ...patch};
+    await saveConvertRecord(deps.publicHex, rec);
+    await deps.onUpdate(rec);
+    return rec;
+  };
+  const settle = async (): Promise<ConvertRecord> => {
+    const outcome = await watchSolTx(leg, confirmAttempts, intervalMs);
+    if (outcome.kind === 'confirmed') {
+      const realized = await getSolNativeCredit(leg.signature).catch(() => null);
+      return advance({
+        step: 'done',
+        outAmountNet: realized ?? cross.solExpectedLamports ?? '',
+        outTx: leg.signature,
+        ...(realized == null ? {failureDetail: 'payout-floor'} : {}),
+      });
+    }
+    if (outcome.kind === 'failed') {
+      return advance({step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: outcome.detail});
+    }
+    if (outcome.kind === 'dead') {
+      return advance({step: 'failed_refunded', failureCode: 'unknown', failureDetail: 'blockhash-expired'});
+    }
+    return advance({step: 'stuck', failureCode: 'unknown'});
+  };
+  if (rec.step === 'stuck') {
+    const outcome = await watchSolTx(leg, 1, 0);
+    if (outcome.kind === 'confirmed') {
+      rec = await advance({step: 'settling'});
+    } else if (outcome.kind === 'failed') {
+      return advance({step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: outcome.detail});
+    } else if (outcome.kind === 'dead') {
+      return advance({step: 'failed_refunded', failureCode: 'unknown', failureDetail: 'blockhash-expired'});
+    } else {
+      return rec;
+    }
+  }
+  if (rec.step === 'swapping') {
+    const raw = hexToBytes(leg.signedTxHex);
+    if (raw == null) {
+      return advance({step: 'stuck', failureCode: 'unknown', failureDetail: 'unreadable-signed-bytes'});
+    }
+    void saveTxNote(deps.publicHex, {k: leg.signature, who: venueDisplayName(cross.solVenueId ?? rec.venueId)}, Date.now());
+    let submitted = false;
+    let lastErr: unknown = null;
+    for (let i = 0; i < submitAttempts && !submitted; i++) {
+      try {
+        const nodeSig = await submitRawSolTx(raw);
+        submitted = nodeSig === leg.signature;
+        if (!submitted) return advance({step: 'stuck', failureCode: 'unknown', failureDetail: 'signature-mismatch'});
+      } catch (e) {
+        lastErr = e;
+        const probe = await watchSolTx(leg, 1, 0);
+        if (probe.kind === 'confirmed') {
+          submitted = true;
+        } else if (probe.kind === 'failed') {
+          return advance({step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: probe.detail});
+        } else if (probe.kind === 'dead') {
+          return advance({step: 'failed_refunded', failureCode: 'unknown', failureDetail: 'blockhash-expired'});
+        }
+      }
+    }
+    if (!submitted) {
+      if (lastErr != null) console.warn('cross-rail sol submit: no verdict after retries', lastErr);
+      return advance({step: 'stuck', failureCode: 'unknown'});
+    }
+    rec = await advance({step: 'settling'});
+  }
   if (rec.step === 'settling') {
     return settle();
   }

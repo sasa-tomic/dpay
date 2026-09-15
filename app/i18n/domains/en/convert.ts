@@ -224,12 +224,62 @@ export type ConvertMessages = {
     stuckRouteBody: string;
   };
 
+  // --- the cross-rail family (Routes B/C, 2026-09-16): the CCTP handoff (the USER's own
+  // Ethereum wallet signs; dpay never holds an EVM key), the Circle attestation watch, and
+  // Route C's final Jupiter offer. Every dead-end names where the funds sit and the exit.
+  crossrail: {
+    heading: string;
+    handoffIntro: (amount: string, sym: string) => string;
+    stepApproveLabel: string;
+    stepBurnLabel: string;
+    txToLabel: string;
+    txAmountLabel: string;
+    txCalldataLabel: string;
+    copy: string;
+    copied: string;
+    approveHint: string;
+    burnHint: string;
+    timingNote: string;
+    externalGasLine: string;
+    circleFeeLine: (fee: string) => string;
+    mintFloorLine: (floor: string) => string;
+    burnTxLabel: string;
+    burnTxPlaceholder: string;
+    attachButton: string;
+    burnTxInvalid: string;
+    declineButton: string;
+    whatSigning: string;
+    crossingTitle: string;
+    crossingBody: string;
+    viewBurnTx: string;
+    viewCircle: string;
+    stillCrossing: string;
+    solReadyTitle: string;
+    solReadyBody: (credit: string, ata: string) => string;
+    solQuoteLabel: string;
+    solMinLine: (min: string) => string;
+    solConfirmButton: string;
+    solFeeLine: (fee: string) => string;
+    solPreflightTitle: string;
+    solPreflightBody: (needed: string) => string;
+    doneTitle: string;
+    doneBody: (amount: string, sym: string, address: string) => string;
+    declinedTitle: string;
+    declinedBody: (address: string) => string;
+    solFailedTitle: string;
+    solFailedBody: (ata: string, venue: string) => string;
+    legCctpBurn: (sym: string, network: string) => string;
+    legSolSwap: (venue: string, sym: string) => string;
+    destAddressCrossNote: string;
+  };
+
   // --- module-thrown errors (app/convert.ts) ----------------------------------------------------
   errors: {
     quoteUnreachable: (venue: string) => string;
     quoteRefused: (venue: string) => string;
     quoteUnavailable: (code: string) => string;
     gasUnavailable: string;
+    cctpFeeUnavailable: string;
   };
 };
 
@@ -390,10 +440,65 @@ export const convertEn: ConvertMessages = {
     stuckRouteBody: 'A leg was sent but its outcome is unknown yet. dpay keeps watching the ledgers in the background; this screen flips on its own when the route resolves.',
   },
 
+  /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —
+   *  the CCTP handoff (dpay renders the exact transactions, the USER's own Ethereum wallet
+   *  signs; dpay never holds an EVM key), the Circle attestation watch, and Route C's
+   *  final Jupiter offer. Every dead-end names where the funds sit and the exit. */
+  crossrail: {
+    heading: 'Sign in your Ethereum wallet',
+    handoffIntro: (amount, sym) =>
+      `The Internet Computer part is done: ${amount} ${sym} is at your Ethereum address. Your wallet now sends it across — dpay never touches your Ethereum keys.`,
+    stepApproveLabel: 'Step 1 — let Circle\u2019s contract move the USDC',
+    stepBurnLabel: 'Step 2 — burn the USDC for the Solana transfer',
+    txToLabel: 'To',
+    txAmountLabel: 'Amount',
+    txCalldataLabel: 'Transaction data',
+    copy: 'Copy',
+    copied: 'Copied',
+    approveHint: 'This lets Circle\u2019s TokenMessenger move exactly the USDC being sent — nothing more.',
+    burnHint: 'This locks the USDC on Ethereum. Circle\u2019s bridge then mints the same USDC to your Solana address — no wrapped token, Circle runs the arrival for you.',
+    timingNote: 'On the fast path the arrival typically takes seconds to a few minutes (measured ~20 s in our live check). If Ethereum is busy it can take longer — this screen updates on its own.',
+    externalGasLine: 'Ethereum gas for these two transactions is paid by your wallet\u2019s own ETH. dpay cannot pay it or quote it exactly.',
+    circleFeeLine: fee => `Circle\u2019s bridge fee (its own number, taken from the amount): at most ${fee}`,
+    mintFloorLine: floor => `At least ${floor} arrives at your Solana address`,
+    burnTxLabel: 'Burn transaction hash',
+    burnTxPlaceholder: '0x… (from your wallet, after signing)',
+    attachButton: 'I signed it — watch the crossing',
+    burnTxInvalid: 'That does not look like an Ethereum transaction hash.',
+    declineButton: 'I am not signing this',
+    whatSigning: 'You are signing two ordinary Ethereum transactions in your own wallet: an approval, then the burn. Nothing is signed on dpay\u2019s side for this step.',
+    crossingTitle: 'Crossing to Solana',
+    crossingBody: 'Circle is attesting the burn and will mint the USDC at your Solana address. dpay is watching Circle\u2019s own status feed — this page flips by itself.',
+    viewBurnTx: 'View the burn transaction',
+    viewCircle: 'Circle\u2019s status page',
+    stillCrossing: 'Attestation is not finished yet. This stays pending — it is not failed. On the fast path it is seconds to minutes; if Ethereum is congested, longer.',
+    solReadyTitle: 'USDC landed on Solana',
+    solReadyBody: (credit, ata) => `${credit} USDC is at ${ata}, verified on-chain. Finish the route, or leave the USDC there — it is yours either way.`,
+    solQuoteLabel: 'Jupiter quote (fresh)',
+    solMinLine: min => `At least ${min} SOL at your address`,
+    solConfirmButton: 'Swap to SOL',
+    solFeeLine: fee => `Solana transaction fee: ${fee}`,
+    solPreflightTitle: 'A little SOL is needed for the fee',
+    solPreflightBody: needed =>
+      `The swap\u2019s network fee is paid in SOL and this wallet holds under ${needed}. Get a little SOL into this wallet first — the USDC stays put meanwhile.`,
+    doneTitle: 'Converted',
+    doneBody: (amount, sym, address) => `${amount} ${sym} is at your Solana address ${address} — verified on-chain.`,
+    declinedTitle: 'Handoff cancelled',
+    declinedBody: address =>
+      `Nothing crossed. Your USDC sits at your own Ethereum address ${address} — send it anywhere from your wallet, or run this route again later.`,
+    solFailedTitle: 'The Solana swap did not go through',
+    solFailedBody: (ata, venue) =>
+      `The USDC already crossed safely and is at your Solana address ${ata}. ${venue} declined the final swap — try again here in a moment, or keep the USDC.`,
+    legCctpBurn: (sym, network) => `Cross ${sym} to ${network} via Circle (you sign this in your wallet)`,
+    legSolSwap: (venue, sym) => `Swap for ${sym} on ${venue}`,
+    destAddressCrossNote: 'This Ethereum address is also the wallet that signs the crossing — paste an address you control.',
+  },
+
   errors: {
     quoteUnreachable: venue => `Could not reach ${venue} for a quote. Check your connection and try again.`,
     quoteRefused: venue => `${venue} declined to quote this pair right now.`,
     quoteUnavailable: code => `A quote could not be shown (code ${code}).`,
     gasUnavailable: 'The cash-out minter could not be asked for its gas price — nothing was signed. Try again.',
+    cctpFeeUnavailable: 'Circle\u2019s bridge fee could not be fetched — nothing was signed. Check your connection and try again.',
   },
 };

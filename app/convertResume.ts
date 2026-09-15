@@ -37,10 +37,15 @@ import {DpayCore} from './services/native';
 import {fetchWithTimeout} from './services/relay';
 import {deriveSolanaAddress} from './solana/identity';
 import {
+  attachCctpBurnTx as attachCctpBurnTxToRecord,
+  declineCctpHandoff as declineCctpHandoffOnRecord,
   executeConvert,
+  executeCrossRailConvert,
+  executeCrossRailSolSwap,
   executeSolanaConvert,
   isTerminalConvertStep,
   loadConvertRecords,
+  prepareCrossRailSolLeg,
   probeConvertSettlement,
   probeHopPayout,
   saveConvertRecord,
@@ -336,7 +341,83 @@ async function driveOne(id: string): Promise<void> {
   try {
     let next = rec;
     if (!isTerminalConvertStep(rec.step)) {
-      if (rec.legs.length > 0) {
+      if (rec.crossRail != null) {
+        // Cross-rail dispatch (convert.ts, Routes B/C 2026-09-16) — keyed on the phase:
+        //  - `crossing`: Circle's mint watch + the ATA credit verification (the record moves
+        //    itself to done/sol_ready when Circle completes; a stall parks pending, NEVER
+        //    a false failure — the re-arm keeps the watch alive).
+        //  - `solanaLeg` set (`swapping`/`settling` after sol_ready): the cross-rail Jupiter
+        //    driver — NOT executeSolanaConvert, whose payout reads key on the standalone
+        //    record shape.
+        //  - `awaiting_external` / `sol_ready`: USER-paced. The handoff panel owns the first
+        //    (dpay never signs EVM); the fresh-quote offer owns the second. The engine still
+        //    re-arms so a reload picks the record up the moment it moves.
+        //  - the IC phases (`approving`/`pending_withdrawal`) fall through to the legs
+        //    driver below, exactly as Route A — the executor hands off to `awaiting_external`
+        //    when the IC route's withdraw lands.
+        if (rec.step === 'crossing') {
+          next = await executeCrossRailConvert(rec, {
+            secretHex: ctx.secretHex,
+            publicHex: ctx.publicHex,
+            onUpdate: (r) => {
+              if (!mine()) return;
+              fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+              state.records.set(r.id, r);
+              notify();
+            },
+          });
+          if (!mine()) return;
+          if (next !== rec) {
+            const before = state.records.get(id)?.step;
+            state.records.set(id, next);
+            fireOnTerminalIfEnteredListed(before, next);
+            notify();
+          }
+        } else if (rec.solanaLeg != null) {
+          next = await executeCrossRailSolSwap(rec, {
+            secretHex: ctx.secretHex,
+            publicHex: ctx.publicHex,
+            onUpdate: (r) => {
+              if (!mine()) return;
+              fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+              state.records.set(r.id, r);
+              notify();
+            },
+          });
+          if (!mine()) return;
+          if (next !== rec) {
+            const before = state.records.get(id)?.step;
+            state.records.set(id, next);
+            fireOnTerminalIfEnteredListed(before, next);
+            notify();
+          }
+        }
+        // awaiting_external / sol_ready: USER-paced, nothing to drive this tick — the
+        // re-arm below picks the record up the moment it moves (attach/decline/confirm).
+        // The IC phases (approving / pending_withdrawal) reach the legs driver here,
+        // exactly as Route A — the executor hands off to `awaiting_external` when the IC
+        // route's withdraw lands.
+        else if (rec.step !== 'awaiting_external' && rec.step !== 'sol_ready') {
+          next = await executeConvert(rec, {
+            secretHex: ctx.secretHex,
+            publicHex: ctx.publicHex,
+            relayUrl: ctx.relayUrl,
+            onUpdate: (r) => {
+              if (!mine()) return;
+              fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+              state.records.set(r.id, r);
+              notify();
+            },
+            claimedOutTx: claimedOutTxFor(id),
+            claimedRefundTx: claimedRefundTxFor(id),
+          }, state.opts.executorOpts);
+          if (!mine()) return;
+          const before = state.records.get(id)?.step;
+          state.records.set(id, next);
+          fireOnTerminalIfEnteredListed(before, next);
+          notify();
+        }
+      } else if (rec.legs.length > 0) {
         // IC-legs driver (convert.ts): the V6 trichotomy lives inside — resubmit only unexpired
         // signed bytes, watch everything else, never sign anything new.
         next = await executeConvert(rec, {
@@ -395,9 +476,22 @@ async function driveOne(id: string): Promise<void> {
       && rec.acknowledgedStuckAtMs == null
     ) {
       // The honest unknown stays watchable until the user reads it: one slow probe per window.
-      // (A Solana stuck record re-reads its signature status the same way — inside
-      // executeSolanaConvert's stuck entry, since the chain IS the ledger watch on that rail.)
-      if (rec.solanaLeg != null) {
+      // (A Solana stuck record re-reads its signature status the same way — inside the
+      // executor's stuck entry, since the chain IS the ledger watch on that rail. A
+      // cross-rail record's Solana leg goes to the cross-rail driver, whose payout reads
+      // key on the cross-rail facts.)
+      if (rec.crossRail != null && rec.solanaLeg != null) {
+        next = await executeCrossRailSolSwap(rec, {
+          secretHex: ctx.secretHex,
+          publicHex: ctx.publicHex,
+          onUpdate: (r) => {
+            if (!mine()) return;
+            fireOnTerminalIfEnteredListed(state.records.get(r.id)?.step, r);
+            state.records.set(r.id, r);
+            notify();
+          },
+        });
+      } else if (rec.solanaLeg != null) {
         next = await executeSolanaConvert(rec, {
           publicHex: ctx.publicHex,
           solAddress: deriveSolanaAddress(ctx.secretHex),
@@ -530,6 +624,41 @@ export async function acknowledgeStuckRecord(id: string): Promise<void> {
   if (rec == null || rec.step !== 'stuck' || rec.acknowledgedStuckAtMs != null) return;
   await commit({...rec, step: 'stuck', acknowledgedStuckAtMs: Date.now()});
   clearTimer(id); // the honest unknown has been read; nothing advances it but the user now
+}
+
+/** The handoff's return path (Routes B/C): the user's own EVM wallet signed the burn, and the
+ *  burn tx hash is in. Attaches it (convert.ts validates the hash shape and freezes it),
+ *  parks the record on `crossing`, and immediately drives the Circle watch. This is the ONLY
+ *  way an `awaiting_external` record advances — dpay never signs, so it never guesses. */
+export async function attachCctpBurnTx(id: string, burnTxHash: string): Promise<void> {
+  const rec = state.records.get(id);
+  if (rec == null || rec.step !== 'awaiting_external') return;
+  const next = attachCctpBurnTxToRecord(rec, burnTxHash);
+  await commit(next);
+  void driveOne(id);
+}
+
+/** The handoff's honest exit: the user is NOT signing in their wallet (declined, wrong wallet,
+ *  changed their mind). The record ends `failed_leg`/`external_declined` — funds sit as USDC
+ *  at the user's OWN EVM address, exactly where Route A would have delivered them; the dead-end
+ *  copy names it. Refuses non-awaiting records. */
+export async function declineCctpHandoff(id: string): Promise<void> {
+  const rec = state.records.get(id);
+  if (rec == null || rec.step !== 'awaiting_external') return;
+  await commit(declineCctpHandoffOnRecord(rec));
+}
+
+/** Route C's final confirm: build + verify + sign the Jupiter leg from the VERIFIED mint
+ *  credit (convert.ts `prepareCrossRailSolLeg` owns every red line) and hand the signed
+ *  record to the executor. The screen's own confirm button is the only caller. */
+export async function confirmCrossRailSolLeg(id: string): Promise<ConvertRecord | null> {
+  const rec = state.records.get(id);
+  const ctx = state.ctx;
+  if (rec == null || ctx == null || rec.step !== 'sol_ready') return null;
+  const next = await prepareCrossRailSolLeg(ctx.secretHex, rec);
+  await commit(next);
+  void driveOne(id);
+  return next;
 }
 
 /** Test-only: full teardown between suites (jest module state persists across files). */
