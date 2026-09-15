@@ -1,0 +1,583 @@
+//! The SideShift partner-key proxy — the FIRST relay-held partner-key surface
+//! (founder decision 3, 2026-09-14, `docs/specs/2026-09-14-swap-venue-feasibility.md`
+//! §Founder decisions; the partner-key infrastructure pattern is recorded there under
+//! "Partner-key infrastructure").
+//!
+//! SideShift is a CeFi instant-exchange service. Its API (verified live 2026-09-15:
+//! base `https://sideshift.ai/api/v2/…` — the old `api.sideshift.ai` host is NXDOMAIN)
+//! requires an account: every quote and order call carries the account secret in
+//! `x-sideshift-secret` and the account id as `affiliateId`. An account is the
+//! INTEGRATION, not an end user (their own docs: "Use one account for your entire
+//! integration"), so unlike OpenCryptoPay there is NO per-user session the device
+//! could hold — the key is one shared partner credential, and by the founder boundary
+//! it lives HERE, on the relay, never on the device.
+//!
+//! # What this module serves
+//!
+//! Two routes, both registered on EVERY build (the 503-not-404 philosophy):
+//!
+//! - `POST /api/v1/sideshift/quotes` — the query-only quote surface. The device posts
+//!   rail identifiers (`depositLedger`, `settleLedger` — the registry's own pair ids)
+//!   and a decimal `depositAmount` string. The relay maps the pair onto SideShift's
+//!   own coin/network codes, attaches the partner credentials, and forwards. A
+//!   successful upstream answer is wrapped `{"venue_id":"sideshift","quote":<the
+//!   venue's body VERBATIM>,"fetched_at":<unix secs>}` — the attribution + timestamp
+//!   the delegated-conversion red lines require, with the venue's numbers untouched
+//!   (the relay never computes, blends or rounds a rate).
+//! - `POST /api/v1/sideshift/shifts/fixed` — fixed-shift (order) creation, same
+//!   credential attachment, response VERBATIM (no wrap: an order is not a quote
+//!   surface). The device then shows the user SideShift's `depositAddress` — the user
+//!   sends the deposit to SIDESHIFT's address; that is what CeFi means and the app's
+//!   disclosure says so.
+//!
+//! Everything else stays DEVICE-DIRECT by SideShift's own design: shift status reads
+//! (`GET /api/v2/shifts/{id}`) are keyless (verified live), so the resume engine's
+//! provider poller (`app/convertResume.ts`) reads them over https without this relay
+//! — the relay remains query/credential surface only, never a funds party.
+//!
+//! # The pair mapping (and why the relay owns it)
+//!
+//! The registry row (`catalog.rs`, kind `cefi`) names the pair in RAIL-CANONICAL ids —
+//! an IC ledger principal and a Solana mint. SideShift speaks its OWN coin/network
+//! codes (`ICP` on `icp`, `SOL` on `solana`). Mapping rail id → venue code is a fact
+//! about the VENUE, so it lives with the venue integration: here, next to the
+//! credentials. The route accepts a pair only if it is exactly the registered
+//! SideShift row's pair (unordered) — a device cannot spend the partner key on a pair
+//! dpay never registered, and cannot smuggle its own `affiliateId` or `commissionRate`
+//! through: both are attached HERE, from config, never read from the request.
+//!
+//! # Founder boundary (recorded in the spec amendment)
+//!
+//! - `commissionRate` is pinned to `"0"` (the documented range is 0%–2%, default
+//!   0.5%): dpay takes NO cut from a conversion — a nonzero commission would be one.
+//! - The SideShift account holds no user funds and dpay sends none to it: the account
+//!   is provably non-withdrawal-capable in the only sense that matters (nothing to
+//!   withdraw). The secret still grants full ACCOUNT access per SideShift's docs, so
+//!   if SideShift ever offers read-only keys the switch is mandatory, not optional.
+//! - A withdrawal-capable key anywhere in dpay remains an absolute no.
+//!
+//! # Failure semantics (same contract as `crate::solana`)
+//!
+//! - Upstream HTTP error status → SAME status, upstream body VERBATIM (SideShift's
+//!   own `{"error":{message,code}}` shape — whatever refused is the venue, not us).
+//! - Relay-originated failures carry the body marker
+//!   `{"dpayRelayError":"sideshift-unconfigured"|"sideshift-upstream-unreachable",
+//!   "detail":"…"}` (503 when a credential env var is unset, 504 on transport
+//!   trouble). The detail names the ENV VAR NAMES and categories only.
+//! - Malformed device bodies are 400s in the house `{"error": …}` shape, refused
+//!   BEFORE any upstream call.
+//! - The reqwest error text is never included (it embeds the request URL); redirects
+//!   are not followed.
+//!
+//! # Secrets
+//!
+//! `DPAY_SIDESHIFT_SECRET` is deploy config carrying the partner account secret: never
+//! logged, never echoed in a response, never committed (docs/OPS.md §3). Every error
+//! body in this module is a fixed string for exactly that reason.
+//!
+//! # x-user-ip (SideShift's proxying rule)
+//!
+//! SideShift's permissions doc: requests sent from an integration's own server MUST
+//! carry `x-user-ip` set to the end user's IP. The relay forwards the CONNECTING
+//! client's IP (wired via `into_make_service_with_connect_info` in main.rs; absent in
+//! oneshot-driven tests, where the header is simply omitted). It is forwarded as
+//! SideShift requires — jurisdiction detection is their service's own need, and an
+//! honest integration satisfies it with the best IP it can actually see.
+
+use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
+use std::sync::OnceLock;
+
+use axum::body::Bytes;
+use axum::extract::{ConnectInfo, FromRequestParts, State};
+use axum::http::{header, request::Parts, StatusCode};
+use axum::response::{IntoResponse, Response};
+use serde_json::{json, Value};
+
+use crate::AppState;
+
+/// The venue id this adapter serves (must match the `cefi` row in `catalog.rs`).
+pub const SIDESHIFT_VENUE_ID: &str = "sideshift";
+
+/// The SideShift API base (host verified live 2026-09-15 — the old
+/// `api.sideshift.ai` host is NXDOMAIN; the API lives under `sideshift.ai/api/v2`).
+/// Overridable via `DPAY_SIDESHIFT_API_BASE` (main.rs): the offline loop points it at
+/// the relay's own test stub, and an operator may pin a different base.
+pub const DEFAULT_API_BASE: &str = "https://sideshift.ai/api/v2";
+
+/// Per-upstream-call timeout. SideShift quotes/shifts are single round trips; no env
+/// knob (the solana proxy's `DPAY_SOLANA_TIMEOUT_MS` exists because its calls ride
+/// poll loops — this surface does not).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The partner commission rate, pinned to ZERO by the founder red line: dpay is paid
+/// nothing for a conversion. SideShift's documented range is "0"–"2" (percent); "0"
+/// is the best rate the venue offers the user and no cut to us. NEVER set this from
+/// a request — it is a constant of this integration.
+const COMMISSION_RATE: &str = "0";
+
+/// Rail-canonical id → SideShift's own (coin, network) for every asset a registered
+/// SideShift pair names. Verified against the live `GET /coins` (keyless) 2026-09-15:
+/// ICP lives on network `icp` (hasMemo false), SOL on `solana`.
+const SIDESHIFT_ASSETS: &[(&str, &str, &str)] = &[
+    (crate::catalog::ICP_LEDGER_PRINCIPAL, "ICP", "icp"),
+    (crate::catalog::WRAPPED_SOL_MINT, "SOL", "solana"),
+];
+
+/// The proxy's state: the two partner credentials (secrets — module header), the API
+/// base, the shared HTTP client and the per-call timeout. Held in an `Arc` on
+/// [`AppState`]; `configured()` decides between serving and the 503 marker.
+pub struct SideShiftProxy {
+    secret: Option<String>,
+    affiliate_id: Option<String>,
+    base: String,
+    timeout: Duration,
+    #[allow(dead_code)] // read through `&self` in every call path; field kept for symmetry
+    client: reqwest::Client,
+}
+
+impl SideShiftProxy {
+    /// Build the proxy. Either credential `None` (or both) leaves the routes
+    /// registered but answering the 503 `sideshift-unconfigured` marker naming
+    /// exactly which variable(s) are missing.
+    pub fn new(
+        secret: Option<String>,
+        affiliate_id: Option<String>,
+        base: String,
+        timeout: Duration,
+    ) -> Self {
+        SideShiftProxy {
+            secret,
+            affiliate_id,
+            base,
+            timeout,
+            client: http_client(),
+        }
+    }
+
+    /// Both halves of the partner credential are present. Unset is a LEGAL state
+    /// (503, not 404); half-set is reported as the same 503 with the missing names.
+    fn missing_credentials(&self) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        if self.secret.is_none() {
+            missing.push("DPAY_SIDESHIFT_SECRET");
+        }
+        if self.affiliate_id.is_none() {
+            missing.push("DPAY_SIDESHIFT_AFFILIATE_ID");
+        }
+        missing
+    }
+
+    /// The credential pair, when fully configured. Cloned per call (two short
+    /// strings); the None branch is handled by `missing_credentials` first.
+    fn credentials(&self) -> Option<(String, String)> {
+        Some((
+            self.secret.clone()?,
+            self.affiliate_id.clone()?,
+        ))
+    }
+}
+
+/// The connecting client's IP, when the server was started with connection info
+/// (prod: `into_make_service_with_connect_info`; oneshot-driven tests: absent).
+/// Infallible by construction so the route works identically under both servers —
+/// SideShift's `x-user-ip` is forwarded when we can see the IP and omitted when we
+/// cannot, never fabricated. Public only because the handlers that take it are public.
+pub struct ClientIp(pub Option<IpAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(ClientIp(
+            parts
+                .extensions
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|c| c.0.ip()),
+        ))
+    }
+}
+
+/// `POST /api/v1/sideshift/quotes` — the quote surface. Request (device):
+/// `{"depositLedger": "<rail id>", "settleLedger": "<rail id>", "depositAmount":
+/// "<decimal string in the venue's own units>"}`. The pair must be exactly the
+/// registered `cefi` row's pair (unordered). Success answers the attribution wrap
+/// (module header); upstream errors pass through verbatim.
+pub async fn quotes_proxy(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    body: Bytes,
+) -> Response {
+    let proxy = state.sideshift.clone();
+    if let Some(response) = unconfigured(&proxy) {
+        return response;
+    }
+    let (secret, affiliate_id) = proxy.credentials().expect("checked above");
+
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "request body is not valid JSON ({e}) — POST /api/v1/sideshift/quotes takes \
+                     {{depositLedger, settleLedger, depositAmount}}"
+                ),
+            );
+        }
+    };
+    let (Some(deposit_ledger), Some(settle_ledger)) = (
+        req.get("depositLedger").and_then(Value::as_str),
+        req.get("settleLedger").and_then(Value::as_str),
+    ) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "request needs string fields `depositLedger` and `settleLedger` (the registry's \
+             rail ids for the registered SideShift pair)",
+        );
+    };
+    // The venue speaks DECIMAL strings in its own units — the device sends exactly the
+    // amount the user is depositing, and the relay forwards it without converting,
+    // rounding or range-checking (SideShift's own min/max refusal is the authority).
+    let Some(deposit_amount) = req.get("depositAmount").and_then(Value::as_str) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "request needs a string `depositAmount` (decimal, in the deposit asset's own \
+             units — the venue's own wire format)",
+        );
+    };
+    if !is_decimal_string(deposit_amount) {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "`depositAmount` must be a plain decimal string (e.g. \"1.5\") — the venue's own \
+             wire format, forwarded as-is",
+        );
+    }
+    let Some((deposit_coin, deposit_network, settle_coin, settle_network)) =
+        pair_direction(deposit_ledger, settle_ledger)
+    else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "unsupported pair: the registered SideShift venue row trades exactly one \
+             cross-rail pair — pass its two rail ids as depositLedger/settleLedger",
+        );
+    };
+
+    let upstream_body = json!({
+        "depositCoin": deposit_coin,
+        "depositNetwork": deposit_network,
+        "settleCoin": settle_coin,
+        "settleNetwork": settle_network,
+        "depositAmount": deposit_amount,
+        "settleAmount": null,
+        // Partner facts, attached HERE from config — never read from the request (module
+        // header): a device cannot re-attribute the commission or set its rate.
+        "affiliateId": affiliate_id,
+        "commissionRate": COMMISSION_RATE,
+    });
+    let outcome = post_upstream(
+        &proxy,
+        "/quotes",
+        &upstream_body,
+        &secret,
+        ip,
+    )
+    .await;
+    // Success (SideShift answers 201 Created): wrap for attribution + timestamp. The
+    // venue's numbers ride untouched under `quote`. A 2xx body that is not a JSON
+    // object is passed VERBATIM instead — it is what the venue said, and the wrap is
+    // only for bodies the app can actually read.
+    if outcome.status.is_success() {
+        if let Ok(Value::Object(venue_body)) = serde_json::from_slice::<Value>(&outcome.body) {
+            let wrapped = json!({
+                "venue_id": SIDESHIFT_VENUE_ID,
+                "quote": Value::Object(venue_body),
+                "fetched_at": crate::now_secs(),
+            });
+            return json_response(outcome.status, &Bytes::from(wrapped.to_string()));
+        }
+    }
+    json_response(outcome.status, &outcome.body)
+}
+
+/// `POST /api/v1/sideshift/shifts/fixed` — fixed-order creation. Request (device):
+/// `{"quoteId": "<id from the quote surface>", "settleAddress": "<the user's OWN
+/// address on the settle rail>", "settleMemo"?: string}`. Response VERBATIM (module
+/// header): the device persists `id`, `depositAddress` (+`depositMemo`, required for
+/// some venues' networks) and `expiresAt` off the venue's own answer.
+pub async fn shifts_fixed_proxy(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    body: Bytes,
+) -> Response {
+    let proxy = state.sideshift.clone();
+    if let Some(response) = unconfigured(&proxy) {
+        return response;
+    }
+    let (secret, affiliate_id) = proxy.credentials().expect("checked above");
+
+    let req: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "request body is not valid JSON ({e}) — POST /api/v1/sideshift/shifts/fixed \
+                     takes {{quoteId, settleAddress, settleMemo?}}"
+                ),
+            );
+        }
+    };
+    let (Some(quote_id), Some(settle_address)) = (
+        req.get("quoteId").and_then(Value::as_str),
+        req.get("settleAddress").and_then(Value::as_str),
+    ) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "request needs string fields `quoteId` and `settleAddress` (the user's own address \
+             on the settle rail)",
+        );
+    };
+    if quote_id.is_empty() || settle_address.is_empty() {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "`quoteId` and `settleAddress` must be non-empty strings",
+        );
+    }
+    let mut upstream_body = json!({
+        "quoteId": quote_id,
+        "settleAddress": settle_address,
+        "affiliateId": affiliate_id,
+    });
+    // settleMemo is the venue's own field for memo-required settle networks (ICP is
+    // not one — verified hasMemo:false — but the field stays open for future pairs).
+    if let Some(memo) = req.get("settleMemo").and_then(Value::as_str) {
+        upstream_body["settleMemo"] = Value::String(memo.to_string());
+    }
+    let outcome = post_upstream(&proxy, "/shifts/fixed", &upstream_body, &secret, ip).await;
+    json_response(outcome.status, &outcome.body)
+}
+
+/// Map a (deposit, settle) rail-id pair onto SideShift's own codes — accepted only if
+/// it is EXACTLY the registered `cefi` row's pair, unordered (the registry's own
+/// rule: pair_ledgers carry no order). This is the whole pair allowlist for the
+/// partner key: one row, both directions.
+fn pair_direction(deposit: &str, settle: &str) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
+    let row = crate::catalog::venues()
+        .into_iter()
+        .find(|v| v.venue_id == SIDESHIFT_VENUE_ID && v.kind == crate::catalog::VenueKind::Cefi)?;
+    if row.pair_ledgers != [deposit, settle] && row.pair_ledgers != [settle, deposit] {
+        return None;
+    }
+    let lookup = |id: &str| {
+        SIDESHIFT_ASSETS
+            .iter()
+            .find(|(rail_id, _, _)| *rail_id == id)
+            .map(|(_, coin, network)| (*coin, *network))
+    };
+    let ((d_coin, d_net), (s_coin, s_net)) = (lookup(deposit)?, lookup(settle)?);
+    Some((d_coin, d_net, s_coin, s_net))
+}
+
+/// A plain non-negative decimal string (the venue's amount wire format). Structural
+/// only — min/max and precision are the VENUE's own refusals to relay, not ours.
+fn is_decimal_string(s: &str) -> bool {
+    let mut seen_dot = false;
+    let mut seen_digit = false;
+    for c in s.chars() {
+        match c {
+            '0'..='9' => seen_digit = true,
+            '.' if !seen_dot => seen_dot = true,
+            _ => return false,
+        }
+    }
+    seen_digit
+}
+
+/// The 503 answer for an unconfigured (or half-configured) proxy, naming exactly the
+/// missing variable(s). `None` when fully configured.
+fn unconfigured(proxy: &SideShiftProxy) -> Option<Response> {
+    let missing = proxy.missing_credentials();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(json_response(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &relay_error_body(
+            "sideshift-unconfigured",
+            &format!(
+                "sideshift proxy is not configured: set {} in the relay's environment (the \
+                 partner account credentials — see docs/OPS.md §3 and the feasibility spec's \
+                 Partner-key infrastructure section)",
+                missing.join(" and ")
+            ),
+        ),
+    ))
+}
+
+/// One upstream call: attach the secret header (and `x-user-ip`, SideShift's
+/// proxying rule, when the client IP is visible), POST the built body, answer with
+/// the upstream's status + body verbatim — or the fixed 504 marker for transport
+/// trouble. The reqwest error is DROPPED, not formatted (it embeds the request URL).
+async fn post_upstream(
+    proxy: &SideShiftProxy,
+    path: &str,
+    body: &Value,
+    secret: &str,
+    client_ip: Option<IpAddr>,
+) -> Outcome {
+    let url = format!("{}{}", proxy.base, path);
+    let mut request = proxy
+        .client
+        .post(&url)
+        .header("x-sideshift-secret", secret)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCEPT, "application/json")
+        .timeout(proxy.timeout)
+        .body(body.to_string());
+    if let Some(ip) = client_ip {
+        request = request.header("x-user-ip", ip.to_string());
+    }
+    let response = match request.send().await {
+        Ok(r) => r,
+        Err(e) => return transport_refusal(e, proxy.timeout),
+    };
+    let status = response.status();
+    match response.bytes().await {
+        Ok(bytes) => Outcome { status, body: bytes },
+        Err(e) => transport_refusal(e, proxy.timeout),
+    }
+}
+
+/// One completed upstream call: status + body (the verbatim-passthrough currency of
+/// this module — same shape as `crate::solana`).
+struct Outcome {
+    status: StatusCode,
+    body: Bytes,
+}
+
+/// The honest answer when SideShift could not be reached: a 504 carrying the
+/// relay-originated marker, category only (never the error, never the URL).
+fn transport_refusal(e: reqwest::Error, timeout: Duration) -> Outcome {
+    let why = if e.is_timeout() {
+        format!("timed out after {} ms", timeout.as_millis())
+    } else if e.is_connect() {
+        "connection failed".to_string()
+    } else {
+        "request failed".to_string()
+    };
+    Outcome {
+        status: StatusCode::GATEWAY_TIMEOUT,
+        body: relay_error_body(
+            "sideshift-upstream-unreachable",
+            &format!("sideshift upstream unreachable: {why}"),
+        ),
+    }
+}
+
+/// Serialize a relay-originated error body — the marker contract shared with
+/// `crate::solana`: `{"dpayRelayError": <code>, "detail": <short human phrase>}`.
+/// Fixed inputs only (env var NAMES and categories), so no secret can leak through.
+fn relay_error_body(code: &str, detail: &str) -> Bytes {
+    Bytes::from(
+        serde_json::json!({
+            "dpayRelayError": code,
+            "detail": detail,
+        })
+        .to_string(),
+    )
+}
+
+/// The shared HTTP client (one per process; redirects NOT followed — same discipline
+/// as the solana pipe: exactly one hop, surfaced not chased).
+fn http_client() -> reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("dpay-relay: cannot build the sideshift proxy's HTTP client")
+        })
+        .clone()
+}
+
+/// House error shape (`{"error": …}`, application/json) — client bugs, not
+/// relay-path facts.
+fn err(status: StatusCode, msg: impl Into<String>) -> Response {
+    use axum::Json;
+    (status, Json(json!({ "error": msg.into() }))).into_response()
+}
+
+/// A body-carrying response with a fixed status, `application/json` by contract.
+fn json_response(status: StatusCode, body: &Bytes) -> Response {
+    (
+        status,
+        [(header::CONTENT_TYPE, "application/json")],
+        body.clone(),
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decimal_strings_are_structural_only() {
+        assert!(is_decimal_string("1.5"));
+        assert!(is_decimal_string("0"));
+        assert!(is_decimal_string("100"));
+        assert!(is_decimal_string("1.18958662"));
+        // Junk the venue should be the one to refuse — or that is not an amount at all.
+        assert!(!is_decimal_string(""));
+        assert!(!is_decimal_string("-1"));
+        assert!(!is_decimal_string("1,5"));
+        assert!(!is_decimal_string("1.5.5"));
+        assert!(!is_decimal_string("abc"));
+    }
+
+    #[test]
+    fn pair_direction_accepts_the_registered_pair_both_ways_and_nothing_else() {
+        let icp = crate::catalog::ICP_LEDGER_PRINCIPAL;
+        let sol = crate::catalog::WRAPPED_SOL_MINT;
+        // Both directions of the registered cross-rail pair.
+        assert_eq!(
+            pair_direction(icp, sol),
+            Some(("ICP", "icp", "SOL", "solana"))
+        );
+        assert_eq!(
+            pair_direction(sol, icp),
+            Some(("SOL", "solana", "ICP", "icp"))
+        );
+        // Anything else — including rail ids that exist but are not the registered
+        // pair — refuses. VCHF is a real IC ledger; it must not ride the partner key.
+        assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, sol).is_none());
+        assert!(pair_direction(icp, crate::catalog::SOLANA_USDC_MINT).is_none());
+        assert!(pair_direction(icp, icp).is_none());
+        assert!(pair_direction("", "").is_none());
+    }
+
+    #[test]
+    fn unconfigured_proxy_names_exactly_the_missing_variables() {
+        let none = SideShiftProxy::new(None, None, DEFAULT_API_BASE.to_string(), DEFAULT_TIMEOUT);
+        let response = unconfigured(&none).expect("fully unconfigured → 503");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // The detail names BOTH variables (leak-free by construction: fixed strings).
+        let half = SideShiftProxy::new(
+            Some("secret".into()),
+            None,
+            DEFAULT_API_BASE.to_string(),
+            DEFAULT_TIMEOUT,
+        );
+        let response = unconfigured(&half).expect("half-configured → 503");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let full = SideShiftProxy::new(
+            Some("secret".into()),
+            Some("aff".into()),
+            DEFAULT_API_BASE.to_string(),
+            DEFAULT_TIMEOUT,
+        );
+        assert!(unconfigured(&full).is_none());
+    }
+}

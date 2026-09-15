@@ -113,6 +113,19 @@
       ],
       "testnet": false,
       "disclosure_key": "jupiter"
+    },
+    {
+      "_doc": "The FIRST CeFi venue (registered 2026-09-15, founder decision 3 — the relay-held partner-key pattern, docs/specs/2026-09-14-swap-venue-feasibility.md §Partner-key infrastructure): SideShift, an automated instant-exchange service, on the cross-rail pair ICP ↔ SOL. IDENTIFIER SEMANTICS for a cefi row: `pair_ledgers` are RAIL-CANONICAL ids — the IC side by ledger principal, the Solana side by MINT (native SOL = the wrapped-SOL mint, the jupiter row's own precedent for naming native SOL in a registry row) — while the VENUE's own coin/network codes (ICP/icp, SOL/solana) live with the venue integration (crates/dpay-relay/src/sideshift.rs), not here. `endpoint` is the venue's https API BASE (verified live 2026-09-15: the old api.sideshift.ai host is NXDOMAIN; the API lives under sideshift.ai/api/v2). UNLIKE every other row this venue needs a partner credential: quote and fixed-order creation run through the relay's sideshift proxy (DPAY_SIDESHIFT_SECRET / DPAY_SIDESHIFT_AFFILIATE_ID — the account secret attaches relay-side, the device never sees it; both may be unset, in which case the proxy answers 503 naming them and the venue is simply absent), while shift STATUS reads are SideShift's own KEYLESS GET the device polls directly (app/convertResume.ts provider path — verified live 2026-09-15). NO FIXTURE by the same rule as the jupiter row: fixtures are the ic_amm offline-fake-IC seeding; this row's offline stand-ins are the relay's /api/v1/test/sideshift-upstream stub (harness/relay.mjs points DPAY_SIDESHIFT_API_BASE at it) and the e2e page fetch stub on the sideshift.ai origin (e2e/harness/sideshift.mjs). Founder boundary: the partner account holds no funds and dpay sends none to it (nothing to withdraw); commissionRate pinned to 0 (dpay is paid nothing); withdrawal-capable keys remain an absolute no.",
+      "venue_id": "sideshift",
+      "display_name": "SideShift",
+      "kind": "cefi",
+      "endpoint": "https://sideshift.ai/api/v2",
+      "pair_ledgers": [
+        "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "So11111111111111111111111111111111111111112"
+      ],
+      "testnet": false,
+      "disclosure_key": "sideshift"
     }
    ]
 }

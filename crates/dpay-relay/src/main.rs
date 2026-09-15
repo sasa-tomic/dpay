@@ -67,6 +67,25 @@
 //!                           refuses startup (EXIT_CONFIG).
 //!   DPAY_SOLANA_TIMEOUT_MS  per-call upstream timeout for the solana proxy in milliseconds
 //!                           (default 10000). `0` or non-numeric → startup refuses (EXIT_CONFIG).
+//!   DPAY_SIDESHIFT_SECRET   the SideShift partner ACCOUNT SECRET for the partner-key proxy
+//!                           (founder decision 3, 2026-09-14 — POST /api/v1/sideshift/*; see
+//!                           src/sideshift.rs and the feasibility spec's Partner-key
+//!                           infrastructure section). Attached server-side as the
+//!                           `x-sideshift-secret` header; the device never sees it. SECRET
+//!                           deploy config: never logged, never echoed, never committed.
+//!                           Unset is LEGAL — the routes still register and answer 503
+//!                           naming this variable (the venue is simply absent until the
+//!                           founder signs up at sideshift.ai; docs/OPS.md §3).
+//!   DPAY_SIDESHIFT_AFFILIATE_ID
+//!                           the SideShift partner ACCOUNT ID (the same account's public
+//!                           half — SideShift's own docs call it the affiliateId). Attached
+//!                           server-side with the secret; unset behaves exactly like the
+//!                           secret being unset (503 naming the variable(s) missing).
+//!   DPAY_SIDESHIFT_API_BASE the SideShift API base the proxy posts to (default
+//!                           `https://sideshift.ai/api/v2` — verified live 2026-09-15; the
+//!                           old api.sideshift.ai host is NXDOMAIN). The offline loop points
+//!                           it at the relay's own test stub. A set-but-malformed URL
+//!                           refuses startup (EXIT_CONFIG).
 
 use std::net::SocketAddr;
 use std::process;
@@ -156,6 +175,16 @@ async fn main() {
         cfg.solana_rpc_url.clone(),
         cfg.solana_timeout,
     ));
+    // The SideShift partner-key proxy (founder decision 3, 2026-09-14): same
+    // always-registered contract — unconfigured it answers 503 naming the missing
+    // variable(s). BOTH credential halves are SECRET deploy config (the partner account
+    // credentials): never logged, never echoed in a response. See src/sideshift.rs.
+    let state = state.with_sideshift(dpay_relay::sideshift::SideShiftProxy::new(
+        cfg.sideshift_secret.clone(),
+        cfg.sideshift_affiliate_id.clone(),
+        cfg.sideshift_api_base.clone(),
+        dpay_relay::sideshift::DEFAULT_TIMEOUT,
+    ));
     // IC-rail cutover (test-helpers / memory mode only): attach the fake-IC `/api/v2` gateway.
     // The app signs envelopes and POSTs them HERE instead of icp-api.io; the gateway verifies the
     // real envelope signature and moves principal-keyed balances. Prod (`agent` mode) never builds
@@ -229,6 +258,28 @@ async fn main() {
              deploy environment."
         );
     }
+    // Same one-line WHETHER (never the values — they are the partner account's
+    // credentials), naming the exact variable(s) an operator must set.
+    if cfg.sideshift_secret.is_some() && cfg.sideshift_affiliate_id.is_some() {
+        println!(
+            "POST /api/v1/sideshift/*: ENABLED — the partner-key proxy (quotes + fixed-order \
+             creation) attaches DPAY_SIDESHIFT_SECRET server-side; the device never sees it. \
+             Shift status stays the venue's own keyless device-direct GET."
+        );
+    } else {
+        let mut missing = Vec::new();
+        if cfg.sideshift_secret.is_none() {
+            missing.push("DPAY_SIDESHIFT_SECRET");
+        }
+        if cfg.sideshift_affiliate_id.is_none() {
+            missing.push("DPAY_SIDESHIFT_AFFILIATE_ID");
+        }
+        println!(
+            "POST /api/v1/sideshift/*: unconfigured — the routes answer 503 until {} set in the \
+             deploy environment (the SideShift partner account credentials; see docs/OPS.md §3).",
+            missing.join(" and ")
+        );
+    }
 
     let listener = tokio::net::TcpListener::bind(cfg.addr)
         .await
@@ -246,10 +297,18 @@ async fn main() {
          APK http://{bound}/download/dpay.apk"
     );
 
-    axum::serve(listener, app(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("relay server error");
+    // Connection info is wired into the request extensions so the SideShift proxy can
+    // forward the CONNECTING client's IP as `x-user-ip` — SideShift's own proxying rule
+    // (their permissions doc: server-sent requests must identify the end user's IP). The
+    // relay forwards the best IP it can actually see and omits the header when there is
+    // none (oneshot-driven tests); it never fabricates one.
+    axum::serve(
+        listener,
+        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .expect("relay server error");
 }
 
 /// Load the Android build to serve, if `DPAY_APK_PATH` names one. A set-but-unreadable path is a
@@ -313,6 +372,15 @@ struct Config {
     solana_rpc_url: Option<String>,
     /// Per-call upstream timeout for the solana proxy (`DPAY_SOLANA_TIMEOUT_MS`).
     solana_timeout: std::time::Duration,
+    /// The SideShift partner account secret (`DPAY_SIDESHIFT_SECRET`) — one half of the
+    /// FIRST relay-held partner credential (founder decision 3). SECRET: never logged,
+    /// never echoed, never committed. Unset is legal (503 naming the variable).
+    sideshift_secret: Option<String>,
+    /// The SideShift partner account id / affiliateId (`DPAY_SIDESHIFT_AFFILIATE_ID`) —
+    /// the credential's public half. Unset is legal, same 503 as the secret.
+    sideshift_affiliate_id: Option<String>,
+    /// The SideShift API base (`DPAY_SIDESHIFT_API_BASE`); default the verified-live host.
+    sideshift_api_base: String,
 }
 
 impl Config {
@@ -425,6 +493,28 @@ impl Config {
             None => dpay_relay::solana::DEFAULT_TIMEOUT,
         };
 
+        // The SideShift partner-key credentials (founder decision 3, 2026-09-14). EITHER may
+        // be unset — that is a legal state: the routes still register and answer 503 naming
+        // exactly the variable(s) missing (the venue is simply absent until the founder's
+        // signup produces both halves; docs/OPS.md §3). The secret is SECRET deploy config —
+        // it never appears in an error, log, or response; there is deliberately no shape
+        // validation because SideShift documents none (a hex-ish string per their examples,
+        // but only the upstream can judge it, and its own 401 is the honest refusal).
+        let sideshift_secret = non_empty("DPAY_SIDESHIFT_SECRET");
+        let sideshift_affiliate_id = non_empty("DPAY_SIDESHIFT_AFFILIATE_ID");
+        // The API base defaults to the host verified live 2026-09-15 (docs.sideshift.ai;
+        // the old api.sideshift.ai is NXDOMAIN). A set-but-malformed URL refuses startup —
+        // same discipline as DPAY_SOLANA_RPC_URL, and the ParseError text names the defect,
+        // never the value.
+        let sideshift_api_base = match non_empty("DPAY_SIDESHIFT_API_BASE") {
+            Some(base) => {
+                reqwest::Url::parse(&base)
+                    .map_err(|e| format!("DPAY_SIDESHIFT_API_BASE is not a valid URL: {e}"))?;
+                base
+            }
+            None => dpay_relay::sideshift::DEFAULT_API_BASE.to_string(),
+        };
+
         Ok(Config {
             addr,
             ledger,
@@ -432,6 +522,9 @@ impl Config {
             till,
             solana_rpc_url,
             solana_timeout,
+            sideshift_secret,
+            sideshift_affiliate_id,
+            sideshift_api_base,
         })
     }
 }

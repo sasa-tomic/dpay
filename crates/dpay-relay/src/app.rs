@@ -65,6 +65,15 @@
 //!   cache for the explicit read allowlist (that is what makes a free-tier RPC quota survive N
 //!   wallets). Registered on every build; unconfigured (`DPAY_SOLANA_RPC_URL` unset) it answers
 //!   503 naming the variable. No value is inspected, held or moved — see [`crate::solana`].
+//! - `POST /api/v1/sideshift/quotes` and `POST /api/v1/sideshift/shifts/fixed` — the FIRST
+//!   relay-held partner-key surface (founder decision 3, 2026-09-14; [`crate::sideshift`]).
+//!   The relay attaches the SideShift partner credentials (`DPAY_SIDESHIFT_SECRET` /
+//!   `DPAY_SIDESHIFT_AFFILIATE_ID`) server-side — the device never sees them — maps the
+//!   registry's rail ids onto the venue's own coin/network codes, and returns the venue's
+//!   quote (wrapped with attribution + timestamp) or fixed-order answer verbatim. Registered
+//!   on every build; unconfigured it answers 503 naming the missing variable(s). Still no
+//!   value moves through the relay: the user deposits straight to the VENUE's address, and
+//!   shift status reads are the venue's own keyless GET the device polls directly.
 //!
 //! Read-only by construction apart from the play-money faucet: there is no value-moving route
 //! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
@@ -153,6 +162,14 @@ pub struct AppState {
     /// answers, honestly, 503 naming `DPAY_SOLANA_RPC_URL`. The default state here carries that
     /// unconfigured proxy; `main` replaces it via [`AppState::with_solana`] from the env.
     pub solana: Arc<crate::solana::SolanaProxy>,
+    /// The SideShift partner-key proxy (`crate::sideshift`) — `POST /api/v1/sideshift/quotes`
+    /// and `POST /api/v1/sideshift/shifts/fixed`. Same always-registered contract as the
+    /// solana proxy above: unset partner credentials still answer 503 naming
+    /// `DPAY_SIDESHIFT_SECRET` / `DPAY_SIDESHIFT_AFFILIATE_ID` (either may be unset; that is
+    /// a LEGAL deploy state — the venue is simply absent). The default state here carries
+    /// that unconfigured proxy; `main` replaces it via [`AppState::with_sideshift`] from the
+    /// env. BOTH credential halves are secrets: never logged, never echoed.
+    pub sideshift: Arc<crate::sideshift::SideShiftProxy>,
 }
 
 impl AppState {
@@ -173,6 +190,16 @@ impl AppState {
             solana: Arc::new(crate::solana::SolanaProxy::new(
                 None,
                 crate::solana::DEFAULT_TIMEOUT,
+            )),
+            // The unconfigured SideShift partner-key proxy: /api/v1/sideshift/* answers 503
+            // naming the missing env vars until `with_sideshift` attaches the partner
+            // credentials (see `crate::sideshift` — the FIRST relay-held partner-key surface,
+            // founder decision 3).
+            sideshift: Arc::new(crate::sideshift::SideShiftProxy::new(
+                None,
+                None,
+                crate::sideshift::DEFAULT_API_BASE.to_string(),
+                crate::sideshift::DEFAULT_TIMEOUT,
             )),
             #[cfg(feature = "test-helpers")]
             fake_ic: None,
@@ -208,6 +235,17 @@ impl AppState {
     /// never logged here or anywhere else.
     pub fn with_solana(mut self, proxy: crate::solana::SolanaProxy) -> Self {
         self.solana = Arc::new(proxy);
+        self
+    }
+
+    /// Attach the SideShift partner-key proxy (`crate::sideshift::SideShiftProxy`).
+    /// `main` builds it from `DPAY_SIDESHIFT_SECRET` + `DPAY_SIDESHIFT_AFFILIATE_ID`
+    /// (+ optional `DPAY_SIDESHIFT_API_BASE`); tests build it against the local stub
+    /// upstream. BOTH halves are SECRETS (the partner account credentials — never
+    /// logged here or anywhere else), and either may stay unset: an unconfigured
+    /// proxy still answers, honestly, 503 naming the missing variable(s).
+    pub fn with_sideshift(mut self, proxy: crate::sideshift::SideShiftProxy) -> Self {
+        self.sideshift = Arc::new(proxy);
         self
     }
 
@@ -279,7 +317,20 @@ pub fn app(state: AppState) -> Router {
         // The Solana JSON-RPC proxy (spec 2026-09-09, Direction 1) — registered ALWAYS, unlike
         // the till below: an unconfigured proxy still answers (503 naming DPAY_SOLANA_RPC_URL),
         // because a route that vanishes makes the client guess. Pure pipe + read cache.
-        .route("/solana/rpc", axum::routing::post(crate::solana::rpc_proxy));
+        .route("/solana/rpc", axum::routing::post(crate::solana::rpc_proxy))
+        // The SideShift partner-key proxy (founder decision 3, 2026-09-14) — registered
+        // ALWAYS for the same reason: unset credentials still answer 503 naming
+        // DPAY_SIDESHIFT_SECRET / DPAY_SIDESHIFT_AFFILIATE_ID. The relay attaches the
+        // partner credentials server-side (quote + fixed-order creation); the device never
+        // sees them. See `crate::sideshift`.
+        .route(
+            "/sideshift/quotes",
+            axum::routing::post(crate::sideshift::quotes_proxy),
+        )
+        .route(
+            "/sideshift/shifts/fixed",
+            axum::routing::post(crate::sideshift::shifts_fixed_proxy),
+        );
 
     // --- the OpenCryptoPay till, ON unless the operator refuses it --------------------------------
     //
@@ -356,6 +407,28 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/test/solana-upstream/hits",
             axum::routing::get(solana_stub_hits),
+        );
+    // Test-only SIDESHIFT UPSTREAM (flow 187 `e2e/tests/187-convert-cefi-sideshift.mjs`):
+    // the harness points the partner-key proxy (src/sideshift.rs, DPAY_SIDESHIFT_* set
+    // explicitly in harness/relay.mjs, base = DPAY_SIDESHIFT_API_BASE) at these routes ON
+    // THE SAME SERVER, so the flow drives the REAL client path — app → POST
+    // /api/v1/sideshift/quotes → THIS stub — offline, with no partner account. The stub
+    // asserts the proxy attached the credential headers (it counts secret-bearing calls)
+    // and answers the venue's own wire shapes; shift STATUS reads never come through here
+    // (SideShift's are keyless device-direct https, which the e2e page fetch stub owns).
+    #[cfg(feature = "test-helpers")]
+    let api = api
+        .route(
+            "/test/sideshift-upstream/quotes",
+            axum::routing::post(sideshift_stub_quotes),
+        )
+        .route(
+            "/test/sideshift-upstream/shifts/fixed",
+            axum::routing::post(sideshift_stub_shift_fixed),
+        )
+        .route(
+            "/test/sideshift-upstream/hits",
+            axum::routing::get(sideshift_stub_hits),
         );
 
     // `GET /api/v1/swap_quote` — the delegated-conversion PoC's venue quote (spec 2026-09-07
@@ -979,6 +1052,109 @@ async fn solana_stub_hits() -> Response {
     (
         StatusCode::OK,
         Json(serde_json::json!({"hits": SOLANA_STUB_HITS.load(Ordering::Relaxed)})),
+    )
+        .into_response()
+}
+
+// --- test-only SIDESHIFT upstream (the partner-key proxy's offline stand-in) ----------------------
+//
+// The REAL venue's wire shapes, as verified live + from the docs 2026-09-15
+// (docs.sideshift.ai): POST /quotes answers 201 with {id, echoed pair fields,
+// depositAmount, settleAmount}; POST /shifts/fixed answers 201 with {id, depositAddress,
+// echoed pair fields, depositAmount, settleAmount, expiresAt}. The stub replays exactly
+// those shapes with deterministic values (quote id, shift id, deposit address) so flow 187
+// can assert them verbatim. It counts calls that carried the x-sideshift-secret header —
+// the flow's proof that the proxy attached the credential the device never sees — and
+// records the last request body per route so tests can pin what the relay forwarded.
+// STATUS reads never route through here (they are the venue's own keyless GET, owned by
+// the e2e page fetch stub; see e2e/harness/sideshift.mjs).
+#[cfg(feature = "test-helpers")]
+static SIDESHIFT_STUB_SECRET_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static SIDESHIFT_STUB_BARE_CALLS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "test-helpers")]
+static SIDESHIFT_STUB_LAST: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Record one stub arrival: classify by credential-header presence, remember the body.
+#[cfg(feature = "test-helpers")]
+fn sideshift_stub_record(headers: &axum::http::HeaderMap, body: &str) {
+    use std::sync::atomic::Ordering;
+    if headers.contains_key("x-sideshift-secret") {
+        SIDESHIFT_STUB_SECRET_CALLS.fetch_add(1, Ordering::Relaxed);
+    } else {
+        SIDESHIFT_STUB_BARE_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+    if let Ok(mut slot) = SIDESHIFT_STUB_LAST.lock() {
+        *slot = Some(body.to_string());
+    }
+}
+
+/// `POST /api/v1/test/sideshift-upstream/quotes` — the venue's 201 quote shape.
+#[cfg(feature = "test-helpers")]
+async fn sideshift_stub_quotes(headers: axum::http::HeaderMap, body: axum::body::Bytes) -> Response {
+    sideshift_stub_record(&headers, &String::from_utf8_lossy(&body));
+    let req: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
+    };
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": "e2e-quote-7f3a",
+            "depositCoin": req.get("depositCoin").cloned().unwrap_or(serde_json::json!("ICP")),
+            "depositNetwork": req.get("depositNetwork").cloned().unwrap_or(serde_json::json!("icp")),
+            "settleCoin": req.get("settleCoin").cloned().unwrap_or(serde_json::json!("SOL")),
+            "settleNetwork": req.get("settleNetwork").cloned().unwrap_or(serde_json::json!("solana")),
+            "depositAmount": req.get("depositAmount").cloned().unwrap_or(serde_json::json!("2")),
+            "settleAmount": "0.0495",
+            "rate": "0.02475",
+        })),
+    )
+        .into_response()
+}
+
+/// `POST /api/v1/test/sideshift-upstream/shifts/fixed` — the venue's 201 fixed-shift
+/// shape (the deposit address + memo the user must send to are the whole point).
+#[cfg(feature = "test-helpers")]
+async fn sideshift_stub_shift_fixed(
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    sideshift_stub_record(&headers, &String::from_utf8_lossy(&body));
+    let req: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
+    };
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "id": "e2e-shift-9c1d",
+            "depositCoin": req.get("depositCoin").cloned().unwrap_or(serde_json::json!("ICP")),
+            "settleCoin": req.get("settleCoin").cloned().unwrap_or(serde_json::json!("SOL")),
+            "depositAddress": "e2e-deposit-address-01",
+            "settleAddress": req.get("settleAddress").cloned().unwrap_or(serde_json::json!("")),
+            "depositAmount": req.get("depositAmount").cloned().unwrap_or(serde_json::json!("2")),
+            "settleAmount": "0.0495",
+            "expiresAt": "2026-09-16T00:00:00.000Z",
+        })),
+    )
+        .into_response()
+}
+
+/// `GET /api/v1/test/sideshift-upstream/hits` — how many credentialed vs bare calls the
+/// stub has served (bare should stay ZERO for every flow: the proxy always attaches the
+/// secret — a bare hit means a path reached the stub without the relay's key).
+#[cfg(feature = "test-helpers")]
+async fn sideshift_stub_hits() -> Response {
+    use std::sync::atomic::Ordering;
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "secretCalls": SIDESHIFT_STUB_SECRET_CALLS.load(Ordering::Relaxed),
+            "bareCalls": SIDESHIFT_STUB_BARE_CALLS.load(Ordering::Relaxed),
+        })),
     )
         .into_response()
 }

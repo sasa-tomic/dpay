@@ -132,23 +132,28 @@ pub(crate) const ICP_LEDGER_PRINCIPAL: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 
 /// A conversion venue's kind. Extensible by construction: a later Solana venue kind is a new
-/// variant (or a string on the wire), never a schema break — `cefi` is already reserved and is
-/// deliberately NOT an IC-pool shape (the `Ledger` trait takes no CeFi method; CeFi lives
-/// device-side, `app/services/opencryptopay.ts` shape). `solana_amm` (2026-09-15, Jupiter —
+/// variant (or a string on the wire), never a schema break — `cefi` (SideShift, 2026-09-15:
+/// founder decision 3's relay-held partner-key pattern, `crate::sideshift`) is deliberately
+/// NOT an IC-pool shape (the `Ledger` trait takes no CeFi method).
+/// `solana_amm` (2026-09-15, Jupiter —
 /// multi-venue readiness V11) is likewise NOT an IC-pool shape: its quote and swap round-trip
 /// device-direct over keyless https (never the relay's `/api/v1/swap_quote`, never an IC
 /// update), its `endpoint` is an https origin (not a principal), and its `pair_ledgers` are
 /// Solana MINTS. `venue_of_endpoint` — the IC quote allowlist — stays `IcAmm`-only: a
-/// solana_amm row must never resolve as a pool there, and the fake-IC seeding skips it.
+/// solana_amm or cefi row must never resolve as a pool there, and the fake-IC seeding skips
+/// them both.
 #[cfg_attr(not(any(feature = "agent", feature = "test-helpers")), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VenueKind {
     /// An on-chain IC AMM pool the user's device signs against (ICPSwap today).
     IcAmm,
-    /// A centralized exchange integration — device-side quote/deposit/submit, no relay hop.
-    /// Reserved: no entry uses it yet, but the registry (and the served route's `kind` string)
-    /// already speaks it so adding the first CeFi venue is data, not a schema change.
-    #[allow(dead_code)]
+    /// A centralized exchange integration. The FIRST cefi row (SideShift,
+    /// 2026-09-15) runs through the relay-held partner-key pattern
+    /// (`crate::sideshift`): quotes and order creation are proxied by the relay —
+    /// which attaches the partner credentials the device never sees — while the
+    /// venue's own keyless surfaces (shift status) stay device-direct. `endpoint`
+    /// is an https API base, `pair_ledgers` are RAIL-CANONIAL ids (IC principal,
+    /// Solana mint), and `fixture` is None (non-ic_amm rule).
     Cefi,
     /// A Solana on-chain aggregator the device talks to DIRECTLY over keyless https (Jupiter
     /// today): the quote is fetched device-side, the returned unsigned transaction is verified
@@ -338,6 +343,32 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             pair_ledgers: [WRAPPED_SOL_MINT, SOLANA_USDC_MINT],
             testnet: false,
             disclosure_key: "jupiter",
+            test_helpers_served: false,
+            fixture: None,
+        },
+        VenueEntry {
+            // The FIRST CeFi venue (registered 2026-09-15, founder decision 3 — the
+            // relay-held partner-key pattern, `docs/specs/2026-09-14-swap-venue-feasibility.md`
+            // §Partner-key infrastructure): SideShift, an automated instant-exchange
+            // service, on the cross-rail pair ICP ↔ SOL. IDENTIFIER SEMANTICS for a
+            // cefi row: `pair_ledgers` are RAIL-CANONICAL ids — the IC side by ledger
+            // principal, the Solana side by mint (native SOL = the wrapped-SOL mint,
+            // the jupiter row's own precedent) — while the VENUE's own coin/network
+            // codes live with the venue integration (`crate::sideshift`). `endpoint`
+            // is the venue's https API BASE. Unlike every other row, this venue needs
+            // a partner credential: quote + order creation run through the relay's
+            // sideshift proxy (the account secret attaches there — the device never
+            // sees it), while shift STATUS reads are the venue's own keyless GET the
+            // device polls directly (app/convertResume.ts provider path). `fixture`
+            // is None like every non-ic_amm row: the offline stand-ins are the relay's
+            // test-stub upstream + the e2e page fetch stub on this origin.
+            venue_id: "sideshift",
+            display_name: "SideShift",
+            kind: VenueKind::Cefi,
+            endpoint: "https://sideshift.ai/api/v2",
+            pair_ledgers: [ICP_LEDGER_PRINCIPAL, WRAPPED_SOL_MINT],
+            testnet: false,
+            disclosure_key: "sideshift",
             test_helpers_served: false,
             fixture: None,
         },
@@ -718,14 +749,14 @@ fn is_testnet_row(d: &CurrencyDescriptor) -> bool {
 /// against `dfx/catalog_truth.json` is NOT done for this one (the truth file pins the EUR pair
 /// only — see [`SOLANA_EURC_MINT`]). It doubles as one side of the FIRST venue pair whose
 /// `pair_ledgers` are mints (the Jupiter row — see [`WRAPPED_SOL_MINT`]).
-const SOLANA_USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+pub(crate) const SOLANA_USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 /// The wrapped-SOL mint (`So111…12`, Mantle/SPL token account of native SOL) — the identifier a
 /// SOLANA venue row carries for the NATIVE side of a pair: Jupiter routes native SOL through its
 /// wrapped form, and a registry row needs a stable string id for each side, so the wrapped mint
 /// IS "SOL" in venue `pair_ledgers` (mirrors `WRAPPED_SOL_MINT_ADDRESS`, app/solana/tokens.ts;
 /// pinned against `dfx/catalog_truth.json` venues[].pair_ledgers by `venue_truth_tests`).
-const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
+pub(crate) const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 
 /// The mainnet EURC mint — `HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr` (Circle's native
 /// EURC on solana mainnet, 6 decimals). The solana half of the EUR dual-rail (Stage 1,
@@ -1823,6 +1854,22 @@ mod venue_truth_tests {
                     v.venue_id
                 );
             }
+            // A cefi row follows the same two invariants: no IC fixture (its offline
+            // stand-in is the relay's sideshift test-stub upstream + the e2e page fetch
+            // stub), and an https API base as endpoint (the partner-key proxy surface —
+            // never a canister principal).
+            if v.kind == VenueKind::Cefi {
+                assert!(
+                    v.fixture.is_none(),
+                    "{}: a cefi venue is ic-fixture-free by rule (fixture is ic_amm-only)",
+                    v.venue_id
+                );
+                assert!(
+                    v.endpoint.starts_with("https://"),
+                    "{}: a cefi endpoint is an https API base (the partner-key proxy surface)",
+                    v.venue_id
+                );
+            }
             // The pair is an UNORDERED set: sort both sides before comparing, so neither the
             // truth file nor the registry can smuggle an ORDER back in unnoticed.
             let mut truth_pair: Vec<&str> = t["pair_ledgers"]
@@ -1917,25 +1964,35 @@ mod venue_truth_tests {
         assert!(venue_of_endpoint("https://lite-api.jup.ag").is_none());
         assert!(venue_of_endpoint(WRAPPED_SOL_MINT).is_none());
         assert!(venue_of_endpoint(SOLANA_USDC_MINT).is_none());
+        // A CEFI venue is never an IC quote target either — same load-bearing guard: the
+        // allowlist is ic_amm-only, so SideShift's https API base (and BOTH rail ids of
+        // its cross-rail pair, one of which IS a real IC principal that IC pools also
+        // trade) resolves to NOTHING. The principal half is the sharp edge this pins:
+        // icpswap's rows carry ICP_LEDGER_PRINCIPAL in their own pairs, but an endpoint
+        // match is what venue_of_endpoint requires, and a pair member is not an endpoint.
+        assert!(venue_of_endpoint("https://sideshift.ai/api/v2").is_none());
+        assert!(venue_of_endpoint(ICP_LEDGER_PRINCIPAL).is_none());
+        assert!(venue_of_endpoint(WRAPPED_SOL_MINT).is_none());
         // SERVED-by-default (the knob un-armed — the agent build's permanent state, and every
         // build's state before a test opts in): never a fixture venue. Jupiter IS served — it is
         // a real venue (kind solana_amm), just not an IC-servable one: the count includes it and
-        // the IC-quote allowlist above excludes it, by design.
+        // the IC-quote allowlist above excludes it, by design. So is SideShift (kind cefi).
         let served: Vec<_> = venues()
             .into_iter()
             .filter(|v| venue_servable(v, false))
             .collect();
         assert_eq!(
             served.len(),
-            4,
-            "exactly four real venues are served today (three IC pools + Jupiter, one per pair)"
+            5,
+            "exactly five real venues are served today (three IC pools + Jupiter + SideShift, \
+             one per pair)"
         );
         assert_eq!(
             served
                 .iter()
                 .map(|v| v.venue_id)
                 .collect::<Vec<_>>(),
-            vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh", "jupiter"],
+            vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh", "jupiter", "sideshift"],
             "registry order is the stable wire order"
         );
         assert!(served.iter().all(|v| !v.test_helpers_served));
