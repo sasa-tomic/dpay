@@ -322,7 +322,13 @@ single RED alone before believing it.
   annotation in the log ("received 0.01 VCHF − 0.0001 VCHF fees"), hidden when the fee is 0 or
   unknown. The WIRE stays netted exactly as before (`nettedWireRaw`/`netSolWireLamports` and
   everything signed/sent is unchanged); the gross/fee ride along as device-saved note metadata
-  (`services/txNotes.ts`) that the log rows render.
+  (`services/txNotes.ts`) that the log rows render. **Offline half completed 2026-09-15
+  (`9ec2a36`→`812f661`):** the payer's OFFLINE review keeps the exact requested amount too —
+  live fee → persisted ledger-fee cache (`dpay.ledgerfees.v1`) → catalog row → wire-only, at
+  DISPLAY seams only (signing still requires the LIVE fee; BadFee) — and the same gross drives
+  the pending-outbox rows and the offline deduction (`dpay.pendingpays.v1.<publicHex>`,
+  flows 179–182), so an unconfirmed offline payment renders and deducts at the gross it will
+  actually move.
 
 ## Solana rails — the dead key is REPLACED and SHIPPED (2026-09-09)
 
@@ -546,8 +552,9 @@ U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration
   re-checkable offline: `just dfx-arg-parity` (`deploy/tests/literal-parity.sh`) replays both
   scripts against a mock dfx and diffs the emitted install arguments against the committed
   pre-refactor captures in `deploy/tests/fixtures/` — zero delta.
-- **Doc-rot**: living docs verified clean 2026-09-06 (the 2026-09-04 six-agent audit + the
-  session landings since); `docs/specs/` session reports remain historical records, not re-audited.
+- **Doc-rot**: living docs verified clean 2026-09-15 (the 2026-09-06 pass + the
+  offline-payments/outbox session landing, docs updated in the same change);
+  `docs/specs/` session reports remain historical records, not re-audited.
 
 ## Documented decisions / tripwires
 
