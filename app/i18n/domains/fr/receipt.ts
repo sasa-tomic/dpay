@@ -25,6 +25,7 @@ export const receiptFr: ReceiptMessages = {
   noAccount: 'Le registre n’a enregistré aucun compte de ce côté du transfert.',
   noReferenceIc: 'Aucune référence — ce transfert ne portait pas de mémo. Une demande de paiement dpay en met toujours une.',
   noReferenceSolana: 'Un transfert Solana ne porte aucune référence dpay. La signature ci-dessous l’identifie.',
+  pendingProof: 'Pas encore confirmé — ce paiement sera réglé dans le registre plus tard.',
 
   copy: 'Copier le reçu',
   copied: 'Copié ✓',

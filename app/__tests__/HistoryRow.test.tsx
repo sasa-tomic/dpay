@@ -419,3 +419,48 @@ describe('TxnReceipt — the fee rides beside the gross, and flips the source fo
     for (const line of text.split('\n')) expect(line).not.toMatch(/:\s*$/);
   });
 });
+
+describe('a PENDING row — the offline hand-off renders as activity with an honest marker (2026-09-15)', () => {
+  const pendingTxn = () => txn('ic:0', '2510', TS_NEW, {
+    pending: true, who: 'Café Sunrise', memo: 'Two flat whites', ledgerRef: '', counterparty: '',
+  });
+
+  test('the row carries ONE clock marker beside the amount; a settled row carries none', () => {
+    // Pressable renders its children into two layers under the jest preset, so the ID-SET idiom
+    // (the fee-anchor test's) is the honest count here: presence is the assertion.
+    const marked = mount(pendingTxn());
+    const markedIds = [...new Set(marked.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
+    expect(markedIds).toContain('hist-pending-0');
+
+    const settled = mount(txn('ic:0', '2510', TS_NEW));
+    const settledIds = [...new Set(settled.root.findAll(n => typeof n.props?.testID === 'string').map(n => String(n.props.testID)))];
+    expect(settledIds).not.toContain('hist-pending-0');
+    act(() => { marked.unmount(); settled.unmount(); });
+  });
+
+  test('the receipt says NOT CONFIRMED, and claims no ledger proof it does not have', () => {
+    const tree = mountReceipt(pendingTxn());
+    const all = texts(tree);
+    expect(all).toContain(M.receipt.pendingProof);            // the one honest sentence
+    expect(all).not.toContain(M.receipt.source);              // "read from the ledger" would be false
+    expect(all).not.toContain(M.receipt.sourceAnnotated);
+    expect(tree.root.findAllByProps({testID: 'txn-receipt-proof'})).toHaveLength(0); // no block ref exists yet
+    act(() => { tree.unmount(); });
+  });
+
+  test('pending outranks the failed-status line on the Solana rail too (one status slot)', () => {
+    const solPending = txn('solana:SOL', '5000', TS_NEW, {
+      pending: true, memo: '', ledgerRef: '',
+    });
+    const tree = mountReceipt(solPending);
+    expect(texts(tree)).toContain(M.receipt.pendingProof);
+    act(() => { tree.unmount(); });
+  });
+
+  test('receiptText is copyable proof of intent — the pending sentence INSTEAD of the proof line', () => {
+    const text = receiptText(pendingTxn(), CATALOG, ASSETS);
+    expect(text).toContain(M.receipt.pendingProof);
+    expect(text).not.toContain(M.receipt.blockLabel);
+    for (const line of text.split('\n')) expect(line).not.toMatch(/:\s*$/);
+  });
+});

@@ -502,7 +502,6 @@ describe('buildSelectableAssets — bundled VCHF/ICP direct-ICRC rows (2026-08-2
       assets,
       icBalances: {},            // never polled ⇒ each IC asset reads '0'
       primaryBalance: null,
-      online: true,
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {},
     });

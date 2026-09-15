@@ -142,7 +142,6 @@ function payElement(props: Partial<PayModeProps> = {}) {
       online={false}
       nfcStatus="unknown"
       onSettled={() => {}}
-      onOfflinePaid={() => {}}
       shownBalance="10000"
       catalog={[]}
       assets={[]}
@@ -1578,7 +1577,6 @@ describe('PayMode — what the affordability gate is allowed to read, and what i
   test('an UNKNOWN non-primary balance is not a zero balance either', async () => {
     // VCHF (currency 7) with an empty poll map: the ledger has not answered once. Sign.
     const tree = mountPay({
-      online: true,
       catalog: icpCatalogOf(BUNDLED_NETWORKS),
       shownBalance: '0',
       assetBalances: {},

@@ -25,6 +25,7 @@ export const receiptDe: ReceiptMessages = {
   noAccount: 'Das Ledger hat für diese Seite der Überweisung kein Konto festgehalten.',
   noReferenceIc: 'Keine Referenz — diese Überweisung trug kein Memo. Eine dpay-Zahlungsanfrage setzt immer eine.',
   noReferenceSolana: 'Eine Solana-Überweisung trägt keine dpay-Referenz. Die Signatur unten identifiziert sie.',
+  pendingProof: 'Noch nicht bestätigt — diese Zahlung wird später im Ledger verbucht.',
 
   copy: 'Beleg kopieren',
   copied: 'Kopiert ✓',

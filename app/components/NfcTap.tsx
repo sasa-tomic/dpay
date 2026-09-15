@@ -12,6 +12,7 @@ import {
 } from '../services/rail';
 import {DpayNfc} from '../services/native';
 import {saveTxNote} from '../services/txNotes';
+import {addPendingPays, removePendingPays} from '../services/pendingPays';
 import {fallbackLedgerFee} from '../services/ledgerFees';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
 import {NfcTapView} from './NfcTapView';
@@ -49,7 +50,7 @@ type MerchantVerdict = 'settled' | 'refused-unverified' | 'nothing-seen';
  * envelope and serves that DPN2 bundle. The online merchant submits/polls it, signs one nonce-bound
  * result, and returns the result over the still-open NFC channel. The payer never needs a network.
  */
-export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, onSettled, onOfflinePaid, onActive, onClose, offlinePeak, onConfirmed}: {
+export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, onSettled, onActive, onClose, offlinePeak, onConfirmed}: {
   role: 'card' | 'reader';
   identity: Identity;
   relayUrl?: string;
@@ -61,7 +62,6 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   reqInfo?: {amount: string; displayAmount?: string; nonce: string; who: string; currency: number};
   catalog: CurrencyDescriptor[];
   onSettled?: () => void;
-  onOfflinePaid?: (amount: string, currency: number) => void;
   onActive?: () => void;
   onClose: () => void;
   /** Trip Ready J5 — mount the one-shot offline peak on this tap's success phase (payer card, merchant-settled-while-offline story). */
@@ -100,7 +100,6 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
   const preparedRef = useRef<(RailPrepared & {readStateEnvelopeHex: string}) | null>(null);
   const readerVerdictRef = useRef<MerchantVerdict | null>(null);
   const recordedRef = useRef(false);
-  const deductedRef = useRef(false);
 
   const record = useCallback(() => {
     if (recordedRef.current || !onSettled) return;
@@ -233,13 +232,11 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     }
   }, [catalog, identity.secretHex]);
 
-  const onSettling = useCallback(() => {
-    const prepared = preparedRef.current;
-    if (role === 'card' && prepared && !deductedRef.current) {
-      deductedRef.current = true;
-      onOfflinePaid?.(prepared.amount, prepared.currency);
-    }
-  }, [onOfflinePaid, role]);
+  // (No onSettling deduction anymore — founder requirements 2026-09-15 #1/#3: the optimistic
+  // balance subtraction moved from the EPHEMERAL onOfflinePaid funnel into the persisted
+  // pending-outbox record written at approve() below. It survives restart, sums the GROSS not the
+  // bare wire, and retires against the balance poll's per-currency clock — see
+  // services/pendingPays.ts.)
 
   const onResult = useCallback((event: Extract<NfcEvent, {type: 'result'}>, ctx: TapCtx) => {
     const prepared = preparedRef.current;
@@ -248,14 +245,21 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
       record();
       awardPaymentTested(journeyRef.current);
       onConfirmed?.();
+      // The merchant's submission PROVED itself on-chain: the pending record retires here (the
+      // settled history row replaces the pending row on the next refresh — same key, the memo).
+      void removePendingPays(identity.publicHex, [prepared.memoHex]);
       ctx.finalize('success');
     } else if (event.status === RESULT_REJECTED) {
-      if (deductedRef.current) onOfflinePaid?.(`-${prepared.amount}`, prepared.currency);
+      // Terminal refusal while the payer was still tapped: nothing can settle, so the record's
+      // deduction + row must both retire — this REPLACES the old negative onOfflinePaid refund
+      // with the same effect (record gone → no subtraction) plus the row cleanup the old path
+      // never had.
+      void removePendingPays(identity.publicHex, [prepared.memoHex]);
       ctx.finalize('declined', M.rail.declined(''));
     } else {
       ctx.finalize('pending', M.errors.tap.couldntConfirmOffline);
     }
-  }, [onConfirmed, onOfflinePaid, record]);
+  }, [identity.publicHex, onConfirmed, record]);
 
   const {phase, reason, activeRef, advance} = useNfcTapState<NfcEvent>({
     role,
@@ -270,7 +274,6 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     // Authenticated IC results remain actionable across an arbitrarily delayed result-only re-tap.
     // The user can explicitly Cancel; a local timer must never discard a later core-verified result.
     waitsForReceipt: false,
-    onSettling,
     onRequest: (e, ctx) => {
       if (e.type === 'request') void validateRequest(e, ctx);
     },
@@ -311,6 +314,14 @@ export function NfcTap({role, identity, relayUrl, requestHex, reqInfo, catalog, 
     void (async () => {
       const fee = await feePromiseRef.current;
       saveTxNote(identity.publicHex, {k: req.nonceHex, who: req.toName || undefined, msg: req.memo || undefined, ...(fee != null ? {gross: (BigInt(req.amount) + BigInt(fee)).toString(), fee} : {})}, Date.now());
+      // Founder requirements 2026-09-15 #1/#3 — the persisted pending-outbox record, same key as
+      // the note (nonceHex = the on-chain memo). The offline tap is UNCONFIRMED BY CONSTRUCTION
+      // (the payer never submits; the merchant does, over THEIR connection, later): the record is
+      // the payer's only local trace of the debit until the ledger echoes it. Its gross (wire +
+      // fee — the account moves both; the old ephemeral deduction subtracted the bare wire) is
+      // what the offline balance subtracts, and its row renders in Home/Ledger until a history
+      // refresh matches the memo or a later result event retires it (SETTLED/REJECTED above).
+      addPendingPays(identity.publicHex, [{k: req.nonceHex, assetId: `ic:${req.currency}`, currency: req.currency, wireAmount: req.amount, ...(fee != null ? {fee, gross: (BigInt(req.amount) + BigInt(fee)).toString()} : {}), ...(req.toName ? {who: req.toName} : {}), ...(req.memo ? {msg: req.memo} : {}), ts: Date.now(), kind: 'ic-nfc'}]);
     })().catch(() => {});
     try {
       const prepared = await prepareNfcTransfer(identity.secretHex, {currencies: catalog}, req);

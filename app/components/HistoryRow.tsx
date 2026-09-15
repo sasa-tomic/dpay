@@ -8,7 +8,7 @@ import {fmtAssetCompact} from '../lib/format';
 import {useCopyFeedback} from '../hooks/useCopyFeedback';
 import {useEscapeToClose} from '../hooks/useHotkeys';
 import {AppModal} from './AppModal';
-import {IconArrowDownLeft, IconArrowUpRight, IconCopy} from './icons';
+import {IconArrowDownLeft, IconArrowUpRight, IconClock, IconCopy} from './icons';
 import type {Txn} from '../lib/types';
 import type {TxAnnotation} from '../services/txNotes';
 
@@ -119,6 +119,15 @@ export function HistoryRow({t, i, catalog, assets, testPrefix = 'hist', onPress,
           {feeTxt != null ? <Text style={S.histFee} testID={`${testPrefix}-fee-${i}`}>{M.wallet.ledger.fees(feeTxt)}</Text> : null}
         </View>
       </View>
+      {/* A pending row (projected from the device's outbox, no ledger confirmation yet) carries
+          exactly ONE marker: the warn-tinted clock — the same icon/tint pair CoachTip's
+          pendingOutcome uses, no second line of copy (founder rule). It rides BESIDE the amount,
+          the field the marker qualifies. */}
+      {t.pending ? (
+        <View testID={`${testPrefix}-pending-${i}`} style={S.histPendingMark}>
+          <IconClock size={14} color={C.warn} />
+        </View>
+      ) : null}
       <Text style={[S.histAmt, {color: t.dir === 'out' ? C.ink : C.ok}]} testID={`${testPrefix}-amt-${i}`}>{amtTxt}</Text>
     </Pressable>
   );
@@ -149,6 +158,7 @@ function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: Selectable
   const solana = asset?.protocol === 'solana';
   return {
     solana,
+    pending: t.pending === true,
     amount: fmtReceiptAmount(t, catalog, asset, note),
     // The fee with its minus sign THROUGH the formatter (same truncation rule as every amount):
     // the founder example reads "0.01 VCHF − 0.0001 VCHF fees". Null when unknown/zero — no label
@@ -172,8 +182,9 @@ function receiptFields(t: Txn, catalog: CurrencyDescriptor[], assets: Selectable
     proof: t.ledgerRef,
     // A FAILED Solana transaction moved nothing and was charged only the fee. The row carries that
     // status in its memo slot (`hooks/useSolanaHistory.ts#toTxn`), and a receipt for it must repeat
-    // it — "−0.000005 SOL" alone reads as a tiny successful payment.
-    status: solana ? t.memo : '',
+    // it — "−0.000005 SOL" alone reads as a tiny successful payment. A PENDING row's status outranks
+    // it on both rails: "not confirmed" is the one thing this receipt must not stay silent about.
+    status: t.pending ? M.receipt.pendingProof : solana ? t.memo : '',
   };
 }
 
@@ -192,7 +203,14 @@ export function receiptText(t: Txn, catalog: CurrencyDescriptor[], assets: Selec
   if (f.fee != null) lines.push(`${M.receipt.fees}: ${f.fee}`);
   if (f.peer) lines.push(`${M.receipt.peer}: ${f.peer}`);
   if (f.noteText) lines.push(`${M.receipt.note}: ${f.noteText}`);
-  lines.push(`${M.receipt.whenLabel}: ${t.time}`, `${M.receipt.referenceLabel}: ${f.reference}`, `${f.proofLabel}: ${f.proof}`);
+  lines.push(`${M.receipt.whenLabel}: ${t.time}`, `${M.receipt.referenceLabel}: ${f.reference}`);
+  // A pending row has no proof to paste yet — the one honest sentence instead (the copy text and
+  // the sheet must agree; the sheet says the same line in its status slot).
+  if (f.pending) {
+    lines.push(M.receipt.pendingProof);
+    return lines.join('\n');
+  }
+  lines.push(`${f.proofLabel}: ${f.proof}`);
   if (f.status) lines.splice(1, 0, f.status);
   return lines.join('\n');
 }
@@ -243,12 +261,16 @@ export function TxnReceipt({t, catalog, assets, onClose, note}: {t: Txn; catalog
             {f.noteText ? <Field label={M.receipt.note} value={f.noteText} testID="txn-receipt-note" note /> : null}
             <Field label={M.receipt.whenLabel} value={t.time} testID="txn-receipt-when" />
             <Field label={M.receipt.referenceLabel} value={f.reference} testID="txn-receipt-ref" note={!f.referenceIsValue} />
-            <Field label={f.proofLabel} value={f.proof} testID="txn-receipt-proof" />
+            {/* A pending row has no proof yet — an empty block index / signature under the label
+                would read as a value that failed to load, so the field is omitted entirely; the
+                status slot under the amount already says the one true thing ("not confirmed yet"). */}
+            {!f.pending ? <Field label={f.proofLabel} value={f.proof} testID="txn-receipt-proof" /> : null}
             {/* The source line is CONDITIONAL now that annotations exist: it claims every value
                 came from the ledger, which is only true when nothing above was device-saved. An
                 annotated receipt says so instead — the same honesty rule, extended (the fee and
-                the gross headline are device-saved facts too). */}
-            <Text style={S.receiptSource}>{f.peer || f.noteText || f.fee != null ? M.receipt.sourceAnnotated : M.receipt.source}</Text>
+                the gross headline are device-saved facts too). A PENDING receipt omits it: every
+                value on it came from this device, and the status slot already says so. */}
+            {!f.pending ? <Text style={S.receiptSource}>{f.peer || f.noteText || f.fee != null ? M.receipt.sourceAnnotated : M.receipt.source}</Text> : null}
           </ScrollView>
           <Pressable
             testID="btn-txn-receipt-copy"

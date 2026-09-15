@@ -89,7 +89,6 @@ function balancesFor(over: Partial<Parameters<typeof buildAssetBalances>[0]> = {
     assets: ASSETS,
     icBalances: {7: '120000000'},
     primaryBalance: '12345',
-    online: true,
     solState: {balance: null, status: 'unavailable'},
     tokenStates: {},
     ...over,
@@ -145,7 +144,8 @@ describe('HomeTab — the headline is the home currency (X4)', () => {
   });
 
   test('offline OUTRANKS the main label — never a main-currency reading over a stale figure', () => {
-    const tree = mountHome({online: false, balances: balancesFor({online: false})});
+    // approx marks the DEMO read stale the way the wallet's 60 s rule does (2026-09-15).
+    const tree = mountHome({online: false, balances: balancesFor({approx: {'ic:0': true}})});
     expect(textOf(tree, 'home-headline-label')).toBe(M.wallet.balance.approx(M.wallet.homeCurrency.name[HOME]));
     expect(textOf(tree, 'home-headline-label')).not.toContain('Main');
     act(() => { tree.unmount(); });

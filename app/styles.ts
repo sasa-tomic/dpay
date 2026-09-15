@@ -537,6 +537,10 @@ function buildStyles(p: Palette) {
   // t.dir is the reliable 'out' | 'in' field on Txn). alignSelf:center overrides the row's
   // baseline alignment — an Svg has no text baseline to align to.
   histDirIcon: {marginRight: 8, alignSelf: 'center'},
+  // The pending-row marker (2026-09-15 offline outbox): the warn-tinted clock BESIDE the amount.
+  // alignSelf:center for the same no-text-baseline reason as the direction glyph; the amount's
+  // right edge stays pinned by the row, so the pixel-diff ledger baseline is unmoved.
+  histPendingMark: {marginRight: 6, alignSelf: 'center'},
   // Ledger page — the transaction list promoted to its own tab. `ledgerWrap` is the page-level
   // container; `ledgerEmpty` is the muted centered placeholder for a wallet with no transactions.
   ledgerWrap: {marginTop: 4},

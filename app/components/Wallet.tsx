@@ -7,24 +7,27 @@ import {M} from '../i18n';
 import {TOP_UP_CENTS, FAUCET_TIMEOUT_MS, SHOW_TESTNET_STORAGE_KEY, SOL_BROADCAST_TIMEOUT_MS, SELECTED_ASSET_STORAGE_KEY, PRACTICE_CURRENCY} from '../config/constants';
 import {familyDisplay, icpCatalogOf, isTestnetCurrency} from '../config/catalog';
 import {setIcClockRoutingCanister} from '../services/icp';
-import {base, randNonceHex} from '../lib/format';
+import {base, randNonceHex, fmtTime} from '../lib/format';
 import {applyOffline} from '../lib/amount';
 import {withTimeout} from '../lib/timeout';
 import {buildSelectableAssets, chipLabel, parseAssetId, prettyNetwork, reconcileSelectedAsset, resolvePayLink, routeDeeplinkToIc, shouldAllowUserSelect, solPayGate, visibleSolanaMints} from '../config/assets';
 import {buildAssetBalances} from '../lib/assetBalances';
-import {mergeHistoryByTime} from '../lib/ledger';
+import {mergeHistoryByTime, mergePendingByTime, settledJoinKey} from '../lib/ledger';
 import type {AssetId, Identity, NfcStatus, PayIntent, Txn} from '../lib/types';
 import {DpayCore} from '../services/native';
 import {loadDeposit} from '../services/ckerc20Persist';
 import {fetchWithTimeout, readJsonOrEmpty, relayCapabilities, NO_RELAY_CAPABILITIES, type RelayCapabilities} from '../services/relay';
 import {loadAddressBook} from '../services/addressBook';
 import {annotateTxn} from '../services/txNotes';
+import {normalizePendingKey, removePendingPays} from '../services/pendingPays';
+import {solanaTokenInfo} from '../solana/tokens';
 import {useHotkeys} from '../hooks/useHotkeys';
 import {useCatalog} from '../hooks/useCatalog';
 import {useBalancePoll} from '../hooks/useBalancePoll';
 import {useSolanaBalances} from '../hooks/useSolanaBalances';
 import {useTransactionHistory} from '../hooks/useTransactionHistory';
 import {useTxNotes} from '../hooks/useTxNotes';
+import {usePendingPays} from '../hooks/usePendingPays';
 import {useConvertResumeEngine} from '../hooks/useConvertResumeEngine';
 import {useSolanaHistory} from '../hooks/useSolanaHistory';
 import {useFundsReady} from '../hooks/useFundsReady';
@@ -58,6 +61,11 @@ import type {LocaleChoice} from '../i18n/locale';
 import type {ReadinessKey} from '../lib/readiness';
 import {modeForScreen, screenForMode, type WalletMode, type WalletRoute} from '../lib/walletRoute';
 import {useWalletHistory} from '../hooks/useWalletHistory';
+
+// Founder requirement #2 (2026-09-15): a balance view older than this while offline renders
+// APPROXIMATE (~ prefix, the same marker demoView always showed). 60 s chosen by the founder as
+// "not online for a long time" — the 30 s nowTick below re-evaluates it without a poll.
+const BALANCE_STALE_MS = 60_000;
 
 export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGateway, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; /** Apply + persist the IC gateway override (App.tsx, F2 — demos/testing against a local replica). THROWS on a refusal — Settings renders it. */ setIcGateway: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   const relayUrl = relayUrls[0];
@@ -312,15 +320,17 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // cross-asset merge.
   const displayAssets = useMemo(() => catalog.filter(c => c.currency !== 0), [catalog]);
   const displayCurrencyIds = useMemo(() => displayAssets.map(a => a.currency).join(','), [displayAssets]);
-  // Primary + per-asset balance poll + the MC5 currency-keyed offline-deduction state. Extracted
-  // verbatim into hooks/useBalancePoll.ts (Effect B); the poll's own deduction resets stay internal
-  // (coupled to a successful fetch), `markOfflinePaid` is the offline hand-off debit, and
-  // `resetDeduction`/`setBalance`/`setOnline` are exposed for the faucet topUp's immediate-refresh
-  // path below (it credits the DEMO balance out-of-band and clears the currency-0 deduction without
-  // waiting on the 2.5s poll).
+  // Primary + per-asset balance poll + the per-currency freshness clocks. Extracted verbatim into
+  // hooks/useBalancePoll.ts (Effect B). Since 2026-09-15 the poll also PERSISTS the last good read
+  // (`dpay.balances.v1.<publicHex>`: founder requirement #3 — funded at home, offline in the city,
+  // restart still shows real numbers) and stamps `atByCurrency` (Date.now() per currency, key 0 =
+  // primary) — the ONE clock both the 60 s approx marker and the pending-outbox subtraction read:
+  // a pending payment subtracts only until a successful poll POSTDATES its hand-off, exactly where
+  // the old ephemeral offlineSpent reset sat, but now derived from persisted records so it survives
+  // a restart. `setBalance`/`setOnline` stay exposed for the faucet topUp's immediate-refresh path.
   const {
-    balance, online, assetBalances, offlineSpent,
-    markOfflinePaid, resetDeduction, setBalance, setOnline, refresh: refreshBalances,
+    balance, online, assetBalances, atByCurrency,
+    setBalance, setOnline, refresh: refreshBalances,
   } = useBalancePoll({relayUrl, publicHex: identity.publicHex, displayAssets, displayCurrencyIds});
   // Durable transaction history sourced from the ledger. Extracted verbatim into
   // hooks/useTransactionHistory.ts (Effect C): the per-currency fan-out + dedup-by-nonce + sort +
@@ -353,7 +363,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // No relayUrl threading (R3 audit): the seam's offline/unreachable oracle probes the IC boundary
   // (icp-api.io / __DPAY_TEST_IC_GATEWAY), NOT the relay — post-proxy the Solana rail path IS the
   // relay, so a relay outage must not read as "this phone is offline".
-  const {sol: solState, tokens: tokenStates, refreshSol, refreshToken, refreshTokens} = useSolanaBalances(identity.secretHex, solAddress, solanaMints);
+  const {sol: solState, tokens: tokenStates, freshAt: solFreshAt, refreshSol, refreshToken, refreshTokens} = useSolanaBalances(identity.secretHex, solAddress, solanaMints);
   // Defined AFTER the destructure (TDZ): manual re-poll for the fund-first "Check again" —
   // fire-and-forget polls get a self-clearing busy flag (UI affordance, not lifecycle tracking).
   const recheckSolBalances = useCallback(() => {
@@ -382,6 +392,45 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // last known rows stay, marked stale (`sol-history-stale`) instead of rendering as current.
   const {history: solHistory, dropped: solDropped, failure: solHistoryFailure, refreshHistory: refreshSolHistory} = useSolanaHistory(solAddress);
   const ledgerHistory = useMemo(() => mergeHistoryByTime(history, solHistory), [history, solHistory]);
+
+  // ── Pending outbox: offline/unconfirmed payments as local rows + the offline deduction ─────
+  // services/pendingPays (written at every offline hand-off seam: PayMode's QR fall-through,
+  // NfcTap/SolNfcTap's approve, SolPayMode's unconfirmed-broadcast catch) is the persisted twin
+  // of the old ephemeral offlineSpent: it survives a restart (founder requirement #1/#3), drives
+  // BOTH the per-currency balance subtraction and a projected row in Home/Ledger, and retires in
+  // two lifetimes — the SUBTRACTION ends when a fresh balance read postdates the hand-off, the
+  // ROW ends when the settling history row arrives under the same join key.
+  const pendingPays = usePendingPays(identity.publicHex);
+  // The 60 s staleness clock (founder requirement #2) needs a re-render to FIRE while offline —
+  // nothing else re-renders Wallet when every poll is failing. One 30 s tick is a rounding error
+  // next to the 2.5 s balance poll's re-renders while online, and it is the ONLY new render source.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  // Reconciliation: a settled row carrying the record's join key (IC: the on-chain memo = the
+  // request nonce; SOL: the transaction signature) is the record's terminal event on BOTH
+  // lifetimes — the history row is the authoritative twin of the projected one. The render-level
+  // merge below ALSO drops matched pendings, so this persistence drop is eventual, not a gate.
+  useEffect(() => {
+    if (pendingPays.length === 0) return;
+    const settled = new Set(ledgerHistory.map(t => settledJoinKey(t)));
+    const done = pendingPays.filter(p => settled.has(normalizePendingKey(p.k))).map(p => p.k);
+    if (done.length > 0) void removePendingPays(identity.publicHex, done);
+  }, [identity.publicHex, pendingPays, ledgerHistory]);
+  // The projected rows: a Txn shape with `pending: true` so HistoryRow marks them and the receipt
+  // says "not confirmed" instead of a block ref. Amount = gross (wire+fee) when known — the same
+  // number the deduction subtracts and the row's settled twin will headline (founder gross rule).
+  const pendingRows = useMemo(() => pendingPays.map(p => {
+    const tsSec = Math.floor(p.ts / 1000);
+    return {
+      nonce: p.k, amount: p.gross ?? p.wireAmount, who: p.who ?? '', memo: p.msg ?? '',
+      time: fmtTime(tsSec), ts: tsSec, dir: 'out' as const, assetId: p.assetId as AssetId,
+      counterparty: '', ledgerRef: '', pending: true as const,
+    };
+  }), [pendingPays]);
+  const walletHistory = useMemo(() => mergePendingByTime(pendingRows, ledgerHistory), [pendingRows, ledgerHistory]);
 
   // ── Device-side row annotations (names + messages in the log) ───────────────────────────────
   // The ledger stays TRUTH and stays untouched: a row's principal, memo hex and signature are what
@@ -854,36 +903,107 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     if (mint != null) refreshToken(mint); else refreshTokens();
     refreshSolHistory();
   }, [refreshToken, refreshTokens, refreshSolHistory]);
+  // The pending-outbox deduction, derived (2026-09-15): per currency, Σ gross of the pending
+  // records whose hand-off POSTDATES the last successful read of that currency (atByCurrency) —
+  // a poll that lands after the hand-off carries the transfer's effect authoritatively, so the
+  // optimistic subtraction retires exactly where the old ephemeral offlineSpent reset retired.
+  // Gross (wire+fee), falling back to the wire when the fee is unknown — the account moves both.
+  // While ONLINE the polled map is passed through untouched (the authoritative read wins, same
+  // gate the old offlineSpent had); while offline the records are all we have. IC records key by
+  // currency; SOL records (currency == null) deduct the SOL rail below instead.
+  const pendingIcDeduction = useMemo(() => {
+    const map: Record<number, string> = {};
+    if (online) return map;
+    for (const p of pendingPays) {
+      if (p.currency == null) continue;
+      if (p.ts <= (atByCurrency[p.currency] ?? 0)) continue;
+      const amt = p.gross ?? p.wireAmount;
+      map[p.currency] = map[p.currency] != null ? (BigInt(map[p.currency]) + BigInt(amt)).toString() : amt;
+    }
+    return map;
+  }, [pendingPays, atByCurrency, online]);
+  // The SOL rail's twin: native records subtract from solState.balance, SPL records from their
+  // mint's token state (symbol → mint through the registry — the same table every other symbol
+  // consumer resolves through). One freshness clock for the whole rail (freshAt): a successful
+  // getMultipleAccounts postdating the hand-off retires the subtraction for native AND tokens.
+  const pendingSolDeduction = useMemo(() => {
+    if (solFreshAt === 0) return {sol: '0', tokens: {} as Record<string, string>};
+    const sol = {sol: '0', tokens: {} as Record<string, string>};
+    for (const p of pendingPays) {
+      if (p.currency != null || !p.assetId.startsWith('solana:')) continue;
+      if (p.ts <= solFreshAt) continue;
+      const amt = p.gross ?? p.wireAmount;
+      if (p.assetId === 'solana:SOL') {
+        sol.sol = (BigInt(sol.sol) + BigInt(amt)).toString();
+      } else {
+        const mint = solanaTokenInfo(p.assetId.slice(8))?.mint;
+        if (mint == null) continue; // unregistered symbol (no sign gate lets it happen; skip honestly)
+        sol.tokens[mint] = sol.tokens[mint] != null ? (BigInt(sol.tokens[mint]) + BigInt(amt)).toString() : amt;
+      }
+    }
+    return sol;
+  }, [pendingPays, solFreshAt]);
   // The DEMO header balance (currency 0): when online the polled balance is authoritative (the
-  // deduction resets on every successful poll); when offline we apply the per-currency deduction.
-  const shownBalance = applyOffline(balance, online ? {} : offlineSpent, 0);
+  // pending subtraction retires on every successful poll via the ts-vs-atByCurrency rule); when
+  // offline we apply the per-currency deduction derived from the pending records above.
+  const shownBalance = applyOffline(balance, online ? {} : pendingIcDeduction, 0);
   // MC5 — the per-asset displayed balances fed to children. Online ⇒ the polled authoritative
-  // values (offlineSpent resets on each successful poll, so passing {} is equivalent). Offline ⇒ the
-  // deduction applies so the card + the per-asset balance gate honestly reflect the in-flight
-  // hand-off. This is the SAME map the DEMO shownBalance reads; keyed by currency, never cross-talk.
+  // values. Offline ⇒ the pending-record deduction applies so the card + the per-asset balance
+  // gate honestly reflect the in-flight hand-off. This is the SAME map the DEMO shownBalance
+  // reads; keyed by currency, never cross-talk.
   const displayAssetBalances = useMemo(() => {
     if (online) return assetBalances;
     const next: Record<number, string> = {};
     for (const [k, v] of Object.entries(assetBalances)) {
       const c = Number(k);
-      next[c] = applyOffline(v, offlineSpent, c) ?? v;
+      next[c] = applyOffline(v, pendingIcDeduction, c) ?? v;
     }
     return next;
-  }, [assetBalances, offlineSpent, online]);
+  }, [assetBalances, pendingIcDeduction, online]);
+  // The SOL rail's displayed states: the deduction applied to whatever balance the poll (or the
+  // cross-restart cache) last established. Statuses untouched — 'unavailable'/'error' still
+  // preserve their number (now the deducted one) and still render approx-marked when stale.
+  const solShownState = useMemo(
+    () => ({...solState, balance: applyOffline(solState.balance, pendingSolDeduction.sol === '0' ? {} : {0: pendingSolDeduction.sol}, 0)}),
+    [solState, pendingSolDeduction.sol],
+  );
+  const tokenShownStates = useMemo(() => {
+    const dedup = Object.keys(pendingSolDeduction.tokens);
+    if (dedup.length === 0) return tokenStates;
+    const next: Record<string, typeof tokenStates[string]> = {...tokenStates};
+    for (const mint of dedup) {
+      const state = tokenStates[mint];
+      if (state == null || state.amount == null) continue; // no number to deduct against
+      next[mint] = {...state, amount: applyOffline(state.amount, {0: pendingSolDeduction.tokens[mint]}, 0) ?? state.amount};
+    }
+    return next;
+  }, [tokenStates, pendingSolDeduction]);
 
   // The per-asset balance map — the ONE source every balance-rendering surface reads (header + the
   // Balances sheet rows). Built pure from the IC poll + DEMO shownBalance + the SOL + per-mint
   // token hook states; keyed by stable AssetId so a catalog object refresh never invalidates it.
-  const balances = useMemo(
-    () => buildAssetBalances({
+  // `approx` (founder requirement #2) is the ONE staleness rule: a view marks its number ~ when
+  // the data behind it is offline AND older than 60 s — IC per atByCurrency, SOL per the rail's
+  // freshAt (never-read tokens inherit approx honestly). The 30 s nowTick keeps the marker
+  // firing while every poll is failing; a fresh read re-renders on its own.
+  const balances = useMemo(() => {
+    const approx: Partial<Record<AssetId, boolean>> = {};
+    for (const a of assets) {
+      if (a.id.startsWith('ic:')) {
+        const c = Number(a.id.slice(3));
+        approx[a.id] = !online && nowTick - (atByCurrency[c] ?? 0) > BALANCE_STALE_MS;
+      } else {
+        approx[a.id] = solFreshAt === 0 || nowTick - solFreshAt > BALANCE_STALE_MS;
+      }
+    }
+    return buildAssetBalances({
       catalog, assets,
       icBalances: displayAssetBalances,
       primaryBalance: shownBalance,
-      online,
-      solState, tokenStates,
-    }),
-    [catalog, assets, displayAssetBalances, shownBalance, online, solState, tokenStates],
-  );
+      approx,
+      solState: solShownState, tokenStates: tokenShownStates,
+    });
+  }, [catalog, assets, displayAssetBalances, shownBalance, online, atByCurrency, nowTick, solFreshAt, solShownState, tokenShownStates]);
   // Trip Ready J5b — fundsReady: awarded ONCE at the first sight of any spendable balance
   // (DEMO counts; `—` unknowns do not). Reads the memo above; ref-guarded against poll spam.
   useFundsReady(balances);
@@ -914,10 +1034,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
       }, FAUCET_TIMEOUT_MS);
       const j = await readJsonOrEmpty(r);
       if (r.ok && typeof j.balance === 'string') {
-        // MC5: topUp is a DEMO (currency-0) credit, so reset ONLY the currency-0 offline deduction.
-        // The balance + online setters + resetDeduction come from useBalancePoll (the poll owns that
-        // state; the next poll tick overwrites both authoritatively).
-        setBalance(j.balance); setOnline(true); resetDeduction(0);
+        // MC5: topUp is a DEMO (currency-0) credit. setBalance comes from useBalancePoll — the
+        // wrapped setter stamps the currency-0 clock and persists the cache, so the next poll
+        // tick and a restart both see the credited value (the old resetDeduction(0) is gone:
+        // the pending-outbox subtraction retires on its own ts-vs-clock rule).
+        setBalance(j.balance); setOnline(true);
       } else {
         // N5: surface the relay/canister's real reason (e.g. "faucet cooldown: try again in ~58 min")
         // rather than a generic "Faucet unavailable". The canister returns the retry time; showing it
@@ -931,7 +1052,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     } finally {
       setTopUpBusy(false);
     }
-  }, [topUpBusy, faucetAvailable, relayUrl, identity.publicHex, setBalance, setOnline, resetDeduction]);
+  }, [topUpBusy, faucetAvailable, relayUrl, identity.publicHex, setBalance, setOnline]);
 
   // Web keyboard shortcuts (plan 1b / UX-V5): the first letters of the main actions —
   // P=Pay, R=Receive, T=Top-up (demo money), A=Home (the asset hub), L=Ledger (transactions). Active ONLY on the wallet
@@ -1243,7 +1364,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               homeCurrency={homeCurrency}
               homeAsset={homeAsset}
               online={online}
-              history={ledgerHistory}
+              history={walletHistory}
               noteFor={noteFor}
               // Pay pins the SCAN sub-mode, so the camera is live in ONE tap from a cold start
               // whatever the Pay tab was last left showing (a `send` sub-mode left over from a
@@ -1290,7 +1411,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               ? <SolPayMode identity={identity} online={online} nfcStatus={nfc} assets={assets} catalog={catalog} homeCurrency={homeCurrency} balances={balances} onSwitchRail={payRailSwitch} solBalance={solBalance ?? '0'} tokenBalance={selectedTokenBalance} tokenAtaAbsent={selectedTokenAbsent} tokenBalances={tokenStates} payGate={activeSolAsset != null ? solPayGate(selectedSolToken, solState, selectedTokenState ?? {amount: null, status: 'loading'}) : 'none'} solZero={solState.status === 'ok' && solState.balance === '0'} solChecking={solState.status === 'loading' || solState.balance == null} selectedToken={selectedSolToken} onSent={onSolSent} onSentToken={onSolTokenSent} onShowSolAddress={() => goToDeposit('solana:SOL', activeSolAsset != null && activeSolAsset.id !== 'solana:SOL' ? activeSolAsset.id : undefined)} onShowTokenAddress={() => goToDeposit(activeSolAsset?.id ?? 'solana:SOL')} onRecheckBalances={recheckSolBalances} recheckBusy={recheckBusy} ataSetupBusy={ataSetupBusy} ataSetupErr={ataSetupErr} onCreateAta={createAta} subMode={paySubMode} onSubModeChange={setPaySubMode} sendPrefill={solPrefill} onSendPrefillConsumed={() => setSolPrefill(null)} prefillScan={pendingTill} onPrefillScanConsumed={() => setPendingTill(null)} onScannedLink={handleUrl} onLockChange={setSelectionLocked} onOpenAddressBook={openAddresses} />
               : <PayMode
                   identity={identity} online={online} nfcStatus={nfc}
-                  onSettled={onActivity} onOfflinePaid={markOfflinePaid} shownBalance={shownBalance}
+                  onSettled={onActivity} shownBalance={shownBalance}
                   onShowDepositAddress={() => goToDeposit(`ic:${selectedCurrency}`, `ic:${selectedCurrency}`)}
                   onRefreshBalances={recheckIcBalances}
                   refreshBusy={recheckBusy}
@@ -1405,7 +1526,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
               // alone. Withheld while locked, exactly as the Pay pointer's button is.
               onSwitchAsset={payRailSwitch}
             />
-          : <Ledger history={ledgerHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
+           : <Ledger history={walletHistory} catalog={catalog} assets={assets} dropped={solDropped} staleFailure={solHistoryFailure} noteFor={noteFor} onOpenReceipt={setReceiptTxn} />}
       </ScrollView>
 
       {/* O4 S1 — persistent bottom navigation: the primary tabs moved from the top pill row

@@ -82,7 +82,6 @@ describe('AccountsTab — bundled VCHF/ICP rows (zero-balance visible, no ramp a
     assets,
     icBalances: {},
     primaryBalance: null,
-    online: true,
     solState: {balance: null, status: 'unavailable'},
     tokenStates: {},
   });
@@ -143,7 +142,6 @@ describe('AccountsTab — home-currency rail badges (mark every rail, never sum 
     assets,
     icBalances: {},
     primaryBalance: null,
-    online: true,
     solState: {balance: null, status: 'unavailable'},
     tokenStates: {},
   });
@@ -185,7 +183,7 @@ describe('AccountsTab — home-currency rail badges (mark every rail, never sum 
 describe('AccountsTab — Convert lives on the selected row (X15)', () => {
   const assets = buildSelectableAssets(BUNDLED, {showTestnet: false, solanaEnabled: true, solanaTokens: true});
   const balances = buildAssetBalances({
-    catalog: BUNDLED, assets, icBalances: {}, primaryBalance: null, online: true,
+    catalog: BUNDLED, assets, icBalances: {}, primaryBalance: null,
     solState: {balance: null, status: 'unavailable'}, tokenStates: {},
   });
 
@@ -258,7 +256,7 @@ describe('orderAccounts — X22: play money is never the biggest number on scree
 
   test('the rendered list carries the practice divider immediately above the practice row', () => {
     const balances = buildAssetBalances({
-      catalog: BUNDLED, assets, icBalances: {}, primaryBalance: '10000', online: true,
+      catalog: BUNDLED, assets, icBalances: {}, primaryBalance: '10000',
       solState: {balance: null, status: 'unavailable'}, tokenStates: {},
     });
     const tree = mount(assets, balances);

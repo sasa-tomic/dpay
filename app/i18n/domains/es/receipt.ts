@@ -25,6 +25,7 @@ export const receiptEs: ReceiptMessages = {
   noAccount: 'La red no registró ninguna cuenta en ese lado de la transferencia.',
   noReferenceIc: 'Sin referencia: esta transferencia no llevaba memo. Una solicitud de pago de dpay siempre pone una.',
   noReferenceSolana: 'Una transferencia de Solana no lleva referencia de dpay. La firma de abajo la identifica.',
+  pendingProof: 'Aún sin confirmar — este pago se liquidará en la red más tarde.',
 
   copy: 'Copiar comprobante',
   copied: 'Copiado ✓',

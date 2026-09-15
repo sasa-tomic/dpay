@@ -18,6 +18,7 @@ import {type CurrencyDescriptor, type FamilyDisplay, type MinterFamily, fmtCurre
 import type {AssetId, Identity, PayIntent, NfcStatus} from '../lib/types';
 import {prepareTransfer, submitTransfer, pollTransfer, wireRequestToIntent, envelopeToQrPayload, fetchLedgerFee, type RailOutcome, type RailPrepared} from '../services/rail';
 import {saveTxNote} from '../services/txNotes';
+import {addPendingPays, removePendingPays} from '../services/pendingPays';
 import {fallbackLedgerFee} from '../services/ledgerFees';
 import {shareReceipt} from '../lib/deepLink';
 import {DpayCore, DpayNfc} from '../services/native';
@@ -56,7 +57,7 @@ const OCP_IC_SEQUENCE_MS =
   + IC_SUBMIT_TIMEOUT_MS
   + IC_POLL_BUDGET.attempts * (IC_READ_STATE_TIMEOUT_MS + IC_POLL_BUDGET.intervalMs);
 
-export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; onOfflinePaid: (amount: string, currency: number) => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void}) {
+export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, catalog, assets, assetBalances, homeCurrency, balances, withdrawCurrency, withdrawDisplay, withdrawFamily, withdrawTokenContract, withdrawBalance, subMode, onSubModeChange, prefillIntent, onPrefillConsumed, prefillScan, onPrefillScanConsumed, onScannedLink, onShowDepositAddress, onRefreshBalances, refreshBusy = false, onLockChange, onSwitchRail, onOpenAddressBook}: {identity: Identity; online: boolean; nfcStatus: NfcStatus; onSettled: () => void; shownBalance: string | null; catalog: CurrencyDescriptor[]; assets: SelectableAsset[]; assetBalances: Record<number, string>; homeCurrency: HomeCurrency | null; balances: RailBalances; withdrawCurrency: number; withdrawDisplay: FamilyDisplay | null; withdrawFamily: MinterFamily | null; withdrawTokenContract: string | null; withdrawBalance: string; subMode: 'scan' | 'send'; onSubModeChange: (m: 'scan' | 'send') => void; prefillIntent?: PayIntent | null; onPrefillConsumed?: () => void; prefillScan?: string | null; onPrefillScanConsumed?: () => void; onScannedLink: (url: string) => void; onShowDepositAddress: () => void; onRefreshBalances?: () => void; refreshBusy?: boolean; onLockChange?: (locked: boolean) => void; onSwitchRail?: (id: AssetId) => void; onOpenAddressBook?: () => void}) {
   const [phase, setPhase] = useState<'scan' | 'review' | 'qr' | 'paid' | 'ocp-choose'>('scan');
   // The within-tab sub-mode is OWNED by Wallet. "scan" = the existing scan-to-pay flow; "send" = the
   // on-chain send-to-address flow, lifted inline. The toggle renders whenever the asset can leave
@@ -258,6 +259,41 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       const fee = await query;
       saveTxNote(identity.publicHex, {k: r.nonceHex, who: r.toName || undefined, msg: r.memo || undefined, ...(fee != null ? {gross: (BigInt(r.amount) + BigInt(fee)).toString(), fee} : {})}, Date.now());
     })().catch(() => {});
+  };
+
+  // Founder requirement 2026-09-15 #1/#3 — the persisted pending-outbox record for an UNCONFIRMED
+  // hand-off (services/pendingPays). Same join key as the note above (nonceHex = the on-chain memo)
+  // so a later history refresh retires the row the moment the ledger echoes the transfer. The
+  // record's gross is what the offline balance subtracts; its `ts` against the balance poll's
+  // per-currency clock decides when that subtraction retires (an authoritative read postdating the
+  // hand-off replaces the optimistic view) and when the approx marker takes over. Fee resolution
+  // mirrors savePriceNote's chain (live → cache → catalog — an offline payer's deduction must be
+  // the gross, never the bare wire: the account moves both). Called ONLY on the unconfirmed
+  // fall-through below — an in-hand settle (online settled / Duplicate) never writes one.
+  // Fire-and-forget for the same reason as the note: the sign is never delayed.
+  const savePendingRecord = (r: PayIntent): void => {
+    void (async () => {
+      let query = feePromiseRef.current;
+      if (query == null) {
+        const ledger = r.currency === 0 ? null : catalog.find(c => c.currency === r.currency)?.ledger ?? null;
+        query = ledger == null ? null : Promise.resolve(fetchLedgerFee(identity.secretHex, ledger))
+          .catch(() => fallbackLedgerFee(ledger, catalog, r.currency));
+        feePromiseRef.current = query;
+      }
+      const fee = await query;
+      addPendingPays(identity.publicHex, [{k: r.nonceHex, assetId: `ic:${r.currency}`, currency: r.currency, wireAmount: r.amount, ...(fee != null ? {fee, gross: (BigInt(r.amount) + BigInt(fee)).toString()} : {}), ...(r.toName ? {who: r.toName} : {}), ...(r.memo ? {msg: r.memo} : {}), ts: Date.now(), kind: 'ic-qr'}]);
+    })().catch(() => {});
+  };
+
+  // The record's other retirement (besides history reconciliation): the payer CANCELS the QR
+  // hand-off — the merchant never scanned it, so nothing can settle and the optimistic deduction
+  // would phantom-subtract forever. The ledger is the backstop if the user is wrong (a scan the
+  // payer missed still settles on-chain and appears in history; the record is gone, so no double
+  // row). Keyed off the live prepared envelope (the re-display branch keeps submittedEnv as the
+  // fallback: prepared is set in both). The signed-but-discarded NOTE stays — it only annotates.
+  const dropPendingRecord = (): void => {
+    const k = prepared?.memoHex ?? submittedEnv?.nonce ?? '';
+    if (k !== '') void removePendingPays(identity.publicHex, [k]);
   };
 
   // U-F1 — visible confirmation after a share resolves, for this component's two Share affordances
@@ -497,9 +533,12 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
        try {
           const out = await pollTransfer(prepared, identity.secretHex, {attempts: 1, intervalMs: 0});
           if (!alive) return;
-          if (out.kind === 'settled') {
-            onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
-            awardPaymentTested(journeyRef.current);
+           if (out.kind === 'settled') {
+             onSettled(); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false}); setPhase('paid');
+             // The handed-off payment PROVED itself on-chain — its pending-outbox record retires
+             // here (the settled history row that arrives on the next refresh replaces the row).
+             void removePendingPays(identity.publicHex, [prepared.memoHex]);
+             awardPaymentTested(journeyRef.current);
             // Trip Ready J5 — CONFIRMED via reconcile after a TRULY offline handoff (the payer
             // approved with no reachable gateway; the merchant's connection settled it): the
             // truthful offlineQr peak path. Award exactly once (idempotent — the stamp IS the
@@ -511,14 +550,17 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
               award(JOURNEY_STAMPS.firstOfflinePayment);
             }
           }
-         if (out.kind === 'rejected') {
-           // Terminal refusal (e.g. the ledger rejected the merchant's submission): surface the
-           // reason on the QR screen and stop polling — spinning silently would leave the payer
-           // showing a dead QR forever. A rejected envelope can never settle, so its retained
-           // submitted-env copy is dead too — drop it (a re-approve may safely prepare fresh).
-           setErr(out.reason);
-           setSubmittedEnv(s => (s && s.prepared.requestIdHex === prepared.requestIdHex ? null : s));
-         }
+          if (out.kind === 'rejected') {
+            // Terminal refusal (e.g. the ledger rejected the merchant's submission): surface the
+            // reason on the QR screen and stop polling — spinning silently would leave the payer
+            // showing a dead QR forever. A rejected envelope can never settle, so its retained
+            // submitted-env copy is dead too — drop it (a re-approve may safely prepare fresh).
+            // The pending-outbox record is equally dead: a never-settling transfer must neither
+            // keep subtracting from the balance nor linger as a pending row (the refund path).
+            setErr(out.reason);
+            void removePendingPays(identity.publicHex, [prepared.memoHex]);
+            setSubmittedEnv(s => (s && s.prepared.requestIdHex === prepared.requestIdHex ? null : s));
+          }
        } catch (e) { console.warn('rail reconcile poll failed:', e instanceof Error ? e.message : String(e)); /* best-effort: keep polling */ }
      };
      check(); const id = setInterval(check, POLL.receiptPay);
@@ -759,6 +801,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         const out = await submitTransfer(p, identity.secretHex, {attempts: 12, intervalMs: 500});
         if (out.kind === 'settled') {
           onSettled();
+          // Settled IN HAND — the ledger answered before the screen changed. No pending record was
+          // written (it is only written on the fall-through below) and none is needed: the settled
+          // history row arrives on the next refresh. The defensive removal covers an edge where the
+          // SAME request was handed off unconfirmed earlier this mount (re-approve after unknown).
+          void removePendingPays(identity.publicHex, [r.nonceHex]);
           // Interim settlement proof (honest W3 receipt): ledger + block index + request id —
           // certified read_state, not BLS-verified on-device (W6 upgrades).
           setPaid({amount: r.amount, currency: r.currency, who, already: false, receipt: {ledger: p.ledger, block_index: out.blockIndex, request_id: p.requestIdHex}}); setPhase('paid');
@@ -770,7 +817,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
           // Reaching it needs a ledger that dedups an UNSTAMPED transfer, which ICRC-1 says a
           // ledger should not and DFINITY's do not — so this is how a third-party ledger's
           // settled-already answer is honoured, never a promise that approving twice is safe.
-          if (out.variant === 'Duplicate') { setPaid({amount: r.amount, currency: r.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
+          if (out.variant === 'Duplicate') { void removePendingPays(identity.publicHex, [r.nonceHex]); setPaid({amount: r.amount, currency: r.currency, who, already: true}); setPhase('paid'); awardPaymentTested(journeyRef.current); return; }
           setErr(out.reason); return;
         }
         // unknown: not terminal within budget — fall through to the offline QR hand-off. The
@@ -783,6 +830,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
       setSubmittedEnv({prepared: p, nonce: r.nonceHex, who});
       setQr({code: envelopeToQrPayload(p.envelopeHex), amount: r.amount, currency: r.currency, who});
       setHandedOffline(online === false);
+      // Founder requirement 2026-09-15 #1 — the unconfirmed hand-off writes its pending-outbox
+      // record NOW (not at btn-paid): the envelope left the payer's hands the moment the QR
+      // renders, and a crash or navigation before the confirm press must still leave the row +
+      // the deduction. btn-notpaid is the explicit user retraction that removes it again.
+      savePendingRecord(r);
       setPhase('qr');
     } catch (e: unknown) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   }
@@ -878,12 +930,13 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
             <CoachTip tipKey="offlineQr" />
             <View style={S.confirmRow}>
               {/* Offline we CANNOT know the ledger settled it, so this is an honest "handed off",
-                  not "Paid ✓". It optimistically reduces the local balance; the real balance
-                  reconciles on the next online poll. It does NOT fabricate a settled history entry.
-                  MC5: pass the request's currency so the deduction lands on THIS asset's entry, not
-                  the DEMO counter (currency-keyed offline deduction). */}
-              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { onOfflinePaid(qr.amount, qr.currency); setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={M.pay.handedTo(qr.who)} accessibilityHint={M.pay.handedOffHint} accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>{M.pay.handedTo(qr.who)}</Text></Pressable>
-              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}><Text style={S.notPaidText}>{M.common.cancel}</Text></Pressable>
+                  not "Paid ✓". The pending-outbox record (written when the QR rendered — see
+                  approve) already carries the deduction + the pending row; this press only
+                  advances the screen to the pending paid card. The real balance reconciles on
+                  the next online poll; the row on the next history refresh. It does NOT
+                  fabricate a settled history entry. */}
+              <Pressable testID="btn-paid" style={S.paidBtn} onPress={() => { setPaid({amount: qr.amount, currency: qr.currency, who: qr.who, already: false, pending: true}); setPhase('paid'); }} accessibilityRole="button" accessibilityLabel={M.pay.handedTo(qr.who)} accessibilityHint={M.pay.handedOffHint} accessibilityState={{disabled: false}}><Text style={S.paidBtnText}>{M.pay.handedTo(qr.who)}</Text></Pressable>
+              <Pressable testID="btn-notpaid" style={S.notPaidBtn} onPress={() => { dropPendingRecord(); reset(); }} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}><Text style={S.notPaidText}>{M.common.cancel}</Text></Pressable>
             </View>
           </>
         )}
@@ -1230,7 +1283,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, onOfflinePaid, 
         <NfcTap
           key={nfcKey} role="card" identity={identity}
           catalog={catalog}
-          onSettled={onSettled} onOfflinePaid={onOfflinePaid}
+          onSettled={onSettled}
           onActive={() => setNfcActive(true)}
           onClose={() => { setNfcActive(false); setNfcKey(k => k + 1); }}
           offlinePeak={!online && shouldShowOfflinePeak(journey, 'nfcMerchantSettled')}

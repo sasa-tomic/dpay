@@ -20,6 +20,7 @@ import {sanitiseDisplayText} from '../lib/deepLink';
 import type {OcpDetails, OcpOffer, OcpScan} from '../lib/opencryptopay';
 import {ocpTimeRefusal, payAndReport, resolveOcpOffer, resolveOcpScan, type OcpResolveResult, type OcpSendResult, type OcpTarget} from '../services/opencryptopay';
 import {saveTxNote} from '../services/txNotes';
+import {addPendingPays, removePendingPays} from '../services/pendingPays';
 import type {SelectableAsset} from '../config/assets';
 import {type HomeCurrency, type RailBalances} from '../config/currency';
 import {FundedSiblingRail} from './FundedSiblingRail';
@@ -94,6 +95,9 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
   // the next, so without this two ticks could both reach a confirmed transfer and both report it.
   const ocpChecking = useRef(false);
   const [solpayUri, setSolpayUri] = useState<string | null>(null);
+  // The last offline-QR hand-off's signature (its pending-outbox join key) — the discard button's
+  // retraction path. Cleared by reset(); read only while the 'qr' phase still shows that code.
+  const solpaySigRef = useRef('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // The disclosure a payment signed on NO fact owes its payer (`solSignCaveat`). It is a CAVEAT,
@@ -529,6 +533,11 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
         // NOT-sent is off the table, so this is the honest pending screen with the signature.
         // Same gross/fee carry as the settled save above (founder rule 2026-09-14).
         void saveTxNote(identity.publicHex, {k: broadcast.sig, who: sanitiseDisplayText(request.label ?? '') || undefined, msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') || undefined, ...(isSol ? {gross: (rawAmount + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
+        // Founder requirement 2026-09-15 #1/#3 — an unconfirmed broadcast is a PENDING PAYMENT
+        // exactly like the offline QR hand-off: the outbox record (join key = the signature) puts
+        // the row in Home/Ledger and the gross into the offline subtraction until history
+        // reconciles the same signature. kind 'sol-qr' — the SOL rail's QR-side flow.
+        addPendingPays(identity.publicHex, [{k: broadcast.sig, assetId: `solana:${unit}`, currency: null, wireAmount: rawAmount.toString(), ...(isSol ? {fee: SOL_FEE_LAMPORTS.toString(), gross: (rawAmount + SOL_FEE_LAMPORTS).toString()} : {}), ...(sanitiseDisplayText(request.label ?? '') ? {who: sanitiseDisplayText(request.label ?? '')} : {}), ...(sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '') ? {msg: sanitiseDisplayText(request.message ?? '') || sanitiseDisplayText(request.memo ?? '')} : {}), ts: Date.now(), kind: 'sol-qr'}]);
         if (isSol) onSent(); else onSentToken(request.splToken);
         setSpayDone({amount, who, signature: broadcast.sig, note: M.pay.spay.pendingNote});
         setPhase('spay-done');
@@ -711,7 +720,19 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       // payer's exact debit, the same sum the hand-off screen shows) + the fee; SPL requests
       // never net (separate-asset gas) — nothing to annotate.
       const parts = extractSignedTxParts(solpay.tx);
-      void saveTxNote(identity.publicHex, {k: parts != null ? bs58.encode(parts.signature) : '', who: sanitiseDisplayText(r.name) || undefined, msg: sanitiseDisplayText(r.memo) || undefined, ...(r.cur === 'SOL' ? {gross: (BigInt(r.amt) + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
+      const sig = parts != null ? bs58.encode(parts.signature) : '';
+      void saveTxNote(identity.publicHex, {k: sig, who: sanitiseDisplayText(r.name) || undefined, msg: sanitiseDisplayText(r.memo) || undefined, ...(r.cur === 'SOL' ? {gross: (BigInt(r.amt) + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
+      // Founder requirements 2026-09-15 #1/#3 — the offline hand-off writes its pending-outbox
+      // record NOW (the envelope left the payer's hands the moment the QR renders — same rule as
+      // PayMode's fall-through, and for the same crash-safety reason). Join key = the signature
+      // (identical to the note's and to the settling SOL history row's identity); `ts` starts the
+      // subtraction clock that the next successful balance read retires. The discard button below
+      // is the explicit user retraction that removes it again. No signature extractable → no key
+      // → nothing worth recording (the note above makes the same empty-key no-op).
+      if (sig !== '') {
+        solpaySigRef.current = sig;
+        addPendingPays(identity.publicHex, [{k: sig, assetId: `solana:${r.cur}`, currency: null, wireAmount: r.amt, ...(r.cur === 'SOL' ? {fee: SOL_FEE_LAMPORTS.toString(), gross: (BigInt(r.amt) + SOL_FEE_LAMPORTS).toString()} : {}), ...(sanitiseDisplayText(r.name) ? {who: sanitiseDisplayText(r.name)} : {}), ...(sanitiseDisplayText(r.memo) ? {msg: sanitiseDisplayText(r.memo)} : {}), ts: Date.now(), kind: 'sol-qr'}]);
+      }
       setSolpayUri(encodeSolPay(solpay));
       setPhase('qr');
     } catch (e: unknown) {
@@ -721,7 +742,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
     }
   }
 
-  function reset() { setReq(null); setSolpayUri(null); setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setSpay(null); setSpayAmount(''); setSpayDone(null); setErr(null); setSignCaveat(null); setScanArmed(false); setPhase('scan'); }
+  function reset() { setReq(null); setSolpayUri(null); solpaySigRef.current = ''; setOcp(null); setOcpChoice(null); setOcpDone(null); setOcpClaim(null); setSpay(null); setSpayAmount(''); setSpayDone(null); setErr(null); setSignCaveat(null); setScanArmed(false); setPhase('scan'); }
 
   // NFC card outcome: success/pending → paid (awaiting merchant confirmation); declined → back to scan.
   function onNfcOutcome(outcome: 'success' | 'pending' | 'declined') {
@@ -1115,7 +1136,12 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
             accessibilityState={{disabled: false}}>
             <Text style={S.paidBtnText}>{M.pay.handedToMerchant}</Text>
           </Pressable>
-          <Pressable testID="btn-sol-pay-discard" style={S.notPaidBtn} onPress={reset} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
+          {/* The user retracts the hand-off: the merchant never scanned the code, nothing can
+              settle, so the pending-outbox record's optimistic deduction + row must go (the
+              ledger is the backstop if a scan the payer missed slipped through — that settled
+              row arrives in history under the same signature key). Same retraction semantics as
+              PayMode's btn-notpaid. */}
+          <Pressable testID="btn-sol-pay-discard" style={S.notPaidBtn} onPress={() => { if (solpaySigRef.current !== '') void removePendingPays(identity.publicHex, [solpaySigRef.current]); reset(); }} accessibilityRole="button" accessibilityLabel={M.common.cancel} accessibilityState={{disabled: false}}>
             <Text style={S.notPaidText}>{M.common.cancel}</Text>
           </Pressable>
         </View>

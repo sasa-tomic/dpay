@@ -17,6 +17,7 @@ import {friendlySolTapError} from '../solana/errors';
 import {decideSolPayerReceiptV2, isSolReqV2Expired, RECEIPT_SETTLED, RECEIPT_REJECTED, RECEIPT_UNREACHABLE, RECEIPT_MISMATCH} from '../solana/payments';
 import {DpaySolNfc} from '../services/native';
 import {saveTxNote} from '../services/txNotes';
+import {addPendingPays, removePendingPays} from '../services/pendingPays';
 import {sanitiseDisplayText} from '../lib/deepLink';
 import {withTimeout} from '../lib/timeout';
 import {useNfcTapState, type TapCtx} from '../hooks/useNfcTapState';
@@ -190,12 +191,20 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       );
       if (outcome.outcome === 'ignore') return; // a receipt for a different payment (cross-tap)
       if (outcome.outcome === 'success') {
+        // Definitive settle over the tap: the pending record's work is done this second (its
+        // subtraction would double-count the very balance the settle moves; the row's settled twin
+        // arrives with the next history tick under the same signature key).
+        void removePendingPays(identity.publicHex, [expectedSigRef.current]);
         onOutcome?.('success');
         awardPaymentTested(journeyRef.current); // payer: tap-settled payment counts
         // No caveat on a settlement: the chain just proved the token account exists, so repeating
         // "dpay couldn't check it" would be the wallet contradicting the ledger.
         ctx.finalize('success');
       } else if (outcome.outcome === 'declined') {
+        // Definitive rejection: nothing will ever settle, so the optimistic deduction + row must
+        // go immediately (the record replaces the old negative-refund dance — the balance was
+        // never authoritatively read, there is nothing to refund against).
+        void removePendingPays(identity.publicHex, [expectedSigRef.current]);
         onOutcome?.('declined');
         // A decline is EXACTLY the outcome an absent token account produces (the merchant's
         // broadcast is rejected on chain), so the unchecked-account caveat is the most useful
@@ -255,6 +264,14 @@ export function SolNfcTap({role, identity, req, reqUri, tokenBalances, onOutcome
       // the payer's exact debit) + the fee, so the log row headlines the price; SPL requests never
       // net (their fee is separate-asset SOL gas) — nothing to annotate there.
       void saveTxNote(identity.publicHex, {k: expectedSigRef.current, who: sanitiseDisplayText(decoded.name) || undefined, msg: sanitiseDisplayText(decoded.memo) || undefined, ...(decoded.cur === 'SOL' ? {gross: (BigInt(decoded.amt) + SOL_FEE_LAMPORTS).toString(), fee: SOL_FEE_LAMPORTS.toString()} : {})}, Date.now());
+      // Pending outbox (services/pendingPays): the sign is pure-offline, so the payment leaves
+      // UNCONFIRMED by construction — the record (same key = this signature) is what deducts the
+      // balance + projects the local row until the merchant's broadcast settles in history. The
+      // per-rail balance-poll clock (useSolanaBalances freshAt) retires the SUBTRACTION once a
+      // fresh read lands; the row lives until the signature appears in history. Removed at once
+      // on a definitive tap outcome (onReceipt below). Only 'SOL' carries gross/fee — SPL fee is
+      // separate-asset gas, the wire is the honest debit.
+      void addPendingPays(identity.publicHex, [{k: expectedSigRef.current, assetId: `solana:${decoded.cur}`, currency: null, wireAmount: decoded.amt, ...(decoded.cur === 'SOL' ? {fee: SOL_FEE_LAMPORTS.toString(), gross: (BigInt(decoded.amt) + SOL_FEE_LAMPORTS).toString()} : {}), ...(sanitiseDisplayText(decoded.name) ? {who: sanitiseDisplayText(decoded.name)} : {}), ...(sanitiseDisplayText(decoded.memo) ? {msg: sanitiseDisplayText(decoded.memo)} : {}), ts: Date.now(), kind: 'sol-nfc'}]);
       const solpayUri = encodeSolPay(solpay);
       await DpaySolNfc.approveSolCard(solpayUri);
     } catch (e: unknown) {

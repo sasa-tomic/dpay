@@ -91,13 +91,15 @@ const textOf = (tree: renderer.ReactTestRenderer, testID: string): string => {
 
 type SolState = Parameters<typeof buildAssetBalances>[0]['solState'];
 
-function balancesFor(solState: SolState, online = true) {
+function balancesFor(solState: SolState, approx = false) {
   return buildAssetBalances({
     catalog: CATALOG,
     assets: ASSETS,
     icBalances: {7: '120000000'},
     primaryBalance: '12345',
-    online,
+    // 2026-09-15: the caller owns the staleness rule; the old `online` flag's only visible effect
+    // (DEMO's "~" marker) now arrives as an explicit per-asset approx mark.
+    approx: approx ? {'ic:0': true} : undefined,
     solState,
     tokenStates: {},
   });
@@ -116,7 +118,6 @@ function solanaDown() {
     assets: ASSETS,
     icBalances: {7: '120000000'},
     primaryBalance: '12345',
-    online: true,
     solState: {balance: null, status: 'error'},
     tokenStates,
   });
@@ -135,7 +136,6 @@ function solanaDownWith(failure: SolanaReadFailure) {
     assets: ASSETS,
     icBalances: {7: '120000000'},
     primaryBalance: '12345',
-    online: true,
     solState: {balance: null, status: 'error', failure},
     tokenStates,
   });
@@ -205,7 +205,7 @@ describe('A2 — the headline announces exactly what it renders, unit stated onc
   test('the offline approximation marker reaches a screen reader (it outranks every other name)', () => {
     const tree = mountHome({
       online: false,
-      balances: balancesFor({balance: null, status: 'unavailable'}, false),
+      balances: balancesFor({balance: null, status: 'unavailable'}),
     });
     expect(announced(tree, 'home-headline')).toContain(M.wallet.balance.approx(M.wallet.homeCurrency.name[HOME]));
     act(() => { tree.unmount(); });
@@ -336,7 +336,6 @@ describe('R3 audit — token-cause banner, offline chrome, and the tappable esca
       assets: ASSETS,
       icBalances: {7: '120000000'},
       primaryBalance: '12345',
-      online: true,
       solState: {balance: '1500000000', status: 'ok'},
       tokenStates,
     });

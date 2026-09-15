@@ -48,6 +48,10 @@ export type ReceiptMessages = {
   noAccount: string;
   noReferenceIc: string;
   noReferenceSolana: string;
+  /** A PENDING payment's one honest sentence: this receipt was written by the device's outbox, no
+   *  ledger confirmation exists yet (2026-09-15 offline outbox). Replaces the proof line + the
+   *  source line — both would claim ledger facts that do not exist. */
+  pendingProof: string;
 
   /** The copy-the-proof action. */
   copy: string;
@@ -81,6 +85,7 @@ export const receiptEn: ReceiptMessages = {
   noAccount: 'The ledger recorded no account on that side of this transfer.',
   noReferenceIc: 'No reference — this transfer carried no memo. A dpay payment request always sets one.',
   noReferenceSolana: 'A Solana transfer carries no dpay reference. The signature below identifies it.',
+  pendingProof: 'Not confirmed yet — this payment settles on the ledger later.',
 
   copy: 'Copy receipt',
   copied: 'Copied ✓',

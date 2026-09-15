@@ -45,7 +45,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     const m = buildAssetBalances({
       catalog: CATALOG, assets,
       icBalances: {1: '50000', 2: '0'}, // ckBTC funded (50000 sats), ckUSDC zero
-      primaryBalance: '10000', online: true,
+      primaryBalance: '10000',
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {},
     });
@@ -59,7 +59,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     const m = buildAssetBalances({
       catalog: CATALOG, assets,
       icBalances: {}, // nothing polled yet
-      primaryBalance: null, online: true,
+      primaryBalance: null,
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {},
     });
@@ -73,7 +73,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
   it('SOL: ok + non-zero ⇒ ok; ok + zero ⇒ zero; unavailable ⇒ "—" (the jest/e2e default)', () => {
     const sol = (balance: string | null, st: 'ok' | 'unavailable'): BalanceView => {
       const m = buildAssetBalances({
-        catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
+        catalog: CATALOG, assets, icBalances: {}, primaryBalance: null,
         solState: {balance, status: st},
         tokenStates: {},
       });
@@ -89,7 +89,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
 
   it('SOL: error PRESERVES the prior balance (never zeroes it — RPC failure ≠ zero)', () => {
     const m = buildAssetBalances({
-      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
+      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null,
       solState: {balance: '2500000000', status: 'error'}, // prior balance preserved
       tokenStates: {},
     });
@@ -102,7 +102,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
       amount: string | null, decimals: number | null,
       status: 'balance' | 'absent' | 'unavailable',
     ): BalanceView => buildAssetBalances({
-      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
+      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null,
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {[USDC_MINT_ADDRESS]: {amount, decimals, status}},
     })['solana:USDC'];
@@ -118,7 +118,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     const m = buildAssetBalances({
       catalog: CATALOG, assets,
       icBalances: {2: '999999'}, // IC USDC funded
-      primaryBalance: null, online: true,
+      primaryBalance: null,
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {[USDC_MINT_ADDRESS]: {amount: '0', decimals: 6, status: 'balance'}}, // Solana USDC zero
     });
@@ -135,7 +135,7 @@ describe('buildAssetBalances — per-asset balance map', () => {
     // cross-mint status bleed; and the EURC row names EURC, not a hardcoded unit.
     const m = buildAssetBalances({
       catalog: CATALOG, assets,
-      icBalances: {}, primaryBalance: null, online: true,
+      icBalances: {}, primaryBalance: null,
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {
         [USDC_MINT_ADDRESS]: {amount: '2000000', decimals: 6, status: 'balance'},
@@ -146,14 +146,14 @@ describe('buildAssetBalances — per-asset balance map', () => {
     expect(m['solana:EURC']).toEqual({displayText: '—', status: 'loading', failure: null});
     // A mint OUTSIDE the state record (e.g. RPC-gated off) fails closed to unknown, never zero.
     const without = buildAssetBalances({
-      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
+      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null,
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {[USDC_MINT_ADDRESS]: {amount: '2000000', decimals: 6, status: 'balance'}},
     });
     expect(without['solana:EURC']).toEqual({displayText: '—', status: 'loading', failure: null});
     // Funded EURC renders in EURC's own unit (same 6-decimal formatting, own symbol).
     const funded = buildAssetBalances({
-      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null, online: true,
+      catalog: CATALOG, assets, icBalances: {}, primaryBalance: null,
       solState: {balance: null, status: 'unavailable'},
       tokenStates: {[EURC_MINT_ADDRESS]: {amount: '2500000', decimals: 6, status: 'balance'}},
     });
