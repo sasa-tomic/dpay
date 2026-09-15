@@ -14,8 +14,6 @@ export const convertFr: ConvertMessages = {
 
   unavailableTitle: sym => `La conversion n'est pas encore disponible pour ${sym}`,
   unavailableBody: (pair, venue) => `Aujourd'hui, dpay convertit ${pair} via ${venue} — et rien d'autre.`,
-  unavailableCkusdc: venue =>
-    `Un pool direct VCHF ↔ USDC existe chez ${venue}, mais sa profondeur est saturée (environ CHF 315) : dpay le refuse plutôt que de t'afficher un prix périmé.`,
 
   amountLabel: sym => `Montant (${sym})`,
   balanceLine: balance => `Solde : ${balance}`,

@@ -14,8 +14,6 @@ export const convertEs: ConvertMessages = {
 
   unavailableTitle: sym => `Convertir aún no está disponible para ${sym}`,
   unavailableBody: (pair, venue) => `Hoy dpay convierte ${pair} a través de ${venue} — y nada más.`,
-  unavailableCkusdc: venue =>
-    `Existe un pool directo VCHF ↔ USDC en ${venue}, pero su profundidad está saturada (unos CHF 315): dpay lo rechaza antes que darte un precio caducado.`,
 
   amountLabel: sym => `Importe (${sym})`,
   balanceLine: balance => `Saldo: ${balance}`,

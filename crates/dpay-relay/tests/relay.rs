@@ -5062,8 +5062,8 @@ async fn venue_surface_is_query_only_in_the_agent_build() {
     assert_eq!(v1, v2, "GET /venues is a pure read in the agent build");
     assert_eq!(
         v1["venues"].as_array().map(Vec::len),
-        Some(1),
-        "exactly the one real venue is served in the agent build"
+        Some(3),
+        "exactly the three real venues (one per pair) are served in the agent build"
     );
     assert_eq!(v1["venues"][0]["venue_id"], "icpswap");
     assert!(
@@ -5355,7 +5355,19 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     assert_eq!(status, StatusCode::OK);
 
     let served = body["venues"].as_array().expect("venues is an array");
-    assert_eq!(served.len(), 1, "exactly one real venue is served today");
+    assert_eq!(
+        served.len(),
+        3,
+        "exactly three real venues are served today (one per pair)"
+    );
+    assert_eq!(
+        served
+            .iter()
+            .map(|v| v["venue_id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh"],
+        "registry order is the stable wire order"
+    );
     let v = &served[0];
     assert_eq!(v["venue_id"], "icpswap");
     assert_eq!(v["display_name"], "ICPSwap");
@@ -5394,13 +5406,13 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
 async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;
 
-    // Default (nothing armed): exactly the one real venue.
+    // Default (nothing armed): exactly the three real venues, one per pair.
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body["venues"].as_array().map(Vec::len),
-        Some(1),
-        "the default experience is ONE venue per pair, like prod"
+        Some(3),
+        "the default experience is one venue per PAIR, like prod"
     );
 
     let post_venue = |served: bool, venue_id: &str| {
@@ -5422,9 +5434,21 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
     let venues = body["venues"].as_array().expect("venues is an array");
-    assert_eq!(venues.len(), 2, "two venues on the pair with the knob armed");
-    assert_eq!(venues[0]["venue_id"], "icpswap", "the real venue stays first");
-    assert_eq!(venues[1]["venue_id"], "icpswap-fixture-b");
+    assert_eq!(
+        venues.len(),
+        4,
+        "four served rows with the knob armed: three real + the fixture on its pair"
+    );
+    // The served list is REGISTRY order (the stable wire order) with the knob arming the
+    // fixture venue into it — the fixture row sits where the registry puts it, second.
+    assert_eq!(
+        venues
+            .iter()
+            .map(|v| v["venue_id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["icpswap", "icpswap-fixture-b", "icpswap-ckusdc", "icpswap-cketh"],
+        "registry order is the stable wire order"
+    );
     assert_eq!(venues[1]["endpoint"], FIXTURE_POOL);
     assert_eq!(venues[1]["display_name"], "ICPSwap (offline fixture)");
     assert_eq!(
@@ -5432,13 +5456,13 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
         "the fixture venue is labelled the invented stand-in it is"
     );
 
-    // Disarm: back to the one-venue default (teardown parity — e2e flows share one relay).
+    // Disarm: back to the three-real-venue default (teardown parity — e2e flows share one relay).
     let (status, body) = call(&state, post_venue(false, "icpswap-fixture-b")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["served"], false);
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["venues"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["venues"].as_array().map(Vec::len), Some(3));
     assert!(!body.to_string().contains(FIXTURE_POOL));
 
     // The knob can neither gate a REAL venue nor invent an unknown one — routing is a

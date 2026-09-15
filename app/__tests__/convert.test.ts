@@ -979,9 +979,6 @@ describe('fail-closed copy — all four locales carry it', () => {
     expect(d.counterparty(VENUE.display_name)).not.toContain(POOL); // the principal is not copy
     expect(d.unavailableTitle('X')).toContain('X');
     expect(d.unavailableBody('ICP ↔ Swiss francs (VCHF)', VENUE.display_name)).toContain(VENUE.display_name);
-    // The saturated direct-pool refusal (spec §1) — parameterized by venue (Wave-2): the line
-    // names WHOSE saturated pool it is, in every locale.
-    expect(d.unavailableCkusdc('SomeFutureVenue')).toContain('SomeFutureVenue');
     expect(d.dpayFeeLine.length).toBeGreaterThan(0); // "dpay charges nothing and is paid nothing"
     // The parameterized copy still speaks the passed-in venue, not a baked one.
     expect(d.quoteSource('12:00', 'SomeFutureVenue')).toContain('SomeFutureVenue');

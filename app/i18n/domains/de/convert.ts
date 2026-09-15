@@ -15,8 +15,6 @@ export const convertDe: ConvertMessages = {
 
   unavailableTitle: sym => `Umtausch ist für ${sym} noch nicht verfügbar`,
   unavailableBody: (pair, venue) => `Heute tauscht dpay ${pair} über ${venue} um — und nichts sonst.`,
-  unavailableCkusdc: venue =>
-    `Ein direkter VCHF-↔-USDC-Pool existiert bei ${venue}, aber seine Tiefe ist gesättigt (etwa CHF 315) — dpay lehnt ihn ab, statt dir einen veralteten Preis zu zeigen.`,
 
   amountLabel: sym => `Betrag (${sym})`,
   balanceLine: balance => `Guthaben: ${balance}`,

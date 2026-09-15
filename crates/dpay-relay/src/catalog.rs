@@ -260,6 +260,52 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
                 reserve1_e8s: 140_000_000_000_000,
             }),
         },
+        VenueEntry {
+            // The pair-scoped ICPSwap ICP/ckUSDC 0.3% pool (registered 2026-09-15). Same venue
+            // family and counterparty-contract family as the PoC row — its own pool canister,
+            // its own pair. MEASURED off the live pool's own `metadata` 2026-09-15: token0 =
+            // ICP, token1 = ckUSDC, fee 3000 (the pool's order is a live fact; the fixture
+            // seed below merely pins the offline fake to the measured order).
+            venue_id: "icpswap-ckusdc",
+            display_name: "ICPSwap",
+            kind: VenueKind::IcAmm,
+            endpoint: "mohjv-bqaaa-aaaag-qjyia-cai",
+            pair_ledgers: [ICP_LEDGER_PRINCIPAL, CKUSDC_LEDGER_PRINCIPAL],
+            testnet: false,
+            disclosure_key: "icpswap",
+            test_helpers_served: false,
+            fixture: Some(FixtureSeed {
+                token0_ledger: ICP_LEDGER_PRINCIPAL,
+                token1_ledger: CKUSDC_LEDGER_PRINCIPAL,
+                fee_millionths: 3000,
+                // Live-measured getTokenAmountState raws 2026-09-15 (raw ledger units per each
+                // token's OWN decimals — "e8s" is the field name, not a claim): ~9.2k ICP /
+                // ~392k ckUSDC. Deep enough that probe-size swaps barely move the fake curve.
+                reserve0_e8s: 9_236_229_557_363,
+                reserve1_e8s: 392_104_897_975,
+            }),
+        },
+        VenueEntry {
+            // The pair-scoped ICPSwap ICP/ckETH 0.3% pool (registered 2026-09-15). MEASURED off
+            // the live pool's own `metadata` 2026-09-15: token0 = ICP, token1 = ckETH, fee 3000.
+            venue_id: "icpswap-cketh",
+            display_name: "ICPSwap",
+            kind: VenueKind::IcAmm,
+            endpoint: "angxa-baaaa-aaaag-qcvnq-cai",
+            pair_ledgers: [ICP_LEDGER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL],
+            testnet: false,
+            disclosure_key: "icpswap",
+            test_helpers_served: false,
+            fixture: Some(FixtureSeed {
+                token0_ledger: ICP_LEDGER_PRINCIPAL,
+                token1_ledger: CKETH_LEDGER_PRINCIPAL,
+                fee_millionths: 3000,
+                // Live-measured getTokenAmountState raws 2026-09-15, in each token's own
+                // units: ~11.3k ICP / ~5.16e18 raw ckETH (≈5.16 ckETH at 18 decimals).
+                reserve0_e8s: 1_131_191_262_612,
+                reserve1_e8s: 5_162_709_386_182_754_830,
+            }),
+        },
     ]
 }
 
@@ -1785,6 +1831,19 @@ mod venue_truth_tests {
                 .venue_id,
             "icpswap"
         );
+        // The pair-scoped ICPSwap pools resolve for quote attribution too — one allowlisted
+        // endpoint per REAL pool, and each resolves to its OWN venue id (never the PoC's).
+        for (pool, want_id) in [
+            ("mohjv-bqaaa-aaaag-qjyia-cai", "icpswap-ckusdc"),
+            ("angxa-baaaa-aaaag-qcvnq-cai", "icpswap-cketh"),
+        ] {
+            assert_eq!(
+                venue_of_endpoint(pool)
+                    .expect("the pair-scoped ICPSwap pool resolves")
+                    .venue_id,
+                want_id
+            );
+        }
         assert!(venue_of_endpoint(ICP_LEDGER_PRINCIPAL).is_none());
         // The invented principal must PARSE — the fake gateway and the relay tests key pools by
         // principal text, and a typo'd fixture id would fail far from its cause.
@@ -1796,8 +1855,19 @@ mod venue_truth_tests {
             .into_iter()
             .filter(|v| venue_servable(v, false))
             .collect();
-        assert_eq!(served.len(), 1, "exactly one real venue is served today");
-        assert_eq!(served[0].venue_id, "icpswap");
+        assert_eq!(
+            served.len(),
+            3,
+            "exactly three real venues are served today (one per pair)"
+        );
+        assert_eq!(
+            served
+                .iter()
+                .map(|v| v.venue_id)
+                .collect::<Vec<_>>(),
+            vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh"],
+            "registry order is the stable wire order"
+        );
         assert!(served.iter().all(|v| !v.test_helpers_served));
     }
 

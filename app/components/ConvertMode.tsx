@@ -796,13 +796,8 @@ function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: SelectableAss
         {M.convert.unavailableTitle(label)}
       </Text>
       <Text testID="convert-unavailable-body" style={S.convertUnavailableBody}>
-        {M.convert.unavailableBody('ICP ↔ Swiss francs (VCHF)', REGISTERED_VENUE_NAME)}
+        {M.convert.unavailableBody('ICP ↔ VCHF, ICP ↔ ckUSDC and ICP ↔ ckETH', REGISTERED_VENUE_NAME)}
       </Text>
-      {selectedAsset != null && selectedAsset.protocol === 'ic' && selectedAsset.currency === 2 ? (
-        <Text testID="convert-unavailable-ckusdc" style={S.convertUnavailableBody}>
-          {M.convert.unavailableCkusdc(REGISTERED_VENUE_NAME)}
-        </Text>
-      ) : null}
       <View style={S.convertFooting}>
         <IconSwap size={20} color={C.sub} />
       </View>

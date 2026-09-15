@@ -60,9 +60,35 @@ const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
 /// 2^96, the fixed-point scale of the pool's `sqrtPriceX96`.
 const Q96: f64 = 79_228_162_514_264_337_593_543_950_336.0;
 
-/// The one trade this probe quotes, in raw units. Both sides of this pair are 8-decimal (pinned
-/// from `decimals.vchf` / `decimals.icp` below), so a raw-unit rate IS a unit rate.
-const PROBE_AMOUNT_IN: u64 = 100_000_000;
+/// The t0-side probe for an 8/8-decimal pair, in raw units (1 whole token0). The VCHF/ICP pair
+/// keeps exactly this historical probe; mixed-decimal pairs (ICP↔ckUSDC 8/6, ICP↔ckETH 8/18)
+/// probe `PROBE_AMOUNT_MIXED` on the t0 side and a price-sized t0-equivalent on the t1 side —
+/// see `probe_real_venue`, which sizes per venue from the truth file's `decimals`.
+const PROBE_AMOUNT_8_8: u64 = 100_000_000;
+/// ~2 ICP worth of raw (the task-sized probe for the pair-scoped ICP pools — large enough that
+/// a quote is never dust, small enough to be price-impact-nothing on these depths).
+const PROBE_AMOUNT_MIXED: u64 = 200_000_000;
+
+/// The decimals a traded ledger carries, from the truth file's own `decimals` map (keyed by the
+/// ledger's `principals` name — ckETH's 18 decimals live under `eth`). Panics on an unknown
+/// ledger so a future venue on a new token FAILS the probe until its decimals are wired here —
+/// the probe sizes its quotes from this, and a wrong size on an 18-decimal token is dust.
+fn ledger_decimals(truth: &Value, ledger: &str) -> u64 {
+    let (principals, decimals) = (&truth["principals"], &truth["decimals"]);
+    for (ledger_key, dec_key) in [
+        ("icp_ledger", "icp"),
+        ("vchf_ledger", "vchf"),
+        ("ckusdc_ledger", "ckusdc"),
+        ("cketh_ledger", "eth"),
+    ] {
+        if principals[ledger_key].as_str() == Some(ledger) {
+            return decimals[dec_key]
+                .as_u64()
+                .unwrap_or_else(|| panic!("truth decimals.{dec_key} must be a number"));
+        }
+    }
+    panic!("no truth-file decimals for ledger {ledger} — extend ledger_decimals for the new pair");
+}
 
 /// The venue's `key` and `sqrtPriceX96` — the factory's identity for this pool and the price it
 /// publishes. Neither is part of [`dpay_relay::agent_ledger::IcpPoolMetadata`] (the relay has no
@@ -84,10 +110,16 @@ enum WideMetadataResult {
 }
 
 /// One real `GET /api/v1/swap_quote` through the PRODUCTION router.
-async fn route_quote(state: &AppState, pool: &str, token_in: &str, token_out: &str) -> Value {
+async fn route_quote(
+    state: &AppState,
+    pool: &str,
+    token_in: &str,
+    token_out: &str,
+    amount_in: u64,
+) -> Value {
     let uri = format!(
         "/api/v1/swap_quote?pool={pool}&token_in={token_in}&token_out={token_out}\
-         &amount_in={PROBE_AMOUNT_IN}"
+         &amount_in={amount_in}"
     );
     let resp = app(state.clone())
         .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
@@ -118,10 +150,9 @@ fn venues_mainnet_pair_and_fee_still_match_the_measured_truth() {
         eprintln!("skipped: set DPAY_IC_MAINNET=1 (opt-in mainnet probe, needs network)");
         return;
     }
-    // The unit-rate math in the probe needs the pair's decimals — asserted equal here for the
-    // one pair dpay trades today. A second REAL pair must extend this guard with its decimals.
-    let truth_all: Value = serde_json::from_str(CATALOG_TRUTH).expect("catalog_truth is JSON");
-    assert_eq!(truth_all["decimals"]["vchf"], truth_all["decimals"]["icp"]);
+    // The per-venue probe sizing needs each pair's decimals — read per venue off the truth
+    // file inside `probe_real_venue` (`ledger_decimals`), which fails loud on a ledger it
+    // does not know instead of assuming a symmetric 8/8 pair.
     let mut probed = 0;
     for venue in &venues_truth() {
         if venue
@@ -217,11 +248,19 @@ fn probe_real_venue(venue: &Value) {
 
         // 4. THE RATE, THE RIGHT WAY UP — driven through the PRODUCTION route.
         //
-        // The pool publishes its own price in the same reply: token1-per-token0 =
-        // (sqrtPriceX96 / 2^96)^2. Both sides of this pair are 8-decimal, so that ratio is
-        // directly a unit rate — assert that, rather than assume it.
+        // The pool publishes its own price in the same reply: token1-per-token0 (in RAW units,
+        // each side in its own token's base) = (sqrtPriceX96 / 2^96)^2. That RAW ratio is
+        // decimals-agnostic — `out_raw = in_raw × price_raw` holds whatever each side's
+        // decimals are. Where decimals DO bite is probe SIZING: a t1 side with more decimals
+        // than t0 needs its own raw amount or the reverse direction quotes dust (100_000_000
+        // raw ckETH = 1e-10 ckETH), and fewer decimals (ckUSDC, 6) makes 1e8 raw = 100 USDC.
+        // So: an 8/8 pair keeps its historical symmetric raw probe (the VCHF pair's behavior,
+        // byte-for-byte); a mixed pair probes ~2 whole t0 units forward and the price-equivalent
+        // t1 amount in reverse — each leg lands on the same economic size.
         let truth_all: Value = serde_json::from_str(CATALOG_TRUTH).expect("catalog_truth is JSON");
-        assert_eq!(truth_all["decimals"]["vchf"], truth_all["decimals"]["icp"]);
+        let d0 = ledger_decimals(&truth_all, want0);
+        let d1 = ledger_decimals(&truth_all, want1);
+        eprintln!("swap-venue mainnet probe [{venue_id}]: pair decimals {d0}/{d1}");
         let sqrt = k.sqrt_price_x96.0.to_f64().expect("sqrtPriceX96 fits f64") / Q96;
         let price_t1_per_t0 = sqrt * sqrt;
 
@@ -230,15 +269,22 @@ fn probe_real_venue(venue: &Value) {
                 .await
                 .expect("AgentLedger connect to mainnet"),
         ));
-        let amount_in = PROBE_AMOUNT_IN as f64;
+        let (amt_t0, amt_t1) = if d0 == d1 {
+            (PROBE_AMOUNT_8_8, PROBE_AMOUNT_8_8)
+        } else {
+            // The t0-equivalent in t1's raw units; clamped into u64 (a hostile price never
+            // panics the probe — the ratio assert below does the real judging).
+            let t1_equiv = (PROBE_AMOUNT_MIXED as f64 * price_t1_per_t0).round();
+            (PROBE_AMOUNT_MIXED, t1_equiv.clamp(1.0, 9.0e18) as u64)
+        };
         // Each direction, quoted by the real handler, against the venue's own price. A quote is
         // the price MINUS the fee tier and minus price impact, so it must land just under
         // parity — never above it, and nowhere near an inverted figure.
-        for (label, token_in, token_out, expected) in [
-            ("token0→token1", want0, want1, amount_in * price_t1_per_t0),
-            ("token1→token0", want1, want0, amount_in / price_t1_per_t0),
+        for (label, token_in, token_out, amount_in, expected) in [
+            ("token0→token1", want0, want1, amt_t0, amt_t0 as f64 * price_t1_per_t0),
+            ("token1→token0", want1, want0, amt_t1, amt_t1 as f64 / price_t1_per_t0),
         ] {
-            let body = route_quote(&state, pool_text, token_in, token_out).await;
+            let body = route_quote(&state, pool_text, token_in, token_out, amount_in).await;
             assert_eq!(
                 body["venue_id"], venue_id,
                 "the route's reply must be attributable to this venue"
@@ -256,7 +302,7 @@ fn probe_real_venue(venue: &Value) {
                 .expect("amount_out parses");
             let ratio = out / expected;
             eprintln!(
-                "swap-venue mainnet probe: {label} {PROBE_AMOUNT_IN} → {out} \
+                "swap-venue mainnet probe: {label} {amount_in} → {out} \
                  (pool's own price implies {expected:.0}; ratio {ratio:.6})"
             );
             assert!(

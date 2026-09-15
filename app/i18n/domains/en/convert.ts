@@ -33,10 +33,6 @@ export type ConvertMessages = {
   /** What exists today, named honestly. Params are the locale-invariant pair string and the
    *  venue's registry display name. */
   unavailableBody: (pair: string, venue: string) => string;
-  /** ckUSDC only (spec §1): the direct VCHF↔USDC pool exists but is saturated — dpay refuses
-   *  it. `venue` names whose pool it is (registry display name) — the line never leaves the
-   *  venue unnamed (Wave-2 fix). */
-  unavailableCkusdc: (venue: string) => string;
 
   // --- the quote surface (every §5 checklist line) ----------------------------------------------
   amountLabel: (sym: string) => string;
@@ -168,8 +164,6 @@ export const convertEn: ConvertMessages = {
 
   unavailableTitle: sym => `Convert is not available for ${sym} yet`,
   unavailableBody: (pair, venue) => `Today dpay converts ${pair} through ${venue} — and nothing else.`,
-  unavailableCkusdc: venue =>
-    `A direct VCHF ↔ USDC pool exists at ${venue}, but its depth is saturated (about CHF 315), so dpay refuses it rather than quote you a stale price.`,
 
   amountLabel: sym => `Amount (${sym})`,
   balanceLine: balance => `Balance: ${balance}`,

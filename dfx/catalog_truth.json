@@ -67,11 +67,39 @@
   "testnet": true,
   "disclosure_key": "icpswap",
   "test_helpers_served": true,
+       "fixture": {
+         "token0_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+         "token1_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
+         "fee_millionths": 1000
+       }
+     },
+    {
+      "venue_id": "icpswap-ckusdc",
+      "display_name": "ICPSwap",
+      "kind": "ic_amm",
+      "endpoint": "mohjv-bqaaa-aaaag-qjyia-cai",
+      "pair_ledgers": ["ryjl3-tyaaa-aaaaa-aaaba-cai", "xevnm-gaaaa-aaaar-qafnq-cai"],
+      "testnet": false,
+      "disclosure_key": "icpswap",
       "fixture": {
         "token0_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
-        "token1_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
-        "fee_millionths": 1000
+        "token1_ledger": "xevnm-gaaaa-aaaar-qafnq-cai",
+        "fee_millionths": 3000
+      }
+    },
+    {
+      "venue_id": "icpswap-cketh",
+      "display_name": "ICPSwap",
+      "kind": "ic_amm",
+      "endpoint": "angxa-baaaa-aaaag-qcvnq-cai",
+      "pair_ledgers": ["ryjl3-tyaaa-aaaaa-aaaba-cai", "ss2fx-dyaaa-aaaar-qacoq-cai"],
+      "testnet": false,
+      "disclosure_key": "icpswap",
+      "fixture": {
+        "token0_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "token1_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai",
+        "fee_millionths": 3000
       }
     }
-  ]
+   ]
 }

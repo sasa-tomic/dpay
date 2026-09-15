@@ -58,6 +58,27 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     testnet: false,
     disclosure_key: 'icpswap',
   },
+  {
+    // Pair-scoped ICPSwap pools (registered 2026-09-15): same venue family, each its own pool
+    // contract on its own pair. Order mirrors dfx/catalog_truth.json venues[] (stable wire
+    // order); the pair stays an UNORDERED set — token0/token1 is read live off each pool.
+    venue_id: 'icpswap-ckusdc',
+    display_name: 'ICPSwap',
+    kind: 'ic_amm',
+    endpoint: 'mohjv-bqaaa-aaaag-qjyia-cai',
+    pair_ledgers: [mainnetIcLedger(8), mainnetIcLedger(2)],
+    testnet: false,
+    disclosure_key: 'icpswap',
+  },
+  {
+    venue_id: 'icpswap-cketh',
+    display_name: 'ICPSwap',
+    kind: 'ic_amm',
+    endpoint: 'angxa-baaaa-aaaag-qcvnq-cai',
+    pair_ledgers: [mainnetIcLedger(8), mainnetIcLedger(6)],
+    testnet: false,
+    disclosure_key: 'icpswap',
+  },
 ];
 
 // The RUNTIME overlay — what THIS relay's `GET /api/v1/venues` actually serves (multi-venue
