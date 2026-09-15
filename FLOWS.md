@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **176 flows**
-> (175 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **177 flows**
+> (176 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (13) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (14) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -184,6 +184,7 @@ wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw
 | 183 | convert-ckusdc-pair | The pair-scoped ICPSwap venues are live on Convert: ckUSDC→ICP executes through the ckUSDC pool end-to-end (ICP payout verbatim, 6-decimal ckUSDC input math), the reverse ICP→ckUSDC quote renders a 6-decimal amount_out, and the ckETH pair is offered quote-only with an 18-decimal quote. | convert, venues, icpswap, ckusdc, cketh, decimal-pairs, 6-decimal, 18-decimal, pool-keyed-execution, venue-attribution |
 | 184 | convert-multihop-route-a | Route A converts ICP to USDC on Ethereum as one intent: the composed destination is an opt-in row beside the direct pair, the swap-hop quote renders verbatim with the min-you'll-receive and the minter's live gas fee as census lines, all five IC legs execute with per-leg status, and the done panel names the net USDC at the destination address plus the payout record. | convert, multihop, route-a, icpswap, ckusdc, withdraw_erc20, cketh-gas, burn, destination-address, fee-census, per-leg-status |
 | 185 | convert-jupiter-sol | A Solana wallet can reach the Convert surface at all (V11): selecting SOL and tapping Convert opens the Jupiter screen with no chooser for the single venue. The quote is fetched device-direct from lite-api.jup.ag and rendered verbatim — receive estimate = outAmount, minimum = otherAmountThreshold, price impact = the published figure, attribution + clock present, https endpoint shown. Fees are honest: route fees inside the quoted output, dpay paid-nothing line. Confirm re-quotes, POSTs the verbatim quoteResponse with the wallet's own SOL address, verifies the venue-built legacy tx (fee payer = user, SPL destination = user's own USDC ATA), signs on device, broadcasts exactly one transaction through the SOL rail's RPC path, and the done panel reports the REALIZED token credit with the payout record signature. | convert, solana-rail, venue:jupiter, quote-verbatim, device-direct, beneficiary-check, execution, fees-honest, one-broadcast |
+| 186 | convert-crossrail-icp-sol | Route C converts ICP to SOL via USDC as one cross-rail intent: the composed route is an explicit pick beside the direct pair with the signer warning on the destination, the census names the external ETH gas and Circle's own fee with the mint floor, the five IC legs execute device-signed, the CCTP burn is built by dpay and signed by the user's own wallet (handoff, no dpay keys), a stalled attestation parks with Circle's link and never fails falsely, a reload resumes from the mint watch without re-signing the IC legs, and the final Jupiter leg lands realized SOL at the user's Solana address. | convert, multihop, route-c, cross-rail, cctp, circle, handoff, external-signature, mint-watch, jupiter, solana-rail, reload-recovery, fee-census, per-leg-status, dead-end-honesty |
 
 ### NFC (tap-to-pay)
 
