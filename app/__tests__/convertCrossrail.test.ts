@@ -479,6 +479,8 @@ describe('prepareCrossRailSolLeg + executeCrossRailSolSwap — the final Jupiter
     expect(out.outAmountNet).toBe('1029000000');
     expect(out.outTx).toBe(sig);
     expect(out.crossRail!.solAddress).toBe(SOL_ADDRESS); // the done copy names THIS address
+    const solLeg = out.legPlan!.find(l => l.kind === 'sol_swap');
+    expect(solLeg?.state).toBe('confirmed'); // the leg list IS the progress UI — done never shows a Sent tail
   });
 
   test('DEAD END — Jupiter refuses: USDC stays safe at the ATA (the record keeps naming it)', async () => {

@@ -2326,10 +2326,21 @@ export async function executeCrossRailSolSwap(
     await deps.onUpdate(rec);
     return rec;
   };
+  // The final leg's own plan entry follows the tx it represents: confirmed when the watch says
+  // so (the leg list IS the progress UI — a done record with a 'Sent' tail would lie).
+  const confirmSolLeg = (r: ConvertRecord): ConvertRecord => {
+    if (r.legPlan == null) return r;
+    const idx = r.legPlan.findIndex(l => l.kind === 'sol_swap');
+    if (idx < 0 || r.legPlan[idx].state === 'confirmed') return r;
+    const legPlan = r.legPlan.slice();
+    legPlan[idx] = {...legPlan[idx], state: 'confirmed'};
+    return {...r, legPlan};
+  };
   const settle = async (): Promise<ConvertRecord> => {
     const outcome = await watchSolTx(leg, confirmAttempts, intervalMs);
     if (outcome.kind === 'confirmed') {
       const realized = await getSolNativeCredit(leg.signature).catch(() => null);
+      rec = confirmSolLeg(rec);
       return advance({
         step: 'done',
         outAmountNet: realized ?? cross.solExpectedLamports ?? '',

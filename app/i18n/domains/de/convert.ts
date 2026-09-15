@@ -173,8 +173,8 @@ export const convertDe: ConvertMessages = {
    *  Mittel liegen, und den Ausweg. */
   crossrail: {
     heading: 'In deiner Ethereum-Wallet signieren',
-    handoffIntro: (amount, sym) =>
-      `Der Internet-Computer-Teil ist erledigt: ${amount} ${sym} liegt an deiner Ethereum-Adresse. Deine Wallet schickt ihn jetzt rüber — dpay fasst deine Ethereum-Schlüssel nie an.`,
+    handoffIntro: (amount) =>
+      `Der Internet-Computer-Teil ist erledigt: ${amount} liegt an deiner Ethereum-Adresse. Deine Wallet schickt ihn jetzt rüber — dpay fasst deine Ethereum-Schlüssel nie an.`,
     stepApproveLabel: 'Schritt 1 — Circle\u2019s Vertrag darf die USDC bewegen',
     stepBurnLabel: 'Schritt 2 — die USDC für den Solana-Transfer verbrennen',
     txToLabel: 'An',

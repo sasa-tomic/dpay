@@ -158,3 +158,64 @@ Route B/C (CCTP v2, Jupiter/Solana legs — wave 3), buying the ckETH gas slice 
 intent (ICP↔ckETH gas pre-conversion — future work), a route CHOOSER (needs a second route to
 choose between), native-ETH burn routes (`withdraw_eth` leg set), per-leg manual re-signing
 (the intent is one confirm), any dpay fee, any change to the payment flow.
+
+## 10. Cross-rail widening (wave 3, 2026-09-16 — Routes B/C shipped)
+
+Route A's record/executor/UI carry two more destinations, composed from the same registries
+(`multihopRoutesFrom` now walks them; `docs/specs/2026-09-14-swap-venue-feasibility.md` §B/C):
+
+- **Route B — ICP → USDC(Solana)** = Route A + a `cctp_burn` leg. Route C — ICP → SOL =
+  B + a `sol_swap` leg (Jupiter, the wave-3a venue verbatim). One route per destination pair
+  today; the "one route" honesty line renders only when literally one route exists.
+
+**New leg kinds (the plan tail, `canister: ''` — no IC canister):**
+
+- `cctp_burn` — the EXTERNAL-signature leg. dpay holds no EVM key and signs nothing: it BUILDS
+  the two exact Ethereum transactions (`TokenMessengerV2.depositForBurnWithHook` on
+  `0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d`, preceded by the canonical-USDC approve) and
+  hands them to the user's own wallet (see the signing boundary below). Plan states still
+  apply: `pending` at prepare, `sent` when the burn tx hash is attached, `confirmed` when the
+  Circle mint is corroborated on-chain at the ATA.
+- `sol_swap` — the final device-signed Jupiter leg (the wave-3a `SolanaSwapLeg` verbatim:
+  fresh quote on the minted amount, beneficiary-verified before signature, identical bytes on
+  retry).
+
+**CCTP v2 shape (live-verified 2026-09-15, cited in `app/cctp.ts`):** burn amount = Route A's
+swap floor (minOut); mint recipient = the user's USDC ATA (the Forwarding Service's extended
+hookData carries the OWNER so Circle creates the ATA — no pre-existing ATA required);
+destination domain Solana = 5; finality FAST = 1000; maxFee = Circle's live published fee
+(`iris-api` burn/fees, med forwardFee) + 20% buffer, fetched BEFORE any leg is signed
+(fee unreachable → nothing signed, same fail-closed rule as route gas).
+
+**The signing boundary — explicit handoff v1:** dpay renders the exact txs (to, calldata,
+value 0, copyable) and polls Circle's own status feed by burn tx hash. The user signs in their
+own Ethereum wallet (the same address as `destAddress` — the picker warns it must be an
+address they control). dpay attaches the returned burn tx hash, then auto-continues when the
+attestation completes AND the USDC credit is verified at the ATA via the SOL rail — a stalled
+attestation parks pending with Circle's own link, never a false failure.
+**Upgrade note (WalletConnect in-session signing):** the handoff is deliberately the floor
+design. `app/walletconnect.ts` is the payment-critical onramp surface (additive-only rule) and
+is runtime-unreachable in jest/e2e (stubbed module), so an in-session WC path could not be
+exercised by any offline gate; when WC dapp-side sessions are added they must remain a
+separate, additive surface with its own device gates.
+
+**New record fields:** `crossRail: {kind: 'cctp'|'cctp_sol', solAddress, mintRecipientAta,
+maxFeeSubunits, mintFloorSubunits, burnTxHash?, forwardTxHash?, mintSubunits?, solVenueId?,
+solExpectedLamports?}`; new steps `awaiting_external` (user-paced — no driver advances it),
+`crossing`, `sol_ready`; new failureCode `external_declined` (dead-end copy names the funds:
+USDC at the user's OWN Ethereum address, exit = any wallet send or re-run later). Hydration
+pins cross-rail records to their own step vocabulary and the plan-tail shape
+(`legs + cctp_burn [+ sol_swap]`); `solanaLeg` coexists ONLY on a cross-rail record.
+
+**Fee census honesty:** EVM gas for the burn is the USER's wallet's own ETH — an external
+line dpay cannot pay or quote exactly; Circle's fee is rendered as Circle's own number with
+the derived mint floor ("at least X arrives at your Solana address"); Jupiter/SOL fees per
+wave-3a. Slippage/floors per §5.
+
+**Wave-3 e2e:** flow 186 drives the whole chain offline (`e2e/harness/cctp.mjs` fakes the
+Circle fees + status feed keyed by burn tx hash; a `__DPAY_TEST_EVM_SIGN` window seam stands
+in for the user's wallet) including the mid-CCTP reload (engine resumes from the mint watch,
+IC legs never re-signed) and the stalled-attestation dead-end.
+
+**Non-goals (updated):** WalletConnect in-session signing (above), Route B/C on the CeFi
+provider rail, buying the ckETH gas slice in-intent, per-leg manual re-sign, any dpay fee.

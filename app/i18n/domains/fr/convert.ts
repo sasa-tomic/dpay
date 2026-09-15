@@ -172,8 +172,8 @@ export const convertFr: ConvertMessages = {
    *  où se trouvent les fonds et la sortie. */
   crossrail: {
     heading: 'Signer dans ton portefeuille Ethereum',
-    handoffIntro: (amount, sym) =>
-      `La partie Internet Computer est faite : ${amount} ${sym} est arrivé à ton adresse Ethereum. Ton portefeuille l\u2019envoie maintenant de l\u2019autre côté — dpay ne touche jamais à tes clés Ethereum.`,
+    handoffIntro: (amount) =>
+      `La partie Internet Computer est faite : ${amount} est arrivé à ton adresse Ethereum. Ton portefeuille l\u2019envoie maintenant de l\u2019autre côté — dpay ne touche jamais à tes clés Ethereum.`,
     stepApproveLabel: 'Étape 1 — autoriser le contrat de Circle à déplacer les USDC',
     stepBurnLabel: 'Étape 2 — brûler les USDC pour le transfer vers Solana',
     txToLabel: 'Vers',

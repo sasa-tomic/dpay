@@ -229,7 +229,7 @@ export type ConvertMessages = {
   // Route C's final Jupiter offer. Every dead-end names where the funds sit and the exit.
   crossrail: {
     heading: string;
-    handoffIntro: (amount: string, sym: string) => string;
+    handoffIntro: (amount: string) => string;
     stepApproveLabel: string;
     stepBurnLabel: string;
     txToLabel: string;
@@ -446,8 +446,8 @@ export const convertEn: ConvertMessages = {
    *  final Jupiter offer. Every dead-end names where the funds sit and the exit. */
   crossrail: {
     heading: 'Sign in your Ethereum wallet',
-    handoffIntro: (amount, sym) =>
-      `The Internet Computer part is done: ${amount} ${sym} is at your Ethereum address. Your wallet now sends it across — dpay never touches your Ethereum keys.`,
+    handoffIntro: (amount) =>
+      `The Internet Computer part is done: ${amount} is at your Ethereum address. Your wallet now sends it across — dpay never touches your Ethereum keys.`,
     stepApproveLabel: 'Step 1 — let Circle\u2019s contract move the USDC',
     stepBurnLabel: 'Step 2 — burn the USDC for the Solana transfer',
     txToLabel: 'To',
