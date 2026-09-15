@@ -41,6 +41,13 @@ export const convertDe: ConvertMessages = {
       // des Tauschs bleibt. Ton wie bei icpswap: benennen, Signer nennen, Parteischeidung.
       jupiter: venue =>
         `${venue} ist ein autonomer On-Chain-Aggregator auf Solana — er wählt die Route, und die Route führt sie aus. Diese Wallet signiert die von ${venue} gebaute Transaktion, und der Kurs ist der eigene von ${venue}, unverändert so angezeigt, wie er ihn veröffentlicht. dpay ist nicht daran beteiligt.`,
+      // disclosure_key 'sideshift' (der Key der ersten CeFi-Venue, 2026-09-15): die CeFi-Fakten
+      // laut Founder-Entscheid — ein automatisierter Tauschdienst, der Mittel während des
+      // Tauschs hält, kein lizenzierter Anbieter; KYC nach DEREN Policy ist DEREN Offenlegung
+      // (die eigenen veröffentlichten Bedingungen werden genannt); dpay ist keine Partei und
+      // wird nicht bezahlt (das Relay pinnt commissionRate „0").
+      sideshift: venue =>
+        `${venue} ist ein automatisierter Tauschdienst — kein lizenzierter Anbieter und keine Bank. Er hält deine Mittel während des Tauschs und zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen nach seiner Policy, sind unter sideshift.ai/terms veröffentlicht. Diese Wallet zeigt dir ${venue}s eigenen Kurs und die Einzahlungs-Adresse, und von dpay wird nichts signiert. dpay ist keine Partei des Tauschs und wird nicht bezahlt.`,
     },
     generic: venue =>
       `Diese Umwandlung wird von ${venue} ausgeführt. Jeder Aufruf wird von dir signiert und direkt übermittelt — dpay ist nicht daran beteiligt.`,
@@ -166,6 +173,21 @@ export const convertDe: ConvertMessages = {
     stuckRouteBody: 'Ein Schritt wurde gesendet, aber sein Ergebnis ist noch unbekannt. dpay beobachtet die Ledgers weiter im Hintergrund; dieser Bildschirm wechselt von selbst, sobald die Route sich auflöst.',
   },
 
+  /** CeFi-Venues (SideShift-Erweiterung, 2026-09-15): die Einzahlungs-Übergabe. Die Venue
+   *  hält die Mittel während des Tauschs; die eigene Einzahlung des Nutzers IST die
+   *  Wertbewegung — von dpay wird nichts signiert. Jede Adresse/jeder Betrag ist der
+   *  eigene der Venue, unverändert. */
+  cefi: {
+    destRow: (sym, network, venue) => `${sym} auf ${network} — über ${venue} (Tauschdienst)`,
+    settleAddressLabel: 'Die Auszahlung landet an deiner eigenen Adresse im Zielnetzwerk',
+    depositAddressLabel: 'Einzahlungs-Adresse',
+    depositAmountLabel: 'Genauer Einzahlungsbetrag',
+    depositMemoLabel: 'Memo (erforderlich)',
+    depositExpiryLine: at => `Bestellung läuft ab ${at}`,
+    depositNote: (venue, sym) =>
+      `Sende ${sym} aus deiner Wallet an die Einzahlungs-Adresse von ${venue} oben — genau den Einzahlungsbetrag. ${venue} ist ein automatisierter Tauschdienst: Er hält dein ${sym} während des Tauschs und zahlt dann an deine Adresse aus. dpay ist keine Partei dieses Tauschs und wird nicht bezahlt.`,
+  },
+
   /** Die Cross-Rail-Familie (Routen B/C, 2026-09-16): alles nach den fünf IC-Beinen —
    *  der CCTP-Handoff (dpay zeigt die exakten Transaktionen, die EIGENE Ethereum-Wallet
    *  des Nutzers signiert; dpay hält nie einen EVM-Schlüssel), das Warten auf Circles
@@ -225,6 +247,8 @@ export const convertDe: ConvertMessages = {
     quoteUnreachable: venue => `Der Kurs von ${venue} war nicht abrufbar — das Relay antwortet nicht. Prüfe deine Verbindung und versuche es erneut.`,
     quoteRefused: venue => `${venue} hat abgelehnt, für dieses Paar gerade einen Kurs zu liefern.`,
     quoteUnavailable: code => `Kurs nicht verfügbar (${code}).`,
+    quoteUnconfigured: venue =>
+      `${venue} ist auf diesem Relay noch nicht eingerichtet — es ist keine Partner-Berechtigung konfiguriert, daher kann kein Kurs angefragt werden. Mit deiner Wallet ist nichts verkehrt.`,
     gasUnavailable: 'Der Gaspreis des Auszahlungs-Minters ließ sich nicht abfragen — nichts wurde signiert. Versuche es erneut.',
     cctpFeeUnavailable: 'Circles Bridge-Gebühr ließ sich nicht abrufen — nichts wurde signiert. Prüfe deine Verbindung und versuche es erneut.',
   },

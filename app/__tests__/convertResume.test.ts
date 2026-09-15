@@ -130,6 +130,31 @@ describe('fetchProviderStatus — the provider status read', () => {
     const reading = await fetchProviderStatus({orderId: 'o', statusUrl: 'https://p.example/s'});
     expect(reading.kind).toBe('unknown');
   });
+  test('the SideShift vocabulary (2026-09-15, first cefi adapter) maps whole', async () => {
+    // SideShift's own status words, verified from their live shift examples: waiting (fresh
+    // shift), multiple (multi-deposit: first settles, later ones refunded — still in flight),
+    // settled (terminal success), refund (refund in progress), refunded (terminal), expired.
+    const cases: Array<[string, string]> = [
+      ['waiting', 'awaiting_deposit'],
+      ['multiple', 'processing'],
+      ['settled', 'completed'],
+      ['refund', 'refunded'],
+      ['refunded', 'refunded'],
+      ['expired', 'expired'],
+    ];
+    for (const [word, kind] of cases) {
+      jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: word}) as never);
+      const reading = await fetchProviderStatus({orderId: 'o', statusUrl: 'https://sideshift.ai/api/v2/shifts/x'});
+      expect(reading.kind).toBe(kind);
+    }
+  });
+  test('SideShift\'s camelCase settleAmount/settleHash carry the provider\'s own amount and tx', async () => {
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(
+      res({status: 'settled', settleAmount: '0.0495', settleHash: '5XxSolSig9'}) as never,
+    );
+    const reading = await fetchProviderStatus({orderId: 'o', statusUrl: 'https://sideshift.ai/api/v2/shifts/x'});
+    expect(reading).toEqual({kind: 'completed', amount: '0.0495', tx: '5XxSolSig9'});
+  });
   test('no statusUrl → unreachable (nothing to poll is not a claim of anything)', async () => {
     const reading = await fetchProviderStatus({orderId: 'o'});
     expect(reading.kind).toBe('unreachable');
@@ -168,6 +193,31 @@ describe('advanceProviderRecord — the providerRef driver', () => {
     expect(next.step).toBe('done');
     expect(next.outAmountNet).toBe('189990000'); // expectedNet — attributed, never invented
     expect(next.outTx).toBeUndefined();
+  });
+  test('the cefi handoff normalizes a DECIMAL settleAmount into raw units (SideShift, 2026-09-15)', async () => {
+    // SideShift speaks "settleAmount": "0.0495" — SOL in its own units. outAmountNet is raw
+    // units like every other record money field, so the boundary converts: 0.0495 SOL at
+    // 9 decimals = 49500000 raw. Scoped to the cefi handoff shape (providerDeposit present)
+    // so the legacy provider records change behavior by exactly nothing.
+    const rec = providerRecord({
+      step: 'provider_processing',
+      outSymbol: 'SOL',
+      outDecimals: 9,
+      expectedNet: '48000000',
+      providerDeposit: {depositAddress: 'e2e-deposit-address-01', depositAmount: '2'},
+    });
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(
+      res({status: 'settled', settleAmount: '0.0495', settleHash: '5XxSolSig9'}) as never,
+    );
+    const next = await advanceProviderRecord(rec);
+    expect(next.step).toBe('done');
+    expect(next.outAmountNet).toBe('49500000'); // toUnits('0.0495', 9) — converted, never echoed
+    expect(next.outTx).toBe('5XxSolSig9');
+    // The legacy shape (no providerDeposit) still carries the provider string untouched —
+    // OCP-style records are raw-unit speakers by construction.
+    const legacy = providerRecord({step: 'provider_processing'});
+    jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: 'completed', amount_out: '189990000'}) as never);
+    expect((await advanceProviderRecord(legacy)).outAmountNet).toBe('189990000');
   });
   test('quote_expired is the PROVIDER\'s verdict (expired before the deposit) — never leg expiry', async () => {
     jest.mocked(fetchWithTimeout).mockResolvedValueOnce(res({status: 'expired'}) as never);

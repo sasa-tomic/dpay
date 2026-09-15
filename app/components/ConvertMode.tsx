@@ -27,6 +27,13 @@
 // of a pool canister: the quote is fetched DEVICE-DIRECT (no relay hop), rendered verbatim
 // (inAmount/outAmount/priceImpact exactly as published), and what gets signed is the venue's
 // own built transaction, beneficiary-checked before the signature (see app/solana/tx.ts).
+// The CeFi surface (founder decision 3, 2026-09-14 — SideShift first adapter, 2026-09-15) is
+// an IC-asset DESTINATION row in the picker below: the venue's quote arrives through the
+// relay's partner-key proxy (the device never sees the credential), the fixed order is created
+// through the same proxy with the user's OWN derived settle address, and the handoff is honest
+// CeFi — the user sends the deposit to the VENUE's address, shown verbatim, and the resume
+// engine polls the venue's keyless status endpoint device-direct. No dpay signature, no dpay
+// custody, commissionRate pinned "0" relay-side: dpay is not a party and is paid nothing.
 // Venue facts (display name, pool principal) are LOOKED UP from the record's/quote's own
 // `venueId` against the registry (../config/venues) — never module constants (V1). Venue-less
 // assets fail closed with honest copy that names what exists today (ICP ↔ VCHF), and ckUSDC's
@@ -34,7 +41,7 @@
 // machine lives in app/convert.ts; the DRIVERS live in app/convertResume.ts (the engine Wallet
 // mounts once per session, V6) — this screen only RENDERS records (a view onto the engine: it
 // subscribes for updates and hands freshly-prepared records to it, never running a private copy).
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Linking, Pressable, Text, TextInput, View} from 'react-native';
 import {isValidDestinationAddress, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
@@ -43,16 +50,20 @@ import {
   CONVERT_SLIPPAGE_BPS_OPTIONS,
   resolveConvertDirection,
 } from '../config/convert';
-import {BUNDLED_VENUES, venueDisplayName, venueEndpointOf, venueOfId, venuesForPair, type VenueEntry} from '../config/venues';
+import {BUNDLED_VENUES, cefiOtherSide, cefiVenuesForLedger, venueDisplayName, venueEndpointOf, venueOfId, venuesForPair, type VenueEntry} from '../config/venues';
 import {
   buildCctpHandoff,
+  ceFiQuoteFromResult,
+  ceFiServiceError,
   convertRecordMinOut,
   deriveConvertMath,
+  fetchCeFiConvertQuote,
   fetchConvertQuote,
   fetchCctpBurnFee,
   isQuoteStale,
   isTerminalConvertStep,
   loadVenueRegistry,
+  prepareCeFiConvertRecord,
   prepareConvertRecord,
   prepareMultihopConvertRecord,
   prepareSolanaConvertRecord,
@@ -73,13 +84,15 @@ import {
 } from '../convertResume';
 import {cctpMaxFee, cctpMintFloor} from '../cctp';
 import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
+import {createSideShiftFixedShift, fetchSideShiftQuote, type SideShiftQuoteResult} from '../services/sideshift';
+import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {multihopRoutesFrom} from '../routes';
 import {solanaAmmVenueForMint} from '../config/venues';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
-import {fmtAssetCompact, parseUserAmount} from '../lib/format';
+import {fmtAssetCompact, parseUserAmount, rawToDecimal} from '../lib/format';
 import {copyToClipboard} from '../lib/clipboard';
 import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
@@ -192,6 +205,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   //     default; every composed route is an EXPLICIT opt-in row — never preselected, never
   //     auto-chosen (a route chooser arrives with a second route, under the V5 rules).
   const [destRouteId, setDestRouteId] = useState<string | null>(null);
+  // --- CeFi destinations (founder decision 3, 2026-09-14 — SideShift first adapter): a
+  //     cefi venue row is a destination of the same rank as a composed route — an EXPLICIT
+  //     pick in the same picker, never preselected (the V5 rules, verbatim).
+  const [destCefiVenueId, setDestCefiVenueId] = useState<string | null>(null);
   const [destAddress, setDestAddress] = useState('');
   // The minter's live gas quote for the census + preflight — refreshed per route, re-queried
   // fresh inside prepare at confirm (the signed number is never this cached one).
@@ -229,7 +246,29 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const routes = legs != null ? multihopRoutesFrom(catalog, legs.inDesc.currency) : [];
   const activeRoute = destRouteId != null ? routes.find(r => r.routeId === destRouteId) ?? null : null;
   const routeMode = activeRoute != null;
-  const chooserMode = !routeMode && chooserVenues != null;
+  // --- the CeFi destination (SideShift today): rows from the registry's cefi entries whose
+  //     pair carries this asset's ledger as one side. The pair is CROSS-RAIL (IC ledger id +
+  //     Solana mint), so the out leg resolves through solAssetOfMint — the IC catalog has no
+  //     SOL currency, which is exactly why cefi records carry no outCurrency (convert.ts
+  //     pins the hydration exemption). A venue pick suppresses the ic_amm chooser just as a
+  //     route pick does: a CeFi venue IS a destination choice.
+  const cefiVenues = legs != null ? cefiVenuesForLedger(legs.inDesc.ledger) : [];
+  const activeCefiVenue = destCefiVenueId != null
+    ? cefiVenues.find(v => v.venue_id === destCefiVenueId) ?? null
+    : null;
+  const cefiMode = activeCefiVenue != null;
+  const cefiOutMint = activeCefiVenue != null && legs != null
+    ? cefiOtherSide(activeCefiVenue, legs.inDesc.ledger)
+    : null;
+  const cefiOut = cefiOutMint != null ? solAssetOfMint(cefiOutMint) : null;
+  // The settle address is the user's OWN derived Solana address — never typed free-hand,
+  // never a third party's (this wallet owns the key; the venue pays out to it). Memoized:
+  // the derivation is real crypto, not per-keystroke work.
+  const cefiSettleAddress = useMemo(
+    () => (cefiMode ? deriveSolanaAddress(identity.secretHex) : null),
+    [cefiMode, identity.secretHex],
+  );
+  const chooserMode = !routeMode && !cefiMode && chooserVenues != null;
   // The user's pick, re-resolved against the CURRENT rows every render — if the venue it named
   // stops serving the pair, the selection silently becomes "none" (never re-picks for the user).
   const selectedVenue = selectedVenueId != null
@@ -246,7 +285,8 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // honest attribution: falling back to the registered default here used to name venue A (and
   // its pool) under a venue B pick, misattributing the pre-sign disclosure.
   const counterVenueId = activeQuote?.venueId ?? selectedVenue?.venue_id
-    ?? (activeRoute != null ? activeRoute.swapVenueId : REGISTERED_VENUE_ID);
+    ?? (cefiMode && destCefiVenueId != null ? destCefiVenueId
+      : activeRoute != null ? activeRoute.swapVenueId : REGISTERED_VENUE_ID);
 
   // --- the engine view (V6): pick the record to render, then follow it. The resume engine
   //     (hooks/useConvertResumeEngine, mounted from Wallet) drives EVERY live record from wallet
@@ -308,6 +348,39 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       setVenueQuotes({});
       setVenueQuoteErrs({});
       return;
+    }
+    if (cefiMode && legs != null) {
+      // CeFI MODE: one quote through the relay's partner-key proxy — the venue's own
+      // settleAmount verbatim, attributed + timestamped. An unresolvable out rail id is a
+      // registry-shape failure: refused honestly, nothing fetched.
+      if (activeCefiVenue == null || cefiOutMint == null || cefiOut == null) {
+        setQuote(null);
+        setMath(null);
+        setQuoteErr(M.convert.errors.quoteUnavailable(venueDisplayName(destCefiVenueId ?? 'venue')));
+        return;
+      }
+      let cancelled = false;
+      setQuoteBusy(true);
+      setQuoteErr(null);
+      void (async () => {
+        try {
+          const q = await fetchCeFiConvertQuote(
+            relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint, parsed.raw,
+            {inDecimals: legs.inDecimals, outDecimals: cefiOut.decimals},
+          );
+          if (!cancelled && mountedRef.current) setQuote(q);
+        } catch (e) {
+          if (!cancelled && mountedRef.current) {
+            setQuote(null);
+            setQuoteErr(e instanceof Error ? e.message : String(e));
+          }
+        } finally {
+          if (!cancelled && mountedRef.current) setQuoteBusy(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
     }
     if (activeRoute != null) {
       // ROUTE MODE: one quote for the SWAP HOP, through the route's OWN registered venue —
@@ -388,9 +461,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // slippageBps deliberately NOT a dependency: it changes the minimum, not the quote.
     // `venueList` IS one: when the relay's served registry lands (e.g. the offline two-venue
     // world) the rows re-fetch per venue. The route's own hop ledger likewise re-keys the
-    // fetch when a destination row is picked.
+    // fetch when a destination row is picked — and so does the CeFi venue pick.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amountText, legs?.inDesc.ledger, legs?.outDesc.ledger, relayUrl, record != null && isLiveRecord(record), venueList, activeRoute?.routeId, activeRoute?.hop.ledger]);
+  }, [amountText, legs?.inDesc.ledger, legs?.outDesc.ledger, relayUrl, record != null && isLiveRecord(record), venueList, activeRoute?.routeId, activeRoute?.hop.ledger, destCefiVenueId]);
 
   // --- stale refresh: >30 s old (test-seam overridable via __DPAY_TEST_CONVERT_STALE_MS) → fetch
   //     a fresh quote in place; a moved amount is surfaced as a review line, never silently kept.
@@ -402,12 +475,19 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       setStaleRefreshing(true);
       void (async () => {
         try {
-          const fresh = await fetchConvertQuote(
-            relayUrl, legs.inDesc.ledger,
-            activeRoute != null ? activeRoute.hop.ledger : legs.outDesc.ledger,
-            quote.amountIn,
-            activeRoute != null ? {venue: venueOfId(activeRoute.swapVenueId) ?? undefined} : {},
-          );
+          // CeFi mode refreshes through the partner-key proxy with the cefi fetcher — the
+          // ic_amm swap_quote path would refuse the cross-rail pair by construction.
+          const fresh = cefiMode && activeCefiVenue != null && cefiOutMint != null && cefiOut != null
+            ? await fetchCeFiConvertQuote(
+              relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint, quote.amountIn,
+              {inDecimals: legs.inDecimals, outDecimals: cefiOut.decimals},
+            )
+            : await fetchConvertQuote(
+              relayUrl, legs.inDesc.ledger,
+              activeRoute != null ? activeRoute.hop.ledger : legs.outDesc.ledger,
+              quote.amountIn,
+              activeRoute != null ? {venue: venueOfId(activeRoute.swapVenueId) ?? undefined} : {},
+            );
           if (mountedRef.current && fresh.amountOutGross !== quote.amountOutGross) {
             setQuoteChanged({oldAmt: quote.amountOutGross, newAmt: fresh.amountOutGross});
           }
@@ -422,7 +502,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, activeRoute?.routeId, activeRoute?.hop.ledger]);
+  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, activeRoute?.routeId, activeRoute?.hop.ledger, destCefiVenueId]);
 
   // --- stale refresh, CHOOSER MODE: every stale row refreshes its OWN quote (row order and the
   //     user's selection are inputs here, never outputs). A moved SELECTED quote is surfaced as
@@ -479,8 +559,14 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       try {
         // In route mode the "output fee" of the hop math is the HOP ledger's own fee (the
         // ckUSDC the burn side pays its approve with) — the direct pair's output fee never
-        // enters a composed quote's arithmetic.
-        const m = await deriveConvertMath(activeQuote, legs.inFee, activeRoute != null ? activeRoute.hop.fee : legs.outFee, slippageBps);
+        // enters a composed quote's arithmetic. In CeFi mode there IS no output ledger fee:
+        // the venue's commission lives inside its own quoted rate (commissionRate "0"
+        // relay-side), so the honest figure is zero, not the direct pair's VCHF fee.
+        const m = await deriveConvertMath(
+          activeQuote, legs.inFee,
+          activeRoute != null ? activeRoute.hop.fee : cefiMode ? '0' : legs.outFee,
+          slippageBps,
+        );
         if (!cancelled && mountedRef.current) setMath(m);
       } catch (e) {
         // The min-out is the compiled core's arithmetic: if it cannot run, the screen has no
@@ -599,6 +685,68 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
           destAddress,
         });
         if (!mountedRef.current) return;
+        recordIdRef.current = rec.id;
+        setRecord(rec);
+        await adoptConvertRecord(rec);
+      } catch (e) {
+        if (mountedRef.current) setConfirmErr(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (mountedRef.current) setConfirmBusy(false);
+      }
+      return;
+    }
+    if (cefiMode && activeCefiVenue != null && cefiOutMint != null && cefiOut != null && cefiSettleAddress != null) {
+      setConfirmBusy(true);
+      setConfirmErr(null);
+      setQuoteChanged(null);
+      try {
+        // Same re-quote-at-confirm discipline, on the venue's own quote — but the fresh
+        // fetch here returns the QUOTE ID too: the fixed order must be created from the
+        // exact quote the reviewed settleAmount came from (SideShift pins quoteId ↔
+        // affiliateId ↔ rate together). A moved market is reviewed, never silently ordered.
+        let freshRes: SideShiftQuoteResult;
+        try {
+          freshRes = await fetchSideShiftQuote(
+            relayUrl, activeCefiVenue, legs.inDesc.ledger, cefiOutMint,
+            rawToDecimal(reviewed.amountIn, legs.inDecimals),
+          );
+        } catch (e) {
+          throw ceFiServiceError(e, activeCefiVenue.display_name);
+        }
+        const fresh = ceFiQuoteFromResult(
+          activeCefiVenue, legs.inDesc.ledger, cefiOutMint, reviewed.amountIn, freshRes, cefiOut.decimals,
+        );
+        if (fresh.amountOutGross !== reviewed.amountOutGross) {
+          setQuote(fresh);
+          setQuoteChanged({oldAmt: reviewed.amountOutGross, newAmt: fresh.amountOutGross});
+          return;
+        }
+        // Order creation is CeFi: the DEVICE posts the order body to the relay proxy (the
+        // relay attaches the partner credential server-side); the venue answers with its
+        // OWN deposit address. The user sends the deposit to the VENUE, never to dpay —
+        // the record's providerDeposit block carries exactly that handoff.
+        let order;
+        try {
+          order = await createSideShiftFixedShift(relayUrl, activeCefiVenue, {
+            quoteId: freshRes.quoteId,
+            settleAddress: cefiSettleAddress,
+          });
+        } catch (e) {
+          throw ceFiServiceError(e, activeCefiVenue.display_name);
+        }
+        const rec = prepareCeFiConvertRecord({
+          quote: fresh,
+          order,
+          settleAddress: cefiSettleAddress,
+          inCurrency: legs.inDesc.currency,
+          inSymbol: legs.inSym,
+          outSymbol: cefiOut.symbol,
+          inDecimals: legs.inDecimals,
+          outDecimals: cefiOut.decimals,
+        });
+        if (!mountedRef.current) return;
+        // Same engine handoff as every other confirm: the ENGINE owns polling the venue's
+        // keyless status endpoint and every state transition from here.
         recordIdRef.current = rec.id;
         setRecord(rec);
         await adoptConvertRecord(rec);
@@ -898,8 +1046,10 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
     && (activeRoute == null || activeRoute.crossRail == null || crossFee != null);
   // Route-mode quote-derived figures describe the HOP asset (ckUSDC), not the direct pair's
   // other side — the destination's own figure is the min-you'll-receive line in the checklist.
-  const dispOutSym = activeRoute != null ? activeRoute.hop.symbol : outSym;
-  const dispOutDecimals = activeRoute != null ? activeRoute.hop.decimals : outDecimals;
+  // CeFi mode likewise describes the VENUE's settle asset (SOL via the registry mint), not
+  // the direct pair's other side.
+  const dispOutSym = activeRoute != null ? activeRoute.hop.symbol : cefiMode && cefiOut != null ? cefiOut.symbol : outSym;
+  const dispOutDecimals = activeRoute != null ? activeRoute.hop.decimals : cefiMode && cefiOut != null ? cefiOut.decimals : outDecimals;
   const netStr = math != null ? fmtAssetCompact(math.netOut, dispOutDecimals, dispOutSym) : null;
   return (
     <View testID="convert-screen" style={S.convertWrap}>
@@ -934,24 +1084,25 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           A destination is a decision of the same rank as a venue, so the rows use the venue
           chooser's own visual language — and the same red lines: registry order, explicit pick,
           never chosen for the user. */}
-      {routes.length > 0 ? (
+      {routes.length > 0 || cefiVenues.length > 0 ? (
         <View testID="convert-dest">
           <Text style={S.convertSlippageLabel}>{M.convert.multihop.destLabel}</Text>
           <Pressable
             testID="convert-dest-direct"
-            style={[S.convertVenueRow, !routeMode && S.convertVenueRowOn]}
+            style={[S.convertVenueRow, !routeMode && !cefiMode && S.convertVenueRowOn]}
             onPress={() => {
               setDestRouteId(null);
+              setDestCefiVenueId(null);
               setQuoteChanged(null);
             }}
             accessibilityRole="radio"
-            accessibilityState={{checked: !routeMode}}
+            accessibilityState={{checked: !routeMode && !cefiMode}}
             accessibilityLabel={M.convert.multihop.destDirect(outSym)}>
-            <View style={[S.convertVenueRadio, !routeMode && S.convertVenueRadioOn]}>
-              {!routeMode ? <View style={S.convertVenueRadioDot} /> : null}
+            <View style={[S.convertVenueRadio, !routeMode && !cefiMode && S.convertVenueRadioOn]}>
+              {!routeMode && !cefiMode ? <View style={S.convertVenueRadioDot} /> : null}
             </View>
             <View style={S.convertVenueRowText}>
-              <Text style={[S.convertVenueName, !routeMode && S.convertVenueNameOn]}>{M.convert.multihop.destDirect(outSym)}</Text>
+              <Text style={[S.convertVenueName, !routeMode && !cefiMode && S.convertVenueNameOn]}>{M.convert.multihop.destDirect(outSym)}</Text>
             </View>
           </Pressable>
           {routes.map(r => {
@@ -963,6 +1114,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
                 style={[S.convertVenueRow, on && S.convertVenueRowOn]}
                 onPress={() => {
                   setDestRouteId(r.routeId);
+                  setDestCefiVenueId(null);
                   setQuoteChanged(null);
                 }}
                 accessibilityRole="radio"
@@ -982,9 +1134,42 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           {/* One-route honesty (spec §7): no chooser, and the copy says exactly that.
               Cross-rail widened this to a per-pair route LIST — the honesty line only
               speaks when there is literally one route (B/C pairs render three today). */}
-          {routes.length === 1 ? (
+          {routes.length === 1 && cefiVenues.length === 0 ? (
             <Text testID="convert-route-note" style={S.convertMetaLine}>{M.convert.multihop.routeNote}</Text>
           ) : null}
+          {/* CeFi venue rows (founder decision 3): the same picker's venue-language rows,
+              registry order, explicit pick, never preselected — labeled by what the venue
+              SETTLES on the other rail ("SOL on Solana — via SideShift (exchange service)")
+              so the counterparty is named as an exchange service, not a pool. */}
+          {cefiVenues.map(v => {
+            const on = destCefiVenueId === v.venue_id;
+            const mint = cefiOtherSide(v, legs.inDesc.ledger);
+            const asset = mint != null ? solAssetOfMint(mint) : null;
+            const sym = asset != null ? asset.symbol : 'SOL';
+            return (
+              <Pressable
+                key={v.venue_id}
+                testID={`convert-dest-cefi-${v.venue_id}`}
+                style={[S.convertVenueRow, on && S.convertVenueRowOn]}
+                onPress={() => {
+                  setDestCefiVenueId(v.venue_id);
+                  setDestRouteId(null);
+                  setQuoteChanged(null);
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{checked: on}}
+                accessibilityLabel={M.convert.cefi.destRow(sym, 'Solana', v.display_name)}>
+                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
+                  {on ? <View style={S.convertVenueRadioDot} /> : null}
+                </View>
+                <View style={S.convertVenueRowText}>
+                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>
+                    {M.convert.cefi.destRow(sym, 'Solana', v.display_name)}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
 
@@ -1015,14 +1200,26 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         </View>
       ) : null}
 
+      {/* The CeFi settle address: not an input — the user's OWN derived Solana address,
+          shown read-only before the order is created so the payout destination is reviewed
+          exactly like a route's typed destination (the phone owns this key; the venue pays
+          out to it and nothing else). */}
+      {cefiMode && cefiSettleAddress != null ? (
+        <View>
+          <Text style={S.convertAmountLabel}>{M.convert.cefi.settleAddressLabel}</Text>
+          <Text testID="convert-settle-address" style={S.convertMetaLine}>{cefiSettleAddress}</Text>
+        </View>
+      ) : null}
+
       {/* The venue chooser (multi-venue readiness V5): N rows in REGISTRY order — the relay's
           own row order, rendered verbatim and NEVER ranked or sorted by output. Each row shows
           its OWN quote, attributed + timestamped; nothing is preselected and the checklist +
           confirm below stay gated on an explicit pick. Renders only when the pair has 2+ venues
           — with one venue this whole block is absent and the screen is exactly today's.
           A route pick suppresses it entirely: the route's swap hop runs through its own single
-          registered venue, and a second venue list would read as a route choice we never make. */}
-      {!routeMode && chooserVenues != null ? (
+          registered venue, and a second venue list would read as a route choice we never make.
+          A CeFi venue pick suppresses it for the same reason — the venue IS the destination. */}
+      {!routeMode && !cefiMode && chooserVenues != null ? (
         <View testID="convert-venues">
           <Text style={S.convertSlippageLabel}>{M.convert.venueChooserLabel}</Text>
           {chooserVenues.map((v) => {
@@ -1139,7 +1336,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
           {venueDisclosure(counterVenueId)}
         </Text>
-        {math != null ? (
+         {math != null && !cefiMode ? (
           <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
             {M.convert.poolFeeTier(formatMillionthsPct(activeQuote!.feeMillionths), venueDisplayName(activeQuote!.venueId))}
           </Text>
@@ -1161,8 +1358,10 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         ) : null}
         {/* There is deliberately NO price-impact line here (V8, 2026-09-11): the venue
             publishes no impact figure, so nothing renders — the minimum-you'll-receive and
-            slippage chips below are the execution protection. */}
-        {math != null ? (
+            slippage chips below are the execution protection. CeFi mode hides the slippage
+            axis entirely: a fixed shift is a LOCKED rate — there is no floor to set and
+            rendering chips would imply an execution guarantee this venue never makes. */}
+        {math != null && !cefiMode ? (
           <View testID="convert-slippage">
             <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
             <View
@@ -1230,7 +1429,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               </View>
             ) : null}
           </View>
-        ) : math != null ? (
+        ) : math != null && !cefiMode ? (
           <Text testID="convert-min-out" style={S.convertMinOutLine}>
             {M.convert.minReceiveLine(fmtAssetCompact(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
           </Text>
@@ -1999,6 +2198,33 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <ActivityIndicator size="large" color={C.brandText} />
           <Text style={S.convertStateTitle}>{M.convert.awaitingDepositTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.awaitingDepositBody(inSymbol, venueName)}</Text>
+          {/* The CeFi handoff (2026-09-15): the venue's own deposit facts, frozen at order
+              creation and rendered VERBATIM — the exact address, the exact amount (a fixed
+              shift settles only this figure), the memo when the venue issued one, and the
+              order's own expiry. This IS the value movement: the user sends from their own
+              wallet; dpay signed nothing. */}
+          {record.providerDeposit != null ? (
+            <View testID="convert-deposit-handoff">
+              <Text style={S.convertStateMeta}>{M.convert.cefi.depositNote(venueName, inSymbol)}</Text>
+              <Text style={S.convertStateMeta}>{M.convert.cefi.depositAddressLabel}:</Text>
+              <Text testID="convert-deposit-address" style={S.convertStateMeta}>
+                {record.providerDeposit.depositAddress}
+              </Text>
+              <Text testID="convert-deposit-amount" style={S.convertStateMeta}>
+                {M.convert.cefi.depositAmountLabel}: {record.providerDeposit.depositAmount} {inSymbol}
+              </Text>
+              {record.providerDeposit.depositMemo != null ? (
+                <Text testID="convert-deposit-memo" style={S.convertStateMeta}>
+                  {M.convert.cefi.depositMemoLabel}: {record.providerDeposit.depositMemo}
+                </Text>
+              ) : null}
+              {record.providerDeposit.expiresAtMs != null ? (
+                <Text style={S.convertStateMeta}>
+                  {M.convert.cefi.depositExpiryLine(nonBreakingClock(new Date(record.providerDeposit.expiresAtMs)))}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
           <Text style={S.convertStateMeta}>{M.convert.stillWatching}</Text>
         </View>
       ) : null}

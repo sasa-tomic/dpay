@@ -224,6 +224,23 @@ export type ConvertMessages = {
     stuckRouteBody: string;
   };
 
+  // --- CeFi venues (SideShift widening, 2026-09-15, founder decision 3): the destination
+  // rows and the deposit handoff. The honest CeFi facts: the venue holds funds mid-trade,
+  // the USER's own deposit is the value movement (nothing is signed by dpay), and every
+  // number/address shown is the venue's own, verbatim.
+  cefi: {
+    /** Destination-picker row: what arrives, on which rail, through which venue. */
+    destRow: (sym: string, network: string, venue: string) => string;
+    /** The derived payout address line (read-only display — never typed free-hand). */
+    settleAddressLabel: string;
+    depositAddressLabel: string;
+    depositAmountLabel: string;
+    depositMemoLabel: string;
+    depositExpiryLine: (at: string) => string;
+    /** The CeFi fact itself: the user sends to the VENUE's address; the venue holds mid-trade. */
+    depositNote: (venue: string, sym: string) => string;
+  };
+
   // --- the cross-rail family (Routes B/C, 2026-09-16): the CCTP handoff (the USER's own
   // Ethereum wallet signs; dpay never holds an EVM key), the Circle attestation watch, and
   // Route C's final Jupiter offer. Every dead-end names where the funds sit and the exit.
@@ -278,6 +295,8 @@ export type ConvertMessages = {
     quoteUnreachable: (venue: string) => string;
     quoteRefused: (venue: string) => string;
     quoteUnavailable: (code: string) => string;
+    /** A cefi venue whose relay holds no partner credential — the venue is ABSENT, not broken. */
+    quoteUnconfigured: (venue: string) => string;
     gasUnavailable: string;
     cctpFeeUnavailable: string;
   };
@@ -315,6 +334,13 @@ export const convertEn: ConvertMessages = {
       // tone: attribute, name the signer, deny party-hood.
       jupiter: venue =>
         `${venue} is an autonomous on-chain aggregator on Solana — it picks the route and the route executes it. This wallet signs the transaction ${venue} builds, and the quote is ${venue}'s own, shown exactly as it publishes it. dpay is not a party to it.`,
+      // disclosure_key 'sideshift' (the registry's key for the first CeFi venue, 2026-09-15):
+      // the CeFi facts the founder set — an automated exchange service holding funds
+      // mid-trade, not a licensed provider; KYC per ITS policy is ITS to disclose (its own
+      // published terms are named); dpay is not a party and is paid nothing (the relay pins
+      // commissionRate "0"). The venue row detail renders this in full.
+      sideshift: venue =>
+        `${venue} is an automated exchange service — not a licensed provider and not a bank. It holds your funds mid-trade, then pays out to your own address; its terms, including any identity checks under its policy, are published at sideshift.ai/terms. This wallet shows you ${venue}'s own quote and deposit address and nothing is signed by dpay. dpay is not a party to the trade and is paid nothing.`,
     },
     generic: venue =>
       `This conversion is executed by ${venue}. Every call is signed by you and sent directly — dpay is not a party to it.`,
@@ -440,6 +466,20 @@ export const convertEn: ConvertMessages = {
     stuckRouteBody: 'A leg was sent but its outcome is unknown yet. dpay keeps watching the ledgers in the background; this screen flips on its own when the route resolves.',
   },
 
+  /** CeFi venues (SideShift widening, 2026-09-15): the deposit handoff screen. The venue
+   *  holds the funds mid-trade; the user's own deposit IS the value movement — nothing is
+   *  signed by dpay. Every address/amount shown is the venue's own, verbatim. */
+  cefi: {
+    destRow: (sym, network, venue) => `${sym} on ${network} — via ${venue} (exchange service)`,
+    settleAddressLabel: 'Payout lands at your own address on the destination network',
+    depositAddressLabel: 'Deposit address',
+    depositAmountLabel: 'Exact deposit amount',
+    depositMemoLabel: 'Memo (required)',
+    depositExpiryLine: at => `Order expires ${at}`,
+    depositNote: (venue, sym) =>
+      `Send ${sym} from your wallet to ${venue}\u2019s deposit address above — exactly the deposit amount. ${venue} is an automated exchange service: it holds your ${sym} mid-trade, then pays out to your address. dpay is not a party to this trade and is paid nothing.`,
+  },
+
   /** The cross-rail family (Routes B/C, 2026-09-16): everything past the five IC legs —
    *  the CCTP handoff (dpay renders the exact transactions, the USER's own Ethereum wallet
    *  signs; dpay never holds an EVM key), the Circle attestation watch, and Route C's
@@ -498,6 +538,8 @@ export const convertEn: ConvertMessages = {
     quoteUnreachable: venue => `Could not reach ${venue} for a quote. Check your connection and try again.`,
     quoteRefused: venue => `${venue} declined to quote this pair right now.`,
     quoteUnavailable: code => `A quote could not be shown (code ${code}).`,
+    quoteUnconfigured: venue =>
+      `${venue} is not set up on this relay yet — no partner credential is configured, so no quote can be asked for. Nothing is wrong with your wallet.`,
     gasUnavailable: 'The cash-out minter could not be asked for its gas price — nothing was signed. Try again.',
     cctpFeeUnavailable: 'Circle\u2019s bridge fee could not be fetched — nothing was signed. Check your connection and try again.',
   },

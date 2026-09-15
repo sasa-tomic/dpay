@@ -102,6 +102,29 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     testnet: false,
     disclosure_key: 'jupiter',
   },
+  {
+    // The FIRST CeFi venue (registered 2026-09-15, founder decision 3 — relay-held
+    // partner-key infrastructure, docs/specs/2026-09-14-swap-venue-feasibility.md
+    // §Partner-key infrastructure): SideShift, an automated instant-exchange service, on
+    // the CROSS-RAIL pair ICP ↔ SOL. Identifier semantics per kind: `endpoint` is the
+    // venue's https API BASE (verified live 2026-09-15 — the old api.sideshift.ai host
+    // is NXDOMAIN), and `pair_ledgers` are RAIL-CANONICAL ids: the IC side by ledger
+    // principal, the Solana side by MINT (native SOL as its wrapped form, the jupiter
+    // row's own precedent). UNLIKE every other row this venue carries a partner
+    // credential — quotes and fixed-order creation run through dpay's relay proxy
+    // (app/services/sideshift.ts; the account secret attaches relay-side, never here),
+    // while shift STATUS is the venue's own keyless device-direct GET. No ic fixture
+    // for this kind (ic_amm-only by rule); the offline stand-ins are the relay's
+    // /api/v1/test/sideshift-upstream stub + the e2e window.fetch stub on the status
+    // origin.
+    venue_id: 'sideshift',
+    display_name: 'SideShift',
+    kind: 'cefi',
+    endpoint: 'https://sideshift.ai/api/v2',
+    pair_ledgers: [mainnetIcLedger(8), WRAPPED_SOL_MINT_ADDRESS],
+    testnet: false,
+    disclosure_key: 'sideshift',
+  },
 ];
 
 // The RUNTIME overlay — what THIS relay's `GET /api/v1/venues` actually serves (multi-venue
@@ -168,6 +191,28 @@ export function solanaAmmVenueForMint(mint: string): VenueEntry | null {
     BUNDLED_VENUES.find(
       v => v.kind === 'solana_amm' && !v.testnet && v.pair_ledgers.includes(mint),
     ) ?? null
+  );
+}
+
+/** The cefi venue's OTHER-side rail id for this deposit ledger: what actually arrives
+ *  (a mint for the Solana rail, a principal for IC). This is the cross-rail widening —
+ *  the convert screen's destination rows for CeFi venues are keyed by it. Null when the
+ *  venue does not serve this deposit side. */
+export function cefiOtherSide(v: VenueEntry, depositLedger: string): string | null {
+  if (v.kind !== 'cefi') return null;
+  const [a, b] = v.pair_ledgers;
+  if (a === depositLedger) return b;
+  if (b === depositLedger) return a;
+  return null;
+}
+
+// The cefi venues a deposit ledger can send through, in REGISTRY ORDER (the
+// solanaVenuesForMint analog for the cross-rail surface). Testnet rows are kept out —
+// a real wallet only routes deposits at mainnet venues. Callers resolve the other side
+// (`cefiOtherSide`) to name what arrives.
+export function cefiVenuesForLedger(depositLedger: string): readonly VenueEntry[] {
+  return registeredVenues().filter(
+    v => v.kind === 'cefi' && !v.testnet && cefiOtherSide(v, depositLedger) != null,
   );
 }
 

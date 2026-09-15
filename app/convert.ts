@@ -54,7 +54,7 @@ import {DpayCore} from './services/native';
 import {relayFetch} from './services/relay';
 import {submitTransfer as railSubmitTransfer, fetchGasFeeWei, fetchLedgerFee} from './services/rail';
 import {icStampExpiry} from './services/icp';
-import {randNonceHex} from './lib/format';
+import {randNonceHex, rawToDecimal, toUnits} from './lib/format';
 import {isValidDestinationAddress, type CurrencyDescriptor} from './config/catalog';
 import type {MultihopRoute} from './routes';
 import {
@@ -68,6 +68,7 @@ import {
 import {
   BUNDLED_VENUES,
   DPAY_CANISTER_PRINCIPALS,
+  cefiOtherSide,
   icAmmVenueForPair,
   registeredVenues,
   setRuntimeVenues,
@@ -78,6 +79,12 @@ import {
 } from './config/venues';
 import {saveTxNote} from './services/txNotes';
 import {fetchJupiterQuote, fetchJupiterSwapTx, type JupiterQuote} from './services/jupiter';
+import {
+  fetchSideShiftQuote,
+  sideShiftStatusUrl,
+  type SideShiftFixedShift,
+  type SideShiftQuoteResult,
+} from './services/sideshift';
 import {deriveSolanaKeypair} from './solana/identity';
 import {deriveAta} from './solana/spl';
 import {
@@ -221,6 +228,79 @@ export async function fetchConvertQuote(
 
 // --- venue registry (the relay's served list, query-only) ------------------------------------------
 
+/** Fetch ONE CeFi quote through the relay's partner-key proxy (the SideShift widening,
+ *  2026-09-15 — founder decision 3). The device sends RAIL ids + the user's amount; the
+ *  relay maps them onto the venue's own coin/network codes, attaches the partner
+ *  credential server-side, and returns the venue's quote wrapped with attribution. The
+ *  venue's settleAmount/rate are carried VERBATIM (V8) — scaled to raw out-units for the
+ *  ConvertQuote shape the screen's existing math renders, but never recomputed, never
+ *  blended. `feeMillionths` is 0 as a FACT, not a claim: the relay pins commissionRate
+ *  "0" (dpay is paid nothing) and the venue's commission lives inside its own rate —
+ *  there is no dpay-side fee figure to display. `pool` carries the venue's API base (a
+ *  cefi venue has no pool; prepare never reads it as one). Fixed-shift rates are LOCKED
+ *  at quote time, so `zeroForOne` is null and the slippage math degenerates honestly
+ *  (min-you'll-receive == the quoted settle figure). */
+/** Map the sideshift service's fail-closed vocabulary onto the screen's honesty keys —
+ *  shared by the quote path and the confirm-time order path so both surfaces name the
+ *  same states, including the one no IC venue can be in: the relay holds no partner
+ *  credential for this venue, so the venue is simply ABSENT (503 naming the env var). */
+export function ceFiServiceError(e: unknown, venueName: string): Error {
+  const code = e instanceof Error ? e.message : 'unavailable';
+  if (code === 'unreachable') return new Error(M.convert.errors.quoteUnreachable(venueName));
+  if (code === 'unconfigured') return new Error(M.convert.errors.quoteUnconfigured(venueName));
+  if (code === 'refused') return new Error(M.convert.errors.quoteRefused(venueName));
+  return new Error(M.convert.errors.quoteUnavailable(code));
+}
+
+/** Scale a verbatim SideShift quote result into the ConvertQuote shape the screen's math
+ *  renders — the ONE mapping, used by both the live fetch and the confirm-time re-quote so
+ *  the reviewed figure and the executed figure can never be built two different ways. */
+export function ceFiQuoteFromResult(
+  venue: VenueEntry,
+  tokenInLedger: string,
+  tokenOutLedger: string,
+  amountIn: string,
+  result: SideShiftQuoteResult,
+  outDecimals: number,
+): ConvertQuote {
+  return {
+    venueId: venue.venue_id,
+    pool: venue.endpoint,
+    tokenInLedger,
+    tokenOutLedger,
+    amountIn,
+    amountOutGross: toUnits(result.settleAmount, outDecimals),
+    zeroForOne: null,
+    feeMillionths: 0,
+    fetchedAtMs: result.fetchedAtMs,
+  };
+}
+
+export async function fetchCeFiConvertQuote(
+  relayUrl: string,
+  venue: VenueEntry,
+  tokenInLedger: string,
+  tokenOutLedger: string,
+  amountIn: string,
+  opts: {timeoutMs?: number; inDecimals: number; outDecimals: number} ,
+): Promise<ConvertQuote> {
+  const venueName = venue.display_name;
+  if (venue.kind !== 'cefi' || venue.testnet
+    || cefiOtherSide(venue, tokenInLedger) !== tokenOutLedger) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  let result;
+  try {
+    result = await fetchSideShiftQuote(
+      relayUrl, venue, tokenInLedger, tokenOutLedger,
+      rawToDecimal(amountIn, opts.inDecimals), opts.timeoutMs,
+    );
+  } catch (e) {
+    throw ceFiServiceError(e, venueName);
+  }
+  return ceFiQuoteFromResult(venue, tokenInLedger, tokenOutLedger, amountIn, result, opts.outDecimals);
+}
+
 /** One load per relay per session — venue identity is not per-keystroke data. */
 const VENUE_REGISTRY_CACHE = new Map<string, readonly VenueEntry[]>();
 
@@ -345,6 +425,25 @@ export type ProviderRef = {
   statusUrl?: string;
 };
 
+/** The CeFi handoff facts (the SideShift widening, 2026-09-15): what the USER must do
+ *  with their own funds, frozen at order creation and displayed VERBATIM. This is the
+ *  honest CeFi boundary made data: `depositAddress` is the VENUE's own address — the
+ *  user sends to it from their wallet, dpay signs nothing and holds nothing mid-trade.
+ *  `depositAmount` is the EXACT figure the fixed order prices (a fixed shift settles
+ *  only this deposit; anything else refunds). `depositMemo` must ride the deposit when
+ *  the venue issues one (their wire: a deposit without its memo is lost). All strings
+ *  are the provider's own, never reformatted. */
+export type ProviderDeposit = {
+  /** The venue's deposit address — where the USER sends. Not a dpay address, ever. */
+  depositAddress: string;
+  /** The venue's memo/tag when its wire requires one on the deposit. */
+  depositMemo?: string;
+  /** The exact deposit amount (decimal string, venue units) the fixed order prices. */
+  depositAmount: string;
+  /** When the order dies unfunded (ms; the venue's own expiresAt, parsed). */
+  expiresAtMs?: number;
+};
+
 /** ONE signed Solana transaction — the Solana rail's widening of the leg vocabulary (Jupiter,
  *  2026-09-15; the per-leg protocol discriminator design: ONE record shape, per-leg protocol).
  *  A Solana venue does not hand the wallet two update calls to sign — it hands it ONE
@@ -462,6 +561,10 @@ export type ConvertRecord = {
    *  ledger-watch evidence — never the #ok alone, spec §4). Set when the row is SEEN. */
   hopTx?: string;
   providerRef?: ProviderRef; // required when legs is empty; ignored otherwise
+  /** The CeFi handoff block — present iff the record was prepared as a CeFi order
+   *  (empty legs + providerRef): the venue's deposit facts the state screen shows
+   *  verbatim. Hydration validates it exactly like the record's other money fields. */
+  providerDeposit?: ProviderDeposit;
   outAmountNet?: string; // actually-received amount (from the ledger row) when done
   outTx?: string; // durable identifier of the incoming output-ledger row when done
   /** Durable identity of the input-ledger refund row a `failed_refunded` resolution consumed —
@@ -619,6 +722,10 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     expectedNet: str('expectedNet') ?? undefined,
     inFee: str('inFee') ?? undefined,
     outFee: str('outFee') ?? undefined,
+    // The payout destination facts (planned records set them via the plan; the CEFI record
+    // sets them directly — the venue pays out to the user's own settle address).
+    destAddress: str('destAddress') ?? undefined,
+    destSymbol: str('destSymbol') ?? undefined,
     outAmountNet: str('outAmountNet') ?? undefined,
     outTx: str('outTx') ?? undefined,
     refundTx: str('refundTx') ?? undefined,
@@ -628,10 +735,18 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   rec.createdAtMs = r.createdAtMs;
   // IC records carry numeric catalog currency ids; a Solana-shaped record has none to carry
   // (the Solana rail keys assets by mint + symbol). Parsed when present, REQUIRED below for
-  // the IC shapes — the discriminator is `solanaLeg`, parsed after the legs.
-  if (r.inCurrency != null || r.outCurrency != null) {
-    if (typeof r.inCurrency !== 'number' || typeof r.outCurrency !== 'number') return null;
+  // the IC shapes — the discriminator is `solanaLeg`, parsed after the legs. The CEFI
+  // widening (2026-09-15): the two parse INDEPENDENTLY — a cefi provider record legitimately
+  // carries the IC deposit side's id and NO out id (SOL is not an IC catalog currency; the
+  // provider driver advances it by statusUrl alone). Every non-cefi shape still needs BOTH,
+  // enforced where the requirement has always lived (the gate below), so this changes no
+  // verdict except the cefi half-pair's survival.
+  if (r.inCurrency != null) {
+    if (typeof r.inCurrency !== 'number') return null;
     rec.inCurrency = r.inCurrency;
+  }
+  if (r.outCurrency != null) {
+    if (typeof r.outCurrency !== 'number') return null;
     rec.outCurrency = r.outCurrency;
   }
   if (typeof r.slippageBps !== 'number') return null;
@@ -801,6 +916,29 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
     rec.providerRef = statusUrl == null
       ? {orderId: (pr as Record<string, unknown>).orderId as string}
       : {orderId: (pr as Record<string, unknown>).orderId as string, statusUrl: String(statusUrl)};
+    // The CeFi handoff block (SideShift widening, 2026-09-15): optional but when present
+    // it must be the whole truth — a corrupt or half-written deposit block on a record
+    // the deposit screen renders verbatim is a money-adjacent lie, so refuse the record.
+    // (Persisted by prepareCeFiConvertRecord only, always complete.)
+    const pd = r.providerDeposit;
+    if (pd != null) {
+      if (typeof pd !== 'object') return null;
+      const pdR = pd as Record<string, unknown>;
+      const addr = pdR.depositAddress;
+      const amt = pdR.depositAmount;
+      const memo = pdR.depositMemo;
+      const exp = pdR.expiresAtMs;
+      if (typeof addr !== 'string' || addr.length === 0) return null;
+      if (typeof amt !== 'string' || amt.length === 0) return null;
+      if (memo != null && typeof memo !== 'string') return null;
+      if (exp != null && (typeof exp !== 'number' || !Number.isSafeInteger(exp) || exp <= 0)) return null;
+      rec.providerDeposit = {
+        depositAddress: addr,
+        depositAmount: amt,
+        ...(memo != null ? {depositMemo: memo} : {}),
+        ...(exp != null ? {expiresAtMs: exp} : {}),
+      };
+    }
     // A legless record lives ONLY in the provider vocabulary (the driver's transition matrix
     // starts at awaiting_* and ends at done/quote_expired/provider_refunded). At any IC-driver
     // step (approving/swapping/settling/…) it is malformed-by-construction: the IC executor
@@ -817,7 +955,16 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   // ledger-watch probes key on those ids. A Solana record is exempt (mint + symbol are its
   // identifiers); every legacy/historical IC record always carried them, so this cannot orphan
   // real history. A cross-rail record carries IC legs too — it always names both currencies.
-  if ((solanaLeg == null || crossRail != null) && (rec.inCurrency == null || rec.outCurrency == null)) return null;
+  // The CEFI widening (2026-09-15): a cefi providerRef record's OUT side may live on another
+  // rail entirely (ICP → SOL: there IS no numeric catalog currency for SOL) — and it needs
+  // none, because the provider driver advances it by statusUrl alone, never a ledger watch.
+  // Its identifiers are the ledger/mint pair + symbols, already enforced above.
+  // (venueId was null-checked in the loop above; the `?? ''` is for the type-narrower —
+  // venueOfId('') resolves no venue, so the classification is still fail-closed.)
+  const cefiProviderRecord = legs.length === 0 && solanaLeg == null
+    && venueOfId(rec.venueId ?? '')?.kind === 'cefi';
+  if ((solanaLeg == null || crossRail != null) && !cefiProviderRecord
+    && (rec.inCurrency == null || rec.outCurrency == null)) return null;
   if (rec.id !== id) return null;
   const full = rec as ConvertRecord;
   out[id] = full;
@@ -1054,6 +1201,86 @@ export async function prepareConvertRecord(args: {
         expiresAtMs,
       },
     ],
+  };
+}
+
+/** Prepare ONE CeFi order as a legless provider record (the SideShift widening, 2026-09-15,
+ *  founder decision 3). NOTHING is signed here — that is the point of the shape: the venue
+ *  holds the funds mid-trade and the user's own deposit is the value movement (the
+ *  disclosures say so; the record's providerDeposit block IS the handoff screen's data).
+ *  The record lands at `awaiting_deposit` and the resume engine's provider driver advances
+ *  it from there by the venue's own status reads.
+ *
+ *  Signing-boundary red lines, the cefi analog of prepareConvertRecord's: the quote's OWN
+ *  venue must be registered, kind cefi, non-testnet, and its registry pair — matched as an
+ *  unordered rail-id set — must be exactly the quote's in/out ids. The settle address is
+ *  the user's own derived address (never typed free-hand, never a third party's), and the
+ *  statusUrl is the venue's keyless device-direct GET — the relay is not in the status
+ *  path, so a relay outage cannot blind an in-flight order. */
+export function prepareCeFiConvertRecord(args: {
+  quote: ConvertQuote;
+  order: SideShiftFixedShift;
+  settleAddress: string;
+  inCurrency: number;
+  inSymbol: string;
+  outSymbol: string;
+  inDecimals?: number;
+  outDecimals?: number;
+}): ConvertRecord {
+  const {quote, order, settleAddress} = args;
+  // (1) The quote's OWN venue must be a real registered cefi row, and the quote's pair
+  // must be exactly that row's pair (unordered) — a misconfigured or hostile relay
+  // echoing venue A's name over venue B's pair cannot ride this surface.
+  const venue = venueOfId(quote.venueId);
+  if (venue == null || venue.kind !== 'cefi' || venue.testnet
+    || cefiOtherSide(venue, quote.tokenInLedger) !== quote.tokenOutLedger) {
+    throw new Error(M.convert.errors.quoteUnavailable('venue'));
+  }
+  // (2) The order the venue issued must price the SAME deposit the quote carried (the
+  // relay already refused pair drift upstream; this is the phone-side twin — the fixed
+  // shift settles only its exact depositAmount, so a mismatch is a different trade than
+  // the one the user approved).
+  const quotedDeposit = rawToDecimal(quote.amountIn, args.inDecimals ?? 8);
+  if (order.depositAmount !== quotedDeposit) {
+    throw new Error(M.convert.errors.quoteUnavailable('deposit'));
+  }
+  if (settleAddress.length === 0 || order.id.length === 0) {
+    throw new Error(M.convert.errors.quoteUnavailable('order'));
+  }
+  const expiresAtMs = order.expiresAt != null ? Date.parse(order.expiresAt) : NaN;
+  return {
+    id: randNonceHex(),
+    createdAtMs: Date.now(),
+    step: 'awaiting_deposit',
+    venueId: quote.venueId,
+    inCurrency: args.inCurrency,
+    // outCurrency deliberately ABSENT: the out side lives on another rail (SOL is not an
+    // IC catalog currency) — the cefi hydration exemption pins why that is sound.
+    inLedger: quote.tokenInLedger,
+    outLedger: quote.tokenOutLedger,
+    inSymbol: args.inSymbol,
+    outSymbol: args.outSymbol,
+    inDecimals: args.inDecimals,
+    outDecimals: args.outDecimals,
+    amountIn: quote.amountIn,
+    expectedGross: quote.amountOutGross,
+    expectedNet: quote.amountOutGross, // the fixed order's own settle figure — dpay adds/subtracts nothing
+    inFee: '0', // the user's deposit is sent by the user; its network fee is theirs, named in the handoff copy
+    outFee: '0', // the venue's commission is INSIDE its quoted rate (commissionRate "0" relay-side)
+    slippageBps: 0, // a fixed shift is a locked rate — there is no slippage axis
+    legs: [],
+    providerRef: {
+      orderId: order.id,
+      statusUrl: sideShiftStatusUrl(order.id),
+    },
+    providerDeposit: {
+      depositAddress: order.depositAddress,
+      depositAmount: order.depositAmount,
+      ...(order.depositMemo != null ? {depositMemo: order.depositMemo} : {}),
+      ...(Number.isSafeInteger(expiresAtMs) && expiresAtMs > 0 ? {expiresAtMs} : {}),
+    },
+    destAddress: settleAddress,
+    destSymbol: args.outSymbol,
   };
 }
 

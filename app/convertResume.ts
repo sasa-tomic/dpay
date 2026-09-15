@@ -35,6 +35,7 @@ import {
 } from './config/convert';
 import {DpayCore} from './services/native';
 import {fetchWithTimeout} from './services/relay';
+import {toUnits} from './lib/format';
 import {deriveSolanaAddress} from './solana/identity';
 import {
   attachCctpBurnTx as attachCctpBurnTxToRecord,
@@ -73,12 +74,18 @@ const PROVIDER_STATUS_MAP: Record<string, ProviderStatusReading['kind']> = {
   waiting_for_deposit: 'awaiting_deposit',
   pending: 'awaiting_deposit',
   pending_deposit: 'awaiting_deposit',
+  // SideShift's own words (verified from docs.sideshift.ai 2026-09-15): a fresh shift
+  // reads `waiting` — the deposit has not landed yet.
+  waiting: 'awaiting_deposit',
   deposit_received: 'processing',
   deposit_confirmed: 'processing',
   confirmed: 'processing',
   processing: 'processing',
   swapping: 'processing',
   executing: 'processing',
+  // SideShift's multi-deposit state: the FIRST deposit settles, later ones refund — the
+  // shift is mid-flight until those resolve, which is 'processing' (never a verdict).
+  multiple: 'processing',
   completed: 'completed',
   complete: 'completed',
   done: 'completed',
@@ -110,13 +117,17 @@ export async function fetchProviderStatus(ref: {orderId: string; statusUrl?: str
     const kind = PROVIDER_STATUS_MAP[j.status.trim().toLowerCase()];
     if (kind == null) return {kind: 'unknown'};
     if (kind === 'completed') {
+      // SideShift's camelCase fields (settleAmount/settleHash) join the snake_case
+      // precedents — the FIRST adapter's vocabulary, added additively.
       const amount = typeof j.settled_amount === 'string' ? j.settled_amount
         : typeof j.amount_out === 'string' ? j.amount_out
         : typeof j.out_amount === 'string' ? j.out_amount
+        : typeof j.settleAmount === 'string' ? j.settleAmount
         : undefined;
       const tx = typeof j.tx_id === 'string' ? j.tx_id
         : typeof j.transaction_id === 'string' ? j.transaction_id
         : typeof j.tx === 'string' ? j.tx
+        : typeof j.settleHash === 'string' ? j.settleHash
         : undefined;
       return {kind: 'completed', amount, tx};
     }
@@ -165,10 +176,18 @@ export async function advanceProviderRecord(
       return record;
     case 'completed':
       if (from === 'provider_processing') {
+        // The cefi widening (2026-09-15): SideShift speaks DECIMAL strings in the out
+        // asset's own units ("settleAmount": "0.0495…"), while outAmountNet is raw units
+        // like every other record money field. Normalize exactly at this boundary and
+        // ONLY for the cefi handoff shape (providerDeposit present) — the legacy provider
+        // records (OCP) never carried a provider amount, so nothing else moves.
+        const rawAmount = reading.amount != null && record.providerDeposit != null
+          ? toUnits(reading.amount, record.outDecimals ?? 8)
+          : reading.amount;
         return apply({
           ...record,
           step: 'done',
-          outAmountNet: reading.amount ?? record.expectedNet,
+          outAmountNet: rawAmount ?? record.expectedNet,
           outTx: reading.tx,
         });
       }

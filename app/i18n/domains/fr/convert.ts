@@ -40,6 +40,13 @@ export const convertFr: ConvertMessages = {
       // Ton miroir de icpswap : attribuer, nommer le signataire, nier la partie.
       jupiter: venue =>
         `${venue} est un agrégateur on-chain autonome sur Solana — il choisit la route et la route l'exécute. Ce portefeuille signe la transaction que ${venue} construit, et le devis est celui de ${venue}, affiché exactement comme il le publie. dpay n'en est pas partie.`,
+      // disclosure_key 'sideshift' (la clé de la première venue CeFi, 2026-09-15) : les faits
+      // CeFi fixés par le fondateur — un service d'échange automatisé détenant les fonds
+      // pendant l'échange, pas un prestataire agréé ; le KYC selon SA politique est à LUI de
+      // le divulguer (ses propres conditions publiées sont nommées) ; dpay n'est pas partie
+      // et ne touche rien (le relay épinglé commissionRate « 0 »).
+      sideshift: venue =>
+        `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont publiées sur sideshift.ai/terms. Ce portefeuille t'affiche le devis propre de ${venue} et l'adresse de dépôt, et dpay ne signe rien. dpay n'est pas partie à l'échange et ne touche rien.`,
     },
     generic: venue =>
       `Cette conversion est exécutée par ${venue}. Chaque appel est signé par toi et envoyé directement — dpay n'en est pas partie.`,
@@ -165,6 +172,21 @@ export const convertFr: ConvertMessages = {
     stuckRouteBody: 'Une étape a été envoyée mais son issue reste inconnue. dpay continue de surveiller les registres en arrière-plan ; cet écran changera tout seul quand la route se résout.',
   },
 
+  /** Venues CeFi (élargissement SideShift, 2026-09-15) : la remise du dépôt. La venue
+   *  détient les fonds pendant l'échange ; le dépôt de l'utilisateur EST le mouvement de
+   *  valeur — dpay ne signe rien. Chaque adresse/montant affiché est celui de la venue,
+   *  tel quel. */
+  cefi: {
+    destRow: (sym, network, venue) => `${sym} sur ${network} — via ${venue} (service d'échange)`,
+    settleAddressLabel: 'Le paiement arrive sur ta propre adresse sur le réseau de destination',
+    depositAddressLabel: 'Adresse de dépôt',
+    depositAmountLabel: 'Montant exact à déposer',
+    depositMemoLabel: 'Memo (obligatoire)',
+    depositExpiryLine: at => `L'ordre expire ${at}`,
+    depositNote: (venue, sym) =>
+      `Envoie ${sym} depuis ton portefeuille vers l'adresse de dépôt de ${venue} ci-dessus — exactement le montant indiqué. ${venue} est un service d'échange automatisé : il détient ton ${sym} pendant l'échange, puis paie vers ton adresse. dpay n'est pas partie à cet échange et ne touche rien.`,
+  },
+
   /** La famille cross-rail (routes B/C, 2026-09-16) : tout ce qui suit les cinq jambes IC —
    *  la remise CCTP (dpay affiche les transactions exactes, c\u2019est le portefeuille Ethereum
    *  PROPRE de l\u2019utilisateur qui signe ; dpay ne détient jamais de clé EVM), l\u2019attente de
@@ -224,6 +246,8 @@ export const convertFr: ConvertMessages = {
     quoteUnreachable: venue => `Impossible d'obtenir le devis de ${venue} — le relay ne répond pas. Vérifie ta connexion et réessaie.`,
     quoteRefused: venue => `${venue} a refusé d'établir un devis pour cette paire pour l'instant.`,
     quoteUnavailable: code => `Devis indisponible (${code}).`,
+    quoteUnconfigured: venue =>
+      `${venue} n'est pas encore configuré sur ce relay — aucune identification de partenaire n'est configurée, aucun devis ne peut donc être demandé. Ton portefeuille n'a aucun problème.`,
     gasUnavailable: 'Le prix du gaz du minter de retrait n\u2019a pas pu être demandé — rien n\u2019a été signé. Réessaie.',
     cctpFeeUnavailable: 'Les frais du pont de Circle n\u2019ont pas pu être récupérés — rien n\u2019a été signé. Vérifie ta connexion et réessaie.',
   },
