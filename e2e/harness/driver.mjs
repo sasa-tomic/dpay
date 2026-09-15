@@ -254,6 +254,9 @@ export class Driver {
       }, o.solRpcUrl);
     }
     const driver = new Driver(browser, context, page, ownsBrowser);
+    // The create-time CDP session (locale override lives HERE — a second session stacking another
+    // locale override is a protocol error, so flows that switch locale mid-run must reuse this one).
+    driver.cdp = cdp;
     driver.attachPageListeners();
     return driver;
   }
