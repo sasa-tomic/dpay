@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {type CurrencyDescriptor} from '../config/catalog';
 import {POLL, BALANCE_TIMEOUT_MS} from '../config/constants';
 import {relayFetch} from '../services/relay';
@@ -10,6 +11,39 @@ type Args = {
   displayCurrencyIds: string;
 };
 
+/** The storage key prefix for the cross-restart balance cache (founder requirement 2026-09-15 #3). */
+const BALANCE_CACHE_PREFIX = 'dpay.balances.v1';
+
+type BalanceCache = {at: number; balance: string | null; assetBalances: Record<number, string>};
+
+const balanceCacheKey = (publicHex: string): string => `${BALANCE_CACHE_PREFIX}.${publicHex}`;
+
+// Best-effort cache read (the txNotes convention): a corrupt or unreadable cache degrades to
+// "nothing cached" — a cold start, which the app already handles — never an exception into the
+// first render.
+async function loadBalanceCache(publicHex: string): Promise<BalanceCache | null> {
+  try {
+    const raw = await AsyncStorage.getItem(balanceCacheKey(publicHex));
+    if (raw === null) return null;
+    const j: unknown = JSON.parse(raw);
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
+    const c = j as Record<string, unknown>;
+    if (typeof c.at !== 'number' || !Number.isFinite(c.at)) return null;
+    const balance = typeof c.balance === 'string' || c.balance === null ? c.balance : null;
+    const assets = (c.assetBalances && typeof c.assetBalances === 'object' && !Array.isArray(c.assetBalances))
+      ? Object.fromEntries(Object.entries(c.assetBalances as Record<string, unknown>).filter(([, v]) => typeof v === 'string') as [string, string][])
+      : {};
+    const assetBalances: Record<number, string> = {};
+    for (const k of Object.keys(assets)) {
+      const n = Number(k);
+      if (Number.isInteger(n) && n >= 0) assetBalances[n] = assets[k];
+    }
+    return {at: c.at, balance, assetBalances};
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The primary (`$` DEMO) + per-asset balance poll. Extracted from Wallet.tsx (Effect B):
  *   - SINGLE batch fetch (`GET /api/v1/balances/<account>`) returns EVERY catalog currency's balance
@@ -18,9 +52,6 @@ type Args = {
  *   - The relay fans the per-currency ledger queries out concurrently + best-effort (a hiccup on one
  *     asset's ledger OMITS it from the response, never failing the whole batch), so a slow ledger for
  *     one asset never flips the primary offline. A missing entry keeps the prior value (no flap).
- *   - MC5 offline-deduction resets are COUPLED to a successful per-currency read and stay INTERNAL:
- *     the primary read resets currency-0; each successful per-asset read resets that currency. These
- *     never fire on a miss (the authoritative balance must land before the optimistic view is cleared).
  *   - The effect dep is `displayCurrencyIds` (a stable STRING signature), NOT `displayAssets` (a new
  *     array each render) — so the poll resets only when a currency is added/removed, not every frame.
  *   - Relay-retarget race fix (OPEN_ISSUES #6): on teardown (relayUrl/displayCurrencyIds change) the
@@ -29,34 +60,46 @@ type Args = {
  *     relay's slow in-flight poll could resolve after the new relay's poll and shadow the new balance
  *     (the `alive` closure flag is retained as a secondary gate).
  *
- * `markOfflinePaid` is the offline QR/NFC hand-off debit (BigInt-summed; negative = the refund-on-
- * failed-but-signed path). `resetDeduction` is exposed for Wallet's faucet `topUp`, which credits the
- * DEMO balance out-of-band and must clear the currency-0 deduction without waiting on the next poll.
- * `setBalance`/`setOnline` are exposed for that same `topUp` immediate-refresh path (the faucet
- * response carries the new balance → show it instantly; the next poll overwrites both authoritatively).
+ * 2026-09-15 offline-payments completion:
+ *   - The EPHEMERAL `offlineSpent`/`markOfflinePaid` deduction is GONE. The offline debit now lives
+ *     in the persisted outbox (services/pendingPays) and Wallet derives the subtraction from those
+ *     records against `atByCurrency`: a handed-off payment subtracts until a SUCCESSFUL POLL for its
+ *     asset lands AFTER the hand-off (`at > record.ts`) — the same per-currency "authoritative
+ *     balance replaces the optimistic view" reset the ephemeral map had, now timestamp-driven so it
+ *     survives a restart and fixes the off-by-fee (the record carries the GROSS; the old funnel
+ *     subtracted the bare wire). In-session immediacy is unchanged in practice: the outbox write
+ *     announces and the usePendingPays subscription re-reads within one storage round-trip.
+ *   - `atByCurrency` records Date.now() per currency on every successful read (primary included, as
+ *     key 0). It is the freshness authority for BOTH the offline subtraction above and the
+ *     APPROXIMATE marker (a view whose data is older than 60 s renders "~", founder requirement #2).
+ *     On a cache hit it is seeded from the cache's own `at` — a hydrate is a fact about the PAST.
+ *   - CROSS-RESTART CACHE (founder requirement #3): the last good read is persisted per identity on
+ *     every successful poll and hydrated on mount BEFORE the first poll can answer, so a wallet
+ *     funded at home and opened offline in the city shows real numbers (and the fund gate passes).
+ *     `setBalance` (the faucet topUp path) bumps key 0's timestamp too — the faucet response is an
+ *     authoritative read, and a pending DEMO hand-off must stop subtracting against it exactly as it
+ *     would against a poll.
  */
 export function useBalancePoll(args: Args): {
   balance: string | null;
   online: boolean;
   assetBalances: Record<number, string>;
-  offlineSpent: Record<number, string>;
-  markOfflinePaid: (amount: string, currency: number) => void;
-  resetDeduction: (currency: number) => void;
+  atByCurrency: Record<number, number>;
   setBalance: (b: string | null) => void;
   setOnline: (o: boolean) => void;
   refresh: () => void;
 } {
   const {relayUrl, publicHex, displayAssets, displayCurrencyIds} = args;
-  const [balance, setBalance] = useState<string | null>(null);
+  const [balance, setBalanceState] = useState<string | null>(null);
   // Non-primary assets — each is a SEPARATE asset on a separate ledger, polled in parallel on the
   // same cadence. A "0" entry means "not yet funded"; the card still renders (muted) so the full
   // asset rail is always visible. MC1 units 2-4: balances are raw-u64 decimal STRINGS (never number).
   const [assetBalances, setAssetBalances] = useState<Record<number, string>>({});
   const [online, setOnline] = useState(false);
-  // MC5 — currency-KEYED offline deduction. A per-currency map of raw-u64 decimal strings (missing
-  // key ⇒ '0' spent ⇒ no deduction). The offline QR/NFC hand-off (markOfflinePaid) debits THIS
-  // asset's entry. Source of truth for every "shown" balance via the applyOffline helper.
-  const [offlineSpent, setOfflineSpent] = useState<Record<number, string>>({});
+  // Date.now() of the last SUCCESSFUL read per currency (key 0 = the primary). Drives the offline
+  // subtraction's "has an authoritative balance landed since the hand-off?" test and the approx
+  // marker's staleness test — one timestamp, both consumers.
+  const [atByCurrency, setAtByCurrency] = useState<Record<number, number>>({});
 
   // Relay-retarget race fix (OPEN_ISSUES #6): a monotonically-increasing generation id. Every effect
   // run captures its generation; before ANY state write, a poll re-checks the ref — if a newer
@@ -67,6 +110,14 @@ export function useBalancePoll(args: Args): {
   const genRef = useRef(0);
   // Latest poll of the CURRENT effect (null between effects) — the "Check again" escape hatch.
   const pollRef = useRef<(() => Promise<void>) | null>(null);
+  // Date.now() of the last SUCCESSFUL read this mount (any generation) — 0 until one lands. The
+  // hydrate effect reads it to know whether a fresh poll beat the cache to the state (then the
+  // cache is strictly older information and stays unused).
+  const lastSuccessAtRef = useRef(0);
+  // Mirror of the asset map for the non-React setBalance path (the faucet persist needs the
+  // current assets; a state read inside the callback would be a stale closure).
+  const assetBalancesRef = useRef(assetBalances);
+  assetBalancesRef.current = assetBalances;
 
   useEffect(() => {
     let alive = true;
@@ -142,17 +193,20 @@ export function useBalancePoll(args: Args): {
             const primary = map['0'];
             if (fresh() && typeof primary === 'string') {
               successCount++; // completed success — retires every still-in-flight sibling timeout
-              setBalance(primary);
+              setBalanceState(primary);
               setOnline(true);
-              setOfflineSpent(prev => prev[0] != null && prev[0] !== '0' ? {...prev, 0: '0'} : prev);
             } else if (!staleFailure()) {
               setOnline(false);
             }
             if (!fresh()) return;
             // Non-primary assets: merge keeping prior on a missing entry (the relay omits a currency
-            // whose ledger hiccupped — best-effort, no flap). MC5: a successful per-asset read resets
-            // that currency's offline deduction (the authoritative polled balance replaces the local
-            // optimistic view — same rationale as the DEMO reset above).
+            // whose ledger hiccupped — best-effort, no flap). Every PRESENT entry (primary included,
+            // as key 0) stamps its atByCurrency clock at the same instant — the ONE timestamp both
+            // consumers read: the offline subtraction (an outbox record stops subtracting once an
+            // authoritative read postdates its hand-off) and the approx marker (a view staler than
+            // 60 s renders "~"). This replaces the old per-currency offlineSpent reset with the same
+            // "authoritative balance replaces the optimistic view" semantics, timestamp-driven.
+            const now = Date.now();
             setAssetBalances(prev => {
               let changed = false;
               const next = {...prev};
@@ -162,15 +216,28 @@ export function useBalancePoll(args: Args): {
               }
               return changed ? next : prev;
             });
-            setOfflineSpent(prev => {
-              let changed = false;
-              const next = {...prev};
+            setAtByCurrency(() => {
+              const next: Record<number, number> = {};
+              if (typeof primary === 'string') next[0] = now;
+              for (const a of displayAssets) {
+                if (typeof map[String(a.currency)] === 'string') next[a.currency] = now;
+              }
+              return next;
+            });
+            // Founder requirement #3 — persist the last good read per identity (the cross-restart
+            // balance cache). Only a batch that actually answered the primary is worth caching: a
+            // primary-less body is a primary-ledger hiccup, and caching it would let a cold offline
+            // start hydrate a null DEMO balance. Fire-and-forget best-effort — a failed cache write
+            // never disturbs the poll (the txNotes convention).
+            if (typeof primary === 'string') {
+              lastSuccessAtRef.current = Math.max(lastSuccessAtRef.current, now);
+              const cachedAssets: Record<number, string> = {0: primary};
               for (const a of displayAssets) {
                 const v = map[String(a.currency)];
-                if (typeof v === 'string' && next[a.currency] != null && next[a.currency] !== '0') { next[a.currency] = '0'; changed = true; }
+                if (typeof v === 'string') cachedAssets[a.currency] = v;
               }
-              return changed ? next : prev;
-            });
+              void AsyncStorage.setItem(balanceCacheKey(publicHex), JSON.stringify({at: now, balance: primary, assetBalances: cachedAssets} as BalanceCache)).catch(() => {});
+            }
           } else {
             // Non-2xx: no silent errors — log the status + body so a relay 5xx/4xx is debuggable, then
             // flip offline (the next poll retries). The body is tiny JSON; read best-effort.
@@ -194,24 +261,48 @@ export function useBalancePoll(args: Args): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relayUrl, publicHex, displayCurrencyIds]);
 
-  // MC5 — currency-KEYED offline deduction. The reducer sums BigInt(amount) under the given currency
-  // key; the negative case (the refund-on-failed-but-signed NFC path) UNDOES a prior deduction. MC1
-  // units 2-4: amount is a raw-u64 decimal STRING; never `+`/`-` on strings.
-  const markOfflinePaid = useCallback((amount: string, currency: number) => setOfflineSpent(prev => {
-    const cur = prev[currency] ?? '0';
-    const next = BigInt(cur) + BigInt(amount);
-    return {...prev, [currency]: (next < 0n ? 0n : next).toString()};
-  }), []);
+  // Founder requirement #3 — hydrate the last good read BEFORE the first poll can answer: a wallet
+  // funded at home and opened offline in the city shows its real numbers (and the fund gate
+  // passes) instead of '—' until a relay that will never answer times out. The cache's OWN `at`
+  // seeds atByCurrency, so the hydrated numbers are honest about their age: approx-marked once
+  // older than 60 s, and an outbox hand-off made after the cached read still subtracts. A fresh
+  // poll that beat the cache to the state cancels the hydrate (lastSuccessAtRef) — the cache is
+  // then strictly older information. Identity switch: the state RESETS first — the cache is
+  // per-identity and one identity's balance must never leak into another's, even for a frame.
+  useEffect(() => {
+    let alive = true;
+    setBalanceState(null);
+    setAssetBalances({});
+    setOnline(false);
+    setAtByCurrency({});
+    void loadBalanceCache(publicHex).then(cache => {
+      if (!alive || cache === null || cache.at <= lastSuccessAtRef.current) return;
+      setBalanceState(cache.balance);
+      setAssetBalances(cache.assetBalances);
+      const seeded: Record<number, number> = {};
+      if (cache.balance != null) seeded[0] = cache.at;
+      for (const k of Object.keys(cache.assetBalances)) seeded[Number(k)] = cache.at;
+      setAtByCurrency(seeded);
+    });
+    return () => { alive = false; };
+  }, [publicHex]);
 
-  // Exposed for Wallet's faucet topUp: crediting the DEMO balance out-of-band must clear the
-  // currency-0 deduction immediately (no waiting on the 2.5s poll). Generalized per-currency to
-  // match the poll's own reset shape. No-op when the entry is already '0' / absent (avoids a
-  // needless new object → no spurious re-render of the derived displayAssetBalances memo).
-  const resetDeduction = useCallback((currency: number) => setOfflineSpent(prev => prev[currency] != null && prev[currency] !== '0' ? {...prev, [currency]: '0'} : prev), []);
+  // The faucet topUp path: the response carries the new authoritative balance — show it instantly,
+  // stamp currency-0's clock (an outbox hand-off must stop subtracting against a credit exactly as
+  // it would against a poll; the old resetDeduction call, now derived) and refresh the cache. The
+  // next poll overwrites all of it authoritatively.
+  const setBalance = useCallback((b: string | null) => {
+    setBalanceState(b);
+    if (b == null) return;
+    const now = Date.now();
+    lastSuccessAtRef.current = Math.max(lastSuccessAtRef.current, now);
+    setAtByCurrency(prev => ({...prev, 0: now}));
+    void AsyncStorage.setItem(balanceCacheKey(publicHex), JSON.stringify({at: now, balance: b, assetBalances: assetBalancesRef.current} as BalanceCache)).catch(() => {});
+  }, [publicHex]);
 
   // Manual refresh for the fund-first panel's "Check again" (same shape as the SOL rail's
   // refreshSol — an immediate re-poll, generation-safe).
   const refresh = useCallback(() => { pollRef.current?.(); }, []);
 
-  return {balance, online, assetBalances, offlineSpent, markOfflinePaid, resetDeduction, setBalance, setOnline, refresh};
+  return {balance, online, assetBalances, atByCurrency, setBalance, setOnline, refresh};
 }

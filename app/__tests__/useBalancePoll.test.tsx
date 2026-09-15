@@ -15,15 +15,21 @@
  *   - a batch with no primary flips `online` false and LEAVES the last known balance alone;
  *   - a non-2xx does the same, and writes nothing.
  *
- * Plus the offline-deduction reducer's own arithmetic, which is currency-keyed and clamped.
+ * Plus the 2026-09-15 offline-payments contract: the poll STAMPS a per-currency freshness clock
+ * (`atByCurrency` — the one clock the pending-outbox subtraction and the 60 s approx marker read)
+ * and PERSISTS the last good read per identity (`dpay.balances.v1.<publicHex>` — founder
+ * requirement #3: funded at home, walked offline, restarted in the city ⇒ real numbers still
+ * render and the fund gate still passes). The old ephemeral offlineSpent reducer is gone; its
+ * arithmetic lives in Wallet's pending-record derivation now.
  *
  * The hook is driven through a probe component (react-test-renderer is this project's only
- * renderer); `fetchWithTimeout` is mocked at its module boundary — nothing else is.
+ * renderer); `relayFetch` is mocked at its module boundary — nothing else is.
  */
 import {describe, test, expect, jest, beforeEach, afterEach} from '@jest/globals';
 import React from 'react';
 import renderer, {act} from 'react-test-renderer';
 import {Text} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.mock('../services/relay', () => ({
   relayFetch: jest.fn(), // R1: the hook's relay seam moved from fetchWithTimeout(url) to relayFetch(relay, path)
@@ -78,6 +84,8 @@ async function nextPoll() {
 beforeEach(() => {
   jest.useFakeTimers({doNotFake: ['Date']});
   jest.mocked(relayFetch).mockReset();
+  // The balance cache is per-identity persisted state — tests must not see each other's writes.
+  return AsyncStorage.clear();
 });
 
 afterEach(() => { jest.useRealTimers(); });
@@ -155,28 +163,78 @@ describe('useBalancePoll — an unknown balance is never reported as zero', () =
   });
 });
 
-describe('useBalancePoll — the offline deduction is currency-keyed and clamped', () => {
-  test('a spend on one asset never touches another, and a refund cannot go negative', async () => {
-    jest.mocked(relayFetch).mockResolvedValue(answer({'0': '10000'}) as never);
+describe('useBalancePoll — the 2026-09-15 offline contract: a freshness clock and a persisted restart', () => {
+  const CACHE_KEY = `dpay.balances.v1.${'aa'.repeat(32)}`;
+
+  test('a successful batch stamps every currency it answered for, key 0 included', async () => {
+    jest.mocked(relayFetch).mockResolvedValue(answer({'0': '10000', [String(VCHF)]: '500000000', [String(CKBTC)]: '7'}) as never);
     const {latest, tree} = await mountPoll();
 
-    act(() => { latest().markOfflinePaid('2500', 0); });
-    expect(latest().offlineSpent[0]).toBe('2500');
-    expect(latest().offlineSpent[VCHF]).toBeUndefined();
+    const firstStamp = latest().atByCurrency[0];
+    // Key 0 and BOTH answered display currencies carry a wall-clock stamp — the pending-outbox
+    // subtraction (`rec.ts > clock`) and the 60 s approx marker both read exactly this.
+    expect(firstStamp).toBeGreaterThan(0);
+    expect(latest().atByCurrency[VCHF]).toBe(firstStamp);
+    expect(latest().atByCurrency[CKBTC]).toBe(firstStamp);
 
-    // A second hand-off on the SAME asset sums; the other asset stays untouched.
-    act(() => { latest().markOfflinePaid('500', 0); });
-    act(() => { latest().markOfflinePaid('100000000', VCHF); });
-    expect(latest().offlineSpent[0]).toBe('3000');
-    expect(latest().offlineSpent[VCHF]).toBe('100000000');
+    await nextPoll();
+    // The clock only moves FORWARD — a stalled ledger read must not resurrect a retired deduction.
+    expect(latest().atByCurrency[0]).toBeGreaterThanOrEqual(firstStamp);
+    act(() => { tree.unmount(); });
+  });
 
-    // The refund path (a signed-but-failed NFC hand-off) undoes a deduction, and over-refunding
-    // floors at zero rather than rendering a negative raw amount.
-    act(() => { latest().markOfflinePaid('-99999999999', VCHF); });
-    expect(latest().offlineSpent[VCHF]).toBe('0');
+  test('the last good read is persisted under the identity — founder requirement #3', async () => {
+    jest.mocked(relayFetch).mockResolvedValue(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never);
+    const {tree} = await mountPoll();
 
-    act(() => { latest().resetDeduction(0); });
-    expect(latest().offlineSpent[0]).toBe('0');
+    const raw = await AsyncStorage.getItem(CACHE_KEY);
+    expect(raw).not.toBeNull();
+    const cached = JSON.parse(raw as string) as {at: number; balance: string | null; assetBalances: Record<string, string>};
+    expect(cached.balance).toBe('10000');
+    expect(cached.assetBalances['0']).toBe('10000');
+    expect(cached.assetBalances[String(VCHF)]).toBe('500000000');
+    expect(cached.at).toBeGreaterThan(0);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a cold OFFLINE start hydrates from the cache — funded at home, restarted in the city', async () => {
+    const AT = 1234567; // any wall-clock moment strictly in the past
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({at: AT, balance: '777', assetBalances: {7: '7777'}}));
+    jest.mocked(relayFetch).mockRejectedValue(new Error('ECONNREFUSED') as never);
+
+    const {latest, tree} = await mountPoll();
+    // The poll never answers, yet the wallet renders the REAL numbers (never '—', never zero):
+    // the fund gate passes offline and the balances render approx-marked via the seeded clock.
+    expect(latest().balance).toBe('777');
+    expect(latest().assetBalances[VCHF]).toBe('7777');
+    expect(latest().atByCurrency[VCHF]).toBe(AT);
+    expect(latest().online).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
+  test('a cache older than this mount\'s own live read never overrides it', async () => {
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({at: 1, balance: '1', assetBalances: {}}));
+    jest.mocked(relayFetch).mockResolvedValue(answer({'0': '10000', [String(VCHF)]: '500000000'}) as never);
+
+    const {latest, tree} = await mountPoll();
+    // The live poll landed first; a strictly-older cache (the identity-switch race) is noise.
+    expect(latest().balance).toBe('10000');
+    expect(latest().assetBalances[VCHF]).toBe('500000000');
+    act(() => { tree.unmount(); });
+  });
+
+  test('the faucet\'s setBalance wrapper stamps key 0 and persists the new read', async () => {
+    jest.mocked(relayFetch).mockResolvedValue(answer({'0': '10000'}) as never);
+    const {latest, tree} = await mountPoll();
+    const before = latest().atByCurrency[0];
+
+    act(() => { latest().setBalance('55000'); });
+    expect(latest().balance).toBe('55000');
+    expect(latest().atByCurrency[0]).toBeGreaterThanOrEqual(before);
+
+    const raw = await AsyncStorage.getItem(CACHE_KEY);
+    expect(raw).not.toBeNull();
+    expect((JSON.parse(raw as string) as {balance: string | null}).balance).toBe('55000');
     act(() => { tree.unmount(); });
   });
 });

@@ -108,7 +108,12 @@ export type Identity = {secretHex: string; publicHex: string; username: string};
 //   • `ledgerRef` — the row's identity ON ITS LEDGER: the BLOCK INDEX (decimal) on the IC rail,
 //     which is the only stable identity an IC row has (`nonce` is always '' there); the
 //     transaction SIGNATURE (base58) on Solana. Never empty — every settled row has one.
-export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; ts: number; dir: 'out' | 'in'; assetId: AssetId; counterparty: string; ledgerRef: string};
+// `pending?: true` marks a row the device itself projected from the offline-payment outbox
+// (services/pendingPays) — the payment was handed off UNCONFIRMED and no ledger row exists for it
+// yet. The flag is a render instruction (the row's clock marker, the receipt's not-confirmed line)
+// and never survives into a ledger-sourced list: reconciliation DROPS the pending record the
+// moment the real row lands, so the two never render beside each other.
+export type Txn = {nonce: string; amount: string; who: string; memo: string; time: string; ts: number; dir: 'out' | 'in'; assetId: AssetId; counterparty: string; ledgerRef: string; pending?: true};
 // One row of the relay's GET /api/v1/transactions/{hex} response (from/to are lowercase hex). The
 // relay returns from_name/to_name/memo as JSON STRINGS (NUL-trimmed, lossy; may be ""). `amount` is
 // a decimal-digit string (MC1 units 2-4: protocol u64 amounts cross the JSON boundary as strings).

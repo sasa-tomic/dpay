@@ -69,29 +69,35 @@ export type UsdcStateInput = TokenStateInput;
  *
  * SPL tokens are keyed BY MINT: `tokenStates[mint]` is that token's hook state; each solana asset
  * row reads its own mint's entry (USDC and EURC are financially isolated — invariant #8).
+ *
+ * `approx` is the per-asset APPROXIMATE flag (founder requirement 2026-09-15: a balance view whose
+ * data is STALE — offline for over a minute, or hydrated from the cross-restart cache — is marked
+ * "~", the same marker DEMO has always carried offline). It is DERIVED upstream (Wallet: last-good
+ * timestamp per asset vs a ticking `now`) and only ever PREFIXES a displayed amount here — it never
+ * upgrades a status (an approximate zero is still a zero) and never invents a value ('—' stays '—').
  */
 export function buildAssetBalances(args: {
   catalog: CurrencyDescriptor[];
   assets: SelectableAsset[];
   icBalances: Record<number, string>;       // keyed by IC currency id (the poll's raw map)
   primaryBalance: string | null;            // the DEMO (currency-0) balance (`shownBalance`)
-  online: boolean;                          // IC relay online (drives DEMO's "~" offline prefix)
+  approx?: Readonly<Partial<Record<AssetId, boolean>>>;  // per-asset stale marker (all four rails)
   solState: SolStateInput;
   tokenStates: Record<string, TokenStateInput>;  // keyed by SPL mint pubkey
 }): Record<AssetId, BalanceView> {
-  const {catalog, assets, icBalances, primaryBalance, online, solState, tokenStates} = args;
+  const {catalog, assets, icBalances, primaryBalance, approx, solState, tokenStates} = args;
   const out: Partial<Record<AssetId, BalanceView>> = {};
   for (const a of assets) {
     if (a.protocol === 'ic') {
       out[a.id] = a.currency === 0
-        ? demoView(primaryBalance, online)
-        : icAssetView(catalog, a.currency, icBalances[a.currency] ?? '0');
+        ? demoView(primaryBalance, approx?.[a.id] === true)
+        : icAssetView(catalog, a.currency, icBalances[a.currency] ?? '0', approx?.[a.id] === true);
     } else if (a.token === 'SOL') {
-      out[a.id] = solView(solState, a.minFractionDigits);
+      out[a.id] = solView(solState, a.minFractionDigits, approx?.[a.id] === true);
     } else {
       // A registered SPL token (USDC, EURC, …): its own mint's state, own symbol, own decimals —
       // no cross-token fallback, ever.
-      out[a.id] = tokenView(tokenStates[a.mint ?? ''] ?? {amount: null, decimals: null, status: 'loading'}, a.symbol, a.decimals, a.minFractionDigits);
+      out[a.id] = tokenView(tokenStates[a.mint ?? ''] ?? {amount: null, decimals: null, status: 'loading'}, a.symbol, a.decimals, a.minFractionDigits, approx?.[a.id] === true);
     }
   }
   return out as Record<AssetId, BalanceView>;
@@ -108,12 +114,13 @@ export function buildAssetBalances(args: {
 // text (the offline hand-off debits DEMO and the poll resets on reconnect; the marker tells the
 // user the number is their best-known, not authoritative). It never upgrades the status: an
 // approximate zero is still a zero. The marker itself is catalog copy — "~" is not how every
-// locale writes "about".
-function demoView(primaryBalance: string | null, online: boolean): BalanceView {
+// locale writes "about". Since 2026-09-15 the marker is the ONE staleness rule for every asset
+// (see `buildAssetBalances`); DEMO no longer carries a private offline rule of its own.
+function demoView(primaryBalance: string | null, approx: boolean): BalanceView {
   if (primaryBalance == null) return {displayText: '—', status: 'loading', failure: null};
   const amount = usd(primaryBalance);
   return {
-    displayText: online ? amount : M.wallet.balance.approxAmount(amount),
+    displayText: approx ? M.wallet.balance.approxAmount(amount) : amount,
     status: cmpRaw(primaryBalance, '0') > 0 ? 'ok' : 'zero',
     failure: null,
   };
@@ -122,29 +129,41 @@ function demoView(primaryBalance: string | null, online: boolean): BalanceView {
 // A non-DEMO IC catalog asset. A not-yet-polled asset defaults to '0' (the poll seeds '0'); funded ⇒
 // 'ok', unfunded ⇒ 'zero' (dims). The amount is formatted via the catalog's per-currency COMPACT
 // formatter (backs `displayName`/`familyDisplay`'s unit + decimals) so ckBTC renders "0.0005 BTC",
-// never a misleading dollar amount.
-function icAssetView(catalog: CurrencyDescriptor[], currency: number, balance: string): BalanceView {
+// never a misleading dollar amount. `approx` prefixes the same "~" marker DEMO carries when the
+// asset's last good read is stale (offline > 60 s, or hydrated from the cross-restart cache).
+function icAssetView(catalog: CurrencyDescriptor[], currency: number, balance: string, approx: boolean): BalanceView {
+  const amount = fmtCurrencyAmountCompact(catalog, currency, balance);
   return {
-    displayText: fmtCurrencyAmountCompact(catalog, currency, balance),
+    displayText: approx ? M.wallet.balance.approxAmount(amount) : amount,
     status: cmpRaw(balance, '0') > 0 ? 'ok' : 'zero',
     failure: null,
   };
 }
 
 // Native SOL. 'ok' ⇒ check the value for a zero balance; 'unavailable' ⇒ the RPC is empty/offline
-// (the jest/e2e default — renders '—'); 'error' ⇒ PRESERVES the prior balance (never zeroes it —
-// plan invariant: an RPC failure must not look like a zero balance); 'loading' ⇒ first poll pending.
-function solView(solState: SolStateInput, minFractionDigits: number): BalanceView {
+// (renders '—' only when NOTHING was ever read — founder requirement 2026-09-15 #3: a wallet
+// funded at home and walked offline must still see its number, so a preserved balance renders,
+// approx-marked, because it cannot be fresher than the last successful read); 'error' ⇒ PRESERVES
+// the prior balance (never zeroes it — plan invariant: an RPC failure must not look like a zero
+// balance); 'loading' ⇒ first poll pending.
+function solView(solState: SolStateInput, minFractionDigits: number, approx: boolean): BalanceView {
+  // The ONE staleness rule (2026-09-15): any branch that renders a real number marks it "~" when
+  // the caller says the read is stale — the same marker + the same condition demoView has always
+  // applied. Zero included (demoView marks zeros too): one rule, no per-amount special cases.
+  const mark = (raw: string) => (approx ? M.wallet.balance.approxAmount(raw) : raw);
+  const fmt = () => fmtAssetCompact(solState.balance ?? '0', SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits);
   switch (solState.status) {
     case 'ok':
       if (solState.balance == null) return {displayText: '—', status: 'unavailable', failure: null};
-      if (cmpRaw(solState.balance, '0') === 0) return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'zero', failure: null};
-      return {displayText: fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits), status: 'ok', failure: null};
+      if (cmpRaw(solState.balance, '0') === 0) return {displayText: mark(fmt()), status: 'zero', failure: null};
+      return {displayText: mark(fmt()), status: 'ok', failure: null};
     case 'unavailable':
-      return {displayText: '—', status: 'unavailable', failure: null};
+      return solState.balance == null
+        ? {displayText: '—', status: 'unavailable', failure: null}
+        : {displayText: mark(fmt()), status: 'unavailable', failure: null};
     case 'error':
       return {
-        displayText: solState.balance == null ? '—' : fmtAssetCompact(solState.balance, SOL_DECIMALS, SOL_UNIT, undefined, minFractionDigits),
+        displayText: solState.balance == null ? '—' : mark(fmt()),
         status: 'error',
         // The CAUSE travels with the row (R3): the hook classified it at the transport seam; the
         // note picks its sentence from this field, never from a guess at the component.
@@ -159,28 +178,36 @@ function solView(solState: SolStateInput, minFractionDigits: number): BalanceVie
 // A registered Solana SPL token (USDC, EURC, …). 'balance' ⇒ a real amount (zero ⇒ 'zero', dims);
 // 'absent' ⇒ the device's token account for this mint does not exist on chain (a KNOWN
 // zero-by-absence, rendered as "0 <symbol>" — distinct from a zero balance only in status, and
-// from offline — invariant #10); 'unavailable' ⇒ the rail is misconfigured/offline; 'error' ⇒
-// preserves the prior amount (never zeroes); 'loading' ⇒ first poll pending. The decimals come
-// from the ASSET row (registry-pinned), NOT a per-token fallback — an unknown state never invents
-// a token it isn't. The unit is the asset's symbol (distinct from any IC sibling's
+// from offline — invariant #10); 'unavailable' ⇒ the rail is misconfigured/offline ('—' only when
+// no fact exists — a preserved/persisted amount renders approx-marked, same rule as native SOL);
+// 'error' ⇒ preserves the prior amount (never zeroes); 'loading' ⇒ first poll pending. The decimals
+// come from the ASSET row (registry-pinned), NOT a per-token fallback — an unknown state never
+// invents a token it isn't. The unit is the asset's symbol (distinct from any IC sibling's
 // "SYM · Ethereum" label — invariant #5).
-function tokenView(state: TokenStateInput, symbol: string, decimals: number, minFractionDigits: number): BalanceView {
+function tokenView(state: TokenStateInput, symbol: string, decimals: number, minFractionDigits: number, approx: boolean): BalanceView {
+  // Same ONE staleness rule as solView/demoView: a rendered number carries "~" when the caller
+  // says the read is stale. 'absent' included — the zero is a persisted fact, and a stale fact is
+  // still approximate.
+  const mark = (raw: string) => (approx ? M.wallet.balance.approxAmount(raw) : raw);
+  const fmt = (raw: string) => fmtAssetCompact(raw, decimals, symbol, undefined, minFractionDigits);
   switch (state.status) {
     case 'balance':
       if (state.amount == null) return {displayText: '—', status: 'zero', failure: null};
-      if (cmpRaw(state.amount, '0') === 0) return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'zero', failure: null};
-      return {displayText: fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits), status: 'ok', failure: null};
+      if (cmpRaw(state.amount, '0') === 0) return {displayText: mark(fmt(state.amount)), status: 'zero', failure: null};
+      return {displayText: mark(fmt(state.amount)), status: 'ok', failure: null};
     case 'absent':
       // D3: a missing token account is a KNOWN zero (the RPC answered — the account simply doesn't
       // exist), so render a real "0.00 <symbol>" with normal formatting. The '—' placeholder is
       // reserved strictly for unknown/unreachable states (offline / error / loading). Status stays
       // 'absent' so the row still dims and the receive/send setup-gate surfaces keep their trigger.
-      return {displayText: fmtAssetCompact('0', decimals, symbol, undefined, minFractionDigits), status: 'absent', failure: null};
+      return {displayText: mark(fmt('0')), status: 'absent', failure: null};
     case 'unavailable':
-      return {displayText: '—', status: 'unavailable', failure: null};
+      return state.amount == null
+        ? {displayText: '—', status: 'unavailable', failure: null}
+        : {displayText: mark(fmt(state.amount)), status: 'unavailable', failure: null};
     case 'error':
       return {
-        displayText: state.amount == null ? '—' : fmtAssetCompact(state.amount, decimals, symbol, undefined, minFractionDigits),
+        displayText: state.amount == null ? '—' : mark(fmt(state.amount)),
         status: 'error',
         failure: state.failure ?? null,
       };

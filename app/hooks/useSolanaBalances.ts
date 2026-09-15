@@ -1,9 +1,39 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {POLL} from '../config/constants';
 import {classifyTransportFailure, readSolanaBalances} from '../solana';
 import type {SolanaBalancesRead, SolanaReadFailure, SolanaTokenBalanceResult} from '../solana';
 import {loadSolTokenState, recordSolTokenFact} from '../services/solTokenStatePersist';
 import {usePollCadence} from './usePollCadence';
+
+/** Storage key for the cross-restart NATIVE-SOL balance cache (founder requirement 2026-09-15 #3).
+ *  Keyed by secretHex — the same identity the rail derives its accounts from (token FACTS have
+ *  their own store, services/solTokenStatePersist, which already survives restart). */
+const SOL_BALANCE_CACHE_PREFIX = 'dpay.solbalance.v1';
+const solBalanceCacheKey = (secretHex: string): string => `${SOL_BALANCE_CACHE_PREFIX}.${secretHex}`;
+
+type SolBalanceCache = {at: number; balance: string};
+
+// Best-effort by the house convention (txNotes/pendingPays): an unreadable or corrupt cache is
+// simply absent — never an exception into the poll that asked for it.
+async function loadSolBalanceCache(secretHex: string): Promise<SolBalanceCache | null> {
+  try {
+    const raw = await AsyncStorage.getItem(solBalanceCacheKey(secretHex));
+    if (raw === null) return null;
+    const j: unknown = JSON.parse(raw);
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
+    const c = j as Record<string, unknown>;
+    if (typeof c.at !== 'number' || !Number.isFinite(c.at)) return null;
+    if (typeof c.balance !== 'string' || !/^\d+$/.test(c.balance)) return null;
+    return {at: c.at, balance: c.balance};
+  } catch {
+    return null;
+  }
+}
+
+function saveSolBalanceCache(secretHex: string, balance: string, at: number): void {
+  void AsyncStorage.setItem(solBalanceCacheKey(secretHex), JSON.stringify({at, balance} as SolBalanceCache)).catch(() => {});
+}
 
 /** SOL rail balance status — distinct from the token status (plan invariant #10). */
 export type SolBalanceStatus = 'loading' | 'ok' | 'unavailable' | 'error';
@@ -85,12 +115,18 @@ export function useSolanaBalances(
 ): {
   sol: SolBalanceState;
   tokens: Record<string, SolTokenBalanceState>;
+  /** Date.now() of the last successful read (0 until one lands — including a cache hydrate, which
+   *  seeds it with the CACHED `at`). The freshness authority for the SOL rail's approx marker and
+   *  its pending-payment subtraction: one clock for both consumers, the IC poll's `atByCurrency`
+   *  made per-rail. */
+  freshAt: number;
   refreshSol: () => void;
   refreshToken: (mint: string) => void;
   refreshTokens: () => void;
 } {
   const [sol, setSol] = useState<SolBalanceState>({balance: null, status: 'loading', failure: null});
   const [tokens, setTokens] = useState<Record<string, SolTokenBalanceState>>({});
+  const [freshAt, setFreshAt] = useState(0);
   const genRef = useRef(0);
   // The live poll, assigned by the effect below and driven by the cadence hook. Held in a ref so
   // the cadence never restarts just because this component re-rendered.
@@ -104,6 +140,7 @@ export function useSolanaBalances(
     if (!enabled || secretHex === null) {
       setSol({balance: null, status: 'loading', failure: null});
       setTokens({});
+      setFreshAt(0);
       pollRef.current = () => {};
       return;
     }
@@ -141,6 +178,17 @@ export function useSolanaBalances(
         }
         return changed ? next : prev;
       });
+    });
+
+    // Founder requirement #3 — hydrate the last good NATIVE-SOL read (tokens seed above; the
+    // native balance had no cross-restart home, so a funded-at-home wallet opened offline showed
+    // '—'). Seeded as status 'ok' so it RENDERS; its age travels via freshAt (seeded from the
+    // cache's own `at`) and the approx marker says "stale" once it is. Only seeds the virgin
+    // 'loading' row — a real read that raced the cache wins.
+    void loadSolBalanceCache(secretHex).then((cached) => {
+      if (!fresh() || cached === null) return;
+      setSol((prev) => (prev.status === 'loading' && prev.balance == null ? {balance: cached.balance, status: 'ok', failure: null} : prev));
+      setFreshAt((prev) => (prev === 0 ? cached.at : prev));
     });
 
     // Seed ONLY the membership delta (a newly-visible mint reads 'loading', never a stale row;
@@ -199,12 +247,22 @@ export function useSolanaBalances(
         );
         if (!fresh()) return;
         switch (read.sol.kind) {
-          case 'lamports':
+          case 'lamports': {
             setSol({balance: read.sol.lamports, status: 'ok', failure: null});
+            // The ONE successful-read clock for the rail: the approx marker's staleness test and
+            // the pending-payment subtraction's "has an authoritative read postdated the hand-off?"
+            // test both read it. Also the cross-restart cache write (founder requirement #3).
+            const at = Date.now();
+            setFreshAt(at);
+            saveSolBalanceCache(secretHex, read.sol.lamports, at);
             break;
+          }
           case 'offline':
             // The seam returns 'offline' only when `solanaRpcUrl()` is empty. Distinct from a failure.
-            setSol({balance: null, status: 'unavailable', failure: null});
+            // PRESERVE a prior/hydrated balance (founder requirement #3): the wallet keeps its
+            // number, the 'unavailable' status + the aging freshAt clock carry that it is not
+            // verified live — solView renders it approx-marked instead of '—'.
+            setSol((prev) => ({balance: prev.balance, status: 'unavailable', failure: null}));
             break;
           case 'error': {
             // Preserve the prior balance (do NOT zero it). Only the status flips — WITH the cause
@@ -273,5 +331,5 @@ export function useSolanaBalances(
   const refreshSol = pollNow;
   const refreshToken = useCallback((_mint: string) => pollNow(), [pollNow]);
   const refreshTokens = pollNow;
-  return {sol, tokens, refreshSol, refreshToken, refreshTokens};
+  return {sol, tokens, freshAt, refreshSol, refreshToken, refreshTokens};
 }
