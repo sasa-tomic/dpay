@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **169 flows**
-> (168 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **173 flows**
+> (172 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (46) · offline (12) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (10) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -120,6 +120,10 @@ wire (1) · onboard (23) · pay (46) · offline (12) · deposit (13) · withdraw
 | 110 | offline-send-gate | Offline, Pay ▸ Send to address replaces the form with an instruction naming the constraint and routing to Scan to pay (the rail that works offline); the form returns when the connection does. | offline, send-to-address, error-handling, graceful |
 | 138 | sol-settle-mismatch | SOL settle-verify: confirmed-but-mismatched body → honest doubt copy + reconcile; unreadable body → keeps polling, settles only when verified; on-chain error → rejected copy. | sol-merchant, sol-settle-verify, three-verdict |
 | 151 | offline-web-boot | The shipped /wallet is served by its service worker after the origin is killed — the app reaches READY, generates a key offline, and /api/v1/* is still refused rather than served stale. | offline, cold-start, service-worker, web-prod, pwa, honesty |
+| 179 | offline-nfc-pending | An unconfirmed offline NFC tap renders a pending row headlining the gross and deducts exactly that gross from the balance; no other asset moves. | offline, nfc, pending, balances, history |
+| 180 | offline-qr-pending | An offline QR hand-off (scan → auto-sign → "Paid" press) renders a pending row headlining the gross and deducts exactly that gross from the balance. | offline, pay, pending, balances, history |
+| 181 | offline-restart-cached | A restarted offline wallet shows its cached real balance (approx-marked per the 60 s rule), the pending row survives the restart, and the fund gate stays reachable. | offline, pending, balances, approx, restart |
+| 182 | offline-reconcile | Back online: the authoritative poll replaces the optimistic deduction, then the settled history row (same memo) retires the pending row with no duplicate. | offline, pending, reconcile, history, balances |
 | 20 | offline-handoff | offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows | offline-pay, hand-off, reconcile |
 | 21 | receive-scan | merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger | receive-scan, offline-settle |
 | 46 | sol-offline-handoff | SOL v2 scan solreq:v2 → AUTO-SIGN (no setup, no nonce) → solpay:v2 QR (U-F5 short destination rides the qr header) → honest pending. | sol-offline-sign, qr-handoff, honest-pending, sign-status-short-payee |

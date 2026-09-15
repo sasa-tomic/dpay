@@ -425,7 +425,11 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   const pendingRows = useMemo(() => pendingPays.map(p => {
     const tsSec = Math.floor(p.ts / 1000);
     return {
-      nonce: p.k, amount: p.gross ?? p.wireAmount, who: p.who ?? '', memo: p.msg ?? '',
+      // memo carries the join key when the record has no msg: annotateTxn joins rows on
+      // memo (IC) — the settled twin arrives with the raw nonce as its memo for the same
+      // join, so the projected row must too, or the device-saved note (who/fee/gross)
+      // would never attach to it. Display falls back to note.msg first, exactly as settled.
+      nonce: p.k, amount: p.gross ?? p.wireAmount, who: p.who ?? '', memo: p.msg || p.k,
       time: fmtTime(tsSec), ts: tsSec, dir: 'out' as const, assetId: p.assetId as AssetId,
       counterparty: '', ledgerRef: '', pending: true as const,
     };
