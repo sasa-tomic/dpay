@@ -5,10 +5,13 @@ of course) leveraging one of the existing DEX or CEX platforms. It should ideall
 and support ICP swap with SOL, ETH, USDC, etc."
 
 Everything below was **measured live against mainnet on 2026-09-14** (anonymous read-only
-canister queries + public HTTP APIs), not read from marketing copy. This doc is research
-only — no code, no venue registrations. It slots into the existing delegated-conversion frame
-(`2026-09-07-delegated-conversion-spec.md`) and the multi-venue registry
-(`2026-09-08-multi-venue-readiness.md`, V1–V10 landed; V11 = Solana venue boundary).
+canister queries + public HTTP APIs), not read from marketing copy. It slots into the existing
+delegated-conversion frame (`2026-09-07-delegated-conversion-spec.md`) and the multi-venue
+registry (`2026-09-08-multi-venue-readiness.md`, V1–V10 landed; V11 = Solana venue boundary).
+
+Amended later the same day after a founder-directed deep pass (less-known venues + multi-step
+routes) — see the sections marked **deep pass** and **Founder decisions (2026-09-14)**.
+Implementation status notes inline: the first recommended step is already shipped.
 
 ## Hard constraints recap (why a venue passes or fails)
 
@@ -16,8 +19,10 @@ From CLAUDE.md + the conversion spec — non-negotiable for any *registered* dpa
 
 1. dpay never a party to the trade; no dpay key/address/canister in the funds path.
 2. User's device signs every funds-moving call (ICRC-2 approve + venue call, or Solana tx).
-3. **No exchange API keys ever** — holding withdrawal-capable credentials IS custody. This
+3. **No withdrawal-capable exchange credentials ever** — holding them IS custody. This
    eliminates every CEX account-based integration (Binance, Kraken, etc.) outright.
+   (Boundary refined by founder decision 3 below: relay-held, provably non-withdrawal-capable
+   partner keys are allowed.)
 4. Venue's own quote rendered verbatim, attributed, timestamped; no ranking/blending.
 5. No dpay cut.
 6. KYC-free *preferred*: pure on-chain AMMs/aggregators are KYC-free by construction; any
@@ -25,40 +30,70 @@ From CLAUDE.md + the conversion spec — non-negotiable for any *registered* dpa
 
 ## Findings per venue
 
-### ICPSwap (IC AMM, `kind: ic_amm`) — the only venue both live and already integrated-shaped
+### ICPSwap (IC AMM, `kind: ic_amm`) — the only registrable IC venue
 
-Factory `4mmnk-kiaaa-aaaag-qbllq-cai`, `getPools()` queried live. Relevant mainnet pools
-(key = token0_token1_feeTier; depths from each pool's `getTokenAmountState()`, 2026-09-14):
+Factory `4mmnk-kiaaa-aaaag-qbllq-cai`, `getPools()` queried live. Relevant mainnet pools:
 
-| pair | pool canister | live depth (raw side readings) |
+| pair | pool canister | raw side readings (CLMM reserves, NOT spot) |
 |---|---|---|
 | ICP↔VCHF | `65mrh-fqaaa-aaaar-qapoa-cai` (shipped PoC pool) | 229,277 VCHF / 83,978 ICP |
 | ICP↔ckUSDC | `mohjv-bqaaa-aaaag-qjyia-cai` | 9,236 ICP / 392,105 ckUSDC (6 dec) |
 | ICP↔ckETH | `angxa-baaaa-aaaag-qcvnq-cai` | 11,312 ICP / 51.63 ckETH |
 | ICP↔ckBTC | `xmiu5-jqaaa-aaaag-qbz7q-cai` | 34,642 ICP / 0.562 ckBTC |
 
-- Same factory, same `depositFromAndSwap` shape, same ICRC-2 approve flow the PoC already
-  exercises. Registering any of these = a `venues[]` row in `dfx/catalog_truth.json` +
-  disclosure copy + fake-IC fixture — **zero new architecture** (V11 explicitly says venue
-  onboarding is its own surface, not a gap).
-- ckUSDC/ckETH pools have real tourist-scale depth; the ckBTC pool's BTC side (0.56 BTC) is
-  thin — disclose, let the venue's own quote speak, as with the saturated VCHF↔ckUSDC pool
-  already refused in the PoC UI.
+- **Depth caveat (deep pass correction):** CLMM `getTokenAmountState` reserves are not
+  spot-indicative across fee tiers — treat them as pool-size hints only. The tradeable truth
+  is a live quote: the ckUSDC pool quoted **44 ICP → 122.0557 ckUSDC (0.30% all-in,
+  market-aligned spot 2.783)** at CHF-scale size; 220 ICP → 610.09 ckUSDC (0.33%).
+  Pool healthy.
+- Same factory, same `depositFromAndSwap` shape, same ICRC-2 approve flow the PoC exercises.
+  **Status: ICP↔ckUSDC and ICP↔ckETH are REGISTERED (commit `9ceee43`, 2026-09-14)** —
+  truth-file rows + relay catalog + bundled app copy + fake-IC fixtures + mainnet probe pins
+  (per-venue decimal scaling 8/6 and 8/18) + e2e flow 183. ckBTC stays out (thin BTC side);
+  register later with honest-depth disclosure if depth improves.
 
 ### dpay's already-shipped burn-withdraw turns IC-side assets into native ETH/USDC
 
 `cketh.ts` burn/withdraw ckETH→native ETH and ckUSDC(ckERC20)→ERC20 is BUILT and
-live-proven (Sepolia round-trip). Therefore, with only ICPSwap pool registrations:
+live-proven. The deep pass verified the mainnet machinery end-to-end (read-only):
 
-- **ICP→USDC(Ethereum)**: ICP→ckUSDC on ICPSwap (device-signed), then existing
-  burn-withdraw (device-signed) → USDC at the user's own ETH address. Two legs, both
-  already-supported transaction types, one new venue row.
-- **ICP→ETH**: ICP→ckETH on ICPSwap, then existing burn-withdraw. Same shape.
-- The reverse direction (ETH/USDC→ICP) is the already-supported ckERC20 deposit + swap.
-  Multi-leg conversions are explicitly a PoC non-goal, but *sequenced* user-driven legs
-  (Convert → Withdraw) need no new machinery.
+- The **ckETH minter `sv3dd-oaaaa-aaaar-qacoa-cai` governs all 12 ckERC20 tokens** incl.
+  ckUSDC → ERC20 USDC (`0xA0b8…eB48`, the native Ethereum mainnet USDC contract); it holds
+  ~1.85M USDC, is scraping mainnet (Finalized blocks), and `withdraw_erc20` is live.
+- Flow: icrc2_approve on the ckERC20 ledger + ckETH ledger (gas), then `withdraw_erc20`;
+  user signs only IC-side; one chain-key EVM tx. **Fees ≈ $0.32 all-in** (65k gas @ ~1.76
+  gwei = $0.29 + ledger fees). Constraint: user must hold ckETH for gas.
+- Reverse (USDC→ckUSDC mint): deposit helper live, min 10 USDC, ≈$0.63 gas; dpay already
+  ships the calldata builder (`app/cketh.ts`).
 
-### Solana — no non-custodial ICP↔SOL path exists today
+### Multi-step routes (deep pass — all legs verified live 2026-09-14)
+
+Founder direction: chained legs are acceptable ("multiple steps and hence higher fees, but it
+would work"). Measured all-in costs at CHF 100 / CHF 500 sizes (ICP $2.78, ETH $2,558,
+SOL $103.78, 1 CHF = $1.2238):
+
+| route | legs | all-in cost | time |
+|---|---|---|---|
+| **A. ICP → USDC(Ethereum)** | ICPSwap ICP→ckUSDC + `withdraw_erc20` | **0.6% / 0.4%** | ~15 min (EVM finality) |
+| **B. ICP → USDC(Solana)** | A + CCTP V2 ETH→SOL | **0.9% / 0.5%** | +~20 s fast transfer |
+| **C. ICP → SOL** | B + Jupiter USDC(SOL)→SOL | **1.1% / 0.75%** | minutes |
+| C′ fallback | USDC(ETH)→SOL via THORChain single hop | ~0.7–1.5%, slower | minutes |
+| **D. USDC(ETH) → ckUSDC (reverse)** | CCTP/mint deposit | ≈$0.63 fixed | ~20 min |
+
+Notes:
+- **CCTP V2 is live on Solana** (source+destination): canonical native USDC, no Circle fee,
+  gas only (ETH burn ≈$0.41, SOL claim <$0.05). Wormhole/Portal gives wrapped USDCet —
+  rejected as primary, fallback only.
+- **Quote rails on Ethereum**: ParaSwap v5 (`apiv5.paraswap.io`) is keyless and live;
+  1inch is now key-gated (401); ODOS unreachable from this box.
+- **THORChain** (via Liquify gateway API): `SOL.SOL` + `ETH.USDC` pools Available, outbound
+  fees live (ETH ≈$0.25, SOL ≈$0.025) — usable but memo-heavy integration; fallback.
+- **EVM signing boundary**: dpay has no EVM key surface by design. EVM legs follow the
+  shipped ckETH onramp pattern — dpay BUILDS the calldata, the user's own wallet signs /
+  deep-links. No dpay-held EVM keys ever.
+- ckETH-gas dependency is the main UX cost of Route A/B (user needs a little ckETH).
+
+### Solana — no single-venue non-custodial ICP↔SOL path exists today
 
 - **ckSOL**: the official `dfinity/cksol` repo's mainnet canisters
   (`ljyxk-riaaa-aaaar-qb5mq-cai` minter, `la34w-haaaa-aaaar-qb5na-cai` ledger) exist and
@@ -66,63 +101,91 @@ live-proven (Sepolia round-trip). Therefore, with only ICPSwap pool registration
   this is the devnet variant; repo README says "under active development". No production
   mainnet ckSOL. When it lands: ICP↔ckSOL pool on an IC AMM + a SOL burn-withdraw leg
   exactly parallels the ckETH pattern — the architecture is already ready for it.
-- **Jupiter (Solana aggregator)**: live check `GET lite-api.jup.ag/swap/v1/quote` (keyless):
-  1 SOL→10.36 USDC, price impact 0.003%, `platformFee: null` (no integrator fee — fits the
-  no-dpay-cut rule), slippage honored. KYC-free, non-custodial, user device signs. This is
-  the venue V11 named for the Solana rail — registering it (`kind: solana_amm` or similar
-  new enum value) is what un-gates Convert for `protocol === 'solana'`. It does **not**
-  give ICP↔SOL (different chain, no ICP listing).
-- **THORChain**: KYC-free cross-chain DEX — BTC/ETH/XRP/BNB/SOL/TRON/DOGE/BCH/LTC, **no
-  ICP**. Only relevant as a future ETH↔SOL leg inside a multi-hop, which the spec defers.
-- **Chainflip**: BTC/ETH/SOL/POL — **no ICP**. Same status.
+- **Jupiter (Solana aggregator)**: live keyless check `GET lite-api.jup.ag/swap/v1/quote`:
+  1 SOL→10.36 USDC, price impact 0.003%, `platformFee: null` (fits the no-dpay-cut rule).
+  KYC-free, non-custodial, user device signs. This is the venue V11 named for the Solana
+  rail — registering it (new `kind` value) is what un-gates Convert for
+  `protocol === 'solana'`. It does **not** give ICP↔SOL by itself; in Route C it is the
+  final leg.
+- **Chainflip**: BTC/ETH/SOL/POL — **no ICP**.
 
-### KongSwap — measured dead, reject
+### KongSwap — discontinued (founder-confirmed), reject
 
 The venue Oisy integrated (backend `2ipq2-uqaaa-aaaar-qailq-cai`, the id in Oisy's
 `dfx.json` remote): `tokens()` still lists 132 IC tokens, but `pools()` returns
 `(variant { Ok = vec {} })` — **zero pools, drained**. `kongswap.io` and all subdomains
-return Cloudflare 530/1016 (origin gone). CoinGecko shows ~$2.44 24h volume on KONG.
-Its 2025 "bridgeless native BTC/ETH/SOL" marketing was real (Chain-Fusion) but there is
-no usable venue there today. SNS DAO still exists on-paper
-(`ormnc-tiaaa-aaaaq-aadyq-cai`). Do not build against it; revisit only if it demonstrably
-relaunches.
+return Cloudflare 530/1016 (origin gone). CoinGecko showed ~$2.44 24h volume on KONG.
+Founder confirmed 2026-09-14: discontinued. Do not build against it; revisit only if it
+demonstrably relaunches.
 
-### KYC-light instant exchangers (ChangeNOW, SimpleSwap, etc.) — custodial mid-trade
+### Less-known CeFi / instant exchangers (deep pass, live-checked 2026-09-14)
 
-They list ICP↔SOL/ETH with no signup, but funds transit an exchange-controlled address and
-KYC can be triggered by their risk engine. Under constraint 3's spirit (no dpay-held creds)
-they could only ever appear as a *user-directed external handoff* (user opens their site
-themselves, like any browser link) — **not** as a registered quote venue in dpay's
-multi-venue list. Recommend: out of scope for the Convert screen.
+- **ChangeNOW — FAIL (ICP delisted).** Live keyless API: ICP absent from
+  `api.changenow.io/v2/exchange/currencies`; `min-amount?fromCurrency=icp` →
+  `pair_is_inactive`. The ICP webpage is a stale SEO shell. KYC is risk-triggered (Sumsub).
+  Re-check on relist.
+- **SwissBorg — FAIL.** MiCA-licensed custodial app, unconditional KYC, no third-party API.
+  (Lists ICP since Sep 2025 — irrelevant without API.)
+- **DFX (dfx.swiss) — PASS-with-tradeoffs; the only registerable CeFi found.** Fiat broker +
+  crypto swap, VQF/SRO-regulated (DFX Services AG, Zug). Live keyless catalog
+  (`api.dfx.swiss/v1/asset`, 182 assets): ICP (id 420), SOL, ETH, USDC on Ethereum/Polygon/
+  Solana/Base/Arbitrum/Optimism/BSC. Public quote endpoint (`PUT /v1/swap/quote`: rate,
+  fees, min/max, exactPrice); swap creation is per-user session (`PUT /v1/swap/paymentInfos`
+  → deposit address; `POST /swap/paymentInfos/{id}/confirm`) — dpay never holds a
+  withdrawal-capable key. Threshold-KYC ladder (refund after 7 days if refused), Scorechain
+  address screening, SEPA/CHF/EUR fiat side (relevant to the separate fiat-funding
+  objective). Tradeoffs: DFX is principal mid-trade, KYC at size, Swiss AML gate.
+- **Field sweep**: SideShift.ai — ICP live, no keyless API (account+token; old api host
+  NXDOMAIN). SimpleSwap — ICP live, API key-gated; running a "ONE_TIME_KYC_EXPERIMENT"
+  since 2026-03. LetsExchange — ICP↔SOL live, partner-oriented API (not keyless).
+  Trocador — ICP listed (aggregator; partners may KYC). FixedFloat — bot-walled, publishes
+  0.5% float / 1% fixed. Exolix, ChangeHero — no ICP.
+- **IC DEX sweep (beyond ICPSwap)**: ICDex/ICLighthouse — order-book, pairs exist on paper
+  (router `i5jcx-ziaaa-aaaar-qaazq-cai`) but books are empty/junk (ICP/ckUSDC: one joke
+  ask, vol24h=0; no VCHF pair) and execution is deposit-account custody — not registrable.
+  Oisy Trade — 3 tokens, ~23% spread, deposit-custody — no. Sonic — WICP wraps only.
+  Bitfinity — EVM EOA keys required (IC identity can't sign EVM txs) — out of scope.
+  InfinitySwap never launched. HoudiniSwap/SwapSpace — custodial aggregators, fail rules.
+  **ICPSwap remains the only registrable IC venue.**
 
 ## Feasibility matrix (asked pairs)
 
 | pair | verdict | path |
 |---|---|---|
-| ICP↔USDC | **Feasible now** | ICPSwap ICP↔ckUSDC pool (live, deep) [+ existing burn-withdraw if native-ETH USDC wanted] |
-| ICP↔ETH | **Feasible now** | ICPSwap ICP↔ckETH + existing ckETH burn-withdraw (both legs shipped surfaces) |
-| ICP↔BTC | Feasible, thin | ICPSwap ICP↔ckBTC pool live but 0.56 BTC side — quote verbatim + disclose |
-| ICP↔SOL | **Not yet, non-custodially** | No venue lists ICP with native SOL. Real paths: (a) mainnet ckSOL lands → IC AMM + SOL burn-withdraw (architecture ready); (b) multi-hop ICP→ckETH→ETH→SOL via THORChain/Chainflip (multi-hop is a spec non-goal today); (c) CeFi handoff (custodial, out of scope). Watch `dfinity/cksol`. |
+| ICP↔USDC | **Feasible — registered** | ICPSwap ICP↔ckUSDC pool (live, healthy; commit `9ceee43`); Route A/B extend to native USDC |
+| ICP↔ETH | **Feasible — registered** | ICPSwap ICP↔ckETH + existing burn-withdraw (Route A shape) |
+| ICP↔BTC | Feasible, thin | ICPSwap ICP↔ckBTC pool live but 0.56 BTC side — quote verbatim + disclose when registered |
+| ICP↔SOL | **Feasible as multi-hop** (Routes B/C verified leg-by-leg) | ICP→ckUSDC→USDC(ETH)→USDC(SOL)→SOL; single-venue path waits on mainnet ckSOL |
 | ICP↔VCHF | Shipped | the live PoC |
-| SOL↔USDC (rail-local) | Feasible when Solana venue registered | Jupiter (V11's named venue), keyless API, no platform fee |
+| SOL↔USDC (rail-local) | Feasible when Solana venue registered | Jupiter (V11's named venue), keyless, no platform fee |
 
-All DEX paths above are KYC-free by construction; no CEX passes the no-API-keys rule as a
-registered venue.
+All DEX paths above are KYC-free by construction. Registered CeFi (DFX only) is
+threshold-KYC by law — hence "register after DEX PoC" decision below.
 
-## Recommended unblocked next steps (in work-order terms)
+## Founder decisions (2026-09-14)
 
-1. Register ICPSwap `ICP↔ckUSDC` and `ICP↔ckETH` as additional pair-scoped venues
-   (`dfx/catalog_truth.json` rows + disclosure copy + fake-IC fixtures; probe pins like
-   `just swap-venue-probe` extended per pool). Pure onboarding; V1–V10 machinery applies
-   as-is (N-venue chooser, quote verbatim, recovery engine).
-2. Keep the ckBTC pool out until depth improves, or register with the same honest-depth
-   refusal the saturated VCHF↔ckUSDC pool got.
-3. Jupiter stays the named candidate for the first `kind: solana_*` venue (V11) when the
-   SOL Convert surface is prioritized — its keyless, fee-less, slippage-honest API fits
-   every invariant tested in V9.
-4. ckSOL: no action possible until the mainnet (non-devnet) minter/ledger deploy; re-run
-   this probe (`icrc1_name` on the ledger) when the repo announces launch.
-5. KongSwap: rejected with evidence above; do not revisit without a live pools() reading.
+1. **DFX**: register only after the DEX routes have a live PoC. DFX stays a researched
+   candidate in this doc until then.
+2. **Multi-step UX**: build as a **single multi-hop intent** — one "ICP→SOL" flow
+   orchestrating all legs with per-leg status/recovery. (Supersedes the delegated-conversion
+   spec's multi-hop non-goal; spec amendment lands with the implementation.)
+3. **Relay-held partner keys**: allowed for quote surfaces, with boundary — keys are held on
+   the relay (user never sees them), must be provably non-withdrawal-capable (no funds on
+   those accounts ⇒ nothing to withdraw), and dpay switches to pure read-only keys when a
+   venue offers them. Amends constraint 3's grey area; withdrawal-capable keys remain
+   absolute no.
+
+## Work order (updated after the 2026-09-14 registrations)
+
+1. ~~Register ICPSwap ICP↔ckUSDC and ICP↔ckETH~~ — **DONE, commit `9ceee43`** (probe
+   ratios 0.9969–0.9970 live; e2e flow 183 green).
+2. Multi-hop orchestration: single intent, per-leg status/recovery (widens
+   `app/convert.ts` legs shape + Convert UX; extends the record schema).
+3. CCTP v2 + Jupiter legs (Routes B/C) on the EVM-calldata-build/user-wallet-signs pattern.
+4. Relay-held partner-key infrastructure (SOL-RPC-key pattern; SideShift first candidate).
+5. DFX registration decision after (2)–(3) proven live (founder B2B contact gates it).
+6. ckBTC registration only on depth improvement; ckSOL watch (`icrc1_name` on
+   `la34w-haaaa-aaaar-qb5na-cai`); KongSwap rejected with evidence above.
 
 Regulatory posture is unchanged: officials/counsel confirmation of the delegated-conversion
 frame remains founder-owned (spec §After PoC) — this research adds venues inside that same
