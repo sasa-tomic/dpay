@@ -94,7 +94,13 @@ export async function run() {
       'the Route A row is offered beside the direct pair');
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
       'no destination address input before the route is picked');
-    assertIncludes(await driver.readText('convert-route-note'), 'One route', 'the one-route honesty line says so');
+    // The one-route honesty line (spec §7) speaks only when the route list is the picker's whole
+    // story: since 714dcf5 (SideShift) this ICP pair also offers a cefi row, so the note stays
+    // silent — "one route" would mislabel a picker that also offers an exchange-service path.
+    assert(await driver.findByTestID('convert-dest-cefi-sideshift', {timeoutMs: 2_000}) != null,
+      'the SideShift cefi row is offered beside the route');
+    assert(await driver.findByTestID('convert-route-note', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the one-route note stays quiet when a cefi path shares the picker');
 
     await driver.click(ROUTE_ROW);
     await driver.type('convert-dest-address', DEST);
