@@ -56,7 +56,7 @@ export async function run() {
     // Every request to this origin fails once we kill it; that is the flow, not a defect.
     driver.allowRequestFailuresFrom(base);
 
-    await driver.navigate(base, `/wallet?relay=${encodeURIComponent(base)}`, { timeoutMs: 20_000 });
+    await driver.navigate(base, `/wallet?relay=${encodeURIComponent(base)}`, { waitUntil: 'domcontentloaded', timeoutMs: 20_000 });
     await driver.waitReady({ timeoutMs: 20_000 });
 
     // 1 + 2. The worker is active at the ROOT and has precached the shell.
@@ -86,7 +86,7 @@ export async function run() {
     }, base);
     assert(!stillUp, 'the relay must be DEAD before the offline reload is meaningful');
 
-    await driver.navigate(base, '/wallet', { timeoutMs: 20_000 });
+    await driver.navigate(base, '/wallet', { waitUntil: 'domcontentloaded', timeoutMs: 20_000 });
     await driver.waitReady({ timeoutMs: 20_000 });
     // The document came OFF the worker: `workerStart` is non-zero only when a service worker
     // handled the navigation, and with the origin dead a 200 can come from nowhere else.

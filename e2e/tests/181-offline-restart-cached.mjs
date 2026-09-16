@@ -5,12 +5,15 @@
 // read APPROXIMATE.
 //
 // The approx marker follows the founder's >1 min rule (2026-09-15): a freshly offline wallet
-// shows its plain number; after ~a minute offline the figure is stale enough to be marked. This
-// flow pins BOTH edges: unmarked right after the hand-off, marked once the staleness clock passes
-// 60 s — and still marked (immediately, from the cache's own timestamp) after the restart.
+// shows its plain number; after the staleness bound passes the figure is marked. This flow pins
+// BOTH edges: unmarked right after the hand-off, marked once the staleness clock passes — and
+// still marked (from the cache's own timestamp) after the restart.
 //
-// The slow leg is the point: the wallet's freshness tick fires every 30 s and the marker appears
-// on the first tick past 60 s. Budget accordingly (~90 s worst case).
+// The prod magnitude (60 s, ticked by a 30 s re-render) would make this a ~90 s wall-clock
+// sleep, so the flow shrinks the Wallet.tsx staleness SEAM (__DPAY_TEST_BALANCE_STALE_MS = 3 s,
+// __DPAY_TEST_BALANCE_TICK_MS = 250 ms — per-call reads) after the edge-1 plain assert: the
+// MECHANISM (fresh ⇒ plain, stale ⇒ marked, cache-age ⇒ marked on boot) is what e2e pins; the
+// prod 60 s magnitude stays pinned as the untouched default in Wallet.tsx.
 import {
   setup, assert, assertIncludes, onboardWallet, armPayScan, waitForWallet, selectCurrency, openBalances,
   faucetAccount, accountOf, goOffline,
@@ -28,8 +31,8 @@ export const meta = {
   name: 'offline-restart-cached',
   journey: 'offline',
   covers: ['offline', 'pending', 'balances', 'approx', 'restart'],
-  verifies: 'A restarted offline wallet shows its cached real balance (approx-marked per the 60 s rule), the pending row survives the restart, and the fund gate stays reachable.',
-  timeoutMs: 240_000,
+  verifies: 'A restarted offline wallet shows its cached real balance (approx-marked per the staleness rule), the pending row survives the restart, and the fund gate stays reachable.',
+  timeoutMs: 90_000, // onboard + offline hand-off + seam-shrunk staleness edges + reload (contention budget)
 };
 
 export async function run() {
@@ -84,16 +87,28 @@ export async function run() {
     assert(!sheet.includes('~1.1 ICP'), 'a freshly offline figure must NOT be approx-marked yet (the >1 min rule)');
     console.log('[181-offline-restart-cached] ✓ plain (unmarked) deducted balance — staleness < 60 s');
 
-    // --- Edge 2: the staleness clock passes 60 s ⇒ the figure is marked where the user reads it.-
-    // The sheet stays open across the wait; the wallet's 30 s staleness tick re-renders it.
-    assert(await driver.waitForText('~1.1 ICP', { timeoutMs: 110_000 }),
-      'the balance figure itself must become approx-marked once the offline read is >1 min stale');
-    console.log('[181-offline-restart-cached] ✓ approx marker appeared on the amount (staleness > 60 s)');
+    // --- Edge 2: the staleness clock passes ⇒ the figure is marked where the user reads it.-
+    // The sheet stays open across the wait. Shrink the Wallet staleness seam FIRST (the edge-1
+    // plain assert above ran against the real 60 s default): 3 s bound + 250 ms tick ⇒ the
+    // marker lands in ~3.5 s instead of the ~90 s the prod magnitudes would take.
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_BALANCE_STALE_MS = 3000;
+      globalThis.__DPAY_TEST_BALANCE_TICK_MS = 250;
+    });
+    assert(await driver.waitForText('~1.1 ICP', { timeoutMs: 15_000 }),
+      'the balance figure itself must become approx-marked once the offline read is past the staleness bound');
+    console.log('[181-offline-restart-cached] ✓ approx marker appeared on the amount (staleness past bound)');
 
     // --- The restart: reload against the STILL-DEAD relay (the persisted retarget). -------------
     console.log('[181-offline-restart-cached] reloading the page (offline restart)…');
     await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(deadRelay)}`, { waitUntil: 'domcontentloaded', timeoutMs: 8_000 });
     await driver.waitReady({ timeoutMs: 8_000 });
+    // Fresh document ⇒ the per-call seam globals are gone; re-apply them so the cache's own
+    // timestamp (already past the bound) marks on the first render, no fresh-poll needed.
+    await driver.eval(() => {
+      globalThis.__DPAY_TEST_BALANCE_STALE_MS = 3000;
+      globalThis.__DPAY_TEST_BALANCE_TICK_MS = 250;
+    });
 
     // The wallet shell mounts, the cache hydrates, and the numbers are REAL immediately:
     // the sheet's ICP row carries the deducted balance with the approx marker (the cache's own

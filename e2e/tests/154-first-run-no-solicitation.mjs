@@ -69,7 +69,7 @@ export async function run() {
 
     // A relay that hands out nothing: the app has nothing to give, which is exactly when a lesser
     // design starts asking.
-    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(noFaucet.baseURL)}`, {timeoutMs: 8_000});
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(noFaucet.baseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
 
     // 1. The walkthrough.
@@ -78,13 +78,13 @@ export async function run() {
     await skipWalkthroughIfPresent(driver);
 
     // 2. The create form.
-    await driver.findByTestID('btn-create', {timeoutMs: 8_000});
+    await driver.findByTestID('btn-create', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await assertNoSolicitation(driver, 'create form');
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-nosolicit', {timeoutMs: 8_000});
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-nosolicit', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.click('btn-create', {timeoutMs: 4_000});
 
     // 3. The backup gate.
-    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
+    await driver.findByTestID('mnemonic-backup', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await assertNoSolicitation(driver, 'backup gate');
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
@@ -117,7 +117,7 @@ export async function run() {
     // POSITIVE CONTROL. Funding is one deliberate tap away for a user who wants it — the Add money
     // action is right there on Home. Without this the flow would pass on a build that had simply
     // lost the ability to fund anything.
-    await driver.findByTestID('btn-home-add-money', {timeoutMs: 8_000});
+    await driver.findByTestID('btn-home-add-money', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     console.log('[154-first-run-no-solicitation] ✓ positive control: Home DOES offer Add money, as a choice');
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);

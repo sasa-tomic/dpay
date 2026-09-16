@@ -57,7 +57,7 @@ export async function run() {
     // Onboard with home=EUR — the wallet lands on the EURC rail (funded by the stub below).
     console.log('[137-sol-cross-mint-sign-gate] onboarding with home=EUR…');
     await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-cross-mint', {timeoutMs: 8_000});
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-cross-mint', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.click('btn-create');
     await driver.findByTestID('mnemonic-backup');
     await driver.click('mnemonic-backup-checkbox');
@@ -127,14 +127,14 @@ export async function run() {
     await openBalances(driver);
     await driver.click('asset-sol-eurc-select');
     await driver.click('tab-pay');
-    await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
+    await driver.findByTestID('sol-pay-scan', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
 
     // 1. REFUSAL: a cross-mint solreq naming the absent USDC — refused at the scan, BY NAME,
     //    with the practical next action; nothing signs and no signed QR ever appears.
     console.log('[137-sol-cross-mint-sign-gate] scanning a USDC solreq against the absent USDC account…');
     await armPayScan(driver);
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solreqUri('ab', USDC_MINT, 'USDC'));
-    await driver.waitForText('USDC account yet', {timeoutMs: 8_000});
+    await driver.waitForText('USDC account yet', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     const refusal = await driver.readText('sol-pay-err');
     assertIncludes(refusal, 'USDC', 'the refusal must name the asset');
     assertIncludes(refusal, 'Receive', 'the refusal must give the next action (Receive ▸ create the account)');
@@ -148,7 +148,7 @@ export async function run() {
     await armPayScan(driver);
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solreqUri('cd', EURC_MINT, 'EURC'));
     await driver.findByTestID('sol-pay-qr', {timeoutMs: 10_000});
-    await driver.waitForText('Share signed code', {timeoutMs: 8_000});
+    await driver.waitForText('Share signed code', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.screenshot('137-cross-mint-signed');
     console.log('[137-sol-cross-mint-sign-gate] ✓ fundable request-mint signed offline (signed QR shown)');
 
@@ -158,7 +158,7 @@ export async function run() {
     //    outranks whatever the endpoint is doing now, which is itself part of the gate's contract.
     console.log('[137-sol-cross-mint-sign-gate] fresh wallet, endpoint refusing from the first poll…');
     await driver.clearStorage();
-    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`, {timeoutMs: 8_000});
+    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
     await driver.eval(() => {
       // The measured 2026-09-08 outage: the endpoint ANSWERS and refuses this wallet (HTTP 429).
@@ -182,7 +182,7 @@ export async function run() {
       };
     });
     await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-cross-mint-down', {timeoutMs: 8_000});
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-cross-mint-down', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.click('btn-create');
     await driver.findByTestID('mnemonic-backup');
     await driver.click('mnemonic-backup-checkbox');
@@ -201,7 +201,7 @@ export async function run() {
       {timeoutMs: 15_000},
     );
     await driver.click('tab-pay');
-    await driver.findByTestID('sol-pay-scan', {timeoutMs: 8_000});
+    await driver.findByTestID('sol-pay-scan', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await armPayScan(driver);
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), solreqUri('ef', EURC_MINT, 'EURC'));
     // It SIGNED — the hand-off QR is there. That is the non-negotiable: a caveat is not a block.

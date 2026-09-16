@@ -46,7 +46,7 @@ export const meta = {
   journey: 'convert',
   covers: ['convert', 'icp', 'vchf', 'fail-withdrawal', 'pending-withdrawal', 'honest-unknown', 'pool-ok-not-settled', 'expiry-countdown', 'settle-pending', 'resolution', 'ledger-watch', 'no-resubmit'],
   verifies: 'When the pool replies #ok but holds the output (fail_withdrawal knob), the app parks on an honest pending_withdrawal screen — never done from #ok — naming the asset owed, where it sits, the pool principal, that dpay cannot reverse it, and the approval-expiry bound; settle_pending drains the venue queue and the same screen flips to done with the SEEN amount, with nothing re-signed and VCHF credited exactly.',
-  timeoutMs: 240000, // onboard + settle-watch exhaustion + knob + re-arm + probe + polls (full-suite contention budget)
+  timeoutMs: 120000, // onboard + settle-watch exhaustion + knob + re-arm + probe + polls (seam-shrunk cadences; contention budget)
 };
 
 export async function run() {
@@ -81,8 +81,9 @@ export async function run() {
     let pending = null;
     for (let round = 0; round < 5 && pending == null; round++) {
       await driver.click('btn-convert-confirm', { timeoutMs: 6_000 });
-      // The settle watch exhausts (40 probes × 1.5s) → pending_withdrawal. NOT done.
-      pending = await driver.findByTestID('convert-pending', { timeoutMs: 90_000 }).catch(() => null);
+      // The settle watch exhausts (harness seam: ~10 probes × 100 ms via __DPAY_TEST_CONVERT_ENGINE)
+      // → pending_withdrawal. NOT done.
+      pending = await driver.findByTestID('convert-pending', { timeoutMs: 20_000 }).catch(() => null);
       if (pending == null) {
         const changed = await driver.readText('convert-quote-changed').catch(() => null);
         if (changed != null) {
@@ -113,7 +114,7 @@ export async function run() {
     console.log('[141-convert-pending-withdrawal] draining the venue queue (settle_pending)…');
     await swapPoolKnob(relayBaseURL, { pool: POOL, fail_withdrawal: false, settle_pending: true });
     assert(
-      await driver.waitForText('Converted', { timeoutMs: 90_000 }),
+      await driver.waitForText('Converted', { timeoutMs: 30_000 }),
       'resolution flips the SAME screen to done (re-arm re-watches within seconds)',
     );
     const doneBody = await driver.readText('convert-done');

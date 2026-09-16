@@ -48,9 +48,9 @@ async function readJourney(driver) {
 /** Walk a fresh context from the walkthrough to the practice request card. */
 async function onboardToPractice(driver, name) {
   await skipWalkthroughIfPresent(driver);
-  await driver.typeByPlaceholder('e.g. Alice', name, {timeoutMs: 8_000});
+  await driver.typeByPlaceholder('e.g. Alice', name, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
   await driver.click('btn-create', {timeoutMs: 4_000});
-  await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
+  await driver.findByTestID('mnemonic-backup', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
   await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
   await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
   await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
@@ -88,7 +88,7 @@ export async function run() {
     const stampsBefore = [...((await readJourney(driver))?.stamps ?? [])].sort();
 
     await driver.click('btn-practice-review', {timeoutMs: 5_000});
-    await driver.click('btn-approve', {timeoutMs: 8_000});
+    await driver.click('btn-approve', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.findByTestID('practice-outcome', {timeoutMs: 40_000});
 
     assertEq(
@@ -116,7 +116,7 @@ export async function run() {
 
     // ---- B. REJECTED: the LEDGER refuses, and the screen quotes it. ---------------------------
     await driver.clearStorage();
-    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(noFaucet.baseURL)}`, {timeoutMs: 8_000});
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(noFaucet.baseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
     // Tell the wallet it has practice money. It does not — this relay hands out none — so the only
     // thing that can refuse the payment is the ledger itself, which is the point.
@@ -134,7 +134,7 @@ export async function run() {
     const refusedIdentity = await accountOf(driver);
     const refusedBefore = [...((await readJourney(driver))?.stamps ?? [])].sort();
     await driver.click('btn-practice-review', {timeoutMs: 5_000});
-    await driver.click('btn-approve', {timeoutMs: 8_000});
+    await driver.click('btn-approve', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.findByTestID('practice-outcome', {timeoutMs: 40_000});
 
     assertEq(await driver.readText('practice-outcome-body'), 'Nothing moved.', 'a refusal says exactly that');

@@ -44,9 +44,9 @@ export async function run() {
 
     // Mint a real seed the honest way: create a wallet and read its own 24 words off the gate.
     await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-seed-source', {timeoutMs: 8_000});
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-seed-source', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.click('btn-create', {timeoutMs: 4_000});
-    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
+    await driver.findByTestID('mnemonic-backup', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     const words = [];
     for (let i = 0; i < 24; i++) {
       words.push((await driver.readText(`mnemonic-word-${i}`)).replace(/^\d+\s*/, '').trim());
@@ -61,13 +61,13 @@ export async function run() {
 
     // A NEW device: nothing carried over, not even the walkthrough's own stamp.
     await driver.clearStorage();
-    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {timeoutMs: 8_000});
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
     await skipWalkthroughIfPresent(driver);
 
     await driver.click('btn-restore', {timeoutMs: 5_000});
     await driver.findByTestID('restore-mnemonic-input', {timeoutMs: 5_000});
-    await driver.type('restore-mnemonic-input', words.join(' '), {timeoutMs: 8_000});
+    await driver.type('restore-mnemonic-input', words.join(' '), {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.type('username-input', 'e2e-restored', {timeoutMs: 5_000});
     await driver.click('btn-restore-confirm', {timeoutMs: 5_000});
 

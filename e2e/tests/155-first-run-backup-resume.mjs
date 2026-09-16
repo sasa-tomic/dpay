@@ -48,9 +48,9 @@ export async function run() {
     const {driver, webBaseURL, relayBaseURL} = env;
 
     await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-resume', {timeoutMs: 8_000});
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-resume', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.click('btn-create', {timeoutMs: 4_000});
-    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
+    await driver.findByTestID('mnemonic-backup', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     const before = await readWords(driver);
     assert(before.every(w => w.length > 0), `all 24 words must render (got ${JSON.stringify(before)})`);
 
@@ -64,7 +64,7 @@ export async function run() {
     // because it is not app state — it is the harness telling the build which relay exists at all,
     // and a bare `/` sends the reloaded app at the BAKED default (127.0.0.1:8787), whose refused
     // polls the driver reports as unexpected page diagnostics.
-    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {timeoutMs: 8_000});
+    await driver.navigate(webBaseURL, `/?relay=${encodeURIComponent(relayBaseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
 
     // 1 + 2: back ON the gate, with the same words.

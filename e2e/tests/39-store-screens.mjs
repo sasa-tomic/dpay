@@ -103,8 +103,9 @@ export async function run() {
     await openBalances(driver);
     await selectCurrency(driver, 'ckbtc');
     await openReceiveAddress(driver);
-    await driver.waitForText('bc1', { timeoutMs: 12_000 }).catch(() => {});
-    await driver.findByTestID('deposit-address', { timeoutMs: 8_000 }).catch(() => {});
+    // One wait, not two: the element's presence IS the address rendering (the 'bc1' text-wait
+    // duplicated it and burned its full timeout whenever the address shape differed).
+    await driver.findByTestID('deposit-address', { timeoutMs: 12_000 }).catch(() => {});
     await driver.screenshot('39-store-deposit');
     console.log('[39-store-screens] ✓ deposit address');
 

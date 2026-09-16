@@ -45,7 +45,7 @@ export const meta = {
   journey: 'convert',
   covers: ['convert', 'icp', 'vchf', 'pending-withdrawal', 'reload', 'identity-scoped-store', 'resume-engine', 'unmounted-driving', 'no-resubmit', 'resolution'],
   verifies: 'A conversion parked on pending_withdrawal survives a full app reload under the identity-scoped store key, and the wallet-load resume engine (no Convert screen open) drives it to done when the venue settles — nothing re-signed, outTx recorded, VCHF credited exactly; a terminal record is not resurrected onto the reopened screen.',
-  timeoutMs: 240000, // onboard + pending park + reload + engine re-arm/probe cycles + balance round-trip
+  timeoutMs: 120000, // onboard + pending park + reload + engine re-arm/probe cycles (seam-shrunk cadences)
 };
 
 export async function run() {
@@ -75,7 +75,7 @@ export async function run() {
     let pending = null;
     for (let round = 0; round < 5 && pending == null; round++) {
       await driver.click('btn-convert-confirm', {timeoutMs: 6_000});
-      pending = await driver.findByTestID('convert-pending', {timeoutMs: 90_000}).catch(() => null);
+      pending = await driver.findByTestID('convert-pending', {timeoutMs: 20_000}).catch(() => null);
       if (pending == null) {
         const changed = await driver.readText('convert-quote-changed').catch(() => null);
         if (changed == null) break; // no panel and no interrupt — surface the failure below
@@ -109,10 +109,11 @@ export async function run() {
     console.log('[169-convert-resume-reload] draining the venue queue (settle_pending)…');
     await swapPoolKnob(relayBaseURL, {pool: POOL, fail_withdrawal: false, settle_pending: true});
 
-    // Poll the scoped store until the ENGINE alone has driven it to done. The engine's cadence:
-    // ledger re-arm every 10s + a settle watch of 8 probes × 1s — so done lands within ~30s.
+    // Poll the scoped store until the ENGINE alone has driven it to done. The engine's cadence
+    // under the harness seam (__DPAY_TEST_CONVERT_ENGINE): ledger re-arm every 500 ms + a settle
+    // watch of 10 probes × 100 ms — so done lands within ~2 s; the deadline leaves contention headroom.
     let resolved = null;
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + 30_000;
     while (Date.now() < deadline && resolved == null) {
       resolved = await driver.eval((k) => {
         const raw = window.localStorage.getItem(k);
@@ -121,7 +122,7 @@ export async function run() {
         return rec == null ? null : {step: rec.step, outTx: rec.outTx ?? null, outAmountNet: rec.outAmountNet ?? null};
       }, scopedKey);
       if (resolved?.step !== 'done') resolved = null;
-      if (resolved == null) await new Promise((r) => setTimeout(r, 2_000));
+      if (resolved == null) await new Promise((r) => setTimeout(r, 250));
     }
     assert(resolved != null, 'the unmounted engine drove the reloaded record to done (wallet-load resume)');
     assert(resolved.outTx != null, 'done carries the payout row identity (outTx, the ledger block index)');

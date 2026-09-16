@@ -167,11 +167,11 @@ export async function run() {
     // already EXPANDED — the section that sentence names (the Solana endpoint editor is the
     // advanced content) — and the sheet closes normally after.
     await driver.click('rail-unreadable-solana', {timeoutMs: 4_000});
-    await driver.findByTestID('btn-settings-close', {timeoutMs: 8_000});
-    await driver.findByTestID('settings-sol-rpc', {timeoutMs: 8_000});
+    await driver.findByTestID('btn-settings-close', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await driver.findByTestID('settings-sol-rpc', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.screenshot('147-rail-unreadable-escape');
     await driver.click('btn-settings-close', {timeoutMs: 4_000});
-    await driver.waitGone('btn-settings-close', {timeoutMs: 8_000});
+    await driver.waitGone('btn-settings-close', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
 
     // --- nothing answers anywhere, the IC boundary probe included (OFFLINE) -----------------
     // HONESTY: this is the payer's normal, designed state, and the wallet cannot see far enough
@@ -198,7 +198,7 @@ export async function run() {
     // so the home headline is a Solana number and the outage is the home currency's own outage.
     console.log('[147-rail-unreadable] home=EUR: the landing headline explains its own dash…');
     await driver.clearStorage();
-    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`, {timeoutMs: 8_000});
+    await driver.navigate(env.webBaseURL, `/?relay=${encodeURIComponent(env.relayBaseURL)}`, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 10_000});
     // clearStorage + navigation wiped EVERY page global: the driver's evaluateOnNewDocument
     // re-installs only the URL override and the accounts helper — the stub, its state object and
@@ -221,9 +221,9 @@ export async function run() {
       };
     });
     await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-rail-unreadable-eur', {timeoutMs: 8_000});
+    await driver.typeByPlaceholder('e.g. Alice', 'e2e-rail-unreadable-eur', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.click('btn-create', {timeoutMs: 4_000});
-    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
+    await driver.findByTestID('mnemonic-backup', {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
     await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
     await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});

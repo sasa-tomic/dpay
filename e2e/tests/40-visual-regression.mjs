@@ -172,7 +172,6 @@ export async function run() {
     //    count), so mask it (same mechanism as the request QR) — an unmasked diff was a standing
     //    flake riding just under the 0.5% tolerance.
     await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    await driver.waitForText('No payments yet', { timeoutMs: 3_000 }).catch(() => {});
     if (await driver.isPresent('hist-time-0')) {
       masks['hist-time-0'] = await getTestIDRectDevicePx(driver, 'hist-time-0');
     }
