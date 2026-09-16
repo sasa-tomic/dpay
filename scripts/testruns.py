@@ -388,7 +388,6 @@ def cmd_floor(a):
 
 
 def cmd_timing(a):
-    commit = resolve_commit(a.commit)
     if a.suite is None:
         # List mode: latest run of EVERY suite, wall-desc — the "where does the time go" overview.
         with connect() as con:
@@ -417,16 +416,27 @@ def cmd_timing(a):
                   f"cpu={float(d.get('cpu') or 0):>7.1f}s  {tcol}  {age(ts)} old  @ {rev[:12]}")
         return
     with connect() as con:
-        row = con.execute(
-            """SELECT id, result, ts, detail FROM runs
-               WHERE rev=? AND suite=? ORDER BY id DESC LIMIT 1""",
-            (commit, a.suite),
-        ).fetchone()
+        if a.commit:
+            pin = resolve_commit(a.commit)
+            row = con.execute(
+                """SELECT id, result, ts, detail, rev FROM runs
+                   WHERE rev=? AND suite=? ORDER BY id DESC LIMIT 1""",
+                (pin, a.suite),
+            ).fetchone()
+            missing = f"no '{a.suite}' record at {pin[:12] or '(no commits)'}"
+        else:
+            # Default: the LATEST run of the suite, at whatever rev it was recorded —
+            # "just timing e2e" means "last e2e run", not "e2e at HEAD".
+            row = con.execute(
+                """SELECT id, result, ts, detail, rev FROM runs
+                   WHERE suite=? ORDER BY id DESC LIMIT 1""",
+                (a.suite,),
+            ).fetchone()
+            missing = f"no '{a.suite}' runs recorded yet"
     if not row:
-        print(f"== timing: no '{a.suite}' record at {commit[:12] or '(no commits)'}"
-              f" — unknown is NOT fail")
+        print(f"== timing: {missing} — unknown is NOT fail")
         return
-    run_id, result, ts, detail = row
+    run_id, result, ts, detail, rev = row
     try:
         d = json.loads(detail) if detail else {}
         if not isinstance(d, dict):
@@ -444,7 +454,7 @@ def cmd_timing(a):
                           "tests": [{"name": n, "status": s, "secs": x}
                                     for n, s, x in tests]}, sort_keys=True))
         return
-    print(f"== {a.suite} @ {commit[:12]}  {result}  {age(ts)} old  "
+    print(f"== {a.suite} @ {rev[:12]}  {result}  {age(ts)} old  "
           f"wall={d.get('secs', '?')}s  cpu={d.get('cpu', '?')}s  exit={d.get('exit', '?')}")
     if not tests:
         print("   (no per-test timings recorded for this run)")
