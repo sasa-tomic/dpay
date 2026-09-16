@@ -88,7 +88,7 @@ import {createSideShiftFixedShift, fetchSideShiftQuote, type SideShiftQuoteResul
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import {multihopRoutesFrom} from '../routes';
-import {solanaAmmVenueForMint} from '../config/venues';
+import {solanaVenuesForMint} from '../config/venues';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
@@ -1547,10 +1547,37 @@ function solAssetOfMint(mint: string): {symbol: string; decimals: number} | null
   return found != null ? {symbol: found[0], decimals: found[1].decimals} : null;
 }
 
-/** The Solana analog of `resolveLegs`: the registry's own solana_amm row for this mint names the
- *  pair; the OTHER side of `pair_ledgers` is the destination. Null when no registered venue
- *  serves the asset (the fail-closed panel renders). */
-function resolveSolLegs(asset: Extract<SelectableAsset, {protocol: 'solana'}>): {
+/** Every registered out-destination for a SOL asset's input mint: the solana_amm registry rows
+ *  that serve it, folded to the OTHER side of each pair and deduped by out mint, in REGISTRY
+ *  ORDER (the registry's order is the display order — never sorted, never ranked). Null for a
+ *  mint the SPL registry does not know; an empty `dests` for a mint no venue serves — both
+ *  fail closed on the unavailable panel. */
+function resolveSolDestinations(asset: Extract<SelectableAsset, {protocol: 'solana'}>): {
+  inMint: string;
+  dests: {venue: VenueEntry; outMint: string; outSym: string; outDecimals: number}[];
+} | null {
+  // Native SOL is mint:null in the asset model but WRAPPED-sol in the venue registry — the two
+  // identifiers for the same asset, translated here and only here.
+  const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
+  const inTok = solAssetOfMint(inMint);
+  if (inTok == null) return null;
+  const dests: {venue: VenueEntry; outMint: string; outSym: string; outDecimals: number}[] = [];
+  const seen = new Set<string>();
+  for (const venue of solanaVenuesForMint(inMint)) {
+    const outMint = venue.pair_ledgers.find(m => m !== inMint);
+    if (outMint == null || seen.has(outMint)) continue;
+    const outTok = solAssetOfMint(outMint);
+    if (outTok == null) continue;
+    seen.add(outMint);
+    dests.push({venue, outMint, outSym: outTok.symbol, outDecimals: outTok.decimals});
+  }
+  return {inMint, dests};
+}
+
+/** The Solana analog of `resolveLegs`: the legs the SELECTED venue serves — the venue's own
+ *  registry row names the pair, the OTHER side of `pair_ledgers` is the destination. Null when
+ *  no venue is selected (zero destinations — the fail-closed panel renders). */
+function resolveSolLegs(asset: Extract<SelectableAsset, {protocol: 'solana'}>, venue: VenueEntry | null): {
   inMint: string;
   outMint: string;
   inSym: string;
@@ -1558,10 +1585,7 @@ function resolveSolLegs(asset: Extract<SelectableAsset, {protocol: 'solana'}>): 
   inDecimals: number;
   outDecimals: number;
 } | null {
-  // Native SOL is mint:null in the asset model but WRAPPED-sol in the venue registry — the two
-  // identifiers for the same asset, translated here and only here.
   const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
-  const venue = solanaAmmVenueForMint(inMint);
   if (venue == null) return null;
   const outMint = venue.pair_ledgers.find(m => m !== inMint);
   if (outMint == null) return null;
@@ -1594,9 +1618,36 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const mountedRef = useRef(true);
   const recordIdRef = useRef<string | null>(null);
 
-  const legs = resolveSolLegs(asset);
-  const venue = legs != null ? solanaAmmVenueForMint(legs.inMint) : null;
+  // --- the destination (spec 2026-09-16 §2 decision 5): every registered solana_amm venue for
+  //     this mint is one out option — registry order, deduped by out mint, never ranked. The
+  //     DEFAULT is the FIRST option: the exact pair this surface served before a second venue
+  //     existed, so a one-venue mint renders no chooser chrome and behaves exactly as before.
+  //     A switch resets the quote + its review state (the amount stays — the user's number is
+  //     not the venue's business).
+  const inMint = asset.mint ?? WRAPPED_SOL_MINT_ADDRESS;
+  const [destVenueId, setDestVenueId] = useState<string | null>(null);
+  const [destMint, setDestMint] = useState<string | null>(null);
+  if (destMint !== inMint) {
+    // The pick is per-mint state — a different asset re-derives the default (render-phase
+    // adjustment: set during render when a prop changed the fact the state is keyed on).
+    setDestMint(inMint);
+    setDestVenueId(null);
+  }
+  const solDests = resolveSolDestinations(asset);
+  const destVenues: {venue: VenueEntry; outSym: string}[] = [];
+  if (solDests != null) {
+    for (const d of solDests.dests) destVenues.push({venue: d.venue, outSym: d.outSym});
+  }
+  const activeDest = destVenues.find(x => x.venue.venue_id === destVenueId) ?? destVenues[0] ?? null;
+  const venue = activeDest?.venue ?? null;
+  const legs = venue != null ? resolveSolLegs(asset, venue) : null;
   const venueName = venue != null ? venueDisplayName(venue.venue_id) : venueDisplayName('jupiter');
+
+  const pickDest = (venueId: string) => {
+    if (venueId === destVenueId) return;
+    setDestVenueId(venueId);
+    setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false);
+  };
   const balanceRaw = legs == null ? null : legs.inMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.inMint] ?? null;
   const outHeldRaw = legs == null ? null : legs.outMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.outMint] ?? null;
 
@@ -1826,6 +1877,38 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
         <Text testID="convert-insufficient" style={S.err}>
           {M.convert.insufficientLine(fmtIn(amountN.toString()), fmtIn(balanceN.toString()))}
         </Text>
+      ) : null}
+
+      {/* The out-destination (spec 2026-09-16 §2 decision 5): one row per registered venue for
+          this mint, in the venue chooser's own visual language — registry order, explicit pick,
+          never chosen for the user. Only when there is a CHOICE: a single venue's destination is
+          a fact of the pair, not an option, and renders no chrome. */}
+      {destVenues.length > 1 ? (
+        <View testID="convert-sol-dest">
+          <Text style={S.convertSlippageLabel}>{M.convert.multihop.destLabel}</Text>
+          {destVenues.map(x => {
+            const on = venue?.venue_id === x.venue.venue_id;
+            return (
+              <Pressable
+                key={x.venue.venue_id}
+                testID={`convert-sol-dest-${x.outSym}`}
+                style={[S.convertVenueRow, on && S.convertVenueRowOn]}
+                onPress={() => pickDest(x.venue.venue_id)}
+                accessibilityRole="radio"
+                accessibilityState={{checked: on}}
+                accessibilityLabel={M.convert.multihop.destDirect(x.outSym)}>
+                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
+                  {on ? <View style={S.convertVenueRadioDot} /> : null}
+                </View>
+                <View style={S.convertVenueRowText}>
+                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>
+                    {M.convert.multihop.destDirect(x.outSym)}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
       ) : null}
 
       {/* The decision number + attribution — the IC headline card's exact shape, carrying

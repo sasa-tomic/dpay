@@ -32,6 +32,7 @@ import {bs58Encode} from './soltx.mjs';
 /** The registry row's mints (mirrors app/solana/tokens.ts + dfx/catalog_truth.json venues[]). */
 export const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+export const EURC_MINT = 'HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr';
 /** Solana program ids the mirrors need (mirrors app/solana/spl.ts / constants.ts). */
 export const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 export const ASSOCIATED_TOKEN_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
@@ -181,10 +182,11 @@ export function buildJupiterSwapTx({userPublicKey, userAta, blockhash = new Uint
 
 /**
  * The getTransaction json detail the settle path re-reads after confirmation — the realized-payout
- * oracle (app/solana.ts getSolTokenCredit): the postTokenBalances row whose mint is USDC and whose
- * owner is the user IS the chain's own account of what the route paid out.
+ * oracle (app/solana.ts getSolTokenCredit): the postTokenBalances row whose mint is the OUT mint
+ * (`mint`, default USDC) and whose owner is the user IS the chain's own account of what the route
+ * paid out.
  */
-export function solConvertTxDetail({userPublicKey, userAta, outAmount, slot = 250_000_003}) {
+export function solConvertTxDetail({userPublicKey, userAta, outAmount, mint = USDC_MINT, decimals = 6, slot = 250_000_003}) {
   const user = bs58Decode(userPublicKey);
   const ata = bs58Decode(userAta);
   const blockhash = bs58Encode(new Uint8Array(32).fill(7));
@@ -199,10 +201,10 @@ export function solConvertTxDetail({userPublicKey, userAta, outAmount, slot = 25
       preTokenBalances: [],
       postTokenBalances: [{
         accountIndex: 1,
-        mint: USDC_MINT,
+        mint,
         owner: userPublicKey,
         programId: TOKEN_PROGRAM,
-        uiTokenAmount: {amount: String(outAmount), decimals: 6, uiAmount: Number(outAmount) / 1e6},
+        uiTokenAmount: {amount: String(outAmount), decimals, uiAmount: Number(outAmount) / 10 ** decimals},
       }],
     },
     transaction: {
