@@ -627,8 +627,9 @@ export type ReceiveMessages = {
    * that (`services/till.ts`).
    */
   till: {
-    /** The checkbox under the amount: the same request, two audiences. The label names the
-     *  standard a till code speaks, because "Till code" alone does not say who can scan it. */
+    /** The checkbox under the amount: the same request, two audiences. The label names WHO can scan
+     *  the code — OpenCryptoPay wallets, Binance Pay, MoonPay — and that the payer must be online
+     *  (this is an online-payer standard). Founder wording, 2026-09-16. */
     tillCode: string;
 
     chargeHint: string;
@@ -782,7 +783,7 @@ export const receiveEn: ReceiveMessages = {
   broadcasting: 'Broadcasting on Solana — this can take up to a minute.',
 
   till: {
-    tillCode: 'Till code (OpenCryptoPay)',
+    tillCode: 'OpenCryptoPay (OCP), Binance Pay, MoonPay app [Payer must be Online]',
 
     chargeHint: 'Priced in francs, paid in VCHF — one franc, one VCHF, no conversion.',
     ringUpHint: 'Open this charge on your till and show the customer a code they can pay',

@@ -289,7 +289,7 @@ export const receiveFr: ReceiveMessages = {
   broadcasting: 'Envoi sur Solana — cela peut prendre jusqu’à une minute.',
 
   till: {
-    tillCode: 'Code de caisse (OpenCryptoPay)',
+    tillCode: 'OpenCryptoPay (OCP), Binance Pay, application MoonPay [Le payeur doit être en ligne]',
 
     chargeHint: 'Affiché en francs, payé en VCHF — un franc, un VCHF, sans conversion.',
     ringUpHint: 'Ouvrir ce montant sur votre caisse et montrer au client un code qu’il peut payer',

@@ -288,7 +288,7 @@ export const receiveEs: ReceiveMessages = {
   broadcasting: 'Enviando a la red de Solana: puede tardar hasta un minuto.',
 
   till: {
-    tillCode: 'Código de caja (OpenCryptoPay)',
+    tillCode: 'OpenCryptoPay (OCP), Binance Pay, aplicación MoonPay [El pagador debe estar en línea]',
 
     chargeHint: 'Se marca en francos y se paga en VCHF: un franco, un VCHF, sin conversión.',
     ringUpHint: 'Abrir este importe en tu caja y mostrar al cliente un código que pueda pagar',

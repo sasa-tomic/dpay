@@ -224,6 +224,22 @@ decisions are in
 [`docs/specs/2026-09-07-ux-decisions.md`](docs/specs/2026-09-07-ux-decisions.md) and their defect
 inventory is the "UX swarm" section below.
 
+**6. HIGH — drop the word "till" (→ "checkout") and "ring up" from the whole tree (founder
+decision 2026-09-16; the breaking rename is APPROVED — no external users yet).** "Till" is
+British-retail English the sector does not use (the OpenCryptoPay standard itself says "cash
+register"); "ring up" is likewise uncommon and goes too. The replacement noun is **checkout**
+(Stripe/Shopify precedent, unambiguous software/commerce reading; "terminal"/"POS" were rejected —
+hardware connotation collides with the "no POS hardware" pitch line). Scope, all of it: 
+`dpay_core::TillOpen`/`validate_till_open` and the SIGNED domains `dpay-till-open-v1/v2` (breaking;
+regenerate `dfx/till_open_signing.json` via `just wire-layout`), `crates/dpay-relay/src/till.rs` +
+`TillStore`, the `/api/v1/till*` routes, `DPAY_ENABLE_TILL` + capabilities `{"till":true}`,
+`dfx/till_wire.json`, `app/services/till.ts`, `app/components/TillCharge.tsx`, the `pay.till.*` i18n
+subtree in all four locales, e2e flows + `FLOWS.md`, and the living docs (CLAUDE.md,
+CODEBASE_ANALYSIS.md, memory/glossary.md, the till specs). "Ring up" gets plain replacement wording
+(e.g. "create/open a charge" — final wording picked during the sweep). Already done this session:
+the scan-audience label `M.pay.till.tillCode` now reads "OpenCryptoPay (OCP), Binance Pay, MoonPay
+app [Payer must be Online]" (four locales). Value 6, effort L.
+
 Beyond items 2–3 the remaining list is the physical/outer-loop gates (below, founder-run) and the
 DO-NOT-NAG set.
 
@@ -486,14 +502,14 @@ Nothing from the swarm's defect inventory remains open.
 
 U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration was deleted from `CODEBASE_ANALYSIS.md` and replaced by the pointer paragraph ("Flow coverage lives in `FLOWS.md`, not here — this file points, it never restates"; `just check` regenerating + diffing `FLOWS.md` is recorded beside it), and every non-flow fact it carried was re-homed first (the testID contract, the seed/backup surface, and the restore surface as their own paragraphs in the e2e-harness section; the asset-segregation note into "Where the design earns its keep"). The row survived that commit by oversight. It remained the only entry until U5 below.
 
-U5 — **watch-mode stale-bundle wart (found 2026-09-16 during the e2e-speedup audit; NOT yet fixed).**
-`lib.mjs`'s `getSession` memoizes the shared session and returns early (lib.mjs:138) BEFORE reading
-`opts.rebuildWeb`, so `just e2e-watch` re-runs after an `app/` edit keep testing the dist that existed
-at watch START — fast feedback that can be WRONG. The one-shot `just e2e` path rebuilds and is correct;
-only the persisted watch session is affected. Fix shape: when a watch re-run detects watched-file
-changes, rebuild the web dist BEFORE reusing the memoized browser/relay (or make `getSession` honor a
-per-call rebuild flag). Effort M — needs interactive watch verification (the loop is unwired by
-design, so it can't ride `just verify`). value 6 / effort M.
+U5 — DONE, fixed in-session 2026-09-16 (same session as the e2e speedup): `getSession` now honors a
+per-call rebuild flag on a memoized session — an `opts.rebuildWeb` call on the live watch session
+rebuilds the web dist IN PLACE (same directory, same sirv server; the next per-test fresh-context
+navigation loads the new assets) before returning the session, so `just e2e-watch` re-runs after an
+`app/` edit test the CURRENT tree, not the dist from watch START. The one-shot path is unchanged
+(it always rebuilt). Note: interactive watch verification still pending (the loop is unwired by
+design and can't ride `just verify`); the in-place-rebuild path itself is exercised by construction
+(buildWeb({force:true}) is the same call the one-shot path uses).
 
 ## Other open issues
 
