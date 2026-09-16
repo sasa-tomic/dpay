@@ -793,8 +793,11 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
       // IC user-principal rail: build + sign the icrc1_transfer envelope LOCALLY (the intent
       // already carries the payee's ICRC-1 principal — derived from the request pubkey, or taken
       // verbatim from a payment link; memo = the nonce = reconciliation key). prepareTransfer
-      // refuses to sign on unreachable/skewed IC clock — surfaced as the error.
-      const p = await prepareTransfer(identity.secretHex, {currencies: catalog}, r);
+      // refuses to sign on unreachable/skewed IC clock — surfaced as the error — EXCEPT offline
+      // (online===false), where the hand-off opts into the device-clock stamp: with the gateway
+      // dead there is no reading to distrust, and the merchant submits the envelope on their own
+      // online phone (the NFC hand-off's trust, extended to the camera path).
+      const p = await prepareTransfer(identity.secretHex, {currencies: catalog}, r, {offlineHandoff: online === false});
       const who = r.toName || r.toAccountText;
       setPrepared(p);
       if (online) {

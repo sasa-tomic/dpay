@@ -25,6 +25,7 @@ jest.mock('../services/native', () => ({
     icpSelfPrincipal: jest.fn(),
     icpMinterAccountArg: jest.fn(),
     icpDecodeText: jest.fn(),
+    icpIngressExpiry: jest.fn(),
   },
 }));
 jest.mock('../services/icp', () => ({
@@ -34,6 +35,10 @@ jest.mock('../services/icp', () => ({
   icStampExpiry: jest.fn(),
   IC_SUBMIT_TIMEOUT_MS: 8000,
   INGRESS_AHEAD_S: 300,
+  // The REAL class: rail.ts branches on `instanceof IcClockUnreachable`, and both rail.ts and
+  // this file import it from the SAME mocked module — a factory-fresh class would make the
+  // offline-handoff branch (and its tests) see two incompatible constructors.
+  IcClockUnreachable: jest.requireActual<typeof import('../services/icp')>('../services/icp').IcClockUnreachable,
 }));
 jest.mock('../services/relay', () => ({
   relayFetch: jest.fn(), // R1: rail's relay seam moved from fetchWithTimeout(url) to relayFetch(relay, path)
@@ -45,7 +50,7 @@ jest.mock('../services/relay', () => ({
 
 import {confirmIncomingTransfer, pollTransfer, prepareNfcTransfer, prepareTransfer, railBtcDepositAddress, submitAndConfirmIncomingTransfer, submitNfcTransfer, submitTransfer, transferRejectionMessage, wireRequestToIntent} from '../services/rail';
 import {DpayCore} from '../services/native';
-import {icPollRequestStatus, icPollSignedRequestStatus, icStampExpiry, icSubmit} from '../services/icp';
+import {icPollRequestStatus, icPollSignedRequestStatus, icStampExpiry, icSubmit, IcClockUnreachable} from '../services/icp';
 import {relayFetch} from '../services/relay';
 
 const PREPARED = {ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', requestIdHex: 'cd'.repeat(32)};
@@ -95,6 +100,81 @@ describe('prepareTransfer — the account signed is the account it was handed', 
     jest.mocked(DpayCore.icpValidateIcrcAccount).mockRejectedValue(new Error('bad checksum'));
     await expect(prepare('k2t6j-nope')).rejects.toThrow('bad checksum');
     expect(DpayCore.icpTransferArg).not.toHaveBeenCalled();
+    expect(DpayCore.icpSignUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// The offline QR hand-off (2026-09-16): a fully-offline payer — relay AND IC gateway dead, the
+// camera path's "IC clock unreachable" wall — signs anyway on a DEVICE-clock stamp, the same trust
+// the NFC hand-off already extends (prepareNfcTransfer stamps at the request's expiry because the
+// merchant submits on their own online phone). Pins the three load-bearing edges: the fallback is
+// OPT-IN (every other value signer still refuses), typed to the unreachable failure only (a skew
+// refusal stays a refusal — a reading that exists and disagrees is distrusted, offlineHandoff or
+// not), and capped at the request's own expiry so the envelope never outlives the request that
+// authorized it.
+describe('prepareTransfer — the offline hand-off stamps from the device clock when the IC clock is unreachable', () => {
+  const SECRET = '11'.repeat(32);
+  const NONCE = 'aa'.repeat(16);
+  const CATALOG = {currencies: [{currency: 7, ledger: PREPARED.ledger, fee: '10000'}]};
+  const REQ = {toAccount: 'o', amount: '100', currency: 7, nonceHex: NONCE};
+  const PINNED_NOW_MS = 1_700_000_000_000;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.mocked(DpayCore.icpTransferArg).mockReset().mockResolvedValue('arg' as never);
+    jest.mocked(DpayCore.icpSignUpdate).mockReset()
+      .mockResolvedValue({envelopeHex: 'envelope', requestIdHex: PREPARED.requestIdHex} as never);
+    jest.mocked(DpayCore.icpValidateIcrcAccount).mockReset().mockResolvedValue({owner: 'o', subaccountHex: ''} as never);
+    // The stamp arithmetic runs through the real ingress-expiry shape: now + ahead seconds.
+    jest.mocked(DpayCore.icpIngressExpiry).mockReset()
+      .mockImplementation(((now: string, ahead: number) => (BigInt(now) + BigInt(ahead) * 1_000_000_000n).toString()) as never);
+  });
+
+  test('default (no opts): an unreachable clock still refuses — nothing is signed', async () => {
+    jest.mocked(icStampExpiry).mockRejectedValue(new IcClockUnreachable() as never);
+    await expect(prepareTransfer(SECRET, CATALOG, REQ)).rejects.toThrow('unreachable');
+    expect(DpayCore.icpSignUpdate).not.toHaveBeenCalled();
+  });
+
+  test('offlineHandoff + unreachable: signs with device-now + INGRESS_AHEAD_S, unexpired request', async () => {
+    jest.mocked(icStampExpiry).mockRejectedValue(new IcClockUnreachable() as never);
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(PINNED_NOW_MS);
+    try {
+      // Request expiry 600s out — farther than the 300s ahead window, so the WINDOW binds.
+      await prepareTransfer(SECRET, CATALOG, {...REQ, expiry: 1_700_000_600}, {offlineHandoff: true});
+      expect(DpayCore.icpIngressExpiry).toHaveBeenCalledWith((BigInt(PINNED_NOW_MS / 1000) * 1_000_000_000n).toString(), 300);
+      expect(DpayCore.icpSignUpdate).toHaveBeenCalledWith(SECRET, PREPARED.ledger, 'icrc1_transfer', 'arg', '1700000300000000000');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  test('offlineHandoff: the stamp is CAPPED at the request expiry — the envelope dies with the request', async () => {
+    jest.mocked(icStampExpiry).mockRejectedValue(new IcClockUnreachable() as never);
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(PINNED_NOW_MS);
+    try {
+      // Request expiry only 120s out — nearer than the ahead window, so the REQUEST binds.
+      await prepareTransfer(SECRET, CATALOG, {...REQ, expiry: 1_700_000_120}, {offlineHandoff: true});
+      expect(DpayCore.icpIngressExpiry).toHaveBeenCalledWith((BigInt(PINNED_NOW_MS / 1000) * 1_000_000_000n).toString(), 120);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  test('offlineHandoff: a link (expiry null) uses the full ahead window — the envelope bounds itself', async () => {
+    jest.mocked(icStampExpiry).mockRejectedValue(new IcClockUnreachable() as never);
+    const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(PINNED_NOW_MS);
+    try {
+      await prepareTransfer(SECRET, CATALOG, {...REQ, expiry: null}, {offlineHandoff: true});
+      expect(DpayCore.icpIngressExpiry).toHaveBeenCalledWith((BigInt(PINNED_NOW_MS / 1000) * 1_000_000_000n).toString(), 300);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  test('offlineHandoff + SKEW still refuses — the fallback is typed to "no reading", not "bad reading"', async () => {
+    jest.mocked(icStampExpiry).mockRejectedValue(new Error('device clock disagrees with IC time') as never);
+    await expect(prepareTransfer(SECRET, CATALOG, {...REQ, expiry: 1_700_000_600}, {offlineHandoff: true})).rejects.toThrow('disagrees');
     expect(DpayCore.icpSignUpdate).not.toHaveBeenCalled();
   });
 });

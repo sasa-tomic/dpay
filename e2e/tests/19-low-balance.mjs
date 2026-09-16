@@ -16,10 +16,12 @@
 //
 // Folds both into ONE test (speed: one onboarding, an offline pass, then an online pass). The
 // offline pass uses the harness's guaranteed-dead relay port (ECONNREFUSED, the real failure mode)
-// to force online=false; the online pass restores the good relay.
+// to force online=false — plain goOffline kills the IC gateway too, so the offline pass exercises
+// the FULLY-offline sign (device-clock stamp via prepareTransfer's offlineHandoff fallback,
+// 2026-09-16); the online pass restores the good relay.
 //
-// Selector contract: `pay-amount`, `review-lowbal`, `btn-review-cancel`, `btn-settings`,
-// `settings-relay`, `btn-settings-close`.
+// Selector contract: `btn-paid`, `btn-notpaid`, `review-err` (offline leg), `pay-amount`,
+// `review-lowbal`, `btn-review-cancel`, `btn-settings`, `settings-relay`, `btn-settings-close`.
 import { setup, assert, onboardWallet, goOffline, setRelay, waitForScanner , armPayScan} from '../harness/lib.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
@@ -33,7 +35,7 @@ export const meta = {
   name: 'low-balance',
   journey: 'pay',
   covers: ['low-balance', 'insufficient', 'no-sign-gate'],
-  verifies: 'Insufficient funds: offline still signs (merchant verifies) with a warn note; online blocks the sign entirely.',
+  verifies: 'Insufficient funds: fully offline (gateway dead) still signs on the device-clock stamp and hands off the QR (merchant verifies); online blocks the sign entirely.',
   timeoutMs: 25000, // was 15s: full-suite 10-way parallel browser load runs this at ~15.1s (all
                     // assertions GREEN, backstop false-fired 0.09s past budget — flow-41 precedent
                     // class: host-load spikes uncompensated by the one-shot load factor)
@@ -67,29 +69,30 @@ export async function run() {
     const approx = await driver.waitForText('approx.', { timeoutMs: 8_000 });
     assert(approx, 'the header should show the offline indicator ("~ DEMO approx.") once offline');
 
-    // Scan a ∂200 request (> the ~∂100 local balance). The auto-sign fires (offline pays,
-    // merchant verifies) — but with BOTH the relay and the IC gateway dead, the clock-gated
-    // signer cannot stamp an ingress expiry (icStampExpiry needs certified IC time), so the sign
-    // dies honestly on the read-only surface: the low-balance warn note + the raw sign error +
-    // Cancel. (The gateway-alive offline hand-off — where the sign DOES land — is flow 20/92's
-    // keepGateway territory; here the honest failure is the contract.)
-    console.log('[19-low-balance] scanning a ∂200 request while offline (sign attempts, clock-dead)…');
+    // Scan a ∂200 request (> the ~∂100 local balance) with BOTH the relay and the IC gateway dead
+    // (plain goOffline kills both). The auto-sign fires (offline pays, merchant verifies) and —
+    // since the 2026-09-16 offline hand-off — SUCCEEDS: with no certified clock to read anywhere,
+    // prepareTransfer's offlineHandoff fallback stamps the envelope from the DEVICE clock (capped
+    // at the request's expiry), the NFC tap's trust extended to the camera path, and the payer
+    // lands on the offline hand-off QR for the merchant to scan. This flow pins that harder
+    // fully-dead-gateway sign; the transient "local balance may not cover" warn note that rides
+    // beside it is unit-pinned (PayMode.test.tsx, hung-sign fixture).
+    console.log('[19-low-balance] scanning a ∂200 request while fully offline (device-clock sign)…');
     const offlineReq = buildReq();
     await armPayScan(driver); // pay-intent gate: arm the scan surface (no-op when already armed)
     await driver.eval((qr) => window.__DPAY_TEST_SCAN(qr), offlineReq);
-    await driver.findByTestID('pay-amount', { timeoutMs: 5_000 });
-    await driver.findByTestID('review-lowbal', { timeoutMs: 4_000 });
-    const lowbalTxt = await driver.readText('review-lowbal');
-    assert(lowbalTxt.includes('local balance may not cover'),
-      `review-lowbal should warn about coverage, got: "${lowbalTxt}"`);
-    const errTxt = await driver.readText('review-err');
-    assert(/clock/i.test(errTxt), `the dead-gateway sign failure should surface the clock gate, got: "${errTxt}"`);
-    console.log(`[19-low-balance] ✓ offline insufficient: warn note + honest sign error ("${errTxt}")`);
+    // The sign completes without any network (dead gateway fails fast) → the QR hand-off phase.
+    await driver.findByTestID('btn-paid', { timeoutMs: 8_000 });
+    await driver.findByTestID('btn-notpaid', { timeoutMs: 4_000 });
+    const offlineErr = await driver.isPresent('review-err');
+    assert(!offlineErr, 'the fully-offline sign must not surface an error (device-clock stamp)');
+    console.log('[19-low-balance] ✓ offline insufficient: signed on the device clock, hand-off QR up');
 
     // --- 2. ONLINE insufficient: the sign is blocked outright — honest note + Cancel, no sign. --
-    // Cancel out of the offline pass to return to the gated scan, then restore the relay URL.
+    // Cancel out of the offline pass (drops the pending record) to return to the gated scan, then
+    // restore the relay URL.
     console.log('[19-low-balance] cancelling the offline pass, going back online…');
-    await driver.click('btn-review-cancel', { timeoutMs: 5_000 }); // the read-only surface Cancel
+    await driver.click('btn-notpaid', { timeoutMs: 5_000 }); // the hand-off QR's Cancel
     await setRelay(driver, relayBaseURL);
     // Wait for the header to drop the offline indicator (online=true) before scanning.
     await driver.waitForText('balance', { timeoutMs: 8_000 });

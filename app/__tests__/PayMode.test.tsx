@@ -506,6 +506,33 @@ describe('PayMode — share feedback (U-F1)', () => {
   });
 });
 
+// The offline QR hand-off flag (2026-09-16): with the relay AND the IC gateway dead, the camera
+// path used to die on "IC clock unreachable" — nothing signed, no QR to hand over. prepareTransfer
+// now accepts `offlineHandoff`, which falls back to a DEVICE-clock stamp (NFC-parity trust: the
+// merchant submits the envelope on their own online phone). Pins the wiring ONLY — the stamp
+// arithmetic is pinned in rail.test.ts — and, critically, that the flag is threaded from the LIVE
+// online prop: the offline payer opts in, the online payer NEVER does (certified clock or refuse).
+describe('PayMode — the offline hand-off opts into the device-clock sign fallback; the online path never does', () => {
+  test('offline (online===false): prepareTransfer receives {offlineHandoff: true}', async () => {
+    const tree = mountPay(); // payElement defaults online={false} — the offline fixture
+    await scanToSign(tree, REQ);
+    expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(prepareTransfer).mock.calls[0][3]).toEqual({offlineHandoff: true});
+    act(() => {
+      tree.unmount();
+    });
+  });
+
+  test('online (online===true): the certified clock still gates — {offlineHandoff: false}', async () => {
+    const tree = mountPay({online: true}); // 2500 ≤ 10000 shown → sufficient → signs
+    await scanToSign(tree, REQ);
+    expect(jest.mocked(prepareTransfer).mock.calls[0][3]).toEqual({offlineHandoff: false});
+    act(() => {
+      tree.unmount();
+    });
+  });
+});
+
 // Double-pay / silent-spin guards (post-cutover audit 2026-08-20, items 3+4).
 //
 // Item 3 — the offline-QR reconcile poll treated ONLY 'settled' as actionable; a terminal ledger
@@ -1571,6 +1598,21 @@ describe('PayMode — what the affordability gate is allowed to read, and what i
     await scanToSign(tree, REQ);
     expect(hasTestID(tree, 'review-lowbal')).toBe(false);
     expect(prepareTransfer).toHaveBeenCalledTimes(1);
+    act(() => { tree.unmount(); });
+  });
+
+  test('offline insufficient: the warn note rides beside a sign that still fires (flow 19, unit-pinned)', async () => {
+    // The offline branch of the coverage note: the app cannot check the ledger, so it WARNS
+    // (localBalanceMayNotCover — "the merchant will verify") and still signs, rather than
+    // BLOCKING (notEnoughBalance, the online branch above). Pinned here because the e2e surface
+    // is transient — the offline sign now completes (device-clock stamp) and moves to the QR
+    // hand-off, so the note can only be caught deterministically with the sign hung mid-flight.
+    jest.mocked(prepareTransfer).mockReset().mockImplementation(() => new Promise<RailPrepared>(() => {}));
+    const tree = mountPay({online: false, shownBalance: '0'}); // ∂25 request > ∂0.00 local, offline
+    await scanToSign(tree, REQ);
+    expect(textByTestID(tree, 'review-lowbal')).toBe(M.pay.localBalanceMayNotCover);
+    expect(prepareTransfer).toHaveBeenCalledTimes(1); // warned, not blocked — the sign FIRED
+    expect(jest.mocked(prepareTransfer).mock.calls[0][3]).toEqual({offlineHandoff: true});
     act(() => { tree.unmount(); });
   });
 

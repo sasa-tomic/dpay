@@ -15,7 +15,7 @@
 //    it a DFINITY ledger runs no duplicate check at all (`icp_transfer_arg` in dpay-ffi).
 import {DpayCore} from './native';
 import {rememberLedgerFee} from './ledgerFees';
-import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IC_SUBMIT_TIMEOUT_MS, INGRESS_AHEAD_S} from './icp';
+import {icStampExpiry, icSubmit, icPollRequestStatus, icPollSignedRequestStatus, icQuery, IcClockUnreachable, IC_SUBMIT_TIMEOUT_MS, INGRESS_AHEAD_S} from './icp';
 import {hexToBytes, bytesToHex, base, short} from '../lib/format';
 import {bytesToBase64Url, base64UrlToBytes} from '../lib/base64url';
 import {sanitiseDisplayText} from '../lib/deepLink';
@@ -53,18 +53,39 @@ export type RailOutcome =
  *  so the ONE string the screen showed, the address book saved and this function signs is the same
  *  string — an account cannot be displayed and a different one paid. Signing only `owner` and
  *  discarding the subaccount would credit the owner's DEFAULT account: same wallet, different
- *  account, and nothing dpay could undo. */
+ *  account, and nothing dpay could undo.
+ *
+ *  `opts.offlineHandoff` (the offline QR hand-off, PayMode with `online === false`): the ONE
+ *  sanctioned exception to the certified-clock gate. A fully-offline payer has no clock to read —
+ *  both the relay and the IC gateway are dead — yet the payment must sign, because the MERCHANT
+ *  submits the envelope on their own online phone (the same trust `prepareNfcTransfer` already
+ *  extends on the tap path, where it stamps at the request's own certified-stamped expiry). The
+ *  fallback stamp is the DEVICE clock + INGRESS_AHEAD_S, capped at the request's own expiry so the
+ *  envelope never outlives the request that authorized it. Typed to the unreachable failure
+ *  (`IcClockUnreachable`) only: a SKEWED certified reading still refuses everywhere — offline the
+ *  skew check cannot even run (it needs a reading), and the residual trust in the device clock is
+ *  the same bet the request-expiry gate at approve already makes. */
 export async function prepareTransfer(
   secretHex: string,
   catalog: {currencies: Array<{currency: number; ledger: string; fee: string | null}>},
-  req: {toAccount: string; amount: string; currency: number; nonceHex: string},
+  req: {toAccount: string; amount: string; currency: number; nonceHex: string; expiry?: number | null},
+  opts?: {offlineHandoff?: boolean},
 ): Promise<RailPrepared> {
   const desc = catalog.currencies.find(c => c.currency === req.currency);
   if (!desc || !desc.ledger) throw new Error(M.errors.ic.noLedgerForCurrency);
   const to = await DpayCore.icpValidateIcrcAccount(req.toAccount);
   const argHex = await DpayCore.icpTransferArg(to.owner, to.subaccountHex, '', req.amount, desc.fee ?? '', req.nonceHex);
-  // Clock-gated: refuses to sign when the IC clock is unreachable or skewed vs the device.
-  const expiry = await icStampExpiry(secretHex);
+  // Clock-gated: refuses to sign when the IC clock is unreachable or skewed vs the device —
+  // except the offline hand-off above, which stamps from the device clock when NO reading exists.
+  let expiry: string;
+  try {
+    expiry = await icStampExpiry(secretHex);
+  } catch (e) {
+    if (!opts?.offlineHandoff || !(e instanceof IcClockUnreachable)) throw e;
+    const nowS = Math.floor(Date.now() / 1000);
+    const aheadS = req.expiry != null ? Math.max(1, Math.min(INGRESS_AHEAD_S, req.expiry - nowS)) : INGRESS_AHEAD_S;
+    expiry = await DpayCore.icpIngressExpiry((BigInt(nowS) * 1_000_000_000n).toString(), aheadS);
+  }
   const signed = await DpayCore.icpSignUpdate(secretHex, desc.ledger, 'icrc1_transfer', argHex, expiry);
   return {ledger: desc.ledger, envelopeHex: signed.envelopeHex, requestIdHex: signed.requestIdHex, amount: req.amount, currency: req.currency, memoHex: req.nonceHex};
 }

@@ -45,9 +45,10 @@ export async function run() {
     // keepGateway (the flow-20 offline hand-off premise): offline here = RELAY-dead (balance +
     // history polls fail → online flips false → the QR fall-through + approx. eyebrow), while the
     // IC gateway stays alive — the camera sign path stamps its value envelope from the certified
-    // IC clock (icp.ts refuses to sign value envelopes on an unreachable clock; only the NFC
-    // prepare, which stamps at the request's own expiry, signs under a dead gateway too — flow 179
-    // pins that harder case).
+    // IC clock. (Under a DEAD gateway too the camera path now signs — prepareTransfer's
+    // offlineHandoff device-clock fallback, 2026-09-16 — but that fully-offline case is flow 19's;
+    // this flow keeps the gateway alive so the certified stamp, the reconcile poll against the
+    // live gateway, and the pending-row honesty are all exercised in their shipped shape.)
     await goOffline(driver, { keepGateway: true });
     assert(await driver.waitForText('approx.', { timeoutMs: 8_000 }), 'the offline eyebrow must appear');
     console.log('[180-offline-qr-pending] ✓ offline (dead relay retargeted, eyebrow shown)');

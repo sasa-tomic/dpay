@@ -327,16 +327,27 @@ export async function icNowNs(secretHex: string, signal?: AbortSignal): Promise<
   return clockInFlight;
 }
 
+/** The certified clock could not be read at all (gateway dead / read_state refused) — as opposed
+ *  to a skewed clock, where the reading EXISTS and disagrees with the device. Typed so callers can
+ *  branch on the failure mode without string-matching a localized message; the ONE branch today is
+ *  `prepareTransfer`'s offline hand-off (`offlineHandoff`), which falls back to a device-clock
+ *  stamp here exactly because no reading exists to distrust. A skew refusal stays a refusal. */
+export class IcClockUnreachable extends Error {
+  constructor() {
+    super(M.errors.ic.clockUnreachable);
+  }
+}
+
 /** The clock-gated expiry stamp for signing VALUE envelopes. Throws when the certified time is
- * unreachable or the device clock disagrees beyond MAX_CLOCK_SKEW_NS — callers surface honest
- * pending (never sign on a bad clock: the plan's founder rule). */
+ *  unreachable or the device clock disagrees beyond MAX_CLOCK_SKEW_NS — callers surface honest
+ *  pending (never sign on a bad clock: the plan's founder rule). */
 export async function icStampExpiry(
   secretHex: string,
   aheadS = INGRESS_AHEAD_S,
   signal?: AbortSignal,
 ): Promise<string> {
   const icNs = await icNowNs(secretHex, signal);
-  if (icNs == null) throw new Error(M.errors.ic.clockUnreachable);
+  if (icNs == null) throw new IcClockUnreachable();
   const deviceNs = BigInt(Date.now()) * 1_000_000n;
   const skew = icNs > deviceNs ? icNs - deviceNs : deviceNs - icNs;
   if (skew > MAX_CLOCK_SKEW_NS) throw new Error(M.errors.ic.clockSkew);
