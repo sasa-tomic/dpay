@@ -31,6 +31,7 @@ import {
   CONVERT_ENGINE_PROVIDER_POLL_MS,
   CONVERT_ENGINE_REARM_MS,
   CONVERT_ENGINE_STUCK_WATCH_MS,
+  CONVERT_ENGINE_TEST_OPTS,
   CONVERT_PROVIDER_TIMEOUT_MS,
 } from './config/convert';
 import {DpayCore} from './services/native';
@@ -227,8 +228,14 @@ type EngineOpts = {
 
 /** The executor budget the engine drives with: enough submit retries to survive a flaky hop,
  *  a settle watch that spans one re-arm window, then the honest pending state — the re-arm
- *  timer, not an inner loop, is what keeps the watch alive. */
-const ENGINE_EXECUTOR_OPTS = {submitAttempts: 3, poll: {attempts: 20, intervalMs: 500}, settleAttempts: 8, settleIntervalMs: 1000};
+ *  timer, not an inner loop, is what keeps the watch alive. Overridable wholesale via
+ *  __DPAY_TEST_CONVERT_ENGINE.executorOpts (the config/convert.ts seam). */
+const ENGINE_EXECUTOR_OPTS = {
+  submitAttempts: CONVERT_ENGINE_TEST_OPTS?.executorOpts?.submitAttempts ?? 3,
+  poll: CONVERT_ENGINE_TEST_OPTS?.executorOpts?.poll ?? {attempts: 20, intervalMs: 500},
+  settleAttempts: CONVERT_ENGINE_TEST_OPTS?.executorOpts?.settleAttempts ?? 8,
+  settleIntervalMs: CONVERT_ENGINE_TEST_OPTS?.executorOpts?.settleIntervalMs ?? 1000,
+};
 
 type EngineState = {
   ctx: EngineCtx | null;

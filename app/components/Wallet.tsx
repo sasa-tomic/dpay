@@ -64,8 +64,16 @@ import {useWalletHistory} from '../hooks/useWalletHistory';
 
 // Founder requirement #2 (2026-09-15): a balance view older than this while offline renders
 // APPROXIMATE (~ prefix, the same marker demoView always showed). 60 s chosen by the founder as
-// "not online for a long time" — the 30 s nowTick below re-evaluates it without a poll.
-const BALANCE_STALE_MS = 60_000;
+// "not online for a long time" — the nowTick below re-evaluates it without a poll.
+// Test seam (e2e), read PER CALL like icGatewayUrl: the staleness bound and its re-render tick
+// can be shrunk mid-session (flow 181) without a reload; prod never sets the globals, so every
+// `??` falls through to the 60 s / 30 s prod values.
+function balanceStaleMs(): number {
+  return (globalThis as {__DPAY_TEST_BALANCE_STALE_MS?: number}).__DPAY_TEST_BALANCE_STALE_MS ?? 60_000;
+}
+function balanceTickMs(): number {
+  return (globalThis as {__DPAY_TEST_BALANCE_TICK_MS?: number}).__DPAY_TEST_BALANCE_TICK_MS ?? 30_000;
+}
 
 export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGateway, onReset, onRestore, resolvedTheme, themeChoice, onSetTheme, localeChoice, onSetLocale, homeCurrency, onSetHomeCurrency}: {identity: Identity; /** R1: the operator's ordered relay address list — [0] is the active address every hook below still consumes as `relayUrl`; the full list is passed through to the Settings list editor. */ relayUrls: string[]; setRelayUrls: (urls: string[]) => void; /** Apply + persist the Solana endpoint (App.tsx). THROWS on a refusal — Settings renders it. */ setSolanaRpc: (s: string) => void; /** Apply + persist the IC gateway override (App.tsx, F2 — demos/testing against a local replica). THROWS on a refusal — Settings renders it. */ setIcGateway: (s: string) => void; onReset: () => void; onRestore: (id: Identity) => Promise<void>; resolvedTheme: ThemeOverride; themeChoice: ThemeOverride | null; onSetTheme: (t: ThemeOverride | null) => void; localeChoice: LocaleChoice; onSetLocale: (l: LocaleChoice) => void; homeCurrency: HomeCurrency | null; onSetHomeCurrency: (c: HomeCurrency) => void}) {
   const relayUrl = relayUrls[0];
@@ -414,8 +422,12 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // next to the 2.5 s balance poll's re-renders while online, and it is the ONLY new render source.
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNowTick(Date.now()), 30_000);
-    return () => clearInterval(t);
+    // Self-rescheduling rather than setInterval so the cadence is read fresh each fire — the e2e
+    // seam can shrink the tick mid-session (flow 181) without remounting the wallet.
+    let t: ReturnType<typeof setTimeout>;
+    const loop = () => { setNowTick(Date.now()); t = setTimeout(loop, balanceTickMs()); };
+    t = setTimeout(loop, balanceTickMs());
+    return () => clearTimeout(t);
   }, []);
   // Reconciliation: a settled row carrying the record's join key (IC: the on-chain memo = the
   // request nonce; SOL: the transaction signature) is the record's terminal event on BOTH
@@ -995,17 +1007,18 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   // Balances sheet rows). Built pure from the IC poll + DEMO shownBalance + the SOL + per-mint
   // token hook states; keyed by stable AssetId so a catalog object refresh never invalidates it.
   // `approx` (founder requirement #2) is the ONE staleness rule: a view marks its number ~ when
-  // the data behind it is offline AND older than 60 s — IC per atByCurrency, SOL per the rail's
-  // freshAt (never-read tokens inherit approx honestly). The 30 s nowTick keeps the marker
+  // the data behind it is offline AND older than the staleness bound (60 s; e2e-shrinkable via
+  // __DPAY_TEST_BALANCE_STALE_MS) — IC per atByCurrency, SOL per the rail's
+  // freshAt (never-read tokens inherit approx honestly). The nowTick keeps the marker
   // firing while every poll is failing; a fresh read re-renders on its own.
   const balances = useMemo(() => {
     const approx: Partial<Record<AssetId, boolean>> = {};
     for (const a of assets) {
       if (a.id.startsWith('ic:')) {
         const c = Number(a.id.slice(3));
-        approx[a.id] = !online && nowTick - (atByCurrency[c] ?? 0) > BALANCE_STALE_MS;
+        approx[a.id] = !online && nowTick - (atByCurrency[c] ?? 0) > balanceStaleMs();
       } else {
-        approx[a.id] = solFreshAt === 0 || nowTick - solFreshAt > BALANCE_STALE_MS;
+        approx[a.id] = solFreshAt === 0 || nowTick - solFreshAt > balanceStaleMs();
       }
     }
     return buildAssetBalances({

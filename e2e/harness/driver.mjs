@@ -847,4 +847,14 @@ function injectTestGlobals() {
   // SOL rail: DISABLE so the offline e2e suite never hits real Solana devnet. An empty URL makes
   // useSolanaBalance no-op and the SOL card render with `—` (tested offline-rendered, see flow SOL).
   globalThis.__DPAY_TEST_SOLANA_RPC_URL = '';
+  // Convert engine cadences (the config/convert.ts seam): the suite proves the honest-pending /
+  // resume-engine invariants at ~100 ms probe cadence instead of prod's seconds. The invariants
+  // are cadence-independent — the settle watch still has to EXHAUST before a record parks on
+  // pending_withdrawal (never done from a pool #ok), and resolution still only comes from the
+  // ledger row — while the wall-clock magnitudes these `??` fall back to are what a real venue
+  // needs and stay pinned as the prod defaults.
+  globalThis.__DPAY_TEST_CONVERT_ENGINE = {
+    rearmMs: 500, stuckWatchMs: 2000, providerPollMs: 500,
+    executorOpts: {submitAttempts: 3, poll: {attempts: 4, intervalMs: 100}, settleAttempts: 10, settleIntervalMs: 100},
+  };
 }

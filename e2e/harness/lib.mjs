@@ -16,6 +16,7 @@ import { existsSync } from 'node:fs';
 import { Driver } from './driver.mjs';
 import { startRelay } from './relay.mjs';
 import { buildWeb, serveWeb, pickFreePort } from './web.mjs';
+import { generateKeypair } from './wire.mjs';
 import { killTrackedChildren } from './procs.mjs';
 
 // Re-exported so the signal/exit handlers in run.mjs + watch.mjs can reach the SYNC last-resort
@@ -471,9 +472,57 @@ export async function selectDemoAsset(driver, opts = {}) {
 }
 
 /**
+ * Plant a fresh, FUNDED identity directly into the page's localStorage so the app boots as a
+ * RETURNING user — the seeded-identity fast path for `onboardWallet`. Generates a fresh random
+ * keypair (the same ed25519 wire format every flow's `generateKeypair` uses), funds it over the
+ * relay's faucet route (the exact `{account}` POST Onboarding itself sends, → ∂100.00), and
+ * writes the two storage keys the first-run router gates on:
+ *   `dpay.identity.v1` = {secretHex, publicHex, username}   (STORAGE_KEY)
+ *   `dpay.journey.v1`  = {stamps:[walkthroughDone, recoverySaved], at:{…}, seen:[firstRunPractice]}
+ * …which is byte-for-byte the end-state the real create path leaves (Skip awarded walkthroughDone,
+ * the backup ack awarded recoverySaved, the practice skip marked firstRunPractice seen). The
+ * home-currency question is deliberately NOT seeded — the chooser itself answers it through the
+ * app's own persistence, exactly as the slow path does.
+ *
+ * Returns true when the page now carries the identity (caller reloads + lands the wallet);
+ * false when the environment can't support it (no `?relay=` on the page, or the relay serves no
+ * faucet) so the caller falls back to the real create path. Throws on REAL failures after the
+ * storage write has been decided on — a half-planted identity must never silently reroll.
+ */
+async function seedIdentityIntoPage(driver, name) {
+  const relay = driver.baseURL ? new URL(driver.baseURL).searchParams.get('relay') : null;
+  if (!relay) return false;
+  const kp = await generateKeypair();
+  const fund = await faucetAccount(relay, kp.publicHex, undefined);
+  if (!fund.ok) return false; // e.g. a relay advertising no faucet — the slow path handles it honestly
+  const now = Date.now();
+  await driver.eval((payload) => {
+    localStorage.setItem('dpay.identity.v1', payload.identityJson);
+    localStorage.setItem('dpay.journey.v1', payload.journeyJson);
+  }, {
+    identityJson: JSON.stringify({ secretHex: kp.secretHex, publicHex: kp.publicHex, username: name }),
+    journeyJson: JSON.stringify({
+      stamps: ['walkthroughDone', 'recoverySaved'],
+      at: { walkthroughDone: now, recoverySaved: now },
+      seen: ['firstRunPractice'],
+    }),
+  });
+  return true;
+}
+
+/**
  * Onboard a fresh wallet: type the username, click create, dismiss the BIP-39 mnemonic backup screen,
  * wait for the funded balance. This is the shared preamble every browser test used to copy-paste
  * (4 lines × 15 files). Returns the driver for chaining.
+ *
+ * FAST PATH (the default): `seedIdentityIntoPage` plants a fresh random identity + journey, funds
+ * it over the relay faucet, and the caller below reloads into a RETURNING wallet — skipping ~30 UI
+ * round trips (walkthrough → create → backup ack → practice beat → polls) that none of the ~140
+ * non-onboarding flows assert on. The REAL create path stays the subject of the flows that ARE
+ * about onboarding (01/23/37/58/68/152-156 hand-roll the steps) and of `opts.slow`;
+ * `DPAY_E2E_SLOW_ONBOARD=1` is the suite-wide kill switch. The end state is the SAME both ways:
+ * identity + journey stamps in storage, home currency answered, funded DEMO wallet, on the Pay
+ * scanner, ∂100.00 on screen.
  *
  * D4-B: clicking btn-create now shows the mnemonic backup screen BEFORE the faucet runs. The backup
  * is dismissed (check the ack checkbox + Continue) so the faucet fires and the wallet loads. The
@@ -487,6 +536,22 @@ export async function selectDemoAsset(driver, opts = {}) {
  */
 export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  if (opts.slow !== true && process.env.DPAY_E2E_SLOW_ONBOARD !== '1') {
+    const seeded = await seedIdentityIntoPage(driver, name);
+    if (seeded) {
+      // The page now carries a funded returning-user identity: reload into the wallet and land
+      // exactly where the slow path ends (Pay tab, DEMO selected, ∂100.00 visible).
+      await driver.navigate(driver.baseURL, '', { waitUntil: 'domcontentloaded' });
+      await driver.waitReady({ timeoutMs: 10_000 });
+      await chooseHomeCurrencyIfPresent(driver);
+      await driver.findByTestID(WALLET_READY, { timeoutMs: 10_000 });
+      await selectDemoAsset(driver);
+      await driver.waitForText('∂100.00', { timeoutMs });
+      return driver;
+    }
+    // No relay/faucet on this page → fall through to the real create path (it owns the honest
+    // no-faucet branches; e.g. flow 37's practice-continue exit).
+  }
   // Trip Ready J1 — a fresh context boots into the walkthrough before the create form. Skip it
   // (no-op if already dismissed — e.g. a flow that skipped it manually first).
   await skipWalkthroughIfPresent(driver);

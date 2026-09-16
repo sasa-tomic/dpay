@@ -52,19 +52,40 @@ export const CONVERT_LEGACY_STORAGE_KEY = 'dpay.convert.v1';
 // bounds below are what keeps it idle-safe: every re-arm is a SINGLE bounded network round
 // after a sleep — never a spin loop — and terminal states stop their record's timer for good.
 
+/**
+ * e2e/jest seam for the engine cadences below — the exact POLL pattern: read ONCE at module load
+ * from `__DPAY_TEST_CONVERT_ENGINE`, before any bundle code runs (driver.mjs
+ * evaluateOnNewDocument). In a shipped build the global is never set → every `??` falls through
+ * to the prod default. `executorOpts` also seeds ENGINE_EXECUTOR_OPTS (convertResume.ts) and
+ * executeConvert's default settle budget (convert.ts), so ONE object re-times the whole engine.
+ * Jest suites that need speed pass explicit opts instead — they must not depend on module state.
+ */
+export const CONVERT_ENGINE_TEST_OPTS: {
+  rearmMs?: number;
+  stuckWatchMs?: number;
+  providerPollMs?: number;
+  executorOpts?: {submitAttempts?: number; poll?: {attempts: number; intervalMs: number}; settleAttempts?: number; settleIntervalMs?: number};
+} | null =
+  (globalThis as {__DPAY_TEST_CONVERT_ENGINE?: {
+    rearmMs?: number;
+    stuckWatchMs?: number;
+    providerPollMs?: number;
+    executorOpts?: {submitAttempts?: number; poll?: {attempts: number; intervalMs: number}; settleAttempts?: number; settleIntervalMs?: number};
+  }}).__DPAY_TEST_CONVERT_ENGINE ?? null;
+
 /** A pending_withdrawal / settling record re-probes the ledgers at this cadence (the mounted
  *  screen's own 2 s re-arm is gone; the engine owns the watch for everyone). */
-export const CONVERT_ENGINE_REARM_MS = 10_000;
+export const CONVERT_ENGINE_REARM_MS = CONVERT_ENGINE_TEST_OPTS?.rearmMs ?? 10_000;
 
 /** An expired-unconfirmed record parked on `stuck` (outcome unknown, resubmission forbidden)
  *  is still probed at this SLOW cadence until it resolves or the user acknowledges the stuck
  *  state — a record that cannot be advanced any faster must not be polled any faster. */
-export const CONVERT_ENGINE_STUCK_WATCH_MS = 60_000;
+export const CONVERT_ENGINE_STUCK_WATCH_MS = CONVERT_ENGINE_TEST_OPTS?.stuckWatchMs ?? 60_000;
 
 /** A live providerRef record (CeFi shape) polls its statusUrl at this cadence — one request
  *  per interval per record, forever bounded by that rate, stopping at the first terminal
  *  provider state. A venue that holds funds for hours is watched, not hammered. */
-export const CONVERT_ENGINE_PROVIDER_POLL_MS = 10_000;
+export const CONVERT_ENGINE_PROVIDER_POLL_MS = CONVERT_ENGINE_TEST_OPTS?.providerPollMs ?? 10_000;
 
 /** One provider status read's transport budget. */
 export const CONVERT_PROVIDER_TIMEOUT_MS = 8_000;

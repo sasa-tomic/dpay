@@ -63,6 +63,7 @@ import {
   CONVERT_PROBE_WINDOW_ROWS,
   CONVERT_STALE_MS,
   CONVERT_UNSCOPED_STORAGE_KEY,
+  CONVERT_ENGINE_TEST_OPTS,
   convertStoreKey,
 } from './config/convert';
 import {
@@ -1950,9 +1951,13 @@ export async function executeConvert(
   opts: {submitAttempts?: number; poll?: {attempts: number; intervalMs: number}; settleAttempts?: number; settleIntervalMs?: number; nowMs?: number} = {},
 ): Promise<ConvertRecord> {
   const submitAttempts = opts.submitAttempts ?? 2;
-  const poll = opts.poll ?? {attempts: 12, intervalMs: 400};
-  const settleAttempts = opts.settleAttempts ?? 14;
-  const settleIntervalMs = opts.settleIntervalMs ?? 1200;
+  // The settle-watch defaults are e2e-shrinkable wholesale via __DPAY_TEST_CONVERT_ENGINE
+  // (config/convert.ts): the honest-pending invariant — the watch must EXHAUST before a record
+  // parks, never `done` from a pool #ok — is cadence-independent, so the suite proves it at
+  // ~1 s instead of the ~17 s the prod defaults take.
+  const poll = opts.poll ?? CONVERT_ENGINE_TEST_OPTS?.executorOpts?.poll ?? {attempts: 12, intervalMs: 400};
+  const settleAttempts = opts.settleAttempts ?? CONVERT_ENGINE_TEST_OPTS?.executorOpts?.settleAttempts ?? 14;
+  const settleIntervalMs = opts.settleIntervalMs ?? CONVERT_ENGINE_TEST_OPTS?.executorOpts?.settleIntervalMs ?? 1200;
   const nowMs = opts.nowMs ?? Date.now();
 
   // Local twin of rail.submitTransfer's submit+poll, with the identical-bytes retry discipline and
