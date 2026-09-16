@@ -13,17 +13,23 @@ never by opening the DB directly:
                                  it is only reached when their deps already passed)
   report [commit] [--json]       per-suite latest status at a commit (default HEAD);
                                  a missing row is "unknown", never "fail"
+  timing <suite> [commit]        per-test timing breakdown (slowest first) of the latest
+                                 recorded run; suites feed it via $DPAY_TESTRUNS_TIMING
+                                 (nextest libtest-json / jest --json / e2e per-flow JSON)
   floor [--require verify]       composite prod gate: curl the live /api/v1/version,
                                  classify it vs HEAD exactly like verify-relay
-                                 (DIRTY first / MATCH / BEHIND-by-N / MISMATCH), then
+                                 (DIRTY first / BEHIND-by-N / MISMATCH), then
                                  look up the evidence RECORDED AT THE LIVE COMMIT.
                                  Exit 0 iff prod runs a clean commit whose --require
                                  suite has a green record on this machine.
 
-DB: .dev/testruns.db (gitignored, WAL). Every row pins the commit AND the hash of the
+DB: .dev/testruns.db (gitignored, WAL). Every `runs` row pins the commit AND the hash of the
 WORKING TREE (throwaway index seeded from HEAD, updated from the worktree) plus a dirty
 flag — the `-dirty` lesson: suites exercise the working tree, not the commit, so a green
-row taken on a dirty tree can never read as "the commit is verified".
+row taken on a dirty tree can never read as "the commit is verified". Each run also
+records wall + CPU seconds (os.times, children included); when the suite writes a timing
+file to $DPAY_TESTRUNS_TIMING, per-test/per-flow durations land in the `tests` table
+keyed by run — where the time went, per suite, queryable via `timing`.
 
 Unwired by design: e2e-watch / e2e-watch-filter (interactive, Ctrl-C), e2e-visual-seed
 (baseline regen, not a gate), e2e-live-testnet (opt-in, special env).
@@ -77,6 +83,14 @@ def connect():
             host TEXT NOT NULL,
             detail TEXT NOT NULL DEFAULT '')"""
     )
+    con.execute(
+        """CREATE TABLE IF NOT EXISTS tests(
+            id INTEGER PRIMARY KEY,
+            run_id INTEGER NOT NULL REFERENCES runs(id),
+            name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            secs REAL NOT NULL DEFAULT 0)"""
+    )
     return con
 
 
@@ -96,21 +110,22 @@ def worktree():
 
 
 def record(suite, result, extra=None):
-    """Best-effort: a recording failure must never fail the run it annotates."""
+    """Best-effort: a recording failure must never fail the run it annotates.
+    Returns the inserted run id (or None) so per-test timings can attach to it."""
     try:
         commit, tree, dirty = worktree()
         detail = json.dumps(extra or {}, sort_keys=True)
         with connect() as con:
-            con.execute(
+            cur = con.execute(
                 "INSERT INTO runs(ts,rev,tree,dirty,suite,result,host,detail)"
                 " VALUES(?,?,?,?,?,?,?,?)",
                 (int(time.time()), commit, tree, dirty, suite, result,
                  socket.gethostname()[:64], detail),
             )
-        return True
+            return cur.lastrowid
     except Exception as e:
         print(f"testruns: WARNING — could not record {suite}={result}: {e}", file=sys.stderr)
-        return False
+        return None
 
 
 def resolve_commit(ref):
@@ -178,17 +193,104 @@ def print_evidence(commit, label):
     return rows
 
 
+def parse_timing_file(path):
+    """[(name, status, secs)] from whatever the suite left at $DPAY_TESTRUNS_TIMING —
+    auto-detected among nextest libtest-json (NDJSON), jest --json, and the e2e
+    harness's {format:'e2e-flows'} dump. Anything unparseable/absent → []."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            raw = f.read().strip()
+    except OSError:
+        return []
+    if not raw:
+        return []
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        data = None
+
+    if isinstance(data, dict):
+        if data.get("format") == "e2e-flows":
+            return [(str(f.get("name", "?"))[:200], "pass" if f.get("ok") else "fail",
+                     float(f.get("secs") or 0)) for f in data.get("flows", [])]
+        tests = []
+        for suite in data.get("testResults") or []:
+            base = os.path.basename(suite.get("name") or suite.get("testFilePath") or "?")
+            for t in suite.get("testResults") or []:
+                status = {"passed": "pass", "failed": "fail"}.get(t.get("status"), "skip")
+                name = t.get("fullName") or t.get("title") or "?"
+                secs = (t.get("duration") or 0) / 1000.0
+                tests.append((f"{base}::{name}"[:200], status, secs))
+        return tests
+
+    tests = []
+    status_of = {"ok": "pass", "failed": "fail", "timeout": "fail",
+                 "skipped": "skip", "ignored": "skip"}
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "test" and ev.get("event") in status_of:
+            tests.append((str(ev.get("name", "?"))[:200], status_of[ev["event"]],
+                          float(ev.get("exec_time") or 0)))
+    return tests
+
+
+def ingest_timing(run_id, path):
+    """Attach per-test durations to the recorded run. Best-effort, like record()."""
+    if not run_id or not path:
+        return
+    try:
+        tests = parse_timing_file(path)
+        if not tests:
+            return
+        with connect() as con:
+            con.executemany(
+                "INSERT INTO tests(run_id,name,status,secs) VALUES(?,?,?,?)",
+                [(run_id, n, s, round(x, 3)) for n, s, x in tests],
+            )
+    except Exception as e:
+        print(f"testruns: WARNING — could not record per-test timings: {e}", file=sys.stderr)
+
+
+def cpu_now():
+    """Total CPU seconds (self + children) — children are where suite time lives."""
+    t = os.times()
+    return t.user + t.system + t.children_user + t.children_system
+
+
 def cmd_run(a):
     t0 = time.time()
+    c0 = cpu_now()
+    # Per-test timing seam: the child MAY write a machine-readable timing file here
+    # (nextest libtest-json, jest --json, e2e per-flow JSON). Absent → wall/CPU only.
+    timing_path = None
+    env = dict(os.environ)
+    if a.sh is not None or a.cmd:
+        with tempfile.NamedTemporaryFile(prefix="dpay-testruns-timing-", delete=False) as tf:
+            timing_path = tf.name
+        env["DPAY_TESTRUNS_TIMING"] = timing_path
     try:
         if a.sh is not None:
-            rc = subprocess.run(["bash", "-uc", a.sh]).returncode
+            rc = subprocess.run(["bash", "-uc", a.sh], env=env).returncode
         else:
-            rc = subprocess.run(a.cmd).returncode
+            rc = subprocess.run(a.cmd, env=env).returncode
     except KeyboardInterrupt:
         rc = 130
-    record(a.suite, "pass" if rc == 0 else "fail",
-           {"exit": rc, "secs": round(time.time() - t0, 1)})
+    run_id = record(a.suite, "pass" if rc == 0 else "fail",
+                    {"exit": rc, "secs": round(time.time() - t0, 1),
+                     "cpu": round(cpu_now() - c0, 1)})
+    ingest_timing(run_id, timing_path)
+    if timing_path:
+        try:
+            os.unlink(timing_path)
+        except OSError:
+            pass
     sys.exit(rc)
 
 
@@ -284,6 +386,48 @@ def cmd_floor(a):
     sys.exit(1)
 
 
+def cmd_timing(a):
+    commit = resolve_commit(a.commit)
+    with connect() as con:
+        row = con.execute(
+            """SELECT id, result, ts, detail FROM runs
+               WHERE rev=? AND suite=? ORDER BY id DESC LIMIT 1""",
+            (commit, a.suite),
+        ).fetchone()
+    if not row:
+        print(f"== timing: no '{a.suite}' record at {commit[:12] or '(no commits)'}"
+              f" — unknown is NOT fail")
+        return
+    run_id, result, ts, detail = row
+    try:
+        d = json.loads(detail) if detail else {}
+        if not isinstance(d, dict):
+            d = {}
+    except json.JSONDecodeError:
+        d = {}
+    with connect() as con:
+        tests = con.execute(
+            "SELECT name, status, secs FROM tests WHERE run_id=? ORDER BY secs DESC",
+            (run_id,),
+        ).fetchall()
+    if a.json:
+        print(json.dumps({"suite": a.suite, "commit": commit, "result": result, "ts": ts,
+                          "detail": d,
+                          "tests": [{"name": n, "status": s, "secs": x}
+                                    for n, s, x in tests]}, sort_keys=True))
+        return
+    print(f"== {a.suite} @ {commit[:12]}  {result}  {age(ts)} old  "
+          f"wall={d.get('secs', '?')}s  cpu={d.get('cpu', '?')}s  exit={d.get('exit', '?')}")
+    if not tests:
+        print("   (no per-test timings recorded for this run)")
+        return
+    total = sum(x for _, _, x in tests)
+    print(f"   {len(tests)} tests, Σ {total:.1f}s — slowest {min(a.top, len(tests))}:")
+    for name, status, secs in tests[: a.top]:
+        mark = {"pass": "✓", "fail": "✗"}.get(status, "·")
+        print(f"   {mark} {secs:>8.2f}s  {status:<5} {name}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -308,6 +452,14 @@ def main():
     r = sub.add_parser("floor", help="composite prod gate: live commit -> recorded evidence")
     r.add_argument("--require", default="verify", help="suite that must be green (default verify)")
     r.set_defaults(fn=cmd_floor)
+
+    r = sub.add_parser("timing",
+                       help="per-test timing breakdown of a recorded run (default: latest at HEAD)")
+    r.add_argument("suite")
+    r.add_argument("commit", nargs="?")
+    r.add_argument("--top", type=int, default=20, help="how many slowest tests to show")
+    r.add_argument("--json", action="store_true")
+    r.set_defaults(fn=cmd_timing)
 
     args = p.parse_args()
     args.fn(args)

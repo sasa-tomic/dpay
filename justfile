@@ -10,6 +10,8 @@ export PATH := (root / ".dev/cargo/bin") + ":" + (root / ".dev/node/bin") + ":" 
 export POCKET_IC_BIN := root / "third_party/bin/pocket-ic"
 export DPAY_CANISTER_WASM := root / "target/wasm32-unknown-unknown/release/dpay_canister.wasm"
 export DPAY_MOCK_MINTER_WASM := root / "target/wasm32-unknown-unknown/release/dpay_mock_minter.wasm"
+# nextest's per-test libtest-json output (the $DPAY_TESTRUNS_TIMING feed) is experimental-gated
+export NEXTEST_EXPERIMENTAL_LIBTEST_JSON := "1"
 
 # list recipes
 default:
@@ -21,7 +23,7 @@ default:
 # and the till-open one additionally compares the COMMITTED dfx/till_open_signing.json against what
 # today's core emits. They were previously on no recipe at all, so that drift could land green.
 test-core:
-    python3 scripts/testruns.py run test-core --sh 'cargo nextest run -p dpay-core --features rng && cargo nextest run -p dpay-fixture'
+    python3 scripts/testruns.py run test-core --sh 'cargo nextest run -p dpay-core --features rng --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-fixture --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # build the canister to wasm (release)
 build-canister:
@@ -35,7 +37,7 @@ build-mock-minter:
 # DFINITY ic-icrc1-ledger (cached in third_party/ic-icrc1-ledger/); multi-ledger proof incl. the
 # double-spend concurrency regression. Fully offline.
 test-canister: build-canister build-mock-minter
-    python3 scripts/testruns.py run test-canister --sh 'cargo nextest run -p dpay-canister-tests'
+    python3 scripts/testruns.py run test-canister --sh 'cargo nextest run -p dpay-canister-tests --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # user-principal rail tests on PocketIC's make_live() gateway (offline, deterministic, seconds):
 # raw-ed25519 device keys whose self-authenticating principals hold funds DIRECTLY on the REAL
@@ -46,7 +48,7 @@ test-canister: build-canister build-mock-minter
 # ALSO runs the dpay-icp wire-contract goldens (byte-parity vs the cached production crates —
 # seconds-fast, was previously on no recipe) and the dpay-wasm host tests (icp goldens).
 test-icp: build-mock-minter
-    python3 scripts/testruns.py run test-icp --sh 'cargo nextest run -p dpay-icp && cargo nextest run -p dpay-wasm && cargo nextest run -p dpay-icp-tests'
+    python3 scripts/testruns.py run test-icp --sh 'cargo nextest run -p dpay-icp --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-wasm --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-icp-tests --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # relay DEFAULT-features compile gate: `cargo check -p dpay-relay` with no features. Every other
 # recipe compiles the relay WITH a feature (test-relay: test-helpers; test-live: agent+test-helpers),
@@ -67,7 +69,7 @@ relay-default-check: web
 # Depends on `web`: dpay-relay's build.rs embeds e2e/dist-prod (the /wallet route serves the real
 # app from it) and FAILS LOUD when it's missing — this dependency keeps every relay build honest.
 test-relay: web
-    python3 scripts/testruns.py run test-relay --sh 'cargo nextest run -p dpay-relay --features test-helpers'
+    python3 scripts/testruns.py run test-relay --sh 'cargo nextest run -p dpay-relay --features test-helpers --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # emit the committed core goldens from the real Rust core: the wire layout (single source of truth
 # for the JS ed25519 signing shim) and the till-open signing document (the merchant's ring-up proof,
@@ -154,7 +156,7 @@ sim: build-canister
 # Also builds the mock-minter wasm — the WAVE-5 live test drives TWO mock minters to prove the
 # ckERC20 onramp's runtime `get_minter_info` helper read + its logged-constant fallback.
 test-live: web
-    python3 scripts/testruns.py run test-live --sh 'CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-canister --target wasm32-unknown-unknown --release && CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release && DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" DPAY_MOCK_MINTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_mock_minter.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers'
+    python3 scripts/testruns.py run test-live --sh 'CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-canister --target wasm32-unknown-unknown --release && CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release && DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" DPAY_MOCK_MINTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_mock_minter.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # UniFFI shared-core binding: build host lib, generate bindings, run the language roundtrip test
 ffi:
@@ -285,6 +287,12 @@ verify-relay:
 floor:
     python3 scripts/testruns.py floor
 
+# per-test timing breakdown of a recorded run: `just timing e2e` prints the slowest flows
+# (or tests, for the nextest/jest suites) first, with the run's wall + CPU seconds on top.
+# The data is what suites write to $DPAY_TESTRUNS_TIMING during testruns.py runs.
+timing suite *args:
+    python3 scripts/testruns.py timing "{{suite}}" {{args}}
+
 # OBJECTIVE integrity gate for the FACADE CANISTER: curls the live `/api/v1/integrity` and asserts
 # the canister's on-chain module hash matches the PIN the relay image was built with
 # (deploy/facade-module-hash.txt — GOVERNANCE row 7). MATCH = the deployed facade is the recorded
@@ -330,7 +338,7 @@ palette-css:
 # Wired into `check` because it WASN'T: the suite ran only by hand, so a broken component or a
 # regressed formatter passed `just verify` green. Same shape as `typecheck` above.
 test-app:
-    python3 scripts/testruns.py run test-app --sh 'cd app && npm test'
+    python3 scripts/testruns.py run test-app --sh 'cd app && npm test -- --json --outputFile="${DPAY_TESTRUNS_TIMING:-/dev/null}"'
 
 # bridge parity: assert every TS DpayCoreApi/DpayNfcApi method has a matching-arity Kotlin @ReactMethod
 # (and vice-versa). Sub-second, no device — the static net that makes wire/arity drift fail the build.

@@ -31,6 +31,7 @@
 // harness/meta.mjs). No other change needed — the harness auto-discovers it, filters by it, and
 // regenerates FLOWS.md from it.
 import os from 'node:os';
+import fs from 'node:fs';
 import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 
@@ -298,6 +299,22 @@ export async function runTestsSubset(tests, opts = {}) {
   // "element not visible within 5000ms" — a statement about the app that was really about the box.
   process.env.DPAY_E2E_TIMEOUT_SCALE = String(timeoutScale);
   const { results, firstFailure } = await runPool(tests, resolved.concurrency, timeoutScale);
+
+  // Timing seam: testruns.py points DPAY_TESTRUNS_TIMING at a file; dump per-flow wall
+  // times so `just timing e2e` shows exactly where the suite's time went. Best-effort —
+  // a dump failure must never affect the run itself.
+  const timingPath = process.env.DPAY_TESTRUNS_TIMING;
+  if (timingPath) {
+    try {
+      const flows = tests.map((t) => {
+        const r = results.get(t.file);
+        return { name: t.file, ok: !!r?.ok, secs: (r?.ms ?? 0) / 1000, ran: !!r };
+      });
+      fs.writeFileSync(timingPath, JSON.stringify({ format: 'e2e-flows', flows }));
+    } catch (e) {
+      console.error(`  (timing dump failed: ${e instanceof Error ? e.message : e})`);
+    }
+  }
 
   // Tear down the shared relay + web server + browser once the run is done (pass OR fail) — UNLESS
   // the caller asked to keep it alive (watch mode reuses it across re-runs).
