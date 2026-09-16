@@ -289,9 +289,10 @@ floor:
 
 # per-test timing breakdown of a recorded run: `just timing e2e` prints the slowest flows
 # (or tests, for the nextest/jest suites) first, with the run's wall + CPU seconds on top.
-# The data is what suites write to $DPAY_TESTRUNS_TIMING during testruns.py runs.
-timing suite *args:
-    python3 scripts/testruns.py timing "{{suite}}" {{args}}
+# Bare `just timing` lists every recorded suite by wall time. The data is what suites
+# write to $DPAY_TESTRUNS_TIMING during testruns.py runs.
+timing *args:
+    python3 scripts/testruns.py timing {{args}}
 
 # OBJECTIVE integrity gate for the FACADE CANISTER: curls the live `/api/v1/integrity` and asserts
 # the canister's on-chain module hash matches the PIN the relay image was built with

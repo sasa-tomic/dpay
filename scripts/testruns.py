@@ -13,9 +13,10 @@ never by opening the DB directly:
                                  it is only reached when their deps already passed)
   report [commit] [--json]       per-suite latest status at a commit (default HEAD);
                                  a missing row is "unknown", never "fail"
-  timing <suite> [commit]        per-test timing breakdown (slowest first) of the latest
-                                 recorded run; suites feed it via $DPAY_TESTRUNS_TIMING
-                                 (nextest libtest-json / jest --json / e2e per-flow JSON)
+  timing [suite] [commit]      per-test timing breakdown (slowest first) of the latest
+                               recorded run; bare `timing` lists every suite by wall time.
+                               Suites feed it via $DPAY_TESTRUNS_TIMING
+                               (nextest libtest-json / jest --json / e2e per-flow JSON)
   floor [--require verify]       composite prod gate: curl the live /api/v1/version,
                                  classify it vs HEAD exactly like verify-relay
                                  (DIRTY first / BEHIND-by-N / MISMATCH), then
@@ -388,6 +389,33 @@ def cmd_floor(a):
 
 def cmd_timing(a):
     commit = resolve_commit(a.commit)
+    if a.suite is None:
+        # List mode: latest run of EVERY suite, wall-desc — the "where does the time go" overview.
+        with connect() as con:
+            rows = con.execute(
+                """SELECT r.suite, r.result, r.ts, r.detail, r.rev,
+                          (SELECT COUNT(*) FROM tests t WHERE t.run_id = r.id)
+                   FROM runs r
+                   JOIN (SELECT MAX(id) AS m FROM runs GROUP BY suite) x ON x.m = r.id""").fetchall()
+        if not rows:
+            print("== timing: no runs recorded yet")
+            return
+        parsed = []
+        for suite, result, ts, detail, rev, ntests in rows:
+            try:
+                d = json.loads(detail) if detail else {}
+            except json.JSONDecodeError:
+                d = {}
+            if not isinstance(d, dict):
+                d = {}
+            parsed.append((float(d.get("secs") or 0), suite, result, ts, d, rev or "?", ntests))
+        parsed.sort(key=lambda r: r[0], reverse=True)
+        print(f"== {len(parsed)} suites (latest run each) — wall desc; drill in: just timing <suite>")
+        for secs, suite, result, ts, d, rev, ntests in parsed:
+            tcol = f"{ntests:>4} tests" if ntests else "      ·"
+            print(f"   {suite:<20} {result:<5} wall={secs:>7.1f}s  "
+                  f"cpu={float(d.get('cpu') or 0):>7.1f}s  {tcol}  {age(ts)} old  @ {rev[:12]}")
+        return
     with connect() as con:
         row = con.execute(
             """SELECT id, result, ts, detail FROM runs
@@ -454,8 +482,8 @@ def main():
     r.set_defaults(fn=cmd_floor)
 
     r = sub.add_parser("timing",
-                       help="per-test timing breakdown of a recorded run (default: latest at HEAD)")
-    r.add_argument("suite")
+                       help="per-test timing breakdown of a recorded run; bare: list suites by wall")
+    r.add_argument("suite", nargs="?", default=None)
     r.add_argument("commit", nargs="?")
     r.add_argument("--top", type=int, default=20, help="how many slowest tests to show")
     r.add_argument("--json", action="store_true")
