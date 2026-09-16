@@ -16,11 +16,13 @@
 //!   configured value and an `affiliateId` that came from CONFIG, never from the
 //!   request — and `commissionRate` is the pinned `"0"` (the founder red line: dpay
 //!   takes no cut), never a request-suppliable field;
-//! - the pair allowlist: only the registered cross-rail pair (ICP principal ↔ SOL
-//!   mint, both directions) reaches the upstream; anything else is a 400 house error
-//!   with zero upstream hits;
+//! - the pair allowlist: only the registered cross-rail pairs (the `sideshift` row's
+//!   ICP principal ↔ SOL mint and the `sideshift-usdc` row's ICP principal ↔ USDC
+//!   mint, both directions each) reach the upstream; anything else is a 400 house
+//!   error with zero upstream hits;
 //! - the quote wrap: a successful upstream answer comes back as
-//!   `{"venue_id":"sideshift","quote":<venue body VERBATIM>,"fetched_at":<unix secs>}`
+//!   `{"venue_id":<the matched registry row's id>,"quote":<venue body VERBATIM>,
+//!   "fetched_at":<unix secs>}`
 //!   (attribution + timestamp, numbers untouched), while upstream ERRORS pass through
 //!   status+body verbatim (no wrap, no marker — whatever refused is the venue);
 //! - fixed-order creation: verbatim passthrough both ways, `settleMemo` forwarded only
@@ -53,6 +55,7 @@ const STUB_AFFILIATE: &str = "stub-affiliate-id";
 
 const ICP: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 const SOL: &str = "So11111111111111111111111111111111111111112";
+const USDC: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 // ---- the stub upstream ----
 
@@ -366,6 +369,41 @@ async fn quote_accepts_the_reverse_direction_of_the_registered_pair() {
     assert_eq!(sent["depositAmount"], "3.5");
 }
 
+/// The SECOND cefi row (sideshift-usdc, registered 2026-09-16): ICP → USDC(Solana)
+/// maps onto the venue's codes and attributes the MATCHED row's id — the pair
+/// disambiguates the row.
+#[tokio::test]
+async fn quote_serves_the_usdc_pair_under_its_own_row_id() {
+    let (stub, base) = spawn_stub().await;
+    let state = state_with(configured(&base));
+
+    let (status, _h, body) =
+        post_json(&state, "/api/v1/sideshift/quotes", &quote_body(ICP, USDC, "2")).await;
+    assert_eq!(status, StatusCode::CREATED, "body: {}", String::from_utf8_lossy(&body));
+    let (_seen_headers, seen_body) = stub.last();
+    let sent: serde_json::Value = serde_json::from_str(&seen_body).unwrap();
+    assert_eq!(sent["depositCoin"], "ICP");
+    assert_eq!(sent["depositNetwork"], "icp");
+    assert_eq!(sent["settleCoin"], "usdc");
+    assert_eq!(sent["settleNetwork"], "solana");
+    let wrapped: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        wrapped["venue_id"], "sideshift-usdc",
+        "the attribution names the row the pair resolved to"
+    );
+    assert_eq!(wrapped["quote"]["id"], "stub-quote-1", "the venue body rides verbatim");
+    // Reverse direction: same row, mapped onto the venue's codes the other way.
+    let (status, _h, _body) =
+        post_json(&state, "/api/v1/sideshift/quotes", &quote_body(USDC, ICP, "1")).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let (_seen_headers, seen_body) = stub.last();
+    let sent: serde_json::Value = serde_json::from_str(&seen_body).unwrap();
+    assert_eq!(sent["depositCoin"], "usdc");
+    assert_eq!(sent["depositNetwork"], "solana");
+    assert_eq!(sent["settleCoin"], "ICP");
+    assert_eq!(sent["settleNetwork"], "icp");
+}
+
 /// The partner key is spendable on EXACTLY the registered pair: any other rail ids
 /// (real ledgers included) are a 400 house error and never reach the upstream.
 #[tokio::test]
@@ -373,11 +411,13 @@ async fn quote_refuses_unregistered_pairs_without_touching_the_upstream() {
     let (stub, base) = spawn_stub().await;
     let state = state_with(configured(&base));
 
-    // VCHF is a real IC ledger (a real pair member of icpswap) — still not THIS row's pair.
+    // VCHF is a real IC ledger (a real pair member of icpswap) — still not a cefi pair.
+    // SOL → USDC is a real mint pair (the jupiter row trades it) — but jupiter is a
+    // solana_amm row, never a cefi one, so the partner key must not serve it either.
     for (deposit, settle) in [
         ("ly36x-wiaaa-aaaai-aqj7q-cai", SOL), // VCHF → SOL
-        (ICP, "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), // ICP → USDC mint
-        (ICP, ICP),                             // same asset both sides
+        (SOL, USDC),                          // SOL → USDC mint (not a cefi pair)
+        (ICP, ICP),                           // same asset both sides
     ] {
         let (status, _h, body) =
             post_json(&state, "/api/v1/sideshift/quotes", &quote_body(deposit, settle, "2")).await;

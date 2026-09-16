@@ -102,6 +102,62 @@
       }
     },
     {
+      "venue_id": "icpswap-ckbtc",
+      "display_name": "ICPSwap",
+      "kind": "ic_amm",
+      "endpoint": "xmiu5-jqaaa-aaaag-qbz7q-cai",
+      "pair_ledgers": ["mxzaz-hqaaa-aaaar-qaada-cai", "ryjl3-tyaaa-aaaaa-aaaba-cai"],
+      "testnet": false,
+      "disclosure_key": "icpswap",
+      "fixture": {
+        "token0_ledger": "mxzaz-hqaaa-aaaar-qaada-cai",
+        "token1_ledger": "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "fee_millionths": 3000
+      }
+    },
+    {
+      "venue_id": "icpswap-ckbtc-cketh",
+      "display_name": "ICPSwap",
+      "kind": "ic_amm",
+      "endpoint": "akhru-myaaa-aaaag-qcvna-cai",
+      "pair_ledgers": ["mxzaz-hqaaa-aaaar-qaada-cai", "ss2fx-dyaaa-aaaar-qacoq-cai"],
+      "testnet": false,
+      "disclosure_key": "icpswap",
+      "fixture": {
+        "token0_ledger": "mxzaz-hqaaa-aaaar-qaada-cai",
+        "token1_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai",
+        "fee_millionths": 3000
+      }
+    },
+    {
+      "venue_id": "icpswap-vchf-ckusdc",
+      "display_name": "ICPSwap",
+      "kind": "ic_amm",
+      "endpoint": "hx7nb-diaaa-aaaar-qbxsa-cai",
+      "pair_ledgers": ["ly36x-wiaaa-aaaai-aqj7q-cai", "xevnm-gaaaa-aaaar-qafnq-cai"],
+      "testnet": false,
+      "disclosure_key": "icpswap",
+      "fixture": {
+        "token0_ledger": "ly36x-wiaaa-aaaai-aqj7q-cai",
+        "token1_ledger": "xevnm-gaaaa-aaaar-qafnq-cai",
+        "fee_millionths": 3000
+      }
+    },
+    {
+      "venue_id": "icpswap-ckusdc-cketh",
+      "display_name": "ICPSwap",
+      "kind": "ic_amm",
+      "endpoint": "mvcvq-3iaaa-aaaag-qjykq-cai",
+      "pair_ledgers": ["xevnm-gaaaa-aaaar-qafnq-cai", "ss2fx-dyaaa-aaaar-qacoq-cai"],
+      "testnet": false,
+      "disclosure_key": "icpswap",
+      "fixture": {
+        "token0_ledger": "ss2fx-dyaaa-aaaar-qacoq-cai",
+        "token1_ledger": "xevnm-gaaaa-aaaar-qafnq-cai",
+        "fee_millionths": 3000
+      }
+    },
+    {
       "_doc": "The FIRST SOLANA venue (registered 2026-09-15, multi-venue readiness V11 — 'a Solana venue cannot reach the screen'): Jupiter, the autonomous on-chain Solana aggregator, for the rail-local pair SOL ↔ USDC(Solana). IDENTIFIER SEMANTICS for a solana_amm row: `pair_ledgers` are Solana MINTS in base58 (the eurc_mint precedent for base58 identifiers in this file), NOT IC ledger principals — the SOL side is identified by the WRAPPED-SOL mint So111…12 because that is the stable string id a venue route carries for native SOL (a registry row needs an identifier per side; 'null', the payment rail's marker for native SOL, is not one). `endpoint` is an https ORIGIN, not a principal: the quote is a keyless device-direct GET and the swap is Jupiter's serialized unsigned transaction, signed on-device — the relay's role for this row is REGISTRY ONLY (served in /api/v1/venues with kind solana_amm; never resolvable through venue_of_endpoint, the IC quote allowlist). NO FIXTURE by rule: fixtures are the ic_amm offline-fake-IC seeding and are ic_amm-only — the offline Jupiter stand-in lives app-side (the e2e window.fetch stub on this origin), so this row carries no fixture block at all. Measured live 2026-09-14 (docs/specs/2026-09-14-swap-venue-feasibility.md): lite-api.jup.ag quote/swap are keyless, no KYC, platformFee null (no integrator fee).",
       "venue_id": "jupiter",
       "display_name": "Jupiter",
@@ -115,6 +171,19 @@
       "disclosure_key": "jupiter"
     },
     {
+      "_doc": "The SECOND Solana venue (registered 2026-09-16, convert coverage expansion — docs/specs/2026-09-16-convert-coverage-expansion.md §1): the same Jupiter aggregator family as the row above, on the rail-local pair SOL ↔ EURC. Identifier semantics match the jupiter row (mints in base58, https-origin endpoint, REGISTRY-ONLY relay role, no fixture — the offline stand-in is the e2e window.fetch stub on this origin). Measured live 2026-09-16: SOL→EURC quotes healthy both directions keyless (~110 ms, platformFee null). The USDC↔EURC pair was probed and deliberately SKIPPED — a thin ~13% spread market; revisit on depth.",
+      "venue_id": "jupiter-eurc",
+      "display_name": "Jupiter",
+      "kind": "solana_amm",
+      "endpoint": "https://lite-api.jup.ag",
+      "pair_ledgers": [
+        "So11111111111111111111111111111111111111112",
+        "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
+      ],
+      "testnet": false,
+      "disclosure_key": "jupiter"
+    },
+    {
       "_doc": "The FIRST CeFi venue (registered 2026-09-15, founder decision 3 — the relay-held partner-key pattern, docs/specs/2026-09-14-swap-venue-feasibility.md §Partner-key infrastructure): SideShift, an automated instant-exchange service, on the cross-rail pair ICP ↔ SOL. IDENTIFIER SEMANTICS for a cefi row: `pair_ledgers` are RAIL-CANONICAL ids — the IC side by ledger principal, the Solana side by MINT (native SOL = the wrapped-SOL mint, the jupiter row's own precedent for naming native SOL in a registry row) — while the VENUE's own coin/network codes (ICP/icp, SOL/solana) live with the venue integration (crates/dpay-relay/src/sideshift.rs), not here. `endpoint` is the venue's https API BASE (verified live 2026-09-15: the old api.sideshift.ai host is NXDOMAIN; the API lives under sideshift.ai/api/v2). UNLIKE every other row this venue needs a partner credential: quote and fixed-order creation run through the relay's sideshift proxy (DPAY_SIDESHIFT_SECRET / DPAY_SIDESHIFT_AFFILIATE_ID — the account secret attaches relay-side, the device never sees it; both may be unset, in which case the proxy answers 503 naming them and the venue is simply absent), while shift STATUS reads are SideShift's own KEYLESS GET the device polls directly (app/convertResume.ts provider path — verified live 2026-09-15). NO FIXTURE by the same rule as the jupiter row: fixtures are the ic_amm offline-fake-IC seeding; this row's offline stand-ins are the relay's /api/v1/test/sideshift-upstream stub (harness/relay.mjs points DPAY_SIDESHIFT_API_BASE at it) and the e2e page fetch stub on the sideshift.ai origin (e2e/harness/sideshift.mjs). Founder boundary: the partner account holds no funds and dpay sends none to it (nothing to withdraw); commissionRate pinned to 0 (dpay is paid nothing); withdrawal-capable keys remain an absolute no.",
       "venue_id": "sideshift",
       "display_name": "SideShift",
@@ -123,6 +192,19 @@
       "pair_ledgers": [
         "ryjl3-tyaaa-aaaaa-aaaba-cai",
         "So11111111111111111111111111111111111111112"
+      ],
+      "testnet": false,
+      "disclosure_key": "sideshift"
+    },
+    {
+      "_doc": "The SECOND CeFi venue (registered 2026-09-16, convert coverage expansion — docs/specs/2026-09-16-convert-coverage-expansion.md §1): the same SideShift venue family as the row above, on the cross-rail pair ICP ↔ USDC(Solana) — the first pair with two registered routes (this beside the CCTP multihop Route B out of the ckUSDC leg). Identifier semantics match the sideshift row (rail-canonical pair ids, https API base, relay-held partner key: quote/order ride the proxy, status reads stay device-direct keyless, no fixture). The USDC(Solana) mint → SideShift coin/network mapping in crates/dpay-relay/src/sideshift.rs is best-effort and UNVERIFIED until the founder's partner key exists — the keyless 503 tripwire applies to this row exactly as to its sibling.",
+      "venue_id": "sideshift-usdc",
+      "display_name": "SideShift",
+      "kind": "cefi",
+      "endpoint": "https://sideshift.ai/api/v2",
+      "pair_ledgers": [
+        "ryjl3-tyaaa-aaaaa-aaaba-cai",
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
       ],
       "testnet": false,
       "disclosure_key": "sideshift"

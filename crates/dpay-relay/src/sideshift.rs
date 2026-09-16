@@ -20,10 +20,10 @@
 //!   rail identifiers (`depositLedger`, `settleLedger` — the registry's own pair ids)
 //!   and a decimal `depositAmount` string. The relay maps the pair onto SideShift's
 //!   own coin/network codes, attaches the partner credentials, and forwards. A
-//!   successful upstream answer is wrapped `{"venue_id":"sideshift","quote":<the
-//!   venue's body VERBATIM>,"fetched_at":<unix secs>}` — the attribution + timestamp
-//!   the delegated-conversion red lines require, with the venue's numbers untouched
-//!   (the relay never computes, blends or rounds a rate).
+//!   successful upstream answer is wrapped `{"venue_id":<the matched registry row's
+//!   id>,"quote":<the venue's body VERBATIM>,"fetched_at":<unix secs>}` — the
+//!   attribution + timestamp the delegated-conversion red lines require, with the
+//!   venue's numbers untouched (the relay never computes, blends or rounds a rate).
 //! - `POST /api/v1/sideshift/shifts/fixed` — fixed-shift (order) creation, same
 //!   credential attachment, response VERBATIM (no wrap: an order is not a quote
 //!   surface). The device then shows the user SideShift's `depositAddress` — the user
@@ -118,10 +118,14 @@ const COMMISSION_RATE: &str = "0";
 
 /// Rail-canonical id → SideShift's own (coin, network) for every asset a registered
 /// SideShift pair names. Verified against the live `GET /coins` (keyless) 2026-09-15:
-/// ICP lives on network `icp` (hasMemo false), SOL on `solana`.
+/// ICP lives on network `icp` (hasMemo false), SOL on `solana`. The USDC(Solana) row is
+/// BEST-EFFORT and UNVERIFIED until the founder's partner key exists (both cefi routes
+/// 503 until then — the keyless tripwire is unchanged): the coin code `usdc` on
+/// network `solana` follows the venue's documented code shape.
 const SIDESHIFT_ASSETS: &[(&str, &str, &str)] = &[
     (crate::catalog::ICP_LEDGER_PRINCIPAL, "ICP", "icp"),
     (crate::catalog::WRAPPED_SOL_MINT, "SOL", "solana"),
+    (crate::catalog::SOLANA_USDC_MINT, "usdc", "solana"),
 ];
 
 /// The proxy's state: the two partner credentials (secrets — module header), the API
@@ -253,13 +257,14 @@ pub async fn quotes_proxy(
              wire format, forwarded as-is",
         );
     }
-    let Some((deposit_coin, deposit_network, settle_coin, settle_network)) =
+    let Some((venue_id, deposit_coin, deposit_network, settle_coin, settle_network)) =
         pair_direction(deposit_ledger, settle_ledger)
     else {
         return err(
             StatusCode::BAD_REQUEST,
-            "unsupported pair: the registered SideShift venue row trades exactly one \
-             cross-rail pair — pass its two rail ids as depositLedger/settleLedger",
+            "unsupported pair: the registered SideShift venue rows trade exactly their \
+             registered cross-rail pairs — pass one row's two rail ids as \
+             depositLedger/settleLedger",
         );
     };
 
@@ -290,7 +295,7 @@ pub async fn quotes_proxy(
     if outcome.status.is_success() {
         if let Ok(Value::Object(venue_body)) = serde_json::from_slice::<Value>(&outcome.body) {
             let wrapped = json!({
-                "venue_id": SIDESHIFT_VENUE_ID,
+                "venue_id": venue_id,
                 "quote": Value::Object(venue_body),
                 "fetched_at": crate::now_secs(),
             });
@@ -359,16 +364,25 @@ pub async fn shifts_fixed_proxy(
 }
 
 /// Map a (deposit, settle) rail-id pair onto SideShift's own codes — accepted only if
-/// it is EXACTLY the registered `cefi` row's pair, unordered (the registry's own
-/// rule: pair_ledgers carry no order). This is the whole pair allowlist for the
-/// partner key: one row, both directions.
-fn pair_direction(deposit: &str, settle: &str) -> Option<(&'static str, &'static str, &'static str, &'static str)> {
-    let row = crate::catalog::venues()
-        .into_iter()
-        .find(|v| v.venue_id == SIDESHIFT_VENUE_ID && v.kind == crate::catalog::VenueKind::Cefi)?;
-    if row.pair_ledgers != [deposit, settle] && row.pair_ledgers != [settle, deposit] {
-        return None;
-    }
+/// it is EXACTLY a registered `cefi` row's pair, unordered (the registry's own rule:
+/// pair_ledgers carry no order; one row per pair, so the pair disambiguates the row).
+/// This is the whole pair allowlist for the partner key: every cefi row, both
+/// directions. Returns the matched row's venue_id first, so attribution names the row
+/// the pair actually resolved to.
+fn pair_direction(
+    deposit: &str,
+    settle: &str,
+) -> Option<(
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+)> {
+    let row = crate::catalog::venues().into_iter().find(|v| {
+        v.kind == crate::catalog::VenueKind::Cefi
+            && (v.pair_ledgers == [deposit, settle] || v.pair_ledgers == [settle, deposit])
+    })?;
     let lookup = |id: &str| {
         SIDESHIFT_ASSETS
             .iter()
@@ -376,7 +390,7 @@ fn pair_direction(deposit: &str, settle: &str) -> Option<(&'static str, &'static
             .map(|(_, coin, network)| (*coin, *network))
     };
     let ((d_coin, d_net), (s_coin, s_net)) = (lookup(deposit)?, lookup(settle)?);
-    Some((d_coin, d_net, s_coin, s_net))
+    Some((row.venue_id, d_coin, d_net, s_coin, s_net))
 }
 
 /// A plain non-negative decimal string (the venue's amount wire format). Structural
@@ -541,19 +555,31 @@ mod tests {
     fn pair_direction_accepts_the_registered_pair_both_ways_and_nothing_else() {
         let icp = crate::catalog::ICP_LEDGER_PRINCIPAL;
         let sol = crate::catalog::WRAPPED_SOL_MINT;
-        // Both directions of the registered cross-rail pair.
+        let usdc = crate::catalog::SOLANA_USDC_MINT;
+        // Both directions of the registered cross-rail pair (the sideshift row).
         assert_eq!(
             pair_direction(icp, sol),
-            Some(("ICP", "icp", "SOL", "solana"))
+            Some(("sideshift", "ICP", "icp", "SOL", "solana"))
         );
         assert_eq!(
             pair_direction(sol, icp),
-            Some(("SOL", "solana", "ICP", "icp"))
+            Some(("sideshift", "SOL", "solana", "ICP", "icp"))
         );
-        // Anything else — including rail ids that exist but are not the registered
+        // Both directions of the SECOND cefi row (sideshift-usdc): the pair
+        // disambiguates the row, and the attribution follows the matched row.
+        assert_eq!(
+            pair_direction(icp, usdc),
+            Some(("sideshift-usdc", "ICP", "icp", "usdc", "solana"))
+        );
+        assert_eq!(
+            pair_direction(usdc, icp),
+            Some(("sideshift-usdc", "usdc", "solana", "ICP", "icp"))
+        );
+        // Anything else — including rail ids that exist but are not a registered
         // pair — refuses. VCHF is a real IC ledger; it must not ride the partner key.
         assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, sol).is_none());
-        assert!(pair_direction(icp, crate::catalog::SOLANA_USDC_MINT).is_none());
+        assert!(pair_direction(crate::catalog::VCHF_LEDGER_PRINCIPAL, usdc).is_none());
+        assert!(pair_direction(sol, usdc).is_none());
         assert!(pair_direction(icp, icp).is_none());
         assert!(pair_direction("", "").is_none());
     }

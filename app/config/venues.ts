@@ -13,6 +13,7 @@
 //     when the offline test relay serves them knob-gated, V5).
 import {BUNDLED_NETWORKS, icpCatalogOf} from './catalog';
 import {
+  EURC_MINT_ADDRESS,
   USDC_MINT_ADDRESS,
   WRAPPED_SOL_MINT_ADDRESS,
 } from '../solana/tokens';
@@ -87,6 +88,47 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     disclosure_key: 'icpswap',
   },
   {
+    // The 2026-09-16 coverage expansion (docs/specs/2026-09-16-convert-coverage-expansion.md
+    // §1): four more pair-scoped ICPSwap pools, each MEASURED off the live pool's own
+    // `metadata` — same venue family, each its own pool contract on its own pair. Order
+    // mirrors dfx/catalog_truth.json venues[] (stable wire order); the pair stays an
+    // UNORDERED set — token0/token1 is read live off each pool.
+    venue_id: 'icpswap-ckbtc',
+    display_name: 'ICPSwap',
+    kind: 'ic_amm',
+    endpoint: 'xmiu5-jqaaa-aaaag-qbz7q-cai',
+    pair_ledgers: [mainnetIcLedger(1), mainnetIcLedger(8)],
+    testnet: false,
+    disclosure_key: 'icpswap',
+  },
+  {
+    venue_id: 'icpswap-ckbtc-cketh',
+    display_name: 'ICPSwap',
+    kind: 'ic_amm',
+    endpoint: 'akhru-myaaa-aaaag-qcvna-cai',
+    pair_ledgers: [mainnetIcLedger(1), mainnetIcLedger(6)],
+    testnet: false,
+    disclosure_key: 'icpswap',
+  },
+  {
+    venue_id: 'icpswap-vchf-ckusdc',
+    display_name: 'ICPSwap',
+    kind: 'ic_amm',
+    endpoint: 'hx7nb-diaaa-aaaar-qbxsa-cai',
+    pair_ledgers: [mainnetIcLedger(7), mainnetIcLedger(2)],
+    testnet: false,
+    disclosure_key: 'icpswap',
+  },
+  {
+    venue_id: 'icpswap-ckusdc-cketh',
+    display_name: 'ICPSwap',
+    kind: 'ic_amm',
+    endpoint: 'mvcvq-3iaaa-aaaag-qjykq-cai',
+    pair_ledgers: [mainnetIcLedger(2), mainnetIcLedger(6)],
+    testnet: false,
+    disclosure_key: 'icpswap',
+  },
+  {
     // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter, the
     // autonomous on-chain aggregator, for the rail-local pair SOL ↔ USDC(Solana). Identifier
     // semantics per kind: `endpoint` is an https ORIGIN (quote + unsigned swap tx, device-direct
@@ -99,6 +141,21 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     kind: 'solana_amm',
     endpoint: 'https://lite-api.jup.ag',
     pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS],
+    testnet: false,
+    disclosure_key: 'jupiter',
+  },
+  {
+    // The SECOND Solana venue (registered 2026-09-16, coverage expansion §1): the same
+    // Jupiter aggregator family, on the rail-local pair SOL ↔ EURC — everything the
+    // jupiter row comment above says holds verbatim (https origin, mints derived from
+    // the Solana token registry, no fixture, offline stand-in = the e2e fetch stub).
+    // Measured live 2026-09-16: SOL→EURC healthy keyless; the USDC↔EURC pair probed
+    // and SKIPPED (a thin ~13% spread market — revisit on depth).
+    venue_id: 'jupiter-eurc',
+    display_name: 'Jupiter',
+    kind: 'solana_amm',
+    endpoint: 'https://lite-api.jup.ag',
+    pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, EURC_MINT_ADDRESS],
     testnet: false,
     disclosure_key: 'jupiter',
   },
@@ -122,6 +179,21 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     kind: 'cefi',
     endpoint: 'https://sideshift.ai/api/v2',
     pair_ledgers: [mainnetIcLedger(8), WRAPPED_SOL_MINT_ADDRESS],
+    testnet: false,
+    disclosure_key: 'sideshift',
+  },
+  {
+    // The SECOND CeFi venue (registered 2026-09-16, coverage expansion §1): the same
+    // SideShift venue family, on the cross-rail pair ICP ↔ USDC(Solana) — the first
+    // pair with two registered routes from one screen (this beside the CCTP multihop
+    // Route B out of the ckUSDC leg). Everything the sideshift row comment above says
+    // holds verbatim (relay-held partner key, keyless status reads, no fixture). The
+    // venue stays absent until the partner key exists — the 503 tripwire is unchanged.
+    venue_id: 'sideshift-usdc',
+    display_name: 'SideShift',
+    kind: 'cefi',
+    endpoint: 'https://sideshift.ai/api/v2',
+    pair_ledgers: [mainnetIcLedger(8), USDC_MINT_ADDRESS],
     testnet: false,
     disclosure_key: 'sideshift',
   },

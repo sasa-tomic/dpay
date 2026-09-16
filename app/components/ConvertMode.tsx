@@ -43,7 +43,7 @@
 // subscribes for updates and hands freshly-prepared records to it, never running a private copy).
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {ActivityIndicator, Linking, Pressable, Text, TextInput, View} from 'react-native';
-import {isValidDestinationAddress, type CurrencyDescriptor} from '../config/catalog';
+import {isValidDestinationAddress, icpCatalogOf, BUNDLED_NETWORKS, type CurrencyDescriptor} from '../config/catalog';
 import type {SelectableAsset} from '../config/assets';
 import {
   CONVERT_SLIPPAGE_BPS_DEFAULT,
@@ -2056,6 +2056,38 @@ function ConvertHeader({title, onBack}: {title: string; onBack: () => void}) {
 }
 
 /** The fail-closed panel: same entry point for every asset, honest copy for everything venue-less. */
+
+// The what-exists-today pair list is DERIVED from the bundled mainnet ic_amm registry —
+// never hardcoded, so the next venue registration re-words this copy for free (the 2026-09-16
+// lesson: the 9ceee43 registration added a pool but the sentence stayed stale until a flow
+// caught it). Unique unordered pairs in registry first-appearance order, each named by the
+// display symbols the asset rows themselves render (`backing_symbol ?? symbol` — resolveLegs'
+// own rule), joined "A, B and C". A pair whose ledgers the bundled catalog cannot name is
+// skipped, never invented.
+const CONVERTED_PAIR_LABEL: string = (() => {
+  const symbolOf = new Map<string, string>();
+  for (const r of icpCatalogOf(BUNDLED_NETWORKS)) {
+    if (r.testnet || r.ledger === '') continue;
+    const sym = r.backing_symbol ?? r.symbol;
+    if (sym != null) symbolOf.set(r.ledger, sym);
+  }
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const v of BUNDLED_VENUES) {
+    if (v.kind !== 'ic_amm' || v.testnet) continue;
+    const [a, b] = v.pair_ledgers;
+    const key = [a, b].sort().join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const sa = symbolOf.get(a);
+    const sb = symbolOf.get(b);
+    if (sa != null && sb != null) labels.push(`${sa} ↔ ${sb}`);
+  }
+  if (labels.length === 0) return '';
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+})();
+
 function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: SelectableAsset | null; onBack: () => void}) {
   // SelectableAsset.symbol already carries the backing display name (CHF for VCHF, ICP for ICP,
   // USDC for ckUSDC) — the same symbol every other surface shows for the row.
@@ -2067,7 +2099,7 @@ function UnavailablePanel({selectedAsset, onBack}: {selectedAsset: SelectableAss
         {M.convert.unavailableTitle(label)}
       </Text>
       <Text testID="convert-unavailable-body" style={S.convertUnavailableBody}>
-        {M.convert.unavailableBody('ICP ↔ VCHF, ICP ↔ ckUSDC and ICP ↔ ckETH', REGISTERED_VENUE_NAME)}
+        {M.convert.unavailableBody(CONVERTED_PAIR_LABEL, REGISTERED_VENUE_NAME)}
       </Text>
       <View style={S.convertFooting}>
         <IconSwap size={20} color={C.sub} />

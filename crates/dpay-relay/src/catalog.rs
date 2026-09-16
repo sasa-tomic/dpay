@@ -324,6 +324,100 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             }),
         },
         VenueEntry {
+            // The pair-scoped ICPSwap ckBTC/ICP 0.3% pool (registered 2026-09-16, coverage
+            // expansion — docs/specs/2026-09-16-convert-coverage-expansion.md §1; the
+            // 2026-09-14 "thin, stay out" verdict is superseded by measured depth — the
+            // deepest ckBTC pool in the factory, the doc's own re-registration condition).
+            // MEASURED off the live pool's own `metadata` 2026-09-16: token0 = ckBTC,
+            // token1 = ICP, fee 3000.
+            venue_id: "icpswap-ckbtc",
+            display_name: "ICPSwap",
+            kind: VenueKind::IcAmm,
+            endpoint: "xmiu5-jqaaa-aaaag-qbz7q-cai",
+            pair_ledgers: [CKBTC_LEDGER_PRINCIPAL, ICP_LEDGER_PRINCIPAL],
+            testnet: false,
+            disclosure_key: "icpswap",
+            test_helpers_served: false,
+            fixture: Some(FixtureSeed {
+                token0_ledger: CKBTC_LEDGER_PRINCIPAL,
+                token1_ledger: ICP_LEDGER_PRINCIPAL,
+                fee_millionths: 3000,
+                // Curve approximation from the measured reserves 2026-09-16, in each token's
+                // own units: 1.11 ckBTC / 50,980 ICP — deep enough that probe-size swaps
+                // barely move the fake curve.
+                reserve0_e8s: 111_000_000,
+                reserve1_e8s: 5_098_000_000_000,
+            }),
+        },
+        VenueEntry {
+            // The pair-scoped ICPSwap ckBTC/ckETH 0.3% pool (registered 2026-09-16, coverage
+            // expansion §1). MEASURED off the live pool's own `metadata` 2026-09-16: token0 =
+            // ckBTC, token1 = ckETH, fee 3000 — real depth, market-aligned price.
+            venue_id: "icpswap-ckbtc-cketh",
+            display_name: "ICPSwap",
+            kind: VenueKind::IcAmm,
+            endpoint: "akhru-myaaa-aaaag-qcvna-cai",
+            pair_ledgers: [CKBTC_LEDGER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL],
+            testnet: false,
+            disclosure_key: "icpswap",
+            test_helpers_served: false,
+            fixture: Some(FixtureSeed {
+                token0_ledger: CKBTC_LEDGER_PRINCIPAL,
+                token1_ledger: CKETH_LEDGER_PRINCIPAL,
+                fee_millionths: 3000,
+                // Curve approximation from the measured reserves 2026-09-16, in each token's
+                // own units: 1.15 ckBTC / 24.63 ckETH.
+                reserve0_e8s: 115_000_000,
+                reserve1_e8s: 24_630_000_000_000_000_000,
+            }),
+        },
+        VenueEntry {
+            // The pair-scoped ICPSwap VCHF/ckUSDC 0.3% pool (registered 2026-09-16, coverage
+            // expansion §1) — the CHF→USD direct pair. Thin but real: the quote is verbatim,
+            // so a thin market discloses itself in its own numbers. MEASURED off the live
+            // pool's own `metadata` 2026-09-16: token0 = VCHF, token1 = ckUSDC, fee 3000.
+            venue_id: "icpswap-vchf-ckusdc",
+            display_name: "ICPSwap",
+            kind: VenueKind::IcAmm,
+            endpoint: "hx7nb-diaaa-aaaar-qbxsa-cai",
+            pair_ledgers: [VCHF_LEDGER_PRINCIPAL, CKUSDC_LEDGER_PRINCIPAL],
+            testnet: false,
+            disclosure_key: "icpswap",
+            test_helpers_served: false,
+            fixture: Some(FixtureSeed {
+                token0_ledger: VCHF_LEDGER_PRINCIPAL,
+                token1_ledger: CKUSDC_LEDGER_PRINCIPAL,
+                fee_millionths: 3000,
+                // Curve approximation from the measured reserves 2026-09-16, in each token's
+                // own units: 1,430.93 VCHF / 505.32 ckUSDC.
+                reserve0_e8s: 143_093_000_000,
+                reserve1_e8s: 505_320_000,
+            }),
+        },
+        VenueEntry {
+            // The pair-scoped ICPSwap ckUSDC/ckETH 0.3% pool (registered 2026-09-16, coverage
+            // expansion §1). MEASURED off the live pool's own `metadata` 2026-09-16: token0 =
+            // ckETH, token1 = ckUSDC (REVERSED relative to the registry pair order — the
+            // direction logic must derive per pool), fee 3000. Thin but real.
+            venue_id: "icpswap-ckusdc-cketh",
+            display_name: "ICPSwap",
+            kind: VenueKind::IcAmm,
+            endpoint: "mvcvq-3iaaa-aaaag-qjykq-cai",
+            pair_ledgers: [CKUSDC_LEDGER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL],
+            testnet: false,
+            disclosure_key: "icpswap",
+            test_helpers_served: false,
+            fixture: Some(FixtureSeed {
+                token0_ledger: CKETH_LEDGER_PRINCIPAL,
+                token1_ledger: CKUSDC_LEDGER_PRINCIPAL,
+                fee_millionths: 3000,
+                // Curve approximation from the measured reserves 2026-09-16, in each token's
+                // own units: 1.40 ckETH / 1,552.45 ckUSDC.
+                reserve0_e8s: 1_400_000_000_000_000_000,
+                reserve1_e8s: 1_552_450_000,
+            }),
+        },
+        VenueEntry {
             // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter,
             // the on-chain aggregator. Everything the IC rows do through the relay happens
             // device-direct here — the quote is a keyless https GET the phone issues itself, and
@@ -341,6 +435,24 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             kind: VenueKind::SolanaAmm,
             endpoint: "https://lite-api.jup.ag",
             pair_ledgers: [WRAPPED_SOL_MINT, SOLANA_USDC_MINT],
+            testnet: false,
+            disclosure_key: "jupiter",
+            test_helpers_served: false,
+            fixture: None,
+        },
+        VenueEntry {
+            // The SECOND Solana venue (registered 2026-09-16, coverage expansion §1): the same
+            // Jupiter aggregator family, on the rail-local pair SOL ↔ EURC. Everything the
+            // jupiter row comment above says holds verbatim (registry-only relay role, https
+            // origin endpoint, mints in base58, device-direct keyless quote, fixture None).
+            // Measured live 2026-09-16: SOL→EURC healthy both directions (~110 ms,
+            // platformFee null); the USDC↔EURC pair probed and SKIPPED — a thin ~13% spread
+            // market, revisit on depth.
+            venue_id: "jupiter-eurc",
+            display_name: "Jupiter",
+            kind: VenueKind::SolanaAmm,
+            endpoint: "https://lite-api.jup.ag",
+            pair_ledgers: [WRAPPED_SOL_MINT, SOLANA_EURC_MINT],
             testnet: false,
             disclosure_key: "jupiter",
             test_helpers_served: false,
@@ -367,6 +479,25 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             kind: VenueKind::Cefi,
             endpoint: "https://sideshift.ai/api/v2",
             pair_ledgers: [ICP_LEDGER_PRINCIPAL, WRAPPED_SOL_MINT],
+            testnet: false,
+            disclosure_key: "sideshift",
+            test_helpers_served: false,
+            fixture: None,
+        },
+        VenueEntry {
+            // The SECOND CeFi venue (registered 2026-09-16, coverage expansion §1): the same
+            // SideShift venue family, on the cross-rail pair ICP ↔ USDC(Solana) — the first
+            // pair with two registered routes from one screen (this beside the CCTP multihop
+            // Route B out of the ckUSDC leg). Everything the sideshift row comment above says
+            // holds verbatim (relay-held partner key, status reads device-direct, fixture
+            // None). The keyless 503-until-founder-key tripwire applies to this row exactly
+            // as to its sibling; the USDC(Solana) coin/network mapping in `crate::sideshift`
+            // is best-effort and unverified until that key exists.
+            venue_id: "sideshift-usdc",
+            display_name: "SideShift",
+            kind: VenueKind::Cefi,
+            endpoint: "https://sideshift.ai/api/v2",
+            pair_ledgers: [ICP_LEDGER_PRINCIPAL, SOLANA_USDC_MINT],
             testnet: false,
             disclosure_key: "sideshift",
             test_helpers_served: false,
@@ -1942,6 +2073,10 @@ mod venue_truth_tests {
         for (pool, want_id) in [
             ("mohjv-bqaaa-aaaag-qjyia-cai", "icpswap-ckusdc"),
             ("angxa-baaaa-aaaag-qcvnq-cai", "icpswap-cketh"),
+            ("xmiu5-jqaaa-aaaag-qbz7q-cai", "icpswap-ckbtc"),
+            ("akhru-myaaa-aaaag-qcvna-cai", "icpswap-ckbtc-cketh"),
+            ("hx7nb-diaaa-aaaar-qbxsa-cai", "icpswap-vchf-ckusdc"),
+            ("mvcvq-3iaaa-aaaag-qjykq-cai", "icpswap-ckusdc-cketh"),
         ] {
             assert_eq!(
                 venue_of_endpoint(pool)
@@ -1983,16 +2118,28 @@ mod venue_truth_tests {
             .collect();
         assert_eq!(
             served.len(),
-            5,
-            "exactly five real venues are served today (three IC pools + Jupiter + SideShift, \
-             one per pair)"
+            11,
+            "exactly eleven real venues are served today (seven IC pools + two Jupiter + \
+             two SideShift, one row per pair)"
         );
         assert_eq!(
             served
                 .iter()
                 .map(|v| v.venue_id)
                 .collect::<Vec<_>>(),
-            vec!["icpswap", "icpswap-ckusdc", "icpswap-cketh", "jupiter", "sideshift"],
+            vec![
+                "icpswap",
+                "icpswap-ckusdc",
+                "icpswap-cketh",
+                "icpswap-ckbtc",
+                "icpswap-ckbtc-cketh",
+                "icpswap-vchf-ckusdc",
+                "icpswap-ckusdc-cketh",
+                "jupiter",
+                "jupiter-eurc",
+                "sideshift",
+                "sideshift-usdc",
+            ],
             "registry order is the stable wire order"
         );
         assert!(served.iter().all(|v| !v.test_helpers_served));

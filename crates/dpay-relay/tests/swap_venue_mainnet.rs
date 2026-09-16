@@ -90,6 +90,7 @@ fn ledger_decimals(truth: &Value, ledger: &str) -> u64 {
         ("vchf_ledger", "vchf"),
         ("ckusdc_ledger", "ckusdc"),
         ("cketh_ledger", "eth"),
+        ("ckbtc_ledger", "ckbtc"),
     ] {
         if principals[ledger_key].as_str() == Some(ledger) {
             return decimals[dec_key]

@@ -690,7 +690,9 @@ describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', ()
   test('the resolver never crosses rails: solana mints resolve only the solana_amm row, IC ledgers never do', () => {
     expect(solanaAmmVenueForMint(WRAPPED_SOL_MINT_ADDRESS)?.venue_id).toBe('jupiter');
     expect(solanaAmmVenueForMint(USDC_MINT_ADDRESS)?.venue_id).toBe('jupiter');
-    expect(solanaAmmVenueForMint(EURC_MINT_ADDRESS)).toBeNull(); // venue-less: Convert stays gated
+    // EURC has its OWN row since 2026-09-16 (the SOL ↔ EURC Jupiter pair) — registry-first
+    // resolution still lands the jupiter row for the mints they share.
+    expect(solanaAmmVenueForMint(EURC_MINT_ADDRESS)?.venue_id).toBe('jupiter-eurc');
     expect(solanaAmmVenueForMint('garbage')).toBeNull();
     expect(solanaAmmVenueForMint(ICP_LEDGER)).toBeNull(); // an IC ledger is not a mint
     expect(icAmmVenueForPair(WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS)).toBeNull(); // and vice versa
@@ -701,7 +703,8 @@ describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', ()
     setRuntimeVenues([{venue_id: 'jupiter-testnet', display_name: 'Jupiter (test)', kind: 'solana_amm', endpoint: 'https://t.jup.ag', pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS], testnet: true, disclosure_key: 'jupiter'}]);
     expect(solanaVenuesForMint(WRAPPED_SOL_MINT_ADDRESS)).toEqual([]);
     setRuntimeVenues(null);
-    expect(solanaVenuesForMint(WRAPPED_SOL_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter']);
+    // Both bundled rows serve the wrapped-SOL side, in registry order, never ranked.
+    expect(solanaVenuesForMint(WRAPPED_SOL_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter', 'jupiter-eurc']);
   });
 
   test('INV-1/2 (Solana): a venue tx paying from or to ANYONE but the user is refused BEFORE the signature', async () => {
