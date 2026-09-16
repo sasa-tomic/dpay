@@ -241,7 +241,12 @@ DO-NOT-NAG set.
   is the operator opt-out). What remains of it is the two-handset tap (below). The cashier page
   (`8805027`), the OCP tx-id fix and the bearer-token revisit are done and recorded below/inline.
 
-## PROD STATE (checked, never asserted — floor `e2b3002`)
+## PROD STATE (checked, never asserted — the floor is now DERIVED, not hand-recorded)
+
+As of 2026-09-16 the floor mechanism is automatic: every `just` test recipe annotates
+`scripts/testruns.py` → `.dev/testruns.db` (commit + worktree tree hash + result), and
+`just floor` = live relay commit → recorded evidence at that exact tree. The hand-written
+floor notes below are HISTORICAL (last hand-bumped floor: `d2f3bde`, 2026-09-15).
 
 Re-measured 2026-09-14, HEAD `e2b3002`:
 

@@ -21,8 +21,7 @@ default:
 # and the till-open one additionally compares the COMMITTED dfx/till_open_signing.json against what
 # today's core emits. They were previously on no recipe at all, so that drift could land green.
 test-core:
-    cargo nextest run -p dpay-core --features rng
-    cargo nextest run -p dpay-fixture
+    python3 scripts/testruns.py run test-core --sh 'cargo nextest run -p dpay-core --features rng && cargo nextest run -p dpay-fixture'
 
 # build the canister to wasm (release)
 build-canister:
@@ -36,7 +35,7 @@ build-mock-minter:
 # DFINITY ic-icrc1-ledger (cached in third_party/ic-icrc1-ledger/); multi-ledger proof incl. the
 # double-spend concurrency regression. Fully offline.
 test-canister: build-canister build-mock-minter
-    cargo nextest run -p dpay-canister-tests
+    python3 scripts/testruns.py run test-canister --sh 'cargo nextest run -p dpay-canister-tests'
 
 # user-principal rail tests on PocketIC's make_live() gateway (offline, deterministic, seconds):
 # raw-ed25519 device keys whose self-authenticating principals hold funds DIRECTLY on the REAL
@@ -47,9 +46,7 @@ test-canister: build-canister build-mock-minter
 # ALSO runs the dpay-icp wire-contract goldens (byte-parity vs the cached production crates —
 # seconds-fast, was previously on no recipe) and the dpay-wasm host tests (icp goldens).
 test-icp: build-mock-minter
-    cargo nextest run -p dpay-icp
-    cargo nextest run -p dpay-wasm
-    cargo nextest run -p dpay-icp-tests
+    python3 scripts/testruns.py run test-icp --sh 'cargo nextest run -p dpay-icp && cargo nextest run -p dpay-wasm && cargo nextest run -p dpay-icp-tests'
 
 # relay DEFAULT-features compile gate: `cargo check -p dpay-relay` with no features. Every other
 # recipe compiles the relay WITH a feature (test-relay: test-helpers; test-live: agent+test-helpers),
@@ -63,14 +60,14 @@ test-icp: build-mock-minter
 # without it (just runs a recipe once per invocation, so `check` still builds it once).
 # Warm cost ~1s: deps are shared with test-relay; only the relay crate's lean fingerprint is new.
 relay-default-check: web
-    cargo check -p dpay-relay
+    python3 scripts/testruns.py run relay-default-check --sh 'cargo check -p dpay-relay'
 
 # relay tests (native, in-memory — no network). `test-helpers` also compiles the fake-IC /api/v2
 # gateway the e2e web harness points the app at (the seam is e2e-build-only — see shims.ts).
 # Depends on `web`: dpay-relay's build.rs embeds e2e/dist-prod (the /wallet route serves the real
 # app from it) and FAILS LOUD when it's missing — this dependency keeps every relay build honest.
 test-relay: web
-    cargo nextest run -p dpay-relay --features test-helpers
+    python3 scripts/testruns.py run test-relay --sh 'cargo nextest run -p dpay-relay --features test-helpers'
 
 # emit the committed core goldens from the real Rust core: the wire layout (single source of truth
 # for the JS ed25519 signing shim) and the till-open signing document (the merchant's ring-up proof,
@@ -86,8 +83,7 @@ wire-layout:
 # Runs the DEFAULT enumeration: every flow except `meta.optional` render-only capture harnesses
 # (flow 39 runs via `just e2e-store`; the flow catalog lives in FLOWS.md — never hardcode a count here).
 e2e:
-    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
-    cd e2e && node run.mjs
+    python3 scripts/testruns.py run e2e --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && node run.mjs'
 
 # visual-regression gate (fast iteration on flow 40 alone): re-capture the 5 primary surfaces and
 # pixel-diff each vs its committed baseline (e2e/shots/baselines/). Fails on drift >0.5%. Catches the
@@ -97,8 +93,7 @@ e2e:
 # banner, no other flows). On an intentional UI change, regenerate the baselines via
 # `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
 e2e-visual:
-    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
-    cd e2e && DPAY_E2E_FILTER=40 node run.mjs
+    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=40 node run.mjs'
 
 # regenerate the visual-regression baselines from the current app surfaces (run after an intentional
 # UI/style change). Writes e2e/shots/baselines/<surface>.png for each of the 5 surfaces. COMMIT the
@@ -112,8 +107,7 @@ e2e-visual-seed:
 # `meta.optional = true` marker. This recipe is its dedicated entry point; the raw captures feed
 # `e2e/store-assets/compose.mjs` for marketing compositing.
 e2e-store:
-    cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
-    cd e2e && DPAY_E2E_FILTER=store-screens node run.mjs
+    python3 scripts/testruns.py run e2e-store --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=store-screens node run.mjs'
 
 # watch mode (Phase 3): a LONG-RUNNING dev loop that re-runs a SUBSET of flows on every change to
 # app/, e2e/, crates/dpay-core/src/, or crates/dpay-ffi/src/. The changed file is mapped to a journey
@@ -135,7 +129,7 @@ e2e-watch-filter filter:
 # production gate: same harness drives the LIVE relay + canister at DPAY_E2E_BASE. Throwaway identities,
 # throttled, read-only-ish (never sends real BTC). Honest ceiling until KYC-allowlist lands (see plan §4.3).
 e2e-live:
-    cd e2e && DPAY_E2E_MODE=live DPAY_E2E_BASE=https://dpay.kalaj.org node run.mjs
+    python3 scripts/testruns.py run e2e-live --sh 'cd e2e && DPAY_E2E_MODE=live DPAY_E2E_BASE=https://dpay.kalaj.org node run.mjs'
 
 # LIVE testnet-wiring flow (OPEN_ISSUES #1/#2/#8) — drives a relay at DPAY_E2E_BASE carrying the
 # testnet currencies against REAL IC testnet chain-key canisters. Proves the FREE testnet path:
@@ -153,20 +147,18 @@ e2e-live-testnet:
 
 # narrated end-to-end demo: offline sign -> canister -> Paid (self-checking)
 sim: build-canister
-    cargo run -q -p dpay-sim
+    python3 scripts/testruns.py run sim -- cargo run -q -p dpay-sim
 
 # relay <-> real canister over ic-agent against a live local IC (offline); feature-gated.
 # Depends on `web`: builds dpay-relay, whose build.rs embeds e2e/dist-prod (fail-loud without it).
 # Also builds the mock-minter wasm — the WAVE-5 live test drives TWO mock minters to prove the
 # ckERC20 onramp's runtime `get_minter_info` helper read + its logged-constant fallback.
 test-live: web
-    CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-canister --target wasm32-unknown-unknown --release
-    CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release
-    DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" DPAY_MOCK_MINTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_mock_minter.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers
+    python3 scripts/testruns.py run test-live --sh 'CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-canister --target wasm32-unknown-unknown --release && CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo build -p dpay-mock-minter --target wasm32-unknown-unknown --release && DPAY_CANISTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_canister.wasm" DPAY_MOCK_MINTER_WASM="{{root}}/.dev/target-relay/wasm32-unknown-unknown/release/dpay_mock_minter.wasm" CARGO_TARGET_DIR="{{root}}/.dev/target-relay" cargo nextest run -p dpay-relay --features agent,test-helpers'
 
 # UniFFI shared-core binding: build host lib, generate bindings, run the language roundtrip test
 ffi:
-    bash crates/dpay-ffi/verify.sh
+    python3 scripts/testruns.py run ffi -- bash crates/dpay-ffi/verify.sh
 
 # outer-loop gate: real dfx replica deploy + settle the offline-signed wire via `dfx canister call`
 deploy:
@@ -206,7 +198,7 @@ dfx-arg-parity:
 # signed envelopes through /api/v2 (202 → read_state poll → replied; signed query; bad-sig/expired
 # → 4xx). Second INDEPENDENT ingress implementation beyond the PocketIC gateway of test-live.
 test-icp-replica:
-    bash scripts/icp-replica-e2e.sh
+    python3 scripts/testruns.py run test-icp-replica -- bash scripts/icp-replica-e2e.sh
 
 # OPT-IN mainnet read-only probe (NEEDS NETWORK, never in check/verify): signed queries only —
 # no cycles, no state change, throwaway fixed-seed key. Proves the envelope against the real
@@ -274,14 +266,24 @@ ic-mainnet-update-probe:
 # the code built from the current source (compares the dfx-built artifact's sha256 to the live module
 # hash). Catches a stale WASM shipping while `just check` is green. Exit 1 = stale → `just deploy-ic`.
 verify-deploy:
-    bash scripts/verify-deploy.sh
+    python3 scripts/testruns.py run verify-deploy -- bash scripts/verify-deploy.sh
 
 # OBJECTIVE deploy-fidelity gate for the RELAY: curls the live `/api/v1/version` and compares its
 # baked git commit to `git rev-parse HEAD`. MATCH = current; DIRTY / BEHIND-N / MISMATCH = the image
 # does not correspond to HEAD → redeploy per docs/OPS.md section 3. No dfx needed (a plain curl).
 # Override the target via DPAY_RELAY_URL.
 verify-relay:
-    bash scripts/verify-relay-version.sh
+    python3 scripts/testruns.py run verify-relay -- bash scripts/verify-relay-version.sh
+
+# composite prod-floor gate (replaces the hand-bumped floor): classifies the live relay commit
+# vs HEAD exactly like verify-relay (DIRTY first / MATCH / BEHIND-by-N / MISMATCH), then looks up
+# which suites scripts/testruns.py recorded as green AT THE LIVE COMMIT — prod is "on the floor"
+# iff it runs a clean commit whose --require suite (default: verify) passed on this machine.
+# The evidence comes from the automatic annotations every `just` test recipe writes via
+# scripts/testruns.py into the gitignored .dev/testruns.db — the ONLY interface to that record
+# is the script (agents: never open the DB directly).
+floor:
+    python3 scripts/testruns.py floor
 
 # OBJECTIVE integrity gate for the FACADE CANISTER: curls the live `/api/v1/integrity` and asserts
 # the canister's on-chain module hash matches the PIN the relay image was built with
@@ -290,7 +292,7 @@ verify-relay:
 # check itself cannot run. Deliberately OFF the hot `verify` path — it is a network probe of PROD.
 # Override the target via DPAY_RELAY_URL. The changelog this gate polices is docs/UPGRADES.md.
 integrity-check:
-    bash scripts/integrity-check.sh
+    python3 scripts/testruns.py run integrity-check -- bash scripts/integrity-check.sh
 
 # operator hook: mint (credit) minor units to an account (controller-only). `just mint <64-hex-account> <cents>`
 mint account amount currency='0':
@@ -314,7 +316,7 @@ faucet-verify *args:
 
 # typecheck the RN app — catches bridge arity drift against the TS interfaces (tsc --noEmit, ~2s, no device)
 typecheck:
-    cd app && npm run typecheck
+    python3 scripts/testruns.py run typecheck --sh 'cd app && npm run typecheck'
 
 # regenerate crates/dpay-relay/assets/palette.css from app/config/palette.ts — the ONE source of
 # dpay's colour values. Run it after ANY palette edit; `just test-app` fails until you do
@@ -328,18 +330,18 @@ palette-css:
 # Wired into `check` because it WASN'T: the suite ran only by hand, so a broken component or a
 # regressed formatter passed `just verify` green. Same shape as `typecheck` above.
 test-app:
-    cd app && npm test
+    python3 scripts/testruns.py run test-app --sh 'cd app && npm test'
 
 # bridge parity: assert every TS DpayCoreApi/DpayNfcApi method has a matching-arity Kotlin @ReactMethod
 # (and vice-versa). Sub-second, no device — the static net that makes wire/arity drift fail the build.
 bridge-parity:
-    node scripts/bridge-parity.mjs
+    python3 scripts/testruns.py run bridge-parity -- node scripts/bridge-parity.mjs
 
 # aid parity: assert each NFC AID's byte literal (Rust const / Kotlin val) is byte-equal to its XML
 # <aid-filter> hex. Sub-second, no device — the static net that makes an AID routing drift fail the
 # build (a mismatch silently breaks OS tap routing → opaque "not a dpay phone" / SW_NOT_READY).
 aid-parity:
-    node scripts/aid-parity.mjs
+    python3 scripts/testruns.py run aid-parity -- node scripts/aid-parity.mjs
 
 # the native Rust inner loop — core + canister + relay. test-live is INCLUDED (not off-path):
 # it is offline (PocketIC HTTP gateway) + ~seconds-fast, and exercises the AgentLedger↔real-canister
@@ -355,6 +357,7 @@ aid-parity:
 #  real app builds requests through its own wasm core, so the hand-rolled-encoder drift class it
 #  guarded against no longer has a surface to live on.)
 check: test-core test-canister relay-default-check test-relay test-live test-icp typecheck test-app bridge-parity aid-parity wasm-core flows-md
+    @python3 scripts/testruns.py record check pass
     @echo "rust inner loop green"
 
 # FLOWS.md is GENERATED from each flow's own `meta` (e2e/harness/meta.mjs is the single reader), so
@@ -373,7 +376,7 @@ flows-md:
 # web surface loads) signs/builds byte-identically to the JS oracle — catches a stale or corrupted
 # staged artifact even when `just wasm` (which runs this same guard after rebuilding) wasn't run.
 wasm-core:
-    node scripts/check-wasm-core.mjs
+    python3 scripts/testruns.py run wasm-core -- node scripts/check-wasm-core.mjs
 
 # Build the prod WEB build of the REAL app (app/App.tsx via react-native-web) → e2e/dist-prod:
 # the dist dpay-relay's build.rs embeds and serves at GET /wallet (+ /assets/*, immutable).
@@ -407,7 +410,7 @@ fonts:
 # `verify` (see that recipe for why there and not `check`).
 # acceptance gate for the SHIPPED /wallet bytes — boots, onboards, persists, renders
 web-smoke: web
-    cd e2e && node web-wallet-smoke.mjs
+    python3 scripts/testruns.py run web-smoke --sh 'cd e2e && node web-wallet-smoke.mjs'
 
 # Decode gate for the prod web wallet's camera scanner: regenerates the fake-camera QR video
 # (scripts/gen-scan-video.mjs → e2e/shots/scan-qr.y4m, a REAL 132-byte wire request rendered as a
@@ -420,8 +423,7 @@ web-smoke: web
 # in-project; gen-scan-video.mjs says so by name if it is missing.
 # decode gate for the SHIPPED /wallet camera: a real getUserMedia stream, decoded by the real jsQR
 web-scan: web
-    node scripts/gen-scan-video.mjs
-    cd e2e && node web-scan-smoke.mjs
+    python3 scripts/testruns.py run web-scan --sh 'node scripts/gen-scan-video.mjs && cd e2e && node web-scan-smoke.mjs'
 
 # Build the frozen wire core (crates/dpay-wasm) for wasm32-unknown-unknown and stage it as the
 # committed relay asset crates/dpay-relay/assets/dpay-core.wasm (served at GET /dpay-core.wasm —
@@ -446,6 +448,7 @@ wasm:
 # REAL App.tsx and screenshots every flow state — so `ui` is gone.)
 # everything: rust loop + the two shipped-bytes web smokes + radical e2e (real app, relay, browser)
 verify: check web-smoke web-scan e2e
+    @python3 scripts/testruns.py record verify pass
     @echo "full inner loop green"
 
 # cross-compile dpay-ffi to Android .so for arm64-v8a + x86_64 (NDK)
@@ -454,15 +457,15 @@ ndk:
 
 # device gate: run the shared core on the booted emulator/device (instrumented test)
 ondevice:
-    bash scripts/android-ondevice.sh
+    python3 scripts/testruns.py run ondevice -- bash scripts/android-ondevice.sh
 
 # device gate: assert REAL camera pixels render in the IC + SOL Pay scan boxes (no mocks)
 campreview:
-    bash scripts/android-campreview.sh
+    python3 scripts/testruns.py run campreview -- bash scripts/android-campreview.sh
 
 # build + run the React Native app on the emulator/device; assert it signed via dpay-core
 app:
-    bash scripts/rn-run.sh
+    python3 scripts/testruns.py run app -- bash scripts/rn-run.sh
 
 # build + verify signed release APK/AAB; stage the APK to deploy/dist/dpay.apk for the relay
 apk:
