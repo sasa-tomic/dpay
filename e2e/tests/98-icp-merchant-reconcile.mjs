@@ -25,6 +25,7 @@ import {
   setup, assert, assertEq, assertIncludes, getBalance, faucetAccount, icpCatalog, railPrincipalText,
   onboardWallet, accountOf, openBalances, selectCurrency,
 } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import {
   generateKeypair, randNonceHex, decodeRequestHex, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate,
   b64urlEncode,
@@ -159,8 +160,7 @@ export async function run() {
 
     // --- (7) Merchant Ledger: incoming row with exact units + payer counterparty ----------------
     console.log('[98-icp-merchant-reconcile] assert Ledger incoming row…');
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 8_000 });
+    await openHistory(driver);
     const shortPayer = (await railPrincipalText(payer.publicHex)).slice(0, 8);
     const named = await driver.waitForText(shortPayer, { timeoutMs: 10_000 });
     const histBody = await driver.bodyText();

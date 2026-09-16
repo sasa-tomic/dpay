@@ -8,6 +8,7 @@ import {
   setup, assert, assertIncludes, onboardWallet, openBalances, armPayScan, selectCurrency,
   faucetAccount, accountOf, goOffline,
 } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { buildRequestQR, generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 const CURRENCY = 8; // ICP — real ledger, real catalog fee, GROSS ≠ WIRE
@@ -79,8 +80,7 @@ export async function run() {
     assertIncludes(home, 'Café Sunrise', 'the merchant name from the request rides the row');
     console.log('[180-offline-qr-pending] ✓ pending activity row on Home (gross + merchant name)');
 
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 5_000 });
+    await openHistory(driver, { recentMs: 5_000 });
     await driver.findByTestID('hist-pending-0', { timeoutMs: 5_000 });
     assertIncludes(await driver.bodyText(), '\u22121.00000001 ICP', 'the Ledger row carries the same gross headline');
     console.log('[180-offline-qr-pending] ✓ Ledger pending row');

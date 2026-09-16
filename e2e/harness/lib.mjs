@@ -31,9 +31,10 @@ export { pickFreePort };
 
 /**
  * Per-test AsyncLocalStorage context. `runOne` (in run.mjs) wraps each `mod.run()` in
- * `_testCtx.run(test.file, ...)`, so any code path inside the flow — including `setup()` — can read
- * `_testCtx.getStore()` to discover WHICH test file it is running under. This is how `setup()`
- * registers its freshly-created driver into the `_drivers` registry WITHOUT the flow having to pass
+ * `_testCtx.run({ file: test.file, browser }, ...)`, so any code path inside the flow — including
+ * `setup()` — can read `_testCtx.getStore()` to discover WHICH test file it is running under (and
+ * WHICH browser shard owns it). This is how `setup()` registers its freshly-created driver into the
+ * `_drivers` registry and picks its lane's browser WITHOUT the flow having to pass any of that
  * its filename through (which would mean editing every flow's `setup()` call). AsyncLocalStorage
  * propagates through native promises/async boundaries in Node 18+, so it survives the
  * `runOne → mod.run → flow body → setup()` call chain. Standalone runs (`node tests/NN.mjs` directly)
@@ -135,8 +136,69 @@ export async function ensureWireLayout() {
 let _session = null;
 let _sessionPromise = null;
 
+/**
+ * Browser-process shards beyond the session's first browser. The pool's concurrency lanes are
+ * spread across SEVERAL browser processes because one chrome process serializes its contexts:
+ * measured 2026-09-16 on this 16-core box, a flow that runs ~10-15s alone inflated 2-5x when 12
+ * contexts shared ONE chrome-headless-shell (CPU sat ~96% idle the whole time — the bottleneck is
+ * the process's serialized main/IO work, not compute), which both inflated the wall clock AND made
+ * inner waits false-fire RED on healthy flows. Each shard is a full browser launched with the SAME
+ * flags as the first; contexts (fresh identity per test) are created from their shard's browser, so
+ * isolation semantics are unchanged. Shards are launched once per run (primeBrowserShards) and torn
+ * down with the session (their stops ride the session's `stops` list).
+ */
+const _shardBrowsers = new Map();
+let _browserShardsWanted = 1;
+
+/** Set how many browser-process shards the pool wants (runTestsSubset calls this; default 1). */
+export function setBrowserShards(n) {
+  _browserShardsWanted = Math.max(1, n | 0);
+}
+
+/**
+ * The browser process for pool lane `index` (0-based). Lane 0 (and any lane when sharding is off)
+ * gets the session's own browser; other lanes get shard `index % _browserShardsWanted`, launched
+ * lazily on first use and reused for every later test on that lane. Awaiting getSession() first
+ * means a lane that starts before the shared build finishes simply queues behind it.
+ */
+export async function laneBrowser(index) {
+  const s = await getSession();
+  if (index <= 0 || _browserShardsWanted <= 1) return s.browser;
+  const shard = index % _browserShardsWanted;
+  if (shard === 0) return s.browser;
+  if (!_shardBrowsers.has(shard)) {
+    const { browser, stop } = await Driver.launchBrowser();
+    _shardBrowsers.set(shard, browser);
+    s.addStop(stop);
+    console.log(`[lib] headless browser shard #${shard + 1} launched (shared by its lanes; fresh context per test)`);
+  }
+  return _shardBrowsers.get(shard);
+}
+
+/**
+ * Launch every non-primary browser shard up front, concurrently, BEFORE the pool seeds — so a lane
+ * never pays a mid-run launch and the map's check-then-set above stays single-threaded. Calling
+ * this also publishes the shard count (setBrowserShards) in one step.
+ */
+export async function primeBrowserShards(n) {
+  setBrowserShards(n);
+  if (n <= 1) return;
+  await Promise.all(Array.from({ length: n - 1 }, (_, k) => laneBrowser(k + 1)));
+}
+
 export async function getSession(opts = {}) {
-  if (_session) return _session;
+  if (_session) {
+    // Watch-mode freshness (OPEN_ISSUES U5): a memoized session must not pin a STALE web bundle.
+    // A `rebuildWeb` call on a live session rebuilds the dist IN PLACE — same directory, same
+    // sirv server, so the next per-test fresh-context navigation loads the new assets. (Watch
+    // re-runs are serial, so there is no concurrent-rebuild race.) Everything else (relay, port,
+    // browsers) stays exactly as built; `stopSession()` clears the memo as before.
+    if (opts.rebuildWeb && _session.webBaseURL) {
+      console.log('[lib] rebuildWeb on live session — rebuilding web bundle in place');
+      await buildWeb({ force: true });
+    }
+    return _session;
+  }
   // Memoize the BUILD as a promise so concurrent callers (parallel test pool) await the SAME build
   // instead of racing to spawn a second relay/web/browser.
   if (!_sessionPromise) {
@@ -172,8 +234,9 @@ export async function getSession(opts = {}) {
         stops.push(stopBrowser);
         console.log('[lib] headless browser launched (shared across tests; fresh context per test)');
 
+        const addStop = (fn) => { stops.push(fn); };
         const stop = async () => { for (const s of stops.slice().reverse()) { try { await s(); } catch {} } };
-        return { mode, relayBaseURL, webBaseURL, browser, stop };
+        return { mode, relayBaseURL, webBaseURL, browser, addStop, stop };
       } catch (e) {
         for (const s of stops.slice().reverse()) { try { await s(); } catch {} }
         throw e;
@@ -193,6 +256,8 @@ export async function stopSession() {
   const s = _session;
   _session = null;
   _sessionPromise = null;
+  _shardBrowsers.clear();
+  _browserShardsWanted = 1;
   try { await s.stop(); } catch {}
 }
 
@@ -214,7 +279,13 @@ export async function stopSession() {
  *   in intent: `solStub` answers in-page before fetch; `solRpcUrl` drives the real wire.
  */
 export async function setup(opts = {}) {
-  const { mode, relayBaseURL, webBaseURL, browser } = await getSession(opts);
+  const { mode, relayBaseURL, webBaseURL, browser: mainBrowser } = await getSession(opts);
+  // The store is `{file, browser}` when driven by run.mjs's pool (`browser` = this lane's shard
+  // process), or a plain file string from older callers, or undefined standalone. Fall back to the
+  // session's own browser whenever the store doesn't carry a shard pick.
+  const store = _testCtx.getStore();
+  const ctxBrowser = store && typeof store === 'object' ? store.browser : null;
+  const browser = ctxBrowser || mainBrowser;
 
   // Fresh incognito context per test → fresh localStorage → fresh identity (the isolation gate).
   const driver = await Driver.create(browser, {
@@ -239,7 +310,8 @@ export async function setup(opts = {}) {
   // a re-run of the same file overwrites, and a CLOSED driver is cheap to retain (its page/context/
   // browser are gone — only the small in-memory timeline/consoleLog arrays persist, which is exactly
   // what the dump needs). One-shot runs reap the map at process exit; watch-mode re-runs overwrite.
-  const testFile = _testCtx.getStore();
+  const storeForFile = _testCtx.getStore();
+  const testFile = typeof storeForFile === 'string' ? storeForFile : storeForFile?.file;
   if (testFile) _registerDriver(testFile, driver);
 
   // `driver.close()` also asserts that the page produced no unexpected diagnostics. Never swallow

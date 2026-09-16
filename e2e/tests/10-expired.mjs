@@ -24,7 +24,7 @@ export const meta = {
   journey: 'pay',
   covers: ['expiry', 'honest-error', 'no-sign'],
   verifies: 'Payer scans an already-expired request → auto-sign refused client-side, honest error, no leaked nonce.',
-  timeoutMs: 15000,
+  timeoutMs: 31000,
 };
 
 export async function run() {

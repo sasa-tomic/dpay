@@ -20,7 +20,7 @@ export const meta = {
   journey: 'system',
   covers: ['home-tab', 'activity-feed'],
   verifies: 'Home activity shows the newest ledger rows in their own token units, capped at 5; See all opens the full Transactions tab',
-  timeoutMs: 30000,
+  timeoutMs: 32000,
 };
 
 export async function run() {

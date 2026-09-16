@@ -30,6 +30,7 @@
 // walked above. The probe's honesty control (Accounts with the ICP row selected reports exactly
 // ONE convert affordance) runs mid-flow, proving the census CAN fail.
 import {setup, assert, assertEq, onboardWallet, armNfcCard, openBalances, selectCurrency} from '../harness/lib.mjs';
+import { nfcPhase } from '../harness/flow-steps.mjs';
 
 export const meta = {
   id: '171',
@@ -135,21 +136,16 @@ export async function run() {
     await zeroConvert('IC idle armed pay surface');
 
     // --- IC card: the pure phase walk — every NfcTapView status the tap passes through. ---------
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('nfc-status', {timeoutMs: 4_000});
-    assert(await driver.waitForText('Connecting', {timeoutMs: 4_000}), 'linking should show "Connecting…"');
+    assert(await nfcPhase(driver, dispatch, 'linking', { statusId: 'nfc-status', mount: true }), 'linking should show "Connecting…"');
     await zeroConvert('IC linking (Connecting…)');
 
-    await dispatch({type: 'phase', role: 'card', phase: 'exchanging'});
-    assert(await driver.waitForText('Communicating', {timeoutMs: 4_000}), 'exchanging should show "Communicating…"');
+    assert(await nfcPhase(driver, dispatch, 'exchanging'), 'exchanging should show "Communicating…"');
     await zeroConvert('IC exchanging (Communicating…)');
 
-    await dispatch({type: 'phase', role: 'card', phase: 'settling'});
-    assert(await driver.waitForText('Confirming', {timeoutMs: 4_000}), 'settling should show "Confirming…"');
+    assert(await nfcPhase(driver, dispatch, 'settling'), 'settling should show "Confirming…"');
     await zeroConvert('IC settling (Confirming…)');
 
-    await dispatch({type: 'phase', role: 'card', phase: 'success'});
-    assert(await driver.waitForText('Paid', {timeoutMs: 5_000}), 'success should show the honest "Paid ✓" terminal');
+    assert(await nfcPhase(driver, dispatch, 'success', { text: 'Paid', timeoutMs: 5_000 }), 'success should show the honest "Paid ✓" terminal');
     await zeroConvert('IC success terminal (Paid ✓)');
     assert((await clickNfcButton(driver, 'Done')) === 'Done', 'Done reachable after the success terminal');
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
@@ -176,8 +172,7 @@ export async function run() {
     await driver.waitGone('nfc-status', {timeoutMs: 5_000});
 
     // --- IC card: the transport-error terminal ("Tap failed"). ----------------------------------
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('nfc-status', {timeoutMs: 4_000});
+    await nfcPhase(driver, dispatch, 'linking', { statusId: 'nfc-status', text: null, mount: true });
     await dispatch({type: 'error', role: 'card', reason: 'Lost the radio link'});
     assert(await driver.waitForText('Tap failed', {timeoutMs: 5_000}), 'the error terminal should show "Tap failed"');
     await zeroConvert('IC error terminal (Tap failed)');
@@ -204,9 +199,7 @@ export async function run() {
 
     await zeroConvert('SOL idle armed pay surface');
 
-    await dispatchSol({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
-    assert(await driver.waitForText('Connecting', {timeoutMs: 4_000}), 'SOL linking should show "Connecting…"');
+    assert(await nfcPhase(driver, dispatchSol, 'linking', { statusId: 'sol-nfc-status', mount: true }), 'SOL linking should show "Connecting…"');
     await zeroConvert('SOL linking (Connecting…)');
 
     await dispatchSol({type: 'request', role: 'card', solreqUri: buildSolReq()});

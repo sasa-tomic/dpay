@@ -12,6 +12,7 @@ import {
   setup, assert, assertIncludes, onboardWallet, openBalances, armNfcCard, selectCurrency,
   faucetAccount, accountOf, goOffline,
 } from '../harness/lib.mjs';
+import { nfcPhaseWalk, openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 const CURRENCY = 8; // ICP — a real ledger with a real catalog fee, so GROSS ≠ WIRE here
@@ -59,8 +60,7 @@ export async function run() {
 
     // --- The tap: request → auto-sign → unconfirmed. -------------------------------------------
     const dispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
-    await dispatch({ type: 'phase', role: 'card', phase: 'linking' });
-    await driver.findByTestID('nfc-status', { timeoutMs: 4_000 });
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'nfc-status', text: null });
 
     const nowSecs = Math.floor(Date.now() / 1000);
     const nonceHex = randNonceHex();
@@ -91,8 +91,7 @@ export async function run() {
     assertIncludes(home, '\u22121.00000001 ICP', 'the pending home row headlines the GROSS (U+2212)');
     console.log('[179-offline-nfc-pending] ✓ pending activity row on Home, gross headline');
 
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 5_000 });
+    await openHistory(driver, { recentMs: 5_000 });
     await driver.findByTestID('hist-pending-0', { timeoutMs: 5_000 });
     const ledger = await driver.bodyText();
     assertIncludes(ledger, '\u22121.00000001 ICP', 'the Ledger row carries the same gross headline');

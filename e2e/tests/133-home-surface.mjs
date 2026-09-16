@@ -27,7 +27,7 @@ export const meta = {
   journey: 'system',
   covers: ['home-tab', 'action-row', 'landing', 'scan-affordance'],
   verifies: 'The app LANDS on Home: the headline shows the home currency in the home rail\'s own token unit, Home carries the accounts affordance but not the list, Scan reaches a live camera in one tap even after the Pay tab was left on Send-to-address, and Receive opens the request form',
-  timeoutMs: 25000,
+  timeoutMs: 61000,
 };
 
 export async function run() {

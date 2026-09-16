@@ -23,6 +23,7 @@
 // Selector contract: `nfc-status` (the NfcTap view once active), `__DPAY_TEST_NFC_APPROVED_WIRE`
 // (the web shim's signed-wire stash).
 import { setup, assert, onboardWallet , armNfcCard} from '../harness/lib.mjs';
+import { nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
 /** Flow metadata — read by `e2e/harness/meta.mjs` (filter + coverage matrix + per-test timeout)
   * and by `e2e/gen-flows-md.mjs` (FLOWS.md generation). The filename is the source of truth for
@@ -36,7 +37,7 @@ export const meta = {
   // 30s, not 15s: measured 19.9s ALONE on an idle host — i.e. the flow could never fit its own
   // budget, and only passed when the load-scale happened to stretch it far enough. Same class as
   // flows 105/106. A budget smaller than the flow's measured cost is a coin toss, not a gate.
-  timeoutMs: 30000,
+  timeoutMs: 32000,
 };
 
 export async function run() {
@@ -63,9 +64,7 @@ export async function run() {
     const dispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
 
     // linking → "Connecting…" (NfcTap takes over the screen; nfc-status mounts).
-    await dispatch({ type: 'phase', role: 'card', phase: 'linking' });
-    await driver.findByTestID('nfc-status', { timeoutMs: 4_000 });
-    assert(await driver.waitForText('Connecting', { timeoutMs: 4_000 }), 'linking should show "Connecting…"');
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'nfc-status' });
     console.log('[11-nfc] ✓ linking → "Connecting…"');
 
     // --- AUTO-SIGN (one-press rule): a request event validates + signs IMMEDIATELY. -------------
@@ -106,19 +105,10 @@ export async function run() {
 
     // --- PURE-PHASE WALK (post-Approve progression, no request involved). ----------------------
 
-    // linking → "Connecting…" (fresh session after the re-arm).
-    await dispatch({ type: 'phase', role: 'card', phase: 'linking' });
-    await driver.findByTestID('nfc-status', { timeoutMs: 4_000 });
-    assert(await driver.waitForText('Connecting', { timeoutMs: 4_000 }), 'linking should show "Connecting…"');
-
-    // exchanging → "Communicating…".
-    await dispatch({ type: 'phase', role: 'card', phase: 'exchanging' });
-    assert(await driver.waitForText('Communicating', { timeoutMs: 4_000 }), 'exchanging should show "Communicating…"');
-    console.log('[11-nfc] ✓ exchanging → "Communicating…"');
-
+    // linking → "Connecting…" (fresh session after the re-arm); exchanging → "Communicating…";
     // settling → the envelope has left the NFC transport; ledger polling now owns the outcome.
-    await dispatch({ type: 'phase', role: 'card', phase: 'settling' });
-    assert(await driver.waitForText('Confirming', { timeoutMs: 4_000 }), 'settling should show "Confirming…"');
+    await nfcPhaseWalk(driver, dispatch, ['linking', 'exchanging', 'settling'], { statusId: 'nfc-status' });
+    console.log('[11-nfc] ✓ exchanging → "Communicating…"');
     console.log('[11-nfc] ✓ settling → "Confirming…"');
 
     await driver.screenshot('11-nfc');

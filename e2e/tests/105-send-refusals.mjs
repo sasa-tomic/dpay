@@ -48,7 +48,7 @@ export const meta = {
   // another process on the box — pushed it past even the harness's load-scaled budget, so it went
   // red on a tree where nothing was wrong. A budget that only passes on an idle machine is a
   // flake generator, not a gate.
-  timeoutMs: 45000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

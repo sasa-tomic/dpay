@@ -16,6 +16,7 @@
 //
 // Selector contract: `balance`, `tab-transactions` (stable surfaces — the sign status is transient).
 import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText , armPayScan} from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -94,9 +95,7 @@ export async function run() {
     // pubkey stay OFF the row, exactly as before. Flow 61 pins the receive side; the rail rows
     // themselves remain name-less (asserted below via the direct relay query).
     const bobPrincipal = await railPrincipalText(bob.publicHex);
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
-    assert(hasHistory, 'the Recent card should render once the payment lands in history');
+    assert(await openHistory(driver), 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();
     assertIncludes(histBody, `to ${PAYEE_NAME}`, 'A history row should show the payee NAME (the device-saved note)');
     assertIncludes(histBody, MEMO, 'A history row should show the human memo (the device-saved note)');

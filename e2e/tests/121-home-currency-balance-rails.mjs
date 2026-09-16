@@ -19,10 +19,7 @@
 // (2026-09-08: the accounts list is its own ROUTE, reached by the header balance chip — it was
 // inlined on the Home tab before that, and a Balances sheet before that. `openBalances` owns the
 // navigation, so this flow reads the same either way.)
-import {
-  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
-  openBalances,
- waitForWallet} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, onboardWallet, openBalances, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '121',
@@ -30,7 +27,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'ckusdc', 'solana-usdc', 'vchf', 'group-model'],
   verifies: 'The accounts route marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges).',
-  timeoutMs: 30000,
+  timeoutMs: 59000,
 };
 
 export async function run() {
@@ -40,20 +37,13 @@ export async function run() {
   try {
     const {driver} = env;
 
-    // --- 1. onboard by hand, choose USD, land on its preferred rail --------------------------------
-    console.log('[121-home-currency-balance-rails] onboarding to the currency question…');
-    await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-balance-rails', {timeoutMs: 8_000});
-    await driver.click('btn-create', {timeoutMs: 4_000});
-    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
-    await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
-    await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
-    await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipPracticeIfPresent(driver);
-    await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
-    await driver.click('home-currency-USD', {timeoutMs: 4_000});
-    await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
-    await waitForWallet(driver, {timeoutMs: 10_000});
+    // --- 1. onboard seeded, pin home=USD, land on its preferred rail ------------------------------
+    console.log('[121-home-currency-balance-rails] onboarding, pinning home=USD…');
+    await onboardWallet(driver, 'e2e-balance-rails');
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    await driver.click('btn-currency-USD', {timeoutMs: 5_000});
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
 
     // --- 2. home=USD: BOTH rails visible, MAIN on ckUSDC only, sibling named, nothing summed ------
     await openBalances(driver);

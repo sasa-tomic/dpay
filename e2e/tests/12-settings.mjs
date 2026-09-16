@@ -33,7 +33,7 @@ export const meta = {
   // therefore only ever passed on the runner's host-load scale multiplier (the same defect flow 101
   // had). The flow does a full onboarding, two Settings round trips, a reload, four RPC-field
   // submissions and a reset-to-onboarding.
-  timeoutMs: 45000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

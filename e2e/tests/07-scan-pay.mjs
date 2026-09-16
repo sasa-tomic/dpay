@@ -17,6 +17,7 @@
 //
 // Selector contract: `tab-pay` (default), `btn-new`, `balance`.
 import { setup, assert, assertIncludes, getBalance, onboardWallet, railPrincipalText , armPayScan} from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00 (DEMO_USD = currency 0, the wallet asset)
@@ -31,7 +32,7 @@ export const meta = {
   journey: 'pay',
   covers: ['scan', 'sign', 'settle', 'receipt', 'history', 'recipient-name'],
   verifies: 'Payer scans (auto-sign, one press): two-wallet real ed25519 sign + relay settle → \'Paid ✓\', balances correct.',
-  timeoutMs: 20000,
+  timeoutMs: 33000,
 };
 
 export async function run() {
@@ -89,9 +90,7 @@ export async function run() {
     // (the request QR's to_name + nonce joined to the ledger row via the echoed memo nonce —
     // flow 172 pins the grammar). The row still must not dump the full principal or raw hex.
     const bobPrincipal = await railPrincipalText(bob.publicHex);
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
-    assert(hasHistory, 'the Recent card should render once the payment lands in history');
+    assert(await openHistory(driver), 'the Recent card should render once the payment lands in history');
     const histBody = await driver.bodyText();
     assertIncludes(histBody, 'to Bob', 'history row should show the payee name (device-saved annotation)');
     assert(!histBody.includes(bobPrincipal), 'history must NOT dump the full principal');

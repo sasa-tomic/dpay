@@ -38,7 +38,7 @@ export const meta = {
   // at HEAD (before that day's UI work) with "exceeded its per-test timeout of 45825ms". The budget
   // now reflects what the flow actually does — onboarding (~16s on its own, flow 01) plus three
   // blocked legs, each a faucet credit, a balance-poll wait, a scan and a cancel.
-  timeoutMs: 70000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

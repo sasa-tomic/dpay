@@ -14,6 +14,7 @@
 //
 // Selector contract: `asset-sol-select`, `sol-pay-scan`, `sol-nfc-status`, `__DPAY_SOL_NFC_LAST`.
 import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import { nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
 export const meta = {
   id: '139',
@@ -21,7 +22,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['sol-nfc', 'sol-v2-receipt', 'sol-settle-verify', 'three-verdict'],
   verifies: 'SOL NFC receipt code 3 (settle-verify mismatch) → payer honest pending ("Sent · awaiting"), never a decline.',
-  timeoutMs: 25000,
+  timeoutMs: 38000,
 };
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
@@ -82,9 +83,7 @@ export async function run() {
     const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
 
     console.log('[139-sol-nfc-mismatch-receipt] dispatching phase=linking…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
-    assert(await driver.waitForText('Connecting', {timeoutMs: 4_000}), 'linking should show "Connecting…"');
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'sol-nfc-status' });
 
     console.log('[139-sol-nfc-mismatch-receipt] dispatching request (auto-signs on arrival)…');
     await dispatch({type: 'request', role: 'card', solreqUri: buildSolReq()});

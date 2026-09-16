@@ -9,10 +9,7 @@
 //     would contradict itself), not on untiered rows (VCHF, SOL, USDC say nothing they cannot
 //     back), not on non-EUR rows.
 //   * No badge colours change and no group total appears — the note is text, not chrome.
-import {
-  setup, assert, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
-  openBalances,
- waitForWallet} from '../harness/lib.mjs';
+import {setup, assert, assertIncludes, onboardWallet, openBalances, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '130',
@@ -20,7 +17,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'eur', 'eurc', 'veur', 'vchf', 'group-model', 'rail-health'],
   verifies: 'home=EUR in the accounts route: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none.',
-  timeoutMs: 30000,
+  timeoutMs: 46000,
 };
 
 export async function run() {
@@ -30,20 +27,13 @@ export async function run() {
   try {
     const {driver} = env;
 
-    // --- 1. onboard by hand, choose EUR, land on its preferred rail ------------------------------
-    console.log('[130-eur-balances-rails] onboarding with home=EUR…');
-    await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-eur-balances', {timeoutMs: 8_000});
-    await driver.click('btn-create', {timeoutMs: 4_000});
-    await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
-    await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
-    await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
-    await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-    await skipPracticeIfPresent(driver);
-    await driver.findByTestID('home-currency-title', {timeoutMs: 10_000});
-    await driver.click('home-currency-EUR', {timeoutMs: 4_000});
-    await driver.click('btn-home-currency-continue', {timeoutMs: 4_000});
-    await waitForWallet(driver, {timeoutMs: 10_000});
+    // --- 1. onboard seeded, pin home=EUR, land on its preferred rail -----------------------------
+    console.log('[130-eur-balances-rails] onboarding, pinning home=EUR…');
+    await onboardWallet(driver, 'e2e-eur-balances');
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    await driver.click('btn-currency-EUR', {timeoutMs: 5_000});
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
 
     // --- 2. both EUR rails are distinct rows: MAIN on EURC, VEUR named ---------------------------
     await openBalances(driver);

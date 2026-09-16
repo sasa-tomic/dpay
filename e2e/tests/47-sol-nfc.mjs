@@ -22,6 +22,7 @@
 //
 // Selector contract: `asset-sol-select`, `sol-pay-scan`, `sol-nfc-status`, `__DPAY_SOL_NFC_LAST`.
 import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import { nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
 export const meta = {
   id: '47',
@@ -101,9 +102,7 @@ export async function run() {
 
     // linking → "Connecting…".
     console.log('[47-sol-nfc] dispatching phase=linking…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
-    assert(await driver.waitForText('Connecting', {timeoutMs: 4_000}), 'linking should show "Connecting…"');
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'sol-nfc-status' });
     console.log('[47-sol-nfc] ✓ linking → "Connecting…"');
 
     // request → AUTO-SIGN (one-press rule: the request's arrival IS the payment — decode →

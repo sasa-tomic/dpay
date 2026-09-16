@@ -16,6 +16,7 @@
 //
 // Selector contract: `tab-receive`, `amount-input`, `btn-request`, `request-qr`, `balance`.
 import { setup, assert, getBalance, faucetAccount, icpCatalog, railPrincipalText, onboardWallet, accountOf } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, icpPrincipalBytes, icpTransferArgBytes, icpSignUpdate, b64urlEncode } from '../harness/wire.mjs';
 import { parsePayLink } from '../harness/paylink.mjs';
 
@@ -31,7 +32,7 @@ export const meta = {
   journey: 'pay',
   covers: ['receive', 'settle', 'confirmation'],
   verifies: 'Merchant scans the payer\'s signed icrc1_transfer envelope, submits it to the IC gateway → recipient \'Received\' confirmation.',
-  timeoutMs: 25000,
+  timeoutMs: 37000,
 };
 
 export async function run() {
@@ -107,9 +108,7 @@ export async function run() {
     console.log('[08-merchant-settle] ✓ B balance ∂100.00 → ∂130.00 (A debited once)');
 
     // --- B's Recent history shows the INCOMING payment from A (recipient row, short principal). -
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    const hasHistory = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
-    assert(hasHistory, 'B history should render the incoming payment');
+    assert(await openHistory(driver), 'B history should render the incoming payment');
     // The history hook polls (POLL.history); the transfer row may land after RECENT first paints.
     // Poll for the payer's short principal rather than snapshotting once.
     const shortPayer = alicePrincipal.slice(0, 8);

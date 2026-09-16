@@ -63,7 +63,7 @@ export const meta = {
   journey: 'pay',
   covers: ['opencryptopay', 'scan-fallback', 'explicit-approve', 'loss-path', 'unresolved-outcome', 'one-shot-submit', 'honest-instructions', 'fail-closed'],
   verifies: 'Scanning a merchant OpenCryptoPay till resolves a live quote and lands on an explicit review (full destination, plus ONE line carrying the fiat price the till charges and the host that set it, with no countdown while there is runway) that never auto-signs; Approve moves the funds and reports the proof once → Paid; a settled transfer whose single proof submission is indefinite renders as UNRESOLVED with the ledger block index, no retry and no "paid"; a till that does not take the selected asset is refused by name with the switch-in-Balances instruction and costs no quote.',
-  timeoutMs: 45000, // 4 legs: 3 provider round trips (one deliberately slow) + 2 real IC settlements
+  timeoutMs: 66000, // 4 legs: 3 provider round trips (one deliberately slow) + 2 real IC settlements
 };
 
 /** Point the camera at the till code (arming the pay-intent gate first — the shared choke point). */

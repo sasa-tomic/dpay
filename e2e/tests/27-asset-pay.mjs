@@ -29,6 +29,7 @@
 // `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
 // Value seam: POST /api/v1/faucet {account, currency: 1, amount}.
 import { setup, assert, assertIncludes, faucetAccount, getBalance, onboardWallet, accountOf, openBalances , armPayScan} from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR } from '../harness/wire.mjs';
 
 const CKBTC_CURRENCY = 1;
@@ -118,9 +119,7 @@ export async function run() {
     //     history hook fetches EVERY catalog currency, so the currency-1 rail row lands regardless
     //     of the active asset. 'RECENT' is uppercased via CSS text-transform (matches flow 07's
     //     anchor).
-    await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    const hasRecent = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
-    assert(hasRecent, 'the Ledger should render the ckBTC payment row once it lands in history');
+    assert(await openHistory(driver, { timeoutMs: 5_000 }), 'the Ledger should render the ckBTC payment row once it lands in history');
     const ledgerBody = await driver.bodyText();
     assertIncludes(ledgerBody, '0.0005 BTC', 'Ledger row must show the ckBTC units (−0.0005 BTC), not a $ amount');
     // The row must not leak a dollar figure for this ckBTC payment (the header's ∂ glyph is not '$',

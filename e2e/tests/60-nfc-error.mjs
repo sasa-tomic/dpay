@@ -26,6 +26,7 @@
 // Selector contract: `nfc-status` (the NfcTapView surface), `balance` (unchanged), the Done link
 // (aria-label="Done" — terminal-phase Cancel flips its label).
 import {setup, assert, onboardWallet, armNfcCard} from '../harness/lib.mjs';
+import { nfcPhase, nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
 export const meta = {
   id: '60',
@@ -79,8 +80,7 @@ export async function run() {
 
     // --- 1. TRANSPORT ERROR mid-tap (linking → error): honest "Tap failed", no fake Paid. -------
     console.log('[60-nfc-error] case 1: transport error mid-tap (linking → error)…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('nfc-status', {timeoutMs: 4_000});
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'nfc-status', text: null });
     // The error event carries a reason; the hook surfaces it as the status sub-line.
     await dispatch({type: 'error', role: 'card', reason: 'Lost the radio link'});
     const errTitle = await driver.waitForText('Tap failed', {timeoutMs: 5_000});
@@ -100,8 +100,7 @@ export async function run() {
     // A request carrying currency 99 (not in the catalog) auto-declines at validation: declineCard
     // fires + terminal "Declined" + "Unsupported asset (currency 99)". No sign ever fires (no wire).
     console.log('[60-nfc-error] case 2: unsupported-asset request auto-declines (fail-closed)…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('nfc-status', {timeoutMs: 4_000});
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'nfc-status', text: null });
     await dispatch({
       type: 'request', role: 'card',
       toHex: '11'.repeat(32), amount: '5000', nonceHex: 'cd'.repeat(16),
@@ -126,11 +125,9 @@ export async function run() {
     // radio glitch can't mask a real success. We drive settling, fire a late error, and assert the
 // phase does NOT flip to 'error' (settlement owns the outcome after envelope delivery).
     console.log('[60-nfc-error] case 3: late error after settling is ignored (no false failure)…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('nfc-status', {timeoutMs: 4_000});
-    await dispatch({type: 'phase', role: 'card', phase: 'exchanging'});
-    await dispatch({type: 'phase', role: 'card', phase: 'settling'}); // committed=true
-    await driver.waitForText('Confirming', {timeoutMs: 4_000});
+    await nfcPhase(driver, dispatch, 'linking', { statusId: 'nfc-status', text: null, mount: true });
+    await nfcPhase(driver, dispatch, 'exchanging', { text: null });
+    await nfcPhase(driver, dispatch, 'settling'); // committed=true
     // Fire the late error — it MUST be ignored (committed=true).
     await dispatch({type: 'error', role: 'card', reason: 'should be ignored'});
     // STALE-ASSERTION FIX: a bare waitForText('Confirming') would resolve on the FIRST poll — catching

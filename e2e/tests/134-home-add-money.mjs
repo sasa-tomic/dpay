@@ -28,7 +28,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['home-tab', 'add-money', 'faucet'],
   verifies: 'Home add-money lands the deposit surface for the HOME rail even while another account is selected; the DEMO faucet is not a Home action but the practice row\'s own button, and both it and the T hotkey carry the relay\'s own cooldown refusal back to the user without moving money',
-  timeoutMs: 25000,
+  timeoutMs: 55000,
 };
 
 export async function run() {

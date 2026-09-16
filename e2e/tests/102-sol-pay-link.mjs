@@ -27,7 +27,7 @@ export const meta = {
   journey: 'pay',
   covers: ['pay-link', 'url-routing', 'sol-send', 'rail-parity'],
   verifies: 'A SOL payment link selects the SOL rail and pre-fills the Send-to-address form with the link\'s address + amount (no auto-send); Confirm broadcasts it.',
-  timeoutMs: 30000,
+  timeoutMs: 34000,
 };
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

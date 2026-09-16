@@ -25,6 +25,7 @@
 // Selector contract: `asset-sol-select`, `tab-receive`, `tab-pay`, `sol-req-amount-input`,
 // `btn-sol-req-make`, `sol-req-qr`, `sol-req-status`, `sol-req-sig`, `sol-pay-scan`.
 import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import { nfcPhaseWalk } from '../harness/flow-steps.mjs';
 import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
 export const meta = {
@@ -138,8 +139,7 @@ export async function run() {
     await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
 
     const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'sol-nfc-status', text: null });
     await dispatch({type: 'request', role: 'card', solreqUri});
     await driver.waitForText('Communicating', {timeoutMs: 6_000});
 

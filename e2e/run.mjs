@@ -32,7 +32,7 @@
 // regenerates FLOWS.md from it.
 import os from 'node:os';
 import fs from 'node:fs';
-import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor } from './harness/lib.mjs';
+import { stopSession, killTrackedChildren, _testCtx, dumpDiagnosticsFor, laneBrowser, primeBrowserShards } from './harness/lib.mjs';
 import { loadTestsMeta, filterByToken, JOURNEYS } from './harness/meta.mjs';
 
 // Default concurrency: 12. The host has 16 cores; each parallel test is one chrome incognito context
@@ -96,19 +96,42 @@ function autoConcurrency() {
  * MINIMUM timeout headroom (×1.00). That inversion is why the suite went red on a QUIET machine
  * while every one of those flows passed in isolation.
  *
- * Slowdown tracks concurrency rather than spare cores because the contexts are not independent:
- * all of them share ONE browser process (`launched (shared across tests; fresh context per test)`),
- * so its main/IO threads serialize a fraction of every flow. Spare cores do not relieve that.
+ * The model target is contexts-per-BROWSER-PROCESS, not raw lanes: one chrome process serializes a
+ * fraction of every context's work on its main/IO threads (spare cores do not relieve that), but the
+ * pool spreads its lanes across browser shards (`resolveBrowserShards`), so the count that matters
+ * is ceil(concurrency / shards).
  *
  * CONTENTION_PER_CONTEXT is empirical, with deliberate margin: 12-settings runs ~9.9s alone and
- * ~21.1s at concurrency 12 (≈2.1×), so 0.15 predicts ≈2.65× — ~25% above the worst case measured.
- * Erring high is the correct bias: this timeout exists to catch a genuine HANG (which never
- * finishes, so a looser bound still catches it), whereas a bound that is too tight produces false
- * REDs on healthy code — the expensive failure, and the one that erodes trust in the gate.
+ * ~21.1s at concurrency 12 (≈2.1×), so 0.15 predicts ≈2.65× at 12 ctx/browser — ~25% above the
+ * worst case measured. Erring high is the correct bias: this timeout exists to catch a genuine
+ * HANG (which never finishes, so a looser bound still catches it), whereas a bound that is too
+ * tight produces false REDs on healthy code — the expensive failure, and the one that erodes trust
+ * in the gate.
  */
 const CONTENTION_PER_CONTEXT = 0.15;
-function selfContentionFactor(concurrency) {
-  return 1 + Math.max(0, concurrency - 1) * CONTENTION_PER_CONTEXT;
+function selfContentionFactor(concurrency, shards = 1) {
+  const perBrowser = Math.max(1, Math.ceil(concurrency / Math.max(1, shards)));
+  return 1 + Math.max(0, perBrowser - 1) * CONTENTION_PER_CONTEXT;
+}
+
+/**
+ * Browser-process shards for the pool. One chrome-headless-shell process serializes the main/IO
+ * work of every context inside it — measured 2026-09-16 (idle 16-core box): per-flow time inflated
+ * ~2.1× at concurrency 12 while the CPU sat ~96% IDLE, i.e. the lanes starved on the shared browser
+ * process, not on compute — and that inflation both wasted wall time and false-fired inner waits
+ * into RED on healthy flows (see 04/05 RED at tree 1d7264d, green solo minutes later). The default
+ * spreads the lanes across ceil(concurrency / 3) browser processes (~3 contexts each), which keeps
+ * per-test isolation IDENTICAL (fresh context per test, whatever process it lives in) while
+ * removing the process-level serialization. `DPAY_E2E_BROWSERS` overrides (1 restores the old
+ * single-browser behavior); extra processes cost ~150-250MB each — cheap on this class of host.
+ */
+function resolveBrowserShards(concurrency) {
+  const env = process.env.DPAY_E2E_BROWSERS;
+  if (env !== undefined && env !== '') {
+    const raw = parseInt(env, 10);
+    if (Number.isFinite(raw) && raw >= 1) return Math.min(raw, concurrency);
+  }
+  return Math.min(concurrency, Math.max(1, Math.ceil(concurrency / 3)));
 }
 
 /**
@@ -120,8 +143,8 @@ function selfContentionFactor(concurrency) {
  * derived it from load, and the `just e2e` entry derived it again and passed it in as an explicit
  * override — so fixing one silently left the other authoritative on the main path.
  */
-function resolveTimeoutScale(load, concurrency) {
-  return Math.max(load.factor, selfContentionFactor(concurrency));
+function resolveTimeoutScale(load, concurrency, shards = 1) {
+  return Math.max(load.factor, selfContentionFactor(concurrency, shards));
 }
 
 /**
@@ -175,17 +198,19 @@ export function withTimeout(promise, timeoutMs, label) {
   return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
-async function runOne(test, timeoutScale) {
+async function runOne(test, timeoutScale, lane = 0, shards = 1) {
   const mod = await import(`file://${test.path}`);
   if (typeof mod.run !== 'function') throw new Error(`${test.file}: no \`run\` export`);
   const base = test.meta?.timeoutMs ?? FALLBACK_TIMEOUT_MS;
   const effective = Math.round(base * timeoutScale);
-  // Wrap mod.run() in an AsyncLocalStorage context carrying the test file. setup() (called inside
-  // the flow body) reads this store to register its freshly-created driver into the per-test
-  // registry, so runPool's catch can later reach it for the RED-path diagnostics dump. ALS
+  // Wrap mod.run() in an AsyncLocalStorage context carrying the test file AND this lane's browser
+  // shard. setup() (called inside the flow body) reads this store to register its freshly-created
+  // driver into the per-test registry (so runPool's catch can later reach it for the RED-path
+  // diagnostics dump) and to create the test's context on the lane's own browser process. ALS
   // propagates through native async/promise boundaries in Node 18+, surviving the
   // runOne → mod.run → flow body → setup() chain. No flow file had to change.
-  const run = _testCtx.run(test.file, () => mod.run());
+  const browser = shards > 1 ? await laneBrowser(lane) : null;
+  const run = _testCtx.run({ file: test.file, browser }, () => mod.run());
   await withTimeout(run, effective, test.file);
 }
 
@@ -194,7 +219,7 @@ async function runOne(test, timeoutScale) {
  * STARTED; in-flight tests are allowed to finish (so their contexts tear down cleanly), then the
  * pool drains. Returns the ordered results + the first failure (if any).
  */
-async function runPool(tests, concurrency, timeoutScale) {
+async function runPool(tests, concurrency, timeoutScale, shards = 1) {
   const results = new Map(); // name -> { ok, ms, err? }
   let firstFailure = null;
   let nextIdx = 0;
@@ -209,7 +234,7 @@ async function runPool(tests, concurrency, timeoutScale) {
     if (exhausted && activeWorkers === 0) resolveAll();
   };
 
-  const startOne = async () => {
+  const startOne = async (lane = 0) => {
     if (firstFailure && !noFailFast) return; // fail-fast: don't start new tests after a failure
     const idx = nextIdx++;
     if (idx >= tests.length) return;
@@ -223,13 +248,13 @@ async function runPool(tests, concurrency, timeoutScale) {
     if (test.broken) {
       results.set(key, { ok: false, ms: 0, err: new Error(`BROKEN (import failed): ${test.broken}`), broken: true });
       console.error(`  ⚠ ${key}  SKIPPED — module import failed: ${test.broken}`);
-      void startOne(); // keep the worker chain alive (this slot is done instantly)
+      void startOne(lane); // keep the worker chain alive (this slot is done instantly)
       return;
     }
     activeWorkers++;
     const tStart = Date.now();
     try {
-      await runOne(test, timeoutScale);
+      await runOne(test, timeoutScale, lane, shards);
       results.set(key, { ok: true, ms: Date.now() - tStart });
       console.log(`  ✓ ${key}  ${((Date.now() - tStart) / 1000).toFixed(2)}s`);
     } catch (e) {
@@ -251,15 +276,17 @@ async function runPool(tests, concurrency, timeoutScale) {
       activeWorkers--;
       // Spawn the next test (unless we've fail-fast-stopped), then check for drain.
       if (!firstFailure || noFailFast) {
-        void startOne();
+        void startOne(lane);
       }
       maybeFinish();
     }
   };
 
-  // Seed `concurrency` workers (but never more than there are tests).
+  // Seed `concurrency` workers (but never more than there are tests). Each seed owns a fixed lane
+  // index for its whole chain: lane → browser shard = lane % shards (runOne), so a chain never
+  // migrates browser processes mid-run.
   const seeded = Math.min(concurrency, tests.length);
-  for (let i = 0; i < seeded; i++) void startOne();
+  for (let i = 0; i < seeded; i++) void startOne(i);
 
   await allDone;
   return { results, firstFailure };
@@ -305,7 +332,12 @@ export async function runTestsSubset(tests, opts = {}) {
   // wall-clock budget does. Two notions of "how slow is this host" is how a loaded machine produced
   // "element not visible within 5000ms" — a statement about the app that was really about the box.
   process.env.DPAY_E2E_TIMEOUT_SCALE = String(timeoutScale);
-  const { results, firstFailure } = await runPool(tests, resolved.concurrency, timeoutScale);
+  // Browser shards: spread the lanes across several chrome processes (ONE process serializes its
+  // contexts — see resolveBrowserShards). Clamped by tests.length so a small subset doesn't launch
+  // more browsers than lanes; primed up-front so no lane pays a mid-run launch.
+  const shards = Math.min(resolveBrowserShards(resolved.concurrency), tests.length);
+  await primeBrowserShards(shards);
+  const { results, firstFailure } = await runPool(tests, resolved.concurrency, timeoutScale, shards);
 
   // Timing seam: testruns.py points DPAY_TESTRUNS_TIMING at a file; dump per-flow wall
   // times so `just timing e2e` shows exactly where the suite's time went. Best-effort —
@@ -398,14 +430,16 @@ async function main() {
     process.exit(1);
   }
   const { concurrency, auto, load } = resolveConcurrency();
-  const timeoutScale = resolveTimeoutScale(load, concurrency);
+  const shards = Math.min(resolveBrowserShards(concurrency), tests.length);
+  const timeoutScale = resolveTimeoutScale(load, concurrency, shards);
   const filter = process.env.DPAY_E2E_FILTER ?? '';
   const filterNote = filter
     ? ` matching filter "${filter}" (by journey/id/name/filename/covers)`
     : '';
+  const ctxNote = `${Math.ceil(concurrency / shards)} ctx/browser × ${shards} browser${shards === 1 ? '' : 's'}`;
   const concurrencyNote = auto
-    ? `concurrency=${concurrency} (auto: load ${load.load1.toFixed(1)} on ${load.cpus} cores → headroom ${Math.max(0, load.cpus - load.load1).toFixed(1)}, timeout scale ×${timeoutScale.toFixed(2)} = max(load ×${load.factor.toFixed(2)}, contention ×${selfContentionFactor(concurrency).toFixed(2)}))`
-    : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} = max(load ×${load.factor.toFixed(2)} on ${load.cpus} cores, contention ×${selfContentionFactor(concurrency).toFixed(2)}))`;
+    ? `concurrency=${concurrency} (auto: load ${load.load1.toFixed(1)} on ${load.cpus} cores → headroom ${Math.max(0, load.cpus - load.load1).toFixed(1)}, timeout scale ×${timeoutScale.toFixed(2)} = max(load ×${load.factor.toFixed(2)}, contention ×${selfContentionFactor(concurrency, shards).toFixed(2)} @ ${ctxNote}))`
+    : `concurrency=${concurrency} (explicit; timeout scale ×${timeoutScale.toFixed(2)} = max(load ×${load.factor.toFixed(2)} on ${load.cpus} cores, contention ×${selfContentionFactor(concurrency, shards).toFixed(2)} @ ${ctxNote}))`;
   console.log(
     `[run] running ${tests.length} test(s)${filterNote} in ${process.env.DPAY_E2E_MODE ?? 'local'} mode` +
     ` (parallel, ${concurrencyNote})` +

@@ -26,6 +26,7 @@ import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, railPrincipalText,
 } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 import { startRelay } from '../harness/relay.mjs';
 
@@ -245,8 +246,7 @@ export async function run() {
 
     // --- Ledger row: the incoming VCHF transfer from the pool's short principal -------------------
     console.log('[140-convert-happy-path] asserting the Ledger row…');
-    await driver.click('tab-transactions', { timeoutMs: 5_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 8_000 });
+    await openHistory(driver, { timeoutMs: 5_000 });
     await driver.waitForText(POOL.slice(0, 8), { timeoutMs: 12_000 });
     const ledgerBody = await driver.bodyText();
     assertIncludes(ledgerBody, 'VCHF', 'ledger shows the VCHF conversion row');

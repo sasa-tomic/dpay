@@ -22,6 +22,7 @@
 // Selector contract: `sol-nfc-status`, `asset-sol-select`, `sol-pay-scan`, `tab-receive`,
 // `sol-req-amount-input`, `btn-sol-req-make`, `sol-req-qr`.
 import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import { nfcPhase, nfcPhaseWalk } from '../harness/flow-steps.mjs';
 
 export const meta = {
   id: '66',
@@ -127,8 +128,7 @@ export async function run() {
     // SW_DECLINED the moment the card phase is DECLINED — is the Kotlin transport hop, a device
     // gate; case 4 covers the reader-side decline plumbing via the seam.)
     console.log('[66-sol-nfc-error] case 1: expired solreq → auto-decline at sign…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'sol-nfc-status', text: null });
     await dispatch({type: 'request', role: 'card', solreqUri: buildSolReq({expired: true})});
     assert(await driver.waitForText('Declined', {timeoutMs: 5_000}),
       'an expired solreq should auto-decline at sign time (the honest "Declined" terminal)');
@@ -146,8 +146,7 @@ export async function run() {
 
     // --- 2. TRANSPORT ERROR mid-tap: honest "Tap failed", no fake Paid. -----------------------
     console.log('[66-sol-nfc-error] case 2: transport error mid-tap (linking → error)…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
+    await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'sol-nfc-status', text: null });
     await dispatch({type: 'error', role: 'card', reason: 'Lost the radio link'});
     assert(await driver.waitForText('Tap failed', {timeoutMs: 5_000}),
       'a mid-tap transport error should surface the honest "Tap failed" status');
@@ -161,11 +160,9 @@ export async function run() {
 
     // --- 3. LATE ERROR AFTER SETTLING IGNORED (no false failure over a decided outcome). --------
     console.log('[66-sol-nfc-error] case 3: late error after settling is ignored (no false failure)…');
-    await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
-    await dispatch({type: 'phase', role: 'card', phase: 'exchanging'});
-    await dispatch({type: 'phase', role: 'card', phase: 'settling'}); // committed=true
-    assert(await driver.waitForText('Confirming', {timeoutMs: 4_000}),
+    await nfcPhase(driver, dispatch, 'linking', { statusId: 'sol-nfc-status', text: null, mount: true });
+    await nfcPhase(driver, dispatch, 'exchanging', { text: null });
+    assert(await nfcPhase(driver, dispatch, 'settling'), // committed=true
       'settling should surface the "Confirming…" status');
     await dispatch({type: 'error', role: 'card', reason: 'should be ignored'});
     // STALE-ASSERTION FIX: a bare waitForText('Confirming') would resolve on the FIRST poll — catching
@@ -194,10 +191,8 @@ export async function run() {
     await driver.type('sol-req-amount-input', '0.025', {timeoutMs: 5_000});
     await driver.click('btn-sol-req-make', {timeoutMs: 5_000});
     await driver.findByTestID('sol-req-qr', {timeoutMs: 8_000}); // reader is now mounted (nfc ready)
-    await dispatch({type: 'phase', role: 'reader', phase: 'linking'});
-    await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
-    await dispatch({type: 'phase', role: 'reader', phase: 'declined'});
-    assert(await driver.waitForText('Declined', {timeoutMs: 5_000}),
+    await nfcPhase(driver, dispatch, 'linking', { role: 'reader', statusId: 'sol-nfc-status', text: null, mount: true });
+    assert(await nfcPhase(driver, dispatch, 'declined', { role: 'reader', text: 'Declined', timeoutMs: 5_000 }),
       'the merchant reader should surface the honest "Declined" status');
     const readerBody = await driver.bodyText();
     assert(!/\bPaid\b/.test(readerBody) && !/Received/.test(readerBody),

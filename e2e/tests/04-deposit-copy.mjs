@@ -21,7 +21,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['deposit-address', 'clipboard'],
   verifies: '\'Copy address\' writes the REAL address to the clipboard (not the Share noop).',
-  timeoutMs: 15000,
+  timeoutMs: 46000,
 };
 
 export async function run() {

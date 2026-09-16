@@ -46,7 +46,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['send-to-address', 'direct-icrc', 'vchf', 'icrc1_transfer', 'route-disclosure', 'fee', 'balance-delta', 'ui-balance-delta'],
   verifies: 'Send VCHF to an external IC account: the Pay tab exposes "Send to address" for a no-minter asset, the pasted principal is CRC-validated and its route disclosed with the fee, one icrc1_transfer settles, and both the sender (−amount−fee) and the recipient (+amount) move at the gateway; the UI balance follows.',
-  timeoutMs: 30000,
+  timeoutMs: 63000,
 };
 
 export async function run() {

@@ -9,6 +9,7 @@ import {
   setup, assert, assertIncludes, assertEq, onboardWallet, armPayScan, getBalance, selectCurrency, openBalances,
   faucetAccount, accountOf, goOffline, setRelay, railTransfer,
 } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { buildRequestQR, generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 const CURRENCY = 8; // ICP
@@ -87,8 +88,7 @@ export async function run() {
     await openBalances(driver);
     assert(await driver.waitForText('1.1 ICP', { timeoutMs: 20_000 }),
       'the settled transfer must bring the balance back to funded − gross');
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 5_000 });
+    await openHistory(driver, { recentMs: 5_000 });
     await driver.waitGone('hist-pending-0', { timeoutMs: 15_000 }); // throws if it lingers
 
     const ledger = await driver.bodyText();

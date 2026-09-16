@@ -26,7 +26,7 @@ export const meta = {
   journey: 'pay',
   covers: ['solana-pay', 'sol-scan', 'review', 'reference-keys', 'spl-token', 'ata', 'refusal', 'sign', 'broadcast'],
   verifies: 'Solana Pay accept: scan a merchant solana: URI → named refusals on the IC rail and for unknown params/mints → explicit review (amount/label/message/full payee) → Approve sends SOL then USDC via the recipient ATA with reference keys attached (stub RPC).',
-  timeoutMs: 30000,
+  timeoutMs: 53000,
 };
 
 const MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

@@ -35,6 +35,7 @@ import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, armPayScan, waitForScanner, railPrincipalText,
 } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex } from '../harness/wire.mjs';
 
 const CURRENCY = 7; // VCHF
@@ -205,8 +206,7 @@ export async function run() {
 
     // --- (7) Ledger outgoing row ---------------------------------------------------------------
     console.log('[95-vchf-pay] assert Ledger outgoing row…');
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 8_000 });
+    await openHistory(driver);
     const named = await driver.waitForText('to Bob', { timeoutMs: 10_000 });
     const bodyText = await driver.bodyText();
     assert(named, `ledger row names the payee via the link-label annotation ("to Bob"). ledger:\n${bodyText.slice(0, 500)}`);

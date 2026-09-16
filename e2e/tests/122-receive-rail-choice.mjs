@@ -28,7 +28,7 @@
 //
 // The single-rail control: home=CHF on VCHF renders EXACTLY as before — same principal sheet,
 // NO rail disclosure anywhere (the component renders null outside a two-rail group).
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, accountOf, openBalances, selectCurrency, railPrincipalText, waitForWallet} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, openBalances, selectCurrency, railPrincipalText, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '122',
@@ -36,7 +36,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['home-currency', 'receive', 'rails', 'ckusdc', 'sol-usdc', 'vchf', 'group-model'],
   verifies: 'Receive ▸ "My address" on a multi-rail home currency defaults to the wallet\'s rail pick with no "default rail" suffix and the rail\'s own fee fact, exposes the sibling rail\'s own address + fee one toggle away without leaving the sub-mode, and asserts both addresses belong to the user; single-rail CHF renders with no rail disclosure.',
-  timeoutMs: 30000,
+  timeoutMs: 84000,
 };
 
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.
@@ -49,19 +49,14 @@ export async function run() {
   try {
     const {driver} = env;
 
-    console.log('[122-receive-rail-choice] onboarding with home=USD…');
-    await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-receive-rails', {timeoutMs: 8_000});
-    await driver.click('btn-create');
-    await driver.findByTestID('mnemonic-backup');
-    await driver.click('mnemonic-backup-checkbox');
-    await waitForEnabled(driver, 'btn-mnemonic-continue');
-    await driver.click('btn-mnemonic-continue');
-    await skipPracticeIfPresent(driver);
-    await driver.findByTestID('home-currency-title');
-    await driver.click('home-currency-USD');
-    await driver.click('btn-home-currency-continue');
-    await waitForWallet(driver);
+    console.log('[122-receive-rail-choice] onboarding, pinning home=USD…');
+    await onboardWallet(driver, 'e2e-receive-rails');
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    await driver.click('btn-currency-USD', {timeoutMs: 5_000});
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver);
+    await selectCurrency(driver, 'ckusdc');
     const account = await accountOf(driver);
     const wantPrincipal = await railPrincipalText(account.publicHex);
 

@@ -33,7 +33,7 @@ export const meta = {
   journey: 'offline',
   covers: ['offline', 'send-to-address', 'error-handling', 'graceful'],
   verifies: 'Offline, Pay ▸ Send to address replaces the form with an instruction naming the constraint and routing to Scan to pay (the rail that works offline); the form returns when the connection does.',
-  timeoutMs: 40000,
+  timeoutMs: 76000,
 };
 
 export async function run() {

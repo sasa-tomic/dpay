@@ -16,6 +16,7 @@
 // Selector contract: `header-who` (username line), `balance` (header → Home tab),
 // `asset-ckusdc` / `asset-ckbtc` (the currency rows in the Home accounts list), `tab-pay`.
 import { setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, railTransfer, railPrincipalText, openBalances } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 
 const CKBTC_CURRENCY = 1;   // the CkBtcUtxo catalog entry (resolved at runtime, not hardcoded in app)
@@ -87,9 +88,7 @@ export async function run() {
     assert(pay.ok === true && pay.status === 202, `currency-1 rail transfer must be accepted (202), got ${JSON.stringify(pay)}`);
     console.log('[24-wallet-cleanup] ✓ currency-1 (BTC) icrc1_transfer accepted by the IC gateway');
 
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    const hasRecent = await driver.waitForText('RECENT', { timeoutMs: 8_000 });
-    assert(hasRecent, 'RECENT card should render once the currency-1 transfer lands in history');
+    assert(await openHistory(driver), 'RECENT card should render once the currency-1 transfer lands in history');
     const sawShort = await driver.waitForText(bobPrincipal.slice(0, 8), { timeoutMs: 8_000});
     assert(sawShort, 'history should show the currency-1 payee (short PRINCIPAL text) — proves multi-currency fetch (H2)');
 

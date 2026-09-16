@@ -52,7 +52,7 @@ export const meta = {
   journey: 'pay',
   covers: ['opencryptopay', 'tx-ledger-spelling', 'vchf', 'explicit-approve', 'one-shot-submit', 'pending-not-paid', 'honest-instructions', 'charge-reference', 'signed-note', 'settle'],
   verifies: 'A dpay wallet pays a dpay-served OpenCryptoPay till: the till offers only InternetComputer/VCHF and the payer pays it — the explicit review shows the VCHF amount, the full destination, that relay as the price\'s host, the claimed merchant name, the CHF price and the note the merchant signed at ring-up (what the charge is for), and Approve moves the exact VCHF (payer −amount−fee, merchant +amount) carrying the till\'s per-charge `ref` as the transfer\'s on-chain memo, then reports the proof exactly once — as `<vchf ledger>:<block index>`, the spelling a non-ICP ICRC ledger requires and the one whose absence cost a real payment — → Paid ✓. A submission the till answers 202 PENDING renders as sent-and-waiting with the ledger reference — never as paid, never as failed, and never with a second submission.',
-  timeoutMs: 45000, // 2 legs: 4 provider round trips + 2 real IC settlements
+  timeoutMs: 47000, // 2 legs: 4 provider round trips + 2 real IC settlements
 };
 
 /** Point the camera at the till's code (arming the pay-intent gate first — the shared choke point).

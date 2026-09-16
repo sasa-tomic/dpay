@@ -15,6 +15,7 @@
 //   - the online direct payment updates balance + history (it does NOT flip the merchant's
 //     "Received" — that flip is merchant-app-submission only, gated by flows 08/21).
 import { setup, assert, assertIncludes, getBalance, onboardWallet, accountOf, railTransfer, railPrincipalText, faucetAccount } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair } from '../harness/wire.mjs';
 
 const PAY_CENTS = 2500; // ∂25.00
@@ -74,8 +75,7 @@ export async function run() {
     assert(aliceBal === '12500', `A must be credited (12500), got ${aliceBal}`);
 
     // --- A's history renders the payment: SHORT PRINCIPAL + memo (the reconciliation key). ----
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 8_000 });
+    await openHistory(driver);
     const sawShort = await driver.waitForText(bobPrincipal.slice(0, 8), { timeoutMs: 8_000});
     assert(sawShort, 'history should show the payer as the short PRINCIPAL prefix');
     const body = await driver.bodyText();

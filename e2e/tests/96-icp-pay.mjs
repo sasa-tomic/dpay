@@ -31,6 +31,7 @@ import {
   setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, getBalance, faucetAccount,
   openBalances, selectCurrency, armPayScan, waitForScanner, railPrincipalText,
 } from '../harness/lib.mjs';
+import { openHistory } from '../harness/flow-steps.mjs';
 import { generateKeypair, randNonceHex, buildRequestQR, decodeRequest } from '../harness/wire.mjs';
 
 const CURRENCY = 8; // ICP
@@ -176,8 +177,7 @@ export async function run() {
 
     // --- (7) Ledger outgoing row ---------------------------------------------------------------
     console.log('[96-icp-pay] assert Ledger outgoing row…');
-    await driver.click('tab-transactions', { timeoutMs: 4_000 });
-    await driver.waitForText('RECENT', { timeoutMs: 8_000 });
+    await openHistory(driver);
     const bobPrincipal = await railPrincipalText(bob.publicHex);
     const named = await driver.waitForText('to Bob', { timeoutMs: 10_000 });
     const bodyText = await driver.bodyText();

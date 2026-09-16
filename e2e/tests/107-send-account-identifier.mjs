@@ -49,7 +49,7 @@ export const meta = {
   // it too passed only on the host-load scale multiplier (see flow 101). Onboarding, a faucet
   // credit, a rejected address, an accepted one, and a real settled transfer read back off the
   // ledger.
-  timeoutMs: 60000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

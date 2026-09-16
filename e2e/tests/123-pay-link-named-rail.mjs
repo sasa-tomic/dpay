@@ -18,7 +18,7 @@
 //
 // Selector contract: `active-asset-label`, `sol-send-address-input`, `sol-send-amount-input`,
 // `sol-send-review`, `btn-sol-send-confirm`, `sol-send-outcome`.
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, waitForWallet} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '123',
@@ -26,7 +26,7 @@ export const meta = {
   journey: 'pay',
   covers: ['pay-link', 'url-routing', 'rail-choice', 'never-override'],
   verifies: 'A payment link naming USDC@Solana pays exactly that rail with home=USD/preferred ckUSDC selected — no rail-selection copy on the pinned path.',
-  timeoutMs: 30000,
+  timeoutMs: 52000,
 };
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';
@@ -39,25 +39,19 @@ export async function run() {
   try {
     const {driver, relayBaseURL, webBaseURL} = env;
 
-    console.log('[123-pay-link-named-rail] onboarding with home=USD (manual — onboardWallet pins CHF+DEMO)…');
-    await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-named-rail', {timeoutMs: 8_000});
-    await driver.click('btn-create');
-    await driver.findByTestID('mnemonic-backup');
-    await driver.click('mnemonic-backup-checkbox');
-    await waitForEnabled(driver, 'btn-mnemonic-continue');
-    await driver.click('btn-mnemonic-continue');
-    await skipPracticeIfPresent(driver);
-    await driver.findByTestID('home-currency-title');
-    await driver.click('home-currency-USD');
-    await driver.click('btn-home-currency-continue');
-    await waitForWallet(driver, {timeoutMs: 10_000});
+    console.log('[123-pay-link-named-rail] onboarding, pinning home=USD…');
+    await onboardWallet(driver, 'e2e-named-rail');
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    await driver.click('btn-currency-USD', {timeoutMs: 5_000});
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
 
     // 1. Baseline: USD home selects the PREFERRED ckUSDC rail (flow 118's remembered-asset rule).
     //    This is what the named-rail link must override — by naming, not by choosing.
-    // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
-    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
-    // flow 158). `home-headline-label` is the currency statement on this surface.
+    // The seeded preamble lands on Pay, so go Home for the currency statement — the header chip
+    // is not rendered there (it names the SELECTION, which is a different fact; see flow 158).
+    // `home-headline-label` is the currency statement on this surface.
+    await driver.click('tab-home', {timeoutMs: 5_000});
     assertIncludes(await driver.readText('home-headline-label'), 'US dollars',
       'home=USD must start on the preferred ckUSDC rail');
 

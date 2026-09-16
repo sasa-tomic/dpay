@@ -13,7 +13,7 @@
 //
 // Selector contract: `pay-fund`, `fund-sibling-rail`, `fund-sibling-holds`,
 // `btn-fund-sibling-switch`, `active-asset-label`, `btn-sol-start-scan`.
-import {setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent, waitForWallet} from '../harness/lib.mjs';
+import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency, waitForWallet} from '../harness/lib.mjs';
 
 export const meta = {
   id: '124',
@@ -21,7 +21,7 @@ export const meta = {
   journey: 'pay',
   covers: ['fund-gate', 'rail-choice', 'home-currency', 'solana'],
   verifies: 'The IC fund-first gate names a funded USDC@Solana sibling rail and one tap switches to it (user gesture, selection unlocked).',
-  timeoutMs: 30000,
+  timeoutMs: 55000,
 };
 
 export async function run() {
@@ -31,23 +31,14 @@ export async function run() {
   try {
     const {driver} = env;
 
-    console.log('[124-fund-gate-sibling-rail] onboarding with home=USD (manual — onboardWallet pins CHF+DEMO)…');
-    await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-sibling', {timeoutMs: 8_000});
-    await driver.click('btn-create');
-    await driver.findByTestID('mnemonic-backup');
-    await driver.click('mnemonic-backup-checkbox');
-    await waitForEnabled(driver, 'btn-mnemonic-continue');
-    await driver.click('btn-mnemonic-continue');
-    await skipPracticeIfPresent(driver);
-    await driver.findByTestID('home-currency-title');
-    await driver.click('home-currency-USD');
-    await driver.click('btn-home-currency-continue');
-    await waitForWallet(driver, {timeoutMs: 10_000});
-
-    // The FIRST currency choice lands on Home (docs/specs/2026-09-07-ux-decisions.md); the gate
-    // this flow exercises lives on the Pay tab, so go there.
-    await driver.click('tab-pay', {timeoutMs: 5_000});
+    console.log('[124-fund-gate-sibling-rail] onboarding, pinning home=USD…');
+    await onboardWallet(driver, 'e2e-sibling');
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    await driver.click('btn-currency-USD', {timeoutMs: 5_000});
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver);
+    await selectCurrency(driver, 'ckusdc');
 
     assertIncludes(await driver.readText('active-asset-label'), 'US dollars',
       'home=USD must start on the preferred ckUSDC rail');

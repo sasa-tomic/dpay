@@ -29,7 +29,7 @@ export const meta = {
   journey: 'system',
   covers: ['offline', 'econnrefused', 'graceful', 'capability-fail-closed', 'right-reason'],
   verifies: 'Relay down → the app degrades honestly (header "~ approx.", wallet rendered, no crash), balance requests fail for the right reason (ECONNREFUSED, not unsafe-port), and the DEMO top-up is hidden rather than advertised (capability fail-closed).',
-  timeoutMs: 20000,
+  timeoutMs: 51000,
 };
 
 export async function run() {

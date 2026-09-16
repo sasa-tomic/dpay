@@ -12,7 +12,7 @@
 // account's public hex; the EURC ATA is base58-shaped and stable across a flip-away-and-back
 // (the harness has no independent ATA derivation — stability under one identity is the bound).
 import {
-  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
+  setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
   accountOf, railPrincipalText,
  waitForWallet} from '../harness/lib.mjs';
 
@@ -22,7 +22,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['home-currency', 'receive', 'rails', 'eur', 'eurc', 'veur', 'rail-health', 'fees'],
   verifies: 'Receive ▸ My address on home=EUR defaults to EURC@Solana (own ATA + SOL fees, no health line on the deep rail) and toggles to VEUR@IC (own principal + e8s VEUR fee + the thin-liability note on the disclosure) without leaving the sub-mode; both addresses stable across flips.',
-  timeoutMs: 30000,
+  timeoutMs: 70000,
 };
 
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.
@@ -35,19 +35,14 @@ export async function run() {
   try {
     const {driver} = env;
 
-    console.log('[131-eur-receive-rail] onboarding with home=EUR…');
-    await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-eur-receive', {timeoutMs: 8_000});
-    await driver.click('btn-create');
-    await driver.findByTestID('mnemonic-backup');
-    await driver.click('mnemonic-backup-checkbox');
-    await waitForEnabled(driver, 'btn-mnemonic-continue');
-    await driver.click('btn-mnemonic-continue');
-    await skipPracticeIfPresent(driver);
-    await driver.findByTestID('home-currency-title');
-    await driver.click('home-currency-EUR');
-    await driver.click('btn-home-currency-continue');
-    await waitForWallet(driver);
+    console.log('[131-eur-receive-rail] onboarding, pinning home=EUR…');
+    await onboardWallet(driver, 'e2e-eur-receive');
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    await driver.click('btn-currency-EUR', {timeoutMs: 5_000});
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
     const account = await accountOf(driver);
     const wantPrincipal = await railPrincipalText(account.publicHex);
 

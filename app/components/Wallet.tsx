@@ -423,10 +423,13 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
     // Self-rescheduling rather than setInterval so the cadence is read fresh each fire — the e2e
-    // seam can shrink the tick mid-session (flow 181) without remounting the wallet.
+    // seam can shrink the tick mid-session (flow 181) without remounting the wallet. The FIRST
+    // arm honors the shrink too (min(tick, staleness bound)): the bound is when the marker is due,
+    // so the re-render that fires it must not lag a shrunk bound (prod: min(30s, 60s) = 30s, the
+    // historical cadence; e2e: 250ms — the marker lands right after the bound, not up to 30s later).
     let t: ReturnType<typeof setTimeout>;
     const loop = () => { setNowTick(Date.now()); t = setTimeout(loop, balanceTickMs()); };
-    t = setTimeout(loop, balanceTickMs());
+    t = setTimeout(loop, Math.min(balanceTickMs(), balanceStaleMs()));
     return () => clearTimeout(t);
   }, []);
   // Reconciliation: a settled row carrying the record's join key (IC: the on-chain memo = the

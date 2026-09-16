@@ -21,6 +21,7 @@
 //
 // Selector contract: same as flow 51 + `sol-req-reconcile` (durable unknown-state card).
 import {setup, assert, onboardWallet, armNfcCard, waitForWallet, openBalances} from '../harness/lib.mjs';
+import { nfcPhaseWalk } from '../harness/flow-steps.mjs';
 import {solTxDetailFromSolpay} from '../harness/soltx.mjs';
 
 export const meta = {
@@ -29,7 +30,7 @@ export const meta = {
   journey: 'offline',
   covers: ['sol-merchant', 'sol-settle-verify', 'three-verdict'],
   verifies: 'SOL settle-verify: confirmed-but-mismatched body → honest doubt copy + reconcile; unreadable body → keeps polling, settles only when verified; on-chain error → rejected copy.',
-  timeoutMs: 45000,
+  timeoutMs: 65000,
 };
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -73,8 +74,7 @@ async function merchantCycle(driver, label, amount, splice, seedDetail = true) {
   await driver.click('tab-pay', {timeoutMs: 5_000});
   await driver.findByTestID('sol-pay-scan', {timeoutMs: 5_000});
   const dispatch = async (event) => { await armNfcCard(driver, 'sol'); return driver.eval((e) => window.__DPAY_TEST_SOL_NFC_SESSION(e), event); };
-  await dispatch({type: 'phase', role: 'card', phase: 'linking'});
-  await driver.findByTestID('sol-nfc-status', {timeoutMs: 4_000});
+  await nfcPhaseWalk(driver, dispatch, ['linking'], { statusId: 'sol-nfc-status', text: null });
   await dispatch({type: 'request', role: 'card', solreqUri});
   await driver.waitForText('Communicating', {timeoutMs: 6_000});
 

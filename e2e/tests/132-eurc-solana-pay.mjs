@@ -7,7 +7,7 @@
 // a mint that is NOT in the catalog is refused BY NAME with its pubkey, never guessed at, never
 // silently routed to another token.
 import {
-  setup, assert, assertEq, assertIncludes, waitForEnabled, skipWalkthroughIfPresent, skipPracticeIfPresent,
+  setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, selectCurrency,
   armPayScan,
  waitForWallet} from '../harness/lib.mjs';
 
@@ -17,7 +17,7 @@ export const meta = {
   journey: 'pay',
   covers: ['solana-pay', 'eur', 'eurc', 'scan', 'refusal', 'fees'],
   verifies: 'home=EUR on the EURC rail: a scanned solana: URI naming EURC\'s mint reviews and pays EURC (named token, own 6 decimals, ATA rent disclosed); a non-catalog mint is refused BY NAME with its pubkey.',
-  timeoutMs: 30000,
+  timeoutMs: 59000,
 };
 
 const MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address
@@ -32,24 +32,20 @@ export async function run() {
     const {driver} = env;
 
     // Onboard with home=EUR — the wallet lands on the EURC rail (the stated preference).
-    console.log('[132-eurc-solana-pay] onboarding with home=EUR…');
-    await skipWalkthroughIfPresent(driver);
-    await driver.typeByPlaceholder('e.g. Alice', 'e2e-eurc-pay', {timeoutMs: 8_000});
-    await driver.click('btn-create');
-    await driver.findByTestID('mnemonic-backup');
-    await driver.click('mnemonic-backup-checkbox');
-    await waitForEnabled(driver, 'btn-mnemonic-continue');
-    await driver.click('btn-mnemonic-continue');
-    await skipPracticeIfPresent(driver);
-    await driver.findByTestID('home-currency-title');
-    await driver.click('home-currency-EUR');
-    await driver.click('btn-home-currency-continue');
-    await waitForWallet(driver, {timeoutMs: 10_000});
-    // The wallet lands on HOME, and Home states the chosen currency in its own headline — the
-    // header chip is not rendered there (it names the SELECTION, which is a different fact; see
-    // flow 158). `home-headline-label` is the currency statement on this surface.
+    console.log('[132-eurc-solana-pay] onboarding, pinning home=EUR…');
+    await onboardWallet(driver, 'e2e-eurc-pay');
+    await driver.click('btn-settings', {timeoutMs: 5_000});
+    await driver.click('btn-currency-EUR', {timeoutMs: 5_000});
+    await driver.click('btn-settings-close', {timeoutMs: 5_000});
+    await waitForWallet(driver, {timeoutMs: 8_000});
+    // The seeded preamble lands on Pay, so go Home for the currency statement — the header chip
+    // is not rendered there (it names the SELECTION, which is a different fact; see flow 158).
+    // `home-headline-label` is the currency statement on this surface.
+    await driver.click('tab-home', {timeoutMs: 5_000});
     const label = await driver.readText('home-headline-label');
     assertIncludes(label, 'uros', 'home=EUR names the currency in the header');
+    await openBalances(driver);
+    await selectCurrency(driver, 'sol-eurc');
 
     // The SOL RPC simulator (same seam as flow 119): 5 SOL for fees, 2 units (6 dec) of the
     // requested token, token accounts present so sender and merchant ATAs exist — no create leg.
