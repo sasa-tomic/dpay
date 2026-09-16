@@ -45,3 +45,6 @@ signing.properties
 *.log
 .DS_Store
 dist-prod
+
+# nested git worktrees (session work areas)
+/.worktrees
