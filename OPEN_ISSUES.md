@@ -484,7 +484,16 @@ Nothing from the swarm's defect inventory remains open.
 
 ## Tech-debt follow-ups
 
-U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration was deleted from `CODEBASE_ANALYSIS.md` and replaced by the pointer paragraph ("Flow coverage lives in `FLOWS.md`, not here — this file points, it never restates"; `just check` regenerating + diffing `FLOWS.md` is recorded beside it), and every non-flow fact it carried was re-homed first (the testID contract, the seed/backup surface, and the restore surface as their own paragraphs in the e2e-harness section; the asset-segregation note into "Where the design earns its keep"). The row survived that commit by oversight. No tech-debt items remain open.
+U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration was deleted from `CODEBASE_ANALYSIS.md` and replaced by the pointer paragraph ("Flow coverage lives in `FLOWS.md`, not here — this file points, it never restates"; `just check` regenerating + diffing `FLOWS.md` is recorded beside it), and every non-flow fact it carried was re-homed first (the testID contract, the seed/backup surface, and the restore surface as their own paragraphs in the e2e-harness section; the asset-segregation note into "Where the design earns its keep"). The row survived that commit by oversight. It remained the only entry until U5 below.
+
+U5 — **watch-mode stale-bundle wart (found 2026-09-16 during the e2e-speedup audit; NOT yet fixed).**
+`lib.mjs`'s `getSession` memoizes the shared session and returns early (lib.mjs:138) BEFORE reading
+`opts.rebuildWeb`, so `just e2e-watch` re-runs after an `app/` edit keep testing the dist that existed
+at watch START — fast feedback that can be WRONG. The one-shot `just e2e` path rebuilds and is correct;
+only the persisted watch session is affected. Fix shape: when a watch re-run detects watched-file
+changes, rebuild the web dist BEFORE reusing the memoized browser/relay (or make `getSession` honor a
+per-call rebuild flag). Effort M — needs interactive watch verification (the loop is unwired by
+design, so it can't ride `just verify`). value 6 / effort M.
 
 ## Other open issues
 
