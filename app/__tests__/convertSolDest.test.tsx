@@ -101,7 +101,7 @@ function quoteOf(venueId: string, inputMint: string, outputMint: string, amount:
 
 beforeEach(() => {
   jest.mocked(fetchJupiterQuote).mockReset();
-  jest.mocked(fetchJupiterQuote).mockImplementation(async (venue, inputMint, outputMint, amount) =>
+  jest.mocked(fetchJupiterQuote).mockImplementation(async (_relayUrl, venue, inputMint, outputMint, amount) =>
     quoteOf(venue.venue_id, inputMint, outputMint, amount),
   );
 });
@@ -138,7 +138,7 @@ const textOf = (tree: renderer.ReactTestRenderer, testID: string): string => {
 };
 const lastQuoteCall = (): {venueId: string; inputMint: string; outputMint: string; amount: string} => {
   const calls = jest.mocked(fetchJupiterQuote).mock.calls;
-  const [venue, inputMint, outputMint, amount] = calls[calls.length - 1];
+  const [_relayUrl, venue, inputMint, outputMint, amount] = calls[calls.length - 1];
   return {venueId: venue.venue_id, inputMint, outputMint, amount};
 };
 /** Mount + flush the mount-time quote effect (if any). */
@@ -272,7 +272,7 @@ describe('SOL convert out-destination picker', () => {
     let release: (q: ReturnType<typeof quoteOf>) => void = () => undefined;
     jest.mocked(fetchJupiterQuote).mockImplementationOnce(async (...args: Parameters<typeof fetchJupiterQuote>) =>
       new Promise(resolve => {
-        release = () => resolve(quoteOf(args[0].venue_id, args[1], args[2], args[3]));
+        release = () => resolve(quoteOf(args[1].venue_id, args[2], args[3], args[4]));
       }),
     );
     await act(async () => {

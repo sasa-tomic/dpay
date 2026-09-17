@@ -131,11 +131,14 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
   {
     // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter, the
     // autonomous on-chain aggregator, for the rail-local pair SOL ↔ USDC(Solana). Identifier
-    // semantics per kind: `endpoint` is an https ORIGIN (quote + unsigned swap tx, device-direct
-    // and keyless) and `pair_ledgers` are MINTS — the native side by its WRAPPED form. The mints
-    // are DERIVED from the Solana token registry (the app's one copy of each), never standalone
-    // literals. No ic fixture exists for this kind (fixtures are ic_amm-only); the offline
-    // stand-in is the e2e window.fetch stub on the endpoint origin.
+    // semantics per kind: `endpoint` is an https ORIGIN — the venue's IDENTITY and attribution
+    // (it renders in the pool/attribution line), NOT a dial target since 2026-09-16: quotes +
+    // unsigned swap tx builds go through dpay's relay proxy (`/api/v1/jupiter/*`,
+    // services/jupiter.ts) — and `pair_ledgers` are MINTS — the native side by its WRAPPED form.
+    // The mints are DERIVED from the Solana token registry (the app's one copy of each), never
+    // standalone literals. No ic fixture exists for this kind (fixtures are ic_amm-only); the
+    // offline stand-in is the relay's test stub upstream (DPAY_JUPITER_API_BASE →
+    // /api/v1/test/jupiter-upstream, e2e/harness/jupiter.mjs).
     venue_id: 'jupiter',
     display_name: 'Jupiter',
     kind: 'solana_amm',
@@ -147,8 +150,9 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
   {
     // The SECOND Solana venue (registered 2026-09-16, coverage expansion §1): the same
     // Jupiter aggregator family, on the rail-local pair SOL ↔ EURC — everything the
-    // jupiter row comment above says holds verbatim (https origin, mints derived from
-    // the Solana token registry, no fixture, offline stand-in = the e2e fetch stub).
+    // jupiter row comment above says holds verbatim (https-origin endpoint as identity,
+    // relay-proxied dials, mints derived from the Solana token registry, no fixture,
+    // offline stand-in = the relay's test stub upstream).
     // Measured live 2026-09-16: SOL→EURC healthy keyless; the USDC↔EURC pair probed
     // and SKIPPED (a thin ~13% spread market — revisit on depth).
     venue_id: 'jupiter-eurc',

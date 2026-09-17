@@ -175,13 +175,14 @@ const nonBreakingClock = (d: Date): string => formatClock(d).replace(/ /g, '\u00
 
 export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onShowDepositAddress, onSwitchAsset, solana}: Props) {
   // THE V11 DISPATCH: every asset gets the same Convert gesture (uniform IA); the rail picks the
-  // surface. A Solana asset renders the Solana branch (Jupiter, device-direct https) with the
+  // surface. A Solana asset renders the Solana branch (Jupiter, through the relay proxy) with the
   // same transparency rules; everything below is the IC rail unchanged. When no Solana venue
   // serves the asset the branch itself fails closed with honest copy (never a blank form).
   if (selectedAsset != null && selectedAsset.protocol === 'solana') {
     return (
       <SolConvertMode
         identity={identity}
+        relayUrl={relayUrl}
         asset={selectedAsset}
         solana={solana ?? {sol: null, tokens: {}}}
         onBack={onBack}
@@ -802,7 +803,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // final-Solana phases. Checked before the plain planned panel: a cross-rail record always
     // carries a legPlan too, so the order matters.
     if (record.crossRail != null) {
-      return <CrossRailStatePanel record={record} secretHex={identity.secretHex} solLamports={solana?.sol ?? null} onBack={onBack} />;
+      return <CrossRailStatePanel record={record} secretHex={identity.secretHex} relayUrl={relayUrl} solLamports={solana?.sol ?? null} onBack={onBack} />;
     }
     // A PLANNED record renders its own per-leg surface — the route's leg list IS the progress UI.
     return record.legPlan != null
@@ -1625,6 +1626,8 @@ function resolveSolLegs(asset: Extract<SelectableAsset, {protocol: 'solana'}>, v
 
 type SolConvertProps = {
   identity: Identity;
+  /** The active relay — the Jupiter quote/swap dials go through it (2026-09-16). */
+  relayUrl: string;
   asset: Extract<SelectableAsset, {protocol: 'solana'}>;
   solana: {sol: string | null; tokens: Record<string, string | null>};
   onBack: () => void;
@@ -1632,7 +1635,7 @@ type SolConvertProps = {
   onSwitchAsset?: (id: AssetId) => void;
 };
 
-function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, onSwitchAsset}: SolConvertProps) {
+function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDepositAddress, onSwitchAsset}: SolConvertProps) {
   const [amountText, setAmountText] = useState('');
   const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
   const [quote, setQuote] = useState<JupiterQuote | null>(null);
@@ -1648,6 +1651,10 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const [detailsOpen, setDetailsOpen] = useState(false);
   const mountedRef = useRef(true);
   const recordIdRef = useRef<string | null>(null);
+  // Sync latch for the confirm gesture: `confirmBusy` state lags a re-render, and a duplicate
+  // press delivered inside that window would run prepare twice (two venue swap POSTs from one
+  // gesture — observed once under heavy host load, 2026-09-17). The ref closes it same-tick.
+  const confirmBusyRef = useRef(false);
 
   // --- the destination (spec 2026-09-16 §2 decision 5): every registered solana_amm venue for
   //     this mint is one out option — registry order, deduped by out mint, never ranked. The
@@ -1714,8 +1721,9 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const liveRecord = record != null && isLiveRecord(record);
   const showRecord = record != null && (liveRecord || record.step === 'stuck' || isTerminalConvertStep(record.step));
 
-  // --- the quote: device-direct per keystroke. Slippage IS a dep here (unlike IC): Jupiter's
-  // route + threshold are computed against it, so a changed chip must re-ask the venue.
+  // --- the quote: through the relay proxy per keystroke (the relay pipes the venue
+  // byte-faithfully, short-TTL-caching identical asks). Slippage IS a dep here (unlike IC):
+  // Jupiter's route + threshold are computed against it, so a changed chip must re-ask the venue.
   useEffect(() => {
     if (legs == null || venue == null || showRecord) return;
     const parsed = parseUserAmount(amountText, legs.inDecimals);
@@ -1725,7 +1733,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
     }
     let cancelled = false;
     setQuoteBusy(true);
-    fetchJupiterQuote(venue, legs.inMint, legs.outMint, parsed.raw, slippageBps)
+    fetchJupiterQuote(relayUrl, venue, legs.inMint, legs.outMint, parsed.raw, slippageBps)
       .then(res => {
         if (cancelled) return;
         if (res.ok) {
@@ -1755,7 +1763,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
     const tick = setInterval(() => {
       if (!isQuoteStale(quote)) return;
       setStaleRefreshing(true);
-      fetchJupiterQuote(venue, legs.inMint, legs.outMint, quote.inAmount, slippageBps)
+      fetchJupiterQuote(relayUrl, venue, legs.inMint, legs.outMint, quote.inAmount, slippageBps)
         .then(res => {
           if (res.ok && mountedRef.current) {
             setQuote(res.quote);
@@ -1784,12 +1792,14 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const canConfirm = legs != null && quote != null && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n;
 
   const onConfirm = async () => {
+    if (confirmBusyRef.current) return; // sync latch: a duplicate press before the re-render is a no-op
     if (legs == null || venue == null || amountRaw == null) return;
+    confirmBusyRef.current = true;
     setConfirmBusy(true); setConfirmErr(null);
     try {
       // Re-quote at the confirm gesture (the IC rule): a moved output gets a review line, never
       // a silent submit on stale digits.
-      const fresh = await fetchJupiterQuote(venue, legs.inMint, legs.outMint, amountRaw, slippageBps);
+      const fresh = await fetchJupiterQuote(relayUrl, venue, legs.inMint, legs.outMint, amountRaw, slippageBps);
       if (!fresh.ok) {
         setConfirmErr(M.convert.errors.quoteUnreachable(venueName));
         return;
@@ -1801,6 +1811,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
       }
       const rec = await prepareSolanaConvertRecord({
         secretHex: identity.secretHex,
+        relayUrl,
         quote: fresh.quote,
         inAsset: {symbol: legs.inSym, mint: legs.inMint, decimals: legs.inDecimals},
         outAsset: {symbol: legs.outSym, mint: legs.outMint, decimals: legs.outDecimals},
@@ -1811,6 +1822,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
     } catch (e) {
       setConfirmErr(e instanceof Error ? e.message : M.convert.errors.quoteUnavailable('unknown'));
     } finally {
+      confirmBusyRef.current = false;
       setConfirmBusy(false);
     }
   };
@@ -2620,9 +2632,10 @@ function plannedLegFee(record: ConvertRecord, lp: LegPlan, legCanister: string):
  *  the mint lands AND is corroborated on-chain at the ATA, and sol_ready offers the final
  *  Jupiter leg on a fresh quote. Every dead-end names where the funds sit (in-wallet ckUSDC,
  *  USDC at the user's own EVM address, or USDC(SOL) at their ATA) and the way out. */
-function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
+function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}: {
   record: ConvertRecord;
   secretHex: string;
+  relayUrl: string;
   solLamports: string | null;
   onBack: () => void;
 }) {
@@ -2690,7 +2703,7 @@ function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
     const venue = venueOfId(cross.solVenueId);
     if (venue == null) return;
     let live = true;
-    fetchJupiterQuote(venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, record.slippageBps)
+    fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, record.slippageBps)
       .then((q) => {
         if (!live || !mountedRef.current) return;
         if (q.ok) { setSolQuote(q.quote); setSolQuoteErr(null); }

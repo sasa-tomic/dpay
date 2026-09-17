@@ -710,21 +710,21 @@ describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', ()
   test('INV-1/2 (Solana): a venue tx paying from or to ANYONE but the user is refused BEFORE the signature', async () => {
     // A stranger fee payer: the tx wants someone else's key to sign — never signed by us.
     jest.mocked(fetchJupiterSwapTx).mockResolvedValue(built(venueTx({feePayer: new Uint8Array(32).fill(3), skipUserAta: true})));
-    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, relayUrl: 'http://relay', quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
     // A stranger's destination token account: proceeds would land outside the user's own ATA.
     jest.mocked(fetchJupiterSwapTx).mockResolvedValue(built(venueTx({skipUserAta: true, extraKeys: [{pubkey: new Uint8Array(32).fill(4), writable: true}]})));
-    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, relayUrl: 'http://relay', quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
     // A quote naming mints outside the registry pair: the venue may only run what it is registered for.
     jest.mocked(fetchJupiterSwapTx).mockResolvedValue(built(venueTx()));
-    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote({outputMint: EURC_MINT_ADDRESS}), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'EURC', mint: EURC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/pool/);
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, relayUrl: 'http://relay', quote: quote({outputMint: EURC_MINT_ADDRESS}), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'EURC', mint: EURC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/pool/);
     // A venueId that names no solana row: never reaches https.
-    await expect(prepareSolanaConvertRecord({secretHex: SECRET, quote: quote({venueId: 'no-such-venue'}), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
+    await expect(prepareSolanaConvertRecord({secretHex: SECRET, relayUrl: 'http://relay', quote: quote({venueId: 'no-such-venue'}), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}})).rejects.toThrow(/venue/);
     // Nothing was signed-then-abandoned along the way: no submit ever ran.
     expect(submitRawSolTx).not.toHaveBeenCalled();
   });
 
   test('the happy prepare: record is Solana-shaped (legs [], one solanaLeg, venue digits verbatim)', async () => {
-    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
+    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, relayUrl: 'http://relay', quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
     expect(rec.step).toBe('swapping');
     expect(rec.legs).toEqual([]);
     expect(rec.legPlan).toBeUndefined();
@@ -747,7 +747,7 @@ describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', ()
   });
 
   test('INV-9 (Solana): submission goes through the SOL rail seam — the relay is never in the path', async () => {
-    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
+    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, relayUrl: 'http://relay', quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
     const leg = rec.solanaLeg!;
     jest.mocked(submitRawSolTx).mockResolvedValue(leg.signature);
     jest.mocked(getSolSignatureStatus).mockResolvedValue({confirmationStatus: 'confirmed'});
@@ -770,7 +770,7 @@ describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', ()
   });
 
   test('recovery vocabulary: a node signature that is not ours parks stuck; a failed tx refunds honestly', async () => {
-    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
+    const rec = await prepareSolanaConvertRecord({secretHex: SECRET, relayUrl: 'http://relay', quote: quote(), inAsset: {symbol: 'SOL', mint: WRAPPED_SOL_MINT_ADDRESS, decimals: 9}, outAsset: {symbol: 'USDC', mint: USDC_MINT_ADDRESS, decimals: 6}});
     // A FOREIGN node signature: not our bytes — park, never guess, never re-sign.
     jest.mocked(submitRawSolTx).mockResolvedValue('SomeOtherSignature1111111111111111111111111111111');
     let next = await executeSolanaConvert(rec, {publicHex: 'ab'.repeat(32), solAddress: KP.address, onUpdate: jest.fn((_r: ConvertRecord) => undefined)}, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
