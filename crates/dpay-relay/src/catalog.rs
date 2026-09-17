@@ -137,8 +137,9 @@ pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
 /// NOT an IC-pool shape (the `Ledger` trait takes no CeFi method).
 /// `solana_amm` (2026-09-15, Jupiter —
 /// multi-venue readiness V11) is likewise NOT an IC-pool shape: its quote and swap round-trip
-/// device-direct over keyless https (never the relay's `/api/v1/swap_quote`, never an IC
-/// update), its `endpoint` is an https origin (not a principal), and its `pair_ledgers` are
+/// through the relay's Jupiter proxy since 2026-09-16 (never the relay's `/api/v1/swap_quote`,
+/// never an IC update), its `endpoint` is an https origin kept as the venue's IDENTITY and
+/// attribution (no longer a device dial target), and its `pair_ledgers` are
 /// Solana MINTS. `venue_of_endpoint` — the IC quote allowlist — stays `IcAmm`-only: a
 /// solana_amm or cefi row must never resolve as a pool there, and the fake-IC seeding skips
 /// them both.
@@ -155,11 +156,13 @@ pub(crate) enum VenueKind {
     /// is an https API base, `pair_ledgers` are RAIL-CANONIAL ids (IC principal,
     /// Solana mint), and `fixture` is None (non-ic_amm rule).
     Cefi,
-    /// A Solana on-chain aggregator the device talks to DIRECTLY over keyless https (Jupiter
-    /// today): the quote is fetched device-side, the returned unsigned transaction is verified
-    /// (fee payer = the user) and signed on-device, then submitted through the same Solana
+    /// A Solana on-chain aggregator (Jupiter today): since 2026-09-16 the quote and the
+    /// unsigned-transaction build are proxied by the relay (`crate::jupiter`, byte-faithful,
+    /// short-TTL quote cache); the returned unsigned transaction is still verified (fee
+    /// payer = the user) and signed on-device, then submitted through the same Solana
     /// JSON-RPC proxy path SOL payments use. `fixture` is None for this kind — the offline
-    /// stand-in lives app-side (e2e window.fetch stub), not in the fake-IC gateway.
+    /// stand-in is the relay's own test stub upstream (DPAY_JUPITER_API_BASE), not in the
+    /// fake-IC gateway.
     #[allow(dead_code)]
     SolanaAmm,
 }
@@ -419,17 +422,19 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
         },
         VenueEntry {
             // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter,
-            // the on-chain aggregator. Everything the IC rows do through the relay happens
-            // device-direct here — the quote is a keyless https GET the phone issues itself, and
-            // the swap is Jupiter's serialized UNSIGNED transaction, verified (fee payer = the
-            // user) and signed on-device, then submitted through the same Solana JSON-RPC proxy
-            // path SOL payments use. The relay's role for this row is REGISTRY ONLY: it serves
-            // the row in `/api/v1/venues` (kind solana_amm) and never quotes or executes it.
-            // `endpoint` is therefore an https ORIGIN, not a canister principal, and
-            // `pair_ledgers` are Solana MINTS (wrapped SOL + USDC — identifier semantics
-            // documented in dfx/catalog_truth.json venues[] _doc). `fixture` is None: fixtures
-            // are the ic_amm offline-fake-IC seeding and are ic_amm-only by rule; the offline
-            // Jupiter stand-in lives app-side (e2e window.fetch stub on this origin).
+            // the on-chain aggregator. Since 2026-09-16 the quote and the swap-tx build are
+            // PROXIED by the relay (`crate::jupiter`: a byte-faithful pipe with a short-TTL
+            // canonical-params cache on quotes, never caching the swap POST), while the swap is
+            // still Jupiter's serialized UNSIGNED transaction, verified (fee payer = the user)
+            // and signed on-device, then submitted through the same Solana JSON-RPC proxy
+            // path SOL payments use. The relay's role beyond the proxy is REGISTRY ONLY: it
+            // serves the row in `/api/v1/venues` (kind solana_amm). `endpoint` is an https
+            // ORIGIN kept as the venue's identity/attribution (it renders in the pool line),
+            // not a dial target since the proxy; `pair_ledgers` are Solana MINTS (wrapped
+            // SOL + USDC — identifier semantics documented in dfx/catalog_truth.json
+            // venues[] _doc). `fixture` is None: fixtures are the ic_amm offline-fake-IC
+            // seeding and are ic_amm-only by rule; the offline Jupiter stand-in is the
+            // relay's own test stub upstream (DPAY_JUPITER_API_BASE).
             venue_id: "jupiter",
             display_name: "Jupiter",
             kind: VenueKind::SolanaAmm,
@@ -443,8 +448,8 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
         VenueEntry {
             // The SECOND Solana venue (registered 2026-09-16, coverage expansion §1): the same
             // Jupiter aggregator family, on the rail-local pair SOL ↔ EURC. Everything the
-            // jupiter row comment above says holds verbatim (registry-only relay role, https
-            // origin endpoint, mints in base58, device-direct keyless quote, fixture None).
+            // jupiter row comment above says holds verbatim (relay-proxied dials, https
+            // origin endpoint as identity, mints in base58, fixture None).
             // Measured live 2026-09-16: SOL→EURC healthy both directions (~110 ms,
             // platformFee null); the USDC↔EURC pair probed and SKIPPED — a thin ~13% spread
             // market, revisit on depth.
@@ -1981,7 +1986,8 @@ mod venue_truth_tests {
                 );
                 assert!(
                     v.endpoint.starts_with("https://"),
-                    "{}: a solana_amm endpoint is an https origin (device-direct, keyless)",
+                    "{}: a solana_amm endpoint is an https origin (venue identity — dial \
+                     targets are the relay proxy)",
                     v.venue_id
                 );
             }
