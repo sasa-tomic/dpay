@@ -632,7 +632,6 @@ export type ReceiveMessages = {
      *  (this is an online-payer standard). Founder wording, 2026-09-16. */
     tillCode: string;
 
-    chargeHint: string;
     ringUpHint: string;
     /** Why the typed total cannot be a till charge. Three causes, three different corrections. */
     badAmount: (reason: 'too-precise' | 'not-a-number' | 'too-large') => string;
@@ -785,7 +784,6 @@ export const receiveEn: ReceiveMessages = {
   till: {
     tillCode: 'OpenCryptoPay (OCP), Binance Pay, MoonPay app [Payer must be Online]',
 
-    chargeHint: 'Priced in francs, paid in VCHF — one franc, one VCHF, no conversion.',
     ringUpHint: 'Open this charge on your till and show the customer a code they can pay',
     badAmount: reason =>
       reason === 'too-precise'

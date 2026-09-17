@@ -297,7 +297,6 @@ export const receiveDe: ReceiveMessages = {
   till: {
     tillCode: 'OpenCryptoPay (OCP), Binance Pay, MoonPay App [Zahler muss online sein]',
 
-    chargeHint: 'In Franken ausgezeichnet, in VCHF bezahlt — ein Franken, ein VCHF, kein Umtausch.',
     ringUpHint: 'Diesen Betrag auf deiner Kasse buchen und der Kundschaft einen bezahlbaren Code zeigen',
     badAmount: reason =>
       reason === 'too-precise'

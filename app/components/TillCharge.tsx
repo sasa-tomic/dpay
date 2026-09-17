@@ -579,13 +579,11 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
   // above this are the PARENT's, shared with the dpay-code form (one box, both modes — founder
   // 2026-09-14); this component takes the typed price and the typed note from there and parses the
   // price with the TILL's own rule (`chfCents` — two decimals, a third is refused rather than
-  // rounded, because a rounded price is a misprice). The franc/VCHF equivalence is said out loud
-  // by the hint, not left as an unstated conversion. No submit-on-Enter from the shared rows: a
+  // rounded, because a rounded price is a misprice). No submit-on-Enter from the shared rows: a
   // ring-up is signed, so the button stays the only thing that does it.
   const opening = phase.k === 'opening';
   return (
     <View style={S.centerTop}>
-      <Text style={S.dim2}>{M.receive.till.chargeHint}</Text>
       {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
       {opening ? <ActivityIndicator color={C.brandText} /> : null}
       <Pressable
