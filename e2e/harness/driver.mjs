@@ -64,10 +64,14 @@ const FREEZE_CSS = `
  *
  *  Re-read on EVERY call: `runOne` republishes the env per test start with the LIVE 1-min load
  *  folded in (a test starting mid-spike gets the spike's factor), so a value frozen at the first
- *  read would leave every later test's inner waits at the run-start scale — the exact class that
- *  killed 176 mid-spike (12s wait died at ×1.30 while the box was at ×2+). Number() on a short
- *  string is nothing next to a CDP roundtrip. */
-function scaled(ms) {
+ * read would leave every later test's inner waits at the run-start scale — the exact class that
+ * killed 176 mid-spike (12s wait died at ×1.30 while the box was at ×2+). Number() on a short
+ * string is nothing next to a CDP roundtrip. Exported for the harness's own raw-deadline loops
+ * (lib.mjs skip-practice) which sit OUTSIDE the driver's method-level waits and would otherwise
+ * run unscaled — the 2026-09-17 verify RED on 164 (15s practice deadline at scale ×1.42, green
+ * everywhere else) is that hole, punched through.
+ */
+export function scaled(ms) {
   const raw = process.env.DPAY_E2E_TIMEOUT_SCALE;
   if (raw === undefined) return Math.round(ms);
   const n = Number(raw);

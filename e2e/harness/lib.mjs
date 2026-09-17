@@ -13,7 +13,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { Driver } from './driver.mjs';
+import { Driver, scaled } from './driver.mjs';
 import { startRelay } from './relay.mjs';
 import { buildWeb, serveWeb, pickFreePort } from './web.mjs';
 import { generateKeypair } from './wire.mjs';
@@ -441,10 +441,15 @@ export async function skipWalkthroughIfPresent(driver, opts = {}) {
  * practice mounts, so poll for one of practice's two exits OR the surface that comes after it —
  * one of them appears on every path (the restore path skips practice entirely).
  *
- * There are TWO exits and which one is on screen is a real fact about the run, not a race: the
- * request card carries `btn-practice-skip`, and every outcome and every fail-closed branch carries
- * `btn-practice-continue` instead. A flow whose relay has no faucet (37) lands on the second, so
- * this helper takes whichever it finds rather than assuming the happy one.
+ * There are TWO settled exits and which one is on screen is a real fact about the run, not a race:
+ * the request card carries `btn-practice-skip`, and every outcome and every fail-closed branch
+ * carries `btn-practice-continue` instead. A flow whose relay has no faucet (37) lands on the
+ * second, so this helper takes whichever it finds rather than assuming the happy one. A THIRD
+ * surface is transient: the boot-time connectivity probe can lose its race and render the
+ * `practice-offline` card (retried via its `practice-offline-check` re-probe — 2026-09-17, a
+ * load-spike RED on 164 whose failover walk needed one more beat than the probe allowed). The
+ * deadline is host-load scaled (`scaled`), so a merely-slow probe cannot starve the helper into a
+ * false RED.
  *
  * A no-op when absent; onboardWallet calls this after the backup ack, and flows that tap
  * btn-mnemonic-continue manually call it explicitly.
@@ -457,12 +462,13 @@ export async function skipPracticeIfPresent(driver, opts = {}) {
   // question that stands in front of it on a first run (2026-09-04). Waiting only for `balance`
   // made every create-path flow fail here with the chooser plainly on screen.
   const done = async () => (await driver.isPresent(WALLET_READY)) || (await driver.isPresent('btn-home-currency-continue'));
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + scaled(timeoutMs);
   let exit = null;
   while (Date.now() < deadline) {
     if (await done()) return;
     if (await driver.isPresent('btn-practice-skip')) { exit = 'btn-practice-skip'; break; }
     if (await driver.isPresent('btn-practice-continue')) { exit = 'btn-practice-continue'; break; }
+    if (await driver.isPresent('practice-offline-check')) { exit = 'practice-offline-check'; break; }
     await new Promise(r => setTimeout(r, 100));
   }
   if (exit === null) return; // neither surface — the documented no-op (a restore path has neither)
@@ -477,6 +483,7 @@ export async function skipPracticeIfPresent(driver, opts = {}) {
   while (Date.now() < deadline) {
     const now = (await driver.isPresent('btn-practice-skip')) ? 'btn-practice-skip'
       : (await driver.isPresent('btn-practice-continue')) ? 'btn-practice-continue'
+      : (await driver.isPresent('practice-offline-check')) ? 'practice-offline-check'
       : null;
     if (now !== null) {
       try { await driver.click(now, {timeoutMs: 2_000}); }
