@@ -107,6 +107,18 @@ Notes:
   rail — registering it (new `kind` value) is what un-gates Convert for
   `protocol === 'solana'`. It does **not** give ICP↔SOL by itself; in Route C it is the
   final leg.
+  **Update 2026-09-16 (founder ask: "get live quotes from them … possibly through our
+  relay (for caching etc)")**: the V11 call path was device-direct with the relay registry-
+  only; it is now RELAY-PROXIED — `crates/dpay-relay/src/jupiter.rs` pipes
+  `GET /api/v1/jupiter/quote` (short-TTL cache keyed on canonical sorted query params,
+  byte-faithful body) and `POST /api/v1/jupiter/swap` (never cached — the device posts
+  Jupiter's own quoteResponse back and must receive the swapTransaction unmodified) to
+  `lite-api.jup.ag`. Same R2 marker contract as the Solana RPC proxy: upstream statuses
+  verbatim, transport death → 504 `jupiter-upstream-unreachable`; keyless, so no 503
+  state and the registry row's `endpoint` (`https://lite-api.jup.ag`) stays as the venue's
+  identity/attribution, no longer a dial target. Operator override semantics follow R2.
+  The signing boundary is unchanged: the venue returns an UNSIGNED transaction, verified
+  (fee payer = the user) and signed on-device.
 - **Chainflip**: BTC/ETH/SOL/POL — **no ICP**.
 
 ### KongSwap — discontinued (founder-confirmed), reject
