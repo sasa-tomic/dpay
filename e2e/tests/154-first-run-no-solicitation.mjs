@@ -128,8 +128,11 @@ export async function run() {
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[154-first-run-no-solicitation] GREEN in ${elapsed}s`);
   } finally {
-    await noFaucet.stop();
+    // env.stop() first (flow-38 convention): closing the page quiesces the app's balance/history
+    // polls — a poll that fired after noFaucet.stop() would surface as a requestfailed diagnostic
+    // at driver.close() and RED an otherwise-green flow under load.
     await env.stop();
+    await noFaucet.stop();
   }
 }
 

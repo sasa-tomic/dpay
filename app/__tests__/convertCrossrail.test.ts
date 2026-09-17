@@ -455,21 +455,22 @@ describe('prepareCrossRailSolLeg + executeCrossRailSolSwap — the final Jupiter
 
   test('sol_ready signs the final leg against a FRESH quote, at the frozen Solana address', async () => {
     const rec = await solReadyRecord();
-    const out = await prepareCrossRailSolLeg(SECRET, rec);
+    const out = await prepareCrossRailSolLeg(SECRET, rec, 'http://relay');
     expect(out.step).toBe('swapping');
     expect(out.legPlan![6].state).toBe('sent');
     expect(out.solanaLeg).toBeDefined();
     expect(out.crossRail!.solExpectedLamports).toBe('1025000000');
     // The quote was for the VERIFIED mint amount at the record's own slippage.
     const q = jest.mocked(fetchJupiterQuote).mock.calls[0]!;
-    expect(q[1]).toBe(USDC_MINT_ADDRESS);
-    expect(q[2]).toBe(WRAPPED_SOL_MINT_ADDRESS);
-    expect(q[3]).toBe('187700000');
-    expect(q[4]).toBe(100);
+    expect(q[0]).toBe('http://relay'); // the quote dials the wallet's relay
+    expect(q[2]).toBe(USDC_MINT_ADDRESS);
+    expect(q[3]).toBe(WRAPPED_SOL_MINT_ADDRESS);
+    expect(q[4]).toBe('187700000');
+    expect(q[5]).toBe(100);
   });
 
   test('happy path: submit + confirm → done at the user\'s Solana address with realized lamports', async () => {
-    const ready = await prepareCrossRailSolLeg(SECRET, await solReadyRecord());
+    const ready = await prepareCrossRailSolLeg(SECRET, await solReadyRecord(), 'http://relay');
     const sig = ready.solanaLeg!.signature;
     jest.mocked(submitRawSolTx).mockResolvedValue(sig);
     jest.mocked(getSolSignatureStatus).mockResolvedValue({err: null, confirmationStatus: 'confirmed'} as never);
@@ -484,7 +485,7 @@ describe('prepareCrossRailSolLeg + executeCrossRailSolSwap — the final Jupiter
   });
 
   test('DEAD END — Jupiter refuses: USDC stays safe at the ATA (the record keeps naming it)', async () => {
-    const ready = await prepareCrossRailSolLeg(SECRET, await solReadyRecord());
+    const ready = await prepareCrossRailSolLeg(SECRET, await solReadyRecord(), 'http://relay');
     jest.mocked(submitRawSolTx).mockResolvedValue(ready.solanaLeg!.signature);
     jest.mocked(getSolSignatureStatus).mockResolvedValue({err: {InstructionFailed: []}, confirmationStatus: null} as never);
     const out = await executeCrossRailSolSwap(ready, deps, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
@@ -494,7 +495,7 @@ describe('prepareCrossRailSolLeg + executeCrossRailSolSwap — the final Jupiter
   });
 
   test('DEAD END — blockhash expired: failed_refunded/unknown, never stuck-forever', async () => {
-    const ready = await prepareCrossRailSolLeg(SECRET, await solReadyRecord());
+    const ready = await prepareCrossRailSolLeg(SECRET, await solReadyRecord(), 'http://relay');
     jest.mocked(submitRawSolTx).mockResolvedValue(ready.solanaLeg!.signature);
     jest.mocked(getSolSignatureStatus).mockResolvedValue(null);
     jest.mocked(getSolBlockHeight).mockResolvedValue(300_000_001);

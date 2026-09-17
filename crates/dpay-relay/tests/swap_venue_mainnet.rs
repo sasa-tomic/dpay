@@ -70,14 +70,30 @@ const CATALOG_TRUTH: &str = include_str!("../../../dfx/catalog_truth.json");
 /// 2^96, the fixed-point scale of the pool's `sqrtPriceX96`.
 const Q96: f64 = 79_228_162_514_264_337_593_543_950_336.0;
 
-/// The t0-side probe for an 8/8-decimal pair, in raw units (1 whole token0). The VCHF/ICP pair
-/// keeps exactly this historical probe; mixed-decimal pairs (ICP↔ckUSDC 8/6, ICP↔ckETH 8/18)
-/// probe `PROBE_AMOUNT_MIXED` on the t0 side and a price-sized t0-equivalent on the t1 side —
-/// see `probe_real_venue`, which sizes per venue from the truth file's `decimals`.
-const PROBE_AMOUNT_8_8: u64 = 100_000_000;
-/// ~2 ICP worth of raw (the task-sized probe for the pair-scoped ICP pools — large enough that
-/// a quote is never dust, small enough to be price-impact-nothing on these depths).
-const PROBE_AMOUNT_MIXED: u64 = 200_000_000;
+/// Per-SIDE probe sizes in raw units, keyed by the truth file's ledger names (the same walk
+/// `ledger_decimals` does). Sized to "non-dust, price-impact-noise on the registered pools":
+/// 2 ICP / 1 VCHF / 1 USDC / 0.001 ckBTC / 0.005 ckETH. A token's UNIT VALUE is not encoded
+/// in its decimals — measured 2026-09-17, the historical 1-whole-token probe on the ckBTC side
+/// of `xmiu5-…` (ICP↔ckBTC, 50,980-ICP pool side) was a ~$90k whale trade and landed ratio
+/// 0.872 against the pool's own price: 12.8% of honest CLMM price impact, NOT the
+/// inverted-direction defect this probe exists for (an inversion misses by the square of the
+/// price — the 2026-09-07 build was off 5.9x — and `zero_for_one` asserted correct here). A
+/// NEW ledger FAILS here until it is sized, exactly like `ledger_decimals`.
+fn ledger_probe_raw(truth: &Value, ledger: &str) -> u64 {
+    let (principals, _) = (&truth["principals"], &truth["decimals"]);
+    for (ledger_key, raw) in [
+        ("icp_ledger", 200_000_000u64),
+        ("vchf_ledger", 100_000_000),
+        ("ckusdc_ledger", 1_000_000),
+        ("cketh_ledger", 5_000_000_000_000_000_000),
+        ("ckbtc_ledger", 100_000),
+    ] {
+        if principals[ledger_key].as_str() == Some(ledger) {
+            return raw;
+        }
+    }
+    panic!("no truth-file probe size for ledger {ledger} — extend ledger_probe_raw for the new pair");
+}
 
 /// The decimals a traded ledger carries, from the truth file's own `decimals` map (keyed by the
 /// ledger's `principals` name — ckETH's 18 decimals live under `eth`). Panics on an unknown
@@ -339,9 +355,10 @@ fn probe_real_venue(venue: &Value) {
         // decimals are. Where decimals DO bite is probe SIZING: a t1 side with more decimals
         // than t0 needs its own raw amount or the reverse direction quotes dust (100_000_000
         // raw ckETH = 1e-10 ckETH), and fewer decimals (ckUSDC, 6) makes 1e8 raw = 100 USDC.
-        // So: an 8/8 pair keeps its historical symmetric raw probe (the VCHF pair's behavior,
-        // byte-for-byte); a mixed pair probes ~2 whole t0 units forward and the price-equivalent
-        // t1 amount in reverse — each leg lands on the same economic size.
+        // So every side is sized from `ledger_probe_raw` (unit value is not encoded in
+        // decimals — see the 0.872 whole-ckBTC measurement there), and a mixed pair
+        // price-sizes its t1 leg from the t0 amount, so each leg lands on the same economic
+        // size.
         let truth_all: Value = serde_json::from_str(CATALOG_TRUTH).expect("catalog_truth is JSON");
         let d0 = ledger_decimals(&truth_all, want0);
         let d1 = ledger_decimals(&truth_all, want1);
@@ -354,13 +371,14 @@ fn probe_real_venue(venue: &Value) {
                 .await
                 .expect("AgentLedger connect to mainnet"),
         ));
-        let (amt_t0, amt_t1) = if d0 == d1 {
-            (PROBE_AMOUNT_8_8, PROBE_AMOUNT_8_8)
+        let amt_t0 = ledger_probe_raw(&truth_all, want0);
+        let amt_t1 = if d0 == d1 {
+            ledger_probe_raw(&truth_all, want1)
         } else {
-            // The t0-equivalent in t1's raw units; clamped into u64 (a hostile price never
-            // panics the probe — the ratio assert below does the real judging).
-            let t1_equiv = (PROBE_AMOUNT_MIXED as f64 * price_t1_per_t0).round();
-            (PROBE_AMOUNT_MIXED, t1_equiv.clamp(1.0, 9.0e18) as u64)
+            // The t0-sized equivalent in t1's raw units; clamped into u64 (a hostile price
+            // never panics the probe — the ratio assert below does the real judging).
+            let t1_equiv = (amt_t0 as f64 * price_t1_per_t0).round();
+            t1_equiv.clamp(1.0, 9.0e18) as u64
         };
         // Each direction, quoted by the real handler, against the venue's own price. A quote is
         // the price MINUS the fee tier and minus price impact, so it must land just under

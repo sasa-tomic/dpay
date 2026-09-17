@@ -19,22 +19,18 @@ export const convertDe: ConvertMessages = {
   amountLabel: sym => `Betrag (${sym})`,
   balanceLine: balance => `Guthaben: ${balance}`,
   receiveHeadline: 'Du erhältst',
-  counterparty: venue =>
-    `Ausgeführt vom ${venue}-Pool — ein autonomer On-Chain-Vertrag, kein lizenzierter Anbieter und nicht dpay.`,
+  counterparty: venue => `Ausgeführt vom ${venue}-Pool.`,
   counterpartySigns: 'Dein Handy signiert; der Pool zieht genau den freigegebenen Betrag ab.',
   quoteSource: (at, venue) => `Kurs von ${venue}, abgerufen ${at}`,
   rateLabel: (inSym, outSym) => `Kurs für diesen Umtausch (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Pool-Gebühr: ${tier} (${venue}-Gebührenstufe)`,
   inputFeeLine: fee => `Eingangsgebühr: ${fee}`,
   outputFeeLine: fee => `Ausgangsgebühr: ${fee}`,
-  dpayFeeLine: 'dpay verlangt nichts und bekommt nichts dafür.',
   disclosures: {
     byKey: {
       // disclosure_key 'icpswap' (der Key der Registry für die ICPSwap-Pools): der
-      // venue-spezifische Fakt ist, WO der Tausch läuft — der eigene Pool-Vertrag der Venue,
-      // vom Nutzer signiert, dpay nicht Partei.
-      icpswap: venue =>
-        `Der Tausch läuft auf dem eigenen Pool-Vertrag von ${venue} ab. Jeder Aufruf wird von dir signiert und direkt übermittelt — ${venue} führt den Tausch aus, und dpay ist nicht daran beteiligt.`,
+      // venue-spezifische Fakt ist, WO der Tausch läuft — der eigene Pool-Vertrag der Venue.
+      icpswap: venue => `Der Tausch läuft auf dem eigenen Pool-Vertrag von ${venue} ab.`,
       // disclosure_key 'jupiter' (der Key der Registry für die Solana-Venue-Zeile): die
       // venue-spezifischen Fakten sind, WAS Jupiter ist — ein autonomer On-Chain-Aggregator —
       // und dass der Kurs der eigene ist, unverändert angezeigt, während dpay ganz außerhalb
@@ -49,35 +45,31 @@ export const convertDe: ConvertMessages = {
       sideshift: venue =>
         `${venue} ist ein automatisierter Tauschdienst — kein lizenzierter Anbieter und keine Bank. Er hält deine Mittel während des Tauschs und zahlt dann an deine eigene Adresse aus; seine Bedingungen, einschließlich etwaiger Identitätsprüfungen nach seiner Policy, sind unter sideshift.ai/terms veröffentlicht. Diese Wallet zeigt dir ${venue}s eigenen Kurs und die Einzahlungs-Adresse, und von dpay wird nichts signiert. dpay ist keine Partei des Tauschs und wird nicht bezahlt.`,
     },
-    generic: venue =>
-      `Diese Umwandlung wird von ${venue} ausgeführt. Jeder Aufruf wird von dir signiert und direkt übermittelt — dpay ist nicht daran beteiligt.`,
+    generic: venue => `Diese Umwandlung wird von ${venue} ausgeführt.`,
   },
   slippageLabel: 'Slippage',
   minReceiveLine: (amount, pct) => `Mindestens erhältst du: ${amount} (${pct} Slippage)`,
   refusalLine: sym =>
     `Wenn der Pool-Preis bei der Bestätigung über dein Minimum hinaus wandert, scheitert der Tausch: Dein ${sym} bleibt in deiner Wallet, und die Freigabe läuft ungenutzt ab.`,
-  netEndStateLine: amount => `Endergebnis: ${amount} erwartet in deiner Wallet, nach allen Gebühren.`,
+  detailsLabel: 'Details',
   confirmButton: 'Neuen Kurs holen und bestätigen',
   staleRefreshing: 'Kurs veraltet — wird neu geladen…',
   quoteChanged: (oldAmt, newAmt) => `Kurs geändert: ${oldAmt} → ${newAmt}. Prüfe und bestätige erneut.`,
   venueChooserLabel: 'Handelsplatz',
   venueNoneSelected: 'Wähle einen Handelsplatz, um seinen vollständigen Kurs zu sehen und fortzufahren.',
-  venueRowQuote: amount => `Kurs: ${amount}`,
 
   sol: {
     heading: (inSym, outSym) => `${inSym} in ${outSym} umwandeln (Solana)`,
     unavailableTitle: sym => `${sym} kann noch nicht umgewandelt werden`,
     unavailableBody: (sym, venue) =>
       `Umwandlungen für Solana-Assets laufen über eine registrierte Solana-Venue (heute ${venue}). Keine Venue bedient derzeit ${sym} — nichts wurde angeboten, nichts hat sich bewegt.`,
-    counterparty: venue =>
-      `Ausgeführt von ${venue} — ein autonomer On-Chain-Aggregator auf Solana, kein lizenzierter Anbieter und nicht dpay.`,
+    counterparty: venue => `Ausgeführt von ${venue}.`,
     counterpartySigns: 'Dein Telefon signiert die Transaktion, die die Venue gebaut hat — niemand sonst signiert irgendetwas.',
     priceImpactLine: (pct, venue) => `Preisauswirkung: ${pct} (eigene Angabe von ${venue})`,
     platformFeeLine: (pct, venue) => `${venue}-Integratorgebühr: ${pct}`,
     solFeeLine: fee => `Solana-Netzwerkgebühr: ${fee} (an das Netzwerk gezahlt, nicht an die Venue, nicht an dpay)`,
     refusalLine: sym =>
       `Wenn der Preis über das Minimum hinaus wandert, scheitert die Transaktion on-chain: Dein ${sym} bleibt in deiner Wallet, und nichts anderes wurde signiert.`,
-    quoteFeesNote: 'Die Routen-Gebühren stecken bereits im angebotenen Ausgabebetrag — oben kommt nichts hinzu.',
     pendingBody:
       'Die Swap-Transaktion liegt im Solana-Netzwerk. Dieser Bildschirm beobachtet die Chain selbst und löst sich von allein auf — kein Neuladen, kein erneuter Versuch nötig.',
     failedBody: (sym, venue, detail) =>
@@ -103,15 +95,15 @@ export const convertDe: ConvertMessages = {
   doneTx: tx => `Auszahlungs-Eintrag: ${tx}`,
   pendingTitle: 'Auszahlung ausstehend',
   pendingBody: (sym, pool, at) =>
-    `Der Pool hat den Tausch angenommen, aber die ${sym}-Auszahlung ist noch nicht in deiner Wallet angekommen. Dieser Bildschirm bleibt am Ball — du musst gerade nichts tun. dpay kann die Auszahlung nicht rückgängig machen und nicht beschleunigen. Falls sie nie ankommt, nimm diese Angaben zum Support: Pool ${pool}, Tausch übermittelt um ${at}.`,
+    `Der Pool hat den Tausch angenommen, aber die ${sym}-Auszahlung ist noch nicht in deiner Wallet angekommen. Dieser Bildschirm bleibt am Ball — du musst gerade nichts tun. Falls sie nie ankommt, nimm diese Angaben zum Support: Pool ${pool}, Tausch übermittelt um ${at}.`,
   stillWatching: 'Weitere Beobachtung der Auszahlung…',
   failedTitle: 'Tausch nicht ausgeführt',
   failedApproveBody: sym =>
     `Das ${sym}-Ledger hat die Freigabe verweigert, deshalb hat sich nichts bewegt — du besitzt weiterhin jede Einheit deines ${sym}. Es wurde keine Freigabe erstellt; nichts muss erstattet oder rückgängig gemacht werden.`,
   failedSwapBody: (reason, sym, venue) =>
-    `Der ${venue}-Pool hat den Tausch abgelehnt (${reason}). Dein ${sym} hat deine Wallet nie verlassen. dpay kann ihn weder rückgängig machen noch für dich wiederholen; weiter ist nichts nötig.`,
+    `Der ${venue}-Pool hat den Tausch abgelehnt (${reason}). Dein ${sym} hat deine Wallet nie verlassen — weiter ist nichts nötig.`,
   refundedBody: sym =>
-    `Der Tausch ist gescheitert und der Pool hat dir dein ${sym} zurückgegeben — dein Guthaben ist wieder vollständig. dpay kann hier nichts rückgängig machen.`,
+    `Der Tausch ist gescheitert und der Pool hat dir dein ${sym} zurückgegeben — dein Guthaben ist wieder vollständig.`,
   stuckTitle: 'Unbekannter Ausgang',
   stuckBody:
     'Der Tausch wurde übermittelt, aber die Antwort des Pools kam nicht an. Starte keinen zweiten Tausch mit denselben Mitteln. Wenn die Auszahlung eintrifft, springt dieser Bildschirm von selbst auf „Getauscht".',
@@ -127,13 +119,13 @@ export const convertDe: ConvertMessages = {
     `${venue} hat diese Order ausgestellt und wartet auf die ${sym}-Einzahlung. Der Swap läuft, sobald der Anbieter die Einzahlung sieht; dpay beobachtet weiterhin seinen Status. Kommt rechtzeitig keine Einzahlung, läuft das Angebot ab und es bewegt sich nichts.`,
   providerProcessingTitle: 'Wird beim Anbieter verarbeitet',
   providerProcessingBody: (sym, venue) =>
-    `${venue} hält die Einzahlung und führt die Order aus. Dein ${sym} kommt an, sobald der Anbieter sie abschließt — dpay kann das weder rückgängig machen noch beschleunigen und beobachtet weiter, bis es sich auflöst.`,
+    `${venue} hält die Einzahlung und führt die Order aus. Dein ${sym} kommt an, sobald der Anbieter sie abschließt — dpay beobachtet weiter, bis es sich auflöst.`,
   quoteExpiredTitle: 'Angebot abgelaufen',
   quoteExpiredBody: (sym, venue) =>
     `Das Angebot ist abgelaufen, bevor ein Wert bewegt wurde: ${venue} hat die Einzahlung nie erhalten, also wurde nichts getauscht und nichts muss rückgängig gemacht werden. Dein ${sym} ist geblieben, wo es war — starte eine neue Umwandlung, wenn du weiterhin eine möchtest.`,
   providerRefundedTitle: 'Vom Anbieter erstattet',
   providerRefundedBody: (sym, venue) =>
-    `${venue} hat diese Order storniert und die Einzahlung zurückgezahlt. Beobachte, wann dein ${sym} zurückkommt — dpay kann die Erstattung des Anbieters weder rückgängig machen noch beschleunigen.`,
+    `${venue} hat diese Order storniert und die Einzahlung zurückgezahlt. Beobachte, wann dein ${sym} zurückkommt.`,
   stuckWatching: 'dpay beobachtet dies im Hintergrund. Wenn die Auszahlung oder Erstattung ankommt, springt dieser Bildschirm von selbst um.',
   stuckAcknowledge: 'Verstanden — nicht mehr beobachten',
   stuckAcknowledged: 'Du hast dies zur Kenntnis genommen und die Hintergrundbeobachtung ist gestoppt. Wenn sich später Mittel bewegen, landen sie weiterhin an der Adresse dieser Wallet.',
@@ -142,7 +134,6 @@ export const convertDe: ConvertMessages = {
     destLabel: 'Ziel',
     destDirect: sym => `${sym} — in dieser Wallet (direkter Tausch)`,
     destRoute: (sym, network) => `${sym} auf ${network} — Tausch-und-Auszahlung-Route`,
-    routeNote: 'Für dieses Paar ist heute genau eine Route registriert — sie wird hier gezeigt, nie für dich gewählt.',
     destAddressLabel: 'Deine eigene Adresse im Zielnetzwerk',
     destAddressInvalid: 'Keine gültige Zieladresse — erwartet: 0x gefolgt von 40 Hex-Zeichen.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} auf ${network}`,
@@ -232,7 +223,7 @@ export const convertDe: ConvertMessages = {
     viewCircle: 'Circles Status-Seite',
     stillCrossing: 'Die Attestierung ist noch nicht fertig. Das bleibt offen — es ist nicht fehlgeschlagen. Auf dem schnellen Pfad sind es Sekunden bis Minuten; bei Stau auf Ethereum länger.',
     solReadyTitle: 'USDC sind auf Solana angekommen',
-    solReadyBody: (credit, ata) => `${credit} USDC liegen bei ${ata}, on-chain verifiziert. Schließe die Route ab — oder lass die USDC dort, sie sind in beiden Fällen deine.`,
+    solReadyBody: (credit, ata) => `${credit} liegen bei ${ata}, on-chain verifiziert. Schließe die Route ab — oder lass die USDC dort, sie sind in beiden Fällen deine.`,
     solQuoteLabel: venue => `${venue}-Kurs (frisch)`,
     solMinLine: min => `Mindestens ${min} SOL an deiner Adresse`,
     solConfirmButton: 'Zu SOL tauschen',

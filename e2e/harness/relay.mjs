@@ -247,6 +247,11 @@ async function spawnOnce(opts = {}) {
     DPAY_SIDESHIFT_SECRET: 'e2e-stub-partner-secret',
     DPAY_SIDESHIFT_AFFILIATE_ID: 'e2e-stub-affiliate-id',
     DPAY_SIDESHIFT_API_BASE: `http://127.0.0.1:${port}/api/v1/test/sideshift-upstream`,
+    // Flow 185/186/189 (2026-09-16): the Jupiter proxy's upstream — the relay's own
+    // test-helpers stub on this same server (keyless venue, so no credential vars). Same
+    // deliberate-per-spawn rule as the two blocks above: named HERE so a shell-exported
+    // DPAY_JUPITER_API_BASE can never leak a real base into the harness relay.
+    DPAY_JUPITER_API_BASE: `http://127.0.0.1:${port}/api/v1/test/jupiter-upstream`,
     // Clamp noisy logs (the binary's banner is enough).
     RUST_LOG: process.env.RUST_LOG ?? 'warn',
   };

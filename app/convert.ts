@@ -2108,7 +2108,9 @@ export async function executeConvert(
 
 export type SolanaConvertPrepareArgs = {
   secretHex: string;
-  quote: JupiterQuote; // the device-direct verbatim read (services/jupiter)
+  /** The active relay — the swap-tx build dials it (services/jupiter, 2026-09-16). */
+  relayUrl: string;
+  quote: JupiterQuote; // the verbatim read piped through the relay (services/jupiter)
   inAsset: {symbol: string; mint: string; decimals: number}; // mint: WRAPPED form for native SOL
   outAsset: {symbol: string; mint: string; decimals: number};
 };
@@ -2121,7 +2123,7 @@ export type SolanaConvertPrepareArgs = {
  *  the user's OWN ATA for that mint. Any violation fails closed with the IC prepare's own
  *  error vocabulary; nothing is signed, no record is written. */
 export async function prepareSolanaConvertRecord(args: SolanaConvertPrepareArgs): Promise<ConvertRecord> {
-  const {secretHex, quote, inAsset, outAsset} = args;
+  const {secretHex, relayUrl, quote, inAsset, outAsset} = args;
   // Red line 1: the venue row, from the registry — a stored/roaming venueId that names no row
   // (or a non-Solana row) never reaches https.
   const venue = venueOfId(quote.venueId);
@@ -2140,7 +2142,7 @@ export async function prepareSolanaConvertRecord(args: SolanaConvertPrepareArgs)
   }
   // Who the user is on this rail: the SOL key derived from the same device secret (SLIP-10).
   const kp = deriveSolanaKeypair(secretHex);
-  const built = await fetchJupiterSwapTx(venue, quote, kp.address);
+  const built = await fetchJupiterSwapTx(relayUrl, quote, kp.address);
   if (!built.ok) {
     if (built.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
     throw new Error(M.convert.errors.quoteUnavailable(built.code));
@@ -2466,7 +2468,7 @@ export async function executeCrossRailConvert(
  *  decodable, fee-payer IS the user, and the native-SOL proceeds land on the fee payer
  *  (no ATA needed); the message fee is quoted honestly; the device signs. The input is
  *  the VERIFIED mint credit — never an estimate. */
-export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertRecord): Promise<ConvertRecord> {
+export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertRecord, relayUrl: string): Promise<ConvertRecord> {
   const cross = rec.crossRail;
   if (cross == null || rec.step !== 'sol_ready' || cross.kind !== 'cctp_sol') {
     throw new Error(M.convert.errors.quoteUnavailable('venue'));
@@ -2486,12 +2488,12 @@ export async function prepareCrossRailSolLeg(secretHex: string, rec: ConvertReco
     // The derivation no longer matches the frozen recipient — refuse, never re-target.
     throw new Error(M.convert.errors.quoteUnavailable('venue'));
   }
-  const quoted = await fetchJupiterQuote(venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, rec.slippageBps);
+  const quoted = await fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, rec.slippageBps);
   if (!quoted.ok) {
     if (quoted.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
     throw new Error(M.convert.errors.quoteUnavailable(quoted.code));
   }
-  const built = await fetchJupiterSwapTx(venue, quoted.quote, kp.address);
+  const built = await fetchJupiterSwapTx(relayUrl, quoted.quote, kp.address);
   if (!built.ok) {
     if (built.code === 'refused') throw new Error(M.convert.errors.quoteRefused(venue.display_name));
     throw new Error(M.convert.errors.quoteUnavailable(built.code));

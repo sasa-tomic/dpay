@@ -153,8 +153,9 @@ export async function run() {
     const elapsed = ((Date.now() - start) / 1000).toFixed(2);
     console.log(`[153-practice-not-settled] GREEN in ${elapsed}s`);
   } finally {
-    await noFaucet.stop();
+    // env.stop() first (flow-38 convention): quiesce the page's polls before killing the relay.
     await env.stop();
+    await noFaucet.stop();
   }
 }
 

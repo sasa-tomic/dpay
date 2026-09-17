@@ -75,8 +75,9 @@ export async function run() {
       'a till-ENABLED relay must offer the cashier-code action — otherwise step 1 proves nothing');
     await driver.screenshot('144-till-capability-on');
   } finally {
-    await tillOff.stop();
+    // env.stop() first (flow-38 convention): quiesce the page's polls before killing the relay.
     await env.stop();
+    await tillOff.stop();
   }
 }
 

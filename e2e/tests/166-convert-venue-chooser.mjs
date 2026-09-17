@@ -8,11 +8,12 @@
 //
 // After the no-pick assertions, the flow ALSO runs the V9 INV-6 fee census (zero tolerance):
 // it forces the real venue's fee tier through the same pool knob 167 uses (fee_millionths 4321),
-// picks that venue, and asserts EVERY fee-bearing money line on the pre-sign checklist renders
-// exactly the venue-quoted tier / catalog-quoted ledger fees / the dpay-paid-nothing line — plus
-// the derived money lines (headline, min-out, net) against the relay's own quote reply fetched
-// flow-side for the same amount. Deterministic end to end: private relay, forced tier, no
-// sibling can touch the pool.
+// picks that venue, and asserts EVERY fee-bearing money line — now folded behind the checklist's
+// one Details control (10x-verbosity pass 2026-09-16) — renders exactly the venue-quoted tier /
+// catalog-quoted ledger fees, with dpay-paid-nothing + net end state asserted GONE, and the
+// derived money lines (headline, min-out) against the relay's own quote reply fetched flow-side
+// for the same amount. Deterministic end to end: private relay, forced tier, no sibling can
+// touch the pool.
 //
 // The two-venue world exists only on this flow's OWN relay (startRelay — the same pattern flow
 // 164 uses): the second fixture venue `icpswap-fixture-b` is served by the test-helpers gateway
@@ -43,7 +44,7 @@ export const meta = {
   name: 'convert-venue-chooser',
   journey: 'convert',
   covers: ['convert', 'venues', 'venue-chooser', 'no-preselection', 'quote-attribution', 'registry-order', 'fees-itemised', 'inv-6-fee-census', 'venue-disclosure', 'no-impact-line'],
-  verifies: 'With two venues served on one pair (test-helpers knob on a private relay), the chooser renders both rows in registry order, each with its OWN quote attributed + timestamped; no row is preselected, and the headline/checklist/confirm stay withheld until the user picks one. Under the pick: the INV-6 fee census forces the venue tier (4321 millionths) and asserts every fee line on the pre-sign checklist byte-matches the venue-quoted tier / catalog fees / dpay-paid-nothing, with min-out+net derived from the same forced quote (and no price-impact line, V8).',
+  verifies: 'With two venues served on one pair (test-helpers knob on a private relay), the chooser renders both rows in registry order, each with its OWN quote (compact amount, no "Quote:" prefix; attribution+timestamp folded behind the chooser Details control); no row is preselected, and the headline/checklist/confirm stay withheld until the user picks one. Under the pick: the INV-6 fee census opens the checklist Details and forces the venue tier (4321 millionths), asserting every fee line byte-matches the venue-quoted tier / catalog fees, with dpay-paid-nothing + net end state asserted GONE and min-out derived from the same forced quote (and no price-impact line, V8).',
   timeoutMs: 120000,
 };
 
@@ -91,14 +92,16 @@ export async function run() {
     assert(order[0] === 'convert-venue-icpswap' && order[1] === `convert-venue-${FIXTURE_VENUE}`,
       `rows keep registry order (real venue first), got [${order.join(', ')}]`);
 
-    // Each row carries its OWN quote, attributed + timestamped (the venue's display name + the
-    // relay's fetched_at — never the device receipt time).
+    // Each row carries its OWN quote (the compact amount — the "Quote: " prefix is GONE,
+    // 10x-verbosity pass 2026-09-16), attributed + timestamped behind the chooser's ONE
+    // Details control (the per-row fetch lines fold; open it to pin them).
     const rowA = await driver.readText('convert-venue-icpswap-quote');
     const rowB = await driver.readText(`convert-venue-${FIXTURE_VENUE}-quote`);
-    assertIncludes(rowA, 'Quote:', 'the real venue row shows its own quote');
-    assertIncludes(rowA, 'VCHF', 'the real venue row quotes the output asset');
-    assertIncludes(rowB, 'Quote:', 'the fixture venue row shows its own quote');
-    assertIncludes(rowB, 'VCHF', 'the fixture venue row quotes the output asset');
+    assertIncludes(rowA, 'VCHF', 'the real venue row shows its own quote');
+    assert(!rowA.includes('Quote:'), 'the "Quote: " prefix is gone from the row (verbosity pass)');
+    assertIncludes(rowB, 'VCHF', 'the fixture venue row shows its own quote');
+    assert(!rowB.includes('Quote:'), 'the "Quote: " prefix is gone from the fixture row (verbosity pass)');
+    await driver.click('convert-venue-details', {timeoutMs: 5_000}); // pre-pick: the chooser's own toggle
     assertIncludes(await driver.readText(`convert-venue-${FIXTURE_VENUE}-source`), 'Quote from ICPSwap (offline fixture), fetched',
       'the fixture row is attributed + timestamped');
     assertIncludes(await driver.readText('convert-venue-icpswap-source'), 'Quote from ICPSwap, fetched',
@@ -134,9 +137,9 @@ export async function run() {
     // --- V9 INV-6 FEE CENSUS (zero tolerance) on the checklist that appears under a pick. --------
     // Force the real venue's fee tier through the pool knob (the same seam flow 167 mutates with),
     // fetch the oracle quote flow-side for the SAME amount the UI will re-key to, then pick the
-    // venue and assert every fee-bearing money line renders EXACTLY the forced venue tier, the
-    // catalog ledger fees, and the dpay-paid-nothing line — plus the derived lines (headline,
-    // min-out, net) derived from the same forced quote. Zero tolerance: not "a fee appears" but
+    // venue and assert every folded fee-bearing money line renders EXACTLY the forced venue
+    // tier and the catalog ledger fees — plus the derived lines (headline,
+    // min-out) derived from the same forced quote. Zero tolerance: not "a fee appears" but
     // byte-exact strings, incl. the 4-decimal tier (0.4321%, never rounded to 0.43%).
     console.log('[166-convert-chooser] INV-6 fee census: forcing the real pool tier to 4321 millionths…');
     const knob = await fetch(`${r2.baseURL}/api/v1/test/swap_pool`, {
@@ -158,12 +161,20 @@ export async function run() {
     const minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // the core's floor math @ 1%
     const net = gross - VCHF_FEE;
 
-    // Re-key so the rows re-fetch at the forced tier, then PICK the real venue. The checklist
-    // gates on math != null; the pool-fee line settling at the FORCED tier is the deterministic
-    // signal that the re-fetch landed and derivation finished (the pre-knob 0.30% line would
-    // still read 0.30% until the fresh quote replaces it — this wait closes that race).
+    // Re-key so the rows re-fetch at the forced tier, then PICK the real venue. The census
+    // folds behind the checklist's ONE Details control (10x-verbosity pass 2026-09-16) — open
+    // it by its own testID (the chooser's toggle is `convert-venue-details`, so
+    // `convert-details` is unique in the DOM), then the pool-fee line settling at the FORCED
+    // tier is the deterministic signal that the re-fetch landed and derivation finished (the
+    // pre-knob 0.30% line would still read 0.30% until the fresh quote replaces it — this
+    // wait closes that race).
     await driver.type('convert-amount', '2');
     await driver.click('convert-venue-icpswap', {timeoutMs: 5_000});
+    // Open the census unless the pre-pick chooser-timestamps click already left it open
+    // (one shared state drives both toggles).
+    if (await driver.findByTestID('convert-details-block', {timeoutMs: 1_000}).catch(() => null) == null) {
+      await driver.click('convert-details', {timeoutMs: 5_000});
+    }
     await driver.waitForFunction(
       () => (document.querySelector('[data-testid="convert-pool-fee"]')?.textContent ?? '').includes('0.4321%'),
       {timeoutMs: 15_000},
@@ -183,8 +194,8 @@ export async function run() {
       `input fee = the catalog ledger fee, exact (${fmt8(ICP_FEE)} ICP)`);
     assertIncludes(await driver.readText('convert-out-fee'), `${fmt8(VCHF_FEE)} VCHF`,
       `output fee = the catalog ledger fee, exact (${fmt8(VCHF_FEE)} VCHF)`);
-    assertIncludes(await driver.readText('convert-dpay-fee'), 'dpay charges nothing and is paid nothing',
-      'the dpay line: no fee recipient, paid nothing (INV-6)');
+    assert(await driver.findByTestID('convert-dpay-fee', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the dpay line is GONE (verbosity pass 2026-09-16) — INV-6 now pins its absence');
     // The derived money lines follow the SAME forced quote — the census is self-consistent:
     assertIncludes(await driver.readText('convert-headline'), `${fmt8(net)} VCHF`,
       `headline receive-amount = gross − output fee from the forced quote (${fmt8(net)} VCHF)`);
@@ -192,8 +203,8 @@ export async function run() {
     assertIncludes(minOutLine, `${fmt8(minOut)} VCHF`,
       `min-out = the core's floor math on the forced quote (${fmt8(minOut)} VCHF)`);
     assertIncludes(minOutLine, '1% slippage', 'at the default 1% slippage');
-    assertIncludes(await driver.readText('convert-net'), `${fmt8(net)} VCHF`,
-      `net end state = gross − output fee from the forced quote (${fmt8(net)} VCHF)`);
+    assert(await driver.findByTestID('convert-net', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the net end-state line is GONE (verbosity pass 2026-09-16): the headline IS the end state');
     assertIncludes(await driver.readText('convert-quote-source'), 'Quote from ICPSwap, fetched',
       'the checklist quote stays attributed to the picked venue');
     // WP1 surfaces render under the pick: the per-venue disclosure sentence; and NO price-impact

@@ -143,6 +143,9 @@ export async function run() {
     assertIncludes(settle, kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
     await driver.waitForText(SETTLE_TEXT, {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-quote-source'), 'SideShift', 'the quote is attributed to SideShift');
+    // The counterparty + disclosure census folds behind the ONE Details control
+    // (10x-verbosity pass 2026-09-16): open it before pinning them.
+    await driver.click('convert-details', {timeoutMs: 5_000});
     const counterparty = await driver.readText('convert-counterparty');
     assertIncludes(counterparty, 'SideShift', 'the counterparty line names the venue');
     assertIncludes(counterparty, 'automated exchange service',

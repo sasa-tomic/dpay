@@ -5,10 +5,12 @@
 //   * VEUR (a mainnet asset with no registered venue — the 2026-09-16 factory census found ZERO
 //     ICPSwap VEUR pools, and no other surveyed venue lists it; the copy is DERIVED from the
 //     bundled registry, so it names exactly what exists): the surface renders the fail-closed
-//     panel with the honest what-exists-today copy naming all seven pairs dpay converts today
-//     ("VCHF ↔ ICP, ICP ↔ USDC, ICP ↔ ETH, BTC ↔ ICP, BTC ↔ ETH, VCHF ↔ USDC and USDC ↔ ETH
-//     through ICPSwap — and nothing else" — the copy grew with the 2026-09-15 pair-scoped pools
-//     and the 2026-09-16 coverage expansion), never a teaser, never a waitlist;
+//     panel with the honest what-exists-today copy naming all six pairs dpay converts today
+//     ("VCHF ↔ ICP, ICP ↔ USDC, ICP ↔ ETH, BTC ↔ ICP, BTC ↔ ETH and VCHF ↔ USDC through
+//     ICPSwap — and nothing else" — the copy grows with the registry: the 2026-09-15
+//     pair-scoped pools and the 2026-09-16 coverage expansion added pairs, and the
+//     probe-driven 2026-09-17 unregister of ckUSDC↔ckETH (`8ade315`) removed one), never a
+//     teaser, never a waitlist;
 //   * DEMO (a plain venue-less asset): the same fail-closed panel and the same copy;
 //   * the panel gives the way back to the accounts list (a real action, not a dead end);
 //   * no quote is fetched and no amount field is offered on the fail-closed surface.
@@ -53,7 +55,6 @@ export async function run() {
     assertIncludes(veBody, 'BTC ↔ ICP', 'fail-closed body names what exists today (BTC ↔ ICP)');
     assertIncludes(veBody, 'BTC ↔ ETH', 'fail-closed body names what exists today (BTC ↔ ETH)');
     assertIncludes(veBody, 'VCHF ↔ USDC', 'fail-closed body names what exists today (VCHF ↔ USDC)');
-    assertIncludes(veBody, 'USDC ↔ ETH', 'fail-closed body names what exists today (USDC ↔ ETH)');
     assertIncludes(veBody, 'ICPSwap', 'fail-closed body names the venue');
     assertIncludes(veBody, 'nothing else', 'fail-closed copy is exhaustive, never a teaser');
 
@@ -75,7 +76,7 @@ export async function run() {
     assertIncludes(await driver.readText('convert-unavailable-title'), 'DEMO', 'fail-closed title names DEMO');
     const dmBody = await driver.readText('convert-unavailable-body');
     assertIncludes(dmBody, 'ICP ↔ USDC', 'same honest what-exists-today copy for DEMO');
-    assertIncludes(dmBody, 'USDC ↔ ETH', 'the copy grew with the registry (the 2026-09-16 pairs are named too)');
+    assertIncludes(dmBody, 'BTC ↔ ETH', 'the copy tracks the registry (the 2026-09-16 pairs are named too)');
     assertIncludes(dmBody, 'nothing else', 'the copy stays exhaustive, never a teaser');
     await driver.screenshot('142-convert-venueless-demo');
 

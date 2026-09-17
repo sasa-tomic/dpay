@@ -92,7 +92,7 @@ import {solanaVenuesForMint} from '../config/venues';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
 import {M} from '../i18n';
-import {fmtAssetCompact, parseUserAmount, rawToDecimal} from '../lib/format';
+import {fmtAssetCompact, parseUserAmount, rawToDecimal, toUnits} from '../lib/format';
 import {copyToClipboard} from '../lib/clipboard';
 import type {AssetId, Identity} from '../lib/types';
 import {C} from '../config/palette';
@@ -175,13 +175,14 @@ const nonBreakingClock = (d: Date): string => formatClock(d).replace(/ /g, '\u00
 
 export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBalances, onBack, onShowDepositAddress, onSwitchAsset, solana}: Props) {
   // THE V11 DISPATCH: every asset gets the same Convert gesture (uniform IA); the rail picks the
-  // surface. A Solana asset renders the Solana branch (Jupiter, device-direct https) with the
+  // surface. A Solana asset renders the Solana branch (Jupiter, through the relay proxy) with the
   // same transparency rules; everything below is the IC rail unchanged. When no Solana venue
   // serves the asset the branch itself fails closed with honest copy (never a blank form).
   if (selectedAsset != null && selectedAsset.protocol === 'solana') {
     return (
       <SolConvertMode
         identity={identity}
+        relayUrl={relayUrl}
         asset={selectedAsset}
         solana={solana ?? {sol: null, tokens: {}}}
         onBack={onBack}
@@ -201,6 +202,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
   const [record, setRecord] = useState<ConvertRecord | null>(null);
+  // The one Details disclosure on the quote-ready surface (10x-verbosity pass 2026-09-16):
+  // the venue/fee/signing census collapses behind it, default CLOSED for everyone.
+  const [detailsOpen, setDetailsOpen] = useState(false);
   // --- multi-hop destinations (2026-09-14 spec §7): the direct pair stays the standing
   //     default; every composed route is an EXPLICIT opt-in row — never preselected, never
   //     auto-chosen (a route chooser arrives with a second route, under the V5 rules).
@@ -799,7 +803,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // final-Solana phases. Checked before the plain planned panel: a cross-rail record always
     // carries a legPlan too, so the order matters.
     if (record.crossRail != null) {
-      return <CrossRailStatePanel record={record} secretHex={identity.secretHex} solLamports={solana?.sol ?? null} onBack={onBack} />;
+      return <CrossRailStatePanel record={record} secretHex={identity.secretHex} relayUrl={relayUrl} solLamports={solana?.sol ?? null} onBack={onBack} />;
     }
     // A PLANNED record renders its own per-leg surface — the route's leg list IS the progress UI.
     return record.legPlan != null
@@ -960,9 +964,6 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           ) : (
             <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
           )}
-          <Text testID="convert-expiry" style={S.convertStateMeta}>
-            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-          </Text>
         </View>
       ) : null}
 
@@ -1137,12 +1138,8 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               </Pressable>
             );
           })}
-          {/* One-route honesty (spec §7): no chooser, and the copy says exactly that.
-              Cross-rail widened this to a per-pair route LIST — the honesty line only
-              speaks when there is literally one route (B/C pairs render three today). */}
-          {routes.length === 1 && cefiVenues.length === 0 ? (
-            <Text testID="convert-route-note" style={S.convertMetaLine}>{M.convert.multihop.routeNote}</Text>
-          ) : null}
+          {/* One-route honesty (spec §7): no chooser. The copy line itself is GONE (10x-verbosity
+              pass 2026-09-16 — UI meta-commentary); the absence of a route list IS the honesty. */}
           {/* CeFi venue rows (founder decision 3): the same picker's venue-language rows,
               registry order, explicit pick, never preselected — labeled by what the venue
               SETTLES on the other rail ("SOL on Solana — via SideShift (exchange service)")
@@ -1254,7 +1251,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
                   <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{v.display_name}</Text>
                   {vq != null ? (
                     <Text testID={`convert-venue-${v.venue_id}-quote`} style={S.convertVenueAmount}>
-                      {M.convert.venueRowQuote(fmtAssetCompact(vq.amountOutGross, outDecimals, outSym))}
+                      {fmtAssetCompact(vq.amountOutGross, outDecimals, outSym)}
                     </Text>
                   ) : verr != null ? (
                     <Text testID={`convert-venue-${v.venue_id}-err`} style={S.err}>{verr}</Text>
@@ -1263,7 +1260,9 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
                       <ActivityIndicator color={C.sub} />
                     </View>
                   )}
-                  {vq != null ? (
+                  {/* The per-row attribution+timestamp folds behind the ONE Details control
+                      below (10x-verbosity pass 2026-09-16); the row shows just the digits. */}
+                  {detailsOpen && vq != null ? (
                     <Text testID={`convert-venue-${v.venue_id}-source`} style={S.convertMetaLine}>
                       {M.convert.quoteSource(nonBreakingClock(new Date(vq.fetchedAtMs)), venueDisplayName(v.venue_id))}
                     </Text>
@@ -1272,6 +1271,16 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               </Pressable>
             );
           })}
+          {/* The chooser's own Details control: opens the per-row fetch timestamps (the
+              attribution lines), default CLOSED (10x-verbosity pass 2026-09-16). Its testID is
+              DISTINCT from the checklist's `convert-details` so the checklist control stays
+              unique in the DOM — e2e locators resolve the first match. */}
+          <DetailsToggle
+            testID="convert-venue-details"
+            open={detailsOpen}
+            onToggle={() => setDetailsOpen(o => !o)}
+            label={M.convert.detailsLabel}
+          />
           {selectedVenue == null ? (
             <Text testID="convert-venue-none" style={S.convertMetaLine}>
               {M.convert.venueNoneSelected}
@@ -1280,8 +1289,9 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         </View>
       ) : null}
 
-      {/* The decision, as one number: what actually lands in the wallet, the rate it came from,
-          and whose quote it is. Everything the user is agreeing TO lives below, in the checklist. */}
+      {/* The decision, as one number: what actually lands in the wallet, and whose quote it
+          is. The rate folds behind the checklist's Details control (10x-verbosity pass
+          2026-09-16); the attribution line stays — it is WHOSE number this is. */}
       {math != null && activeQuote != null ? (
         <View testID="convert-headline" style={S.convertHeadlineCard}>
           {/* Route mode: the quoted number is the HOP payout landing in THIS wallet, not the
@@ -1291,10 +1301,6 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
             {routeMode ? M.convert.multihop.swapPaysLabel : M.convert.receiveHeadline}
           </Text>
           <Text style={S.convertHeadlineAmount}>{netStr}</Text>
-          <View testID="convert-rate" style={S.convertRateRow}>
-            <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, dispOutSym)}</Text>
-            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, legs.inDecimals), dispOutDecimals, dispOutSym)}</Text>
-          </View>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(nonBreakingClock(new Date(activeQuote.fetchedAtMs)), venueDisplayName(activeQuote.venueId))}
           </Text>
@@ -1313,72 +1319,14 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           with one venue the card renders exactly as it always has. */}
       {(!chooserMode || selectedVenue != null) ? (
       <View style={S.convertChecklistCard}>
-      {/* Counterparty disclosure: the venue the QUOTE is attributed to names itself — display
-            name and pool principal are registry lookups on the quote's own venueId, so a second
-            venue cannot render under the first one's identity (V1). Before a quote arrives the
-            standing disclosure names the one registered venue; attribution follows the quote —
-            or, under a chooser pick, the PICKED venue (counterVenueId above). */}
-        <View testID="convert-counterparty">
-          {/* The ic_amm sentence ("autonomous on-chain contract") is FALSE for a CeFi venue —
-              an exchange service is a company, not a contract; the cefi block says what it is. */}
-          <Text style={S.convertChecklistLine}>
-            {cefiMode
-              ? M.convert.cefi.counterparty(venueDisplayName(counterVenueId))
-              : M.convert.counterparty(venueDisplayName(counterVenueId))}
-          </Text>
-          {/* The pool principal renders only when THIS venue's own number stands behind it: the
-              quote's pool echo once one arrives, or the standing single-venue disclosure. Under a
-              chooser pick whose quote has not settled (or errored) NO principal renders — the
-              picked venue is still named above, but an execution fact is never asserted without
-              its quote, and another venue's principal is never borrowed. A CeFi venue renders NO
-              principal line either: its https API base is where the relay carries the partner
-              key — not a fact a depositor can check, so it earns no place on this checklist. */}
-          {!cefiMode && (activeQuote != null || !chooserMode) ? (
-            <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
-          ) : null}
-          {/* "Your phone signs" is likewise false for CeFi: the phone signs NOTHING — the user
-              sends the deposit to the venue's own address. */}
-          <Text style={S.convertChecklistLine}>
-            {cefiMode ? M.convert.cefi.checklistSigns : M.convert.counterpartySigns}
-          </Text>
-          {/* A route names its SECOND counterparty too: the ckETH minter that executes the
-              burn — its principal is an execution fact, shown as plainly as the pool's. */}
-          {routeMode && activeRoute != null ? (
-            <Text testID="convert-minter-principal" style={S.convertPrincipal}>{activeRoute.burn.minter}</Text>
-          ) : null}
-        </View>
-        {/* The per-venue disclosure sentence (the registry's own `disclosure_key` picks the
-            copy; an unknown key falls back to honest generic copy — fail closed). Checklist
-            ONLY: the chooser rows never carry it, and in chooser mode it follows the PICKED
-            venue (the counterVenueId the quote's own attribution resolves to). */}
-        <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
-          {venueDisclosure(counterVenueId)}
-        </Text>
-         {math != null && !cefiMode ? (
-          <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
-            {M.convert.poolFeeTier(formatMillionthsPct(activeQuote!.feeMillionths), venueDisplayName(activeQuote!.venueId))}
-          </Text>
-        ) : null}
-        {math != null ? (
-          <Text testID="convert-in-fee" style={S.convertChecklistLine}>
-            {M.convert.inputFeeLine(fmtAssetCompact(math.inFee, inDecimals, inSym))}
-          </Text>
-        ) : null}
-        {math != null ? (
-          <Text testID="convert-out-fee" style={S.convertChecklistLine}>
-            {M.convert.outputFeeLine(fmtAssetCompact(math.outFee, dispOutDecimals, dispOutSym))}
-          </Text>
-        ) : null}
-        {math != null ? (
-          <Text testID="convert-dpay-fee" style={S.convertChecklistLine}>
-            {M.convert.dpayFeeLine}
-          </Text>
-        ) : null}
-        {/* There is deliberately NO price-impact line here (V8, 2026-09-11): the venue
-            publishes no impact figure, so nothing renders — the minimum-you'll-receive and
-            slippage chips below are the execution protection. CeFi mode hides the slippage
-            axis entirely: a fixed shift is a LOCKED rate — there is no floor to set and
-            rendering chips would imply an execution guarantee this venue never makes. */}
+      {/* The MAIN surface is the decision (10x-verbosity pass 2026-09-16): the slippage axis,
+            the minimum, and a quote-change warning. The venue/fee/signing census — rate,
+            counterparty + principals, disclosure sentence, per-side fee lines, refusal
+            consequence, route surplus/gas notes — collapses behind the ONE Details control at
+            the bottom of this card, default CLOSED. Full attribution (quoteSource) stays on
+            the headline card. There is deliberately NO price-impact line here (V8): the IC
+            venues publish no impact figure. CeFi mode hides the slippage axis entirely: a
+            fixed shift is a LOCKED rate — there is no floor to set. */}
         {math != null && !cefiMode ? (
           <View testID="convert-slippage">
             <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
@@ -1404,8 +1352,9 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         ) : null}
         {/* The minimum line is where route mode and direct mode part ways: a route's floor is
             the DESTINATION's floor (the burn amount is the swap's min-you'll-receive — spec
-            §5), any swap surplus stays in the wallet as the hop asset, and the route's gas
-            joins the census as its own itemized line. The direct min-you'll-receive stays. */}
+            §5). The route's surplus/gas notes and the cross-rail fee census fold behind
+            Details; the live ERROR branches stay on the main surface — an instruction is
+            never hidden (founder rule 2026-08-29). */}
         {math != null && routeMode && activeRoute != null ? (
           <View testID="convert-route-min">
             <Text style={S.convertMinOutLine}>
@@ -1416,55 +1365,18 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
                 formatBps(slippageBps),
               )}
             </Text>
-            <Text style={S.convertChecklistLine}>{M.convert.multihop.routeSurplusNote(dispOutSym)}</Text>
-            {routeGas != null ? (
-              <Text testID="convert-gas-note" style={S.convertChecklistLine}>
-                {M.convert.multihop.gasFeeLine(fmtAssetCompact(routeGas.feeWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol))}
-              </Text>
-            ) : routeGasErr != null ? (
+            {routeGasErr != null ? (
               <Text testID="convert-gas-note" style={S.err}>{routeGasErr}</Text>
             ) : null}
-            {activeRoute.crossRail != null ? (
+            {activeRoute.crossRail != null && crossFeeErr != null ? (
               <View testID="convert-crossrail-fees">
-                {/* Fee census honesty for the crossing: the EVM gas is the USER's wallet's ETH
-                    (dpay can neither pay nor quote it); Circle's mint fee is Circle's own
-                    published number, deducted from the amount — never a dpay fee. */}
-                <Text testID="crossrail-external-gas" style={S.convertChecklistLine}>
-                  {M.convert.crossrail.externalGasLine}
-                </Text>
-                {crossFee != null ? (
-                  <>
-                    <Text testID="crossrail-circle-fee" style={S.convertChecklistLine}>
-                      {M.convert.crossrail.circleFeeLine(fmtAssetCompact(crossFee.maxFee, dispOutDecimals, dispOutSym))}
-                    </Text>
-                    <Text testID="crossrail-mint-floor" style={S.convertChecklistLine}>
-                      {M.convert.crossrail.mintFloorLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, dispOutSym))}
-                    </Text>
-                  </>
-                ) : crossFeeErr != null ? (
-                  <Text testID="crossrail-circle-fee" style={S.err}>{crossFeeErr}</Text>
-                ) : null}
+                <Text testID="crossrail-circle-fee" style={S.err}>{crossFeeErr}</Text>
               </View>
             ) : null}
           </View>
         ) : math != null && !cefiMode ? (
           <Text testID="convert-min-out" style={S.convertMinOutLine}>
             {M.convert.minReceiveLine(fmtAssetCompact(math.minOut, outDecimals, outSym), formatBps(slippageBps))}
-          </Text>
-        ) : null}
-        {/* The refusal line names THIS trade's failure mode. A pool trade fails on price (the
-            pool/approval language); a CeFi deposit-order fails by never being sent — the order
-            expires and nothing moved. Same slot, same rank: what happens if it goes wrong. */}
-        {math != null ? (
-          <Text testID="convert-refusal" style={S.convertChecklistLine}>
-            {cefiMode ? M.convert.cefi.refusalLine(inSym) : M.convert.refusalLine(inSym)}
-          </Text>
-        ) : null}
-        {/* In route mode the END state is the destination floor above (routeMinLine) — a second
-            net line naming the hop asset would read as a second promise. */}
-        {math != null && netStr != null && !routeMode ? (
-          <Text testID="convert-net" style={S.convertChecklistLine}>
-            {M.convert.netEndStateLine(netStr)}
           </Text>
         ) : null}
         {quoteChanged != null ? (
@@ -1474,6 +1386,123 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               fmtAssetCompact(quoteChanged.newAmt, dispOutDecimals, dispOutSym),
             )}
           </Text>
+        ) : null}
+        {/* The one Details control, at the bottom of the decision card. Default CLOSED. */}
+        <DetailsToggle
+          open={detailsOpen}
+          onToggle={() => setDetailsOpen(o => !o)}
+          label={M.convert.detailsLabel}
+        />
+        {detailsOpen ? (
+          <View testID="convert-details-block">
+            {math != null && activeQuote != null ? (
+              <View testID="convert-rate" style={S.convertRateRow}>
+                <Text style={S.convertRateLabel}>{M.convert.rateLabel(inSym, dispOutSym)}</Text>
+                <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(activeQuote.amountOutGross, activeQuote.amountIn, legs.inDecimals), dispOutDecimals, dispOutSym)}</Text>
+              </View>
+            ) : null}
+            {/* Counterparty disclosure: the venue the QUOTE is attributed to names itself —
+                display name and pool principal are registry lookups on the quote's own venueId,
+                so a second venue cannot render under the first one's identity (V1). Before a
+                quote arrives the standing disclosure names the one registered venue; attribution
+                follows the quote — or, under a chooser pick, the PICKED venue. The sentence
+                itself is trimmed to bare venue attribution (the tail moved to the disclosure
+                copy + quoteSource). */}
+            <View testID="convert-counterparty">
+              {/* The ic_amm sentence is FALSE for a CeFi venue — an exchange service is a
+                  company, not a contract; the cefi block says what it is. */}
+              <Text style={S.convertChecklistLine}>
+                {cefiMode
+                  ? M.convert.cefi.counterparty(venueDisplayName(counterVenueId))
+                  : M.convert.counterparty(venueDisplayName(counterVenueId))}
+              </Text>
+              {/* The pool principal renders only when THIS venue's own number stands behind it:
+                  the quote's pool echo once one arrives, or the standing single-venue
+                  disclosure. Under a chooser pick whose quote has not settled (or errored) NO
+                  principal renders — an execution fact is never asserted without its quote, and
+                  another venue's principal is never borrowed. A CeFi venue renders NO principal
+                  line: its https API base is where the relay carries the partner key — not a
+                  fact a depositor can check. */}
+              {!cefiMode && (activeQuote != null || !chooserMode) ? (
+                <Text testID="convert-pool-principal" style={S.convertPrincipal}>{activeQuote?.pool ?? venueEndpointOf(counterVenueId)}</Text>
+              ) : null}
+              {/* "Your phone signs" is likewise false for CeFi: the phone signs NOTHING — the
+                  user sends the deposit to the venue's own address. */}
+              <Text style={S.convertChecklistLine}>
+                {cefiMode ? M.convert.cefi.checklistSigns : M.convert.counterpartySigns}
+              </Text>
+              {/* A route names its SECOND counterparty too: the ckETH minter that executes the
+                  burn — its principal is an execution fact, shown as plainly as the pool's. */}
+              {routeMode && activeRoute != null ? (
+                <Text testID="convert-minter-principal" style={S.convertPrincipal}>{activeRoute.burn.minter}</Text>
+              ) : null}
+            </View>
+            {/* The per-venue disclosure sentence (the registry's own `disclosure_key` picks the
+                copy; an unknown key falls back to honest generic copy — fail closed). It
+                follows the PICKED venue (the counterVenueId the quote's own attribution
+                resolves to). */}
+            <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
+              {venueDisclosure(counterVenueId)}
+            </Text>
+            {math != null && !cefiMode && activeQuote != null ? (
+              <Text testID="convert-pool-fee" style={S.convertChecklistLine}>
+                {M.convert.poolFeeTier(formatMillionthsPct(activeQuote.feeMillionths), venueDisplayName(activeQuote.venueId))}
+              </Text>
+            ) : null}
+            {math != null ? (
+              <Text testID="convert-in-fee" style={S.convertChecklistLine}>
+                {M.convert.inputFeeLine(fmtAssetCompact(math.inFee, inDecimals, inSym))}
+              </Text>
+            ) : null}
+            {math != null ? (
+              <Text testID="convert-out-fee" style={S.convertChecklistLine}>
+                {M.convert.outputFeeLine(fmtAssetCompact(math.outFee, dispOutDecimals, dispOutSym))}
+              </Text>
+            ) : null}
+            {/* Route census (route mode only): the surplus note, the minter's gas line, and the
+                cross-rail fee census. The happy gas/crossrail branches live here; their error
+                branches stay on the main surface above. */}
+            {math != null && routeMode && activeRoute != null ? (
+              <View testID="convert-route-census">
+                <Text style={S.convertChecklistLine}>{M.convert.multihop.routeSurplusNote(dispOutSym)}</Text>
+                {routeGas != null ? (
+                  <Text testID="convert-gas-note" style={S.convertChecklistLine}>
+                    {M.convert.multihop.gasFeeLine(fmtAssetCompact(routeGas.feeWei, activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol))}
+                  </Text>
+                ) : null}
+                {activeRoute.crossRail != null ? (
+                  <View testID="convert-crossrail-fees">
+                    {/* Fee census honesty for the crossing: the EVM gas is the USER's wallet's
+                        ETH (dpay can neither pay nor quote it); Circle's mint fee is Circle's
+                        own published number, deducted from the amount — never a dpay fee. */}
+                    <Text testID="crossrail-external-gas" style={S.convertChecklistLine}>
+                      {M.convert.crossrail.externalGasLine}
+                    </Text>
+                    {crossFee != null ? (
+                      <>
+                        <Text testID="crossrail-circle-fee" style={S.convertChecklistLine}>
+                          {M.convert.crossrail.circleFeeLine(fmtAssetCompact(crossFee.maxFee, dispOutDecimals, dispOutSym))}
+                        </Text>
+                        <Text testID="crossrail-mint-floor" style={S.convertChecklistLine}>
+                          {M.convert.crossrail.mintFloorLine(fmtAssetCompact(crossFee.floor, dispOutDecimals, dispOutSym))}
+                        </Text>
+                      </>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            {/* The refusal line names THIS trade's failure mode. A pool trade fails on price
+                (the pool/approval language); a CeFi deposit-order fails by never being sent —
+                the order expires and nothing moved. Same slot, same rank: what happens if it
+                goes wrong. Lives behind Details: it is context, not an active error — the
+                active error branches (quote/confirm/gas/crossrail) never fold. */}
+            {math != null ? (
+              <Text testID="convert-refusal" style={S.convertChecklistLine}>
+                {cefiMode ? M.convert.cefi.refusalLine(inSym) : M.convert.refusalLine(inSym)}
+              </Text>
+            ) : null}
+          </View>
         ) : null}
       </View>
       ) : null}
@@ -1597,6 +1626,8 @@ function resolveSolLegs(asset: Extract<SelectableAsset, {protocol: 'solana'}>, v
 
 type SolConvertProps = {
   identity: Identity;
+  /** The active relay — the Jupiter quote/swap dials go through it (2026-09-16). */
+  relayUrl: string;
   asset: Extract<SelectableAsset, {protocol: 'solana'}>;
   solana: {sol: string | null; tokens: Record<string, string | null>};
   onBack: () => void;
@@ -1604,7 +1635,7 @@ type SolConvertProps = {
   onSwitchAsset?: (id: AssetId) => void;
 };
 
-function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, onSwitchAsset}: SolConvertProps) {
+function SolConvertMode({identity, relayUrl, asset, solana, onBack, onShowDepositAddress, onSwitchAsset}: SolConvertProps) {
   const [amountText, setAmountText] = useState('');
   const [slippageBps, setSlippageBps] = useState<number>(CONVERT_SLIPPAGE_BPS_DEFAULT);
   const [quote, setQuote] = useState<JupiterQuote | null>(null);
@@ -1615,8 +1646,15 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmErr, setConfirmErr] = useState<string | null>(null);
   const [record, setRecord] = useState<ConvertRecord | null>(null);
+  // The one Details disclosure on the quote-ready surface (10x-verbosity pass 2026-09-16):
+  // the venue/fee/signing census collapses behind it, default CLOSED for everyone.
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const mountedRef = useRef(true);
   const recordIdRef = useRef<string | null>(null);
+  // Sync latch for the confirm gesture: `confirmBusy` state lags a re-render, and a duplicate
+  // press delivered inside that window would run prepare twice (two venue swap POSTs from one
+  // gesture — observed once under heavy host load, 2026-09-17). The ref closes it same-tick.
+  const confirmBusyRef = useRef(false);
 
   // --- the destination (spec 2026-09-16 §2 decision 5): every registered solana_amm venue for
   //     this mint is one out option — registry order, deduped by out mint, never ranked. The
@@ -1644,9 +1682,11 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const venueName = venue != null ? venueDisplayName(venue.venue_id) : venueDisplayName('jupiter');
 
   const pickDest = (venueId: string) => {
-    if (venueId === destVenueId) return;
+    // Frozen while a confirm is in flight: the in-flight confirm closes over THIS pair, and its
+    // late setQuote/setQuoteChanged must never land under the newly picked pair's heading.
+    if (venueId === destVenueId || confirmBusy) return;
     setDestVenueId(venueId);
-    setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false);
+    setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
   };
   const balanceRaw = legs == null ? null : legs.inMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.inMint] ?? null;
   const outHeldRaw = legs == null ? null : legs.outMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.outMint] ?? null;
@@ -1681,8 +1721,9 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const liveRecord = record != null && isLiveRecord(record);
   const showRecord = record != null && (liveRecord || record.step === 'stuck' || isTerminalConvertStep(record.step));
 
-  // --- the quote: device-direct per keystroke. Slippage IS a dep here (unlike IC): Jupiter's
-  // route + threshold are computed against it, so a changed chip must re-ask the venue.
+  // --- the quote: through the relay proxy per keystroke (the relay pipes the venue
+  // byte-faithfully, short-TTL-caching identical asks). Slippage IS a dep here (unlike IC):
+  // Jupiter's route + threshold are computed against it, so a changed chip must re-ask the venue.
   useEffect(() => {
     if (legs == null || venue == null || showRecord) return;
     const parsed = parseUserAmount(amountText, legs.inDecimals);
@@ -1692,7 +1733,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
     }
     let cancelled = false;
     setQuoteBusy(true);
-    fetchJupiterQuote(venue, legs.inMint, legs.outMint, parsed.raw, slippageBps)
+    fetchJupiterQuote(relayUrl, venue, legs.inMint, legs.outMint, parsed.raw, slippageBps)
       .then(res => {
         if (cancelled) return;
         if (res.ok) {
@@ -1722,7 +1763,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
     const tick = setInterval(() => {
       if (!isQuoteStale(quote)) return;
       setStaleRefreshing(true);
-      fetchJupiterQuote(venue, legs.inMint, legs.outMint, quote.inAmount, slippageBps)
+      fetchJupiterQuote(relayUrl, venue, legs.inMint, legs.outMint, quote.inAmount, slippageBps)
         .then(res => {
           if (res.ok && mountedRef.current) {
             setQuote(res.quote);
@@ -1751,12 +1792,14 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const canConfirm = legs != null && quote != null && !quoteBusy && !confirmBusy && !insufficient && amountN > 0n;
 
   const onConfirm = async () => {
+    if (confirmBusyRef.current) return; // sync latch: a duplicate press before the re-render is a no-op
     if (legs == null || venue == null || amountRaw == null) return;
+    confirmBusyRef.current = true;
     setConfirmBusy(true); setConfirmErr(null);
     try {
       // Re-quote at the confirm gesture (the IC rule): a moved output gets a review line, never
       // a silent submit on stale digits.
-      const fresh = await fetchJupiterQuote(venue, legs.inMint, legs.outMint, amountRaw, slippageBps);
+      const fresh = await fetchJupiterQuote(relayUrl, venue, legs.inMint, legs.outMint, amountRaw, slippageBps);
       if (!fresh.ok) {
         setConfirmErr(M.convert.errors.quoteUnreachable(venueName));
         return;
@@ -1768,6 +1811,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
       }
       const rec = await prepareSolanaConvertRecord({
         secretHex: identity.secretHex,
+        relayUrl,
         quote: fresh.quote,
         inAsset: {symbol: legs.inSym, mint: legs.inMint, decimals: legs.inDecimals},
         outAsset: {symbol: legs.outSym, mint: legs.outMint, decimals: legs.outDecimals},
@@ -1778,6 +1822,7 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
     } catch (e) {
       setConfirmErr(e instanceof Error ? e.message : M.convert.errors.quoteUnavailable('unknown'));
     } finally {
+      confirmBusyRef.current = false;
       setConfirmBusy(false);
     }
   };
@@ -1912,16 +1957,13 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
       ) : null}
 
       {/* The decision number + attribution — the IC headline card's exact shape, carrying
-          Jupiter's OWN digits (outAmount verbatim; the rate is the only derived figure, the
-          same BigInt division the IC card does). */}
+          Jupiter's OWN digits (outAmount verbatim). The rate folds behind the Details control
+          on the checklist card below (10x-verbosity pass 2026-09-16); the attribution line
+          stays — it is WHOSE number this is. */}
       {quote != null ? (
         <View testID="convert-headline" style={S.convertHeadlineCard}>
           <Text style={S.convertHeadlineLabel}>{M.convert.receiveHeadline}</Text>
           <Text style={S.convertHeadlineAmount}>{outEstimate}</Text>
-          <View testID="convert-rate" style={S.convertRateRow}>
-            <Text style={S.convertRateLabel}>{M.convert.rateLabel(legs.inSym, legs.outSym)}</Text>
-            <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(quote.outAmount, quote.inAmount, legs.inDecimals), legs.outDecimals, legs.outSym)}</Text>
-          </View>
           <Text testID="convert-quote-source" style={S.convertHeadlineMeta}>
             {M.convert.quoteSource(nonBreakingClock(new Date(quote.fetchedAtMs)), venueName)}
           </Text>
@@ -1931,29 +1973,12 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
         </View>
       ) : null}
 
-      {/* The pre-sign checklist: same rules as IC. The V8 impact exception flips HERE — Jupiter
-          DOES publish a price-impact figure, so it renders verbatim (its absence on IC is
-          because the IC venues publish none, not a blanket rule). */}
+      {/* The pre-sign checklist, same rules as IC (10x-verbosity pass 2026-09-16): the main
+          surface is the decision — slippage axis, the floor, quote-change warning. The
+          venue/fee/signing census folds behind ONE Details control (default CLOSED). The V8
+          impact exception still holds — Jupiter DOES publish a price-impact figure — but it
+          too is census, not decision, so it lives behind the same control. */}
       <View style={S.convertChecklistCard}>
-        <View testID="convert-counterparty">
-          <Text style={S.convertChecklistLine}>{M.convert.sol.counterparty(venueName)}</Text>
-          <Text testID="convert-pool-principal" style={S.convertPrincipal}>{venue.endpoint}</Text>
-          <Text style={S.convertChecklistLine}>{M.convert.sol.counterpartySigns}</Text>
-        </View>
-        <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
-          {venueDisclosure(venue.venue_id)}
-        </Text>
-        {impact != null ? (
-          <Text testID="convert-sol-impact" style={S.convertChecklistLine}>
-            {M.convert.sol.priceImpactLine(impact, venueName)}
-          </Text>
-        ) : null}
-        {/* Fee census, Solana side: the ROUTE's fees are inside the quoted output (Jupiter
-            publishes no separate tier through this keyless integration — platformFee null,
-            measured 2026-09-14), the network fee is quoted per-tx at prepare and shows on the
-            record panels, and dpay's line is the same line everywhere. */}
-        <Text testID="convert-sol-fees-note" style={S.convertChecklistLine}>{M.convert.sol.quoteFeesNote}</Text>
-        <Text testID="convert-dpay-fee" style={S.convertChecklistLine}>{M.convert.dpayFeeLine}</Text>
         <View testID="convert-slippage">
           <Text style={S.convertSlippageLabel}>{M.convert.slippageLabel}</Text>
           <View
@@ -1980,16 +2005,50 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
         <Text testID="convert-min-out" style={S.convertMinOutLine}>
           {M.convert.minReceiveLine(outFloor ?? '', formatBps(slippageBps))}
         </Text>
-        <Text testID="convert-refusal" style={S.convertChecklistLine}>
-          {M.convert.sol.refusalLine(legs.inSym)}
-        </Text>
-        <Text testID="convert-net" style={S.convertChecklistLine}>
-          {M.convert.netEndStateLine(outEstimate ?? '')}
-        </Text>
         {quoteChanged != null ? (
           <Text testID="convert-quote-changed" style={S.convertChecklistWarn}>
             {M.convert.quoteChanged(fmtOut(quoteChanged.oldAmt), fmtOut(quoteChanged.newAmt))}
           </Text>
+        ) : null}
+        {/* The one Details control, at the bottom of the decision card. Default CLOSED. */}
+        <DetailsToggle
+          open={detailsOpen}
+          onToggle={() => setDetailsOpen(o => !o)}
+          label={M.convert.detailsLabel}
+        />
+        {detailsOpen ? (
+          <View testID="convert-details-block">
+            {quote != null ? (
+              <View testID="convert-rate" style={S.convertRateRow}>
+                <Text style={S.convertRateLabel}>{M.convert.rateLabel(legs.inSym, legs.outSym)}</Text>
+                <Text style={S.convertRateValue}>{fmtAssetCompact(scaledRate(quote.outAmount, quote.inAmount, legs.inDecimals), legs.outDecimals, legs.outSym)}</Text>
+              </View>
+            ) : null}
+            <View testID="convert-counterparty">
+              <Text style={S.convertChecklistLine}>{M.convert.sol.counterparty(venueName)}</Text>
+              <Text testID="convert-pool-principal" style={S.convertPrincipal}>{venue.endpoint}</Text>
+              <Text style={S.convertChecklistLine}>{M.convert.sol.counterpartySigns}</Text>
+            </View>
+            <Text testID="convert-venue-disclosure" style={S.convertChecklistLine}>
+              {venueDisclosure(venue.venue_id)}
+            </Text>
+            {impact != null ? (
+              <Text testID="convert-sol-impact" style={S.convertChecklistLine}>
+                {M.convert.sol.priceImpactLine(impact, venueName)}
+              </Text>
+            ) : null}
+            {/* The refusal consequence (context, not an active error — the active error
+                branches never fold). */}
+            <Text testID="convert-refusal" style={S.convertChecklistLine}>
+              {M.convert.sol.refusalLine(legs.inSym)}
+            </Text>
+            {/* Fee census, Solana side: the ROUTE's fees are inside the quoted output (Jupiter
+                publishes no separate tier through this keyless integration — platformFee null,
+                measured 2026-09-14); the network fee is quoted per-tx at prepare and shows on
+                the record panels. The old fees-note + dpay line are GONE (10x-verbosity pass
+                2026-09-16): the route fee is already inside the quoted number the headline
+                shows, and dpay's nothing-charged line lives nowhere on the surface. */}
+          </View>
         ) : null}
       </View>
 
@@ -2112,11 +2171,11 @@ function SolStatePanel({record, onBack}: {record: ConvertRecord; onBack: () => v
         </View>
       ) : null}
       {/* The fee census on every state panel (the IC stuck panel's rule): the realized network
-          fee quoted by the chain before signing, and dpay's nothing. */}
+          fee quoted by the chain before signing. dpay's nothing-charged line is GONE everywhere
+          (10x-verbosity pass 2026-09-16). */}
       {solFeeLine != null ? (
         <Text testID="convert-sol-fee" style={S.convertMetaLine}>{solFeeLine}</Text>
       ) : null}
-      <Text testID="convert-dpay-fee" style={S.convertMetaLine}>{M.convert.dpayFeeLine}</Text>
       <View style={S.convertFooting}>
         <IconSwap size={20} color={C.sub} />
       </View>
@@ -2135,6 +2194,28 @@ function ConvertHeader({title, onBack}: {title: string; onBack: () => void}) {
       <Text style={S.routeHeaderTitle}>{title}</Text>
       <View style={S.routeHeaderSpacer} />
     </View>
+  );
+}
+
+/** The ONE Details disclosure control (10x-verbosity pass 2026-09-16): a quiet full-width
+ *  row at the bottom of the decision card that expands the venue/fee/signing census behind
+ *  it. Default CLOSED for everyone — no "verbose mode" split. The chevron names the
+ *  direction the tap moves you (the same rule as every chevron in the app), so it flips
+ *  when open. */
+function DetailsToggle({open, onToggle, label, testID = 'convert-details'}: {open: boolean; onToggle: () => void; label: string; testID?: string}) {
+  return (
+    <Pressable
+      testID={testID}
+      style={S.convertDetailsToggle}
+      onPress={onToggle}
+      accessibilityRole="button"
+      accessibilityState={{expanded: open}}
+      accessibilityLabel={label}>
+      <Text style={S.convertDetailsToggleText}>{label}</Text>
+      <View style={open ? S.convertDetailsChevronOpen : undefined}>
+        <IconChevronDown size={16} color={C.sub} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -2290,9 +2371,9 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           ) : (
             <Text style={S.convertStateBody}>{M.convert.refundedBody(inSymbol)}</Text>
           )}
-          <Text testID="convert-expiry" style={S.convertStateMeta}>
-            {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-          </Text>
+          {/* The approval-expiry line renders ONLY where the window is still live
+              (10x-verbosity pass 2026-09-16): on failed_refunded the pool has returned the
+              funds — the approval window is closed, so the line is noise here. */}
         </View>
       ) : null}
       {record.step === 'stuck' ? (
@@ -2347,10 +2428,13 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
           <Text style={S.convertStateTitle}>{M.convert.awaitingDepositTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.awaitingDepositBody(inSymbol, venueName)}</Text>
           {/* The CeFi handoff (2026-09-15): the venue's own deposit facts, frozen at order
-              creation and rendered VERBATIM — the exact address, the exact amount (a fixed
-              shift settles only this figure), the memo when the venue issued one, and the
-              order's own expiry. This IS the value movement: the user sends from their own
-              wallet; dpay signed nothing. */}
+              creation — the exact address, the exact amount (a fixed shift settles only this
+              figure), the memo when the venue issued one, and the order's own expiry. The
+              amount goes through the SAME formatter as every other money line (10x-verbosity
+              pass audit fix): the venue's decimal string is normalized via
+              decimal→raw→fmtAssetCompact, so a padded "3.00000000" renders as "3 ICP" and no
+              raw-unit figure can ever leak through raw. The address stays verbatim. This IS
+              the value movement: the user sends from their own wallet; dpay signed nothing. */}
           {record.providerDeposit != null ? (
             <View testID="convert-deposit-handoff">
               <Text style={S.convertStateMeta}>{M.convert.cefi.depositNote(venueName, inSymbol)}</Text>
@@ -2374,7 +2458,7 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
                 <Text style={S.linkText}>{copiedDeposit === 'address' ? M.convert.crossrail.copied : M.convert.crossrail.copy}</Text>
               </Pressable>
               <Text testID="convert-deposit-amount" style={S.convertStateMeta}>
-                {M.convert.cefi.depositAmountLabel}: {record.providerDeposit.depositAmount} {inSymbol}
+                {M.convert.cefi.depositAmountLabel}: {fmtAssetCompact(toUnits(record.providerDeposit.depositAmount, inDecimals), inDecimals, inSymbol)}
               </Text>
               {record.providerDeposit.depositMemo != null ? (
                 <>
@@ -2548,9 +2632,10 @@ function plannedLegFee(record: ConvertRecord, lp: LegPlan, legCanister: string):
  *  the mint lands AND is corroborated on-chain at the ATA, and sol_ready offers the final
  *  Jupiter leg on a fresh quote. Every dead-end names where the funds sit (in-wallet ckUSDC,
  *  USDC at the user's own EVM address, or USDC(SOL) at their ATA) and the way out. */
-function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
+function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}: {
   record: ConvertRecord;
   secretHex: string;
+  relayUrl: string;
   solLamports: string | null;
   onBack: () => void;
 }) {
@@ -2618,7 +2703,7 @@ function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
     const venue = venueOfId(cross.solVenueId);
     if (venue == null) return;
     let live = true;
-    fetchJupiterQuote(venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, record.slippageBps)
+    fetchJupiterQuote(relayUrl, venue, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, cross.mintSubunits, record.slippageBps)
       .then((q) => {
         if (!live || !mountedRef.current) return;
         if (q.ok) { setSolQuote(q.quote); setSolQuoteErr(null); }
@@ -2840,7 +2925,6 @@ function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
               <Text style={S.convertChecklistLine}>
                 {M.convert.crossrail.solMinLine(fmtAssetCompact(solQuote.otherAmountThreshold, SOLANA_TOKENS.SOL.decimals, destSymbol))}
               </Text>
-              <Text style={S.convertChecklistLine}>{M.convert.dpayFeeLine}</Text>
             </>
           ) : solQuoteErr != null ? (
             <Text testID="crossrail-sol-quote-err" style={S.err}>{solQuoteErr}</Text>
@@ -2909,9 +2993,8 @@ function CrossRailStatePanel({record, secretHex, solLamports, onBack}: {
               ) : (
                 <Text style={S.convertStateBody}>{M.convert.failedSwapBody(record.failureDetail ?? '', record.inSymbol, venueName)}</Text>
               )}
-              <Text testID="convert-expiry" style={S.convertStateMeta}>
-                {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
-              </Text>
+              {/* No approval-expiry line here: failed_refunded means the window is closed
+                  (10x-verbosity pass 2026-09-16); only live windows carry the line. */}
             </>
           )}
         </View>

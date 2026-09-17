@@ -21,6 +21,7 @@
 
 pub mod app;
 pub mod catalog;
+pub mod jupiter;
 pub mod ledger;
 pub mod sideshift;
 pub mod solana;

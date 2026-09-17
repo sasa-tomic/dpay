@@ -74,6 +74,15 @@
 //!   on every build; unconfigured it answers 503 naming the missing variable(s). Still no
 //!   value moves through the relay: the user deposits straight to the VENUE's address, and
 //!   shift status reads are the venue's own keyless GET the device polls directly.
+//! - `GET /api/v1/jupiter/quote` and `POST /api/v1/jupiter/swap` — the Jupiter proxy
+//!   (2026-09-16 founder ask, "through our relay (for caching etc)";
+//!   [`crate::jupiter`]). The keyless venue behind the Convert surface's SOL legs: quotes
+//!   pipe through a short-TTL canonical-params cache, swap-tx builds are a byte-faithful
+//!   never-cached pipe (the device posts Jupiter's own quoteResponse back and must receive
+//!   the swapTransaction unmodified). Registered on every build — keyless, so there is NO
+//!   503 state; transport death answers 504 `jupiter-upstream-unreachable`. The registry
+//!   row's `endpoint` stays the venue's identity/attribution, no longer a device dial
+//!   target.
 //!
 //! Read-only by construction apart from the play-money faucet: there is no value-moving route
 //! left on this crate (the 2026-08-19 IC-rail cutover moved settlement to the app's own signed
@@ -170,6 +179,13 @@ pub struct AppState {
     /// that unconfigured proxy; `main` replaces it via [`AppState::with_sideshift`] from the
     /// env. BOTH credential halves are secrets: never logged, never echoed.
     pub sideshift: Arc<crate::sideshift::SideShiftProxy>,
+    /// The Jupiter proxy (`crate::jupiter`) — `GET /api/v1/jupiter/quote` +
+    /// `POST /api/v1/jupiter/swap` (2026-09-16 founder ask). Same always-registered
+    /// contract as the proxies above, but with NO unconfigured state at all: the venue is
+    /// keyless and its base has a constant default, so there is no credential whose absence
+    /// would degrade the routes. `main` may re-point the upstream via
+    /// [`AppState::with_jupiter`] from `DPAY_JUPITER_API_BASE`.
+    pub jupiter: Arc<crate::jupiter::JupiterProxy>,
 }
 
 impl AppState {
@@ -200,6 +216,13 @@ impl AppState {
                 None,
                 crate::sideshift::DEFAULT_API_BASE.to_string(),
                 crate::sideshift::DEFAULT_TIMEOUT,
+            )),
+            // The Jupiter proxy, ALWAYS serving (keyless — no unconfigured state): the
+            // default state carries the venue's documented lite-api base; `main` re-points
+            // it via `with_jupiter` when DPAY_JUPITER_API_BASE is set (see `crate::jupiter`).
+            jupiter: Arc::new(crate::jupiter::JupiterProxy::new(
+                crate::jupiter::DEFAULT_API_BASE.to_string(),
+                crate::jupiter::DEFAULT_TIMEOUT,
             )),
             #[cfg(feature = "test-helpers")]
             fake_ic: None,
@@ -246,6 +269,15 @@ impl AppState {
     /// proxy still answers, honestly, 503 naming the missing variable(s).
     pub fn with_sideshift(mut self, proxy: crate::sideshift::SideShiftProxy) -> Self {
         self.sideshift = Arc::new(proxy);
+        self
+    }
+
+    /// Point the Jupiter proxy at its upstream (`crate::jupiter::JupiterProxy`). `main`
+    /// builds it from `DPAY_JUPITER_API_BASE` (default the venue's own lite-api base);
+    /// tests build it against the local stub upstream. The base is NOT a secret (the
+    /// venue is keyless — no credential exists to leak), but it still never needs logging.
+    pub fn with_jupiter(mut self, proxy: crate::jupiter::JupiterProxy) -> Self {
+        self.jupiter = Arc::new(proxy);
         self
     }
 
@@ -330,6 +362,18 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/sideshift/shifts/fixed",
             axum::routing::post(crate::sideshift::shifts_fixed_proxy),
+        )
+        // The Jupiter proxy (2026-09-16 founder ask) — registered ALWAYS, and unlike the
+        // proxies above there is no unconfigured 503 branch at all: the venue is keyless
+        // and its base has a constant default. Quote GETs ride the short-TTL canonical
+        // cache; the swap POST is a byte-faithful never-cached pipe. See `crate::jupiter`.
+        .route(
+            "/jupiter/quote",
+            axum::routing::get(crate::jupiter::quote_proxy),
+        )
+        .route(
+            "/jupiter/swap",
+            axum::routing::post(crate::jupiter::swap_proxy),
         );
 
     // --- the OpenCryptoPay till, ON unless the operator refuses it --------------------------------
@@ -429,6 +473,33 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/test/sideshift-upstream/hits",
             axum::routing::get(sideshift_stub_hits),
+        );
+    // Test-only JUPITER UPSTREAM (flows 185/186/189 — the SOL convert surfaces): the harness
+    // points the Jupiter proxy (src/jupiter.rs, DPAY_JUPITER_API_BASE set explicitly in
+    // harness/relay.mjs) at these routes ON THE SAME SERVER, so the flows drive the REAL
+    // client path — app → GET /api/v1/jupiter/quote → THIS stub — offline. The stub replays
+    // the lite-api quote/swap wire shapes with the values the flow configures
+    // (`POST …/config`), and the `/hits` twin reports every quote/swap arrival (the flow's
+    // proof the request went THROUGH the proxy, and that two identical quotes produced one
+    // upstream call when the TTL allows). The sub-path after `/test/jupiter-upstream` is the
+    // venue's own, because the proxy appends `/swap/v1/{quote,swap}` to its configured base.
+    #[cfg(feature = "test-helpers")]
+    let api = api
+        .route(
+            "/test/jupiter-upstream/config",
+            axum::routing::post(jupiter_stub_configure),
+        )
+        .route(
+            "/test/jupiter-upstream/swap/v1/quote",
+            axum::routing::get(jupiter_stub_quote),
+        )
+        .route(
+            "/test/jupiter-upstream/swap/v1/swap",
+            axum::routing::post(jupiter_stub_swap),
+        )
+        .route(
+            "/test/jupiter-upstream/hits",
+            axum::routing::get(jupiter_stub_hits),
         );
 
     // `GET /api/v1/swap_quote` — the delegated-conversion PoC's venue quote (spec 2026-09-07
@@ -1186,6 +1257,228 @@ async fn sideshift_stub_hits() -> Response {
             "bareCalls": SIDESHIFT_STUB_BARE_CALLS.load(Ordering::Relaxed),
             "quoteCalls": SIDESHIFT_STUB_QUOTE_CALLS.load(Ordering::Relaxed),
             "shiftCalls": SIDESHIFT_STUB_SHIFT_CALLS.load(Ordering::Relaxed),
+        })),
+    )
+        .into_response()
+}
+
+// --- test-only JUPITER upstream (the keyless venue's offline stand-in) ---------------------------
+//
+// The lite-api wire shapes the app's client actually reads (verified live 2026-09-14,
+// docs/specs/2026-09-14-swap-venue-feasibility.md): GET /swap/v1/quote answers 200 with
+// {inputMint, outputMint, inAmount, outAmount, otherAmountThreshold, priceImpact, slippageBps,
+// platformFee}; POST /swap/v1/swap answers 200 with {swapTransaction: <base64>,
+// lastValidBlockHeight}. The stub ECHOES the request's own params where the real venue does
+// (inputMint/outputMint/inAmount/slippageBps) and serves the quote figures the flow
+// configured, so the app's shape validation and the flow's UI assertions run against exactly
+// the field names the real venue uses. State is process-global statics (the repo's stub
+// idiom): every flow gets a fresh relay process, so counters start at zero per flow.
+//
+// `unexpected` stays an ALWAYS-EMPTY array only to keep the old page-stub state shape — the
+// stray-device-direct-dial watch it used to own is structural now (the app has no
+// device-direct Jupiter path left to go stray; jest pins that).
+
+/// The canned quote figures + swap-tx answer a flow arms via `POST …/config`.
+#[cfg(feature = "test-helpers")]
+struct JupiterStubConfig {
+    out_amount: String,
+    other_amount_threshold: String,
+    price_impact: Option<String>,
+    user_public_key: String,
+    tx_b64: String,
+    last_valid_block_height: u64,
+}
+
+#[cfg(feature = "test-helpers")]
+static JUPITER_STUB_CONFIG: std::sync::Mutex<Option<JupiterStubConfig>> =
+    std::sync::Mutex::new(None);
+/// Every quote arrival, in order — {inputMint, outputMint, amount, slippageBps} (raw query
+/// strings, exactly what the app sent). This is the flow's proof the quote went THROUGH the
+/// relay's proxy, and (with the proxy's own cache upstream of here) that identical quotes
+/// within the TTL share one upstream call.
+#[cfg(feature = "test-helpers")]
+static JUPITER_STUB_QUOTE_CALLS: std::sync::Mutex<Vec<serde_json::Value>> =
+    std::sync::Mutex::new(Vec::new());
+/// Every swap arrival, in order — {userPublicKey, wrapAndUnwrapSol, asLegacyTransaction}.
+#[cfg(feature = "test-helpers")]
+static JUPITER_STUB_SWAP_CALLS: std::sync::Mutex<Vec<serde_json::Value>> =
+    std::sync::Mutex::new(Vec::new());
+/// The quoteResponse object the app posted back with its LAST swap build (the flow pins
+/// that the device round-trips Jupiter's own quote verbatim).
+#[cfg(feature = "test-helpers")]
+static JUPITER_STUB_LAST_QUOTE_RESPONSE: std::sync::Mutex<Option<serde_json::Value>> =
+    std::sync::Mutex::new(None);
+/// Set when a swap arrived whose userPublicKey differs from the configured one (an app bug
+/// the flow asserts absent — the page stub's userMismatch role).
+#[cfg(feature = "test-helpers")]
+static JUPITER_STUB_USER_MISMATCH: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// `POST /api/v1/test/jupiter-upstream/config` `{quote: {outAmount, otherAmountThreshold,
+/// priceImpact?}, userPublicKey, txB64, lastValidBlockHeight}` → `{ok: true}` — arm the
+/// canned answers. Required before the stub serves anything: an unconfigured stub answers
+/// 503 rather than inventing a quote.
+#[cfg(feature = "test-helpers")]
+async fn jupiter_stub_configure(Json(req): Json<serde_json::Value>) -> Response {
+    let Some(quote) = req.get("quote") else {
+        return err(StatusCode::BAD_REQUEST, "stub config needs `quote`");
+    };
+    let (Some(out_amount), Some(threshold)) = (
+        quote.get("outAmount").and_then(|v| v.as_str()),
+        quote.get("otherAmountThreshold").and_then(|v| v.as_str()),
+    ) else {
+        return err(
+            StatusCode::BAD_REQUEST,
+            "stub config quote needs string outAmount + otherAmountThreshold",
+        );
+    };
+    let Some(user_public_key) = req.get("userPublicKey").and_then(|v| v.as_str()) else {
+        return err(StatusCode::BAD_REQUEST, "stub config needs userPublicKey");
+    };
+    let Some(tx_b64) = req.get("txB64").and_then(|v| v.as_str()) else {
+        return err(StatusCode::BAD_REQUEST, "stub config needs txB64");
+    };
+    let Some(height) = req.get("lastValidBlockHeight").and_then(|v| v.as_u64()) else {
+        return err(StatusCode::BAD_REQUEST, "stub config needs lastValidBlockHeight");
+    };
+    *JUPITER_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner()) = Some(JupiterStubConfig {
+        out_amount: out_amount.to_string(),
+        other_amount_threshold: threshold.to_string(),
+        price_impact: quote
+            .get("priceImpact")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        user_public_key: user_public_key.to_string(),
+        tx_b64: tx_b64.to_string(),
+        last_valid_block_height: height,
+    });
+    (StatusCode::OK, Json(serde_json::json!({"ok": true}))).into_response()
+}
+
+/// `GET /api/v1/test/jupiter-upstream/swap/v1/quote` — the venue's quote shape, echoing the
+/// request's own params. The proxy hands us the CANONICAL (sorted) query, so parse pairs by
+/// name; percent-encoding is a no-op for mints (base58) and digit amounts.
+#[cfg(feature = "test-helpers")]
+async fn jupiter_stub_quote(axum::extract::RawQuery(raw): axum::extract::RawQuery) -> Response {
+    let params: Vec<(String, String)> = raw
+        .unwrap_or_default()
+        .split('&')
+        .filter_map(|pair| pair.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
+        .collect();
+    let get = |name: &str| {
+        params
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.clone())
+    };
+    let record = serde_json::json!({
+        "atMs": crate::now_millis(),
+        "inputMint": get("inputMint").unwrap_or_default(),
+        "outputMint": get("outputMint").unwrap_or_default(),
+        "amount": get("amount").unwrap_or_default(),
+        "slippageBps": get("slippageBps").unwrap_or_default(),
+    });
+    JUPITER_STUB_QUOTE_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(record);
+
+    let cfg = JUPITER_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(cfg) = cfg.as_ref() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stub upstream not configured: POST /api/v1/test/jupiter-upstream/config first",
+        );
+    };
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "inputMint": get("inputMint").unwrap_or_default(),
+            "outputMint": get("outputMint").unwrap_or_default(),
+            "inAmount": get("amount").unwrap_or_default(),
+            "outAmount": cfg.out_amount,
+            "otherAmountThreshold": cfg.other_amount_threshold,
+            "priceImpact": cfg.price_impact,
+            "slippageBps": get("slippageBps").and_then(|v| v.parse::<u64>().ok()),
+            "platformFee": serde_json::Value::Null,
+        })),
+    )
+        .into_response()
+}
+
+/// `POST /api/v1/test/jupiter-upstream/swap/v1/swap` — the venue's swap-tx shape, bound to
+/// the configured answer. Records what the app posted (the quoteResponse round-trip pin)
+/// and flags a userPublicKey mismatch against the configured one.
+#[cfg(feature = "test-helpers")]
+async fn jupiter_stub_swap(body: axum::body::Bytes) -> Response {
+    let req: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => return err(StatusCode::BAD_REQUEST, "stub upstream: body is not JSON"),
+    };
+    JUPITER_STUB_SWAP_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(serde_json::json!({
+            "atMs": crate::now_millis(),
+            "userPublicKey": req.get("userPublicKey").cloned().unwrap_or(serde_json::Value::Null),
+            "wrapAndUnwrapSol": req.get("wrapAndUnwrapSol").cloned().unwrap_or(serde_json::Value::Null),
+            "asLegacyTransaction": req.get("asLegacyTransaction").cloned().unwrap_or(serde_json::Value::Null),
+        }));
+    if let Some(qr) = req.get("quoteResponse") {
+        *JUPITER_STUB_LAST_QUOTE_RESPONSE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(qr.clone());
+    }
+    let cfg = JUPITER_STUB_CONFIG.lock().unwrap_or_else(|p| p.into_inner());
+    let Some(cfg) = cfg.as_ref() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stub upstream not configured: POST /api/v1/test/jupiter-upstream/config first",
+        );
+    };
+    let user = req.get("userPublicKey").and_then(|v| v.as_str()).unwrap_or("");
+    if user != cfg.user_public_key {
+        *JUPITER_STUB_USER_MISMATCH.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(format!("{user} != {}", cfg.user_public_key));
+    }
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "swapTransaction": cfg.tx_b64,
+            "lastValidBlockHeight": cfg.last_valid_block_height,
+        })),
+    )
+        .into_response()
+}
+
+/// `GET /api/v1/test/jupiter-upstream/hits` — every arrival, for the flows' assertions:
+/// quoteCalls/swapCalls (in order), the last posted quoteResponse, any userPublicKey
+/// mismatch, and `unexpected` (always empty — see the section comment).
+#[cfg(feature = "test-helpers")]
+async fn jupiter_stub_hits() -> Response {
+    let quote_calls = JUPITER_STUB_QUOTE_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let swap_calls = JUPITER_STUB_SWAP_CALLS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let last_quote_response = JUPITER_STUB_LAST_QUOTE_RESPONSE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let user_mismatch = JUPITER_STUB_USER_MISMATCH
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "quoteCalls": quote_calls,
+            "swapCalls": swap_calls,
+            "lastQuoteResponse": last_quote_response,
+            "userMismatch": user_mismatch,
+            "unexpected": [],
         })),
     )
         .into_response()

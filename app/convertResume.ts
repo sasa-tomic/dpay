@@ -681,7 +681,7 @@ export async function confirmCrossRailSolLeg(id: string): Promise<ConvertRecord 
   const rec = state.records.get(id);
   const ctx = state.ctx;
   if (rec == null || ctx == null || rec.step !== 'sol_ready') return null;
-  const next = await prepareCrossRailSolLeg(ctx.secretHex, rec);
+  const next = await prepareCrossRailSolLeg(ctx.secretHex, rec, ctx.relayUrl);
   await commit(next);
   void driveOne(id);
   return next;

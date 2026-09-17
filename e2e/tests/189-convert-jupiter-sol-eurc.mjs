@@ -11,23 +11,26 @@
 //      exact behavior flow 185 pinned on the one-venue surface.
 //   2. THE PICK RE-TARGETS THE PAIR. Selecting the EURC row flips the heading to SOL→EURC and
 //      every quote GET afterwards asks for the EURC mint from the `jupiter-eurc` venue's pair.
-//   3. THE QUOTE IS STILL JUPITER'S OWN, DEVICE-DIRECT, VERBATIM — the same rules flow 185
-//      holds for USDC: receive estimate = outAmount, minimum = otherAmountThreshold, impact =
-//      the published figure, attribution + clock, https endpoint shown.
+//   3. THE QUOTE IS STILL JUPITER'S OWN, VERBATIM, THROUGH THE WALLET'S RELAY — the same
+//      rules flow 185 holds for USDC: receive estimate = outAmount, minimum =
+//      otherAmountThreshold, impact = the published figure, attribution + clock, https
+//      endpoint shown.
 //   4. WHAT MOVES IS THE VENUE'S OWN TRANSACTION, SIGNED BY THE DEVICE — the beneficiary red
 //      line now checked against the user's own EURC ATA, exactly one broadcast, the SOL rail's
 //      own RPC path, and the done panel reports the REALIZED on-chain EURC credit.
 //
-// Offline stand-ins are flow 185's exact seams: the in-page Jupiter fetch stub on
-// lite-api.jup.ag (fail-closed on every other origin) and the __DPAY_TEST_SOLANA_RPC_STUB, with
+// Offline stand-ins are flow 185's exact seams: the relay's Jupiter test-stub upstream
+// (harness/jupiter.mjs configures it — the dials go through dpay's relay proxy) and the
+// __DPAY_TEST_SOLANA_RPC_STUB, with
 // the getTransaction detail carrying the EURC mint row (the realized-payout oracle matches the
 // record's own out mint).
 import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
-  installJupiterStub, jupiterStubState, EURC_MINT, WRAPPED_SOL_MINT,
+  configureJupiterStub, jupiterStubState, EURC_MINT, WRAPPED_SOL_MINT,
 } from '../harness/jupiter.mjs';
 import {bs58Encode} from '../harness/soltx.mjs';
+import {startRelay} from '../harness/relay.mjs';
 
 /** 1 SOL in, Jupiter's own 84.12 EURC out, floor 83 — the deterministic quote digits. */
 const IN_LAMPORTS = '1000000000';
@@ -38,9 +41,9 @@ export const meta = {
   id: '189',
   name: 'convert-jupiter-sol-eurc',
   journey: 'convert',
-  covers: ['convert', 'solana-rail', 'venue:jupiter-eurc', 'out-destination', 'quote-verbatim', 'device-direct',
+  covers: ['convert', 'solana-rail', 'venue:jupiter-eurc', 'out-destination', 'quote-verbatim', 'relay-proxy',
     'beneficiary-check', 'execution', 'fees-honest', 'one-broadcast'],
-  verifies: 'With two Jupiter venues registered (jupiter, jupiter-eurc) the SOL convert surface renders an out-destination picker with one row per venue in registry order, the FIRST (USDC) preselected — the one-venue behavior unchanged — and picking the EURC row re-targets the pair: every quote GET asks wrapped-SOL → EURC on the jupiter-eurc venue. The EURC quote is device-direct and verbatim (estimate, floor, impact, attribution, https endpoint), confirm re-quotes, POSTs the verbatim quoteResponse, verifies the venue-built legacy tx against the user\'s own EURC ATA, signs on device, broadcasts exactly one transaction, and the done panel reports the REALIZED on-chain EURC credit with the payout record signature.',
+  verifies: 'With two Jupiter venues registered (jupiter, jupiter-eurc) the SOL convert surface renders an out-destination picker with one row per venue in registry order, the FIRST (USDC) preselected — the one-venue behavior unchanged — and picking the EURC row re-targets the pair: every quote GET asks wrapped-SOL → EURC on the jupiter-eurc venue. The EURC quote rides dpay\'s relay Jupiter proxy and is verbatim (estimate, floor, impact, attribution, https endpoint), confirm re-quotes, POSTs the verbatim quoteResponse, verifies the venue-built legacy tx against the user\'s own EURC ATA, signs on device, broadcasts exactly one transaction, and the done panel reports the REALIZED on-chain EURC credit with the payout record signature.',
   timeoutMs: 120000,
 };
 
@@ -88,8 +91,16 @@ async function installSolRpcStub(driver, cfg) {
 
 export async function run() {
   const env = await setup({solStub: true});
+  // OWN relay: the Jupiter stub is SERVER-side state on the relay this page dials, and the
+  // setup relay is SHARED across lanes — two convert flows running concurrently would write
+  // into each other's stub (observed 2026-09-17: this flow's stub read carried another flow's
+  // swap POST, a different wallet's key, 15s apart). An own relay isolates config + records.
+  const r2 = await startRelay();
   try {
-    const {driver, relayBaseURL, webBaseURL} = env;
+    const {driver, webBaseURL} = env;
+    const page = `/?relay=${encodeURIComponent(r2.baseURL)}`;
+    await driver.navigate(webBaseURL, page, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await driver.waitReady({timeoutMs: 8_000});
     await onboardWallet(driver, 'e2e-jupiter-sol-eurc');
 
     // Prebuild the venue's deterministic reply for THIS wallet, EURC side: the tx's SPL
@@ -102,9 +113,8 @@ export async function run() {
     const rpcDetail = solConvertTxDetail({userPublicKey: kp.address, userAta: ataB58, outAmount: Number(OUT_EURC), mint: EURC_MINT});
 
     await installSolRpcStub(driver, {rpcDetail});
-    await installJupiterStub(driver, {
-      passOrigins: [new URL(relayBaseURL).origin, new URL(webBaseURL).origin],
-      quote: {outAmount: OUT_EURC, otherAmountThreshold: FLOOR_EURC, priceImpact: '0.003', slippageBps: 100},
+    await configureJupiterStub(r2.baseURL, {
+      quote: {outAmount: OUT_EURC, otherAmountThreshold: FLOOR_EURC, priceImpact: '0.003'},
       userPublicKey: kp.address,
       txBytes,
       lastValidBlockHeight: 300000000,
@@ -126,14 +136,17 @@ export async function run() {
     await driver.click('convert-sol-dest-EURC', {timeoutMs: 3_000});
     assertIncludes(await driver.readText('convert-screen'), 'Convert SOL to EURC', 'the heading names the picked pair');
 
-    // §3 — Jupiter's own digits for the EURC pair, device-direct, verbatim.
+    // §3 — Jupiter's own digits for the EURC pair, verbatim through the relay proxy.
     await driver.type('convert-amount', '1');
-    assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (device-direct https fetch)');
+    assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (through the relay proxy)');
     assertIncludes(await driver.readText('convert-quote-source'), 'Jupiter', 'attribution names the venue');
     assertIncludes(await driver.readText('convert-quote-source'), 'fetched', 'attribution carries the read instant');
     assertIncludes(await driver.readText('convert-headline'), '84.12 EURC', 'receive estimate is outAmount verbatim');
     assertIncludes(await driver.readText('convert-min-out'), '83 EURC', 'minimum is otherAmountThreshold verbatim');
     assertIncludes(await driver.readText('convert-min-out'), '1% slippage', 'slippage choice shown (default 1%)');
+    // The census folds behind the ONE Details control (10x-verbosity pass 2026-09-16); the
+    // fee-note + dpay lines are gone; the headline IS the end state.
+    await driver.click('convert-details', {timeoutMs: 5_000});
     assertIncludes(await driver.readText('convert-rate'), '84.12', 'rate is the only derived figure (BigInt, cross-decimal 9→6)');
     assertIncludes(await driver.readText('convert-pool-principal'), 'https://lite-api.jup.ag', 'the venue https endpoint is shown');
     assertIncludes(await driver.readText('convert-counterparty'), 'Jupiter', 'counterparty line names the venue');
@@ -141,9 +154,12 @@ export async function run() {
     assertIncludes(await driver.readText('convert-venue-disclosure'), 'autonomous on-chain aggregator', 'byKey.jupiter disclosure (shared key with the USDC venue)');
     assertIncludes(await driver.readText('convert-venue-disclosure'), 'not a party', 'dpay party-hood denied');
     assertIncludes(await driver.readText('convert-sol-impact'), '0.003', 'price impact is Jupiter\'s own figure, unmodified');
-    assertIncludes(await driver.readText('convert-sol-fees-note'), 'inside the quoted output', 'route-fee placement stated');
-    assertIncludes(await driver.readText('convert-dpay-fee'), 'dpay charges nothing and is paid nothing', 'dpay paid-nothing line');
-    assertIncludes(await driver.readText('convert-net'), '84.12 EURC', 'net end state is the quoted output');
+    assert(await driver.findByTestID('convert-sol-fees-note', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the route-fee note is gone (verbosity pass 2026-09-16)');
+    assert(await driver.findByTestID('convert-dpay-fee', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the dpay paid-nothing line is gone (verbosity pass 2026-09-16)');
+    assert(await driver.findByTestID('convert-net', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the net end-state line is gone (verbosity pass 2026-09-16): the headline IS the end state');
     assertIncludes(await driver.readText('convert-balance'), '5 SOL', 'balance line is the SOL rail balance');
     await driver.screenshot('189-convert-sol-eurc-checklist');
 
@@ -162,11 +178,11 @@ export async function run() {
     assert(sent[0].signature.length >= 32 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(sent[0].signature), 'the broadcast signature is the device-signed tx signature (base58)');
     assertIncludes(done, sent[0].signature, 'the payout record IS that signature');
 
-    const jup = await jupiterStubState(driver);
+    const jup = await jupiterStubState(r2.baseURL);
     assert(jup != null, 'jupiter stub state present');
-    assertEq(jup.unexpected.length, 0, `no fetch left the passed origins (unexpected: ${jup.unexpected.join(', ')})`);
+    assertEq(jup.unexpected.length, 0, 'no unexpected upstream requests recorded');
     assert(jup.userMismatch == null, 'the swap POST carried THIS wallet\'s SOL address');
-    assertEq(jup.swapCalls.length, 1, 'exactly one swap POST');
+    assertEq(jup.swapCalls.length, 1, `exactly one swap POST (saw: ${JSON.stringify(jup.swapCalls)})`);
     assertEq(jup.swapCalls[0].asLegacyTransaction, true, 'the app asked for the verifiable legacy shape');
     assertEq(jup.swapCalls[0].wrapAndUnwrapSol, true, 'native SOL routed via wrap/unwrap');
     assertEq(jup.lastQuoteResponse.inAmount, IN_LAMPORTS, 'POST body carried the VERBATIM quote (inAmount)');
@@ -184,6 +200,7 @@ export async function run() {
     console.log(`GREEN 189 — SOL→EURC(Solana) via jupiter-eurc through the out-destination picker: default unchanged, pick re-targets the pair, quote verbatim, device-signed venue tx, one broadcast, realized credit 84.12 EURC (sig ${sent[0].signature.slice(0, 12)}…)`);
   } finally {
     await env.stop();
+    await r2.stop();
   }
 }
 

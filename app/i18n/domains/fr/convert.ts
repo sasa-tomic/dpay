@@ -18,22 +18,18 @@ export const convertFr: ConvertMessages = {
   amountLabel: sym => `Montant (${sym})`,
   balanceLine: balance => `Solde : ${balance}`,
   receiveHeadline: 'Tu recevras',
-  counterparty: venue =>
-    `Exécuté par le pool ${venue} — un contrat autonome on-chain, pas un prestataire agréé et pas dpay.`,
+  counterparty: venue => `Exécuté par le pool ${venue}.`,
   counterpartySigns: 'Ton téléphone signe ; le pool prélève exactement le montant approuvé.',
   quoteSource: (at, venue) => `Devis ${venue}, récupéré ${at}`,
   rateLabel: (inSym, outSym) => `Taux de ce devis (${inSym} → ${outSym})`,
   poolFeeTier: (tier, venue) => `Frais du pool : ${tier} (palier ${venue})`,
   inputFeeLine: fee => `Frais d'entrée : ${fee}`,
   outputFeeLine: fee => `Frais de sortie : ${fee}`,
-  dpayFeeLine: 'dpay ne prend rien et ne reçoit rien pour cela.',
   disclosures: {
     byKey: {
       // disclosure_key 'icpswap' (la clé du registre pour les pools ICPSwap) : le fait propre à
-      // la venue est OÙ tourne l'échange — son propre contrat de pool, signé par l'utilisateur,
-      // dpay n'est pas partie.
-      icpswap: venue =>
-        `L'échange s'exécute sur le propre contrat de pool de ${venue}. Chaque appel est signé par toi et envoyé directement — ${venue} exécute l'échange, et dpay n'en est pas partie.`,
+      // la venue est OÙ tourne l'échange — son propre contrat de pool.
+      icpswap: venue => `L'échange s'exécute sur le propre contrat de pool de ${venue}.`,
       // disclosure_key 'jupiter' (la clé du registre pour la ligne de la venue Solana) : les faits
       // propres à la venue sont CE qu'est Jupiter — un agrégateur on-chain autonome — et que le
       // devis est le sien, affiché tel qu'il le publie, tandis que dpay reste hors de l'échange.
@@ -48,35 +44,31 @@ export const convertFr: ConvertMessages = {
       sideshift: venue =>
         `${venue} est un service d'échange automatisé — ni un prestataire agréé, ni une banque. Il détient tes fonds pendant l'échange, puis paie vers ta propre adresse ; ses conditions, y compris d'éventuelles vérifications d'identité selon sa politique, sont publiées sur sideshift.ai/terms. Ce portefeuille t'affiche le devis propre de ${venue} et l'adresse de dépôt, et dpay ne signe rien. dpay n'est pas partie à l'échange et ne touche rien.`,
     },
-    generic: venue =>
-      `Cette conversion est exécutée par ${venue}. Chaque appel est signé par toi et envoyé directement — dpay n'en est pas partie.`,
+    generic: venue => `Cette conversion est exécutée par ${venue}.`,
   },
   slippageLabel: 'Slippage',
   minReceiveLine: (amount, pct) => `Minimum garanti : ${amount} (${pct} de slippage)`,
   refusalLine: sym =>
     `Si le prix du pool dépasse ton minimum, l'échange échoue : ton ${sym} reste dans ton portefeuille et l'autorisation expire sans être utilisée.`,
-  netEndStateLine: amount => `Résultat final : ${amount} attendus dans ton portefeuille, nets de tous les frais.`,
+  detailsLabel: 'Détails',
   confirmButton: 'Actualiser le devis et confirmer',
   staleRefreshing: 'Devis périmé — actualisation…',
   quoteChanged: (oldAmt, newAmt) => `Le devis a changé : ${oldAmt} → ${newAmt}. Vérifie et confirme à nouveau.`,
   venueChooserLabel: 'Plateforme',
   venueNoneSelected: 'Choisis une plateforme pour voir son devis complet et continuer.',
-  venueRowQuote: amount => `Devis : ${amount}`,
 
   sol: {
     heading: (inSym, outSym) => `Convertir ${inSym} en ${outSym} (Solana)`,
     unavailableTitle: sym => `${sym} ne peut pas encore être converti`,
     unavailableBody: (sym, venue) =>
       `Les conversions d'actifs Solana passent par une venue Solana enregistrée (${venue} aujourd'hui). Aucune venue ne sert ${sym} pour l'instant — rien n'a été proposé, rien n'a bougé.`,
-    counterparty: venue =>
-      `Exécuté par ${venue} — un agrégateur on-chain autonome sur Solana, pas un fournisseur agréé et pas dpay.`,
+    counterparty: venue => `Exécuté par ${venue}.`,
     counterpartySigns: 'Ton téléphone signe la transaction que la venue a construite — personne d\u2019autre ne signe rien.',
     priceImpactLine: (pct, venue) => `Impact sur le prix : ${pct} (chiffre propre de ${venue})`,
     platformFeeLine: (pct, venue) => `Frais d'intégrateur ${venue} : ${pct}`,
     solFeeLine: fee => `Frais de réseau Solana : ${fee} (payés au réseau, pas à la venue, pas à dpay)`,
     refusalLine: sym =>
       `Si le prix dépasse le minimum, la transaction échoue on-chain : ton ${sym} reste dans ton portefeuille et rien d'autre n'a été signé.`,
-    quoteFeesNote: 'Les frais de route sont déjà dans le montant devisé — rien ne s\u2019ajoute par-dessus.',
     pendingBody:
       'La transaction d\u2019échange est sur le réseau Solana. Cet écran observe la chaîne elle-même et se résout de lui-même — sans recharger, sans réessayer.',
     failedBody: (sym, venue, detail) =>
@@ -102,15 +94,15 @@ export const convertFr: ConvertMessages = {
   doneTx: tx => `Référence du versement : ${tx}`,
   pendingTitle: 'Versement en attente',
   pendingBody: (sym, pool, at) =>
-    `Le pool a accepté l'échange, mais le versement en ${sym} n'est pas encore arrivé dans ton portefeuille. Cet écran continue de surveiller — rien à faire pour l'instant. dpay ne peut ni annuler ni accélérer le versement. S'il n'arrive jamais, communique ceci au support : pool ${pool}, échange envoyé à ${at}.`,
+    `Le pool a accepté l'échange, mais le versement en ${sym} n'est pas encore arrivé dans ton portefeuille. Cet écran continue de surveiller — rien à faire pour l'instant. S'il n'arrive jamais, communique ceci au support : pool ${pool}, échange envoyé à ${at}.`,
   stillWatching: 'Toujours en attente du versement…',
   failedTitle: 'Échange non exécuté',
   failedApproveBody: sym =>
     `Le ledger ${sym} a refusé l'approbation, donc rien n'a bougé — tu possèdes toujours chaque unité de ton ${sym}. Aucune autorisation n'a été créée ; rien à rembourser ni à annuler.`,
   failedSwapBody: (reason, sym, venue) =>
-    `Le pool ${venue} a refusé l'échange (${reason}). Ton ${sym} n'a jamais quitté ton portefeuille. dpay ne peut ni l'annuler ni le retenter pour toi ; rien d'autre n'est nécessaire.`,
+    `Le pool ${venue} a refusé l'échange (${reason}). Ton ${sym} n'a jamais quitté ton portefeuille — rien d'autre n'est nécessaire.`,
   refundedBody: sym =>
-    `L'échange a échoué et le pool t'a rendu ton ${sym} — ton solde est de nouveau intact. dpay ne peut rien annuler ici.`,
+    `L'échange a échoué et le pool t'a rendu ton ${sym} — ton solde est de nouveau intact.`,
   stuckTitle: 'Issue inconnue',
   stuckBody:
     'L’échange a été envoyé, mais la réponse du pool n’est pas arrivée. Ne lance pas un second échange avec les mêmes fonds. Si le versement arrive, cet écran passera tout seul à « Converti ».',
@@ -126,13 +118,13 @@ export const convertFr: ConvertMessages = {
     `${venue} a émis cette commande et attend son dépôt en ${sym}. L'échange s'exécute quand le prestataire voit le dépôt ; dpay continue de surveiller son statut. Si aucun dépôt n'arrive à temps, le devis expire et rien ne bouge.`,
   providerProcessingTitle: 'Traitement chez le prestataire',
   providerProcessingBody: (sym, venue) =>
-    `${venue} détient le dépôt et exécute la commande. Ton ${sym} arrive quand le prestataire la termine — dpay ne peut ni l'annuler ni l'accélérer, et continue de surveiller jusqu'à sa résolution.`,
+    `${venue} détient le dépôt et exécute la commande. Ton ${sym} arrive quand le prestataire la termine — dpay continue de surveiller jusqu'à sa résolution.`,
   quoteExpiredTitle: 'Devis expiré',
   quoteExpiredBody: (sym, venue) =>
     `Le devis a expiré avant qu'une valeur ne bouge : ${venue} n'a jamais reçu le dépôt, donc rien n'a été échangé et rien n'est à annuler. Ton ${sym} est resté là où il était — lance une nouvelle conversion si tu en veux toujours une.`,
   providerRefundedTitle: 'Remboursé par le prestataire',
   providerRefundedBody: (sym, venue) =>
-    `${venue} a annulé cette commande et retourné le dépôt. Surveille le retour de ton ${sym} — dpay ne peut ni annuler ni accélérer le remboursement du prestataire.`,
+    `${venue} a annulé cette commande et retourné le dépôt. Surveille le retour de ton ${sym}.`,
   stuckWatching: 'dpay continue de surveiller ceci en arrière-plan. Si le paiement ou le remboursement arrive, cet écran bascule tout seul.',
   stuckAcknowledge: 'Compris — arrêter la surveillance',
   stuckAcknowledged: 'Tu en as pris note et la surveillance en arrière-plan est arrêtée. Si des fonds bougent plus tard, ils arriveront toujours à l\u2019adresse de ce portefeuille.',
@@ -141,7 +133,6 @@ export const convertFr: ConvertMessages = {
     destLabel: 'Destination',
     destDirect: sym => `${sym} — dans ce portefeuille (échange direct)`,
     destRoute: (sym, network) => `${sym} sur ${network} — route échange + retrait`,
-    routeNote: 'Une seule route est enregistrée pour cette paire aujourd\u2019hui — montrée ici, jamais choisie à ta place.',
     destAddressLabel: 'Ta propre adresse sur le réseau de destination',
     destAddressInvalid: 'Adresse de destination invalide — attendu : 0x suivi de 40 caractères hexadécimaux.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route : ${inSym} → ${hopSym} → ${destSym} sur ${network}`,
@@ -231,7 +222,7 @@ export const convertFr: ConvertMessages = {
     viewCircle: 'Page d\u2019état de Circle',
     stillCrossing: 'L\u2019attestation n\u2019est pas encore prête. Cela reste en attente — ce n\u2019est pas un échec. Sur la voie rapide, comptes des secondes à des minutes ; Ethereum congestionné, plus longtemps.',
     solReadyTitle: 'Les USDC sont arrivés sur Solana',
-    solReadyBody: (credit, ata) => `${credit} USDC sont à ${ata}, vérifié on-chain. Termine la route — ou laisse les USDC là, ils sont à toi dans les deux cas.`,
+    solReadyBody: (credit, ata) => `${credit} sont à ${ata}, vérifié on-chain. Termine la route — ou laisse les USDC là, ils sont à toi dans les deux cas.`,
     solQuoteLabel: venue => `Devis ${venue} (en direct)`,
     solMinLine: min => `Au moins ${min} SOL à ton adresse`,
     solConfirmButton: 'Échanger contre du SOL',

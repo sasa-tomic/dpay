@@ -241,17 +241,19 @@ export async function run() {
     }
     await driver.screenshot(SURFACES[6].capture);
 
-    // The checklist under a pick: click the REAL venue row, wait for the math to derive (net is
-    // the last derived line) and the quote attribution to render, then capture — anchored at the
-    // CHECKLIST card (scrollIntoView block:'start'), not the page top: the fee lines
-    // (counterparty → net) are the surface under contract, and they render below the headline +
-    // venue rows. Everything above the anchor is fully off-frame, so no clock text can leak in;
-    // the quote-source mask stays as a safety net (it self-skips when off-frame).
+    // The checklist under a pick: click the REAL venue row, wait for the math to derive (the
+    // minimum is the last MAIN-surface line) and the quote attribution to render, then
+    // capture — anchored at the CHECKLIST card (scrollIntoView block:'start'), not the page
+    // top: the compact decision surface (slippage → minimum → Details control) is under
+    // contract and renders below the headline + venue rows. Everything above the anchor is
+    // fully off-frame, so no clock text can leak in; the quote-source mask stays as a safety
+    // net (it self-skips when off-frame). (10x-verbosity pass 2026-09-16: convert-net is gone
+    // and the fee census folds behind the convert-details control — the main surface shrank.)
     await driver.click('convert-venue-icpswap', {timeoutMs: 5_000});
-    await driver.findByTestID('convert-net', {timeoutMs: 10_000});
+    await driver.findByTestID('convert-min-out', {timeoutMs: 10_000});
     await driver.findByTestID('convert-quote-source', {timeoutMs: 5_000});
     await driver.eval(() => {
-      document.querySelector('[data-testid="convert-counterparty"]').scrollIntoView({block: 'start'});
+      document.querySelector('[data-testid="convert-min-out"]').scrollIntoView({block: 'start'});
     });
     await driver.settleFrames(3);
     for (const tid of SURFACES[7].masksFromTestIDs) {
@@ -284,8 +286,9 @@ export async function run() {
     console.log(`[40-visual-regression] GREEN in ${elapsed}s (0 diffs > ${TOLERANCE_PCT}%)`);
     assert(true, 'visual regression passed');
   } finally {
-    await r2.stop();
+    // env.stop() first (flow-38 convention): quiesce the page's polls before killing the relay.
     await env.stop();
+    await r2.stop();
   }
 }
 

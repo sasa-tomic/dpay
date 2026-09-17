@@ -5062,8 +5062,8 @@ async fn venue_surface_is_query_only_in_the_agent_build() {
     assert_eq!(v1, v2, "GET /venues is a pure read in the agent build");
     assert_eq!(
         v1["venues"].as_array().map(Vec::len),
-        Some(11),
-        "exactly eleven real venues (seven IC pools + two Jupiter + two SideShift) are served \
+        Some(10),
+        "exactly ten real venues (six IC pools + two Jupiter + two SideShift) are served \
          in the agent build"
     );
     assert_eq!(v1["venues"][0]["venue_id"], "icpswap");
@@ -5358,8 +5358,8 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     let served = body["venues"].as_array().expect("venues is an array");
     assert_eq!(
         served.len(),
-        11,
-        "exactly eleven real venues are served today (seven IC pools + two Jupiter + two \
+        10,
+        "exactly ten real venues are served today (six IC pools + two Jupiter + two \
          SideShift)"
     );
     assert_eq!(
@@ -5374,7 +5374,6 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
             "icpswap-ckbtc",
             "icpswap-ckbtc-cketh",
             "icpswap-vchf-ckusdc",
-            "icpswap-ckusdc-cketh",
             "jupiter",
             "jupiter-eurc",
             "sideshift",
@@ -5412,7 +5411,7 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     // pair_ledgers. It is listed (the app's SOL convert gate reads exactly this surface) and is
     // NEVER quotable through the IC rail (`venue_of_endpoint` is ic_amm-only — pinned in
     // catalog.rs venue_truth_tests).
-    let jup = &served[7];
+    let jup = &served[6];
     assert_eq!(jup["venue_id"], "jupiter");
     assert_eq!(jup["display_name"], "Jupiter");
     assert_eq!(jup["kind"], "solana_amm");
@@ -5434,7 +5433,7 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     assert_eq!(jup_pair, jup_want, "the pair as an unordered MINT set");
     // The SECOND Solana row (2026-09-16, coverage expansion): the same Jupiter family on the
     // SOL ↔ EURC pair — same kind/endpoint/attribution semantics, a different mint set.
-    let jup_eurc = &served[8];
+    let jup_eurc = &served[7];
     assert_eq!(jup_eurc["venue_id"], "jupiter-eurc");
     assert_eq!(jup_eurc["display_name"], "Jupiter");
     assert_eq!(jup_eurc["kind"], "solana_amm");
@@ -5463,7 +5462,7 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     // venue's own coin/network codes live in the relay's sideshift proxy, not here). It
     // rides the partner-key proxy for quotes/orders and the venue's keyless GET for
     // status — never the IC rail (`venue_of_endpoint` is ic_amm-only, catalog.rs pins).
-    let ss = &served[9];
+    let ss = &served[8];
     assert_eq!(ss["venue_id"], "sideshift");
     assert_eq!(ss["display_name"], "SideShift");
     assert_eq!(ss["kind"], "cefi");
@@ -5490,7 +5489,7 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
     // ICP ↔ USDC(Solana) cross-rail pair — same kind/endpoint/disclosure semantics, a
     // different rail-id set. With its sibling this is the first pair holding two registered
     // routes (this beside the CCTP multihop Route B out of the ckUSDC leg).
-    let ss_usdc = &served[10];
+    let ss_usdc = &served[9];
     assert_eq!(ss_usdc["venue_id"], "sideshift-usdc");
     assert_eq!(ss_usdc["display_name"], "SideShift");
     assert_eq!(ss_usdc["kind"], "cefi");
@@ -5526,13 +5525,13 @@ async fn venues_route_serves_the_real_registry_and_no_fixture_entries() {
 async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let (state, _led, _fake) = state_with_fake(ledger()).await;
 
-    // Default (nothing armed): exactly the eleven real venues (seven IC pools + two Jupiter +
+    // Default (nothing armed): exactly the ten real venues (six IC pools + two Jupiter +
     // two SideShift).
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body["venues"].as_array().map(Vec::len),
-        Some(11),
+        Some(10),
         "the default experience is one venue per PAIR, like prod"
     );
 
@@ -5557,8 +5556,8 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
     let venues = body["venues"].as_array().expect("venues is an array");
     assert_eq!(
         venues.len(),
-        12,
-        "twelve served rows with the knob armed: seven real IC + two Jupiter + two SideShift \
+        11,
+        "eleven served rows with the knob armed: six real IC + two Jupiter + two SideShift \
          + the fixture on its pair"
     );
     // The served list is REGISTRY order (the stable wire order) with the knob arming the
@@ -5576,7 +5575,6 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
             "icpswap-ckbtc",
             "icpswap-ckbtc-cketh",
             "icpswap-vchf-ckusdc",
-            "icpswap-ckusdc-cketh",
             "jupiter",
             "jupiter-eurc",
             "sideshift",
@@ -5591,13 +5589,13 @@ async fn venue_serve_knob_gates_the_fixture_venue_into_the_served_list() {
         "the fixture venue is labelled the invented stand-in it is"
     );
 
-    // Disarm: back to the eleven-real-venue default (teardown parity — e2e flows share one relay).
+    // Disarm: back to the ten-real-venue default (teardown parity — e2e flows share one relay).
     let (status, body) = call(&state, post_venue(false, "icpswap-fixture-b")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["served"], false);
     let (status, body) = call(&state, get_req("/api/v1/venues")).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["venues"].as_array().map(Vec::len), Some(11));
+    assert_eq!(body["venues"].as_array().map(Vec::len), Some(10));
     assert!(!body.to_string().contains(FIXTURE_POOL));
 
     // The knob can neither gate a REAL venue nor invent an unknown one — routing is a

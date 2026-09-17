@@ -117,18 +117,23 @@ export async function run() {
     assert(knob.ok, `swap_pool knob ok (status ${knob.status})`);
 
     // Re-key the amount (driver.type REPLACES the field) → both rows re-fetch their venues.
-    // (fmtAsset renders a zero payout as "0 ICP" — trailing-zero group collapses to "0".)
+    // (The compact formatter renders a zero payout as "0 ICP" — trailing-zero group collapses
+    // to "0" — and the "Quote: " prefix is GONE (verbosity pass 2026-09-16), so the zero-row
+    // probe anchors the WHOLE row text: a bare "0 ICP", never a suffix of a bigger number.
+    // NOTE: the regex must be INLINED inside waitForFunction callbacks — they run in the PAGE
+    // context, where flow-side consts do not exist.)
+    const ZERO_Q = /^0(\.0+)? ICP$/;
     await driver.type('convert-amount', '2');
     await driver.waitForFunction(() => {
       const el = document.querySelector('[data-testid="convert-venue-icpswap-quote"]');
-      return el != null && /Quote: 0(\.0+)? ICP/.test(el.textContent);
+      return el != null && /^0(\.0+)? ICP$/.test(el.textContent.trim());
     }, {timeoutMs: 15_000});
     const aAfter = await driver.readText('convert-venue-icpswap-quote');
     assertIncludes(aAfter, 'ICP', 'the mutated row really re-fetched (its reverse quote is now zero)');
 
     // The fixture venue's OWN quote is untouched by the real pool's knob (nonzero output).
     const bAfter = await driver.readText(`convert-venue-${FIXTURE_VENUE}-quote`);
-    assert(!/Quote: 0(\.0+)? ICP/.test(bAfter), `the other row keeps its own healthy quote ("${bAfter}")`);
+    assert(!ZERO_Q.test(bAfter.trim()), `the other row keeps its own healthy quote ("${bAfter}")`);
     assertIncludes(bAfter, 'ICP', 'and still quotes the reverse output asset');
 
     // THE RED LINE: order unchanged by the mutation + re-fetch…
@@ -167,12 +172,12 @@ export async function run() {
       const a = document.querySelector('[data-testid="convert-venue-icpswap-quote"]');
       const b = document.querySelector('[data-testid="convert-venue-icpswap-fixture-b-quote"]');
       return a != null && b != null
-        && !/Quote: 0(\.0+)? ICP/.test(a.textContent)
-        && /Quote: 0(\.0+)? ICP/.test(b.textContent);
+        && !/^0(\.0+)? ICP$/.test(a.textContent.trim())
+        && /^0(\.0+)? ICP$/.test(b.textContent.trim());
     }, {timeoutMs: 15_000});
     const aRestored = await driver.readText('convert-venue-icpswap-quote');
     assertIncludes(aRestored, 'ICP', 'the real venue restored to a healthy reverse quote');
-    assert(!/Quote: 0(\.0+)? ICP/.test(aRestored), `the real venue is the strictly-better row now ("${aRestored}")`);
+    assert(!ZERO_Q.test(aRestored.trim()), `the real venue is the strictly-better row now ("${aRestored}")`);
 
     const afterOpposite = await rowOrder(driver);
     assertEq(afterOpposite.join('|'), before.join('|'),

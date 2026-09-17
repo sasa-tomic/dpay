@@ -114,10 +114,14 @@ export async function run() {
     const headline = await driver.readText('convert-headline');
     assertIncludes(headline, "You'll receive", 'the screen leads with what the user receives');
     assertIncludes(headline, 'VCHF', 'the headline is in the asset the user ends up holding');
-    assertIncludes(await driver.readText('convert-rate'), 'ICP', 'the rate sits under the headline and names both legs');
-    // The disclosure block is intact and still spells the counterparty on its own line.
+    // The census folds behind the ONE Details control (10x-verbosity pass 2026-09-16): open
+    // it and the rate + pool principal are still spelled on their own lines. The net end-state
+    // line is GONE — the headline number IS the end state; its absence is pinned, not assumed.
+    await driver.click('convert-details', { timeoutMs: 5_000 });
+    assertIncludes(await driver.readText('convert-rate'), 'ICP', 'the rate names both legs');
     assertIncludes(await driver.readText('convert-pool-principal'), '65mrh-fqaaa-aaaar-qapoa-cai', 'the pool principal has a line of its own');
-    assertIncludes(await driver.readText('convert-net'), 'VCHF', 'the §5 end-state disclosure is still rendered');
+    assert(await driver.findByTestID('convert-net', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the net end-state line is gone (verbosity pass 2026-09-16)');
     // Scroll to the top so the capture shows the decision, not the middle of the terms.
     await driver.eval(() => window.scrollTo(0, 0));
     // A money screen may never slide sideways. The amount `<input>`'s intrinsic width used to beat

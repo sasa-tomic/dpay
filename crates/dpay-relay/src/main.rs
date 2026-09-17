@@ -86,6 +86,13 @@
 //!                           old api.sideshift.ai host is NXDOMAIN). The offline loop points
 //!                           it at the relay's own test stub. A set-but-malformed URL
 //!                           refuses startup (EXIT_CONFIG).
+//!   DPAY_JUPITER_API_BASE   the Jupiter API base the quote/swap proxy calls (default
+//!                           `https://lite-api.jup.ag` — the venue's keyless lite host; see
+//!                           src/jupiter.rs, 2026-09-16 founder ask). The venue has NO
+//!                           credential, so this is not a secret and there is no unconfigured
+//!                           state — the routes serve on every build. The offline loop points
+//!                           it at the relay's own test stub. A set-but-malformed URL
+//!                           refuses startup (EXIT_CONFIG).
 
 use std::net::SocketAddr;
 use std::process;
@@ -185,6 +192,14 @@ async fn main() {
         cfg.sideshift_api_base.clone(),
         dpay_relay::sideshift::DEFAULT_TIMEOUT,
     ));
+    // The Jupiter proxy (2026-09-16 founder ask: quotes + swap-tx builds "through our relay
+    // (for caching etc)"). ALWAYS serving — the venue is keyless and the base has a constant
+    // default, so there is no unconfigured branch and no secret: the base may be named
+    // plainly (it carries no credential). See src/jupiter.rs.
+    let state = state.with_jupiter(dpay_relay::jupiter::JupiterProxy::new(
+        cfg.jupiter_api_base.clone(),
+        dpay_relay::jupiter::DEFAULT_TIMEOUT,
+    ));
     // IC-rail cutover (test-helpers / memory mode only): attach the fake-IC `/api/v2` gateway.
     // The app signs envelopes and POSTs them HERE instead of icp-api.io; the gateway verifies the
     // real envelope signature and moves principal-keyed balances. Prod (`agent` mode) never builds
@@ -280,6 +295,14 @@ async fn main() {
             missing.join(" and ")
         );
     }
+
+    println!(
+        "POST /api/v1/jupiter/*: ENABLED — the quote cache + swap pipe against {} \
+         (DPAY_JUPITER_API_BASE, default the venue's keyless lite host). Upstream error \
+         statuses pass through verbatim; transport death answers 504 \
+         jupiter-upstream-unreachable.",
+        cfg.jupiter_api_base
+    );
 
     let listener = tokio::net::TcpListener::bind(cfg.addr)
         .await
@@ -381,6 +404,9 @@ struct Config {
     sideshift_affiliate_id: Option<String>,
     /// The SideShift API base (`DPAY_SIDESHIFT_API_BASE`); default the verified-live host.
     sideshift_api_base: String,
+    /// The Jupiter API base (`DPAY_JUPITER_API_BASE`); default the venue's keyless lite
+    /// host. Not a secret (no credential exists for this venue).
+    jupiter_api_base: String,
 }
 
 impl Config {
@@ -515,6 +541,20 @@ impl Config {
             None => dpay_relay::sideshift::DEFAULT_API_BASE.to_string(),
         };
 
+        // The Jupiter proxy's upstream (2026-09-16 founder ask). There is no "unset" branch
+        // to reason about — the base always exists (the constant default; src/jupiter.rs) —
+        // but a SET-but-malformed URL still refuses startup here rather than surfacing as a
+        // mystery 504 per request. Same ParseError discipline as the other bases: the text
+        // names the defect, never the value.
+        let jupiter_api_base = match non_empty("DPAY_JUPITER_API_BASE") {
+            Some(base) => {
+                reqwest::Url::parse(&base)
+                    .map_err(|e| format!("DPAY_JUPITER_API_BASE is not a valid URL: {e}"))?;
+                base
+            }
+            None => dpay_relay::jupiter::DEFAULT_API_BASE.to_string(),
+        };
+
         Ok(Config {
             addr,
             ledger,
@@ -525,6 +565,7 @@ impl Config {
             sideshift_secret,
             sideshift_affiliate_id,
             sideshift_api_base,
+            jupiter_api_base,
         })
     }
 }

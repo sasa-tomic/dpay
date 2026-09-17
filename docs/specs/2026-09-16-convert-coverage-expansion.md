@@ -94,3 +94,11 @@ Flow 142's unavailable-body assertions re-pin to the derived copy.
 
 `just check` + jest + full `just e2e` + `just swap-venue-probe` (new pools join the standing
 mainnet tripwire via the truth file) — every touched flow re-run; FLOWS.md regenerated.
+
+**Outcome (2026-09-17):** as specced, plus two findings the probe forced. (1) The probe's own
+sizing was per-pair-shape; a 1-whole-ckBTC ask measured honest 12.8% CLMM impact as if it were
+inversion — sizing is now per-ledger (`42996bc`). (2) With sizing honest, the walk measured
+`icpswap-ckusdc-cketh` quoting 0.079× its own published price (it was registered on reserves,
+which are not spot-indicative; its engine contradicts its own metadata) — UNREGISTERED
+(`8ade315`). Final state: ten real venues, all six IC pools at 0.9968–0.9970 both ways,
+`just verify` GREEN, FLOWS.md regenerated.

@@ -89,13 +89,17 @@ export async function run() {
 
     // --- Edge 2: the staleness clock passes ⇒ the figure is marked where the user reads it.-
     // The sheet stays open across the wait. Shrink the Wallet staleness seam FIRST (the edge-1
-    // plain assert above ran against the real 60 s default): 3 s bound + 250 ms tick ⇒ the
-    // marker lands in ~3.5 s instead of the ~90 s the prod magnitudes would take.
+    // plain assert above ran against the real 60 s default): 3 s bound + 250 ms tick. NOTE the
+    // REAL bound on the marker's arrival: Wallet arms its FIRST tick at MOUNT with the
+    // then-current cadence (prod min(30 s, 60 s) = 30 s) — the shrunk cadence applies only from
+    // the SECOND arm on. So the marker lands at the first tick AFTER the 3 s bound, i.e. up to
+    // ~30 s after wallet mount; the wait budget below covers that worst case. (The tick
+    // self-reschedules from arm 2, so the 250 ms cadence keeps the marker honest thereafter.)
     await driver.eval(() => {
       globalThis.__DPAY_TEST_BALANCE_STALE_MS = 3000;
       globalThis.__DPAY_TEST_BALANCE_TICK_MS = 250;
     });
-    assert(await driver.waitForText('~1.1 ICP', { timeoutMs: 15_000 }),
+    assert(await driver.waitForText('~1.1 ICP', { timeoutMs: 35_000 }),
       'the balance figure itself must become approx-marked once the offline read is past the staleness bound');
     console.log('[181-offline-restart-cached] ✓ approx marker appeared on the amount (staleness past bound)');
 

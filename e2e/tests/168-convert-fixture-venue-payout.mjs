@@ -86,11 +86,14 @@ export async function run() {
     const minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // 1% slippage, the app's exact floor math
 
     // Pick venue B → the decision surfaces appear quoting B, attributed to B, on B's pool.
+    // The counterparty census folds behind the ONE Details control (10x-verbosity pass
+    // 2026-09-16): open it before pinning the principal + tier; the headline + minimum stay main.
     console.log('[168-convert-fixture] picking the fixture venue…');
     await driver.click(`convert-venue-${FIXTURE_VENUE}`, {timeoutMs: 6_000});
     await driver.findByTestID('convert-headline', {timeoutMs: 10_000});
     assert((await driver.findByTestID('convert-venue-none', {timeoutMs: 1_000}).catch(() => null)) == null,
       'the none-selected line clears under the pick');
+    await driver.click('convert-details', {timeoutMs: 5_000});
     assertEq((await driver.readText('convert-pool-principal')).trim(), FIXTURE_POOL,
       'the counterparty principal is pool B\'s own canister');
     const counterparty = await driver.readText('convert-counterparty');
