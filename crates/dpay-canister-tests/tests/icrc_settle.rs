@@ -530,6 +530,50 @@ fn fund_custody(pic: &PocketIc, ledger: Principal, dpay: Principal, pk: [u8; 32]
         .expect("custody-funding transfer ok");
 }
 
+/// `count` identical custody funds submitted WITHOUT waiting on each, then drained in bulk: one
+/// awaited `update_call` pays a full PocketIC round-trip each, so a ~1,000-block log pad dominated
+/// the reconcile tests (R4c measured 65.3s of its wall inside the pad loop). The ingress queue is
+/// FIFO per canister, so block order matches submission order exactly as the sequential loop
+/// produced; payloads, timestamps (no `advance_time` during a pad) and the orphan-filter shape are
+/// identical. The first `await_call` ticks until its own reply exists, draining the whole queue's
+/// rounds as a side effect; every later id is already complete and resolves without ticking.
+fn fund_custody_batched(
+    pic: &PocketIc,
+    ledger: Principal,
+    dpay: Principal,
+    pk: [u8; 32],
+    amount: u64,
+    count: usize,
+) {
+    let ids: Vec<_> = (0..count)
+        .map(|_| {
+            pic.submit_call(
+                ledger,
+                dpay, // sender = the facade = the minting-account owner
+                "icrc1_transfer",
+                encode_one(&TransferArg {
+                    from_subaccount: None,
+                    to: Account { owner: dpay, subaccount: Some(pk) },
+                    amount: Nat::from(amount),
+                    fee: None,
+                    memo: None,
+                    created_at_time: None,
+                })
+                .unwrap(),
+            )
+            .expect("submit custody-funding icrc1_transfer")
+        })
+        .collect();
+    for id in ids {
+        let reply = pic
+            .await_call(id)
+            .expect("custody-funding icrc1_transfer rejected at IC level");
+        decode_one::<Result<Nat, TransferError>>(&reply)
+            .unwrap()
+            .expect("custody-funding transfer ok");
+    }
+}
+
 fn ledger_chain_len(pic: &PocketIc, ledger: Principal) -> u64 {    let reply = pic
         .query_call(
             ledger,
@@ -2021,9 +2065,7 @@ fn reconcile_walks_backwards_pages_and_repairs_orphan_older_than_one_page() {
     // probe (log_length) + page [50..1050) + page [0..50) — the orphan sits in that last page.
     // (The padding funds debit the minting account's default subaccount with no nonce memo, so the
     // orphan filter skips them.)
-    for _ in 0..1_048 {
-        fund_custody(&pic, ledger_dusd, dpay, payer, 1);
-    }
+    fund_custody_batched(&pic, ledger_dusd, dpay, payer, 1, 1_048);
     assert_eq!(ledger_chain_len(&pic, ledger_dusd), 1_050);
 
     // Simulate the trap (same as the R3 tests): reinstall wipes SPENT; the ledger keeps the debit.
@@ -2104,13 +2146,9 @@ fn reconcile_repairs_recent_orphan_under_spike_archive_config() {
     // (block 1_014), and 5 more funds (blocks 1_015..=1_019) → 1_020 blocks: the ledger archived
     // the OLDEST blocks in 10-block batches; the orphan at 1_014 lives in the live tail.
     fund_custody(&pic, ledger, dpay, payer, INIT_A);
-    for _ in 0..1_013 {
-        fund_custody(&pic, ledger, dpay, payer, 1);
-    }
+    fund_custody_batched(&pic, ledger, dpay, payer, 1, 1_013);
     pay(&pic, dpay, signed(&sk, payer, merch, 2_500, nonce, expiry, DEMO_USD)).expect("pay ok");
-    for _ in 0..5 {
-        fund_custody(&pic, ledger, dpay, payer, 1);
-    }
+    fund_custody_batched(&pic, ledger, dpay, payer, 1, 5);
     let log = ledger_chain_len(&pic, ledger);
     assert_eq!(log, 1_020);
 
