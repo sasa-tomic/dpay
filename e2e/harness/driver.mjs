@@ -56,30 +56,26 @@ const FREEZE_CSS = `
  * It cannot mask a genuine hang: the per-test wall clock still bounds the flow and is scaled by the
  * same factor, so a flow that never finishes still fails — with the timeout that describes it.
  */
-let cachedScale = null;
-
 /** A caller-supplied or default wait, stretched by the host-load scale.
  *
  *  Read LAZILY, not at module load. `run.mjs` publishes the scale after it has measured the host,
  *  by which time this module has long been imported — a module-scope constant captured 1 and every
- *  inner wait stayed unscaled, which is the exact bug this helper was added to fix. Cached after
- *  the first read: the scale does not change within a run. */
+ *  inner wait stayed unscaled, which is the exact bug this helper was added to fix.
+ *
+ *  Re-read on EVERY call: `runOne` republishes the env per test start with the LIVE 1-min load
+ *  folded in (a test starting mid-spike gets the spike's factor), so a value frozen at the first
+ *  read would leave every later test's inner waits at the run-start scale — the exact class that
+ *  killed 176 mid-spike (12s wait died at ×1.30 while the box was at ×2+). Number() on a short
+ *  string is nothing next to a CDP roundtrip. */
 function scaled(ms) {
-  if (cachedScale === null) {
-    const raw = process.env.DPAY_E2E_TIMEOUT_SCALE;
-    if (raw === undefined) {
-      cachedScale = 1;
-    } else {
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n <= 0) {
-        console.warn(`[driver] ignoring DPAY_E2E_TIMEOUT_SCALE="${raw}" — not a positive number`);
-        cachedScale = 1;
-      } else {
-        cachedScale = n;
-      }
-    }
+  const raw = process.env.DPAY_E2E_TIMEOUT_SCALE;
+  if (raw === undefined) return Math.round(ms);
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    console.warn(`[driver] ignoring DPAY_E2E_TIMEOUT_SCALE="${raw}" — not a positive number`);
+    return Math.round(ms);
   }
-  return Math.round(ms * cachedScale);
+  return Math.round(ms * n);
 }
 
 export class Driver {

@@ -208,6 +208,9 @@ async function runOne(test, timeoutScale, lane = 0, shards = 1) {
   // the run-start sample). Take the max of the two at test start.
   const scale = Math.max(timeoutScale, hostLoadFactor().factor);
   const effective = Math.round(base * scale);
+  // Republish with the LIVE factor so the driver's inner waits (scaled()) stretch with it too —
+  // a test starting mid-spike gets spike-budgeted waits, not the run-start scale. All lanes share
+  // one env; that is correct, the scale is a box-level property, and lanes differ by noise only.
   // Wrap mod.run() in an AsyncLocalStorage context carrying the test file AND this lane's browser
   // shard. setup() (called inside the flow body) reads this store to register its freshly-created
   // driver into the per-test registry (so runPool's catch can later reach it for the RED-path
@@ -216,6 +219,7 @@ async function runOne(test, timeoutScale, lane = 0, shards = 1) {
   // runOne → mod.run → flow body → setup() chain. No flow file had to change.
   const browser = shards > 1 ? await laneBrowser(lane) : null;
   const run = _testCtx.run({ file: test.file, browser }, () => mod.run());
+  process.env.DPAY_E2E_TIMEOUT_SCALE = String(scale);
   await withTimeout(run, effective, test.file);
 }
 
