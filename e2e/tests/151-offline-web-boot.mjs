@@ -60,8 +60,15 @@ export async function run() {
     await driver.waitReady({ timeoutMs: 20_000 });
 
     // 1 + 2. The worker is active at the ROOT and has precached the shell.
+    // `navigator.serviceWorker.ready` resolves when a registration has an active worker, but
+    // that worker can still be in the `activating` state for a few ticks (observed under
+    // parallel-lane load) — poll for `activated` instead of asserting the first read.
     const sw = await driver.eval(async () => {
-      const reg = await navigator.serviceWorker.ready;
+      const deadline = Date.now() + 10_000;
+      let reg = await navigator.serviceWorker.ready;
+      while (reg.active && reg.active.state !== 'activated' && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
       const names = await caches.keys();
       const shell = names.find((n) => n.startsWith('dpay-shell-'));
       const keys = shell ? (await (await caches.open(shell)).keys()).map((r) => new URL(r.url).pathname) : [];
@@ -128,8 +135,10 @@ export async function run() {
     await driver.screenshot('151-offline-web-boot');
     console.log(`[151-offline-web-boot] GREEN in ${((Date.now() - start) / 1000).toFixed(1)}s`);
   } finally {
-    await relay.stop();
+    // env.stop() first (flow-38 convention): quiesce the page's polls before the final relay stop
+    // (the deliberate mid-test kill above is the tested behavior and stays).
     await env.stop();
+    await relay.stop();
   }
 }
 

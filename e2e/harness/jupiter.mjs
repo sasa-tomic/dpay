@@ -1,13 +1,16 @@
-// The offline Jupiter stand-in — the device-direct venue seam for the Solana convert flows.
+// The offline Jupiter stand-in — the relay-proxied venue seam for the Solana convert flows.
 //
 // Jupiter is a KEYLESS https venue (measured 2026-09-14, docs/specs/2026-09-14-swap-venue-feasibility.md):
 // GET /swap/v1/quote?inputMint&outputMint&amount&slippageBps → the venue's own digits;
 // POST /swap/v1/swap {quoteResponse, userPublicKey} → a serialized UNSIGNED legacy transaction the
 // DEVICE verifies (fee payer = user, SPL destination = user's own ATA — app/solana/tx.ts) and signs.
 // The registry row is endpoint "https://lite-api.jup.ag" with NO ic fixture by rule (dfx/catalog_truth.json
-// venues[] _doc): the offline stand-in lives HERE, at the same seam opencryptopay uses — a window.fetch
-// replacement (harness/ocp.mjs pattern) that fails CLOSED: any non-passed origin is refused and recorded,
-// so a code path that tried to reach the real aggregator would fail the flow, not the founder.
+// venues[] _doc). Since 2026-09-16 the device dials the venue THROUGH dpay's relay
+// (/api/v1/jupiter/* — crates/dpay-relay/src/jupiter.rs), so the offline stand-in is the
+// relay's own test-stub upstream: harness/relay.mjs spawns the relay with
+// DPAY_JUPITER_API_BASE pointed at /api/v1/test/jupiter-upstream on the same server, and the
+// helpers below configure/read that stub over HTTP. The app-side client (app/services/jupiter.ts)
+// never sees a fake fetch — the whole path (relayFetch → relay proxy → upstream) runs for real.
 //
 // This module has two halves:
 //   NODE half  — crypto mirrors of the app's PURE Solana modules (SLIP-10 keypair, ATA PDA, legacy
@@ -16,7 +19,8 @@
 //                exactly; jest pins those modules byte-for-byte against @solana/web3.js, and flow
 //                112's selector for the rail means any drift here shows up as the app's own
 //                beneficiary check refusing the fixture — loudly, not silently.
-//   PAGE half  — installJupiterStub: the fetch replacement keyed on the venue origin.
+//   RELAY half — configureJupiterStub / jupiterStubState: the relay test-stub upstream's config +
+//                hits endpoints (the e2e flow's proof requests went THROUGH the proxy).
 //
 // The page NEVER gets the private key back from the app: the flow derives the keypair in Node from
 // the identity secret (dpay.identity.v1, the same store accountOf reads), prebuilds the venue tx
@@ -221,97 +225,38 @@ export function solConvertTxDetail({userPublicKey, userAta, outAmount, mint = US
 }
 
 /**
- * Install the in-page Jupiter stub: a window.fetch replacement answering the venue origin
- * deterministically and refusing every other origin not passed through (the ocp.mjs fail-closed
- * pattern). cfg:
- *   - passOrigins: [relayOrigin, webOrigin] — dpay's own hosts go to the real fetch.
- *   - quote: {outAmount, otherAmountThreshold, priceImpact, slippageBps} — the deterministic digits
- *     (inAmount is ECHOED from the request's own amount param, so the quote is always about what
- *     the screen asked for).
- *   - userPublicKey: the wallet the tx was prebuilt for (a POST for any other key is userMismatch).
- *   - txBytes: the prebuilt unsigned venue tx (Array of bytes — driver.eval serializes args).
+ * Point the relay's Jupiter test-stub upstream at the deterministic digits. `relayBaseURL` is
+ * the relay the app under test DIALS (flow 186 spawns its own second relay — configure THAT
+ * one). cfg:
+ *   - quote: {outAmount, otherAmountThreshold, priceImpact} — the deterministic digits
+ *     (inAmount is ECHOED from the request's own amount param by the stub, so the quote is
+ *     always about what the screen asked for; slippageBps likewise echoed as a number).
+ *   - userPublicKey: the wallet the tx was prebuilt for (a POST for any other key is
+ *     recorded as userMismatch and fails the flow's attribution asserts).
+ *   - txBytes: the prebuilt unsigned venue tx (sent base64 — the stub's wire field).
  *   - lastValidBlockHeight: echoed into the swap reply; the RPC stub's getBlockHeight stays below.
  */
-export async function installJupiterStub(driver, cfg) {
-  await driver.eval((c) => {
-    const real = window.fetch.bind(window);
-    const state = {
-      quoteCalls: [],
-      swapCalls: [],
-      unexpected: [],
-      userMismatch: null,
-      lastQuoteResponse: null,
-    };
-    globalThis.__E2E_JUP = state;
-    const json = (body, status = 200) =>
-      new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
-    window.fetch = async (input, init) => {
-      const url = typeof input === 'string' ? input : (input && input.url) || String(input);
-      if (!/^https?:/i.test(url) || c.passOrigins.some((o) => url === o || url.startsWith(`${o}/`))) {
-        return real(input, init);
-      }
-      const u = new URL(url);
-      if (u.origin === c.origin && u.pathname === '/swap/v1/quote' && (!init || !init.method || init.method === 'GET')) {
-        const p = u.searchParams;
-        state.quoteCalls.push({
-          inputMint: p.get('inputMint'),
-          outputMint: p.get('outputMint'),
-          amount: p.get('amount'),
-          slippageBps: p.get('slippageBps'),
-        });
-        const body = {
-          inputMint: p.get('inputMint'),
-          outputMint: p.get('outputMint'),
-          inAmount: p.get('amount'),
-          outAmount: c.quote.outAmount,
-          otherAmountThreshold: c.quote.otherAmountThreshold,
-          // The REAL Jupiter wire field is `priceImpact` (services/jupiter.ts maps it to
-          // priceImpactPct internally) — the stub must speak the venue's own shape.
-          priceImpact: c.quote.priceImpact,
-          slippageBps: Number(p.get('slippageBps')),
-          platformFee: null,
-        };
-        return json(body);
-      }
-      if (u.origin === c.origin && u.pathname === '/swap/v1/swap' && init && init.method === 'POST') {
-        const body = JSON.parse(init.body);
-        if (body.userPublicKey !== c.userPublicKey) {
-          state.userMismatch = body.userPublicKey;
-          throw new TypeError(`jupiter stub: POST for a wallet the tx was not built for (${body.userPublicKey})`);
-        }
-        state.swapCalls.push({
-          userPublicKey: body.userPublicKey,
-          wrapAndUnwrapSol: body.wrapAndUnwrapSol,
-          asLegacyTransaction: body.asLegacyTransaction,
-        });
-        state.lastQuoteResponse = body.quoteResponse;
-        const b64 = btoa(String.fromCharCode(...c.txBytes));
-        return json({swapTransaction: b64, lastValidBlockHeight: c.lastValidBlockHeight});
-      }
-      state.unexpected.push(url);
-      throw new TypeError(`jupiter stub: refused fetch to ${url}`);
-    };
-  }, {
-    origin: 'https://lite-api.jup.ag',
-    passOrigins: cfg.passOrigins,
-    quote: cfg.quote,
-    userPublicKey: cfg.userPublicKey,
-    txBytes: Array.from(cfg.txBytes),
-    lastValidBlockHeight: cfg.lastValidBlockHeight,
+export async function configureJupiterStub(relayBaseURL, cfg) {
+  const res = await fetch(`${relayBaseURL}/api/v1/test/jupiter-upstream/config`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      quote: {
+        outAmount: cfg.quote.outAmount,
+        otherAmountThreshold: cfg.quote.otherAmountThreshold,
+        priceImpact: cfg.quote.priceImpact ?? null,
+      },
+      userPublicKey: cfg.userPublicKey,
+      txB64: Buffer.from(cfg.txBytes).toString('base64'),
+      lastValidBlockHeight: cfg.lastValidBlockHeight,
+    }),
   });
+  if (!res.ok) throw new Error(`configureJupiterStub: relay stub config refused (${res.status})`);
 }
 
-/** Read the stub's recorded state back into Node for attribution asserts. */
-export async function jupiterStubState(driver) {
-  return await driver.eval(() => {
-    const s = globalThis.__E2E_JUP;
-    if (!s) return null;
-    return {
-      quoteCalls: s.quoteCalls,
-      swapCalls: s.swapCalls,
-      unexpected: s.unexpected,
-      userMismatch: s.userMismatch,
-      lastQuoteResponse: s.lastQuoteResponse,
-    };
-  });
+/** Read the relay stub's recorded state back into Node for attribution asserts. */
+export async function jupiterStubState(relayBaseURL) {
+  const res = await fetch(`${relayBaseURL}/api/v1/test/jupiter-upstream/hits`);
+  if (!res.ok) return null;
+  return await res.json();
 }

@@ -9,13 +9,14 @@
 //      the Solana convert screen — the venue exists, the pair resolves, nothing fails into a blank form.
 //      Single venue on the pair: NO chooser chrome (the IC one-venue rule carries over), nothing
 //      preselected because there is nothing to select.
-//   2. THE QUOTE IS JUPITER'S OWN, DEVICE-DIRECT, VERBATIM. The wallet fetched it over https straight
-//      from lite-api.jup.ag (keyless — no relay hop: the stub is a window.fetch replacement on that
-//      origin, the opencryptopay seam), and the screen renders Jupiter's digits unmodified: the receive
+//   2. THE QUOTE IS JUPITER'S OWN, VERBATIM, THROUGH THE WALLET'S RELAY. Since 2026-09-16 the
+//      device dials Jupiter through dpay's relay proxy (/api/v1/jupiter/* — the founder ask,
+//      "through our relay (for caching etc)"; the offline stand-in is the relay's own test-stub
+//      upstream), and the screen renders Jupiter's digits unmodified: the receive
 //      estimate IS outAmount, the minimum IS otherAmountThreshold, the price impact IS the published
 //      figure (the V8 exception flips here BECAUSE Jupiter publishes one — it renders, verbatim), the
 //      attribution names Jupiter and stamps the clock. The venue's https endpoint is shown where the
-//      IC form shows the pool principal.
+//      IC form shows the pool principal (identity/attribution — no longer a dial target).
 //   3. THE FEES ARE HONEST. Route fees live inside the quoted output (the screen says exactly that),
 //      platformFee is null (measured 2026-09-14), and the dpay line is the same paid-nothing line as
 //      everywhere.
@@ -29,17 +30,19 @@
 //   5. THE DONE PANEL IS HONEST. It reports the REALIZED on-chain credit re-read from the confirmed
 //      transaction's token balances (not the estimate) and names the payout record by signature.
 //
-// Offline stand-ins (both established seams, no new surface): the Jupiter origin is answered by the
-// in-page fetch stub (harness/jupiter.mjs, ocp.mjs's fail-closed pattern — every other origin is
-// refused and recorded, so unexpected must stay empty); the cluster is the __DPAY_TEST_SOLANA_RPC_STUB
+// Offline stand-ins (both established seams, no new surface): the Jupiter venue is answered by the
+// relay's test-stub upstream (harness/jupiter.mjs configures it; harness/relay.mjs points
+// DPAY_JUPITER_API_BASE at it — the flow's proof that the dials went THROUGH the relay is the stub's
+// hits endpoint itself); the cluster is the __DPAY_TEST_SOLANA_RPC_STUB
 // every SOL flow uses, with sendTransaction decoding the real bytes and returning the tx's own
 // signature so the driver's node-signature identity check passes exactly as against a real node.
 import {setup, assert, assertEq, assertIncludes, onboardWallet, openBalances, accountOf} from '../harness/lib.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
-  installJupiterStub, jupiterStubState, USDC_MINT, WRAPPED_SOL_MINT,
+  configureJupiterStub, jupiterStubState, USDC_MINT, WRAPPED_SOL_MINT,
 } from '../harness/jupiter.mjs';
 import {bs58Encode} from '../harness/soltx.mjs';
+import {startRelay} from '../harness/relay.mjs';
 
 /** 1 SOL in, Jupiter's own 10.36 USDC out, floor 10.25 — the deterministic quote digits. */
 const IN_LAMPORTS = '1000000000';
@@ -50,9 +53,9 @@ export const meta = {
   id: '185',
   name: 'convert-jupiter-sol',
   journey: 'convert',
-  covers: ['convert', 'solana-rail', 'venue:jupiter', 'quote-verbatim', 'device-direct',
+  covers: ['convert', 'solana-rail', 'venue:jupiter', 'quote-verbatim', 'relay-proxy',
     'beneficiary-check', 'execution', 'fees-honest', 'one-broadcast'],
-  verifies: 'A Solana wallet can reach the Convert surface at all (V11): selecting SOL and tapping Convert opens the Jupiter screen with no chooser for the single venue. The quote is fetched device-direct from lite-api.jup.ag and rendered verbatim — receive estimate = outAmount, minimum = otherAmountThreshold, price impact = the published figure, attribution + clock present, https endpoint shown. Fees are honest: route fees inside the quoted output, dpay paid-nothing line. Confirm re-quotes, POSTs the verbatim quoteResponse with the wallet\'s own SOL address, verifies the venue-built legacy tx (fee payer = user, SPL destination = user\'s own USDC ATA), signs on device, broadcasts exactly one transaction through the SOL rail\'s RPC path, and the done panel reports the REALIZED token credit with the payout record signature.',
+  verifies: 'A Solana wallet can reach the Convert surface at all (V11): selecting SOL and tapping Convert opens the Jupiter screen with no chooser for the single venue. The quote is fetched through dpay\'s relay Jupiter proxy and rendered verbatim — receive estimate = outAmount, minimum = otherAmountThreshold, price impact = the published figure, attribution + clock present, https endpoint shown. Fees are honest: route fees inside the quoted output, dpay paid-nothing line. Confirm re-quotes, POSTs the verbatim quoteResponse with the wallet\'s own SOL address, verifies the venue-built legacy tx (fee payer = user, SPL destination = user\'s own USDC ATA), signs on device, broadcasts exactly one transaction through the SOL rail\'s RPC path, and the done panel reports the REALIZED token credit with the payout record signature.',
   timeoutMs: 120000,
 };
 
@@ -106,8 +109,16 @@ async function installSolRpcStub(driver, cfg) {
 
 export async function run() {
   const env = await setup({solStub: true});
+  // OWN relay: the Jupiter stub is SERVER-side state on the relay this page dials, and the
+  // setup relay is SHARED across lanes — two convert flows running concurrently would write
+  // into each other's stub (observed 2026-09-17: flow 189's stub read carried another flow's
+  // swap POST, a different wallet's key, 15s apart). An own relay isolates config + records.
+  const r2 = await startRelay();
   try {
-    const {driver, relayBaseURL, webBaseURL} = env;
+    const {driver, webBaseURL} = env;
+    const page = `/?relay=${encodeURIComponent(r2.baseURL)}`;
+    await driver.navigate(webBaseURL, page, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
+    await driver.waitReady({timeoutMs: 8_000});
     await onboardWallet(driver, 'e2e-jupiter-sol');
 
     // Prebuild the venue's deterministic reply for THIS wallet (the mirrors are byte-identical to
@@ -120,9 +131,8 @@ export async function run() {
     const rpcDetail = solConvertTxDetail({userPublicKey: kp.address, userAta: ataB58, outAmount: Number(OUT_USDC)});
 
     await installSolRpcStub(driver, {rpcDetail});
-    await installJupiterStub(driver, {
-      passOrigins: [new URL(relayBaseURL).origin, new URL(webBaseURL).origin],
-      quote: {outAmount: OUT_USDC, otherAmountThreshold: FLOOR_USDC, priceImpact: '0.003', slippageBps: 100},
+    await configureJupiterStub(r2.baseURL, {
+      quote: {outAmount: OUT_USDC, otherAmountThreshold: FLOOR_USDC, priceImpact: '0.003'},
       userPublicKey: kp.address,
       txBytes,
       lastValidBlockHeight: 300000000,
@@ -139,9 +149,9 @@ export async function run() {
     // Single venue on the pair → no chooser chrome, nothing to preselect (the IC one-venue rule).
     assert(await driver.isPresent('convert-venue-jupiter') === false, 'no venue chooser for the single solana_amm venue');
 
-    // §2 — Jupiter's own digits, device-direct, verbatim.
+    // §2 — Jupiter's own digits, verbatim through the relay proxy.
     await driver.type('convert-amount', '1');
-    assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (device-direct https fetch)');
+    assert(await driver.findByTestID('convert-quote-source', {timeoutMs: 10_000}) != null, 'a quote arrived (through the relay proxy)');
     const quoteSource = await driver.readText('convert-quote-source');
     assertIncludes(quoteSource, 'Jupiter', 'attribution names the venue');
     assertIncludes(quoteSource, 'fetched', 'attribution carries the read instant');
@@ -192,11 +202,11 @@ export async function run() {
     assert(sent[0].signature.length >= 32 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(sent[0].signature), 'the broadcast signature is the device-signed tx signature (base58)');
     assertIncludes(done, sent[0].signature, 'the payout record IS that signature');
 
-    const jup = await jupiterStubState(driver);
+    const jup = await jupiterStubState(r2.baseURL);
     assert(jup != null, 'jupiter stub state present');
-    assertEq(jup.unexpected.length, 0, `no fetch left the passed origins (unexpected: ${jup.unexpected.join(', ')})`);
+    assertEq(jup.unexpected.length, 0, 'no unexpected upstream requests recorded');
     assert(jup.userMismatch == null, 'the swap POST carried THIS wallet\'s SOL address');
-    assertEq(jup.swapCalls.length, 1, 'exactly one swap POST');
+    assertEq(jup.swapCalls.length, 1, `exactly one swap POST (saw: ${JSON.stringify(jup.swapCalls)})`);
     assertEq(jup.swapCalls[0].asLegacyTransaction, true, 'the app asked for the verifiable legacy shape');
     assertEq(jup.swapCalls[0].wrapAndUnwrapSol, true, 'native SOL routed via wrap/unwrap');
     assertEq(jup.lastQuoteResponse.inAmount, IN_LAMPORTS, 'POST body carried the VERBATIM quote (inAmount)');
@@ -213,6 +223,7 @@ export async function run() {
     console.log(`GREEN 185 — SOL→USDC(Solana) via Jupiter: quote verbatim, device-signed venue tx, one broadcast, realized credit 10.36 USDC (sig ${sent[0].signature.slice(0, 12)}…)`);
   } finally {
     await env.stop();
+    await r2.stop();
   }
 }
 

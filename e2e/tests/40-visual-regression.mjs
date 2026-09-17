@@ -286,8 +286,9 @@ export async function run() {
     console.log(`[40-visual-regression] GREEN in ${elapsed}s (0 diffs > ${TOLERANCE_PCT}%)`);
     assert(true, 'visual regression passed');
   } finally {
-    await r2.stop();
+    // env.stop() first (flow-38 convention): quiesce the page's polls before killing the relay.
     await env.stop();
+    await r2.stop();
   }
 }
 

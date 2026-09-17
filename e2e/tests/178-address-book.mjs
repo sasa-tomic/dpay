@@ -26,7 +26,10 @@ export const meta = {
   journey: 'system',
   covers: ['address-book', 'settings', 'send-form'],
   verifies: 'The saved-destination address book route: reached from Settings (and from the send form\'s saved list), an empty book states its way out, manual add refuses invalid destinations with the send form\'s own validation, and entries can be renamed and removed.',
-  timeoutMs: 30000,
+  // 45s, not 30s: this flow is sheet-navigation-heavy (8+ driver round trips) and its observed
+  // 12-lane wall is 40-50s even on a quiet host — 30s was a budget misfit, killing a flow whose
+  // every assert had already passed (2026-09-17, four full-run false REDs).
+  timeoutMs: 45000,
 };
 
 export async function run() {

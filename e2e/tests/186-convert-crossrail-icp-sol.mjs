@@ -29,14 +29,15 @@
 //
 // Offline stand-ins: the private relay's fake-IC (the 184 pattern — it simulates the pool swap
 // and withdraw_erc20), the in-page Circle stub (harness/cctp.mjs — live fee body + scripted
-// message states keyed by burn tx hash), the Jupiter stub (harness/jupiter.mjs) and the SOL
+// message states keyed by burn tx hash), the relay's Jupiter test-stub upstream
+// (harness/jupiter.mjs configures it — the dials go through dpay's relay proxy) and the SOL
 // RPC stub (the 185 seam, extended with a getTransaction keyed by which credit is being read:
 // Circle's forward tx → USDC token credit at the ATA; the swap signature → native SOL credit).
 import {setup, assert, assertEq, assertIncludes, onboardWallet, accountOf, faucetAccount, getBalance, openBalances, selectCurrency} from '../harness/lib.mjs';
 import {startRelay} from '../harness/relay.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
-  installJupiterStub, jupiterStubState, USDC_MINT, WRAPPED_SOL_MINT,
+  configureJupiterStub, jupiterStubState, USDC_MINT, WRAPPED_SOL_MINT,
 } from '../harness/jupiter.mjs';
 import {bs58Encode} from '../harness/soltx.mjs';
 import {installCctpStub, cctpStubState, setCctpMessageState, cctpFeeExpectations, FORWARD_TX_HASH} from '../harness/cctp.mjs';
@@ -187,16 +188,15 @@ export async function run() {
       meta: {preBalances: [1000000000], postBalances: [1000000000 + Number(SOL_OUT)], preTokenBalances: [], postTokenBalances: []},
       slot: 250000001, blockTime: null, version: 'legacy',
     };
-    // Every stub wraps window.fetch fail-closed (unknown origin → unexpected+throw). The CCTP stub
-    // (outermost) must pass the jupiter origin through; the JUPITER stub must NOT list its OWN
-    // origin — it checks passOrigins BEFORE its own origin match, so self-passing would hand the
-    // quote to the real internet instead of the scripted digits (found live: 400 + quoteCalls 0).
-    const passOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin, 'https://lite-api.jup.ag'];
-    const jupPassOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin];
+    // The in-page stubs wrap window.fetch fail-closed (unknown origin → unexpected+throw) — and
+    // since the Jupiter dials moved THROUGH the relay (2026-09-16), lite-api.jup.ag is NOT a
+    // passed origin anymore: a device-direct regression would hit the fail-closed guard loudly
+    // instead of the real internet. The relay's Jupiter stub is configured ONCE on r2 (the
+    // relay this page dials) — it is server-side state, it survives the §5 reload.
+    const passOrigins = [new URL(r2.baseURL).origin, new URL(webBaseURL).origin, new URL(env.relayBaseURL).origin];
     await installSolRpcStub(driver, {forwardTxHash: FORWARD_TX_HASH, tokenDetail, nativeDetail});
-    await installJupiterStub(driver, {
-      passOrigins: jupPassOrigins,
-      quote: {outAmount: SOL_OUT, otherAmountThreshold: SOL_FLOOR, priceImpact: '0.001', slippageBps: 100},
+    await configureJupiterStub(r2.baseURL, {
+      quote: {outAmount: SOL_OUT, otherAmountThreshold: SOL_FLOOR, priceImpact: '0.001'},
       userPublicKey: kp.address,
       txBytes,
       lastValidBlockHeight: 300000000,
@@ -307,15 +307,9 @@ export async function run() {
     const ethBefore = BigInt(await getBalance(r2.baseURL, account.publicHex, 6));
     await driver.navigate(webBaseURL, page, {waitUntil: 'domcontentloaded', timeoutMs: 8_000});
     await driver.waitReady({timeoutMs: 8_000});
-    // The window-scoped stubs died with the page — reinstall them (state still pending).
+    // The window-scoped stubs died with the page — reinstall them (state still pending). The
+    // Jupiter stub needs no reinstall: it is the relay's server-side test stub.
     await installSolRpcStub(driver, {forwardTxHash: FORWARD_TX_HASH, tokenDetail, nativeDetail});
-    await installJupiterStub(driver, {
-      passOrigins: jupPassOrigins,
-      quote: {outAmount: SOL_OUT, otherAmountThreshold: SOL_FLOOR, priceImpact: '0.001', slippageBps: 100},
-      userPublicKey: kp.address,
-      txBytes,
-      lastValidBlockHeight: 300000000,
-    });
     await installCctpStub(driver, {passOrigins, forwardTxHash: FORWARD_TX_HASH});
     await openBalances(driver);
     await selectCurrency(driver, 'icp');
@@ -364,11 +358,11 @@ export async function run() {
     const sent = await driver.eval(() => globalThis.__E2E_SOL_SENT);
     assertEq(sent.length, 1, 'exactly ONE Solana transaction was ever broadcast');
     assertIncludes(done, sent[0].signature, 'the payout record IS the broadcast signature');
-    const jup = await jupiterStubState(driver);
+    const jup = await jupiterStubState(r2.baseURL);
     assert(jup != null, 'jupiter stub state present');
-    assertEq(jup.unexpected.length, 0, `jupiter stub saw no unexpected origins (${jup.unexpected.join(', ')})`);
+    assertEq(jup.unexpected.length, 0, 'jupiter stub saw no unexpected upstream requests');
     assert(jup.userMismatch == null, 'the swap POST carried THIS wallet\'s SOL address');
-    assertEq(jup.swapCalls.length, 1, 'exactly one swap POST');
+    assertEq(jup.swapCalls.length, 1, `exactly one swap POST (saw: ${JSON.stringify(jup.swapCalls)})`);
     const finalLegQuotes = jup.quoteCalls.filter((q) => q.inputMint === USDC_MINT && q.outputMint === WRAPPED_SOL_MINT);
     assert(finalLegQuotes.length >= 1, 'the final leg quoted USDC→wrapped-SOL (fresh, on the verified credit)');
     assertEq(finalLegQuotes[0].amount, mintCredit.toString(), 'the final quote was for the VERIFIED mint amount');

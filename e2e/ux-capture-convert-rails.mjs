@@ -18,7 +18,7 @@ import {setup, onboardWallet, accountOf, faucetAccount, openBalances, selectCurr
 import {startRelay} from './harness/relay.mjs';
 import {
   deriveSolanaKeypair, deriveAta, buildJupiterSwapTx, solConvertTxDetail,
-  installJupiterStub, USDC_MINT,
+  configureJupiterStub, USDC_MINT,
 } from './harness/jupiter.mjs';
 import {bs58Encode} from './harness/soltx.mjs';
 import {installCctpStub, cctpFeeExpectations, FORWARD_TX_HASH} from './harness/cctp.mjs';
@@ -162,13 +162,13 @@ async function phaseA() {
       meta: {preBalances: [1000000000], postBalances: [1000000000 + Number(SOL_OUT)], preTokenBalances: [], postTokenBalances: []},
       slot: 250000001, blockTime: null, version: 'legacy',
     };
-    const passOrigins = [new URL(r2.baseURL).origin, new URL(env.webBaseURL).origin, new URL(env.relayBaseURL).origin, 'https://lite-api.jup.ag'];
-    const jupPassOrigins = [new URL(r2.baseURL).origin, new URL(env.webBaseURL).origin, new URL(env.relayBaseURL).origin];
+    const passOrigins = [new URL(r2.baseURL).origin, new URL(env.webBaseURL).origin, new URL(env.relayBaseURL).origin];
     const installAll = async () => {
       await installSolRpcStub(driver, {forwardTxHash: FORWARD_TX_HASH, tokenDetail, nativeDetail});
-      await installJupiterStub(driver, {
-        passOrigins: jupPassOrigins,
-        quote: {outAmount: SOL_OUT, otherAmountThreshold: '257000000', priceImpact: '0.001', slippageBps: 100},
+      // The relay's Jupiter test-stub upstream (the dials go through the relay proxy; the
+      // config POST is idempotent, so re-running installAll across page reloads is harmless).
+      await configureJupiterStub(r2.baseURL, {
+        quote: {outAmount: SOL_OUT, otherAmountThreshold: '257000000', priceImpact: '0.001'},
         userPublicKey: kp.address,
         txBytes,
         lastValidBlockHeight: 300000000,
