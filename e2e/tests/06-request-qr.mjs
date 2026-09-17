@@ -30,7 +30,7 @@ export const meta = {
   journey: 'pay',
   covers: ['request-qr', 'pay-link', 'merchant', 'to-name', 'memo', 'share', 'nfc-wire'],
   verifies: 'Merchant enters amount → request QR renders the payment LINK (own principal, exact asset/chain/amount/label, ref = reconciliation nonce); Share emits the SAME link; the NFC reader arms with the real 132-byte request, decoded field-for-field.',
-  timeoutMs: 38000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

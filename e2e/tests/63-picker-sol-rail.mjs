@@ -24,7 +24,7 @@ export const meta = {
   journey: 'system',
   covers: ['receive-picker', 'sol-rail', 'currency-switch'],
   verifies: 'SOL is selectable in the Receive currency picker → switches the active rail to SolReceiveMode.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

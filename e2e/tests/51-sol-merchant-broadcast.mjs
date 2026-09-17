@@ -34,7 +34,7 @@ export const meta = {
   journey: 'offline',
   covers: ['sol-merchant', 'sol-broadcast', 'sol-v2-strict-verify', 'qr-scan'],
   verifies: 'SOL v2 merchant: createSolPaymentRequest (ONLINE) quotes the NETTED wire (typed 0.025 → amt 0.024995; fee is the payee\'s cost, founder rule) → scan real signed solpay → broadcast → Received.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';

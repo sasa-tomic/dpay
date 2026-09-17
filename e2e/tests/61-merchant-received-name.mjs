@@ -29,7 +29,7 @@ export const meta = {
   journey: 'pay',
   covers: ['receive', 'settle', 'confirmation', 'counterparty-rendering', 'memo-reconciliation'],
   verifies: 'IC-rail counterparty rendering: history shows the short PRINCIPAL TEXT (not full principal, not hex pubkey) and the memo (reconciliation key) is visible; friendly names died with the facade settlement.',
-  timeoutMs: 25_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

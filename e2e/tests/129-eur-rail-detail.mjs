@@ -25,7 +25,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'onboard', 'eur', 'eurc', 'veur', 'group-model', 'rail-detail', 'fees'],
   verifies: 'Tapping the EUR row expands an in-card detail panel: both rails preferred-first (EURC reason on the pick only), fee facts in each rail\'s own units, thin-warn on VEUR vs deep on EURC, DFX sell-only ramp on VEUR; Back collapses without unpicking; CHF never expands; Continue lands the wallet on EURC@Solana.',
-  timeoutMs: 37000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -22,7 +22,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['sol-nfc', 'sol-v2-receipt', 'sol-settle-verify', 'three-verdict'],
   verifies: 'SOL NFC receipt code 3 (settle-verify mismatch) → payer honest pending ("Sent · awaiting"), never a decline.',
-  timeoutMs: 38000,
+  timeoutMs: 90000,
 };
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';

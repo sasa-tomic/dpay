@@ -35,7 +35,7 @@ export const meta = {
   journey: 'system',
   covers: ['pay-link-routing', 'ic-engine-routing', 'solana-to-ic-handoff', 'prefill-preserve'],
   verifies: 'An IC payment link arriving while SOL is idle-selected routes to the IC Pay engine (PayMode review), not SolPayMode — the payment is never silently lost.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

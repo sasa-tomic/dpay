@@ -41,7 +41,7 @@ export const meta = {
   journey: 'system',
   covers: ['selection-lock', 'in-flight-preserve', 'balances-disable', 'nfc-arming-invariant'],
   verifies: 'An in-flight pay review locks the idle asset selection: the header account chip is disabled + a no-op, and leaving the review releases the lock so the accounts route selects rows again.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 const PAY_CENTS = 20000; // ∂200.00 DEMO — OVER the ∂100 balance: online+insufficient blocks the

@@ -17,7 +17,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'eur', 'eurc', 'veur', 'vchf', 'group-model', 'rail-health'],
   verifies: 'home=EUR in the accounts route: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none.',
-  timeoutMs: 46000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

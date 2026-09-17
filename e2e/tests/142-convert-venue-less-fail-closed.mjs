@@ -21,7 +21,7 @@ export const meta = {
   journey: 'convert',
   covers: ['convert', 'uniform-ia', 'venue-less', 'fail-closed', 'veur', 'honest-copy', 'demo'],
   verifies: 'Every asset gets the same Convert button; assets without a venue fail closed INSIDE the surface: VEUR and DEMO show the honest what-exists-today copy naming all seven converted pairs (derived from the bundled registry), and neither offers an amount field or a quote.',
-  timeoutMs: 45000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -33,7 +33,7 @@ export const meta = {
   journey: 'system',
   covers: ['header', 'layout', 'overflow', 'home-tab', 'a11y'],
   verifies: 'With a long username the header stays inside the phone column and keeps its shape: the wordmark renders on ONE line (never one glyph per line), the account chip sits BELOW the identity row and spans the column, the chip stays fully on screen, and the username truncates on screen while header-who still carries the whole name. Home renders NO chip at all — it would name a different account than its own headline — and keeps its labelled Accounts pill as the single switcher.',
-  timeoutMs: 40000,
+  timeoutMs: 90000,
 };
 
 /** The 22-character name that produced the measured 20.2 px overflow. */

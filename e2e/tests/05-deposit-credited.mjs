@@ -44,7 +44,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['deposit-credit', 'mint-delta', 'asset-card', 'balance-update'],
   verifies: 'ckBTC deposit lands via faucet-at-principal → balance-recheck delta "Deposited ✓", relay balance grows, asset row appears.',
-  timeoutMs: 57000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

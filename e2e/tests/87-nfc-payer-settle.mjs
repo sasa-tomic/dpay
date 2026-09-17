@@ -8,7 +8,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['nfc', 'payer', 'offline', 'returned-result', 'exact-once', 'approve-before-pay'],
   verifies: 'Offline card review-parks, Approve prepares update+read_state (never submits), and only a nonce/rid-bound merchant result resolves Paid.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

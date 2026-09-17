@@ -32,7 +32,7 @@ export const meta = {
   journey: 'pay',
   covers: ['receive', 'settle', 'confirmation'],
   verifies: 'Merchant scans the payer\'s signed icrc1_transfer envelope, submits it to the IC gateway → recipient \'Received\' confirmation.',
-  timeoutMs: 37000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

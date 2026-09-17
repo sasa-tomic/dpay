@@ -47,7 +47,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['native-eth-withdraw', 'cketh', 'family-dispatch', 'withdraw', 'icrc2-approve', 'withdraw_eth', 'gas-quote', 'sign', 'settle', 'balance-delta', 'ui-balance-delta'],
   verifies: 'Withdraw native ckETH: faucet-fund at the principal → enter 0x addr + ETH amount → query the minter gas price + sign approve + withdraw_eth on-device → gateway burns → "Withdrawn ✓"; balance debits fee+amount at both the gateway AND the UI (row drops to 3.999998 ETH).',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

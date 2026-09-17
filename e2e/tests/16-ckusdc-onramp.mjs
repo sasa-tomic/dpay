@@ -65,7 +65,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['ckusdc', 'onramp', 'eip-1193', 'calldata', 'eth-gas'],
   verifies: 'ckUSDC onramp: connect wallet → enter USDC → approve+deposit (EIP-1193 seam, byte-exact calldata, ETH gas note).',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

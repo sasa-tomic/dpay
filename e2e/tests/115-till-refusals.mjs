@@ -30,7 +30,7 @@ export const meta = {
   journey: 'pay',
   covers: ['till', 'merchant-till', 'rail-parity', 'same-surfaces', 'fail-closed', 'honest-instructions', 'asset-switch', 'shared-message-box'],
   verifies: 'The till-code checkbox renders for EVERY asset on BOTH Receive rails and fails closed by name where a charge cannot be rung up: with ckBTC selected it names the asset and its chain, says a till code is paid in VCHF, and offers one tap that switches — after which the counter is open with the checkbox still checked (the code form is wallet-owned, so it survives the rail re-mount). With SOL selected the same checkbox renders on the Solana Receive form and refuses naming SOL on Solana — and the message box there is the ONE box both code forms share (its text survives the checkbox toggle in both directions). A price finer than a rappen is refused on the device with the correction spelled out, and nothing is signed or sent.',
-  timeoutMs: 45_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

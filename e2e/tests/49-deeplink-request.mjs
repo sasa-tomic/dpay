@@ -38,7 +38,7 @@ export const meta = {
   journey: 'pay',
   covers: ['pay-link', 'url-routing', 'prefill', 'pay-review'],
   verifies: 'A shared /wallet/pay/<recipient> link opens the pay review pre-filled with the exact asset, amount and destination account (no auto-approve), and Approve settles it.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

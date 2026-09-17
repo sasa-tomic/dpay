@@ -48,7 +48,7 @@ export const meta = {
   journey: 'pay',
   covers: ['bad-qr', 'malformed', 'error-handling', 'input-validation', 'rescan'],
   verifies: 'Three unpayable codes in a row (non-base64, a bech32-damaged OpenCryptoPay till code, a wrong-length base64) each surface their OWN honest error; the review never mounts; and after every refusal the scanner REMOUNTS (mount counter advances) so the next, different code is genuinely read rather than swallowed.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 const NOT_A_PAYMENT_CODE = "isn't a dpay payment code";

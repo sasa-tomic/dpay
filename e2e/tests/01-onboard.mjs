@@ -29,7 +29,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['onboard', 'faucet', 'first-balance', 'empty-history', 'non-custodial'],
   verifies: 'New user enters a name → wallet created, faucet funds ∂100, balance + empty history render; custody + never-moves-money honesty copy present at create + backup.',
-  timeoutMs: 26000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -23,7 +23,7 @@ export const meta = {
   journey: 'pay',
   covers: ['till', 'capabilities', 'receive', 'vchf', 'fail-closed', 'positive-control'],
   verifies: 'A till-disabled relay makes Receive offer no cashier-code selector while the ordinary VCHF dpay request still works; the SAME app re-pointed at a till-enabled relay shows the selector — so the surface tracks the capability, not a constant.',
-  timeoutMs: 45_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

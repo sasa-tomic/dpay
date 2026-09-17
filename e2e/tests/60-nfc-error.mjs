@@ -34,7 +34,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['nfc-error', 'nfc-declined', 'nfc-phases', 'error-handling', 'no-fake-paid', 'terminal-escape', 'fail-closed'],
   verifies: 'NFC tap failure modes: a mid-tap transport error surfaces honest "Tap failed" (not Paid ✓); an unsupported-asset request auto-declines "Declined" + honest reason (fail-closed, no sign); a late error after settling is ignored (no false failure over a decided outcome).',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

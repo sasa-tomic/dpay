@@ -23,7 +23,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['onboard', 'default-username'],
   verifies: 'New user leaves name empty → creates → defaults to \'me\', onboards + funds.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

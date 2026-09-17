@@ -25,7 +25,7 @@ export const meta = {
   journey: 'system',
   covers: ['keyboard-shortcuts', 'tabs', 'sheet-guard', 'input-guard', 'focus-visible', 'escape-leaves-route', 'enter-submits'],
   verifies: 'Single-key shortcuts (P/R/T/A/L/Esc) switch tabs / top-up / open the accounts route / ledger / close sheet; input + sheet guards work; keyboard focus paints the brand :focus-visible ring (U-F4); Escape leaves a ROUTE the way the hardware Back button does; Enter in the Receive amount submits the request (and is deliberately absent where Enter would sign).',
-  timeoutMs: 47000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

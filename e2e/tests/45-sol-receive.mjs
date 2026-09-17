@@ -19,7 +19,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['sol-card', 'sol-derive', 'sol-receive', 'solana-pay', 'qr', 'address', 'sol-tab-ia', 'sol-clipboard'],
   verifies: 'Native SOL rail: device-derived SOL card in Balances + receive address QR (a Solana Pay URI solana:<address>?reference=<base58>) via the Receive tab "My address" sub-mode (offline, no devnet); the same URI scanned back in the Pay tab opens the Solana Pay review for the same address.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.

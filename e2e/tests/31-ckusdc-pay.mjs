@@ -51,7 +51,7 @@ export const meta = {
   journey: 'pay',
   covers: ['ckusdc-pay', 'multi-currency', '6-decimal', 'byte-exact'],
   verifies: 'ckUSDC (currency 2, 6-decimal) pay end-to-end (faucet-funded at principal) under the founder rule: the payee\'s request QR carries the byte-exact netted wire 40000 (price 0.05 − fee 0.01), the app-signed icrc1_transfer settles on currency 2, the Paid total debit is exactly the price (\'0.05 USDC\'), and the payee nets the fee (credited 40_000).',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

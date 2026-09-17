@@ -50,7 +50,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['ckerc20', 'persist', 'restart', 'watching-resume'],
   verifies: 'ckERC20 deposit watching PERSISTS across restart: reload rehydrates watching (no reconnect), resumed notice shown.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

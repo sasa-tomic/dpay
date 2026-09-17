@@ -33,7 +33,7 @@ export const meta = {
   journey: 'pay',
   covers: ['fund-gate', 'scan', 'sign', 'settle', 'demo', 'honest-copy', 'zero-funds'],
   verifies: 'A zero balance on the SELECTED asset no longer hides the scanner: with VCHF selected and empty, the Pay tab still opens the camera and a DEMO request scanned there settles — while the fund instruction survives beside it and names the ∂100.00 practice balance, one tap away.',
-  timeoutMs: 45000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

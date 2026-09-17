@@ -38,7 +38,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['sol-usdc-withdraw', 'spl-transfer', 'ata-note', 'rent-precheck', 'sol-send'],
   verifies: 'USDC send to address: happy path (USDC units + rent disclosure note → Sent ✓) and the below-rent pre-check failure (friendly error, no Sent).',
-  timeoutMs: 35000,
+  timeoutMs: 90000,
 };
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

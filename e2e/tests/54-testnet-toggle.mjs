@@ -40,7 +40,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['testnet', 'catalog', 'toggle', 'balances'],
   verifies: 'The accounts route\'s testnet toggle reveals + hides all three testnet rows (BTC/USDC/ETH testnet — catalog-driven testnet detection).',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

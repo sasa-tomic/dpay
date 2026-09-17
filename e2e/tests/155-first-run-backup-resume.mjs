@@ -25,7 +25,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['backup-gate', 'persistence', 'recovery', 'first-run-router', 'pending-identity'],
   verifies: 'The backup gate survives an app kill: a wallet created and reloaded before the words are acknowledged comes back to the SAME 24 words, has no persisted identity until they are acknowledged, and cannot reach the wallet in between.',
-  timeoutMs: 45_000,
+  timeoutMs: 90000,
 };
 
 /** Read the 24 words off the backup screen (the chips glue "{n}{word}" together). */

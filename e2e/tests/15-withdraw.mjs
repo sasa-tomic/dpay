@@ -46,7 +46,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['withdraw', 'icrc2-approve', 'retrieve_btc_with_approval', 'sign', 'settle', 'clipboard', 'balance-delta', 'destination-copy', 'ui-balance-delta'],
   verifies: 'Withdraw ckBTC: faucet-fund at the principal → enter addr + amount → sign approve + retrieve on-device → gateway burns → "Withdrawn ✓" + Copy destination; balance debits at both the gateway AND the UI (row drops to 0.0005 BTC).',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

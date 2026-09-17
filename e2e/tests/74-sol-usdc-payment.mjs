@@ -26,7 +26,7 @@ export const meta = {
   journey: 'offline',
   covers: ['sol-usdc-payment', 'sol-spl-sign', 'sol-merchant', 'sol-broadcast', 'sol-v2-strict-verify'],
   verifies: 'USDC@Sol v2 full cycle: createSolPaymentRequest (USDC) → signSplPayment (TransferChecked) → broadcast → Received.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';

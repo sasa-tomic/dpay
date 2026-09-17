@@ -50,7 +50,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['saved-address', 'address-book', 'send-saved', 'withdraw-persist'],
   verifies: 'A successful chain-key send (approve + retrieve settled on /api/v2) writes the destination to the per-asset address book; after the send surface is closed and REMOUNTED the book is re-read from storage and the destination renders as a saved chip that pre-fills the shared field on tap.',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -25,7 +25,7 @@ export const meta = {
     'Settings → How dpay works replays the walkthrough with a close affordance and no Skip',
     'the replay leaves the journey store unchanged',
   ],
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

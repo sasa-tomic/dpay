@@ -22,7 +22,7 @@ export const meta = {
   journey: 'convert',
   covers: ['convert', 'icp', 'vchf', 'quote-staleness', 'auto-refresh', 'quote-attribution', 'quote-changed-interrupt', 'test-seam'],
   verifies: 'A fresh Convert quote shows the attributed+timestamped line with no staleness notice; forcing staleness via the app\'s test seam makes the surface flag + refresh it (re-fetch proven by a request counter, stale notice clears); a real venue-price move via the relay\'s fee knob raises the quote-changed review interrupt while confirm stays armed (the on-confirm re-quote is the signing gate).',
-  timeoutMs: 60000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

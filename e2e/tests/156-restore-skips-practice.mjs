@@ -27,7 +27,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['restore', 'first-run-router', 'journey-stamps', 'practice'],
   verifies: 'A restored wallet skips practice entirely — it lands on the currency chooser with firstRunPractice already seen, and the screen does not return on the next launch.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 async function readJourney(driver) {

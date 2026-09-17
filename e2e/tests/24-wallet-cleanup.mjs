@@ -32,7 +32,7 @@ export const meta = {
   journey: 'system',
   covers: ['asset-cards', 'labels', 'symbols'],
   verifies: 'Funded non-dollar balances/history (rail faucet + icrc1_transfer on currency 1) render as asset cards/rows with known symbols and short principal-text counterparties.',
-  timeoutMs: 25_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

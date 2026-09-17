@@ -23,7 +23,7 @@ export const meta = {
   journey: 'tour',
   covers: ['visual-capture', 'screen-census', 'screenshots'],
   verifies: 'Visual capture: screenshots of every major screen (Pay, Receive+QR, Home, Accounts, Settings, Ledger) for review.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

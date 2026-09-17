@@ -32,7 +32,7 @@ export const meta = {
   journey: 'pay',
   covers: ['exact-amount', 'decimal-transport', 'u64', 'bigint-codec'],
   verifies: 'Raw amount > 2^53 round-trips byte-exact through faucet/request-wire/signed-envelope/ledger-settle on the IC rail (BigInt codec, uleb128 + u128 ledger, decimal strings).',
-  timeoutMs: 25_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

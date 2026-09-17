@@ -45,7 +45,7 @@ export const meta = {
   journey: 'pay',
   covers: ['scan-fallback', 'pay-link', 'send-to-address', 'error-handling', 'input-validation'],
   verifies: 'The Pay camera classifies what it read: a payment-link QR opens the pre-filled review (no auto-sign), a bare IC account opens Send to address with the destination filled + route disclosed, a bitcoin: request is refused by name with an instruction to use a Bitcoin wallet, and unrecognised input keeps the honest "not a payment code" refusal.',
-  timeoutMs: 46000,
+  timeoutMs: 90000,
 };
 
 /** Inject a payload through the camera seam, arming the scan surface first (the pay-intent gate). */

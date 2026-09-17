@@ -30,7 +30,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['sol-nfc-decline', 'sol-nfc-error', 'sol-nfc-receipt-unreachable', 'sol-nfc-phases', 'sol-nfc-reader-decline', 'no-fake-paid', 'terminal-escape', 'fail-closed'],
   verifies: 'SOL v2 NFC failure modes: expired solreq auto-declines at sign (honest reason, no sign); transport error → Tap failed; late error after settling ignored; merchant reader sees the decline.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';

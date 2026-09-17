@@ -33,7 +33,7 @@ export const meta = {
   journey: 'pay',
   covers: ['names', 'memo', 'history', 'wire-v2', 'friendly-counterparties', 'review-short-payee'],
   verifies: 'Alice pays Bob with memo \'coffee\' → review shows the name + short pubkey + memo (U-F5); Alice\'s history names the row "to Bob" + "coffee" from the DEVICE-SAVED note (rail rows stay name-less; the payee reconciles by nonce).',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

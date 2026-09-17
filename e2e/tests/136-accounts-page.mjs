@@ -34,7 +34,7 @@ export const meta = {
   journey: 'system',
   covers: ['accounts-route', 'balances', 'group-model', 'rail-health', 'account-order'],
   verifies: 'The accounts page keeps the Balances-sheet contract: zero-balance rows visible, MAIN on the preferred rail only with the sibling rail named (never a second MAIN, never a group total), the practice rail LAST under its own divider, whole-row select switching the header chip and persisting while the Home headline stays on the home currency, and the testnet toggle reachable.',
-  timeoutMs: 30_000,
+  timeoutMs: 90_000,
 };
 
 export async function run() {

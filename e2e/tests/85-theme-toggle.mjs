@@ -25,7 +25,7 @@ export const meta = {
   journey: 'tour',
   covers: ['theme-toggle', 'dark-theme', 'persistence', 'settings', 'auto-theme'],
   verifies: 'Two-tier theme: header flip toggles Light↔Dark on a single click (target-state label), root bg flips, choice survives reload; Settings 3-way control (Light/Dark/Auto) drives the same state and Auto returns to the OS scheme.',
-  timeoutMs: 25_000,
+  timeoutMs: 90000,
 };
 
 const LIGHT_BG = 'rgb(244, 241, 232)'; // palette LIGHT bg #F4F1E8

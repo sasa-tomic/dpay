@@ -56,7 +56,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['till', 'merchant-till', 'nfc', 'charge-reference', 'observed-settlement', 'vchf', 'settle'],
   verifies: 'A shop rings up CHF 4.50 on its own dpay wallet and the counter ALSO arms the NFC reader from that charge: the 132-byte request it serves names the shop’s own account, the exact raw VCHF, and the CHARGE’s reference as its nonce. A payer’s offline-signed bundle delivered over that reader settles a real icrc1_transfer whose ICRC-1 memo is therefore the charge’s reference, so `GET /api/v1/till/{id}` — which reads the merchant’s own ledger history and knows nothing about taps — flips to paid, names the block, and the shop is credited the exact VCHF. The paid light is the relay’s answer: the tap is given no onSettled, and the merchant’s tap screen is dismissed before the till’s own verdict is read off the counter.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 /** Keep a copy of every ring-up answer the app receives, without changing what it receives. */

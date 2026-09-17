@@ -428,9 +428,21 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
     // so the re-render that fires it must not lag a shrunk bound (prod: min(30s, 60s) = 30s, the
     // historical cadence; e2e: 250ms — the marker lands right after the bound, not up to 30s later).
     let t: ReturnType<typeof setTimeout>;
-    const loop = () => { setNowTick(Date.now()); t = setTimeout(loop, balanceTickMs()); };
-    t = setTimeout(loop, Math.min(balanceTickMs(), balanceStaleMs()));
-    return () => clearTimeout(t);
+    let armedAt = 0;
+    let armedDelay = 0;
+    const arm = (delay: number) => { armedAt = Date.now(); armedDelay = delay; t = setTimeout(loop, delay); };
+    const loop = () => { setNowTick(Date.now()); arm(Math.min(balanceTickMs(), balanceStaleMs())); };
+    arm(Math.min(balanceTickMs(), balanceStaleMs()));
+    // A pending LONG arm would honor the pre-shrink magnitude for up to 30 s after a mid-session
+    // seam shrink. This 250 ms check is a pure numeric compare (no re-render, no work) and re-arms
+    // early ONLY when the effective delay shrank below what is still pending — in prod the seam is
+    // unset, want == armedDelay, and the interval never fires anything.
+    const iv = setInterval(() => {
+      const want = Math.min(balanceTickMs(), balanceStaleMs());
+      const remaining = armedDelay - (Date.now() - armedAt);
+      if (want < remaining) { clearTimeout(t); arm(Math.max(0, want)); }
+    }, 250);
+    return () => { clearTimeout(t); clearInterval(iv); };
   }, []);
   // Reconciliation: a settled row carrying the record's join key (IC: the on-chain memo = the
   // request nonce; SOL: the transaction signature) is the record's terminal event on BOTH

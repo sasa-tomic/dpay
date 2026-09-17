@@ -15,7 +15,7 @@ export const meta = {
   journey: 'pay',
   covers: ['pay', 'scan', 'solana', 'convert', 'separation'],
   verifies: 'The payment surfaces (IC PayMode and the SOL PayMode twin) expose zero conversion entry points — no convert testID and no Convert CTA — conversion stays a standalone wallet action (Accounts tab only).',
-  timeoutMs: 45000,
+  timeoutMs: 90000,
 };
 
 /** Zero tolerance count of every convert-surfaced testID + any button labeled 'Convert'. */

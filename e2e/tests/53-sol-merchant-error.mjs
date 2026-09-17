@@ -25,7 +25,7 @@ export const meta = {
   journey: 'offline',
   covers: ['sol-merchant', 'sol-error', 'sol-v2-rejected', 'friendly-error'],
   verifies: 'SOL v2 merchant broadcast error surfaces a friendly message (not raw RPC, not false Received).',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 // Minimal base58 encoder (see flow 47).

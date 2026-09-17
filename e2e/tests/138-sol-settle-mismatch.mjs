@@ -30,7 +30,7 @@ export const meta = {
   journey: 'offline',
   covers: ['sol-merchant', 'sol-settle-verify', 'three-verdict'],
   verifies: 'SOL settle-verify: confirmed-but-mismatched body → honest doubt copy + reconcile; unreadable body → keeps polling, settles only when verified; on-chain error → rejected copy.',
-  timeoutMs: 65000,
+  timeoutMs: 90000,
 };
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';

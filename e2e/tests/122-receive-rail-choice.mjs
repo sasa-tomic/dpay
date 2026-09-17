@@ -36,7 +36,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['home-currency', 'receive', 'rails', 'ckusdc', 'sol-usdc', 'vchf', 'group-model'],
   verifies: 'Receive ▸ "My address" on a multi-rail home currency defaults to the wallet\'s rail pick with no "default rail" suffix and the rail\'s own fee fact, exposes the sibling rail\'s own address + fee one toggle away without leaving the sub-mode, and asserts both addresses belong to the user; single-rail CHF renders with no rail disclosure.',
-  timeoutMs: 84000,
+  timeoutMs: 90000,
 };
 
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.

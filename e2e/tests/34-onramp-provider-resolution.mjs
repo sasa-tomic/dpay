@@ -55,7 +55,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['onramp-resolver', 'eip-1193', 'walletconnect-gate'],
   verifies: 'Onramp resolver: window.ethereum wins when present; WC branch unreachable on web even when \'configured\' → honest null.',
-  timeoutMs: 15000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -35,7 +35,7 @@ export const meta = {
   journey: 'pay',
   covers: ['till', 'merchant-till', 'send-to-address', 'layout', 'viewport-fit', 'receive', 'vchf', 'i18n', 'regression'],
   verifies: 'The two forms a user types money into — the till ring-up (the shared Receive amount row with the till checkbox checked) and Send-to-address — render entirely inside the phone viewport in both a short and the app’s longest locale: each form’s mode surface is no wider than its content column, and every rendered box in it (the unit prefix, the amount fields, the Max button, the hints and the primary buttons) sits between the two viewport edges with no horizontal page scroll.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 /** Sub-pixel layout rounding. A real overflow here is tens of pixels; half a pixel is the renderer. */

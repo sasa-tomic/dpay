@@ -30,7 +30,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'onboard', 'ckusdc', 'solana-usdc', 'eur', 'eurc', 'veur', 'settings', 'group-model'],
   verifies: 'The chooser row lists EVERY rail of a currency (USD: ckUSDC · Internet Computer AND USDC · Solana; EUR: EURC · Solana first — the deep-liquidity preference — then VEUR · Internet Computer; CHF: VCHF only), keeps the preferred rail first without a “dpay default rail” suffix, Settings shows the same group for the main currency, and Continue still works.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

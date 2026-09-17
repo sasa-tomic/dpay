@@ -22,7 +22,7 @@ export const meta = {
   journey: 'offline',
   covers: ['offline-pay', 'hand-off', 'reconcile', 'delight-peak', 'journey-stamps'],
   verifies: 'first OFFLINE confirmed payment plays the one-shot campaign peak (offline-peak + campaign line → settles to first-offline-stamp remnant); second offline payment and online paid show NO peak; pending hand-off never shows peak or stamp',
-  timeoutMs: 45_000,
+  timeoutMs: 90000,
 };
 
 const PAY_CENTS = 2500;

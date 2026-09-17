@@ -45,7 +45,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['deposit-error', 'offline', 'graceful'],
   verifies: 'IC gateway unreachable when opening the deposit sheet → honest error (\'Check connection\'), no spinner-forever.',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -53,7 +53,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['ckerc20-offramp', 'ckusdc', 'withdraw', 'icrc2-approve', 'withdraw_erc20', 'dual-ledger-gas', 'gas-note', 'sign', 'settle', 'balance-delta', 'ui-balance-delta'],
   verifies: 'ckUSDC Send-to-address: gas-dependency note renders (no-swap honesty) → enter 0x addr + USDC amount → query gas + sign gas-approve + amount-approve + withdraw_erc20 on-device → gateway burns BOTH ledgers → "Withdrawn ✓"; ckUSDC debits fee+amount, ckETH debits gas-fee + gas at the gateway AND the UI row drops to 998.99 USDC.',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -23,7 +23,7 @@ export const meta = {
   journey: 'offline',
   covers: ['offline', 'pay', 'pending', 'balances', 'history'],
   verifies: 'An offline QR hand-off (scan → auto-sign → "Paid" press) renders a pending row headlining the gross and deducts exactly that gross from the balance.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

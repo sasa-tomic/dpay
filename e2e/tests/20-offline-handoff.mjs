@@ -17,7 +17,7 @@ export const meta = {
   journey: 'offline',
   covers: ['offline-pay', 'hand-off', 'reconcile'],
   verifies: 'offline payer signs an icrc1_transfer envelope QR (base64url, memo = request nonce); counterparty submits it to the IC gateway; payer reconnects and reconciles to Paid by request_id (read_state); payee balance grows',
-  timeoutMs: 30_000,
+  timeoutMs: 90000,
 };
 
 const PAY_CENTS = 2500;

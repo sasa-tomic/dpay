@@ -30,7 +30,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['sol-nfc', 'sol-v2-receipt', 'event-bus', 'auto-sign'],
   verifies: 'SOL v2 NFC tap on a NETTED request (wire 0.000995 for a 0.001 price — the customer pays exactly the price, the payee nets the fee): arm card → request AUTO-SIGNS (one-press rule → offline sign) → receipt (rid+sig match) → Paid ✓',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';

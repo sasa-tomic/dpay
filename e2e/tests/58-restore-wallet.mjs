@@ -31,7 +31,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['restore-seed', 'keypair-from-secret', 'both-rails-recovery', 'btn-restore-mode-toggle'],
   verifies: 'A wallet can be restored from the 64-hex recovery seed (toggle to hex mode; no faucet; secretHex matches).',
-  timeoutMs: 15_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

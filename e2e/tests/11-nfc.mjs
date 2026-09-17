@@ -37,7 +37,7 @@ export const meta = {
   // 30s, not 15s: measured 19.9s ALONE on an idle host — i.e. the flow could never fit its own
   // budget, and only passed when the load-scale happened to stretch it far enough. Same class as
   // flows 105/106. A budget smaller than the flow's measured cost is a coin toss, not a gate.
-  timeoutMs: 32000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

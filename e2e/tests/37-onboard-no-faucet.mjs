@@ -29,7 +29,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['onboard', 'capability-failure', 'offline', 'dead-relay', 'right-reason', 'zero-balance', 'no-funding-solicitation'],
   verifies: 'Onboard against a dead relay → capability discovery reaches the relay and fails with a connection refusal (not an unsafe-port artifact), no faucet request follows, the first-run practice screen fails closed with a retry and NO deposit address or add-money action, the wallet is created with $0 (∂100 never shown), and the balance carries the honest offline indicator.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

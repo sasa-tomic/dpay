@@ -54,7 +54,7 @@ export const meta = {
   journey: 'pay',
   covers: ['deeplink', 'receipt-link', 'rail-proof', 'receive', 'handback', 'forgery'],
   verifies: 'merchant treats dpay:pay as a trigger; a forged proof before settlement never flips Received — only the exact nonce-bound ledger row does; never routes to Pay.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

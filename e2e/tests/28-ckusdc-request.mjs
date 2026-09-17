@@ -38,7 +38,7 @@ export const meta = {
   journey: 'pay',
   covers: ['ckusdc-merchant-create', 'request-asset-picker', 'multi-currency', '6-decimal', 'byte-exact', 'pay-link'],
   verifies: 'ckUSDC chip + 0.05 price → QR is the payment LINK with the NETTED amount (ckUSDC/IC/0.04 = price − fee, own principal); NFC wire encodes currency 2 + 40000 raw (6-dec, netted); readout headlines \'0.05 USDC\' with a fee line "you receive 0.04 USDC" (no $0.05).',
-  timeoutMs: 15000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

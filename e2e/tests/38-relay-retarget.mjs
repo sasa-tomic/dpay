@@ -36,7 +36,7 @@ export const meta = {
   journey: 'system',
   covers: ['relay-retarget', 'settings-relay-switch', 'live-poll'],
   verifies: 'Settings relay-switch retargets the LIVE balance poll: header changes from A\'s ∂100.00 to B\'s faucet-funded ∂500.00 (B\'s fresh per-process gateway).',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

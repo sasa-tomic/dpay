@@ -27,7 +27,7 @@ export const meta = {
   journey: 'pay',
   covers: ['till', 'merchant-till', 'offline', 'unknown-outcome', 'honest-instructions', 'cancel-charge', 'fail-closed'],
   verifies: 'A live till charge whose relay goes unreachable renders "can’t check" — the code stays up, the screen never says unpaid and never claims the sale, and it recovers to waiting the moment the relay answers again. Cancelling then signs a cents = 0 request on the merchant’s own key; the relay voids the charge and the screen ends the code with "nothing is owed" and the next action, from which the counter reopens.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

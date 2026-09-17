@@ -21,7 +21,7 @@ export const meta = {
   journey: 'offline',
   covers: ['sol-no-setup', 'sol-expired-request', 'sol-v2-freshness'],
   verifies: 'SOL v2: SolPayMode mounts in scan with no setup; valid req signs offline; expired req is rejected with a friendly error.',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
   notes: 'Replaces the v1 setup-error flow (createNonceAccount failure + stale-nonce resync — both deleted in v2). The error-surface coverage is now the expired-request decline (isSolReqV2Expired gate).',
 };
 

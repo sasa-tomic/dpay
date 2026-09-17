@@ -33,7 +33,7 @@ export const meta = {
   journey: 'pay',
   covers: ['share-receipt', 'receipt-link', 'handback', 'online-settle', 'deeplink'],
   verifies: 'After an online settle, btn-share-receipt hands an openable /wallet?pay= receipt URL to Share and flips to "Link copied ✓".',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

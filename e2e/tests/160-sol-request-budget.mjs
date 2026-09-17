@@ -30,7 +30,7 @@ export const meta = {
   journey: 'system',
   covers: ['solana', 'balances', 'history', 'rpc-budget', 'background'],
   verifies: 'The SOL rail costs ONE getMultipleAccounts per balance tick (the per-rail getBalance/getAccountInfo/getTokenAccountBalance fan-out is never issued by the poll), one signature page per address per history tick with each transaction detail read exactly once, and ZERO requests of any kind while the app is backgrounded — with an immediate read when it returns.',
-  timeoutMs: 60000,
+  timeoutMs: 90000,
 };
 
 const SIGNATURE = '4gLRhTTJLn4hPzkpcw6ZSsws65pNBhrwiDiNMQhM2PNJum4Dbgo2V6EUY5LQV2vquAsF7p1nB3qhesDdpayBudget';

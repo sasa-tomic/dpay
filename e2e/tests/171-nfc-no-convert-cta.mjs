@@ -38,7 +38,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['nfc', 'convert-absence', 'inv-8', 'nfc-phases', 'auto-sign', 'sol-nfc', 'no-conversion-in-payment'],
   verifies: 'Every NFC sub-surface reachable in the harness (IC card: idle/linking/exchanging/settling/success/auto-sign-disclosure/declined/error; SOL card: idle/linking/auto-sign/receipt-paid) shows ZERO convert affordances — the one-press tap never grows a conversion offer. Reader-side (merchant till) is not a wallet surface; pending terminal shares the walked NfcTapView shell.',
-  timeoutMs: 60000,
+  timeoutMs: 90000,
 };
 
 /** Zero-tolerance convert census — the SAME probe flow 170 uses: every convert testID, the

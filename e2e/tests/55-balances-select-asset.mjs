@@ -28,7 +28,7 @@ export const meta = {
   journey: 'system',
   covers: ['asset-select', 'header-balance-binding', 'active-asset-label'],
   verifies: 'Selecting an asset in Balances binds the header: label DEMO→ckBTC→SOL and the balance text follows the active-rail branch.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

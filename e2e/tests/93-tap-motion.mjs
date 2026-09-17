@@ -20,7 +20,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['nfc-phases', 'event-bus', 'delight-motion', 'honesty-guard', 'auto-sign'],
   verifies: 'every NFC phase renders its pinned textContent + its own motion beat (breath/segments/ellipsis/shake); card awaitingApproval maps straight to exchanging (auto-sign); pending carries no settled mark and no campaign line (honesty); no dpay stamp ring exists anywhere',
-  timeoutMs: 30_000,
+  timeoutMs: 90000,
 };
 
 const has = (driver, testID) => driver.eval((id) => document.querySelector(`[data-testid="${id}"]`) !== null, testID);

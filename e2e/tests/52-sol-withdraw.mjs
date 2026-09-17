@@ -28,7 +28,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['sol-withdraw', 'sol-send', 'sol-tab-ia', 'sign', 'route-disclosure', 'error-handling'],
   verifies: 'SOL withdraw: select SOL → Pay tab "Send to address" → a wrong-chain paste is refused by name and a valid one has its route disclosed → enter amount → sign+broadcast (stub) → Sent ✓.',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

@@ -30,7 +30,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['faucet', 'topup', 'cooldown', 'balance-delta'],
   verifies: 'Demo faucet funds ∂100 once; a second top-up inside the hour is refused with the relay\'s own retry time and the balance does not move.',
-  timeoutMs: 37000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

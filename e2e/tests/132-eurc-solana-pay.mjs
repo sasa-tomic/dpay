@@ -17,7 +17,7 @@ export const meta = {
   journey: 'pay',
   covers: ['solana-pay', 'eur', 'eurc', 'scan', 'refusal', 'fees'],
   verifies: 'home=EUR on the EURC rail: a scanned solana: URI naming EURC\'s mint reviews and pays EURC (named token, own 6 decimals, ATA rent disclosed); a non-catalog mint is refused BY NAME with its pubkey.',
-  timeoutMs: 59000,
+  timeoutMs: 90000,
 };
 
 const MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

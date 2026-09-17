@@ -26,7 +26,7 @@ export const meta = {
   journey: 'pay',
   covers: ['pay-link', 'url-routing', 'rail-choice', 'never-override'],
   verifies: 'A payment link naming USDC@Solana pays exactly that rail with home=USD/preferred ckUSDC selected — no rail-selection copy on the pinned path.',
-  timeoutMs: 52000,
+  timeoutMs: 90000,
 };
 
 const DEST_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';

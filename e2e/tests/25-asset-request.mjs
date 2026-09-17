@@ -28,7 +28,7 @@ export const meta = {
   journey: 'pay',
   covers: ['asset-request', 'ckbtc', 'currency-id', 'encode', 'btc-units', 'pay-link'],
   verifies: 'ckBTC chip + BTC amount → QR is the payment LINK (ckBTC/IC/0.0005, own principal); NFC wire encodes RUNTIME currency 1 + 50000 sats; readout \'0.0005 BTC\' (no $).',
-  timeoutMs: 15000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

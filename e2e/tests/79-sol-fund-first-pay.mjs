@@ -22,7 +22,7 @@ export const meta = {
   journey: 'system',
   covers: ['sol-fund-first', 'pay-gate', 'nfc-disarm', 'fail-open', 'zero-funds'],
   verifies: 'SOL Pay tab: known-zero → fund panel replaces scanner+NFC, 1-tap to deposit QR, auto-release on funding, fail-open on unknown.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

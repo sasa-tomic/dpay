@@ -27,7 +27,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'ckusdc', 'solana-usdc', 'vchf', 'group-model'],
   verifies: 'The accounts route marks every rail of the home-currency group without summing it: home=USD keeps ckUSDC (MAIN) and USDC · Solana (named rail badge) as distinct rows with no group total; home=CHF renders exactly as before (MAIN on VCHF, no rail badges).',
-  timeoutMs: 59000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -23,7 +23,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['deposit-address', 'qr', 'instructions', 'fee-min', 'deep-link'],
   verifies: 'ckBTC deposit sheet: address + QR + instructions + fee/min + the "Already on the Internet Computer?" ICRC-1 receive section (own principal); deep-link ?screen=deposit works.',
-  timeoutMs: 37000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

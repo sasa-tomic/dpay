@@ -24,7 +24,7 @@ export const meta = {
   journey: 'system',
   covers: ['accounts-route', 'balances', 'one-gesture', 'zero-balance-visible'],
   verifies: 'The currency list is one gesture from every screen: the header balance chip on the Pay scanner opens the Accounts route, every enabled asset including zero-balance rows renders, Back returns to the surface it was opened from, no modal overlay is mounted, and the `a` hotkey plus the Home affordance reach the same route.',
-  timeoutMs: 30_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

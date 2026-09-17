@@ -19,7 +19,7 @@ export const meta = {
   journey: 'system',
   covers: ['seam-integrity', 'fail-loud', 'regression-guard'],
   verifies: 'Every injection seam (scan/NFC/SOL-NFC) throws when no listener is mounted — regression guard against silent-drop bugs.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 // Call a seam inside the page, capturing whether it threw (instead of letting the throw escape as

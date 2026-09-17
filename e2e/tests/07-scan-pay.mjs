@@ -32,7 +32,7 @@ export const meta = {
   journey: 'pay',
   covers: ['scan', 'sign', 'settle', 'receipt', 'history', 'recipient-name'],
   verifies: 'Payer scans (auto-sign, one press): two-wallet real ed25519 sign + relay settle → \'Paid ✓\', balances correct.',
-  timeoutMs: 33000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

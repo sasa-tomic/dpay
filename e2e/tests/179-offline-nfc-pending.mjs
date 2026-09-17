@@ -27,7 +27,7 @@ export const meta = {
   journey: 'offline',
   covers: ['offline', 'nfc', 'pending', 'balances', 'history'],
   verifies: 'An unconfirmed offline NFC tap renders a pending row headlining the gross and deducts exactly that gross from the balance; no other asset moves.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -22,7 +22,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['home-currency', 'receive', 'rails', 'eur', 'eurc', 'veur', 'rail-health', 'fees'],
   verifies: 'Receive ▸ My address on home=EUR defaults to EURC@Solana (own ATA + SOL fees, no health line on the deep rail) and toggles to VEUR@IC (own principal + e8s VEUR fee + the thin-liability note on the disclosure) without leaving the sub-mode; both addresses stable across flips.',
-  timeoutMs: 70000,
+  timeoutMs: 90000,
 };
 
 // base58 (Bitcoin alphabet) — the Solana address charset. 32–44 chars is the valid pubkey range.

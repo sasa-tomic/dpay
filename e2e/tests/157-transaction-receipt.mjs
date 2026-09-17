@@ -33,7 +33,7 @@ export const meta = {
   journey: 'system',
   covers: ['ledger', 'receipt', 'reconciliation', 'home-tab', 'activity-feed', 'honest-copy'],
   verifies: 'A transaction row opens a receipt carrying the exact amount, the counterparty\'s full account, the memo reference and the ledger block index, and copies all of it to the clipboard; a row whose ledger recorded no counterparty and no memo says so instead of rendering blank labelled fields; the Home feed opens the same receipt.',
-  timeoutMs: 45000,
+  timeoutMs: 90000,
 };
 
 const MEMO_HEX = '9f2c00112233445566778899aabbccdd';

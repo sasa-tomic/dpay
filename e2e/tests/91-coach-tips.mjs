@@ -19,7 +19,7 @@ export const meta = {
   covers: ['coach-receiveRequest', 'coach-offlineQr', 'coach-pendingOutcome',
     'btn-coach-*-dismiss', 'journey-seen-markers', 'one-time-coaching'],
   verifies: 'each coaching tip mounts on its surface exactly once per identity: presence, dismiss, re-entry → absent; the payment review carries none at all; pendingOutcome never appears on a confirmed Paid screen; the offline hand-off still settles (counterparty submit + reconcile)',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 const PAY_CENTS = 2500;

@@ -38,7 +38,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['funding-routes', 'honest-instructions', 'no-endorsement', 'attributed-figures', 'asset-switch', 'one-gesture'],
   verifies: 'The deposit surfaces answer "I do not have any yet": VCHF names the buy-ICP-then-convert route because no provider sells it, native ICP is a direct buy, providers carry their own published figures with the "up to" qualifier intact, and the screen states that dpay recommends none of them and is paid by none of them. Also: another asset\'s receiving address is ONE tap from this surface and the switch keeps the address sub-mode instead of bouncing to the request form.',
-  timeoutMs: 40_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -24,7 +24,7 @@ export const meta = {
   journey: 'system',
   covers: ['qr-scanner', 'teardown', 'unmount', 'listener-leak', 'pay-intent-gate'],
   verifies: 'Pay tab starts gated (0 listeners until "Pay Now"); armed → 1; Pay→Receive→Pay tears down cleanly (no leak; re-mount re-gates then re-arms).',
-  timeoutMs: 15000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

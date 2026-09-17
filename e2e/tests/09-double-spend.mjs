@@ -19,7 +19,7 @@ export const meta = {
   journey: 'pay',
   covers: ['pay', 'replay-safety', 'confirmation'],
   verifies: 'identical-byte envelope resubmit is idempotent on the IC gateway (request_id dedup): both POSTs 202, transfer executed once, payee credited once — and re-signing is a NEW request (the never-retry-by-resigning hazard)',
-  timeoutMs: 25_000,
+  timeoutMs: 90000,
 };
 
 const PAY_CENTS = 2500;

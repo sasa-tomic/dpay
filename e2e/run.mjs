@@ -202,7 +202,12 @@ async function runOne(test, timeoutScale, lane = 0, shards = 1) {
   const mod = await import(`file://${test.path}`);
   if (typeof mod.run !== 'function') throw new Error(`${test.file}: no \`run\` export`);
   const base = test.meta?.timeoutMs ?? FALLBACK_TIMEOUT_MS;
-  const effective = Math.round(base * timeoutScale);
+  // The run-start scale is a trailing 1-min average and goes stale on a bursty host: a test that
+  // STARTS during a sibling-load spike must be budgeted for the spike, not for the calmer run
+  // start (measured 2026-09-16: flows killed mid-crawl at scale ×1.6 while the 1-min load was 3×
+  // the run-start sample). Take the max of the two at test start.
+  const scale = Math.max(timeoutScale, hostLoadFactor().factor);
+  const effective = Math.round(base * scale);
   // Wrap mod.run() in an AsyncLocalStorage context carrying the test file AND this lane's browser
   // shard. setup() (called inside the flow body) reads this store to register its freshly-created
   // driver into the per-test registry (so runPool's catch can later reach it for the RED-path

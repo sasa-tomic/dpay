@@ -21,7 +21,7 @@ export const meta = {
   journey: 'system',
   covers: ['seed-backup', 'confirm-gate', 'secret-reveal', 'clipboard-copy', 'mnemonic-backup', 'mnemonic-word-{0..23}', 'btn-backup-show-hex', 'btn-copy-mnemonic', 'btn-copy-seed'],
   verifies: 'Seed stays hidden behind a confirm gate; once revealed the 24 mnemonic words show by default, hex view toggles in and matches identity.secretHex; copy writes the seed to the real clipboard.',
-  timeoutMs: 30_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

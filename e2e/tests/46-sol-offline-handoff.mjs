@@ -23,7 +23,7 @@ export const meta = {
   journey: 'offline',
   covers: ['sol-offline-sign', 'qr-handoff', 'honest-pending', 'sign-status-short-payee'],
   verifies: 'SOL v2 scan solreq:v2 → AUTO-SIGN (no setup, no nonce) → solpay:v2 QR (U-F5 short destination rides the qr header) → honest pending.',
-  timeoutMs: 25000,
+  timeoutMs: 90000,
 };
 
 const MERCHANT_ADDR = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r';

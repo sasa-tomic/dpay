@@ -35,7 +35,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['practice', 'first-run', 'demo', 'real-settlement', 'flow-understood', 'journey-stamps'],
   verifies: 'The first-run practice settles a REAL ∂1.00 practice transfer to the pinned practice payee: the request card names payee and amount, the review is the Pay tab’s own review, Approve signs one envelope, the ledger confirms, the balance drops to ∂99.00, flowUnderstood persists and paymentTested does NOT.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 /** Read + parse the persisted journey store (dpay.journey.v1) from page localStorage. */

@@ -36,7 +36,7 @@ export const meta = {
   journey: 'pay',
   covers: ['request-qr', 'pay-link', 'camera-scan', 'pay-review', 'memo-reconcile', 'sol-send', 'rail-parity'],
   verifies: 'The request QR is the payment LINK: camera-scanning the exact QR string opens the payer flow on each rail — IC review+Approve settles with ref-as-memo and the open request auto-confirms Received (DEMO fee=null → verbatim amount); SOL pre-fills Send-to-address with the NETTED wire (typed 0.02 − fee → 0.019995; customer pays exactly the price) and broadcasts (screen does not auto-confirm).',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 const IC_AMOUNT = '3.50';

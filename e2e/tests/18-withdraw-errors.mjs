@@ -55,7 +55,7 @@ export const meta = {
   journey: 'withdraw',
   covers: ['withdraw-errors', 'below-min', 'over-balance', 'wrong-chain', 'rail-rejection', 'money-safe'],
   verifies: 'Withdraw error paths: below-min / over-balance warnings disable the confirm button, a wrong-chain destination is refused by name in send-status and renders no offramp body at all; a minter-refused full-balance withdraw surfaces the "insufficient funds" reject in withdraw-err with a fee-only debit.',
-  timeoutMs: 35000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

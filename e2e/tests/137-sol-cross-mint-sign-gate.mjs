@@ -24,7 +24,7 @@ export const meta = {
   journey: 'pay',
   covers: ['solreq', 'cross-mint', 'absent-ata', 'refusal', 'fail-open', 'offline-sign', 'rpc-error', 'honest-copy'],
   verifies: 'OPEN_ISSUES 6(a): a solreq naming a KNOWN-absent mint (per-mint state from the balance rail, persisted across restarts) is refused at the scan by name before any sign; a fundable request-mint still signs; and a request-mint the endpoint has REFUSED to answer for signs too, carrying a caveat on the hand-off screen that names the token, states the payment cannot settle without the account, and never tells an already-online payer to find signal.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 const MERCHANT = 'Ecs89dz8NsNoSxyUtp54G2HPbmvJr8qZnxnWUqiLT92r'; // valid base58 Solana address

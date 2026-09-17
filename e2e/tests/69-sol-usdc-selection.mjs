@@ -24,7 +24,7 @@ export const meta = {
   journey: 'system',
   covers: ['asset-picker', 'ic-usdc', 'sol-usdc', 'rail-switch', 'amount-clear'],
   verifies: 'IC USDC ↔ Solana USDC: unified picker switches rail + clears amount (symmetric in both directions).',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

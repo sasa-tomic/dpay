@@ -21,7 +21,7 @@ export const meta = {
   journey: 'system',
   covers: ['sol-fund-funnel', 'ata-setup', 'needs-setup-badge', 'escape-hatch', 'zero-funds'],
   verifies: 'SOL zero→pay journey: absent-ATA setup card with fund hatch (no dead-end copy), 1-tap to SOL address, funded unlock, one-tap create, badge truth.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

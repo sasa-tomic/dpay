@@ -28,7 +28,7 @@ export const meta = {
     'creating from there lands in the funded Wallet',
     'walkthroughDone is persisted in the journey store',
   ],
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

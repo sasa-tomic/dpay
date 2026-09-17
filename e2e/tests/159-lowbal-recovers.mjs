@@ -36,7 +36,7 @@ export const meta = {
   journey: 'pay',
   covers: ['low-balance', 'insufficient', 'no-sign-gate', 'scan', 'sign', 'settle'],
   verifies: 'A payment refused on a low balance becomes payable — with a deliberate Approve, never a silent re-sign — as soon as the poll reads enough.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

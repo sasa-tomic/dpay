@@ -33,7 +33,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'onboard', 'vchf', 'ckusdc', 'settings', 'asset-selector', 'persistence'],
   verifies: 'The first run asks which currency the user thinks in, offers only currencies the catalog can realise (CHF/USD/EUR) with each row naming exactly its catalogued rails as token · chain, names the ledger token on its settlement chain, lands the wallet on that currency, follows a Settings change, and remembers the asset across a reload.',
-  timeoutMs: 44000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

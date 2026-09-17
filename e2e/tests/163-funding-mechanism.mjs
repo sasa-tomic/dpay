@@ -44,7 +44,7 @@ export const meta = {
   journey: 'deposit',
   covers: ['funding-routes', 'deposit-mechanism', 'ckerc20', 'ckbtc', 'solana', 'money-loss-guard', 'honest-instructions'],
   verifies: 'The "don\'t have any yet?" instruction matches the deposit that actually runs. On a USD wallet ckUSDC reaches the wallet-signed ckERC20 sheet (not the ICRC address sheet that used to shadow it) and its funding card says there is no address, names ETH as a separate holding for the fee, and never says to send the token to an address; ckBTC says buy BTC on Bitcoin — the backing chain, not the Internet Computer its row settles on — and does send it to the address shown; and the Solana rail gets the same send-to-address shape with no catalog descriptor behind it.',
-  timeoutMs: 45_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

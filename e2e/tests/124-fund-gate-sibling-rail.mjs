@@ -21,7 +21,7 @@ export const meta = {
   journey: 'pay',
   covers: ['fund-gate', 'rail-choice', 'home-currency', 'solana'],
   verifies: 'The IC fund-first gate names a funded USDC@Solana sibling rail and one tap switches to it (user gesture, selection unlocked).',
-  timeoutMs: 55000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

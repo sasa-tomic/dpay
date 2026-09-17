@@ -34,7 +34,7 @@ export const meta = {
   journey: 'system',
   covers: ['url-routing', 'browser-back', 'deep-link', 'refresh', 'foreign-query-params'],
   verifies: 'Each wallet surface has its own URL: tab changes write it, browser Back walks back through the wallet instead of leaving it, a sub-moded and a Settings URL both restore on a cold load, and query parameters owned by other parsers (a pay link) survive navigation untouched.',
-  timeoutMs: 40_000,
+  timeoutMs: 90000,
 };
 
 /** The wallet's query string, read from the page. NOTE it always carries the harness's own

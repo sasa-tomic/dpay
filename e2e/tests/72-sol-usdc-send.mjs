@@ -39,7 +39,7 @@ export const meta = {
   journey: 'system',
   covers: ['sol-usdc-send', 'spl-transfer', 'fail-closed-ata', 'asset-aware-send', 'ata-create-one-tap'],
   verifies: 'Solana USDC "Send to address": fail-closed device-ATA gate → one-tap create (busy → form appears) and the create-failure leg (err shown, sheet stays usable).',
-  timeoutMs: 40000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

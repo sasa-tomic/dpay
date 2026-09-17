@@ -18,7 +18,7 @@ export const meta = {
   journey: 'offline',
   covers: ['receive-scan', 'offline-settle'],
   verifies: 'merchant scans a base64url icrc1_transfer envelope (memo = request nonce) via the camera seam → app submits it to the IC gateway → read_state poll flips "Received"; balance + history follow from the ledger',
-  timeoutMs: 25_000,
+  timeoutMs: 90000,
 };
 
 const PAY_CENTS = 2500n;

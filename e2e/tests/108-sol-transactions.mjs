@@ -30,7 +30,7 @@ export const meta = {
   journey: 'pay',
   covers: ['sol-history', 'ledger', 'transactions', 'mixed-rail', 'ledger-filter', 'sol-tab-ia'],
   verifies: 'A Solana transaction appears in the Transactions tab: the SOL rail history is polled through the RPC seam, merged with the IC rail by timestamp, and rendered by the one Ledger — SOL row in SOL units with its short counterparty, the IC faucet row still in ∂, and a filter chip per rail.',
-  timeoutMs: 47000,
+  timeoutMs: 90000,
 };
 
 const SIGNATURE = 'E2eSoLhIsToRy1111111111111111111111111111111';

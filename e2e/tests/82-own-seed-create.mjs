@@ -30,7 +30,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['own-seed', 'btn-own-seed-toggle', 'own-seed-input', 'create-from-seed', 'faucet', 'mnemonic-backup'],
   verifies: 'Create a wallet from a pasted seed (words OR hex) instead of a random one; invalid seed is rejected on the form.',
-  timeoutMs: 20_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

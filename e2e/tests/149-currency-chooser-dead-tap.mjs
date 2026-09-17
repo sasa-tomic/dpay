@@ -20,7 +20,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['home-currency', 'onboarding', 'honest-copy', 'dead-end'],
   verifies: 'Continue pressed with no currency picked answers with the missing step instead of swallowing the tap in silence; picking clears the prompt and Continue then commits.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

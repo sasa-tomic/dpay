@@ -33,7 +33,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['first-run', 'no-funding-solicitation', 'anti-scam', 'structural', 'practice', 'positive-control'],
   verifies: 'From cold launch to the wallet — walkthrough, create, backup, practice (on its no-faucet branch) and the currency chooser — no screen renders a deposit address, a fund gate, an add-money action or a top-up button, and the wallet then opens on no fund panel either; Home’s Add money action IS present as the positive control, so funding is a choice the user can make rather than one pushed at them.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 /** Every affordance in the app that asks the user to put money in. None may appear before the
@@ -66,6 +66,11 @@ export async function run() {
   const noFaucet = await startRelay({faucet: false});
   try {
     const {driver, webBaseURL} = env;
+
+    // The ephemeral relay dies in the finally BEFORE env.stop() closes the page — the still-live
+    // history fan-out then lands ERR_CONNECTION_REFUSED on a dead origin and the driver's teardown
+    // diagnostics would fail-closed the flow. Its failures are expected; allowlist the origin.
+    driver.allowRequestFailuresFrom(noFaucet.baseURL);
 
     // A relay that hands out nothing: the app has nothing to give, which is exactly when a lesser
     // design starts asking.

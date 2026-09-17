@@ -40,7 +40,7 @@ export const meta = {
   covers: ['qr-scannable', 'qr-brand-mark', 'quiet-zone', 'solana-pay'],
   verifies:
     'every rendered <QrCode> stays machine-decodable: request-qr (244/M + brand mark) decodes to the exact encoded value (__DPAY_QR_LAST byte-for-byte) and sol-receive-qr (200/L) decodes to the Solana Pay URI — solana:<address>?reference=<base58> for SOL, solana:<owner>?spl-token=<USDC mint>&reference=<base58> for USDC — rasterized pixels through the same vendored jsQR the prod web wallet ships',
-  timeoutMs: 25_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

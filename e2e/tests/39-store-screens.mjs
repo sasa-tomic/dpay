@@ -21,7 +21,7 @@ export const meta = {
   journey: 'tour',
   covers: ['visual-capture', 'store-screenshots'],
   verifies: 'Visual capture: 5 hero screenshots for Play Store compositing (wallet, request, balances, ledger, deposit), rail-funded.',
-  timeoutMs: 45000,
+  timeoutMs: 90000,
   optional: true,
 };
 

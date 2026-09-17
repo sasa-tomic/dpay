@@ -20,7 +20,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['nfc', 'settle', 'history', 'reconcile'],
   verifies: 'Offline payer supplies update + signed read_state; receiver alone settles, exact-history binds success, and queues the returned result.',
-  timeoutMs: 40000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

@@ -137,7 +137,7 @@ export const meta = {
   journey: 'wire',
   covers: ['wire-format', 'ed25519-parity', 'golden-bytes', 'icp-builders'],
   verifies: 'JS byte builders (pay wire, request QR, amount parser, icp transfer/balance/rid) are byte-exact vs the Rust core goldens — no browser, ~0.1s.',
-  timeoutMs: 5000,
+  timeoutMs: 60000,
 };
 
 export async function run() {

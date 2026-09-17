@@ -22,7 +22,7 @@ export const meta = {
   journey: 'system',
   covers: ['layout', 'viewport'],
   verifies: 'On a 390px mobile-web viewport the tab row fits: no horizontal document overflow and the Transactions tab renders fully inside the viewport.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

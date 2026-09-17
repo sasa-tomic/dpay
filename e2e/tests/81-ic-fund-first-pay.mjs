@@ -28,7 +28,7 @@ export const meta = {
   journey: 'system',
   covers: ['ic-fund-first', 'pay-gate', 'fail-open', 'zero-funds', 'send-gate'],
   verifies: 'the IC Pay tab shows the fund-first panel on a KNOWN-zero non-DEMO asset (online), routes to the deposit address in one tap, fails open offline, and gates the send sub-mode with the same panel carrying the send sub-mode\'s own instruction',
-  timeoutMs: 30_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

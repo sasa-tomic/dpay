@@ -45,7 +45,7 @@ export const meta = {
   journey: 'pay',
   covers: ['asset-pay', 'ckbtc', 'per-asset-balance', 'locked-asset-display', 'ledger-units', 'review-short-payee'],
   verifies: 'ckBTC pay (faucet-funded at principal): review \'0.0005 BTC\' (no $) + short pubkey (U-F5); per-asset balance gate (60000≥50000 sats) → app-signed icrc1_transfer settles on currency 1; Ledger row shows the exact ckBTC units.',
-  timeoutMs: 20000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

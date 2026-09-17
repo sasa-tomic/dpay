@@ -26,7 +26,7 @@ export const meta = {
   journey: 'system',
   covers: ['address-book', 'settings', 'send-form'],
   verifies: 'The saved-destination address book route: reached from Settings (and from the send form\'s saved list), an empty book states its way out, manual add refuses invalid destinations with the send form\'s own validation, and entries can be renamed and removed.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

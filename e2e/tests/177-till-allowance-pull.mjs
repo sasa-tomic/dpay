@@ -45,7 +45,7 @@ export const meta = {
   journey: 'pay',
   covers: ['till', 'merchant-till', 'opencryptopay', 'icrc2', 'allowance-pull', 'vchf', 'observed-settlement', 'charge-reference', 'settle'],
   verifies: 'A customer’s wallet approves the shop for a till charge instead of sending it (the ICRC-2 flow Oisy uses) and reports its own principal to the till’s step 4. The relay records that as a CLAIM and carries it to the merchant — it holds no key and collects nothing itself. The shop’s phone reads the claim off its ordinary poll, signs a real icrc2_transfer_from with the charge’s `ref` as the memo, and the money moves; the screen turns Paid only when the RELAY observes it on the merchant’s ledger. The customer’s account goes down by exactly CHF 4.50 and the shop is the one short by the ledger fee.',
-  timeoutMs: 60_000,
+  timeoutMs: 90000,
 };
 
 /** Keep a copy of every ring-up answer the app receives, without changing what it receives.

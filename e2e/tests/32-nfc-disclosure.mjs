@@ -28,7 +28,7 @@ export const meta = {
   journey: 'nfc',
   covers: ['nfc-disclosure', 'consent', 'asset-name', 'auto-sign'],
   verifies: 'NFC auto-sign exchanging status discloses honest asset + amount ("Paying 0.0005 BTC on Bitcoin") + hold-to-send; the wire exists on arrival (one-press rule).',
-  timeoutMs: 15000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

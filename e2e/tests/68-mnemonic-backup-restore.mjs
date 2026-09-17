@@ -24,7 +24,7 @@ export const meta = {
   journey: 'onboard',
   covers: ['mnemonic-backup', 'mnemonic-word-{0..23}', 'mnemonic-backup-checkbox', 'btn-mnemonic-continue', 'restore-mnemonic-input', 'bip39-round-trip', 'restore-via-mnemonic'],
   verifies: 'The 24 mnemonic words shown at create time recover the exact same wallet keypair (publicHex match) when entered on restore.',
-  timeoutMs: 45_000,
+  timeoutMs: 90000,
 };
 
 export async function run() {

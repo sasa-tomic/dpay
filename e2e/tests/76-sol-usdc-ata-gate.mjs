@@ -24,7 +24,7 @@ export const meta = {
   journey: 'system',
   covers: ['sol-usdc', 'ata-gate', 'tri-state', 'ata-setup-card', 'request-block', 'ata-create'],
   verifies: 'USDC receive gate: absent→setup card + Request blocked; insufficient→disabled; funded→one-tap create flips to the address QR; balance→direct address.',
-  timeoutMs: 30000,
+  timeoutMs: 90000,
 };
 
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;

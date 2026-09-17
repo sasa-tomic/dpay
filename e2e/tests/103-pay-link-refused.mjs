@@ -31,7 +31,7 @@ export const meta = {
   journey: 'pay',
   covers: ['pay-link', 'fail-closed', 'wrong-network', 'honest-instructions'],
   verifies: 'A payment link naming the wrong chain, an unknown asset, or a damaged field is refused with an instruction the payer can act on — never a guessed asset and never a silent dead end.',
-  timeoutMs: 38000,
+  timeoutMs: 90000,
 };
 
 const PRINCIPAL = 'ryjl3-tyaaa-aaaaa-aaaba-cai'; // a real, CRC-valid IC principal
