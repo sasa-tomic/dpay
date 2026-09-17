@@ -1644,9 +1644,11 @@ function SolConvertMode({identity, asset, solana, onBack, onShowDepositAddress, 
   const venueName = venue != null ? venueDisplayName(venue.venue_id) : venueDisplayName('jupiter');
 
   const pickDest = (venueId: string) => {
-    if (venueId === destVenueId) return;
+    // Frozen while a confirm is in flight: the in-flight confirm closes over THIS pair, and its
+    // late setQuote/setQuoteChanged must never land under the newly picked pair's heading.
+    if (venueId === destVenueId || confirmBusy) return;
     setDestVenueId(venueId);
-    setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false);
+    setQuote(null); setQuoteErr(null); setQuoteChanged(null); setQuoteBusy(false); setConfirmErr(null);
   };
   const balanceRaw = legs == null ? null : legs.inMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.inMint] ?? null;
   const outHeldRaw = legs == null ? null : legs.outMint === WRAPPED_SOL_MINT_ADDRESS ? solana.sol : solana.tokens[legs.outMint] ?? null;

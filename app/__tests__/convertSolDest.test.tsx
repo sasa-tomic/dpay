@@ -11,6 +11,8 @@
  *   * Switching destination re-quotes against the PICKED venue's pair and RESETS the quote
  *     (the old pair's digits never render under the new heading); the typed amount stays.
  *   * USDC and EURC inputs keep ONE destination (→ SOL) and render no chooser chrome.
+ *   * A confirm failure's error line belongs to its pair — picking another destination clears
+ *     it — and the picker is frozen while a confirm is in flight.
  *   * A mint no venue serves still fails closed on the unavailable panel.
  *
  * The venue module is REAL (the bundled registry's order IS the surface's order — that is the
@@ -236,6 +238,59 @@ describe('SOL convert out-destination picker', () => {
       outputMint: WRAPPED_SOL_MINT_ADDRESS,
       amount: '1000000',
     });
+  });
+
+  test('a failed confirm leaves an error line that picking another destination clears', async () => {
+    const tree = await mount(SOL_ASSET);
+    const input = present(tree, 'convert-amount')[0];
+    await act(async () => {
+      input.props.onChangeText('1');
+    });
+    // The confirm gesture's re-quote fails: an error line renders under the USDC pair.
+    jest.mocked(fetchJupiterQuote).mockImplementationOnce(async () => ({ok: false as const, code: 'unreachable' as const, status: 503}));
+    const confirm = present(tree, 'btn-convert-confirm')[0];
+    await act(async () => {
+      confirm.props.onPress();
+    });
+    expect(exists(tree, 'convert-confirm-err')).toBe(true);
+
+    // Picking EURC wipes the old pair's error with the old pair's quote.
+    await act(async () => {
+      present(tree, 'convert-sol-dest-EURC')[0].props.onPress();
+    });
+    expect(exists(tree, 'convert-confirm-err')).toBe(false);
+    expect(textOf(tree, 'convert-headline')).toContain('84.12 EURC');
+  });
+
+  test('the picker is frozen while a confirm is in flight', async () => {
+    const tree = await mount(SOL_ASSET);
+    const input = present(tree, 'convert-amount')[0];
+    await act(async () => {
+      input.props.onChangeText('1');
+    });
+    // A confirm whose re-quote never resolves pins confirmBusy for the gesture below.
+    let release: (q: ReturnType<typeof quoteOf>) => void = () => undefined;
+    jest.mocked(fetchJupiterQuote).mockImplementationOnce(async (...args: Parameters<typeof fetchJupiterQuote>) =>
+      new Promise(resolve => {
+        release = () => resolve(quoteOf(args[0].venue_id, args[1], args[2], args[3]));
+      }),
+    );
+    await act(async () => {
+      present(tree, 'btn-convert-confirm')[0].props.onPress();
+    });
+
+    // Mid-flight: the EURC gesture is a no-op — the in-flight confirm closes over THIS pair,
+    // and its late setQuote must never land under the newly picked pair's heading.
+    await act(async () => {
+      present(tree, 'convert-sol-dest-EURC')[0].props.onPress();
+    });
+    expect(checked(tree, 'convert-sol-dest-USDC')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(false);
+
+    await act(async () => {
+      release(quoteOf('jupiter', WRAPPED_SOL_MINT_ADDRESS, USDC_MINT_ADDRESS, '1000000000'));
+    });
+    expect(textOf(tree, 'convert-headline')).toContain('10.36 USDC');
   });
 
   test('a mint no venue serves still fails closed on the unavailable panel', async () => {
