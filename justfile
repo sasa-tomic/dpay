@@ -38,6 +38,7 @@ build-mock-minter:
 # double-spend concurrency regression. Fully offline.
 test-canister: build-canister build-mock-minter
     python3 scripts/testruns.py run test-canister --sh 'cargo nextest run -p dpay-canister-tests --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+    @just pocketic-cleanup
 
 # user-principal rail tests on PocketIC's make_live() gateway (offline, deterministic, seconds):
 # raw-ed25519 device keys whose self-authenticating principals hold funds DIRECTLY on the REAL
@@ -49,6 +50,15 @@ test-canister: build-canister build-mock-minter
 # seconds-fast, was previously on no recipe) and the dpay-wasm host tests (icp goldens).
 test-icp: build-mock-minter
     python3 scripts/testruns.py run test-icp --sh 'cargo nextest run -p dpay-icp --message-format libtest-json > "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-wasm --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}" && cargo nextest run -p dpay-icp-tests --message-format libtest-json >> "${DPAY_TESTRUNS_TIMING:-/dev/null}"'
+    @just pocketic-cleanup
+
+# PocketIC servers survive their test processes (nextest tags every PocketIC-suite test LEAK) and
+# spin CPU while idle — two leaked servers at ~11 combined cores sat under `just verify`'s e2e
+# phase and timeout-flaked healthy flows (the documented "Pocket-IC load flake" class). Kill them
+# after every PocketIC suite so a composite run cannot poison its own later phases. Never fails:
+# pkill exits 1 when nothing matched, which is the common case.
+pocketic-cleanup:
+    @if pkill -f 'bin/pocket-[i]c' 2>/dev/null; then echo "  ✓ leaked PocketIC server stopped"; else echo "  · PocketIC: none leaked"; fi
 
 # relay DEFAULT-features compile gate: `cargo check -p dpay-relay` with no features. Every other
 # recipe compiles the relay WITH a feature (test-relay: test-helpers; test-live: agent+test-helpers),
@@ -551,7 +561,7 @@ stop:
     fi
 
     # A PocketIC server left over from canister/relay tests (the in-project server binary).
-    if pkill -f 'bin/pocket-ic' 2>/dev/null; then echo "  ✓ PocketIC server stopped"; else echo "  · PocketIC: none"; fi
+    if pkill -f 'bin/pocket-[i]c' 2>/dev/null; then echo "  ✓ PocketIC server stopped"; else echo "  · PocketIC: none"; fi
 
     # Metro / React Native packager on port 8081, if one was started (`npm start`).
     if pkill -f 'react-native/cli.js start' 2>/dev/null || pkill -f 'node .*metro' 2>/dev/null; then
