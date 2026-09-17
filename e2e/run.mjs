@@ -96,10 +96,10 @@ function autoConcurrency() {
  * MINIMUM timeout headroom (×1.00). That inversion is why the suite went red on a QUIET machine
  * while every one of those flows passed in isolation.
  *
- * The model target is contexts-per-BROWSER-PROCESS, not raw lanes: one chrome process serializes a
- * fraction of every context's work on its main/IO threads (spare cores do not relieve that), but the
- * pool spreads its lanes across browser shards (`resolveBrowserShards`), so the count that matters
- * is ceil(concurrency / shards).
+ * The model is the WORSE of two sharing terms: contexts-per-BROWSER-PROCESS (one chrome process
+ * serializes a fraction of every context's work on its main/IO threads — spare cores do not
+ * relieve that) and LANES-PER-FREE-CORE (the run's own chromes + drivers oversubscribing whatever
+ * headroom the ambient load left — spare cores very much do not relieve that).
  *
  * CONTENTION_PER_CONTEXT is empirical, with deliberate margin: 12-settings runs ~9.9s alone and
  * ~21.1s at concurrency 12 (≈2.1×), so 0.15 predicts ≈2.65× at 12 ctx/browser — ~25% above the
@@ -109,9 +109,20 @@ function autoConcurrency() {
  * in the gate.
  */
 const CONTENTION_PER_CONTEXT = 0.15;
-function selfContentionFactor(concurrency, shards = 1) {
+/**
+ * Cores one active lane really wants while running (a chrome process + its node driver share the
+ * same second of wall clock). The 2026-09-17 false-RED that surfaced this: with 1 ctx/browser the
+ * old model scaled ×1.00 while 9 lanes ran on a box already carrying load 7.3 — flow 109's
+ * scan-surface arm (5s inner wait, 18s solo) starved and REDed, though every flow is green solo.
+ * Lanes ÷ free cores is the missing term; 1.5 biases high per the rule below (a false RED is the
+ * expensive failure; an over-scaled wait just fires a little later on a genuine hang).
+ */
+const CORES_PER_LANE = 1.5;
+function selfContentionFactor(concurrency, shards = 1, freeCores = concurrency) {
   const perBrowser = Math.max(1, Math.ceil(concurrency / Math.max(1, shards)));
-  return 1 + Math.max(0, perBrowser - 1) * CONTENTION_PER_CONTEXT;
+  const browserSharing = 1 + Math.max(0, perBrowser - 1) * CONTENTION_PER_CONTEXT;
+  const cpuSharing = (concurrency * CORES_PER_LANE) / Math.max(1, freeCores);
+  return Math.max(browserSharing, cpuSharing);
 }
 
 /**
@@ -119,11 +130,15 @@ function selfContentionFactor(concurrency, shards = 1) {
  * work of every context inside it — measured 2026-09-16 (idle 16-core box): per-flow time inflated
  * ~2.1× at concurrency 12 while the CPU sat ~96% IDLE, i.e. the lanes starved on the shared browser
  * process, not on compute — and that inflation both wasted wall time and false-fired inner waits
- * into RED on healthy flows (see 04/05 RED at tree 1d7264d, green solo minutes later). The default
- * spreads the lanes across ceil(concurrency / 3) browser processes (~3 contexts each), which keeps
- * per-test isolation IDENTICAL (fresh context per test, whatever process it lives in) while
- * removing the process-level serialization. `DPAY_E2E_BROWSERS` overrides (1 restores the old
- * single-browser behavior); extra processes cost ~150-250MB each — cheap on this class of host.
+ * into RED on healthy flows (see 04/05 RED at tree 1d7264d, green solo minutes later). ~3
+ * contexts/process was the first cut; the 2026-09-17 A/B on the SAME tree (post lazy-boot rework)
+ * showed the remaining sharing still halves throughput: 12 lanes @ 3 ctx/browser ran 467.7s while
+ * 7 lanes @ 1 ctx/browser (auto-picked, host load 8.5) ran 387.4s — 2.1× the lane-throughput. The
+ * default is now ONE context per browser process (shards = concurrency): per-test isolation is
+ * identical (fresh context per test, whatever process it lives in), and at the suite level the
+ * browser processes ARE the parallelism. `DPAY_E2E_BROWSERS` overrides (1 restores the old
+ * single-browser behavior); extra processes cost ~150-250MB each — 12 of them peaked at well
+ * under half this 62GB host.
  */
 function resolveBrowserShards(concurrency) {
   const env = process.env.DPAY_E2E_BROWSERS;
@@ -131,7 +146,7 @@ function resolveBrowserShards(concurrency) {
     const raw = parseInt(env, 10);
     if (Number.isFinite(raw) && raw >= 1) return Math.min(raw, concurrency);
   }
-  return Math.min(concurrency, Math.max(1, Math.ceil(concurrency / 3)));
+  return concurrency;
 }
 
 /**
@@ -144,7 +159,8 @@ function resolveBrowserShards(concurrency) {
  * override — so fixing one silently left the other authoritative on the main path.
  */
 function resolveTimeoutScale(load, concurrency, shards = 1) {
-  return Math.max(load.factor, selfContentionFactor(concurrency, shards));
+  const freeCores = Math.max(1, load.cpus - load.load1);
+  return Math.max(load.factor, selfContentionFactor(concurrency, shards, freeCores));
 }
 
 /**
