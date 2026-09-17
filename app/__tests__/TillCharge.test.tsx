@@ -307,6 +307,20 @@ describe('ringing up', () => {
     act(() => { tree.unmount(); });
   });
 
+  test('pressable with nothing typed — the empty press is the honest badAmount refusal, not a greyed button', async () => {
+    // Founder 2026-09-17: parity with the dpay form's always-tappable Show code. An empty total
+    // is refused by `chfCents` with the badAmount sentence; the button itself never disables.
+    const tree = mount(VCHF, () => {}, 'ready', CATALOG, '');
+    const btn = node(tree, 'btn-till-ring-up');
+    expect(btn.props.disabled).toBeFalsy();
+    expect(btn.props.accessibilityState.disabled).toBeFalsy();
+    await act(async () => { btn.props.onPress(); await flush(); });
+    expect(openTillCharge).not.toHaveBeenCalled();
+    expect(visible(tree)).toContain(M.receive.till.badAmount('not-a-number'));
+    expect(has(tree, 'till-qr')).toBe(false);
+    act(() => { tree.unmount(); });
+  });
+
   test('a relay that serves no till is a named dead end, not a spinner', async () => {
     jest.mocked(openTillCharge).mockResolvedValue({kind: 'not-served', addr: 'https://till.example'});
     const tree = mount(VCHF);

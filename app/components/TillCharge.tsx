@@ -586,16 +586,19 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
     <View style={S.centerTop}>
       {err ? <Text testID="till-err" style={S.err}>{err}</Text> : null}
       {opening ? <ActivityIndicator color={C.brandText} /> : null}
+      {/* Never disabled for an empty amount (founder 2026-09-17): parity with the dpay form's
+          always-tappable Show code. An empty or malformed total is refused by `chfCents` with the
+          honest badAmount error, not by a greyed-out button that reads as broken. */}
       <Pressable
         testID="btn-till-ring-up"
-        style={[S.primaryWide, (opening || amount.trim().length === 0) && S.disabledFlat]}
-        disabled={opening || amount.trim().length === 0}
+        style={[S.primaryWide, opening && S.disabledFlat]}
+        disabled={opening}
         onPress={ringUp}
         accessibilityRole="button"
         accessibilityLabel={M.receive.request}
         accessibilityHint={M.receive.till.ringUpHint}
-        accessibilityState={{disabled: opening || amount.trim().length === 0}}>
-        <Text style={[S.primaryText, (opening || amount.trim().length === 0) && S.disabledText]}>{opening ? M.receive.creating : M.receive.request}</Text>
+        accessibilityState={{disabled: opening}}>
+        <Text style={[S.primaryText, opening && S.disabledText]}>{opening ? M.receive.creating : M.receive.request}</Text>
       </Pressable>
     </View>
   );
