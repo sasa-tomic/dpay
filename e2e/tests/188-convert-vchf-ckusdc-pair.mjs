@@ -44,7 +44,7 @@ export const meta = {
   name: 'convert-vchf-ckusdc-pair',
   journey: 'convert',
   covers: ['convert', 'venues', 'icpswap', 'vchf', 'ckusdc', 'decimal-pairs', '8-decimal', '6-decimal', 'registry-order', 'multihop', 'route-a', 'destination-address', 'quote-only'],
-  verifies: 'The 2026-09-16 VCHF ↔ ckUSDC ICPSwap pool is live: the served registry lists all eleven real venues in registry order, the DIRECT pair quotes both directions through the production route (VCHF in → zero_for_one true with a 6-decimal USDC out; ckUSDC in → zero_for_one false with an 8-decimal VCHF out), the app\'s VCHF direct form still resolves the row-0 VCHF ↔ ICP venue untouched, and the new pool surfaces as the VCHF → USDC(Ethereum) multihop route whose hop quotes through the SAME pool — the min-you\'ll-receive is the hop quote\'s 1% floor, and nothing executes.',
+  verifies: 'The 2026-09-16 VCHF ↔ ckUSDC ICPSwap pool is live: the served registry lists all ten real venues in registry order, the DIRECT pair quotes both directions through the production route (VCHF in → zero_for_one true with a 6-decimal USDC out; ckUSDC in → zero_for_one false with an 8-decimal VCHF out), the app\'s VCHF direct form still resolves the row-0 VCHF ↔ ICP venue untouched, and the new pool surfaces as the VCHF → USDC(Ethereum) multihop route whose hop quotes through the SAME pool — the min-you\'ll-receive is the hop quote\'s 1% floor, and nothing executes.',
   timeoutMs: 90000,
 };
 
@@ -79,9 +79,8 @@ export async function run() {
     const served = (await venuesRes.json()).venues.map(v => v.venue_id);
     assertEq(served.join('|'), [
       'icpswap', 'icpswap-ckusdc', 'icpswap-cketh', 'icpswap-ckbtc', 'icpswap-ckbtc-cketh',
-      'icpswap-vchf-ckusdc', 'icpswap-ckusdc-cketh', 'jupiter', 'jupiter-eurc', 'sideshift',
-      'sideshift-usdc',
-    ].join('|'), 'the private relay serves all eleven real venues in registry order');
+      'icpswap-vchf-ckusdc', 'jupiter', 'jupiter-eurc', 'sideshift', 'sideshift-usdc',
+    ].join('|'), 'the private relay serves all ten real venues in registry order');
 
     // --- the DIRECT pair: production-route oracle quotes, both directions -----------------------
     // VCHF in (the pool's token0 → zero_for_one TRUE): 8-decimal in, 6-decimal USDC out.

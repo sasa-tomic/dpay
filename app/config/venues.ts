@@ -120,15 +120,6 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     disclosure_key: 'icpswap',
   },
   {
-    venue_id: 'icpswap-ckusdc-cketh',
-    display_name: 'ICPSwap',
-    kind: 'ic_amm',
-    endpoint: 'mvcvq-3iaaa-aaaag-qjykq-cai',
-    pair_ledgers: [mainnetIcLedger(2), mainnetIcLedger(6)],
-    testnet: false,
-    disclosure_key: 'icpswap',
-  },
-  {
     // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter, the
     // autonomous on-chain aggregator, for the rail-local pair SOL ↔ USDC(Solana). Identifier
     // semantics per kind: `endpoint` is an https ORIGIN — the venue's IDENTITY and attribution

@@ -398,29 +398,6 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             }),
         },
         VenueEntry {
-            // The pair-scoped ICPSwap ckUSDC/ckETH 0.3% pool (registered 2026-09-16, coverage
-            // expansion §1). MEASURED off the live pool's own `metadata` 2026-09-16: token0 =
-            // ckETH, token1 = ckUSDC (REVERSED relative to the registry pair order — the
-            // direction logic must derive per pool), fee 3000. Thin but real.
-            venue_id: "icpswap-ckusdc-cketh",
-            display_name: "ICPSwap",
-            kind: VenueKind::IcAmm,
-            endpoint: "mvcvq-3iaaa-aaaag-qjykq-cai",
-            pair_ledgers: [CKUSDC_LEDGER_PRINCIPAL, CKETH_LEDGER_PRINCIPAL],
-            testnet: false,
-            disclosure_key: "icpswap",
-            test_helpers_served: false,
-            fixture: Some(FixtureSeed {
-                token0_ledger: CKETH_LEDGER_PRINCIPAL,
-                token1_ledger: CKUSDC_LEDGER_PRINCIPAL,
-                fee_millionths: 3000,
-                // Curve approximation from the measured reserves 2026-09-16, in each token's
-                // own units: 1.40 ckETH / 1,552.45 ckUSDC.
-                reserve0_e8s: 1_400_000_000_000_000_000,
-                reserve1_e8s: 1_552_450_000,
-            }),
-        },
-        VenueEntry {
             // The FIRST Solana venue (registered 2026-09-15, multi-venue readiness V11): Jupiter,
             // the on-chain aggregator. Since 2026-09-16 the quote and the swap-tx build are
             // PROXIED by the relay (`crate::jupiter`: a byte-faithful pipe with a short-TTL
@@ -2082,7 +2059,6 @@ mod venue_truth_tests {
             ("xmiu5-jqaaa-aaaag-qbz7q-cai", "icpswap-ckbtc"),
             ("akhru-myaaa-aaaag-qcvna-cai", "icpswap-ckbtc-cketh"),
             ("hx7nb-diaaa-aaaar-qbxsa-cai", "icpswap-vchf-ckusdc"),
-            ("mvcvq-3iaaa-aaaag-qjykq-cai", "icpswap-ckusdc-cketh"),
         ] {
             assert_eq!(
                 venue_of_endpoint(pool)
@@ -2124,8 +2100,8 @@ mod venue_truth_tests {
             .collect();
         assert_eq!(
             served.len(),
-            11,
-            "exactly eleven real venues are served today (seven IC pools + two Jupiter + \
+            10,
+            "exactly ten real venues are served today (six IC pools + two Jupiter + \
              two SideShift, one row per pair)"
         );
         assert_eq!(
@@ -2140,7 +2116,6 @@ mod venue_truth_tests {
                 "icpswap-ckbtc",
                 "icpswap-ckbtc-cketh",
                 "icpswap-vchf-ckusdc",
-                "icpswap-ckusdc-cketh",
                 "jupiter",
                 "jupiter-eurc",
                 "sideshift",
