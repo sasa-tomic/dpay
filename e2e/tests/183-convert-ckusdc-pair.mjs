@@ -105,6 +105,9 @@ export async function run() {
     let net = gross - ICP_FEE;
     let minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // 1% slippage, the app's exact floor math
 
+    // The counterparty census folds behind the ONE Details control (10x-verbosity pass
+    // 2026-09-16): open it before pinning the principal + tier; headline + minimum stay main.
+    await driver.click('convert-details', {timeoutMs: 5_000});
     assertEq((await driver.readText('convert-pool-principal')).trim(), CKUSDC_POOL,
       'the counterparty principal is the ckUSDC pool\'s own canister');
     assertIncludes(await driver.readText('convert-counterparty'), 'ICPSwap', 'the counterparty is attributed to ICPSwap');
@@ -162,6 +165,7 @@ export async function run() {
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assert(await driver.findByTestID('convert-venues', {timeoutMs: 1_000}).catch(() => null) == null,
       'single venue on the ckETH pair → no chooser');
+    await driver.click('convert-details', {timeoutMs: 5_000}); // the folded census (verbosity pass 2026-09-16)
     assertEq((await driver.readText('convert-pool-principal')).trim(), CKETH_POOL,
       'the ckETH counterparty principal is the ckETH pool\'s own canister');
     assertIncludes(await driver.readText('convert-counterparty'), 'ICPSwap', 'the ckETH counterparty is attributed to ICPSwap');

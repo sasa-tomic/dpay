@@ -979,7 +979,7 @@ describe('fail-closed copy — all four locales carry it', () => {
     expect(d.counterparty(VENUE.display_name)).not.toContain(POOL); // the principal is not copy
     expect(d.unavailableTitle('X')).toContain('X');
     expect(d.unavailableBody('ICP ↔ Swiss francs (VCHF)', VENUE.display_name)).toContain(VENUE.display_name);
-    expect(d.dpayFeeLine.length).toBeGreaterThan(0); // "dpay charges nothing and is paid nothing"
+    expect(d.detailsLabel.length).toBeGreaterThan(0); // the one Details control (verbosity pass 2026-09-16)
     // The parameterized copy still speaks the passed-in venue, not a baked one.
     expect(d.quoteSource('12:00', 'SomeFutureVenue')).toContain('SomeFutureVenue');
     expect(d.errors.quoteRefused('SomeFutureVenue')).toContain('SomeFutureVenue');

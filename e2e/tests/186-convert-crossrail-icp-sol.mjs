@@ -220,7 +220,10 @@ export async function run() {
       'the destination input warns that this address also SIGNS the crossing');
     assertIncludes(await driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the route floor is the burn amount, in the HOP asset (USDC — not the SOL destination)');
 
-    // --- §2 the cross-rail fee census: external gas named, Circle's own number, mint floor
+    // --- §2 the cross-rail fee census: external gas named, Circle's own number, mint floor.
+    // The census folds behind the ONE Details control (10x-verbosity pass 2026-09-16) —
+    // open it; the route-min floor + the cross-note warning stay on the main surface.
+    await driver.click('convert-details', {timeoutMs: 5_000});
     assertIncludes(await driver.readText('crossrail-external-gas'), 'your wallet', 'the census names WHO pays the EVM gas (the user\'s own wallet)');
     assertIncludes(await driver.readText('crossrail-circle-fee'), `${fmt(fees.maxFee, 6)} USDC`, 'Circle\'s published fee renders as its own census line (app math on the live body)');
     assertIncludes(await driver.readText('crossrail-mint-floor'), `${fmt(fees.mintFloor, 6)} USDC`, 'the mint floor names what survives the fee');

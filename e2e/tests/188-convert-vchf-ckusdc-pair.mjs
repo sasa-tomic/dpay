@@ -121,6 +121,7 @@ export async function run() {
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     assert(await driver.findByTestID('convert-unavailable', {timeoutMs: 500}).catch(() => null) == null,
       'VCHF is venue-PAIRED (no fail-closed panel — the direct form renders)');
+    await driver.click('convert-details', {timeoutMs: 5_000}); // the folded census (verbosity pass 2026-09-16)
     assertEq((await driver.readText('convert-pool-principal')).trim(), VCHF_ICP_POOL,
       'the direct form still quotes through the row-0 VCHF ↔ ICP pool');
     // The new pool's app surface: the VCHF → USDC(Ethereum) route row beside the direct pair.

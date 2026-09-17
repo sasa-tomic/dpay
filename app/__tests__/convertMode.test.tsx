@@ -121,6 +121,13 @@ const present = (tree: renderer.ReactTestRenderer, testID: string): boolean =>
 const node = (tree: renderer.ReactTestRenderer, testID: string) =>
   tree.root.findAll(n => n.props != null && n.props.testID === testID)[0];
 const occurrences = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
+/** Open the ONE Details disclosure (10x-verbosity pass 2026-09-16): every test that pins a
+ *  folded census line presses it first — collapsed is the default state for everyone. */
+const openDetails = async (tree: renderer.ReactTestRenderer): Promise<void> => {
+  await act(async () => {
+    node(tree, 'convert-details')!.props.onPress();
+  });
+};
 
 /** Mount the screen with a given ICP balance, then type `amount` and settle every async effect.
  *  The tree is registered for teardown in `afterEach`: ConvertMode arms a stale-quote interval, so
@@ -174,20 +181,25 @@ beforeEach(() => {
 });
 
 describe('C1 — the unit is printed exactly once on every money line', () => {
-  test('balance, both fees, the minimum and the end state each carry ONE unit', async () => {
+  test('balance and minimum carry ONE unit on the main surface; the fee census folds behind Details', async () => {
     const tree = await mountConvert('250000000', '1');
     // The input leg's unit (ICP) and the output leg's (VCHF) each appear once per money line.
     expect(occurrences(textOf(tree, 'convert-balance'), 'ICP')).toBe(1);
-    expect(occurrences(textOf(tree, 'convert-in-fee'), 'ICP')).toBe(1);
-    expect(occurrences(textOf(tree, 'convert-out-fee'), 'VCHF')).toBe(1);
     expect(occurrences(textOf(tree, 'convert-min-out'), 'VCHF')).toBe(1);
-    expect(occurrences(textOf(tree, 'convert-net'), 'VCHF')).toBe(1);
     // …and the amounts themselves are the compact formatter's strings (trailing zeros trimmed).
     expect(textOf(tree, 'convert-balance')).toContain('2.5 ICP');
+    expect(textOf(tree, 'convert-min-out')).toContain('0.40782196 VCHF');
+    // The fee census folds behind the ONE Details control (10x-verbosity pass 2026-09-16);
+    // open it and the per-side fee lines still carry exactly one unit each. The old net
+    // end-state line is GONE — the headline number IS the end state.
+    expect(present(tree, 'convert-details')).toBe(true);
+    expect(present(tree, 'convert-net')).toBe(false);
+    expect(present(tree, 'convert-dpay-fee')).toBe(false);
+    await openDetails(tree);
+    expect(occurrences(textOf(tree, 'convert-in-fee'), 'ICP')).toBe(1);
+    expect(occurrences(textOf(tree, 'convert-out-fee'), 'VCHF')).toBe(1);
     expect(textOf(tree, 'convert-in-fee')).toContain('0.0001 ICP');
     expect(textOf(tree, 'convert-out-fee')).toContain('0.0001 VCHF');
-    expect(textOf(tree, 'convert-min-out')).toContain('0.40782196 VCHF');
-    expect(textOf(tree, 'convert-net')).toContain('0.41184138 VCHF');
   });
 
   test('a zero balance reads "0 ICP", never "0 ICP ICP" (the shipped defect verbatim)', async () => {
@@ -203,7 +215,6 @@ describe('C1 — the unit is printed exactly once on every money line', () => {
         d.approvingBody('9.99 ICP', '14:42'),
         d.outputFeeLine('9.99 VCHF'),
         d.minReceiveLine('9.99 VCHF', '1%'),
-        d.netEndStateLine('9.99 VCHF'),
         d.doneBody('9.99 VCHF'),
       ];
       for (const line of lines) {
@@ -355,24 +366,35 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     expect(headline).toContain(convertEn.receiveHeadline);
   });
 
-  test('not one spec §5 disclosure line was dropped by the restructure', async () => {
+  test('not one §5 census fact was dropped by the verbosity pass — they fold behind Details', async () => {
     const tree = await mountConvert('250000000', '1');
-    for (const id of [
-      'convert-counterparty', 'convert-quote-source', 'convert-rate', 'convert-pool-fee',
-      'convert-in-fee', 'convert-out-fee', 'convert-dpay-fee', 'convert-venue-disclosure',
-      'convert-min-out', 'convert-refusal', 'convert-net',
-    ]) {
+    // Main surface: the decision facts. The net end-state line is GONE (the headline IS the
+    // end state) and dpay's paid-nothing line is GONE from every locale and render site.
+    expect(present(tree, 'convert-details')).toBe(true);
+    for (const id of ['convert-min-out', 'convert-slippage', 'convert-quote-source']) {
       expect(`${id}: ${present(tree, id)}`).toBe(`${id}: true`);
     }
+    expect(present(tree, 'convert-net')).toBe(false);
+    expect(present(tree, 'convert-dpay-fee')).toBe(false);
     // impact is the ONE §5-era line that is deliberately gone (V8, 2026-09-11): the venue
     // publishes no such figure, so the checklist must not render one.
     expect(present(tree, 'convert-impact')).toBe(false);
-    // the counterparty disclosure still names the venue, what it is not, and who signs
+    // One tap opens the census: every folded §5 fact is still rendered.
+    await openDetails(tree);
+    for (const id of [
+      'convert-counterparty', 'convert-rate', 'convert-pool-fee',
+      'convert-in-fee', 'convert-out-fee', 'convert-venue-disclosure',
+      'convert-refusal',
+    ]) {
+      expect(`${id}: ${present(tree, id)}`).toBe(`${id}: true`);
+    }
+    // the counterparty disclosure names the venue, its pool, and who signs — trimmed to bare
+    // attribution (the licensing tail is gone; quoteSource carries whose quote this is)
     const cp = textOf(tree, 'convert-counterparty');
     expect(cp).toContain('ICPSwap');
     expect(cp).toContain('65mrh-fqaaa-aaaar-qapoa-cai');
-    expect(cp).toContain('not a licensed provider and not dpay');
     expect(cp).toContain('Your phone signs');
+    expect(cp).not.toContain('not a licensed provider and not dpay');
   });
 
   test('the displayed rate is EXACTLY the derivation of the venue\'s own reply digits', async () => {
@@ -382,6 +404,7 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 8n) / BigInt(QUOTE.amountIn);
     const expected = fmtAssetCompact(scaled.toString(), 8, 'VCHF');
     expect(expected).toBe('0.41194138 VCHF'); // 41194138e8 / 100000000 — the derivation itself
+    await openDetails(tree); // the rate folds behind Details (10x-verbosity pass 2026-09-16)
     expect(textOf(tree, 'convert-rate')).toContain(expected);
     expect(textOf(tree, 'convert-rate')).toContain(convertEn.rateLabel('ICP', 'VCHF'));
   });
@@ -391,6 +414,7 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
     // The bundled venue's disclosure_key is 'icpswap' (dfx/catalog_truth.json venues[]) — the
     // known sentence, not the generic fallback, and only ONE Text carries it (counted by type:
     // RN mirrors testID onto the host layer under a Text, so raw findAll double-counts).
+    await openDetails(tree); // the disclosure folds behind Details (verbosity pass 2026-09-16)
     const expected = convertEn.disclosures.byKey.icpswap('ICPSwap');
     expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(expected);
     expect(tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-venue-disclosure')).toHaveLength(1);
@@ -399,7 +423,9 @@ describe('C5 — hierarchy, with every §5 disclosure kept', () => {
   test('the pool principal is its own line, so it can never wrap mid-token', async () => {
     const tree = await mountConvert('250000000', '1');
     // Exactly ONE Text element carries it, and it carries nothing else — so the 27-character
-    // hyphenated principal is a line, not a run inside a wrapping paragraph.
+    // hyphenated principal is a line, not a run inside a wrapping paragraph. It lives behind
+    // the Details control (verbosity pass 2026-09-16); open it first.
+    await openDetails(tree);
     const principals = tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-pool-principal');
     expect(principals).toHaveLength(1);
     expect(textOf(tree, 'convert-pool-principal').trim()).toBe('65mrh-fqaaa-aaaar-qapoa-cai');
@@ -548,6 +574,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({checked: true});
     expect(node(tree, `convert-venue-${VENUE_A.venue_id}`)!.props.accessibilityState).toEqual({checked: false});
     expect(textOf(tree, 'convert-headline')).toContain('0.8999 VCHF');
+    await openDetails(tree); // the pool principal folds behind Details (verbosity pass)
     expect(textOf(tree, 'convert-pool-principal').trim()).toBe(FIXTURE_POOL); // B's pool, not A's
     // Confirm re-quotes the PICKED venue only and executes through it.
     await act(async () => {
@@ -571,6 +598,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     await act(async () => {
       node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.onPress();
     });
+    await openDetails(tree); // the disclosure folds behind Details (verbosity pass)
     const expected = convertEn.disclosures.byKey.icpswap(VENUE_B.display_name);
     expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(expected);
     expect(tree.root.findAllByType(Text).filter(n => n.props.testID === 'convert-venue-disclosure')).toHaveLength(1);
@@ -586,6 +614,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     });
     // B's own quote: 90000000 out for 100000000 in ⇒ scaled 90000000 ⇒ exactly this string.
     const scaled = (BigInt(QUOTE_B.amountOutGross) * 10n ** 8n) / BigInt(QUOTE_B.amountIn);
+    await openDetails(tree); // the rate folds behind Details (verbosity pass)
     expect(textOf(tree, 'convert-rate')).toContain(fmtAssetCompact(scaled.toString(), 8, 'VCHF'));
     expect(textOf(tree, 'convert-rate')).toContain('0.9 VCHF');
   });
@@ -609,6 +638,7 @@ describe('V5 — the venue chooser (two venues on one pair)', () => {
     });
     expect(node(tree, `convert-venue-${VENUE_B.venue_id}`)!.props.accessibilityState).toEqual({checked: true});
     // The counterparty + disclosure name the PICKED venue — B, not the registered default A.
+    await openDetails(tree); // they fold behind Details (verbosity pass 2026-09-16)
     expect(textOf(tree, 'convert-counterparty')).toContain(VENUE_B.display_name);
     expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(convertEn.disclosures.byKey.icpswap(VENUE_B.display_name));
     // No pool principal renders, and venue A's pool appears NOWHERE on the screen — the old
@@ -750,19 +780,31 @@ describe('V9 — chooser invariants parametric over arbitrary venue sets', () =>
     test('INV-4 render half: each row shows ITS OWN venue reply, byte-identical to the echo', async () => {
       const tree = await mountConvert('250000000', '1');
       for (const v of venues) {
-        const expected = convertEn.venueRowQuote(fmtAssetCompact(QUOTES[v.venue_id]!.amountOutGross, 8, 'VCHF'));
+        // The "Quote: " prefix is GONE (verbosity pass 2026-09-16): the row is the venue's
+        // name and the compact amount, nothing else.
+        const expected = fmtAssetCompact(QUOTES[v.venue_id]!.amountOutGross, 8, 'VCHF');
         expect(textOf(tree, `convert-venue-${v.venue_id}-quote`).trim()).toBe(expected);
+        expect(textOf(tree, `convert-venue-${v.venue_id}-quote`)).not.toContain('Quote:');
       }
     });
 
-    test('INV-6: picking ANY venue renders the dpay-paid-nothing line, exactly once, verbatim', async () => {
+    test('INV-6 (verbosity pass): the dpay-paid-nothing line is GONE under every pick; the census is one tap away', async () => {
       const tree = await mountConvert('250000000', '1');
       for (const v of venues) {
         await act(async () => {
           node(tree, `convert-venue-${v.venue_id}`)!.props.onPress();
         });
-        expect(textOf(tree, 'convert-dpay-fee').trim()).toBe(convertEn.dpayFeeLine);
-        expect(occurrences(textOf(tree, 'convert-dpay-fee'), convertEn.dpayFeeLine)).toBe(1);
+        // The line was deleted from every locale and every render site (10x-verbosity pass
+        // 2026-09-16); attribution lives with quoteSource on the headline.
+        expect(present(tree, 'convert-dpay-fee')).toBe(false);
+        expect(present(tree, 'convert-net')).toBe(false);
+        // the Details control is present under every pick; opening it reveals the census
+        expect(present(tree, 'convert-details')).toBe(true);
+        await openDetails(tree);
+        expect(present(tree, 'convert-counterparty')).toBe(true);
+        await act(async () => {
+          node(tree, 'convert-details')!.props.onPress(); // re-close for the next pick
+        });
       }
     });
   });
@@ -791,6 +833,7 @@ describe('V9 — chooser invariants parametric over arbitrary venue sets', () =>
     await act(async () => {
       node(tree, `convert-venue-${VENUE_D.venue_id}`)!.props.onPress();
     });
+    await openDetails(tree); // the disclosure folds behind Details (verbosity pass)
     expect(textOf(tree, 'convert-venue-disclosure').trim()).toBe(convertEn.disclosures.generic(VENUE_D.display_name));
     expect(textOf(tree, 'convert-venue-disclosure')).not.toContain(convertEn.disclosures.byKey.icpswap(VENUE_D.display_name));
   });
@@ -928,6 +971,7 @@ describe('decimals threading — money lines read the ledger, never a literal 8'
     // instead yields "0.41194138 VCHF", and an OUT-scale normalization (the pre-2026-09-15
     // latent form, exposed by the first cross-decimal pair SOL 9 → USDC 6) reads 1000× off.
     const scaled = (BigInt(QUOTE.amountOutGross) * 10n ** 8n) / BigInt(QUOTE.amountIn);
+    await openDetails(tree); // the rate folds behind Details (verbosity pass 2026-09-16)
     expect(textOf(tree, 'convert-rate')).toContain(fmtAssetCompact(scaled.toString(), 6, 'VCHF'));
     expect(textOf(tree, 'convert-rate')).toContain('41.194138 VCHF');
   });
@@ -998,6 +1042,8 @@ describe('multihop — the composed destination is an explicit, gated opt-in', (
     expect(present(tree, 'convert-dest-address')).toBe(true);
     expect(present(tree, 'convert-route-min')).toBe(true);
     expect(present(tree, 'convert-min-out')).toBe(false);
+    // The minter principal + gas census fold behind Details (verbosity pass 2026-09-16).
+    await openDetails(tree);
     expect(present(tree, 'convert-minter-principal')).toBe(true);
     // the gas leg carries the minter's OWN live figure as its census line
     expect(present(tree, 'convert-gas-note')).toBe(true);

@@ -94,13 +94,12 @@ export async function run() {
       'the Route A row is offered beside the direct pair');
     assert(await driver.findByTestID('convert-dest-address', {timeoutMs: 1_000}).catch(() => null) == null,
       'no destination address input before the route is picked');
-    // The one-route honesty line (spec §7) speaks only when the route list is the picker's whole
-    // story: since 714dcf5 (SideShift) this ICP pair also offers a cefi row, so the note stays
-    // silent — "one route" would mislabel a picker that also offers an exchange-service path.
+    // The one-route honesty note is GONE entirely (10x-verbosity pass 2026-09-16 — UI
+    // meta-commentary); its absence stays pinned: no route census line renders in the picker.
     assert(await driver.findByTestID('convert-dest-cefi-sideshift', {timeoutMs: 2_000}) != null,
       'the SideShift cefi row is offered beside the route');
     assert(await driver.findByTestID('convert-route-note', {timeoutMs: 1_000}).catch(() => null) == null,
-      'the one-route note stays quiet when a cefi path shares the picker');
+      'no one-route note renders (deleted by the verbosity pass 2026-09-16)');
 
     await driver.click(ROUTE_ROW);
     await driver.type('convert-dest-address', DEST);
@@ -117,11 +116,12 @@ export async function run() {
     const net = gross - CKUSDC_FEE;
     let minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // 1% slippage, the app's exact floor math
 
-    // The route census: hop quote verbatim (headline net), the destination's figure as the
-    // min-you'll-receive (in DESTINATION units — USDC, not the hop's ckUSDC-in-wallet framing),
-    // the minter's live gas fee as its own line, and the burn counterparty by principal.
+    // The route census: hop quote verbatim (headline net) + the destination's 1% floor (route-min)
+    // stay MAIN; the minter's live gas fee and the burn counterparty fold behind the ONE Details
+    // control (10x-verbosity pass 2026-09-16) — open it before pinning them.
     assertIncludes(await driver.readText('convert-headline'), `${fmt(net, 6)} USDC`, 'the headline states the hop\'s net ckUSDC output');
     assertIncludes(await driver.readText('convert-route-min'), `${fmt(minOut, 6)} USDC`, 'the destination minimum is the hop quote\'s 1% floor');
+    await driver.click('convert-details', {timeoutMs: 5_000});
     assertIncludes(await driver.readText('convert-gas-note'), `${fmt(GAS_WEI, 18)} ETH`, 'the gas census line states the minter\'s live figure');
     assertEq((await driver.readText('convert-minter-principal')).trim(), MINTER,
       'the burn counterparty principal is the ckETH minter');

@@ -148,21 +148,29 @@ export async function run() {
     assertIncludes(await driver.readText('convert-headline'), '10.36 USDC', 'receive estimate is outAmount verbatim');
     assertIncludes(await driver.readText('convert-min-out'), '10.25 USDC', 'minimum is otherAmountThreshold verbatim');
     assertIncludes(await driver.readText('convert-min-out'), '1% slippage', 'slippage choice shown (default 1%)');
+    // The rate / counterparty / disclosure / impact / refusal census folds behind the ONE
+    // Details control (10x-verbosity pass 2026-09-16); the route-fee note and the dpay line
+    // are GONE (route fees are inside the quote — the minimum carries the protection).
+    await driver.click('convert-details', {timeoutMs: 5_000});
     assertIncludes(await driver.readText('convert-rate'), '10.36', 'rate is the only derived figure (BigInt, cross-decimal 9→6)');
     assertIncludes(await driver.readText('convert-pool-principal'), 'https://lite-api.jup.ag', 'the venue https endpoint is shown where IC shows the pool principal');
     assertIncludes(await driver.readText('convert-counterparty'), 'Jupiter', 'counterparty line names the venue');
-    assertIncludes(await driver.readText('convert-counterparty'), 'aggregator', 'counterparty line says what Jupiter IS (an aggregator, not a pool)');
+    const solCounterparty = await driver.readText('convert-counterparty');
+    assert(!solCounterparty.includes('aggregator'), 'counterparty is trimmed to bare attribution (verbosity pass) — what Jupiter IS lives in its disclosure');
     assertIncludes(await driver.readText('convert-counterparty'), 'nobody else signs', 'the Solana signing sentence is present');
     assertIncludes(await driver.readText('convert-venue-disclosure'), 'autonomous on-chain aggregator', 'byKey.jupiter disclosure');
     assertIncludes(await driver.readText('convert-venue-disclosure'), 'not a party', 'dpay party-hood denied');
 
-    // §3 — fees honest: the published price impact renders VERBATIM (V8's deliberate exception),
-    // route fees live inside the quote, dpay's line is the same everywhere.
+    // §3 — fees honest: the published price impact renders VERBATIM (V8's deliberate exception,
+    // folded behind Details with the census); the fee-note + dpay lines are gone entirely.
     assertIncludes(await driver.readText('convert-sol-impact'), '0.003', 'price impact is Jupiter\'s own figure, unmodified');
-    assertIncludes(await driver.readText('convert-sol-fees-note'), 'inside the quoted output', 'route-fee placement stated');
-    assertIncludes(await driver.readText('convert-dpay-fee'), 'dpay charges nothing and is paid nothing', 'dpay paid-nothing line');
+    assert(await driver.findByTestID('convert-sol-fees-note', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the route-fee note is gone (verbosity pass 2026-09-16)');
+    assert(await driver.findByTestID('convert-dpay-fee', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the dpay paid-nothing line is gone (verbosity pass 2026-09-16)');
     assertIncludes(await driver.readText('convert-refusal'), 'SOL', 'refusal line names the input asset');
-    assertIncludes(await driver.readText('convert-net'), '10.36 USDC', 'net end state is the quoted output (no separate out-fee on this rail)');
+    assert(await driver.findByTestID('convert-net', {timeoutMs: 1_000}).catch(() => null) == null,
+      'the net end-state line is gone (verbosity pass 2026-09-16): the headline IS the end state');
     for (const bps of [50, 100, 300]) {
       assert(await driver.findByTestID(`convert-bps-${bps}`, {timeoutMs: 3_000}) != null, `slippage chip ${bps} present`);
     }

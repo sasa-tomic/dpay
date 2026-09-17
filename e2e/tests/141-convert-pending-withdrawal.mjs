@@ -6,10 +6,11 @@
 // "pool #ok ≠ settled" — and the flow pins that dpay never fabricates done from #ok:
 //   * after confirm, the settle watch exhausts its budget → pending_withdrawal, NOT done;
 //   * the pending screen is the founder-rule honest state: names the asset owed (VCHF), where it
-//     sits (the ICPSwap pool), that dpay cannot reverse or speed it up, the pool principal +
-//     submitted time for support, and that it keeps watching — practical instructions, no spinner
-//     lie, no dead end;
-//   * the expiry line counts down the unused-approval bound (spec §3) on failure-family screens;
+//     sits (the ICPSwap pool), the pool principal + submitted time for support, and that it keeps
+//     watching — practical instructions, no spinner lie, no dead end (the 10x-verbosity pass
+//     2026-09-16 cut the "dpay cannot reverse or speed it up" tail — the support recipe stays);
+//   * the expiry line counts down the unused-approval bound (spec §3) — it renders while the
+//     approval window is LIVE, which a held withdrawal still is;
 //   * `settle_pending: true` drains the venue's queue → the ledger row appears → the SAME screen
 //     flips to done with the SEEN amount — resolution without resubmitting anything (identical-
 //     envelope discipline: nothing is re-signed, only re-watched).
@@ -45,7 +46,7 @@ export const meta = {
   name: 'convert-pending-withdrawal',
   journey: 'convert',
   covers: ['convert', 'icp', 'vchf', 'fail-withdrawal', 'pending-withdrawal', 'honest-unknown', 'pool-ok-not-settled', 'expiry-countdown', 'settle-pending', 'resolution', 'ledger-watch', 'no-resubmit'],
-  verifies: 'When the pool replies #ok but holds the output (fail_withdrawal knob), the app parks on an honest pending_withdrawal screen — never done from #ok — naming the asset owed, where it sits, the pool principal, that dpay cannot reverse it, and the approval-expiry bound; settle_pending drains the venue queue and the same screen flips to done with the SEEN amount, with nothing re-signed and VCHF credited exactly.',
+  verifies: 'When the pool replies #ok but holds the output (fail_withdrawal knob), the app parks on an honest pending_withdrawal screen — never done from #ok — naming the asset owed, where it sits, the pool principal + the support recipe, and the still-live approval-expiry bound; settle_pending drains the venue queue and the same screen flips to done with the SEEN amount, with nothing re-signed and VCHF credited exactly.',
   timeoutMs: 120000, // onboard + settle-watch exhaustion + knob + re-arm + probe + polls (seam-shrunk cadences; contention budget)
 };
 
@@ -101,7 +102,7 @@ export async function run() {
     assertIncludes(pendingBody, 'Payout pending', 'pending title');
     assertIncludes(pendingBody, 'VCHF', 'pending names the asset owed (VCHF)');
     assertIncludes(pendingBody, POOL, 'pending names the pool principal (support line)');
-    assertIncludes(pendingBody, 'cannot reverse', 'pending: dpay cannot reverse or speed it up');
+    assertIncludes(pendingBody, 'quote this to support', 'pending: the practical instruction stays (verbosity pass 2026-09-16 — the cannot-reverse tail is cut, the support recipe is not)');
     assertIncludes(pendingBody, 'watching', 'pending: it keeps watching (no dead end)');
     const bodyAll = await driver.bodyText();
     assert(!bodyAll.includes('Converted'), 'done NEVER fabricated from the pool #ok alone');

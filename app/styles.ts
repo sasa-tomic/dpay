@@ -302,6 +302,11 @@ function buildStyles(p: Palette) {
   convertRateValue: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium, flexShrink: 1, textAlign: 'right'},
   convertHeadlineMeta: {fontSize: 12, color: p.sub2, fontFamily: FONT.mono, marginTop: 8},
   convertChecklistCard: {backgroundColor: p.panel2, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: p.line2, alignSelf: 'stretch', marginTop: 12},
+  // The ONE Details disclosure control on the convert decision card (10x-verbosity pass
+  // 2026-09-16): quiet meta-line styling — it opens the census, it is not a CTA.
+  convertDetailsToggle: {flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 12, paddingVertical: 6},
+  convertDetailsToggleText: {fontSize: 13, color: p.sub, fontFamily: FONT.sans},
+  convertDetailsChevronOpen: {transform: [{rotate: '180deg'}]},
   convertChecklistLine: {fontSize: 13, color: p.sub, lineHeight: 19, marginBottom: 9, fontFamily: FONT.sans},
   convertChecklistWarn: {fontSize: 13, color: p.bad, lineHeight: 19, marginBottom: 9, fontFamily: FONT.sansMedium},
   // The pool principal on its own line: 27 hyphenated characters inside a paragraph wrap

@@ -7,12 +7,14 @@
 //     conversion is a §0 red line, so this is asserted before anything else.
 //   * Entry point is the UNIFORM asset action row: Accounts ▸ ICP row ▸ Convert (btn-accounts-convert) —
 //     the same button every asset gets (uniform-IA hard rule); ICP simply has a venue behind it.
-//   * EVERY §5 transparency checklist item is a rendered line on the ONE pre-signing surface, each
-//     asserted by testID: counterparty (pool principal, autonomous contract, not licensed/not
-//     dpay, phone-signs), the venue disclosure sentence, attributed+timestamped rate, pool fee
-//     tier 0.30%, input fee, output fee, dpay-paid-nothing, minimum-you'll-receive + refusal
-//     outcome, net end state. NO price-impact line (removed 2026-09-11, spec V8: the venue
-//     publishes no such figure and none is invented).
+//   * EVERY §5 transparency fact survives the 10x-verbosity pass (2026-09-16): the decision
+//     surface stays compact (amount+balance, "You'll receive", attribution, minimum, slippage)
+//     and the venue/fee/signing census folds behind the ONE `convert-details` disclosure —
+//     each fact still asserted by testID after opening it: counterparty (pool principal,
+//     phone-signs), the venue disclosure sentence, attributed+timestamped rate, pool fee
+//     tier 0.30%, input fee, output fee, refusal outcome. dpay-paid-nothing and the net
+//     end-state line are GONE — their absence is asserted. NO price-impact line (removed
+//     2026-09-11, spec V8: the venue publishes no such figure and none is invented).
 //     Amounts are cross-checked against the relay's OWN quote response fetched flow-side (single
 //     source of truth — the app must render the venue's numbers, never its own math).
 //   * Confirm re-quotes (spec §5), then the §4 state machine runs on-device-signed envelopes:
@@ -61,7 +63,7 @@ export const meta = {
   name: 'convert-happy-path',
   journey: 'convert',
   covers: ['convert', 'icp', 'vchf', 'uniform-ia', 'transparency-checklist', 'counterparty', 'venue-disclosure', 'quote-attribution', 'fees-itemised', 'no-impact-line', 'min-out', 'slippage', 'icrc2-approve', 'deposit-from-and-swap', 'state-machine', 'ledger-watch', 'settle', 'balance-refresh', 'ledger-row', 'no-mid-payment-conversion'],
-  verifies: 'The delegated-conversion happy path: a payment review carries no Convert anywhere (§0.6); Accounts ▸ ICP ▸ Convert opens the one pre-signing surface where every §5 line renders (counterparty/pool principal, the venue disclosure sentence, attributed+timestamped quote, itemised fees, dpay-paid-nothing, NO impact line, minimum+refusal, net end state — all matching the relay\'s own quote); confirm re-quotes then signs approve+swap on-device; settle is exact (ICP −amount−2 fees, VCHF +gross) with done derived from the SEEN ledger row and the Ledger showing the incoming VCHF row from the pool.',
+  verifies: 'The delegated-conversion happy path: a payment review carries no Convert anywhere (§0.6); Accounts ▸ ICP ▸ Convert opens the one pre-signing surface with a COMPACT decision main line-up (attributed+timestamped quote, minimum+slippage, NO impact line) whose venue/fee/signing census folds behind the one Details control and still matches the relay\'s own quote (counterparty/pool principal, disclosure sentence, itemised fees, refusal; dpay-paid-nothing + net end state asserted GONE); confirm re-quotes then signs approve+swap on-device; settle is exact (ICP −amount−2 fees, VCHF +gross) with done derived from the SEEN ledger row and the Ledger showing the incoming VCHF row from the pool.',
   timeoutMs: 180000, // onboard + review-navigation + quote + approve/swap submit+poll + settle watch (120 s inner wait) + ledger polls
 };
 
@@ -129,14 +131,18 @@ export async function run() {
     assertEq(oracle.venue_id, 'icpswap', 'the quote is ATTRIBUTED to its venue (registry venue_id echo)');
     const gross = BigInt(oracle.amount_out);
     const minOut = (gross / 10000n) * 9900n + ((gross % 10000n) * 9900n) / 10000n; // the core's exact floor math
-    const net = gross - VCHF_FEE;
 
+    // The venue/fee/signing census folds behind the ONE Details control (10x-verbosity pass
+    // 2026-09-16): open it, then pin every folded §5 fact. dpay's paid-nothing line and the
+    // net end-state line are GONE (the headline number IS the end state) — their absence is
+    // pinned below, not assumed.
+    await driver.click('convert-details', { timeoutMs: 5_000 });
     const counterparty = await driver.readText('convert-counterparty');
     assertIncludes(counterparty, POOL, 'counterparty names the pool principal');
     assertIncludes(counterparty, 'ICPSwap', 'counterparty names ICPSwap');
-    assertIncludes(counterparty, 'autonomous on-chain contract', 'counterparty: autonomous contract, not a provider');
-    assertIncludes(counterparty, 'not a licensed provider and not dpay', 'counterparty: not licensed, not dpay');
     assertIncludes(counterparty, 'Your phone signs', 'counterparty: the phone signs, the pool pulls exactly the approved amount');
+    assert(!counterparty.includes('not a licensed provider and not dpay'),
+      'counterparty is trimmed to bare attribution (verbosity pass): the licensing tail is gone');
 
     const quoteSource = await driver.readText('convert-quote-source');
     assertIncludes(quoteSource, 'Quote from ICPSwap, fetched', 'rate is attributed + timestamped');
@@ -149,7 +155,13 @@ export async function run() {
     assertIncludes(await driver.readText('convert-pool-fee'), '0.30%', 'pool fee tier is itemised (0.3%)');
     assertIncludes(await driver.readText('convert-in-fee'), `${fmt8(ICP_FEE)} ICP`, `input fee line is the catalog fee (${fmt8(ICP_FEE)} ICP)`);
     assertIncludes(await driver.readText('convert-out-fee'), `${fmt8(VCHF_FEE)} VCHF`, `output fee line is the catalog fee (${fmt8(VCHF_FEE)} VCHF)`);
-    assertIncludes(await driver.readText('convert-dpay-fee'), 'dpay charges nothing and is paid nothing', 'dpay-paid-nothing line');
+    const refusal = await driver.readText('convert-refusal');
+    assertIncludes(refusal, 'ICP', 'refusal outcome names the asset the user keeps');
+    assertIncludes(refusal, 'approval expires', 'refusal outcome: the approval expires unused');
+    assert(await driver.findByTestID('convert-dpay-fee', {timeoutMs: 1_000}).catch(() => null) == null,
+      'dpay-paid-nothing line is gone (verbosity pass 2026-09-16)');
+    assert(await driver.findByTestID('convert-net', {timeoutMs: 1_000}).catch(() => null) == null,
+      'net end-state line is gone (verbosity pass 2026-09-16): the headline IS the end state');
 
     // NO price-impact line renders (removed 2026-09-11, spec V8 "display what the venue
     // publishes, derive only what it does not"): it was dpay's own curve-slope estimate from a
@@ -166,12 +178,6 @@ export async function run() {
     assert(await driver.waitForText(`${fmt8(minOut)} VCHF`, {timeoutMs: 8_000}),
       `minimum-you'll-receive is the core's min-out at 1% (${fmt8(minOut)} VCHF); screen:\n${(await driver.readText('convert-min-out'))}`);
     assertIncludes(await driver.readText('convert-min-out'), '1% slippage', 'slippage choice shown (default 1%)');
-
-    const refusal = await driver.readText('convert-refusal');
-    assertIncludes(refusal, 'ICP', 'refusal outcome names the asset the user keeps');
-    assertIncludes(refusal, 'approval expires', 'refusal outcome: the approval expires unused');
-
-    assertIncludes(await driver.readText('convert-net'), `${fmt8(net)} VCHF`, `net end state is gross − output fee (${fmt8(net)} VCHF)`);
 
     // Slippage options: 0.5 / 1 / 3%, all rendered, default 1%.
     for (const bps of [50, 100, 300]) {
