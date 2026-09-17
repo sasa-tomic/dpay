@@ -304,6 +304,11 @@ floor:
 timing *args:
     python3 scripts/testruns.py timing {{args}}
 
+# evidence query: which suites recorded at a commit and did they pass — `just report` (HEAD),
+# `just report <commit>`, `--json` for machines. Read-only; never reruns anything.
+report *args:
+    python3 scripts/testruns.py report {{args}}
+
 # OBJECTIVE integrity gate for the FACADE CANISTER: curls the live `/api/v1/integrity` and asserts
 # the canister's on-chain module hash matches the PIN the relay image was built with
 # (deploy/facade-module-hash.txt — GOVERNANCE row 7). MATCH = the deployed facade is the recorded
