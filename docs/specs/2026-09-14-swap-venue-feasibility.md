@@ -49,8 +49,15 @@ Factory `4mmnk-kiaaa-aaaag-qbllq-cai`, `getPools()` queried live. Relevant mainn
 - Same factory, same `depositFromAndSwap` shape, same ICRC-2 approve flow the PoC exercises.
   **Status: ICP↔ckUSDC and ICP↔ckETH are REGISTERED (commit `9ceee43`, 2026-09-14)** —
   truth-file rows + relay catalog + bundled app copy + fake-IC fixtures + mainnet probe pins
-  (per-venue decimal scaling 8/6 and 8/18) + e2e flow 183. ckBTC stays out (thin BTC side);
-  register later with honest-depth disclosure if depth improves.
+  (per-venue decimal scaling 8/6 and 8/18) + e2e flow 183.
+  **Update 2026-09-16 (coverage-expansion wave):** the ckBTC condition FIRED — the pool
+  re-measured at 1.11 ckBTC / 50,980 ICP (deepest ckBTC pool on the factory; ~2× the 2026-09-14
+  side) — and ICP↔ckBTC, ckBTC↔ckETH and VCHF↔ckUSDC were REGISTERED (`88dada5`) alongside
+  jupiter-eurc and sideshift-usdc. Depth honesty here is the standing mainnet probe
+  (`just swap-venue-probe`), which drives the venue's real quote both ways against the pool's
+  own published price. The same probe caught the wave's one mistake: ckUSDC↔ckETH (`mvcvq`)
+  was registered on RESERVES — exactly what the caveat above warns are not spot-indicative —
+  and quoted ~77× above its own sqrtPrice; UNREGISTERED (`8ade315`). Ten real venues ship.
 
 ### dpay's already-shipped burn-withdraw turns IC-side assets into native ETH/USDC
 
@@ -166,10 +173,10 @@ demonstrably relaunches.
 |---|---|---|
 | ICP↔USDC | **Feasible — registered** | ICPSwap ICP↔ckUSDC pool (live, healthy; commit `9ceee43`); Route A/B extend to native USDC |
 | ICP↔ETH | **Feasible — registered** | ICPSwap ICP↔ckETH + existing burn-withdraw (Route A shape) |
-| ICP↔BTC | Feasible, thin | ICPSwap ICP↔ckBTC pool live but 0.56 BTC side — quote verbatim + disclose when registered |
+| ICP↔BTC | **Feasible — registered** | ICPSwap ICP↔ckBTC re-measured 1.11 ckBTC / 50,980 ICP, registered 2026-09-16 (`88dada5`); probe-verified live |
 | ICP↔SOL | **Feasible as multi-hop** (Routes B/C verified leg-by-leg) | ICP→ckUSDC→USDC(ETH)→USDC(SOL)→SOL; single-venue path waits on mainnet ckSOL |
 | ICP↔VCHF | Shipped | the live PoC |
-| SOL↔USDC (rail-local) | Feasible when Solana venue registered | Jupiter (V11's named venue), keyless, no platform fee |
+| SOL↔USDC (rail-local) | **Feasible — registered** | Jupiter (`jupiter` 2026-09-15; `jupiter-eurc` 2026-09-16 adds SOL↔EURC), keyless, no platform fee, relay-proxied |
 
 All DEX paths above are KYC-free by construction. Registered CeFi (DFX only) is
 threshold-KYC by law — hence "register after DEX PoC" decision below.
@@ -249,15 +256,20 @@ reload-resume → dead-ends. Opt-in keyless mainnet tripwire:
 
 1. ~~Register ICPSwap ICP↔ckUSDC and ICP↔ckETH~~ — **DONE, commit `9ceee43`** (probe
    ratios 0.9969–0.9970 live; e2e flow 183 green).
-2. Multi-hop orchestration: single intent, per-leg status/recovery (widens
-   `app/convert.ts` legs shape + Convert UX; extends the record schema).
-3. CCTP v2 + Jupiter legs (Routes B/C) on the EVM-calldata-build/user-wallet-signs pattern.
+2. ~~Multi-hop orchestration: single intent, per-leg status/recovery (widens
+   `app/convert.ts` legs shape + Convert UX; extends the record schema)~~ — **DONE,
+   2026-09-15: Route A as one intent (`01ac9ba`,`925c5ec`; flow 184).**
+3. ~~CCTP v2 + Jupiter legs (Routes B/C) on the EVM-calldata-build/user-wallet-signs pattern~~ —
+   **DONE, 2026-09-15: Jupiter leg (`56acda4`,`75da767`; flow 185) + Route B/C
+   (`9a756ed`..`308c2fa`; flow 186).**
 4. ~~Relay-held partner-key infrastructure (SOL-RPC-key pattern; SideShift first candidate)~~ —
    **DONE, 2026-09-15: commits `80c4279` (relay) + `714dcf5` (app) + `fd6502e` (e2e flow 187);
    founder key signup is the only remaining step** (see Partner-key infrastructure above).
 5. DFX registration decision after (2)–(3) proven live (founder B2B contact gates it).
-6. ckBTC registration only on depth improvement; ckSOL watch (`icrc1_name` on
-   `la34w-haaaa-aaaar-qb5na-cai`); KongSwap rejected with evidence above.
+6. ~~ckBTC registration only on depth improvement~~ — **FIRED and consumed 2026-09-16** (pool
+   re-measured ~2× deeper; registered `88dada5`); ckSOL watch (`icrc1_name` on
+   `la34w-haaaa-aaaar-qb5na-cai`) stays — the mainnet canisters are still the devnet variant;
+   KongSwap rejected with evidence above.
 
 Regulatory posture is unchanged: officials/counsel confirmation of the delegated-conversion
 frame remains founder-owned (spec §After PoC) — this research adds venues inside that same

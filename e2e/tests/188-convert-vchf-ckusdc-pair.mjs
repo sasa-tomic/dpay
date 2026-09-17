@@ -10,8 +10,8 @@
 //     app-reachable path through it is the VCHF → USDC(Ethereum) multihop route whose SWAP HOP
 //     is this pool; the DIRECT pair itself is asserted through the production route as oracle
 //     quotes in BOTH directions.
-//   * the served registry: GET /api/v1/venues lists all ELEVEN real venues in registry order
-//     (seven IC pools + two Jupiter + two SideShift) — the expansion is visible on the wire.
+//   * the served registry: GET /api/v1/venues lists all TEN real venues in registry order
+//     (six IC pools + two Jupiter + two SideShift) — the expansion is visible on the wire.
 //   * VCHF → ckUSDC DIRECT quote: venue_id icpswap-vchf-ckusdc, zero_for_one TRUE (the pool's
 //     token0 is VCHF), the venue's own 0.30% tier, a 6-decimal ckUSDC amount_out shape.
 //   * ckUSDC → VCHF reverse quote: zero_for_one FALSE, an 8-decimal VCHF amount_out shape.
