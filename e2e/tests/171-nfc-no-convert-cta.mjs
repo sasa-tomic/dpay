@@ -124,9 +124,10 @@ export async function run() {
     };
 
     // Flip the device NFC status to 'ready' BEFORE the Wallet mounts so Pay mode arms the HCE card.
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
     console.log('[171-nfc-no-convert] onboarding (NFC forced ready)…');
     await onboardWallet(driver, 'e2e-nfc-no-convert');
+    await driver.removeInitScript(nfcSeam);
     await driver.findByTestID('pay-scan', {timeoutMs: 5_000});
 
     const dispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };

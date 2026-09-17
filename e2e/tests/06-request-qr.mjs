@@ -44,8 +44,9 @@ export async function run() {
     //    and the wire's `to`. Force the radio ready so the request also builds the NFC machine code
     //    and arms reader mode (the wire's only exit from the screen now).
     console.log('[06-request-qr] onboarding…');
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-bob');
+    await driver.removeInitScript(nfcSeam);
     const identity = await accountOf(driver);
     const accountHex = identity?.publicHex;
     assert(typeof accountHex === 'string' && accountHex.length === 64, `wallet account must be 32-byte hex, got "${accountHex}"`);

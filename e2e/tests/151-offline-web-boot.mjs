@@ -47,7 +47,7 @@ export async function run() {
     );
   }
   console.log('[151-offline-web-boot] setup (own relay: this flow kills it)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   // A relay of our own, on its own free port — the shared one is serving the rest of the pool.
   const relay = await startRelay();
   try {

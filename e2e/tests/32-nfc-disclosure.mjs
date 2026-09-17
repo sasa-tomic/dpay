@@ -39,10 +39,11 @@ export async function run() {
     const { driver } = env;
 
     // Flip the device NFC status to 'ready' BEFORE the Wallet mounts so the Pay screen arms the HCE card.
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[32-nfc-disclosure] onboarding (NFC forced ready)…');
     await onboardWallet(driver, 'e2e-nfc-disc');
+    await driver.removeInitScript(nfcSeam);
 
     // Waiting-for-tap: NFC ready → the Pay scan surface is visible. On web NFC text is suppressed
     // (PR35); the `pay-scan` testID is platform-agnostic.

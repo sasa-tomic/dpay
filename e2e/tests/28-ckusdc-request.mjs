@@ -51,8 +51,9 @@ export async function run() {
     console.log('[28-ckusdc-request] onboarding…');
     // Force the radio ready so the request ALSO builds the NFC machine code (its one surface now)
     // and the reader arms — the wire-seam read below depends on it.
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-merchant');
+    await driver.removeInitScript(nfcSeam);
     const accountHex = (await accountOf(driver))?.publicHex;
 
     // Switch to Receive + select ckUSDC as the settlement asset (MC5: merchant chooses; payer never

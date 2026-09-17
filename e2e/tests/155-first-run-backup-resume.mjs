@@ -43,7 +43,7 @@ const pendingKey = () => localStorage.getItem('dpay.identity.pending.v1');
 export async function run() {
   const start = Date.now();
   console.log('[155-first-run-backup-resume] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const {driver, webBaseURL, relayBaseURL} = env;
 

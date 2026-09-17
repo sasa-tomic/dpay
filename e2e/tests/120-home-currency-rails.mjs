@@ -36,7 +36,7 @@ export const meta = {
 export async function run() {
   const start = Date.now();
   console.log('[120-home-currency-rails] setup…');
-  const env = await setup({solStub: true});
+  const env = await setup({ lazyBoot: false, solStub: true });
   try {
     const {driver} = env;
 

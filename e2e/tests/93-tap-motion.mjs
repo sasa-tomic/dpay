@@ -33,8 +33,9 @@ export async function run() {
     const { driver } = env;
 
     // ============================== IC rail (nfc-status) ======================================
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-nfc');
+    await driver.removeInitScript(nfcSeam);
     await driver.findByTestID('pay-scan', {timeoutMs: 5_000});
     const icDispatch = async (event) => { await armNfcCard(driver, 'ic'); return driver.eval((e) => window.__DPAY_TEST_NFC_SESSION(e), event); };
 

@@ -75,8 +75,9 @@ export async function run() {
     console.log('[98-icp-merchant-reconcile] merchant requests 1.00000001 ICP in-app…');
     // Radio ready so the request ALSO builds the NFC wire (its one surface now) — the byte-exact
     // currency-id + raw-units encode contract is asserted off the reader seam below.
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-icp-merchant');
+    await driver.removeInitScript(nfcSeam);
     const merchant = await accountOf(driver);
     await openBalances(driver);
     await selectCurrency(driver, 'icp');

@@ -218,7 +218,7 @@ def parse_timing_file(path):
         tests = []
         for suite in data.get("testResults") or []:
             base = os.path.basename(suite.get("name") or suite.get("testFilePath") or "?")
-            for t in suite.get("testResults") or []:
+            for t in suite.get("assertionResults") or []:
                 status = {"passed": "pass", "failed": "fail"}.get(t.get("status"), "skip")
                 name = t.get("fullName") or t.get("title") or "?"
                 secs = (t.get("duration") or 0) / 1000.0

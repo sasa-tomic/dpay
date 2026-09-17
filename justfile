@@ -105,14 +105,14 @@ e2e:
 # banner, no other flows). On an intentional UI change, regenerate the baselines via
 # `just e2e-visual-seed` and commit the new baselines (the diff is reviewable in the commit).
 e2e-visual:
-    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=40 node run.mjs'
+    python3 scripts/testruns.py run e2e-visual --sh 'cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps) && DPAY_E2E_FILTER=40-visual-regression node run.mjs'
 
 # regenerate the visual-regression baselines from the current app surfaces (run after an intentional
 # UI/style change). Writes e2e/shots/baselines/<surface>.png for each of the 5 surfaces. COMMIT the
 # new baselines — they ARE the contract; a future regression diffs against them.
 e2e-visual-seed:
     cd e2e && ([ -d node_modules ] || npm install --prefer-offline --no-audit --no-fund --legacy-peer-deps)
-    cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=40 node run.mjs
+    cd e2e && DPAY_E2E_REGEN_BASELINES=1 DPAY_E2E_FILTER=40-visual-regression node run.mjs
 
 # Play Store screenshot capture (flow 39) — an assert(true) render-only contract sweep, NOT a
 # behavior gate, so it is EXCLUDED from the default `just e2e` run (saves ~37s) via its

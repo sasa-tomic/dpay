@@ -31,7 +31,7 @@ export async function run() {
     const { driver, relayBaseURL } = env;
 
     // The merchant app must treat NFC as available (web default is 'unknown' → NfcTap never mounts).
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     // --- wallet A (payer): generated + faucet-funded in-test. -----------------------------------
     const alice = await generateKeypair();
@@ -40,6 +40,7 @@ export async function run() {
 
     // --- wallet B (merchant): onboarded in the browser. -----------------------------------------
     await onboardWallet(driver, 'e2e-merchant');
+    await driver.removeInitScript(nfcSeam);
     const bob = await accountOf(driver);
     const bobHex = bob.publicHex;
 

@@ -17,6 +17,11 @@
     // Metro and Vite resolve it happily — a break that only ever shows up in that one flow. Metro,
     // Vite and jest all resolve the explicit form too, so it costs nothing. `--noEmit` is required
     // for this flag and is exactly how `npm run typecheck` invokes tsc.
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+
+    // `just typecheck` is a hot-loop gate; --incremental (with the gitignored .dev tsbuildinfo, per
+    // package.json's typecheck script) makes warm re-runs type only what changed.
+    "incremental": true,
+    "tsBuildInfoFile": "../.dev/app-typecheck.tsbuildinfo"
   }
 }

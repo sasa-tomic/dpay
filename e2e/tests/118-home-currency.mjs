@@ -41,7 +41,7 @@ export async function run() {
   console.log('[118-home-currency] setup…');
   // solStub: the EUR row's second rail (EURC@Solana) must be enumerable offline — the stub is the
   // harness's stand-in for the solana RPC the app's coherence check reads.
-  const env = await setup({solStub: true});
+  const env = await setup({ lazyBoot: false, solStub: true });
   try {
     const {driver, webBaseURL, relayBaseURL} = env;
 

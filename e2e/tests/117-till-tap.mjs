@@ -112,10 +112,11 @@ export async function run() {
 
     // The counter must believe it has a radio, or the reader never mounts (web defaults to
     // 'unknown', which is the honest web answer and the reason this seam exists).
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[117-till-tap] onboarding the shop…');
     await onboardWallet(driver, 'Bahnhof Kiosk');
+    await driver.removeInitScript(nfcSeam);
     const merchant = await accountOf(driver);
     const merchantPrincipal = await railPrincipalText(merchant.publicHex);
 

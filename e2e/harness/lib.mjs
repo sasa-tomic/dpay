@@ -271,7 +271,12 @@ export async function stopSession() {
  * faucet (funds each test's own distinct account) — no account-state leakage between tests.
  *
  * @param {{noRelay?: boolean, noWeb?: boolean, rebuildWeb?: boolean, solStub?: boolean,
- *           solRpcUrl?: 'relay' | string, dark?: boolean, locale?: string}} [opts]
+ *           solRpcUrl?: 'relay' | string, dark?: boolean, locale?: string,
+ *           lazyBoot?: boolean}} [opts]
+ *   `lazyBoot`: skip the eager app-boot prologue (the default — `onboardWallet`'s seeded fast
+ *   path pays exactly one boot). `false` restores the old double-boot shape for flows that
+ *   hand-roll the create path or write storage directly; `DPAY_E2E_NO_LAZY_BOOT=1` is the
+ *   suite-wide kill switch.
  *   `solRpcUrl`: re-enable the REAL Solana RPC path (suite default is rail-off). `'relay'`
  *   deletes the test override so the candidate list DERIVES from the App-installed relay
  *   list — the exact production path, harness relay's proxy route included (flow 165); any
@@ -322,18 +327,34 @@ export async function setup(opts = {}) {
 
   try {
     if (!opts.noWeb) {
-      // about:blank first so localStorage.clear() has a same-origin context to operate on (a fresh
-      // context is already empty, but this is harmless and keeps the path identical for live mode).
-      await driver.navigate('about:blank', '/');
-      try { await driver.clearStorage(); } catch {}
       const navPath = `/?relay=${encodeURIComponent(relayBaseURL)}`;
-      // domcontentloaded (not networkidle0): a fresh context lands on the Onboarding screen, which
-      // starts NO continuous polls, so networkidle0's 500ms zero-network window is pure waste. The
-      // real readiness gate is waitReady() polling `window.__DPAY_READY` (set after shims install),
-      // so resolving navigation as soon as the DOM is parsed cuts ~500ms/flow with no correctness
-      // change. This mirrors the pattern flows 12/33 already use for returning-user reloads.
-      await driver.navigate(webBaseURL, navPath, { waitUntil: 'domcontentloaded', timeoutMs: mode === 'live' ? 20_000 : 8_000 });
-      await driver.waitReady({ timeoutMs: mode === 'live' ? 20_000 : 10_000 });
+      driver.appBoot = {
+        base: webBaseURL,
+        path: navPath,
+        relay: relayBaseURL,
+        navTimeoutMs: mode === 'live' ? 20_000 : 8_000,
+        readyTimeoutMs: mode === 'live' ? 20_000 : 10_000,
+      };
+      // Lazy boot (default): stop after context + globals — the seeding fast path lands the app
+      // with ONE boot carrying the planted identity, instead of the old scheme where setup()
+      // booted the app only so a seeder could eval against a live page and boot AGAIN. Flows
+      // that hand-roll the create path or write storage themselves ask for the eager prologue
+      // with `lazyBoot: false` — the exact pre-lazy shape, kill switch DPAY_E2E_NO_LAZY_BOOT=1.
+      const lazyBoot = opts.lazyBoot ?? process.env.DPAY_E2E_NO_LAZY_BOOT !== '1';
+      if (!lazyBoot) {
+        // about:blank first so localStorage.clear() has a same-origin context to operate on (a fresh
+        // context is already empty, but this is harmless and keeps the path identical for live mode).
+        await driver.navigate('about:blank', '/');
+        try { await driver.clearStorage(); } catch {}
+        // domcontentloaded (not networkidle0): a fresh context lands on the Onboarding screen, which
+        // starts NO continuous polls, so networkidle0's 500ms zero-network window is pure waste. The
+        // real readiness gate is waitReady() polling `window.__DPAY_READY` (set after shims install),
+        // so resolving navigation as soon as the DOM is parsed cuts ~500ms/flow with no correctness
+        // change. This mirrors the pattern flows 12/33 already use for returning-user reloads.
+        await driver.navigate(webBaseURL, navPath, { waitUntil: 'domcontentloaded', timeoutMs: driver.appBoot.navTimeoutMs });
+        await driver.waitReady({ timeoutMs: driver.appBoot.readyTimeoutMs });
+        driver.appBooted = true;
+      }
     }
     return { mode, relayBaseURL, webBaseURL, driver, stop };
   } catch (e) {
@@ -544,11 +565,42 @@ export async function selectDemoAsset(driver, opts = {}) {
 }
 
 /**
- * Plant a fresh, FUNDED identity directly into the page's localStorage so the app boots as a
- * RETURNING user — the seeded-identity fast path for `onboardWallet`. Generates a fresh random
- * keypair (the same ed25519 wire format every flow's `generateKeypair` uses), funds it over the
- * relay's faucet route (the exact `{account}` POST Onboarding itself sends, → ∂100.00), and
- * writes the two storage keys the first-run router gates on:
+ * The init-script payload for pre-boot seeding. Registered via `driver.addInitScript`, so it runs
+ * on the APP ORIGIN before any bundle code — where `localStorage.clear()` actually operates on the
+ * app's storage (the old boot-then-eval scheme evaluated on whatever page was up). Plants identity
+ * + journey and raises the flag the seeded boot asserts on.
+ */
+function seedInitScript(identityJson, journeyJson) {
+  try { localStorage.clear(); } catch {}
+  localStorage.setItem('dpay.identity.v1', identityJson);
+  localStorage.setItem('dpay.journey.v1', journeyJson);
+  globalThis.__DPAY_TEST_SEEDED = true;
+}
+
+/**
+ * Where a seeded boot should land: the relay the seed funds against, and the app URL carrying it.
+ * A page ALREADY on an app origin wins — a flow's own navigation, or setup()'s eager prologue
+ * (DPAY_E2E_NO_LAZY_BOOT=1); its query is preserved so the boot re-lands on the SAME relay. Under
+ * the lazy-boot default nothing has loaded yet, so setup()'s stashed boot intent is the target.
+ */
+function seedTarget(driver) {
+  const url = driver.pageURL();
+  if (/^https?:/i.test(url)) {
+    const u = new URL(url);
+    const relay = u.searchParams.get('relay');
+    if (relay) return { relay, base: u.origin, path: `${u.pathname}${u.search}` };
+  }
+  return driver.appBoot
+    ? { relay: driver.appBoot.relay, base: driver.appBoot.base, path: driver.appBoot.path }
+    : null;
+}
+
+/**
+ * Plant a fresh, FUNDED identity PRE-BOOT and bring the app up ONCE over it — the seeded-identity
+ * fast path. Generates a fresh random keypair (the same ed25519 wire format every flow's
+ * `generateKeypair` uses), funds it over the relay's faucet route (the exact `{account}` POST
+ * Onboarding itself sends, → ∂100.00), and registers an init script that writes the two storage
+ * keys the first-run router gates on BEFORE the bundle evaluates:
  *   `dpay.identity.v1` = {secretHex, publicHex, username}   (STORAGE_KEY)
  *   `dpay.journey.v1`  = {stamps:[walkthroughDone, recoverySaved], at:{…}, seen:[firstRunPractice]}
  * …which is byte-for-byte the end-state the real create path leaves (Skip awarded walkthroughDone,
@@ -556,45 +608,86 @@ export async function selectDemoAsset(driver, opts = {}) {
  * home-currency question is deliberately NOT seeded — the chooser itself answers it through the
  * app's own persistence, exactly as the slow path does.
  *
- * Returns true when the page now carries the identity (caller reloads + lands the wallet);
- * false when the environment can't support it (no `?relay=` on the page, or the relay serves no
- * faucet) so the caller falls back to the real create path. Throws on REAL failures after the
- * storage write has been decided on — a half-planted identity must never silently reroll.
+ * ONE navigation total: under lazy boot this is the app's first and only boot; under the eager
+ * prologue it is the reload. The `__DPAY_TEST_SEEDED` flag is asserted fail-loud after waitReady
+ * (the flow-75 seam doctrine: a boot that did not actually carry the planted identity must stop
+ * the flow, not silently onboard over an unknown wallet). The init script is then REMOVED — it is
+ * one-shot by contract, so later in-flow reloads see the page exactly as the app left it.
+ *
+ * Returns true when the wallet shell is mounted over the planted identity; false when the
+ * environment can't support it (no relay target, or the relay serves no faucet) so the caller
+ * falls back to the real create path. Throws on REAL failures after the seed was decided on —
+ * a half-planted identity must never silently reroll.
  */
-async function seedIdentityIntoPage(driver, name) {
-  const relay = driver.baseURL ? new URL(driver.baseURL).searchParams.get('relay') : null;
-  if (!relay) return false;
+async function seedAndBoot(driver, name, opts = {}) {
+  const target = seedTarget(driver);
+  if (!target) return false;
   const kp = await generateKeypair();
-  const fund = await faucetAccount(relay, kp.publicHex, undefined);
-  if (!fund.ok) return false; // e.g. a relay advertising no faucet — the slow path handles it honestly
+  if (opts.fund !== false) {
+    const fund = await faucetAccount(target.relay, kp.publicHex, undefined);
+    if (!fund.ok) return false; // e.g. a relay advertising no faucet — the slow path handles it honestly
+  }
   const now = Date.now();
-  await driver.eval((payload) => {
-    localStorage.setItem('dpay.identity.v1', payload.identityJson);
-    localStorage.setItem('dpay.journey.v1', payload.journeyJson);
-  }, {
-    identityJson: JSON.stringify({ secretHex: kp.secretHex, publicHex: kp.publicHex, username: name }),
-    journeyJson: JSON.stringify({
-      stamps: ['walkthroughDone', 'recoverySaved'],
-      at: { walkthroughDone: now, recoverySaved: now },
+  const seedId = await driver.addInitScript(
+    seedInitScript,
+    JSON.stringify({ secretHex: kp.secretHex, publicHex: kp.publicHex, username: name }),
+    JSON.stringify({
+      stamps: ['walkthroughDone', 'recoverySaved', 'flowUnderstood'],
+      at: { walkthroughDone: now, recoverySaved: now, flowUnderstood: now },
       seen: ['firstRunPractice'],
     }),
-  });
+  );
+  try {
+    const boot = driver.appBoot;
+    await driver.navigate(target.base, target.path, {
+      waitUntil: 'domcontentloaded',
+      timeoutMs: boot?.navTimeoutMs,
+    });
+    await driver.waitReady({ timeoutMs: boot?.readyTimeoutMs });
+    driver.appBooted = true;
+    const flagged = await driver.eval(() => globalThis.__DPAY_TEST_SEEDED === true);
+    assert(flagged, '[lib] the seeded boot never ran its init script (__DPAY_TEST_SEEDED unset) — this page is NOT the planted identity; refusing to continue');
+  } finally {
+    try { await driver.removeInitScript(seedId); } catch {}
+  }
   return true;
 }
 
 /**
- * Onboard a fresh wallet: type the username, click create, dismiss the BIP-39 mnemonic backup screen,
- * wait for the funded balance. This is the shared preamble every browser test used to copy-paste
- * (4 lines × 15 files). Returns the driver for chaining.
+ * Land the app for the SLOW onboarding path. Under the lazy-boot default nothing has loaded when
+ * `onboardWallet` starts, so the create path's first probe would hit a blank page: boot ONCE here
+ * (the same single boot the seeded path would have paid — no configuration pays two). A page a
+ * flow navigated itself is adopted as-is (its query carries ITS relay); the eager prologue has
+ * nothing left to do. Idempotent.
+ */
+async function bootPendingApp(driver) {
+  if (driver.appBooted) return;
+  if (/^https?:/i.test(driver.pageURL())) {
+    await driver.waitReady({ timeoutMs: driver.appBoot?.readyTimeoutMs ?? 10_000 });
+  } else {
+    if (!driver.appBoot) return;
+    const boot = driver.appBoot;
+    await driver.navigate(boot.base, boot.path, { waitUntil: 'domcontentloaded', timeoutMs: boot.navTimeoutMs });
+    await driver.waitReady({ timeoutMs: boot.readyTimeoutMs });
+  }
+  driver.appBooted = true;
+}
+
+
+/**
+ * Onboard a fresh wallet: land a funded returning-user identity in ONE app boot, then settle to
+ * the Pay scanner. This is the shared preamble every browser test used to copy-paste (4 lines ×
+ * 15 files). Returns the driver for chaining.
  *
- * FAST PATH (the default): `seedIdentityIntoPage` plants a fresh random identity + journey, funds
- * it over the relay faucet, and the caller below reloads into a RETURNING wallet — skipping ~30 UI
+ * FAST PATH (the default): `seedAndBoot` plants a fresh random identity + journey pre-boot via an
+ * init script and brings the app up ONCE over it — the seeded single-boot path, skipping ~30 UI
  * round trips (walkthrough → create → backup ack → practice beat → polls) that none of the ~140
  * non-onboarding flows assert on. The REAL create path stays the subject of the flows that ARE
  * about onboarding (01/23/37/58/68/152-156 hand-roll the steps) and of `opts.slow`;
- * `DPAY_E2E_SLOW_ONBOARD=1` is the suite-wide kill switch. The end state is the SAME both ways:
- * identity + journey stamps in storage, home currency answered, funded DEMO wallet, on the Pay
- * scanner, ∂100.00 on screen.
+ * `DPAY_E2E_SLOW_ONBOARD=1` is the suite-wide slow-path switch. `DPAY_E2E_NO_LAZY_BOOT=1` restores
+ * the old double-boot shape (eager prologue in `setup()` + seeded reload here) for bisecting.
+ * The end state is the SAME both ways: identity + journey stamps in storage, home currency
+ * answered, funded DEMO wallet, on the Pay scanner, ∂100.00 on screen.
  *
  * D4-B: clicking btn-create now shows the mnemonic backup screen BEFORE the faucet runs. The backup
  * is dismissed (check the ack checkbox + Continue) so the faucet fires and the wallet loads. The
@@ -609,12 +702,9 @@ async function seedIdentityIntoPage(driver, name) {
 export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   const timeoutMs = opts.timeoutMs ?? 15_000;
   if (opts.slow !== true && process.env.DPAY_E2E_SLOW_ONBOARD !== '1') {
-    const seeded = await seedIdentityIntoPage(driver, name);
-    if (seeded) {
-      // The page now carries a funded returning-user identity: reload into the wallet and land
-      // exactly where the slow path ends (Pay tab, DEMO selected, ∂100.00 visible).
-      await driver.navigate(driver.baseURL, '', { waitUntil: 'domcontentloaded' });
-      await driver.waitReady({ timeoutMs: 10_000 });
+    if (await seedAndBoot(driver, name)) {
+      // The seeded boot landed the wallet as a returning user: settle to exactly where the slow
+      // path ends (home currency answered, Pay tab, DEMO selected, ∂100.00 visible).
       await chooseHomeCurrencyIfPresent(driver);
       await driver.findByTestID(WALLET_READY, { timeoutMs: 10_000 });
       await selectDemoAsset(driver);
@@ -624,6 +714,7 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
     // No relay/faucet on this page → fall through to the real create path (it owns the honest
     // no-faucet branches; e.g. flow 37's practice-continue exit).
   }
+  await bootPendingApp(driver);
   // Trip Ready J1 — a fresh context boots into the walkthrough before the create form. Skip it
   // (no-op if already dismissed — e.g. a flow that skipped it manually first).
   await skipWalkthroughIfPresent(driver);
@@ -641,6 +732,23 @@ export async function onboardWallet(driver, name = 'e2e', opts = {}) {
   await selectDemoAsset(driver);
   await driver.waitForText('∂100.00', { timeoutMs });
   return driver;
+}
+
+/**
+ * The seeded fast path WITHOUT the funded-DEMO contract: seed + single boot + the home-currency
+ * question, ending at the mounted wallet shell — no selectDemoAsset, no ∂100.00 wait. `opts.fund`
+ * = false also skips the IC faucet POST entirely (the create path for these flows skips the
+ * practice funding, so the planted identity must be UNFUNDED on IC too — e.g. 165, whose subject
+ * is the SOL rail funding the wallet through the relay proxy). If seeding is impossible (no relay
+ * target / no faucet when funding) this returns false so the caller can fall back to its own
+ * create path; after the seed is decided on it throws on real failures (the fail-loud seam
+ * doctrine) — a half-planted identity must never silently reroll.
+ */
+export async function onboardSeededUnfunded(driver, name = 'e2e', opts = {}) {
+  if (!(await seedAndBoot(driver, name, opts))) return false;
+  await chooseHomeCurrencyIfPresent(driver);
+  await driver.findByTestID(WALLET_READY, { timeoutMs: 10_000 });
+  return true;
 }
 
 /**

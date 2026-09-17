@@ -93,11 +93,18 @@ export async function run() {
     await driver.click('btn-backup', { timeoutMs: 5_000 });
     await driver.click('btn-backup-confirm', { timeoutMs: 5_000 });
     await driver.findByTestID('mnemonic-words', { timeoutMs: 5_000 });
-    const wordsA = [];
-    for (let i = 0; i < 24; i++) {
-      const t = await driver.readText(`mnemonic-word-${i}`);
-      wordsA.push(t.replace(/^\d+\s*/, '').trim());
-    }
+    // ONE CDP round trip for all 24 words (each readText is its own eval — 24 of them is pure
+    // latency); the row's array shape is asserted here, not trusted.
+    const wordsA = await driver.eval(() => {
+      const row = document.querySelector('[data-testid="mnemonic-words"]');
+      return Array.from({ length: 24 }, (_, i) => {
+        const el = row.querySelector(`[data-testid="mnemonic-word-${i}"]`);
+        if (!el) throw new Error(`mnemonic-word-${i} missing`);
+        return (el.textContent || '').replace(/^\d+\s*/, '').trim();
+      });
+    });
+    assert(Array.isArray(wordsA) && wordsA.length === 24 && wordsA.every((w) => typeof w === 'string' && w.length > 0),
+      `mnemonic words must read back as 24 non-empty strings, got ${JSON.stringify(wordsA)}`);
     await driver.click('btn-settings-restore', { timeoutMs: 5_000 });
     await driver.findByTestID('settings-restore-seed-input', { timeoutMs: 5_000 });
     await driver.type('settings-restore-seed-input', wordsA.join(' '), { timeoutMs: 5_000 });

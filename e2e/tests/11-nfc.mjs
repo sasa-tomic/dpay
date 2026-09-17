@@ -49,10 +49,11 @@ export async function run() {
 
     // Flip the device NFC status to 'ready' BEFORE the Wallet mounts (on onboarding) so the app's
     // nfcStatus() probe returns 'ready' → Pay mode arms the HCE card.
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[11-nfc] onboarding (NFC forced ready)…');
     await onboardWallet(driver, 'e2e-nfc');
+    await driver.removeInitScript(nfcSeam);
 
     // Waiting-for-tap: NFC ready → the Pay scan surface is visible. On native the text is "Tap or
     // scan to pay" (NFC armed); on web NFC is suppressed → "Scan to pay". Either way `pay-scan` mounts.

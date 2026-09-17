@@ -60,7 +60,7 @@ async function onboardToPractice(driver, name) {
 export async function run() {
   const start = Date.now();
   console.log('[153-practice-not-settled] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   const noFaucet = await startRelay({faucet: false});
   try {
     const {driver, relayBaseURL, webBaseURL} = env;

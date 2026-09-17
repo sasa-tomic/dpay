@@ -40,8 +40,26 @@ const SEL_DEPOSIT = '0xdb9751af';
 // is exposed on window.__DPAY_TEST_ETH_CALLS so the flow can assert the sendTransaction count.
 // `receiptStatus` is the status field every eth_getTransactionReceipt returns ('0x1' success /
 // '0x0' reverted); the mock always returns a receipt immediately (no mining delay in the harness).
-async function installMockProvider(driver, chainIdHex, receiptStatus) {
+async function mockProviderInit(driver, chainIdHex, receiptStatus) {
   await driver.eval((hex, status) => {
+    const calls = [];
+    window.__DPAY_TEST_ETH_CALLS = calls;
+    window.ethereum = {
+      request: async ({ method, params }) => {
+        if (method === 'eth_requestAccounts') return ['0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'];
+        if (method === 'eth_chainId') return hex; // MC8 U3: the wallet's current chain
+        if (method === 'eth_sendTransaction') { calls.push(params[0]); return '0x' + 'ab'.repeat(32); }
+        if (method === 'eth_getTransactionReceipt') return { status }; // MC8 U4: mined immediately
+        return null;
+      },
+    };
+  }, chainIdHex, receiptStatus);
+}
+
+/** Same payload as an init script: the seeded boot's navigation discards plain evals made on the
+ *  pre-boot page, so the FIRST install must ride evaluateOnNewDocument to be live at mount. */
+function mockProviderSeed(driver, chainIdHex, receiptStatus) {
+  return driver.addInitScript((hex, status) => {
     const calls = [];
     window.__DPAY_TEST_ETH_CALLS = calls;
     window.ethereum = {
@@ -76,10 +94,11 @@ export async function run() {
     const { driver } = env;
 
     // === MC8 U3 scenario 1: WRONG-NETWORK GUARD (Polygon 0x89) =================================
-    await installMockProvider(driver, '0x89', '0x1');
-    console.log('[16-ckusdc-onramp] mock installed (chainId=0x89 Polygon)');
+    const mockSeed = await mockProviderSeed(driver, '0x89', '0x1');
+    console.log('[16-ckusdc-onramp] mock seeded (chainId=0x89 Polygon)');
 
     await onboardWallet(driver, 'e2e-ckusdc');
+    await driver.removeInitScript(mockSeed);
     console.log('[16-ckusdc-onramp] Balances → select USDC → Receive → My address…');
     await openBalances(driver);
     await selectCurrency(driver, 'ckusdc');
@@ -103,7 +122,7 @@ export async function run() {
     // Reinstall the mock on mainnet but with a REVERTED receipt. Connect succeeds, the user enters an
     // amount and approves; waitForReceipt throws ReceiptReverted → the sheet surfaces "reverted" and
     // stays in 'enter' (NO watching transition). This is the close: a reverted tx no longer lies.
-    await installMockProvider(driver, '0x1', '0x0');
+    await mockProviderInit(driver, '0x1', '0x0');
     console.log('[16-ckusdc-onramp] mock reinstalled (chainId=0x1, receipt=0x0 reverted)');
 
     await driver.click('btn-connect-wallet', { timeoutMs: 5_000 });
@@ -126,7 +145,7 @@ export async function run() {
     // === HAPPY PATH (mainnet 0x1, receipt 0x1) =================================================
     // Reinstall the mock with SUCCESS receipts. The sheet is still in 'enter' (after the revert), so
     // click btn-approve again → approve + deposit both mined → watching.
-    await installMockProvider(driver, '0x1', '0x1');
+    await mockProviderInit(driver, '0x1', '0x1');
     console.log('[16-ckusdc-onramp] mock reinstalled (chainId=0x1, receipt=0x1 success)');
 
     await driver.click('btn-approve', { timeoutMs: 5_000 });

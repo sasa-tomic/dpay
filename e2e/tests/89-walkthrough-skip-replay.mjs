@@ -31,7 +31,7 @@ export const meta = {
 export async function run() {
   // ── Phase A — Skip on sight ──────────────────────────────────────────────────────────────
   {
-    const env = await setup();
+    const env = await setup({ lazyBoot: false });
     try {
       const { driver } = env;
       await driver.findByTestID('walkthrough-scene-1', { timeoutMs: 10_000 });
@@ -50,7 +50,7 @@ export async function run() {
 
   // ── Phase B — persisted stamp suppresses the walkthrough ────────────────────────────────
   {
-    const env = await setup();
+    const env = await setup({ lazyBoot: false });
     try {
       const { driver, webBaseURL, relayBaseURL } = env;
       // Pre-seed the stamp BEFORE the next first-render (same origin, then hard-navigate back).
@@ -73,7 +73,7 @@ export async function run() {
 
   // ── Phase C — the Settings replay ────────────────────────────────────────────────────────
   {
-    const env = await setup();
+    const env = await setup({ lazyBoot: false });
     try {
       const { driver } = env;
       await onboardWallet(driver, 'replayer');

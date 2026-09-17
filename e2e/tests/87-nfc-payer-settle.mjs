@@ -15,8 +15,9 @@ export async function run() {
   const env = await setup();
   try {
     const {driver, relayBaseURL} = env;
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-nfc-payer');
+    await driver.removeInitScript(nfcSeam);
     const payer = await accountOf(driver);
     const merchant = await generateKeypair();
     const payerBefore = BigInt(await getBalance(relayBaseURL, payer.publicHex, 0));

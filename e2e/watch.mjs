@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runTestsSubset } from './run.mjs';
 import { loadTestsMeta, filterByToken } from './harness/meta.mjs';
-import { stopSession, killTrackedChildren } from './harness/lib.mjs';
+import { stopSession, killTrackedChildren, getSession } from './harness/lib.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
@@ -228,6 +228,14 @@ async function executeRun(triggerFiles, { isStartup = false } = {}) {
   console.log(header);
 
   try {
+    // A change under `app/**` or `e2e/web/**` only exists in the SERVED bundle after a rebuild —
+    // the shared session would otherwise re-run flows against the OLD dist. The session's
+    // `rebuildWeb` path rebuilds dist in place (same dir, same sirv server); with sirv's `--dev`
+    // the server reads the fresh assets from disk on the next page load instead of its startup
+    // snapshot.
+    if (triggerFiles.some((f) => f.startsWith('app/') || f.startsWith('e2e/web/'))) {
+      await getSession({ rebuildWeb: true });
+    }
     const { passed, total, elapsed, firstFailure } = await runTestsSubset(tests, { keepSession: true });
     if (firstFailure) {
       // RED: surface the first failure key + point at the full-diagnostic one-shot path. Phase 2's

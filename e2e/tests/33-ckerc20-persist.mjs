@@ -25,8 +25,12 @@ import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurre
 // Install a recording EIP-1193 mock identical to flow 16's (chainId 0x1 = Ethereum mainnet, receipt
 // status 0x1 = success). After reload this is GONE (window.ethereum is undefined) — proving the
 // watching resume works WITHOUT the wallet session.
+/** The happy-path EIP-1193 mock as an init script: the seeded boot's navigation discards plain
+  * evals made on the pre-boot page, so the FIRST install must ride evaluateOnNewDocument to be
+  * live when the deposit surface mounts. Removed right after boot — the flow later proves the
+  * mock does NOT survive a reload. */
 async function installHappyProvider(driver) {
-  await driver.eval(() => {
+  return driver.addInitScript(() => {
     const calls = [];
     window.__DPAY_TEST_ETH_CALLS = calls;
     window.ethereum = {
@@ -61,10 +65,11 @@ export async function run() {
     const { driver, relayBaseURL, webBaseURL } = env;
 
     // === PHASE 1: drive the onramp to `watching` (happy path) ===================================
-    await installHappyProvider(driver);
+    const providerSeed = await installHappyProvider(driver);
     console.log('[33-ckerc20-persist] happy-path ETH mock installed (chainId=0x1, receipt=0x1)');
 
     await onboardWallet(driver, 'e2e-persist');
+    await driver.removeInitScript(providerSeed);
     await openBalances(driver);
     await selectCurrency(driver, 'ckusdc');
     await openReceiveAddress(driver);

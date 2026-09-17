@@ -62,10 +62,11 @@ export async function run() {
     const {driver} = env;
 
     // Force NFC ready so SolPayMode arms the HCE card on mount.
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[66-sol-nfc-error] onboarding (NFC forced ready)…');
     await onboardWallet(driver, 'e2e-sol-nfc-err');
+    await driver.removeInitScript(nfcSeam);
 
     // Install the SOL RPC stub (needed for case 4's ONLINE makeRequest; harmless for cases 1-3
     // which are fully offline).

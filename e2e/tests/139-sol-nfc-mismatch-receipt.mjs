@@ -67,10 +67,11 @@ export async function run() {
   try {
     const {driver} = env;
 
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[139-sol-nfc-mismatch-receipt] onboarding…');
     await onboardWallet(driver, 'e2e-sol-mismatch');
+    await driver.removeInitScript(nfcSeam);
 
     console.log('[139-sol-nfc-mismatch-receipt] selecting SOL via Balances…');
     await waitForWallet(driver, {timeoutMs: 8_000});

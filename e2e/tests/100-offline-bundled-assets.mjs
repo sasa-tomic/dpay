@@ -28,7 +28,7 @@ export const meta = {
 export async function run() {
   const start = Date.now();
   console.log('[100-offline-bundled-assets] setup (web + browser; relay will be dead)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const { webBaseURL, driver } = env;
 

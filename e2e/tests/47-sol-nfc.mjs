@@ -81,10 +81,11 @@ export async function run() {
 
     // Flip the device NFC status to 'ready' BEFORE the Wallet mounts so SolPayMode arms the HCE
     // card on mount (v2: card mounts immediately in 'scan' — no nonce gate).
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[47-sol-nfc] onboarding…');
     await onboardWallet(driver, 'e2e-sol-nfc');
+    await driver.removeInitScript(nfcSeam);
 
     // Select SOL via the Balances sheet.
     console.log('[47-sol-nfc] selecting SOL via Balances…');

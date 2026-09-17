@@ -31,8 +31,11 @@ import { setup, assert, assertIncludes, onboardWallet, openBalances, selectCurre
 // A minimal recording EIP-1193 mock — only the methods `connect` calls (eth_requestAccounts +
 // eth_chainId). eth_sendTransaction is recorded (pushed to window.__DPAY_TEST_ETH_CALLS) so the flow
 // can assert 0 sends in the no-wallet leg, but this flow never submits (no approve/deposit).
+/** The EIP-1193 mock as an init script: the seeded boot's navigation discards plain evals made
+  * on the pre-boot page, so the FIRST install must ride evaluateOnNewDocument to be live when
+  * the resolver runs. Removed right after boot. */
 async function installMockProvider(driver, chainIdHex) {
-  await driver.eval((hex) => {
+  return driver.addInitScript((hex) => {
     const calls = [];
     window.__DPAY_TEST_ETH_CALLS = calls;
     window.ethereum = {
@@ -68,10 +71,11 @@ export async function run() {
     // === (a) WEB-MOCK WINS ============================================================
     // With window.ethereum set, resolveOnrampProvider() returns it FIRST — before any WalletConnect
     // code. Connect succeeds → the amount input appears (the sheet transitioned connect → enter).
-    await installMockProvider(driver, '0x1');
+    const providerSeed = await installMockProvider(driver, '0x1');
     console.log('[34-onramp-provider-resolution] mock installed (window.ethereum, chainId=0x1)');
 
     await onboardWallet(driver, 'e2e-resolve');
+    await driver.removeInitScript(providerSeed);
     await openBalances(driver);
     await selectCurrency(driver, 'ckusdc');
     await openReceiveAddress(driver);

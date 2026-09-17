@@ -123,10 +123,11 @@ export async function run() {
   try {
     const {driver} = env;
 
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[138-sol-settle-mismatch] onboarding…');
     await onboardWallet(driver, 'e2e-sol-settle');
+    await driver.removeInitScript(nfcSeam);
 
     // The settle-gate stub: identical to flow 51 except getTransaction THROWS transiently for the
     // first reads (leg b covers the transient class), then echoes the seeded detail.

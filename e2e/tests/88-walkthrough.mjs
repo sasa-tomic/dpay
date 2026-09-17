@@ -32,7 +32,7 @@ export const meta = {
 };
 
 export async function run() {
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const { driver } = env;
 

@@ -26,7 +26,7 @@ export const meta = {
 export async function run() {
   const start = Date.now();
   console.log('[149-currency-chooser-dead-tap] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const {driver} = env;
 

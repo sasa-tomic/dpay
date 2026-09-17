@@ -36,7 +36,7 @@ export const meta = {
 export async function run() {
   const start = Date.now();
   console.log('[82-own-seed-create] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const { driver, webBaseURL, relayBaseURL } = env;
 

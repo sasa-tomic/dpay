@@ -68,10 +68,11 @@ export async function run() {
     const {driver} = env;
 
     // Force NFC ready (needed for the autoSign step that produces the real signed solpay).
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[51-sol-merchant-broadcast] onboarding…');
     await onboardWallet(driver, 'e2e-sol-merchant');
+    await driver.removeInitScript(nfcSeam);
 
     // Install the SOL RPC stub with v2 methods.
     // Phase 1 (createSolPaymentRequest): getGenesisHash + getLatestBlockhash.

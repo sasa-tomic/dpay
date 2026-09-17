@@ -47,7 +47,7 @@ async function readJourney(driver) {
 export async function run() {
   const start = Date.now();
   console.log('[152-practice-payment] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const {driver, relayBaseURL} = env;
 

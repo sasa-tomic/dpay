@@ -62,7 +62,7 @@ const assertNoSolicitation = (driver, where) => assertAbsent(driver, SOLICITATIO
 export async function run() {
   const start = Date.now();
   console.log('[154-first-run-no-solicitation] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   const noFaucet = await startRelay({faucet: false});
   try {
     const {driver, webBaseURL} = env;

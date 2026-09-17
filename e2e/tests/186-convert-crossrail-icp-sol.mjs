@@ -295,8 +295,15 @@ export async function run() {
     assertEq(sig[0].amountSubunits, minOut.toString(), 'the crossed amount is the swap\'s 1% floor');
     await driver.screenshot('186-crossrail-crossing');
 
-    // The STALL: state still pending — the record must stay parked, not failed.
-    await new Promise((r) => setTimeout(r, 2_500));
+    // The STALL: state still pending — the record must stay parked, not failed. Deterministic
+    // stand-in for a blind sleep: wait until the mint watch has polled AGAIN (the stub's
+    // message census grows past its current size — one full poll cycle has then elapsed, at
+    // whatever speed this machine runs), THEN assert the crossing is still the mounted panel.
+    const pollsAtStall = await driver.eval(() => globalThis.__E2E_CCTP.messageCalls.length);
+    await driver.waitForFunction(
+      (n) => globalThis.__E2E_CCTP && globalThis.__E2E_CCTP.messageCalls.length > n,
+      {timeoutMs: 15_000, label: 'the mint watch polls again while parked', args: [pollsAtStall]},
+    );
     assert(await driver.findByTestID('crossrail-crossing', {timeoutMs: 1_000}) != null, 'a stalled attestation stays parked at crossing (honest pending)');
     // The census evidence lives in the page's stub — the reload about to happen resets it, so
     // capture the pre-reload counters now and audit ACROSS the two epochs at the end.
@@ -324,10 +331,19 @@ export async function run() {
       } catch (e) { if (i === 2) throw e; await new Promise((r) => setTimeout(r, 400)); }
     }
     await driver.findByTestID('crossrail-crossing', {timeoutMs: 15_000});
+    // One CDP round trip for all six leg states (a per-leg readText is its own eval — pure
+    // latency ×6); the reads land in-page and the asserts stay in Node.
+    const legsAfterReload = await driver.eval(() =>
+      Array.from({length: 6}, (_, i) => {
+        const el = document.querySelector(`[data-testid="convert-leg-${i}-state"]`);
+        if (!el) throw new Error(`convert-leg-${i}-state missing`);
+        return el.textContent || '';
+      }),
+    );
     for (let i = 0; i < 5; i++) {
-      assertIncludes(await driver.readText(`convert-leg-${i}-state`), 'Confirmed', `after reload IC leg ${i} reads Confirmed (resumed, not re-signed)`);
+      assertIncludes(legsAfterReload[i], 'Confirmed', `after reload IC leg ${i} reads Confirmed (resumed, not re-signed)`);
     }
-    assertIncludes(await driver.readText('convert-leg-5-state'), 'Sent', 'the cctp_burn leg reads Sent (hash known, mint watched)');
+    assertIncludes(legsAfterReload[5], 'Sent', 'the cctp_burn leg reads Sent (hash known, mint watched)');
     const icpAfter = BigInt(await getBalance(r2.baseURL, account.publicHex, 8));
     const ethAfter = BigInt(await getBalance(r2.baseURL, account.publicHex, 6));
     assertEq(icpAfter, icpBefore, 'ICP ledger UNCHANGED across the reload — the IC legs were never re-signed');
@@ -349,8 +365,15 @@ export async function run() {
     const done = await driver.readText('convert-done');
     assertIncludes(done, `${fmt(SOL_OUT, 9)} SOL`, 'done reports the REALIZED native credit, at the user\'s Solana address');
     assertIncludes(done, kp.address, 'the Solana address is named');
+    const finalLegs = await driver.eval(() =>
+      Array.from({length: 7}, (_, i) => {
+        const el = document.querySelector(`[data-testid="convert-leg-${i}-state"]`);
+        if (!el) throw new Error(`convert-leg-${i}-state missing`);
+        return el.textContent || '';
+      }),
+    );
     for (let i = 0; i < 7; i++) {
-      assertIncludes(await driver.readText(`convert-leg-${i}-state`), 'Confirmed', `final leg ${i} of 7 reads Confirmed`);
+      assertIncludes(finalLegs[i], 'Confirmed', `final leg ${i} of 7 reads Confirmed`);
     }
     await driver.screenshot('186-crossrail-done');
 

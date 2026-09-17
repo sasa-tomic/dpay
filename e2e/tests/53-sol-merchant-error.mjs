@@ -53,10 +53,11 @@ export async function run() {
   try {
     const {driver} = env;
 
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[53-sol-merchant-error] onboarding…');
     await onboardWallet(driver, 'e2e-sol-err');
+    await driver.removeInitScript(nfcSeam);
 
     // Install the REJECTING stub: sendTransaction throws the unfunded-account error. The other
     // methods stay functional so the flow reaches the broadcast point (createSolPaymentRequest uses

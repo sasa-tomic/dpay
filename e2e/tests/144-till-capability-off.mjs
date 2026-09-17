@@ -27,7 +27,7 @@ export const meta = {
 };
 
 export async function run() {
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   const tillOff = await startRelay({till: false});
   try {
     const {driver, webBaseURL} = env;

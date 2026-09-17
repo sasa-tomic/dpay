@@ -46,10 +46,11 @@ export async function run() {
 
     // Flip the device NFC status to 'ready' BEFORE the Wallet mounts so the Pay screen arms the HCE
     // card (NfcTap is live + listening for seam-dispatched events).
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[60-nfc-error] onboarding (NFC forced ready)…');
     await onboardWallet(driver, 'e2e-nfc-err');
+    await driver.removeInitScript(nfcSeam);
     await driver.findByTestID('pay-scan', {timeoutMs: 5_000});
 
     // Helper: dispatch one NFC event through the seam (role='card' = the payer being tapped).

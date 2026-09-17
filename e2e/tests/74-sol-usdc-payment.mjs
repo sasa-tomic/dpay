@@ -53,10 +53,11 @@ export async function run() {
   try {
     const {driver} = env;
 
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     console.log('[74-sol-usdc-payment] onboarding…');
     await onboardWallet(driver, 'e2e-sol-usdc-pay');
+    await driver.removeInitScript(nfcSeam);
 
     // Install the SOL RPC stub (same shape as flow 51 — USDC uses the same RPC methods).
     await driver.eval(() => {

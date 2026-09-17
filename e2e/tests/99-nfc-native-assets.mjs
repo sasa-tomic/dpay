@@ -39,8 +39,9 @@ export async function run() {
     const { driver } = env;
 
     // Arm the HCE card seam BEFORE onboarding so the Pay screen mounts the card role (flow 32).
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
     await onboardWallet(driver, 'e2e-nfc-native');
+    await driver.removeInitScript(nfcSeam);
     await driver.findByTestID('pay-scan', { timeoutMs: 5_000 });
 
     const dispatch = async (event) => {

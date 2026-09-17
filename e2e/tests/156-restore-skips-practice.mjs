@@ -38,7 +38,7 @@ async function readJourney(driver) {
 export async function run() {
   const start = Date.now();
   console.log('[156-restore-skips-practice] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const {driver, webBaseURL, relayBaseURL} = env;
 

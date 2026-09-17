@@ -132,10 +132,20 @@ export async function run() {
       Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => 'hidden'});
       document.dispatchEvent(new Event('visibilitychange'));
     });
-    // Let any in-flight read land before the window opens, then hold still for ~13 ticks.
-    await new Promise((r) => setTimeout(r, 400));
-    const atBackground = await counts(driver);
-    await new Promise((r) => setTimeout(r, 2000));
+    // Let any in-flight read land before the window opens — deterministically: the method
+    // counters must be stable across a painted frame (a blind sleep both guesses and wastes).
+    let atBackground;
+    for (let deadline = Date.now() + 8_000; ;) {
+      const before = await counts(driver);
+      await driver.settleFrames(2);
+      atBackground = await counts(driver);
+      const quiet = ['getMultipleAccounts', 'getSignaturesForAddress', 'getTransaction', 'getBalance', 'getAccountInfo', 'getTokenAccountBalance']
+        .every((m) => (before[m] ?? 0) === (atBackground[m] ?? 0));
+      if (quiet || Date.now() > deadline) break;
+    }
+    // The measurement window itself: 2s of backgrounded wall-clock silence — no in-page signal
+    // fires when backgrounded (that IS the claim), so time passing is the only honest instrument.
+    await new Promise((r) => setTimeout(r, 2_000));
     const afterBackground = await counts(driver);
     for (const method of ['getMultipleAccounts', 'getSignaturesForAddress', 'getTransaction', 'getBalance', 'getAccountInfo', 'getTokenAccountBalance']) {
       assert(

@@ -38,9 +38,10 @@ export async function run() {
     const { driver } = env;
 
     // The web app must treat NFC as available (default 'unknown' → NfcTap never mounts).
-    await driver.eval(() => { window.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     await onboardWallet(driver, 'e2e-offline-nfc');
+    await driver.removeInitScript(nfcSeam);
     const merchant = await generateKeypair(); // only the recipient pubkey is needed offline
 
     // --- Fund ICP, wait for the header to carry it, then go genuinely offline. ------------------

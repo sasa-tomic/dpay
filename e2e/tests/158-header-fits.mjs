@@ -60,7 +60,7 @@ const geometry = (driver) => driver.eval(() => {
 export async function run() {
   const start = Date.now();
   console.log('[158-header-fits] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const { driver } = env;
 

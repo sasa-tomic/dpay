@@ -32,9 +32,7 @@
 // Selector contract: `btn-settings`, `btn-advanced-toggle`, `settings-relay` (multiline list
 // editor), `btn-relay-apply`, `btn-settings-close`, `asset-sol`, `asset-sol-usdc`.
 import {
-  setup, assert, assertIncludes,
-  skipWalkthroughIfPresent, skipPracticeIfPresent, chooseHomeCurrencyIfPresent,
-  waitForEnabled, WALLET_READY, onboardWallet,
+  setup, assert, onboardSeededUnfunded, openBalances,
 } from '../harness/lib.mjs';
 import {pickFreePort} from '../harness/relay.mjs';
 
@@ -47,23 +45,17 @@ export const meta = {
   journey: 'system',
   covers: ['solana-rpc-proxy', 'solana-relay-derivation', 'solana-walk-transport', 'relay-solana-wire'],
   verifies: 'R2 Solana-through-relay: SOL/USDC balances render from the harness relay\'s proxy (stub upstream hit recorded) with the candidate list DERIVED from the App-installed relay list, and a mid-session re-point to a dead-first list still serves SOL from the second home after a recorded transport failure at the dead one\'s proxy route.',
-  timeoutMs: 90000,
+  timeoutMs: 25000,
 };
 
 /** Onboard WITHOUT the funded-wallet contract: the faucet-funded ∂100.00 wait is the IC
   * rail's business; this flow's subject is the SOL rail, whose stub answers from the moment
-  * the relay is up. Same shape as flow 164's onboardUnfunded. */
+  * the relay is up. Seeded single-boot: the planted identity is funded by the harness relay's
+  * IC faucet (∂100.00 simply never waited on — no Demo selection here) and the wallet shell
+  * mounts at once. */
 async function onboardUnfunded(driver, name) {
-  await skipWalkthroughIfPresent(driver);
-  await driver.typeByPlaceholder('e.g. Alice', name, {timeoutMs: 8_000});
-  await driver.click('btn-create', {timeoutMs: 4_000});
-  await driver.findByTestID('mnemonic-backup', {timeoutMs: 8_000});
-  await driver.click('mnemonic-backup-checkbox', {timeoutMs: 4_000});
-  await waitForEnabled(driver, 'btn-mnemonic-continue', {timeoutMs: 4_000});
-  await driver.click('btn-mnemonic-continue', {timeoutMs: 4_000});
-  await skipPracticeIfPresent(driver);
-  await chooseHomeCurrencyIfPresent(driver);
-  await driver.findByTestID(WALLET_READY, {timeoutMs: 10_000});
+  const seeded = await onboardSeededUnfunded(driver, name, { fund: false });
+  assert(seeded, '[165] the seeded unfunded onboard must work here (the harness relay serves the SOL stub this flow is about)');
 }
 
 /** The stub upstream's envelope counter (the relay's `/hits` test route). */
@@ -89,17 +81,23 @@ export async function run() {
     driver.allowRequestFailuresFrom(deadOrigin);
 
     // ── Phase 1: the wire — balances arrive through the relay's proxy, derivationally ───────
-    // setup() already navigated `?relay=<harness relay>`: the App installs that list, the SOL
+    // the seeded boot navigated `?relay=<harness relay>`: the App installs that list, the SOL
     // candidate list derives from it (no test override — 'relay' mode deleted it), and every
     // RPC the rail issues must land on {relay}/api/v1/solana/rpc.
     console.log('[165-solana-via-relay] phase 1: onboard, assert SOL+USDC render through the proxy…');
     await onboardUnfunded(driver, 'e2e-sol-relay');
+    // The balances live on the ACCOUNTS route since 2026-09-14 (Home's headline taps through to
+    // it) — Home itself never shows asset rows, so the waits below are only honest from there.
+    await openBalances(driver);
 
     // The stub's positional getMultipleAccounts answers: wallet → 2 SOL, registered token
-    // accounts → 3.000000 raw at 6 decimals (3 USDC). These strings can ONLY come from the
-    // stub upstream THROUGH the relay's proxy — no page stub is installed, no provider exists.
-    await driver.waitForText('2 SOL', {timeoutMs: 15_000});
-    await driver.waitForText('3 USDC', {timeoutMs: 15_000});
+    // accounts → 3.000000 raw at 6 decimals. These strings can ONLY come from the stub upstream
+    // THROUGH the relay's proxy — no page stub is installed, no provider exists. The rendered
+    // amounts are the COMPACT forms (trailing zeros trimmed to the asset's floor — SOL "2 SOL",
+    // USDC padded to "3.00 USDC"). ASSERTED waits: waitForText returns false on timeout, it does
+    // not throw.
+    assert(await driver.waitForText('2 SOL', {timeoutMs: 15_000}), 'the SOL row renders 2 SOL from the stub upstream');
+    assert(await driver.waitForText('3.00 USDC', {timeoutMs: 15_000}), 'the USDC row renders 3.00 USDC from the stub upstream');
     console.log('[165-solana-via-relay] ✓ SOL and USDC rows render from the stub upstream');
 
     // …and the upstream really was reached THROUGH the proxy: the stub's envelope counter is
@@ -121,8 +119,9 @@ export async function run() {
     // and the live relay's proxy must keep the row at exactly 2 SOL. A walk that stopped at
     // the dead home would render the unreadable/— state; a derivation that DIDN'T follow the
     // list would keep using the (still-live) old base and this assert would prove nothing —
-    // which is why the dead-home failures below are part of the pin.
-    await driver.waitForText('2 SOL', {timeoutMs: 20_000});
+    // which is why the dead-home failures below are part of the pin. The accounts route from
+    // phase 1 stays mounted under the settings sheet; the row re-renders there. ASSERTED.
+    assert(await driver.waitForText('2 SOL', {timeoutMs: 20_000}), 'the SOL row still serves 2 SOL from the second home after the re-point');
     console.log('[165-solana-via-relay] ✓ SOL row still serves 2 SOL from the second home after the re-point');
 
     // …and the dead SOL home was really TRIED (not silently skipped): connection-refused

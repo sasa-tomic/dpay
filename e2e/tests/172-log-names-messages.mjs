@@ -102,9 +102,10 @@ export async function run() {
     // NFC must read 'ready' BEFORE the Wallet mounts (the status is read once at mount + on
     // AppState changes — a mid-session flip is invisible in the browser). Arming the card from
     // the start is inert until (f): nothing dispatches tap events until then.
-    await driver.eval(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
+    const nfcSeam = await driver.addInitScript(() => { globalThis.__DPAY_TEST_NFC_STATUS = 'ready'; });
 
     await onboardWallet(driver, 'e2e-lognames');
+    await driver.removeInitScript(nfcSeam);
     const me = await accountOf(driver);
 
     // The in-page SOL RPC stub (flow-119 pattern, extended with a history half): sendTransaction

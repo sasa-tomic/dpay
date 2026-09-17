@@ -188,7 +188,7 @@ export async function serveWeb(opts = {}) {
   const baseURL = `http://127.0.0.1:${port}`;
   const sirvBin = join(E2E_DIR, 'node_modules', 'sirv-cli', 'bin.js');
   console.log(`[web] serving dist at ${baseURL} (sirv)…`);
-  const child = spawn(process.execPath, [sirvBin, DIST, '--single', '--host', '127.0.0.1', '--port', String(port), '--quiet'], {
+  const child = spawn(process.execPath, [sirvBin, DIST, '--single', '--dev', '--host', '127.0.0.1', '--port', String(port), '--quiet'], {
     cwd: E2E_DIR,
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -82,6 +82,17 @@ export class Driver {
   /** The base URL the app was loaded from (set by `navigate`). */
   baseURL = null;
 
+  /**
+   * The app-boot intent stashed by `setup()` (lib.mjs): `{base, path, relay, navTimeoutMs,
+   * readyTimeoutMs}` — where the single app boot navigates and which relay the seed targets.
+   * `appBooted` flips true once a navigation has landed the app on this page, whether by
+   * `setup()`'s eager prologue (DPAY_E2E_NO_LAZY_BOOT=1) or by the seeding helpers' single
+   * boot. Under the default LAZY boot neither is touched until `onboardWallet` (or a flow's
+   * own navigation) first loads the app.
+   */
+  appBoot = null;
+  appBooted = false;
+
   /** Launch the headless browser once (shared across tests in a run). Returns `{browser, stop}` —
    *  tests create their own fresh incognito CONTEXT from this browser via `create(browser)`, so each
    *  gets an isolated localStorage/identity without paying the ~1.5s browser-launch cost per test. */
@@ -357,6 +368,27 @@ export class Driver {
     } catch (e) {
       throw new Error(`[driver] app never signaled ready within ${timeoutMs}ms: ${e instanceof Error ? e.message : e}`);
     }
+  }
+
+  /** Register a script that runs BEFORE any page script on every navigation until removed.
+   *  Returns the identifier for `removeInitScript`. This is what makes pre-boot storage seeding
+   *  possible: the seed lands on the APP ORIGIN before the bundle evaluates, so onboarding by
+   *  planted identity needs only ONE navigation (no "boot, eval, boot again" preamble). */
+  async addInitScript(fn, ...args) {
+    const reg = await this.page.evaluateOnNewDocument(fn, ...args);
+    return reg.identifier;
+  }
+
+  /** Unregister an `addInitScript` script. The seed script is one-shot by contract: once the
+   *  seeded boot has landed, later in-flow reloads must see the page exactly as the app left
+   *  it — a lingering seed would `localStorage.clear()` away mid-flow writes on every reload. */
+  async removeInitScript(identifier) {
+    await this.page.removeScriptToEvaluateOnNewDocument(identifier);
+  }
+
+  /** The page's current full URL (the honest location — `baseURL` carries no query). */
+  pageURL() {
+    return this.page.url();
   }
 
   /** Find an element by RN `testID` (RNW renders it as `data-testid`). Returns the ElementHandle. */

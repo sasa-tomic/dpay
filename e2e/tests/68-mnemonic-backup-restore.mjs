@@ -30,7 +30,7 @@ export const meta = {
 export async function run() {
   const start = Date.now();
   console.log('[68-mnemonic-backup-restore] setup (relay + web + browser)…');
-  const env = await setup();
+  const env = await setup({ lazyBoot: false });
   try {
     const { driver } = env;
 

@@ -537,14 +537,15 @@ Nothing from the swarm's defect inventory remains open.
 
 U4 — DONE, in `62c86a4` (2026-09-10): the hand-maintained ~40-flow enumeration was deleted from `CODEBASE_ANALYSIS.md` and replaced by the pointer paragraph ("Flow coverage lives in `FLOWS.md`, not here — this file points, it never restates"; `just check` regenerating + diffing `FLOWS.md` is recorded beside it), and every non-flow fact it carried was re-homed first (the testID contract, the seed/backup surface, and the restore surface as their own paragraphs in the e2e-harness section; the asset-segregation note into "Where the design earns its keep"). The row survived that commit by oversight. It remained the only entry until U5 below.
 
-U5 — DONE, fixed in-session 2026-09-16 (same session as the e2e speedup): `getSession` now honors a
-per-call rebuild flag on a memoized session — an `opts.rebuildWeb` call on the live watch session
-rebuilds the web dist IN PLACE (same directory, same sirv server; the next per-test fresh-context
-navigation loads the new assets) before returning the session, so `just e2e-watch` re-runs after an
-`app/` edit test the CURRENT tree, not the dist from watch START. The one-shot path is unchanged
-(it always rebuilt). Note: interactive watch verification still pending (the loop is unwired by
-design and can't ride `just verify`); the in-place-rebuild path itself is exercised by construction
-(buildWeb({force:true}) is the same call the one-shot path uses).
+U5 — DONE (2026-09-16) and CORRECTED 2026-09-17: the original fix was dead code twice — zero callers
+passed `getSession({rebuildWeb})`, and the sirv server was spawned WITHOUT `--dev`, so it snapshotted
+the dist at startup and an in-place rebuild could never have been served. Both halves are wired now:
+`watch.mjs` calls `getSession({rebuildWeb: true})` before a subset re-run whenever the trigger touched
+`app/**` or `e2e/web/**`, and the sirv spawn carries `--dev` (reads dist from disk per request; the
+`just cleanup` reap pgrep still matches). The one-shot path is unchanged. Interactive watch
+verification is still pending (the loop is unwired by design and can't ride `just verify`); the
+in-place-rebuild path itself is exercised by construction (buildWeb({force:true}) is the same call
+the one-shot path uses).
 
 ## Other open issues
 

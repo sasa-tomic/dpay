@@ -50,7 +50,7 @@ function solreqUri(ridSeed, mint, cur) {
 export async function run() {
   const start = Date.now();
   console.log('[137-sol-cross-mint-sign-gate] setup (relay + web + browser + sol stub)…');
-  const env = await setup({solStub: true});
+  const env = await setup({ lazyBoot: false, solStub: true });
   try {
     const {driver} = env;
 
