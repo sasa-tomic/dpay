@@ -652,7 +652,6 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
             onPress={onReturnFromDeposit}
             accessibilityRole="button"
             accessibilityLabel={depositReturnLabel}
-            accessibilityHint={M.deposit.sol.returnHint}
             accessibilityState={{disabled: false}}>
             <Text style={S.ghostBtnText}>{depositReturnLabel}</Text>
           </Pressable>

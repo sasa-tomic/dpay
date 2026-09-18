@@ -41,7 +41,6 @@ export const depositFr: DepositMessages = {
     feeMinLine: (fee, min) => `Frais de réseau ${fee} · Dépôt min. ${min}`,
     feeNone: 'gratuit',
     minNone: 'aucun',
-    custody: 'dpay ne détient jamais vos clés — les fonds sont émis 1:1 dans votre portefeuille dès la confirmation.',
     copyDepositAddress: 'Copier l’adresse de dépôt',
     statusTitle: 'Statut',
     watching: 'En attente de votre dépôt',
@@ -51,20 +50,17 @@ export const depositFr: DepositMessages = {
   },
 
   icrc: {
-    sendToAccount: (symbol, network) => [
+    whereFrom: (symbol, network) => [
       {t: 'Envoyez des '},
       {t: symbol, em: true},
-      {t: ' depuis n’importe quel portefeuille '},
+      {t: ' depuis n’importe quelle application de portefeuille qui en détient sur '},
       {t: network, em: true},
-      {t: ' qui les prend en charge, vers votre compte ci-dessous.'},
+      {t: ' — ou retirez-en depuis une plateforme d’échange qui prend en charge le réseau.'},
     ],
-    whereFrom: (symbol, network) =>
-      `Envoyez-le depuis n’importe quelle application de portefeuille qui détient ${symbol} sur ${network}, ou retirez ${symbol} d’une plateforme d’échange qui prend en charge le réseau ${network}.`,
     onlyAccepts: (symbol, network) =>
-      `Cette adresse reçoit ${symbol} envoyé sur ${network} — rien d’autre, et aucun paiement par carte ni virement bancaire.`,
-    noMemo: 'Aucun memo ni référence nécessaire — un simple transfert vers ce compte suffit.',
+      `Cette adresse reçoit ${symbol} envoyé sur ${network} — rien d’autre ne sera crédité.`,
+    noMemo: 'Aucun memo ni référence nécessaire.',
     feeLine: fee => `Frais de réseau ${fee}`,
-    custody: asset => `dpay ne détient jamais vos clés et ne convertit rien — les ${asset} arrivent directement dans votre portefeuille.`,
     receivedAmount: amount => `${amount} reçus`,
     alsoTitle: 'Déjà sur Internet Computer ?',
     alsoBody: symbol => [
@@ -109,8 +105,8 @@ export const depositFr: DepositMessages = {
       {t: networkLabel, em: true},
       {t: '. Tout autre actif ou réseau envoyé ainsi ne sera pas crédité et pourra être perdu.'},
     ],
-    custody:
-      'dpay ne détient jamais vos clés — votre portefeuille signe, et l’actif est émis 1:1 dans votre portefeuille dès la confirmation (~20 min).',
+    mintLine: 'Votre dépôt est émis 1:1 dans votre portefeuille dès la confirmation (~20 min).',
+    details: 'Détails',
     gasNative: 'Les frais de réseau sont payés en ETH — envoyez un peu plus que le montant à déposer.',
     gasErc20: 'Il vous faudra un peu d’ETH pour les frais de réseau Ethereum.',
     scanToPair: 'Scannez avec votre portefeuille pour l’associer',
@@ -118,14 +114,14 @@ export const depositFr: DepositMessages = {
     openNamedWallet: name => `Ouvrir ${name}`,
     otherWallet: 'Un autre portefeuille',
     otherWalletHint:
-      'Avec « Un autre portefeuille », c’est votre téléphone qui choisit l’application. L’association fonctionne, mais dpay ne pourra pas la rouvrir pour vous ensuite — vous devrez y basculer vous-même pour approuver le dépôt.',
+      'L’association fonctionne, mais dpay ne pourra pas la rouvrir pour vous ensuite — basculez vous-même vers le portefeuille pour approuver le dépôt.',
     couldntOpenWallet: name =>
       `Impossible d’ouvrir ${name} — l’application n’est peut-être plus installée. Choisissez un autre portefeuille ci-dessous, ou scannez le QR avec un portefeuille sur un autre appareil.`,
     walletList: 'MetaMask · Trust · Rabby · tout portefeuille compatible WalletConnect',
     explainNative:
       'Envoyez des ETH directement au contrat de dépôt — une seule transaction signée par votre portefeuille, avec votre montant comme valeur en ETH.',
     explainErc20: nativeAsset =>
-      `${nativeAsset} est un jeton Ethereum — son dépôt demande deux transactions signées par votre portefeuille, et non un simple envoi vers une adresse comme pour Bitcoin.`,
+      `${nativeAsset} est un jeton Ethereum — son dépôt demande deux transactions signées par votre portefeuille : d’abord l’approbation, puis le dépôt.`,
     connectLabel: 'Connecter un portefeuille Ethereum',
     connect: 'Connecter',
     amountPlaceholder: '0.00',
@@ -159,7 +155,6 @@ export const depositFr: DepositMessages = {
     ataUnverifiedUnreadable: asset =>
       `Votre adresse est correcte — Solana a répondu avec des données que ce portefeuille ne peut pas lire, donc votre compte ${asset} n’a pas pu être confirmé sur la chaîne. Rien n’a bougé ; réessayez dans un instant.`,
     retryAtaLabel: asset => `Réessayer la vérification du compte ${asset}`,
-    retryAtaHint: asset => `Vérifie à nouveau si votre compte ${asset} existe sur la chaîne`,
     checkAgain: 'Revérifier',
     backToRequest: 'Retour à la demande',
     sendToAddress: (asset, network) => [
@@ -169,20 +164,16 @@ export const depositFr: DepositMessages = {
       {t: network},
       {t: ' ci-dessous.'},
     ],
-    custody: asset => `dpay ne détient jamais vos clés — les ${asset} arrivent directement dans votre portefeuille dès la confirmation.`,
     devnetWarn: asset =>
       `Connecté au devnet Solana. N’envoyez PAS de ${asset} du mainnet ici — ils n’apparaîtront pas. Utilisez uniquement des ${asset} du devnet.`,
     waitingDeposit: 'En attente de votre dépôt · vérifié toutes les quelques secondes',
-    checkNowHint: 'Revérifie votre solde immédiatement',
-    balanceAutoOnConfirm: 'Votre solde se met à jour automatiquement dès que l’envoi est confirmé.',
     copyAssetAddress: asset => `Copier l’adresse ${asset}`,
-    returnHint: 'Revient à l’onglet Payer avec cet actif sélectionné',
   },
 
   ata: {
     absent: asset => `Vous n’avez pas encore de compte ${asset} sur cet appareil.`,
     cost: (setupCost, asset) =>
-      `Solana conserve vos ${asset} dans un compte de jeton créé une seule fois et rattaché à ce portefeuille. Sa création coûte ${setupCost} (loyer du compte + frais) sur votre solde SOL — il reste votre compte, sous vos clés. dpay ne les détient jamais.`,
+      `La création de votre compte ${asset} coûte ${setupCost} (loyer unique + frais, sur votre solde SOL) — il reste le vôtre, sous vos clés.`,
     checkingSol: 'Vérification de votre solde SOL…',
     needSol: setupCost =>
       `Il vous faut d’abord environ ${setupCost} dans ce portefeuille — recevez des SOL à votre adresse, puis créez le compte.`,
@@ -204,7 +195,7 @@ export const depositFr: DepositMessages = {
       {t: token, em: true},
       {t: ' auprès d\'une plateforme ou d\'un fournisseur par carte qui verse sur '},
       {t: chain, em: true},
-      {t: ', puis envoyez-les à l\'adresse ci-dessus. Ils arrivent dans votre propre portefeuille — dpay ne les reçoit jamais.'},
+      {t: ', puis envoyez-les à l\'adresse ci-dessus.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
       {t: 'Pour celui-ci, il n\'y a pas d\'adresse. Achetez des '},
@@ -213,14 +204,14 @@ export const depositFr: DepositMessages = {
       {t: chain, em: true},
       {t: ' dans un portefeuille qui vous appartient, et gardez-y un peu d\''},
       {t: gasToken, em: true},
-      {t: ' pour les frais de réseau. Revenez ensuite ici et connectez ce portefeuille : c\'est lui qui signe le transfert, et dpay ne détient ni l\'un ni l\'autre.'},
+      {t: ' pour les frais de réseau. Connectez ensuite ce portefeuille ici : c\'est lui qui signe le transfert.'},
     ],
     bridgeSelfGas: (token, chain) => [
       {t: 'Pour celui-ci, il n\'y a pas d\'adresse. Achetez des '},
       {t: token, em: true},
       {t: ' sur '},
       {t: chain, em: true},
-      {t: ' dans un portefeuille qui vous appartient — un peu plus que ce que vous voulez déplacer, car les frais de réseau en sont déduits. Revenez ensuite ici et connectez ce portefeuille : c\'est lui qui signe le transfert, et dpay ne le détient jamais.'},
+      {t: ' dans un portefeuille qui vous appartient — un peu plus que ce que vous voulez déplacer, car les frais de réseau en sont déduits. Connectez ensuite ce portefeuille ici : c\'est lui qui signe le transfert.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Aucun fournisseur ne vend de '},
@@ -229,7 +220,7 @@ export const depositFr: DepositMessages = {
       {t: viaToken, em: true},
       {t: ' par carte, envoyez-les à l\'adresse ci-dessus, puis utilisez Convertir pour les échanger contre des '},
       {t: target, em: true},
-      {t: '. C\'est vous qui signez cet échange, et dpay n\'y prend aucune part.'},
+      {t: '.'},
     ],
     testnetOnly: (symbol, chain) => `${symbol} est de la monnaie de test : elle n\'a aucune valeur et personne n\'en vend. Procurez-vous-en gratuitement sur un faucet public ${chain}, puis envoyez-la à l\'adresse ci-dessus.`,
     testnetOnlyWallet: (symbol, chain) => `${symbol} est de la monnaie de test : elle n\'a aucune valeur et personne n\'en vend. Procurez-vous-en gratuitement sur un faucet public ${chain} dans un portefeuille qui vous appartient, puis connectez ce portefeuille ici.`,
@@ -253,7 +244,7 @@ export const depositFr: DepositMessages = {
     upTo: pct => `jusqu\'à ${pct}`,
     from: pct => `à partir de ${pct}`,
     attribution: readOn => `Chiffres publiés par chaque fournisseur, consultés le ${readOn}. Ce sont des plafonds, pas des prix — vos frais exacts s\'affichent avant le paiement, et la plupart des fournisseurs prennent en plus une marge dans le taux proposé.`,
-    noEndorsement: 'Par ordre alphabétique. dpay n\'en recommande aucun, n\'est payé par aucun, et n\'intervient pas dans votre achat.',
+    noEndorsement: 'Par ordre alphabétique. dpay n\'en recommande aucun, n\'est payé par aucun et n\'intervient pas dans votre achat.',
   },
 };
 

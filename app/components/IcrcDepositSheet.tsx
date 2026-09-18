@@ -129,20 +129,18 @@ export function IcrcDepositSheet({identity, catalog, asset, funding, onClose}: {
         </View>
       ) : (
         <>
-          {/* Complete, practical instructions: which asset, from where, no-memo, the exact
-              network fee, and the non-custody line. All facts from the catalog descriptor. */}
+          {/* Complete, practical instructions: which asset, from where, what the address
+              accepts, no-memo, the exact network fee (10x pass 2026-09-17: one instruction
+              line instead of two, custody line gone — it is stated at onboarding and in
+              Settings and changed no decision here). All facts from the catalog descriptor. */}
           <View testID="deposit-instructions" style={S.instrCard}>
-            <InstrLine runs={M.deposit.icrc.sendToAccount(symbol, network)} />
-            {/* WHERE from, and what this address is. "From any Internet Computer wallet" is a
-                complete instruction only for someone who already has one; the target user is a
-                tourist who does not. These two lines name the kind of thing to look for, the other
-                route that exists (an exchange withdrawal), and the fact that an address is not a
-                card payment — without naming a product, which is a founder decision. */}
-            <Text testID="deposit-where-from" style={S.instrLine}>{M.deposit.icrc.whereFrom(symbol, network)}</Text>
+            <InstrLine
+              testID="deposit-where-from"
+              runs={M.deposit.icrc.whereFrom(symbol, network)}
+            />
             <Text testID="deposit-only-accepts" style={S.instrMeta}>{M.deposit.icrc.onlyAccepts(symbol, network)}</Text>
             <Text style={S.instrMeta}>{M.deposit.icrc.noMemo}</Text>
             <Text style={S.instrMeta}>{M.deposit.icrc.feeLine(feeVal)}</Text>
-            <Text style={S.instrCustody}>{M.deposit.icrc.custody(symbol)}</Text>
           </View>
 
           <View testID="deposit-qr" style={S.qrCard}><QrCode value={principal} size={QR_SIZE_SMALL} ecl="L" /></View>

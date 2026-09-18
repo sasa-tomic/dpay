@@ -63,10 +63,10 @@ export async function run() {
     // card to francs, and the user signs it themselves.
     assertIncludes(vchfBody, 'No provider sells', 'VCHF must say plainly that nobody sells it directly');
     assertIncludes(vchfBody, 'Convert', 'VCHF must name the convert leg — it is the only card route to francs');
-    // Who signs the swap is the load-bearing fact: dpay is never a party to it, and the screen has
-    // to say so where the user is standing rather than only in a spec.
-    assertIncludes(vchfBody, 'You sign that swap yourself', 'the swap must be attributed to the user, on screen');
-    assertIncludes(vchfBody, 'dpay takes no part of it', 'and dpay must state that it takes no part of it');
+    // The swap being USER-signed used to be restated on this route line; the 10x pass (2026-09-17)
+    // cut that restatement — the attribution now lives on the convert surface itself, where the
+    // signing actually happens (convert confirm names the signer). The route stays honest about
+    // WHAT to do (buy ICP, convert) without narrating the mechanics twice.
     console.log('[162-funding-routes] ✓ VCHF names buy-ICP-then-convert, not a seller that does not exist');
 
     // ---- (c) providers, with their own figures and the qualifier intact ----------------------
@@ -100,8 +100,8 @@ export async function run() {
     assertIncludes(attribution, '2026', 'the figures must carry the date they were read');
     assertIncludes(attribution, 'not prices', 'the attribution must say these are limits rather than prices');
     const endorsement = await driver.readText('funding-no-endorsement');
-    assertIncludes(endorsement, 'does not recommend', 'the screen must state that dpay recommends none of them');
-    assertIncludes(endorsement, 'not paid by', 'the screen must state that dpay is paid by none of them');
+    assertIncludes(endorsement, 'recommends none', 'the screen must state that dpay recommends none of them');
+    assertIncludes(endorsement, 'paid by none', 'the screen must state that dpay is paid by none of them');
     console.log('[162-funding-routes] ✓ figures are attributed and dated, and nothing reads as a recommendation');
 
     // ---- (e) native ICP is a DIRECT buy, so the two IC rows differ ----------------------------

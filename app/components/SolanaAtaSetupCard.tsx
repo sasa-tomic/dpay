@@ -11,7 +11,9 @@ import {M} from '../i18n';
 /**
  * The one-tap token-account (ATA) setup card — the SHARED surface for every place the device's
  * token account for a registered SPL token is KNOWN absent (2026-08-14; generalized per-token
- * 2026-09-06). Renders: the instruction card (cost + custody disclosure), the insufficient-SOL
+ * 2026-09-06). Renders: the instruction card (the one-time cost + what it buys — the
+ * 10x pass 2026-09-17 folded the ownership reassurance into the cost sentence), the
+ * insufficient-SOL
  * warning (+ the fund-SOL escape hatch, 2026-08-16), the devnet warning, the busy state, the
  * create button, and the error line. The create action (`onCreateAta`, owned by Wallet →
  * `createTokenAta`) broadcasts a REAL AssociatedTokenProgram.createIdempotent transaction signed

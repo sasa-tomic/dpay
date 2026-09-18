@@ -21,7 +21,7 @@ import {railBalanceOf} from '../services/rail';
 import {DpayCore} from '../services/native';
 import {withTimeout} from '../lib/timeout';
 import {useEscapeToClose} from '../hooks/useHotkeys';
-import {IconCheck} from './icons';
+import {IconCheck, IconChevronDown} from './icons';
 import {InstrLine} from './InstrLine';
 import {IcrcAccountSection} from './IcrcAccountSection';
 import {M} from '../i18n';
@@ -61,6 +61,7 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
   // reached naturally via submit). The ephemeral wallet-bound phases (connect/enter/sending) are
   // NEVER persisted — an EIP-1193 session does not survive restart, so resuming them would lie.
   const [phase, setPhase] = useState<'connect' | 'enter' | 'sending' | 'watching' | 'done'>('connect');
+  const [detailsOpen, setDetailsOpen] = useState(false); // the ONE Details fold (see below)
   const [account, setAccount] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [err, setErr] = useState<string | null>(null);
@@ -496,13 +497,34 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
       {/* Wrong-network warning — unmissable, above the flow. */}
       <View testID="ckerc20-deposit" style={S.instrCard}>
         <InstrLine runs={M.deposit.erc20.sendOnly(display.nativeAsset, display.networkLabel)} />
-        <Text style={S.instrCustody}>{M.deposit.erc20.custody}</Text>
         {/* Gas warning. ERC-20: the onramp needs Ethereum transactions the user must hold ETH to
             pay gas for (separate from the deposited token). Native ETH: the deposit tx itself
             carries ETH, so the network fee comes out of the sent amount — send a little extra. */}
         <Text style={[S.instrCustody, {color: C.warn}]}>
           {nativeEth ? M.deposit.erc20.gasNative : M.deposit.erc20.gasErc20}
         </Text>
+        {/* The 10x fold (2026-09-17): why a wallet is needed + the mint mechanics behind ONE
+            Details control, default CLOSED — the same pattern as the convert surfaces'
+            convert-details. The custody line that used to sit here moved into the fold as
+            `mintLine` (the non-custodial half is stated at onboarding and in Settings). */}
+        <Pressable
+          testID="ckerc20-details"
+          style={S.convertDetailsToggle}
+          onPress={() => setDetailsOpen(o => !o)}
+          accessibilityRole="button"
+          accessibilityState={{expanded: detailsOpen}}
+          accessibilityLabel={M.deposit.erc20.details}>
+          <Text style={S.convertDetailsToggleText}>{M.deposit.erc20.details}</Text>
+          <View style={detailsOpen ? S.convertDetailsChevronOpen : undefined}>
+            <IconChevronDown size={16} color={C.sub} />
+          </View>
+        </Pressable>
+        {detailsOpen ? (
+          <View testID="ckerc20-details-block">
+            <Text style={S.dim2}>{nativeEth ? M.deposit.erc20.explainNative : M.deposit.erc20.explainErc20(display.nativeAsset)}</Text>
+            <Text style={S.dim2}>{M.deposit.erc20.mintLine}</Text>
+          </View>
+        ) : null}
       </View>
 
       {err ? <Text testID="ckerc20-status" style={S.err}>{err}</Text> : null}
@@ -549,12 +571,9 @@ export function CkErc20DepositSheet({identity, relayUrl, currency, decimals, dis
           </View>
         ) : (
           <View style={S.centerAll}>
-            {/* Why a wallet, not an address: depositing on the ckETH ramp requires a wallet-SIGNED
-                transaction (ERC-20: two txs — approve + depositErc20; native ETH: one payable tx —
-                depositEth with the amount as ETH value). Unlike Bitcoin (UTXO, send-to-address),
-                there is no "deposit address" here; the deposit must be initiated from the wallet
-                that holds the asset (+ ETH for gas, for ERC-20). */}
-            <Text style={S.dim2}>{nativeEth ? M.deposit.erc20.explainNative : M.deposit.erc20.explainErc20(display.nativeAsset)}</Text>
+            {/* Why a wallet, not an address: the explanation is FOLDED (10x pass 2026-09-17) behind
+                the persistent card's `ckerc20-details` control above, so the connect screen itself
+                is just the control + button. */}
             <Pressable testID="btn-connect-wallet" accessibilityRole="button" accessibilityLabel={M.deposit.erc20.connectLabel} style={S.primaryWide} onPress={connect}>
               <Text style={S.primaryText}>{M.deposit.erc20.connect}</Text>
             </Pressable>

@@ -39,7 +39,6 @@ export const depositDe: DepositMessages = {
     feeMinLine: (fee, min) => `Netzwerkgebühr ${fee} · Min. Einzahlung ${min}`,
     feeNone: 'keine',
     minNone: 'kein Minimum',
-    custody: 'dpay hält deine Schlüssel nie — nach der Bestätigung wird der Betrag 1:1 deiner Wallet gutgeschrieben.',
     copyDepositAddress: 'Einzahlungsadresse kopieren',
     statusTitle: 'Status',
     watching: 'Wir warten auf deine Einzahlung',
@@ -49,20 +48,17 @@ export const depositDe: DepositMessages = {
   },
 
   icrc: {
-    sendToAccount: (symbol, network) => [
+    whereFrom: (symbol, network) => [
       {t: 'Sende '},
       {t: symbol, em: true},
-      {t: ' von jeder '},
+      {t: ' aus einer beliebigen Wallet-App, die es auf '},
       {t: network, em: true},
-      {t: '-Wallet, die es unterstützt, an dein Konto unten.'},
+      {t: ' hält — oder zahle es von einer Börse aus, die das Netzwerk unterstützt.'},
     ],
-    whereFrom: (symbol, network) =>
-      `Sende es aus einer beliebigen Wallet-App, die ${symbol} auf ${network} hält, oder zahle ${symbol} von einer Börse aus, die das ${network}-Netzwerk unterstützt.`,
     onlyAccepts: (symbol, network) =>
-      `Diese Adresse empfängt ${symbol}, das über ${network} gesendet wird — sonst nichts, und keine Karten- oder Banküberweisung.`,
-    noMemo: 'Kein Memo und keine Referenz nötig — eine normale Überweisung an dieses Konto genügt.',
+      `Diese Adresse empfängt ${symbol}, das über ${network} gesendet wird — alles andere wird nicht gutgeschrieben.`,
+    noMemo: 'Kein Memo und keine Referenz nötig.',
     feeLine: fee => `Netzwerkgebühr ${fee}`,
-    custody: asset => `dpay hält deine Schlüssel nie und wechselt nie — ${asset} landet direkt in deiner Wallet.`,
     receivedAmount: amount => `${amount} empfangen`,
     alsoTitle: 'Schon auf dem Internet Computer?',
     alsoBody: symbol => [
@@ -107,8 +103,8 @@ export const depositDe: DepositMessages = {
       {t: networkLabel, em: true},
       {t: '. Andere Assets oder Chains werden so nicht gutgeschrieben und können verloren gehen.'},
     ],
-    custody:
-      'dpay hält deine Schlüssel nie — deine Wallet signiert, und nach der Bestätigung (~20 Min.) wird dir das Chain-Key-Asset 1:1 in deiner Wallet gutgeschrieben.',
+    mintLine: 'Deine Einzahlung wird nach der Bestätigung (~20 Min.) 1:1 deiner Wallet gutgeschrieben.',
+    details: 'Details',
     gasNative: 'Die Netzwerkgebühr wird in ETH bezahlt — sende etwas mehr, als du einzahlen willst.',
     gasErc20: 'Du brauchst etwas ETH für die Gas-Gebühren im Ethereum-Netzwerk.',
     scanToPair: 'Zum Koppeln mit deiner Wallet scannen',
@@ -116,14 +112,14 @@ export const depositDe: DepositMessages = {
     openNamedWallet: name => `${name} öffnen`,
     otherWallet: 'Andere Wallet',
     otherWalletHint:
-      'Bei „Andere Wallet“ wählt dein Handy die App aus. Das Koppeln funktioniert, aber dpay kann sie später nicht für dich öffnen — du musst zum Bestätigen der Einzahlung selbst dorthin wechseln.',
+      'Das Koppeln funktioniert, aber dpay kann sie später nicht für dich öffnen — wechsle zum Bestätigen der Einzahlung selbst dorthin.',
     couldntOpenWallet: name =>
       `${name} konnte nicht geöffnet werden — die App ist vielleicht nicht mehr installiert. Wähle unten eine andere Wallet oder scanne den QR-Code mit einer Wallet auf einem anderen Gerät.`,
     walletList: 'MetaMask · Trust · Rabby · jede WalletConnect-kompatible Wallet',
     explainNative:
       'Sende ETH direkt an den Einzahlungs-Contract — eine Transaktion, die deine Wallet signiert, mit deinem Einzahlungsbetrag als ETH-Wert.',
     explainErc20: nativeAsset =>
-      `${nativeAsset} ist ein Ethereum-Token — für die Einzahlung signiert deine Wallet zwei Transaktionen, kein einfaches Senden an eine Adresse wie bei Bitcoin.`,
+      `${nativeAsset} ist ein Ethereum-Token — für die Einzahlung signiert deine Wallet zwei Transaktionen: erst die Freigabe, dann die Einzahlung.`,
     connectLabel: 'Ethereum-Wallet verbinden',
     connect: 'Wallet verbinden',
     amountPlaceholder: '0.00',
@@ -157,7 +153,6 @@ export const depositDe: DepositMessages = {
     ataUnverifiedUnreadable: asset =>
       `Mit deiner Adresse ist alles in Ordnung — Solana hat mit Daten geantwortet, die diese Wallet nicht lesen kann, daher konnte dein ${asset}-Konto on-chain nicht bestätigt werden. Es hat sich nichts bewegt; versuche es gleich noch einmal.`,
     retryAtaLabel: asset => `${asset}-Konto erneut prüfen`,
-    retryAtaHint: asset => `Prüft erneut, ob dein ${asset}-Konto on-chain existiert`,
     checkAgain: 'Erneut prüfen',
     backToRequest: 'Zurück zur Anfrage',
     sendToAddress: (asset, network) => [
@@ -167,20 +162,16 @@ export const depositDe: DepositMessages = {
       {t: network},
       {t: '-Adresse unten.'},
     ],
-    custody: asset => `dpay hält deine Schlüssel nie — ${asset} landet nach der Bestätigung direkt in deiner Wallet.`,
     devnetWarn: asset =>
       `Verbunden mit dem Solana-Devnet. Sende hier KEIN Mainnet-${asset} — es erscheint nicht. Nutze nur Devnet-${asset}.`,
     waitingDeposit: 'Wir warten auf deine Einzahlung · Prüfung alle paar Sekunden',
-    checkNowHint: 'Prüft dein Guthaben sofort erneut',
-    balanceAutoOnConfirm: 'Dein Guthaben aktualisiert sich automatisch, sobald die Überweisung bestätigt ist.',
     copyAssetAddress: asset => `${asset}-Adresse kopieren`,
-    returnHint: 'Geht zurück zum Bezahlen-Tab mit diesem Asset ausgewählt',
   },
 
   ata: {
     absent: asset => `Du hast auf diesem Gerät noch kein ${asset}-Konto.`,
     cost: (setupCost, asset) =>
-      `Solana verwahrt dein ${asset} in einem einmaligen Token-Konto, das zu dieser Wallet gehört. Das Erstellen kostet ${setupCost} (Kontomiete + Gebühr) aus deinem SOL-Guthaben — es bleibt dein Konto, unter deinen Schlüsseln. dpay hält sie nie.`,
+      `Das Erstellen deines ${asset}-Kontos kostet ${setupCost} (einmalige Miete + Gebühr, aus deinem SOL-Guthaben) — es bleibt deins, unter deinen Schlüsseln.`,
     checkingSol: 'Dein SOL-Guthaben wird geprüft…',
     needSol: setupCost =>
       `Du brauchst zuerst etwa ${setupCost} in dieser Wallet — empfange SOL an deiner Adresse und erstelle dann das Konto.`,
@@ -202,7 +193,7 @@ export const depositDe: DepositMessages = {
       {t: token, em: true},
       {t: ' bei einer Börse oder einem Kartenanbieter mit Auszahlung auf '},
       {t: chain, em: true},
-      {t: ' und senden Sie es an die Adresse oben. Es landet in Ihrer eigenen Wallet — dpay erhält es nie.'},
+      {t: ' und senden Sie es an die Adresse oben.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
       {t: 'Dafür gibt es keine Adresse. Kaufen Sie '},
@@ -211,14 +202,14 @@ export const depositDe: DepositMessages = {
       {t: chain, em: true},
       {t: ' in eine Wallet, die Ihnen gehört, und halten Sie dort etwas '},
       {t: gasToken, em: true},
-      {t: ' für die Netzwerkgebühr bereit. Kommen Sie dann hierher zurück und verbinden Sie diese Wallet — sie signiert die Überweisung, und dpay hält weder das eine noch das andere.'},
+      {t: ' für die Netzwerkgebühr bereit. Verbinden Sie dann diese Wallet hier — sie signiert die Überweisung.'},
     ],
     bridgeSelfGas: (token, chain) => [
       {t: 'Dafür gibt es keine Adresse. Kaufen Sie '},
       {t: token, em: true},
       {t: ' auf '},
       {t: chain, em: true},
-      {t: ' in eine Wallet, die Ihnen gehört — etwas mehr, als Sie bewegen wollen, denn die Netzwerkgebühr geht davon ab. Kommen Sie dann hierher zurück und verbinden Sie diese Wallet — sie signiert die Überweisung, und dpay hält sie nie.'},
+      {t: ' in eine Wallet, die Ihnen gehört — etwas mehr, als Sie bewegen wollen, denn die Netzwerkgebühr geht davon ab. Verbinden Sie dann diese Wallet hier — sie signiert die Überweisung.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Kein Anbieter verkauft '},
@@ -227,7 +218,7 @@ export const depositDe: DepositMessages = {
       {t: viaToken, em: true},
       {t: ' mit Karte kaufen, an die Adresse oben senden und dann über Umtauschen in '},
       {t: target, em: true},
-      {t: ' tauschen. Diesen Tausch signieren Sie selbst, und dpay ist daran nicht beteiligt.'},
+      {t: ' tauschen.'},
     ],
     testnetOnly: (symbol, chain) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet und senden Sie es an die Adresse oben.`,
     testnetOnlyWallet: (symbol, chain) => `${symbol} ist Testgeld — es hat keinen Gegenwert und wird nirgends verkauft. Holen Sie sich welches kostenlos bei einem öffentlichen ${chain}-Faucet in eine eigene Wallet und verbinden Sie diese Wallet hier.`,
