@@ -76,7 +76,7 @@ import type {ConvertMath, ConvertQuote, ConvertRecord} from '../convert';
 import {buildSelectableAssets} from '../config/assets';
 import type {Identity} from '../lib/types';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
-import {BUNDLED_VENUES, setRuntimeVenues, type VenueEntry} from '../config/venues';
+import {BUNDLED_VENUES, setRuntimeVenues, venueDisplayName, type VenueEntry} from '../config/venues';
 import {convertEn} from '../i18n/domains/en/convert';
 import {formatClock} from '../i18n/intl';
 import {convertDe} from '../i18n/domains/de/convert';
@@ -1219,5 +1219,67 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(args.math1).toMatchObject({minOut: '118800000'});
     expect(args.math2).toMatchObject({minOut: '2970000000000'});
     expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
+  });
+
+  /** A hub record as prepare leaves it (the widening fields frozen), parameterised per test. */
+  const hubScreenRecord = (over: Record<string, unknown>): ConvertRecord => ({
+    id: 'hub-screen', createdAtMs: 1_700_000_000_000, step: 'approving',
+    venueId: 'icpswap', venue2Id: 'icpswap-cketh',
+    inCurrency: 7, outCurrency: 8, destCurrency: 6,
+    inLedger: VCHF_LEDGER, outLedger: ICP_LEDGER, hopLedger: ICP_LEDGER, destLedger: CKETH_LEDGER,
+    inSymbol: 'VCHF', outSymbol: 'ICP', hopSymbol: 'ICP', destSymbol: 'ETH',
+    inDecimals: 8, outDecimals: 8, destDecimals: 18,
+    amountIn: '100000000', inFee: '10000', outFee: '10000', destFee: '2000000000000',
+    slippageBps: 100, legs: [], legPlan: [], ...over,
+  } as never);
+  const POOL1 = '65mrh-fqaaa-aaaar-qapoa-cai';
+  const POOL2 = 'angxa-baaaa-aaaag-qcvnq-cai';
+
+  test('in-flight: four legs fully expanded, per-hop labels, top block tracks the current leg (D14/D15)', async () => {
+    const live = hubScreenRecord({
+      id: 'hub-live',
+      legPlan: [
+        {kind: 'approve', canister: VCHF_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'swap', canister: POOL1, fee: '', state: 'sent'},
+        {kind: 'approve', canister: ICP_LEDGER, fee: '10000', state: 'pending'},
+        {kind: 'swap', canister: POOL2, fee: '', state: 'pending'},
+      ],
+    });
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[live.id]: live});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-route-legs')).toBe(true);
+    expect(present(tree, 'convert-leg-0')).toBe(true);
+    expect(present(tree, 'convert-leg-3')).toBe(true);
+    expect(textOf(tree, 'convert-leg-2')).toContain(convertEn.multihop.legApprovePull('ICP'));
+    expect(textOf(tree, 'convert-leg-3')).toContain(convertEn.multihop.legSwap(venueDisplayName('icpswap-cketh'), 'ICP', 'ETH'));
+    expect(textOf(tree, 'convert-step')).toBe(
+      convertEn.multihop.legProgress(2, 4) + ' — ' + convertEn.multihop.legSwap(venueDisplayName('icpswap'), 'VCHF', 'ICP'));
+  });
+
+  test('done: the hub receipt is the IN-WALLET copy — never the cash-out "on its way" family (D17)', async () => {
+    const live = hubScreenRecord({
+      id: 'hub-done',
+      legPlan: [
+        {kind: 'approve', canister: VCHF_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'swap', canister: POOL1, fee: '', state: 'confirmed'},
+        {kind: 'approve', canister: ICP_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'swap', canister: POOL2, fee: '', state: 'confirmed'},
+      ],
+    });
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[live.id]: live});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-route-legs')).toBe(true);
+    // The engine watches the DEST-ledger payout row and flips the record to done itself;
+    // the screen just renders the receipt.
+    await act(async () => {
+      mockEngineSub.cb?.({
+        [live.id]: {...live, step: 'done', outAmountNet: '1000000000000', outTx: 'dest-tx-9'},
+      });
+    });
+    const receipt = textOf(tree, 'convert-done');
+    expect(receipt).toContain(convertEn.doneTitle);
+    expect(receipt).toContain(convertEn.doneBody(fmtAssetCompact('1000000000000', 18, 'ETH')));
+    expect(receipt).not.toContain(convertEn.multihop.doneOnItsWay);
+    expect(receipt).toContain(convertEn.doneTx('dest-tx-9'));
   });
 });

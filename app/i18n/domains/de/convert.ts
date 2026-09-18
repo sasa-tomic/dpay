@@ -161,6 +161,7 @@ export const convertDe: ConvertMessages = {
     legStateSent: 'Gesendet',
     legStateConfirmed: 'Bestätigt',
     legStateFailed: 'Abgelehnt',
+    legProgress: (n, total) => `Schritt ${n} von ${total}`,
     gasFeeLine: amount => `Auszahlungs-Gas (Live-Angebot des Minters): ${amount}`,
     routeMinLine: (amount, pct) => `Mindestens ${amount} an deiner Adresse (Slippage-Untergrenze ${pct})`,
     routeSurplusNote: hopSym => `Zahlt der Tausch über der Untergrenze, bleibt der Überschuss als ${hopSym} in dieser Wallet.`,

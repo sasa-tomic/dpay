@@ -160,6 +160,7 @@ export const convertEs: ConvertMessages = {
     legStateSent: 'Enviado',
     legStateConfirmed: 'Confirmado',
     legStateFailed: 'Rechazado',
+    legProgress: (n, total) => `Paso ${n} de ${total}`,
     gasFeeLine: amount => `Gas del retiro (cotización en vivo del minter): ${amount}`,
     routeMinLine: (amount, pct) => `Al menos ${amount} en tu dirección (piso de deslizamiento ${pct})`,
     routeSurplusNote: hopSym => `Si el canje paga por encima del piso, el excedente queda en esta cartera como ${hopSym}.`,

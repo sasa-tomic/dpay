@@ -228,6 +228,9 @@ export type ConvertMessages = {
     legStateSent: string;
     legStateConfirmed: string;
     legStateFailed: string;
+    /** D15: the in-flight top block tracks the CURRENT leg — counter + the leg's own label
+     *  (caller joins them with an em dash). */
+    legProgress: (n: number, total: number) => string;
     /** The minter's live gas figure at confirm time — its own census line, verbatim. */
     gasFeeLine: (amount: string) => string;
     /** The floor the destination is promised + where any surplus stays (spec §5). */
@@ -483,6 +486,7 @@ export const convertEn: ConvertMessages = {
     legStateSent: 'Sent',
     legStateConfirmed: 'Confirmed',
     legStateFailed: 'Refused',
+    legProgress: (n, total) => `Step ${n} of ${total}`,
     destInWallet: sym => `${sym} — in this wallet`,
     mechDirect: 'Direct pool',
     mechViaHub: hubSym => `Via ${hubSym}`,

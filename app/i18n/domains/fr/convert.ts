@@ -160,6 +160,7 @@ export const convertFr: ConvertMessages = {
     legStateSent: 'Envoyé',
     legStateConfirmed: 'Confirmé',
     legStateFailed: 'Refusé',
+    legProgress: (n, total) => `Étape ${n} sur ${total}`,
     gasFeeLine: amount => `Gaz du retrait (devis en direct du minter) : ${amount}`,
     routeMinLine: (amount, pct) => `Au moins ${amount} à ton adresse (plancher de glissement ${pct})`,
     routeSurplusNote: hopSym => `Si l\u2019échange paie au-dessus du plancher, l\u2019excédent reste dans ce portefeuille en ${hopSym}.`,

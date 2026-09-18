@@ -1293,16 +1293,37 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
     : s === 'sent' ? M.convert.multihop.legStateSent
     : s === 'confirmed' ? M.convert.multihop.legStateConfirmed
     : M.convert.multihop.legStateFailed;
+  // D15: the top block tracks the CURRENT leg — the first non-confirmed leg in the frozen
+  // plan. Pure render, so it stays correct regardless of executor choreography: a confirmed
+  // leg never comes back, and the first open leg IS where the intent actually is.
+  const legPlan = record.legPlan ?? [];
+  const activeLegIndex = legPlan.findIndex(lp => lp.state !== 'confirmed');
+  const activeLeg = activeLegIndex >= 0 ? legPlan[activeLegIndex] : null;
+  const swapOrdinalOf = (i: number): number => legPlan.slice(0, i).filter(x => x.kind === 'swap').length;
+  const stepLine = activeLeg != null
+    ? M.convert.multihop.legProgress(activeLegIndex + 1, legPlan.length) + ' — '
+      + plannedLegLabel(record, activeLeg, activeLeg.canister, venueName, swapOrdinalOf(activeLegIndex))
+    : null;
   return (
     <View testID="convert-state" style={S.convertWrap}>
       {/* Planned records ARE the composed route — the header must name it (ICP → USDC → USDC on
-          Ethereum), never the direct pair the screen was opened from (UX pass 2026-09-15). */}
+          Ethereum), never the direct pair the screen was opened from (UX pass 2026-09-15).
+          HUB records keep the plain selection heading: the destination is this wallet's own
+          asset, and a route line would hang on an empty network name (D12). */}
       <ConvertHeader
-        title={record.legPlan != null
-          ? M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '')
-          : M.convert.heading(record.inSymbol, record.outSymbol)}
+        title={record.venue2Id != null
+          ? M.convert.heading(record.inSymbol, destSymbol)
+          : record.legPlan != null
+            ? M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '')
+            : M.convert.heading(record.inSymbol, record.outSymbol)}
         onBack={onBack}
       />
+
+      {/* D15: "Step 2 of 4 — Swapping VCHF → ICP on ICPSwap" — counter plus the leg's own
+          label, always visible above the phase block. */}
+      {stepLine != null ? (
+        <Text testID="convert-step" style={S.convertMetaLine}>{stepLine}</Text>
+      ) : null}
 
       {record.step === 'approving' ? (
         <View testID="convert-approving">
@@ -1327,6 +1348,20 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
       ) : null}
 
       {record.step === 'done' ? (
+        record.venue2Id != null ? (
+          // D17: a hub destination IS in this wallet — the direct flow's "Converted /
+          // received in your wallet" copy with the SEEN payout amount and the dest-ledger
+          // payout record. No address, and the cash-out "on its way" family must not leak.
+          <View testID="convert-done">
+            <Text style={S.convertStateTitle}>{M.convert.doneTitle}</Text>
+            <Text style={S.convertStateBody}>
+              {M.convert.doneBody(fmtAssetCompact(
+                record.outAmountNet ?? record.expectedNet2 ?? '0',
+                record.destDecimals ?? hopDecimals, destSymbol))}
+            </Text>
+            {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
+          </View>
+        ) : (
         <View testID="convert-done">
           <Text style={S.convertStateTitle}>{M.convert.multihop.doneRouteTitle}</Text>
           <Text style={S.convertStateBody}>
@@ -1337,6 +1372,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           <Text style={S.convertStateMeta}>{M.convert.multihop.doneOnItsWay}</Text>
           {record.outTx != null ? <Text style={S.convertStateMeta}>{M.convert.doneTx(record.outTx)}</Text> : null}
         </View>
+        )
       ) : null}
 
       {record.step === 'failed_refunded' ? (
@@ -1390,15 +1426,18 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
       ) : null}
 
       {/* THE leg list — every leg, its own state, its own fee; the leg that stopped names
-          itself by its refusal state. This list is the progress UI the route promised. */}
+          itself by its refusal state. This list is the progress UI the route promised. D14:
+          it stays FULLY expanded for hub records — four legs, no folding. */}
       <View testID="convert-route-legs" style={S.convertChecklistCard}>
         {(record.legPlan ?? []).map((lp, i) => {
           const leg = record.legs[i];
           const canister = leg?.canister ?? lp.canister;
           const fee = plannedLegFee(record, lp, canister);
+          const label = plannedLegLabel(record, lp, canister, venueName,
+            (record.legPlan ?? []).slice(0, i).filter(x => x.kind === 'swap').length);
           return (
             <View key={i} testID={`convert-leg-${i}`}>
-              <Text style={S.convertChecklistLine}>{plannedLegLabel(record, lp, canister, venueName)}</Text>
+              <Text style={S.convertChecklistLine}>{label}</Text>
               <Text
                 testID={`convert-leg-${i}-state`}
                 style={lp.state === 'failed' ? S.err : S.convertStateMeta}>
@@ -3030,7 +3069,7 @@ function formatBps(bps: number): string {
 
 /** One planned leg's label — the kind + the leg's own canister decide the copy, never the
  *  position alone (the two asset approves differ by WHICH asset they unlock). */
-function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string): string {
+function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string, swapOrdinal = 0): string {
   if (lp.kind === 'sol_swap') {
     // The final Jupiter leg names ITS own venue (the cross-rail record's venueId is the IC
     // swap venue — the sol venue id is frozen on the crossRail block at prepare).
@@ -3040,12 +3079,26 @@ function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string
     return M.convert.crossrail.legCctpBurn(record.hopSymbol ?? record.outSymbol, record.destNetwork ?? '');
   }
   if (lp.kind === 'swap') {
+    // Hub records run TWO swap legs (D14, same leg vocabulary parameterised per hop):
+    // the second names venue2 and lands the DESTINATION asset in this wallet.
+    if (record.venue2Id != null && swapOrdinal >= 1) {
+      return M.convert.multihop.legSwap(
+        venueDisplayName(record.venue2Id),
+        record.hopSymbol ?? record.outSymbol,
+        record.destSymbol ?? record.outSymbol);
+    }
     return M.convert.multihop.legSwap(venueName, record.inSymbol, record.hopSymbol ?? record.outSymbol);
   }
   if (lp.kind === 'approve') {
-    return legCanister === record.inLedger
-      ? M.convert.multihop.legApprovePull(record.inSymbol)
-      : M.convert.multihop.legApproveBurn(record.hopSymbol ?? record.outSymbol);
+    if (legCanister === record.inLedger) {
+      return M.convert.multihop.legApprovePull(record.inSymbol);
+    }
+    // Hub leg 3 approves the DESTINATION pool's pull of the hub asset — a plain pool
+    // approval on the hub ledger, never the burn-side wording.
+    if (record.venue2Id != null && record.hopLedger != null && legCanister === record.hopLedger) {
+      return M.convert.multihop.legApprovePull(record.hopSymbol ?? record.outSymbol);
+    }
+    return M.convert.multihop.legApproveBurn(record.hopSymbol ?? record.outSymbol);
   }
   if (lp.kind === 'approve_gas') {
     return M.convert.multihop.legApproveGas(record.gasSymbol ?? 'ckETH');
