@@ -140,6 +140,13 @@ export const convertEs: ConvertMessages = {
     mechViaVenue: venue => `Vía ${venue}`,
     mechNoneSelected: 'Elige un mecanismo arriba para ver la cotización.',
     viaHub: hubSym => `vía ${hubSym} · 2 canjes`,
+    routeMinWalletLine: (amount, pct) => `Al menos ${amount} se quedan en esta cartera (piso de deslizamiento ${pct})`,
+    hubQuoteSource: (venue1, venue2, at) => `Cotizaciones de ${venue1} y ${venue2}, obtenidas ${at}`,
+    hubCensusHeading: 'Dos canjes, desglosados uno por uno',
+    approveFeeLine: amount => `Aprobar el siguiente pool cuesta ${amount} (la propia tarifa de transferencia del ledger)`,
+    hubRateLine: (inSym, destSym) => `Tasa combinada ${inSym} → ${destSym}:`,
+    hubSurplusNote: (hubSym, destSym) =>
+      `Si un canje paga por encima de su piso, el excedente se queda en esta cartera como ${hubSym} o ${destSym}.`,
     destAddressLabel: 'Tu propia dirección en la red de destino',
     destAddressInvalid: 'Dirección de destino no válida — se espera 0x seguido de 40 caracteres hexadecimales.',
     routeHeading: (inSym, hopSym, destSym, network) => `Ruta: ${inSym} → ${hopSym} → ${destSym} en ${network}`,

@@ -140,6 +140,13 @@ export const convertFr: ConvertMessages = {
     mechViaVenue: venue => `Via ${venue}`,
     mechNoneSelected: 'Choisis un moyen ci-dessus pour voir le devis.',
     viaHub: hubSym => `via ${hubSym} · 2 échanges`,
+    routeMinWalletLine: (amount, pct) => `Au moins ${amount} restent dans ce portefeuille (plancher de glissement ${pct})`,
+    hubQuoteSource: (venue1, venue2, at) => `Devis de ${venue1} et ${venue2}, obtenus ${at}`,
+    hubCensusHeading: 'Deux échanges, détaillés un par un',
+    approveFeeLine: amount => `L\u2019autorisation du prochain pool coûte ${amount} (les propres frais de transfert du registre)`,
+    hubRateLine: (inSym, destSym) => `Taux combiné ${inSym} → ${destSym} :`,
+    hubSurplusNote: (hubSym, destSym) =>
+      `Si un échange paie au-dessus de son plancher, le surplus reste dans ce portefeuille en ${hubSym} ou en ${destSym}.`,
     destAddressLabel: 'Ta propre adresse sur le réseau de destination',
     destAddressInvalid: 'Adresse de destination invalide — attendu : 0x suivi de 40 caractères hexadécimaux.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route : ${inSym} → ${hopSym} → ${destSym} sur ${network}`,

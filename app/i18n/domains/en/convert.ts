@@ -197,6 +197,21 @@ export type ConvertMessages = {
     mechNoneSelected: string;
     /** The route chip under the headline (D8): which hub, how many swaps. */
     viaHub: (hubSym: string) => string;
+    /** Hub-mode promise line (D9): the floor the SECOND swap signs is an in-wallet amount —
+     *  routeMinLine's "at your address" would be false here. */
+    routeMinWalletLine: (amount: string, pct: string) => string;
+    /** The two-venue attribution (D11): both venues named, verbatim, never blended; `at` is
+     *  the newer fetch (each hop's own timestamp lives in the Details census). */
+    hubQuoteSource: (venue1: string, venue2: string, at: string) => string;
+    /** Details census heading (D10): the per-hop fold, one section, no second fold elsewhere. */
+    hubCensusHeading: string;
+    /** One hop's approve fee (D10): inputFeeLine is ambiguous with two hops — this names the
+     *  approval's own cost. */
+    approveFeeLine: (amount: string) => string;
+    /** The composed per-unit rate label (both swaps combined, net of the dest fee). */
+    hubRateLine: (inSym: string, destSym: string) => string;
+    /** One surplus note covering both hops (D10): above-floor payouts stay in this wallet. */
+    hubSurplusNote: (hubSym: string, destSym: string) => string;
     destAddressLabel: string;
     destAddressInvalid: string;
     /** The confirm-time route summary: ordered legs, fee census per leg (INV-6 style), no dpay cut. */
@@ -475,6 +490,13 @@ export const convertEn: ConvertMessages = {
     mechViaVenue: venue => `Via ${venue}`,
     mechNoneSelected: 'Pick a mechanism above to see the quote.',
     viaHub: hubSym => `via ${hubSym} · 2 swaps`,
+    routeMinWalletLine: (amount, pct) => `At least ${amount} stays in this wallet (slippage floor ${pct})`,
+    hubQuoteSource: (venue1, venue2, at) => `Quotes from ${venue1} and ${venue2}, fetched ${at}`,
+    hubCensusHeading: 'Two swaps, itemized',
+    approveFeeLine: amount => `Approving the next pool costs ${amount} (the ledger\u2019s own transfer fee)`,
+    hubRateLine: (inSym, destSym) => `Combined rate, ${inSym} → ${destSym}:`,
+    hubSurplusNote: (hubSym, destSym) =>
+      `If a swap pays above its floor, the surplus stays in this wallet as ${hubSym} or ${destSym}.`,
     gasFeeLine: amount => `Cash-out gas (the minter\u2019s live quote): ${amount}`,
     routeMinLine: (amount, pct) => `At least ${amount} at your address (slippage floor ${pct})`,
     routeSurplusNote: hopSym => `If the swap pays above the floor, the surplus stays in this wallet as ${hopSym}.`,

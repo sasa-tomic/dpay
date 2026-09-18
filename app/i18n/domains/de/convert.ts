@@ -141,6 +141,13 @@ export const convertDe: ConvertMessages = {
     mechViaVenue: venue => `Über ${venue}`,
     mechNoneSelected: 'Wähle oben einen Weg, um das Angebot zu sehen.',
     viaHub: hubSym => `über ${hubSym} · 2 Tauschgeschäfte`,
+    routeMinWalletLine: (amount, pct) => `Mindestens ${amount} bleiben in dieser Wallet (Slippage-Untergrenze ${pct})`,
+    hubQuoteSource: (venue1, venue2, at) => `Angebote von ${venue1} und ${venue2}, abgerufen ${at}`,
+    hubCensusHeading: 'Zwei Tauschgeschäfte, einzeln aufgeschlüsselt',
+    approveFeeLine: amount => `Die Freigabe des nächsten Pools kostet ${amount} (die eigene Transfergebühr des Ledgers)`,
+    hubRateLine: (inSym, destSym) => `Gesamtkurs ${inSym} → ${destSym}:`,
+    hubSurplusNote: (hubSym, destSym) =>
+      `Zahlt ein Tauschgeschäft über seiner Untergrenze aus, bleibt der Überschuss als ${hubSym} oder ${destSym} in dieser Wallet.`,
     destAddressLabel: 'Deine eigene Adresse im Zielnetzwerk',
     destAddressInvalid: 'Keine gültige Zieladresse — erwartet: 0x gefolgt von 40 Hex-Zeichen.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} auf ${network}`,

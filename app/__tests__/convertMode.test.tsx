@@ -40,6 +40,7 @@ jest.mock('../convert', () => ({
   deriveConvertMath: jest.fn(),
   prepareConvertRecord: jest.fn(),
   prepareMultihopConvertRecord: jest.fn(),
+  prepareHubConvertRecord: jest.fn(),
 }));
 
 // The burn-side rail services (gas quote + ledger fee): the minter's live figure is part of
@@ -68,7 +69,7 @@ jest.mock('../convertResume', () => ({
 }));
 
 import {ConvertMode} from '../components/ConvertMode';
-import {convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord, prepareMultihopConvertRecord} from '../convert';
+import {convertRecordMinOut, deriveConvertMath, fetchConvertQuote, prepareConvertRecord, prepareHubConvertRecord, prepareMultihopConvertRecord} from '../convert';
 import {acknowledgeStuckRecord, adoptConvertRecord, convertResumeSnapshot} from '../convertResume';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
 import type {ConvertMath, ConvertQuote, ConvertRecord} from '../convert';
@@ -77,6 +78,7 @@ import type {Identity} from '../lib/types';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {BUNDLED_VENUES, setRuntimeVenues, type VenueEntry} from '../config/venues';
 import {convertEn} from '../i18n/domains/en/convert';
+import {formatClock} from '../i18n/intl';
 import {convertDe} from '../i18n/domains/de/convert';
 import {convertEs} from '../i18n/domains/es/convert';
 import {convertFr} from '../i18n/domains/fr/convert';
@@ -1099,6 +1101,123 @@ describe('multihop — the composed destination is an explicit, gated opt-in', (
     });
     expect(prepareMultihopConvertRecord).toHaveBeenCalledTimes(1);
     expect(jest.mocked(prepareMultihopConvertRecord).mock.calls[0][0]).toMatchObject({destAddress: DEST});
+    expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('hub destination — the two-quote composed surface (2026-09-18 hub UX D5–D13)', () => {
+  const VCHF_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 7)!;
+  const rowOf = (currency: number) => CATALOG.find(c => c.currency === currency)!;
+  const VCHF_LEDGER = rowOf(7).ledger!;
+  const ICP_LEDGER = rowOf(8).ledger!;
+  const CKETH_LEDGER = rowOf(6).ledger!;
+  const CKETH_ROW = 'convert-dest-inwallet-6';
+  /** quote1: VCHF → ICP through icpswap; its 1% floor is what quote2 is SIZED on. */
+  const HUB_Q1: ConvertQuote = {
+    venueId: 'icpswap', pool: '65mrh-fqaaa-aaaar-qapoa-cai',
+    tokenInLedger: VCHF_LEDGER, tokenOutLedger: ICP_LEDGER,
+    amountIn: '100000000', amountOutGross: '120000000',
+    zeroForOne: true, feeMillionths: 3000, fetchedAtMs: 1_700_000_000_000,
+  };
+  const HUB_M1: ConvertMath = {
+    amountIn: '100000000', grossOut: '120000000', minOut: '118800000', netOut: '119990000',
+    inFee: '10000', outFee: '10000', slippageBps: 100,
+  };
+  /** quote2: ICP → ckETH, amountIn EXACTLY math1.minOut — the composition the engine signs. */
+  const HUB_Q2: ConvertQuote = {
+    venueId: 'icpswap-cketh', pool: 'angxa-baaaa-aaaag-qcvnq-cai',
+    tokenInLedger: ICP_LEDGER, tokenOutLedger: CKETH_LEDGER,
+    amountIn: '118800000', amountOutGross: '3000000000000',
+    zeroForOne: false, feeMillionths: 5000, fetchedAtMs: 1_700_000_005_000,
+  };
+  const HUB_M2: ConvertMath = {
+    amountIn: '118800000', grossOut: '3000000000000', minOut: '2970000000000', netOut: '1000000000000',
+    inFee: '10000', outFee: '2000000000000', slippageBps: 100,
+  };
+  /** The screen renders clocks with non-breaking spaces (nonBreakingClock) — match that. */
+  const nbclock = (ms: number): string => formatClock(new Date(ms)).replace(/ /g, '\u00A0');
+  const armHubMocks = (): void => {
+    jest.mocked(fetchConvertQuote).mockReset();
+    jest.mocked(fetchConvertQuote).mockImplementation(async (_relay: string, tin: string, tout: string) => {
+      if (tin === VCHF_LEDGER && tout === ICP_LEDGER) return HUB_Q1;
+      if (tin === ICP_LEDGER && tout === CKETH_LEDGER) return HUB_Q2;
+      throw new Error('unexpected pair ' + tin + ' -> ' + tout);
+    });
+    // Implementation, not a Once-chain: the effect legitimately re-runs (venue list landing),
+    // and every run must derive the same pair — quote1 derives by input ledger (VCHF vs ICP).
+    jest.mocked(deriveConvertMath).mockReset();
+    jest.mocked(deriveConvertMath).mockImplementation(async (q: ConvertQuote) =>
+      q.tokenInLedger === VCHF_LEDGER ? HUB_M1 : HUB_M2);
+  };
+  const mountHub = async (): Promise<renderer.ReactTestRenderer> => {
+    armHubMocks();
+    const tree = await mountConvert('250000000', '1', {
+      selectedAsset: VCHF_ASSET,
+      assetBalances: {7: '250000000'},
+    });
+    armHubMocks(); // drop the standing-surface direct fetch from the call history
+    await act(async () => {
+      node(tree, CKETH_ROW)!.props.onPress();
+    });
+    return tree;
+  };
+
+  test('the hub-only row auto-picks its single mechanism and shows the composed two-quote surface', async () => {
+    const tree = await mountHub();
+    // D7: no address input, no gas preflight — the destination is this wallet.
+    expect(present(tree, 'convert-dest-address')).toBe(false);
+    expect(present(tree, 'convert-gas-preflight')).toBe(false);
+    // D9: the promise is the in-wallet floor of the SECOND swap, never "at your address".
+    expect(textOf(tree, 'convert-route-min')).toBe(
+      convertEn.multihop.routeMinWalletLine(fmtAssetCompact('2970000000000', 18, 'ETH'), '1%'));
+    expect(present(tree, 'convert-min-out')).toBe(false);
+    // D12: the form heading names the SELECTED destination (ckETH row's symbol is ETH).
+    const headingTexts = tree.root.findAllByType(Text).filter(n => n.props.children === convertEn.heading('VCHF', 'ETH'));
+    expect(headingTexts.length).toBeGreaterThanOrEqual(1);
+    // D7/D8/D11: "You'll receive" (in-wallet), the composed net estimate, BOTH venues verbatim.
+    expect(textOf(tree, 'convert-headline')).toContain(convertEn.receiveHeadline);
+    expect(textOf(tree, 'convert-headline')).toContain(fmtAssetCompact('1000000000000', 18, 'ETH'));
+    expect(textOf(tree, 'convert-quote-source')).toBe(
+      convertEn.multihop.hubQuoteSource('ICPSwap', 'ICPSwap', nbclock(1_700_000_005_000)));
+    expect(textOf(tree, 'convert-route-via')).toBe(convertEn.multihop.viaHub('ICP'));
+    // D10: the per-hop census folds in the SAME Details — both hops, each with its own
+    // approve fee line and its own quoteSource timestamp.
+    await openDetails(tree);
+    const census = textOf(tree, 'convert-hub-census');
+    expect(census).toContain(convertEn.multihop.hubCensusHeading);
+    expect(census).toContain(convertEn.multihop.legSwap('ICPSwap', 'VCHF', 'ICP'));
+    expect(census).toContain(convertEn.multihop.legSwap('ICPSwap', 'ICP', 'ETH'));
+    expect(census).toContain(convertEn.multihop.approveFeeLine(fmtAssetCompact('10000', 8, 'VCHF')));
+    expect(census).toContain(convertEn.multihop.approveFeeLine(fmtAssetCompact('10000', 8, 'ICP')));
+    expect(census).toContain(convertEn.quoteSource(nbclock(1_700_000_000_000), 'ICPSwap'));
+    expect(census).toContain(convertEn.quoteSource(nbclock(1_700_000_005_000), 'ICPSwap'));
+    expect(census).toContain(convertEn.multihop.hubSurplusNote('ICP', 'ETH'));
+  });
+
+  test('confirm re-quotes BOTH hops fresh and composes the record through prepareHubConvertRecord', async () => {
+    const tree = await mountHub();
+    jest.mocked(prepareHubConvertRecord).mockReset();
+    jest.mocked(prepareHubConvertRecord).mockResolvedValue({
+      id: 'hub1', createdAtMs: 1, step: 'approving', venueId: 'icpswap', venue2Id: 'icpswap-cketh',
+      inCurrency: 7, outCurrency: 8, inLedger: VCHF_LEDGER, outLedger: ICP_LEDGER,
+      destLedger: CKETH_LEDGER, destCurrency: 6, inSymbol: 'VCHF', outSymbol: 'ICP', destSymbol: 'ETH',
+      amountIn: '100000000', expectedGross: '120000000', expectedNet: '119990000',
+      inFee: '10000', outFee: '10000', slippageBps: 100, legs: [], legPlan: [],
+    } as never);
+    // The confirm re-quote runs BOTH hops again (fetch 1+1) before anything is signed.
+    // Measured as a delta: the live-fetch effect legitimately re-runs on its own triggers.
+    jest.mocked(fetchConvertQuote).mockClear();
+    await act(async () => {
+      node(tree, 'btn-convert-confirm')!.props.onPress();
+    });
+    expect(jest.mocked(fetchConvertQuote)).toHaveBeenCalledTimes(2);
+    expect(prepareHubConvertRecord).toHaveBeenCalledTimes(1);
+    const args = jest.mocked(prepareHubConvertRecord).mock.calls[0][0];
+    expect(args.route).toMatchObject({routeId: 'hub:icpswap:8:icpswap-cketh'});
+    expect(args.quote1).toMatchObject({venueId: 'icpswap', amountOutGross: '120000000'});
+    expect(args.quote2).toMatchObject({venueId: 'icpswap-cketh', amountIn: '118800000'});
+    expect(args.math1).toMatchObject({minOut: '118800000'});
+    expect(args.math2).toMatchObject({minOut: '2970000000000'});
     expect(adoptConvertRecord).toHaveBeenCalledTimes(1);
   });
 });
