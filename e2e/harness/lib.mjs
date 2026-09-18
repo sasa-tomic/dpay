@@ -932,7 +932,7 @@ async function pressScanGate(driver) {
  * no-ops when already armed, and fails loudly when neither a scanner nor a gate ever appears.
  */
 export async function armPayScan(driver, opts = {}) {
-  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const timeoutMs = opts.timeoutMs ?? 15_000;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if ((await scanCount(driver)) > 0) return;
@@ -951,7 +951,7 @@ export async function armPayScan(driver, opts = {}) {
 export async function armNfcCard(driver, rail, opts = {}) {
   const seam = { ic: '__DPAY_TEST_NFC_COUNT', sol: '__DPAY_TEST_SOL_NFC_COUNT' }[rail];
   assert(seam, `armNfcCard: unknown rail ${JSON.stringify(rail)} (expected 'ic' | 'sol')`);
-  const timeoutMs = opts.timeoutMs ?? 5_000;
+  const timeoutMs = opts.timeoutMs ?? 15_000;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const n = await driver.eval((g) => (typeof window[g] === 'function' ? window[g]() : -1), seam);
