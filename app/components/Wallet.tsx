@@ -1291,7 +1291,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
             onPress={openSettings}
             accessibilityRole="button"
             accessibilityLabel={M.wallet.header.settings}
-            accessibilityHint={M.wallet.header.settingsHint}
           >
             <IconSettings size={20} color={C.sub} />
           </Pressable>
@@ -1304,7 +1303,6 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
             onPress={cycleTheme}
             accessibilityRole="button"
             accessibilityLabel={M.wallet.header.themeSwitch(themeLabel(nextTheme(resolvedTheme)))}
-            accessibilityHint={M.wallet.header.themeSwitchHint}
           >
             {nextTheme(resolvedTheme) === 'dark' ? <IconMoon size={20} color={C.sub} /> : <IconSun size={20} color={C.sub} />}
           </Pressable>
@@ -1339,7 +1337,7 @@ export function Wallet({identity, relayUrls, setRelayUrls, setSolanaRpc, setIcGa
             onPress={openAccounts}
             accessibilityRole="button"
             accessibilityLabel={M.wallet.balance.label}
-            accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : M.wallet.balance.hint}
+            accessibilityHint={balancesDisabled ? M.wallet.balance.lockedHint : undefined}
             accessibilityState={{disabled: balancesDisabled}}
           >
             {/* One row, two ends: which account on the left, how much in it on the right. The amount

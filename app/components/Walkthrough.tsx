@@ -488,7 +488,6 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
             onPress={onSkip}
             accessibilityRole="button"
             accessibilityLabel={M.education.walkthrough.skip}
-            accessibilityHint={M.education.walkthrough.skipHint}
             accessibilityState={{disabled: false}}>
             <IconClose size={18} color={C.sub} />
           </Pressable>
@@ -515,7 +514,7 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
               style={{position: 'absolute', left: 0, minHeight: 44, paddingHorizontal: 4, justifyContent: 'center'}}
               onPress={back}
               accessibilityRole="button"
-              accessibilityLabel={M.education.walkthrough.backLabel}
+              accessibilityLabel={M.education.walkthrough.back}
               accessibilityState={{disabled: false}}>
               <Text style={S.walkBackText}>{M.education.walkthrough.back}</Text>
             </Pressable>
@@ -531,8 +530,7 @@ export function Walkthrough({onDone, onSkip, onClose, reducedMotion}: Walkthroug
           style={S.primary}
           onPress={next}
           accessibilityRole="button"
-          accessibilityLabel={last ? M.education.walkthrough.getStarted : M.education.walkthrough.nextLabel}
-          accessibilityHint={last ? M.education.walkthrough.getStartedHint : M.education.walkthrough.nextHint}
+          accessibilityLabel={last ? M.education.walkthrough.getStarted : M.education.walkthrough.next}
           accessibilityState={{disabled: false}}>
           <Text style={S.primaryText}>{last ? M.education.walkthrough.getStarted : M.education.walkthrough.next}</Text>
         </Pressable>

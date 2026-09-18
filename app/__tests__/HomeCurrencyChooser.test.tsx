@@ -83,7 +83,7 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
     expect(isPresent(tree, 'home-currency-pick-first')).toBe(false);
     press(tree, 'btn-home-currency-continue');
     expect(onChoose).not.toHaveBeenCalled();
-    expect(rowText(tree, 'home-currency-pick-first')).toBe('Tap the currency you want first, then Continue.');
+    expect(rowText(tree, 'home-currency-pick-first')).toBe('Pick a currency first.');
     // Picking clears the prompt and Continue commits — the instruction never outlives its cause.
     press(tree, 'home-currency-CHF');
     expect(isPresent(tree, 'home-currency-pick-first')).toBe(false);
@@ -154,8 +154,8 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
       'Very little VEUR exists on-chain today — receiving can be hard, and paying needs someone who holds it.',
     );
     // Ramp: VEUR is DFX-sellable; EURC has no fiat ramp today.
-    expect(rowText(tree, 'rail-detail-ramp-veur')).toBe('DFX lists this token as sellable; buying is not available today.');
-    expect(rowText(tree, 'rail-detail-ramp-sol-eurc')).toBe('No fiat ramp today — it moves wallet to wallet.');
+    expect(rowText(tree, 'rail-detail-ramp-veur')).toBe('DFX — sell only today.');
+    expect(rowText(tree, 'rail-detail-ramp-sol-eurc')).toBe('No fiat ramp — wallet to wallet only.');
     act(() => { tree.unmount(); });
   });
 

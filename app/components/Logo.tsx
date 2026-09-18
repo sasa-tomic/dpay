@@ -63,8 +63,7 @@ export function WordmarkLink({style}: {style?: object}) {
       testID="link-home"
       onPress={goToSiteHome}
       accessibilityRole="link"
-      accessibilityLabel={M.wallet.header.home}
-      accessibilityHint={M.wallet.header.homeHint}>
+      accessibilityLabel={M.wallet.header.home}>
       <Wordmark style={style} />
     </Pressable>
   );

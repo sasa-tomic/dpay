@@ -51,7 +51,7 @@ export async function run() {
     // The early press: it must ANSWER, and it must not commit anything.
     await driver.click('btn-home-currency-continue', {timeoutMs: 5_000});
     const prompt = await driver.readText('home-currency-pick-first');
-    assertEq(prompt, 'Tap the currency you want first, then Continue.', 'the early press names the missing step');
+    assertEq(prompt, 'Pick a currency first.', 'the early press names the missing step');
     assert(await driver.isPresent('home-currency-title'), 'and commits nothing — the chooser is still on screen');
     assert(!(await driver.isPresent(WALLET_READY)), 'no currency was chosen, so the wallet did not open');
     await driver.screenshot('149-currency-chooser-dead-tap');

@@ -116,7 +116,6 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
         onPress={onOpenAccounts}
         accessibilityRole="button"
         accessibilityLabel={M.wallet.home.accounts.openLabel}
-        accessibilityHint={M.wallet.home.accounts.openHint}
         accessibilityState={{disabled: false}}>
         <View testID="home-headline" style={S.homeEyebrowRow}>
           <Text testID="home-headline-label" style={S.homeEyebrow}>{eyebrow}</Text>
@@ -152,19 +151,17 @@ export function HomeTab({assets, homeCurrency, homeAsset, balances, catalog, onl
         {/* Add money funds the account the headline is showing — the home currency's rail. It is
             disabled only when the catalog carries no rail for that currency, which is the same
             "there is nothing to act on" rule its sibling follows. */}
-        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, homeAsset === null && S.disabledFlat]} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={homeAsset === null} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addMoney} accessibilityHint={M.wallet.home.actions.addMoneyHint} accessibilityState={{disabled: homeAsset === null}}>
+        <Pressable testID="btn-home-add-money" style={[S.homeActionBtn, homeAsset === null && S.disabledFlat]} onPress={() => homeAsset !== null && onDeposit(homeAsset.id)} disabled={homeAsset === null} accessibilityRole="button" accessibilityLabel={M.wallet.home.actions.addMoney} accessibilityState={{disabled: homeAsset === null}}>
           <IconPlus size={22} color={C.brandText} />
           <Text style={[S.homeActionLabel, homeAsset === null && S.disabledText]}>{M.wallet.home.actions.addMoney}</Text>
         </Pressable>
       </View>
       <View style={S.homeActivity} testID="home-activity">
         <Text style={S.histTitle}>{M.wallet.home.activity.title}</Text>
-        {rows.length === 0
-          ? <Text style={S.dim2}>{M.wallet.home.activity.empty}</Text>
-          : rows.map((t, i) => (
-            <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} testPrefix="home-hist" note={noteFor?.(t)} onPress={onOpenReceipt} />
-          ))}
-        <Pressable testID="btn-home-activity-all" style={S.homeSeeAll} onPress={onSeeAll} accessibilityRole="button" accessibilityLabel={M.wallet.home.activity.seeAll} accessibilityHint={M.wallet.home.activity.seeAllHint}>
+        {rows.map((t, i) => (
+          <HistoryRow key={`${i}-${t.nonce}`} t={t} i={i} catalog={catalog} assets={assets} testPrefix="home-hist" note={noteFor?.(t)} onPress={onOpenReceipt} />
+        ))}
+        <Pressable testID="btn-home-activity-all" style={S.homeSeeAll} onPress={onSeeAll} accessibilityRole="button" accessibilityLabel={M.wallet.home.activity.seeAll}>
           <Text style={S.linkText}>{M.wallet.home.activity.seeAll}</Text>
         </Pressable>
       </View>
