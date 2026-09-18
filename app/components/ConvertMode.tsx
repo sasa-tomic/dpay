@@ -1205,10 +1205,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // exactly why `prepareConvertRecord` approves `amountIn + inFee`. A CeFi order costs ONE: the
   // user's own deposit transfer (the phone approves nothing — nothing is signed). A null balance
   // (not yet read) fails OPEN, matching the Pay tab's fund-gate: a balance nobody has measured
-  // is not a zero.
+  // is not a zero. D21: a HUB conversion costs THREE — the two input fees PLUS the hub-ledger
+  // approve fee; without it the gate green-lights a conversion that refuses at leg 3, after the
+  // input is already converted.
   const parsedIn = parseUserAmount(amountText, inDecimals);
   const neededN = parsedIn.ok && parsedIn.raw !== '0'
-    ? BigInt(parsedIn.raw) + (cefiMode ? 1n : 2n) * BigInt(legs.inFee)
+    ? BigInt(parsedIn.raw) + (cefiMode ? 1n : 2n) * BigInt(legs.inFee) + (hubRoute != null ? BigInt(hubRoute.hub.fee) : 0n)
     : null;
   const insufficient = balanceN != null && neededN != null && neededN > balanceN;
 
@@ -1387,6 +1389,21 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
       ) : null}
 
       {record.step === 'failed_leg' ? (
+        record.venue2Id != null ? (
+          // D18: ONE terminal meaning for a hub refusal — a completed swap is BEHIND you,
+          // the rest refused, and the funds are the named HUB asset in THIS wallet. The exit
+          // is that asset's own surfaces (keep / convert from its own account / send); the
+          // cash-out exit would name Pay ▸ Send-to-address, the wrong door. A leg-3 approve
+          // refusal (the hub ledger refusing the allowance) lands here too, with the hub
+          // ledger's own reason.
+          <View testID="convert-failed-leg">
+            <Text style={S.convertStateTitle}>{M.convert.multihop.failedHop2Title}</Text>
+            <Text style={S.convertStateBody}>
+              {M.convert.multihop.failedHop2Body(hopSymbol, destSymbol, record.failureDetail ?? '')}
+            </Text>
+            <Text style={S.convertChecklistWarn}>{M.convert.multihop.failedHop2Exit(hopSymbol)}</Text>
+          </View>
+        ) : (
         <View testID="convert-failed-leg">
           <Text style={S.convertStateTitle}>{M.convert.multihop.failedLegTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.multihop.failedLegBody(hopSymbol, record.failureDetail ?? '')}</Text>
@@ -1394,12 +1411,18 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
               in this wallet, and the standalone Withdraw is the door out. */}
           <Text style={S.convertChecklistWarn}>{M.convert.multihop.failedLegExit}</Text>
         </View>
+        )
       ) : null}
 
       {record.step === 'stuck' ? (
         <View testID="convert-stuck">
           <Text style={S.convertStateTitle}>{M.convert.stuckTitle}</Text>
           <Text style={S.convertStateBody}>{M.convert.multihop.stuckRouteBody}</Text>
+          {/* D19: on a hub record the outcome is NOT all-or-nothing — what is already held
+              is a fact, stated plainly next to the watching copy. */}
+          {record.venue2Id != null ? (
+            <Text style={S.convertStateMeta}>{M.convert.multihop.stuckHoldsLine(hopSymbol)}</Text>
+          ) : null}
           <Text testID="convert-expiry" style={S.convertStateMeta}>
             {M.convert.expiryLine(formatClock(new Date(legExpiryMs)))}
           </Text>
@@ -1524,7 +1547,10 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         <Text testID="convert-insufficient" style={S.err}>
           {cefiMode
             ? M.convert.cefi.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)
-            : M.convert.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)}
+            : hubRoute != null
+              // D21: the copy names the honest overhead — three fees, not two.
+              ? M.convert.multihop.insufficientHubLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)
+              : M.convert.insufficientLine(fmtAssetCompact(neededN!.toString(), inDecimals, inSym), balanceStr!)}
         </Text>
       ) : null}
 

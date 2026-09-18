@@ -176,6 +176,14 @@ export const convertEs: ConvertMessages = {
       `El canje se completó — tus fondos están en ${sym} en esta cartera, nada perdido ni bloqueado. El retiro fue rechazado${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Para retirar, abre Pagar, elige Enviar a dirección y pega cualquier dirección de destino — el paso de retiro corre desde ahí.',
     stuckRouteBody: 'Se envió un tramo pero su resultado aún se desconoce. dpay sigue vigilando los libros en segundo plano; esta pantalla cambiará sola cuando la ruta se resuelva.',
+    failedHop2Title: 'El segundo canje fue rechazado',
+    failedHop2Body: (hubSym, outSym, reason) =>
+      `El primer canje pasó — tienes ${hubSym} en esta cartera, nada perdido y nada atascado. El canje ${hubSym} → ${outSym} fue rechazado${reason ? `: ${reason}` : ''}.`,
+    failedHop2Exit: hubSym =>
+      `Tus ${hubSym} se pueden gastar tal cual: consérvalos, cámbialos más tarde desde su propia cuenta, o envíalos. Nada necesita revertirse.`,
+    stuckHoldsLine: hubSym => `Logrado hasta ahora: tienes ${hubSym} en esta cartera.`,
+    insufficientHubLine: (needed, balance) =>
+      `Esta conversión necesita ${needed} — el monto más tres comisiones de registro — y esta cartera tiene ${balance}. Baja el monto o recibe más primero.`,
   },
 
   /** Venues CeFi (ampliación SideShift, 2026-09-15): la entrega del depósito. La venue

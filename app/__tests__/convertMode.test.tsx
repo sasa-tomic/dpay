@@ -1149,11 +1149,11 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     jest.mocked(deriveConvertMath).mockImplementation(async (q: ConvertQuote) =>
       q.tokenInLedger === VCHF_LEDGER ? HUB_M1 : HUB_M2);
   };
-  const mountHub = async (): Promise<renderer.ReactTestRenderer> => {
+  const mountHub = async (balanceRaw = '250000000'): Promise<renderer.ReactTestRenderer> => {
     armHubMocks();
-    const tree = await mountConvert('250000000', '1', {
+    const tree = await mountConvert(balanceRaw, '1', {
       selectedAsset: VCHF_ASSET,
-      assetBalances: {7: '250000000'},
+      assetBalances: {7: balanceRaw},
     });
     armHubMocks(); // drop the standing-surface direct fetch from the call history
     await act(async () => {
@@ -1281,5 +1281,56 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(receipt).toContain(convertEn.doneBody(fmtAssetCompact('1000000000000', 18, 'ETH')));
     expect(receipt).not.toContain(convertEn.multihop.doneOnItsWay);
     expect(receipt).toContain(convertEn.doneTx('dest-tx-9'));
+  });
+
+  test('failed_leg: the hub trio — first swap behind you, hub asset held, its own exits (D18)', async () => {
+    const live = hubScreenRecord({
+      id: 'hub-failed',
+      legPlan: [
+        {kind: 'approve', canister: VCHF_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'swap', canister: POOL1, fee: '', state: 'confirmed'},
+        {kind: 'approve', canister: ICP_LEDGER, fee: '10000', state: 'failed'},
+        {kind: 'swap', canister: POOL2, fee: '', state: 'pending'},
+      ],
+      step: 'failed_leg', failureCode: 'approve_refused', failureDetail: 'allowance expired',
+    });
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[live.id]: live});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-failed-leg')).toBe(true);
+    const dead = textOf(tree, 'convert-failed-leg');
+    expect(dead).toContain(convertEn.multihop.failedHop2Title);
+    expect(dead).toContain(convertEn.multihop.failedHop2Body('ICP', 'ETH', 'allowance expired'));
+    expect(dead).toContain(convertEn.multihop.failedHop2Exit('ICP'));
+    // The cash-out exit names Pay ▸ Send-to-address — the WRONG door for an in-wallet hub
+    // asset; it must never render on a hub record.
+    expect(dead).not.toContain(convertEn.multihop.failedLegExit);
+  });
+
+  test('stuck: the holds line states what the completed swap already left in the wallet (D19)', async () => {
+    const stuck = hubScreenRecord({
+      id: 'hub-stuck', step: 'stuck',
+      legPlan: [
+        {kind: 'approve', canister: VCHF_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'swap', canister: POOL1, fee: '', state: 'sent'},
+        {kind: 'approve', canister: ICP_LEDGER, fee: '10000', state: 'pending'},
+        {kind: 'swap', canister: POOL2, fee: '', state: 'pending'},
+      ],
+    });
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[stuck.id]: stuck});
+    const tree = await mountConvert('250000000', null);
+    expect(present(tree, 'convert-stuck')).toBe(true);
+    expect(textOf(tree, 'convert-stuck')).toContain(convertEn.multihop.stuckHoldsLine('ICP'));
+  });
+
+  test('the fee gate counts the hub approve fee: exactly-two-fee balance is REFUSED (D21)', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({}); // fresh form, no engine record
+    // 1 VCHF + two input fees = 100020000 — a DIRECT conversion would pass on this balance;
+    // the hub approve fee on the hub ledger (+10000) must still block it.
+    const tree = await mountHub('100020000');
+    const btn = node(tree, 'btn-convert-confirm');
+    expect(btn!.props.disabled).toBe(true);
+    expect(present(tree, 'convert-insufficient')).toBe(true);
+    expect(textOf(tree, 'convert-insufficient')).toBe(
+      convertEn.multihop.insufficientHubLine(fmtAssetCompact('100030000', 8, 'VCHF'), fmtAssetCompact('100020000', 8, 'VCHF')));
   });
 });

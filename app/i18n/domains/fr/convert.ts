@@ -176,6 +176,14 @@ export const convertFr: ConvertMessages = {
       `L\u2019échange a bien eu lieu — tes fonds sont en ${sym} dans ce portefeuille, rien de perdu ni de bloqué. Le retrait a été refusé${reason ? ` : ${reason}` : ''}.`,
     failedLegExit: 'Pour retirer, ouvre Payer, choisis Vers une adresse et colle n\u2019importe quelle adresse de destination — l\u2019étape de retrait part de là.',
     stuckRouteBody: 'Une étape a été envoyée mais son issue reste inconnue. dpay continue de surveiller les registres en arrière-plan ; cet écran changera tout seul quand la route se résout.',
+    failedHop2Title: 'Le second échange a été refusé',
+    failedHop2Body: (hubSym, outSym, reason) =>
+      `Le premier échange est passé — tu détiens ${hubSym} dans ce portefeuille, rien n\u2019est perdu ni bloqué. L\u2019échange ${hubSym} → ${outSym} a été refusé${reason ? ` : ${reason}` : ''}.`,
+    failedHop2Exit: hubSym =>
+      `Tes ${hubSym} sont dépensables tels quels : garde-les, convertis-les plus tard depuis leur propre compte, ou envoie-les. Rien à annuler.`,
+    stuckHoldsLine: hubSym => `Accompli jusqu\u2019ici : tu détiens ${hubSym} dans ce portefeuille.`,
+    insufficientHubLine: (needed, balance) =>
+      `Cette conversion nécessite ${needed} — le montant plus trois frais de registre — et ce portefeuille détient ${balance}. Baisse le montant, ou reçois d\u2019abord plus.`,
   },
 
   /** Venues CeFi (élargissement SideShift, 2026-09-15) : la remise du dépôt. La venue

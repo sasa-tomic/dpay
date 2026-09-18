@@ -177,6 +177,14 @@ export const convertDe: ConvertMessages = {
       `Der Tausch ist durch — deine Mittel liegen als ${sym} in dieser Wallet, nichts verloren und nichts blockiert. Die Auszahlung wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'Zum Auszahlen öffne Bezahlen, wähle An Adresse senden und füge eine beliebige Ziel-Adresse ein — der Auszahlungsschritt läuft von dort.',
     stuckRouteBody: 'Ein Schritt wurde gesendet, aber sein Ergebnis ist noch unbekannt. dpay beobachtet die Ledgers weiter im Hintergrund; dieser Bildschirm wechselt von selbst, sobald die Route sich auflöst.',
+    failedHop2Title: 'Der zweite Tausch wurde abgelehnt',
+    failedHop2Body: (hubSym, outSym, reason) =>
+      `Der erste Tausch ist durch — du hältst ${hubSym} in dieser Wallet, nichts verloren und nichts steckengeblieben. Der Tausch ${hubSym} → ${outSym} wurde abgelehnt${reason ? `: ${reason}` : ''}.`,
+    failedHop2Exit: hubSym =>
+      `Deine ${hubSym} sind so brauchbar wie immer: behalte sie, tausche sie später von ihrem eigenen Konto, oder sende sie. Nichts muss rückgängig gemacht werden.`,
+    stuckHoldsLine: hubSym => `Bisher erreicht: du hältst ${hubSym} in dieser Wallet.`,
+    insufficientHubLine: (needed, balance) =>
+      `Diese Umrechnung braucht ${needed} — der Betrag plus drei Ledger-Gebühren — und diese Wallet hält ${balance}. Senke den Betrag oder lade zuerst mehr auf.`,
   },
 
   /** CeFi-Venues (SideShift-Erweiterung, 2026-09-15): die Einzahlungs-Übergabe. Die Venue

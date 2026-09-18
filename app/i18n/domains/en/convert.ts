@@ -248,6 +248,16 @@ export type ConvertMessages = {
     failedLegBody: (sym: string, reason: string) => string;
     failedLegExit: string;
     stuckRouteBody: string;
+    /** D18: the hub failed_leg trio — a completed swap is BEHIND you; the funds are the hub
+     *  asset, in this wallet; the exit is that asset's own surfaces, never a cash-out. */
+    failedHop2Title: string;
+    failedHop2Body: (hubSym: string, outSym: string, reason: string) => string;
+    failedHop2Exit: (hubSym: string) => string;
+    /** D19: one extra line on the hub stuck screen — what is already held. */
+    stuckHoldsLine: (hubSym: string) => string;
+    /** D21: the hub overhead is THREE fees (two input-ledger, one hub-ledger approve) — the
+     *  direct insufficientLine's "two ledger fees" would be a false promise here. */
+    insufficientHubLine: (needed: string, balance: string) => string;
   };
 
   // --- CeFi venues (SideShift widening, 2026-09-15, founder decision 3): the destination
@@ -516,6 +526,14 @@ export const convertEn: ConvertMessages = {
       `The swap went through — your funds are ${sym} in this wallet, nothing lost and nothing stuck. The cash-out refused${reason ? `: ${reason}` : ''}.`,
     failedLegExit: 'To cash out, open Pay, choose Send to address, and paste any destination address — the withdrawal step runs from there.',
     stuckRouteBody: 'A leg was sent but its outcome is unknown yet. dpay keeps watching the ledgers in the background; this screen flips on its own when the route resolves.',
+    failedHop2Title: 'The second swap was refused',
+    failedHop2Body: (hubSym, outSym, reason) =>
+      `The first swap went through — you hold ${hubSym} in this wallet, nothing lost and nothing stuck. The ${hubSym} → ${outSym} swap was refused${reason ? `: ${reason}` : ''}.`,
+    failedHop2Exit: hubSym =>
+      `Your ${hubSym} is spendable as-is: keep it, convert it later from its own account, or send it. Nothing needs reversing.`,
+    stuckHoldsLine: hubSym => `Completed so far: you hold ${hubSym} in this wallet.`,
+    insufficientHubLine: (needed, balance) =>
+      `This conversion needs ${needed} — the amount plus three ledger fees — and this wallet holds ${balance}. Lower the amount, or receive more first.`,
   },
 
   /** CeFi venues (SideShift widening, 2026-09-15): the deposit handoff screen. The venue
