@@ -71,7 +71,7 @@ export async function run() {
     // D4-c: the backup gate explains WHY the words matter — no account to sign back into, and not
     // even dpay can recover the funds. This is the implicit-custody moment (2026-08-22).
     const backupBody = await driver.bodyText();
-    assertIncludes(backupBody, 'Not even we can recover it', 'backup screen must state recovery is impossible without the words');
+    assertIncludes(backupBody, 'not even dpay can recover them', 'backup screen must state recovery is impossible without the words');
     await driver.click('mnemonic-backup-checkbox', { timeoutMs: 4_000 });
     await waitForEnabled(driver, 'btn-mnemonic-continue', { timeoutMs: 4_000 });
     await driver.click('btn-mnemonic-continue', { timeoutMs: 4_000 });
