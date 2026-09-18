@@ -1213,6 +1213,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     ? BigInt(parsedIn.raw) + (cefiMode ? 1n : 2n) * BigInt(legs.inFee) + (hubRoute != null ? BigInt(hubRoute.hub.fee) : 0n)
     : null;
   const insufficient = balanceN != null && neededN != null && neededN > balanceN;
+  // F4: the Max affordance fills the largest amount that survives the SAME fee overhead the
+  // gate computes — absent (never zero) when nothing would be left to convert.
+  const feeOverheadN = (cefiMode ? 1n : 2n) * BigInt(legs.inFee) + (hubRoute != null ? BigInt(hubRoute.hub.fee) : 0n);
+  const maxRaw = balanceN != null && balanceN > feeOverheadN ? balanceN - feeOverheadN : null;
 
   // Nothing to convert at all: the Pay tab's fund-gate shape, pointed at the ONE surface that can
   // fund an IC asset (Receive ▸ My address — reachable from the bottom nav on this very screen).
@@ -1316,7 +1320,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         title={record.venue2Id != null
           ? M.convert.heading(record.inSymbol, destSymbol)
           : record.legPlan != null
-            ? M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '')
+            ? routeTitleOf(record, hopSymbol, destSymbol)
             : M.convert.heading(record.inSymbol, record.outSymbol)}
         onBack={onBack}
       />
@@ -1539,9 +1543,24 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         />
       </View>
       {balanceStr != null ? (
-        <Text testID="convert-balance" style={S.convertMetaLine}>
-          {M.convert.balanceLine(balanceStr)}
-        </Text>
+        <View style={S.convertBalanceRow}>
+          <Text testID="convert-balance" style={S.convertMetaLine}>
+            {M.convert.balanceLine(balanceStr)}
+          </Text>
+          {maxRaw != null ? (
+            <Pressable
+              testID="btn-convert-max"
+              onPress={() => {
+                setAmountText(rawToDecimal(maxRaw.toString(), inDecimals));
+                setQuoteChanged(null);
+              }}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={M.convert.maxAmount}>
+              <Text style={S.linkText}>{M.convert.maxAmount}</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
       {insufficient ? (
         <Text testID="convert-insufficient" style={S.err}>
@@ -3095,6 +3114,16 @@ function formatBps(bps: number): string {
 
 /** One planned leg's label — the kind + the leg's own canister decide the copy, never the
  *  position alone (the two asset approves differ by WHICH asset they unlock). */
+/** F1 (2026-09-18 hub UX §e): a same-asset hop is not a three-leg route — "Route: ICP → USDC →
+ *  USDC on Ethereum" duplicated the symbol and hung a delivery network off what reads like a
+ *  receipt. Say the through-route and the landing place instead. Hub records never route here:
+ *  their header is the plain selection heading, decided at the call site. */
+function routeTitleOf(record: ConvertRecord, hopSymbol: string, destSymbol: string): string {
+  return hopSymbol === destSymbol
+    ? M.convert.multihop.routeHeadingCollapsed(record.inSymbol, hopSymbol, record.destNetwork ?? '')
+    : M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '');
+}
+
 function plannedLegLabel(record: ConvertRecord, lp: LegPlan, legCanister: string, venueName: string, swapOrdinal = 0): string {
   if (lp.kind === 'sol_swap') {
     // The final Jupiter leg names ITS own venue (the cross-rail record's venueId is the IC
@@ -3294,7 +3323,7 @@ function CrossRailStatePanel({record, secretHex, relayUrl, solLamports, onBack}:
   return (
     <View testID="convert-crossrail" style={S.convertWrap}>
       <ConvertHeader
-        title={M.convert.multihop.routeHeading(record.inSymbol, hopSymbol, destSymbol, record.destNetwork ?? '')}
+        title={routeTitleOf(record, hopSymbol, destSymbol)}
         onBack={onBack}
       />
 

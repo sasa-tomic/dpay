@@ -16,6 +16,7 @@ export const convertEs: ConvertMessages = {
   unavailableBody: (pair, venue) => `Hoy dpay convierte ${pair} a través de ${venue} — y nada más.`,
 
   amountLabel: sym => `Importe (${sym})`,
+  maxAmount: 'Max',
   balanceLine: balance => `Saldo: ${balance}`,
   receiveHeadline: 'Recibirás',
   counterparty: venue => `Ejecutado por el pool de ${venue}.`,
@@ -131,8 +132,9 @@ export const convertEs: ConvertMessages = {
 
   multihop: {
     destLabel: 'Destino',
-    destDirect: sym => `${sym} — en esta cartera (canje directo)`,
-    destRoute: (sym, network) => `${sym} en ${network} — ruta de canje y retiro`,
+    destDirect: sym => `${sym} — en esta cartera`,
+    destRoute: (sym, network) => `${sym} — a tu dirección de ${network}`,
+    routeHeadingCollapsed: (inSym, hopSym, network) => `Ruta: ${inSym} → ${hopSym} (hacia ${network})`,
     destInWallet: sym => `${sym} — en esta cartera`,
     mechDirect: 'Pool directo',
     mechViaHub: hubSym => `Vía ${hubSym}`,

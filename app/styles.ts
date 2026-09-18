@@ -289,6 +289,8 @@ function buildStyles(p: Palette) {
   routeHeaderSpacer: ROUTE_HEADER_SPACER,
   convertAmountLabel: {fontSize: 13, color: p.sub, marginBottom: 6, fontFamily: FONT.sansMedium},
   convertMetaLine: {fontSize: 13, color: p.sub, marginTop: 8, fontFamily: FONT.sans},
+  // F4 (2026-09-18 hub UX §e): the balance line + Max affordance share one row.
+  convertBalanceRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', alignSelf: 'stretch'},
   // Convert reads as ONE decision then its terms (2026-09-08): a lifted white headline card
   // carrying what the user actually receives + the rate + the quote's attribution, over a
   // RECESSED panel2 checklist whose every spec-§5 disclosure is still present but visibly

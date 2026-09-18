@@ -36,6 +36,8 @@ export type ConvertMessages = {
 
   // --- the quote surface (every §5 checklist line) ----------------------------------------------
   amountLabel: (sym: string) => string;
+  /** F4: the Max affordance beside the balance line — fills the largest convertible amount. */
+  maxAmount: string;
   balanceLine: (balance: string) => string;
   /** The one number the decision turns on, as the screen's headline: what lands in the wallet. */
   receiveHeadline: string;
@@ -183,6 +185,9 @@ export type ConvertMessages = {
     destLabel: string;
     destDirect: (sym: string) => string;
     destRoute: (sym: string, network: string) => string;
+    /** F1: the collapsed route heading for a same-asset hop (ICP → USDC → USDC on Ethereum) —
+     *  the through-route plus the landing place, no duplicated symbol. */
+    routeHeadingCollapsed: (inSym: string, hopSym: string, network: string) => string;
     /** Destination rows are ONE per destination ASSET (hub UX guidance D1/D2): an in-wallet
      *  destination with no qualifier of its own (hub-only rows; the mechanism sub-picker
      *  carries the mechanism names). */
@@ -365,6 +370,7 @@ export const convertEn: ConvertMessages = {
   unavailableBody: (pair, venue) => `Today dpay converts ${pair} through ${venue} — and nothing else.`,
 
   amountLabel: sym => `Amount (${sym})`,
+  maxAmount: 'Max',
   balanceLine: balance => `Balance: ${balance}`,
   receiveHeadline: "You'll receive",
   counterparty: venue => `Executed by the ${venue} pool.`,
@@ -481,8 +487,9 @@ export const convertEn: ConvertMessages = {
 
   multihop: {
     destLabel: 'Destination',
-    destDirect: sym => `${sym} — in this wallet (direct swap)`,
-    destRoute: (sym, network) => `${sym} on ${network} — swap + cash-out route`,
+    destDirect: sym => `${sym} — in this wallet`,
+    destRoute: (sym, network) => `${sym} — to your ${network} address`,
+    routeHeadingCollapsed: (inSym, hopSym, network) => `Route: ${inSym} → ${hopSym} (to ${network})`,
     destAddressLabel: 'Your own address on the destination network',
     destAddressInvalid: 'Not a valid destination address — expected 0x followed by 40 hex characters.',
     routeHeading: (inSym, hopSym, destSym, network) => `Route: ${inSym} → ${hopSym} → ${destSym} on ${network}`,

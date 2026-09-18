@@ -17,6 +17,7 @@ export const convertDe: ConvertMessages = {
   unavailableBody: (pair, venue) => `Heute tauscht dpay ${pair} über ${venue} um — und nichts sonst.`,
 
   amountLabel: sym => `Betrag (${sym})`,
+  maxAmount: 'Max',
   balanceLine: balance => `Guthaben: ${balance}`,
   receiveHeadline: 'Du erhältst',
   counterparty: venue => `Ausgeführt vom ${venue}-Pool.`,
@@ -132,8 +133,9 @@ export const convertDe: ConvertMessages = {
 
   multihop: {
     destLabel: 'Ziel',
-    destDirect: sym => `${sym} — in dieser Wallet (direkter Tausch)`,
-    destRoute: (sym, network) => `${sym} auf ${network} — Tausch-und-Auszahlung-Route`,
+    destDirect: sym => `${sym} — in dieser Wallet`,
+    destRoute: (sym, network) => `${sym} — an deine ${network}-Adresse`,
+    routeHeadingCollapsed: (inSym, hopSym, network) => `Route: ${inSym} → ${hopSym} (nach ${network})`,
     destInWallet: sym => `${sym} — in dieser Wallet`,
     mechDirect: 'Direkter Pool',
     mechViaHub: hubSym => `Über ${hubSym}`,

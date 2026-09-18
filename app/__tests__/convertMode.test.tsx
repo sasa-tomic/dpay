@@ -1333,4 +1333,38 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(textOf(tree, 'convert-insufficient')).toBe(
       convertEn.multihop.insufficientHubLine(fmtAssetCompact('100030000', 8, 'VCHF'), fmtAssetCompact('100020000', 8, 'VCHF')));
   });
+
+  test('the cash-out route heading collapses when the hop IS the destination (F1)', async () => {
+    const CKUSDC_LEDGER = CATALOG.find(c => c.currency === 2)!.ledger!;
+    const cashOut = hubScreenRecord({
+      id: 'route-a-cashout', venueId: 'icpswap-ckusdc', venue2Id: undefined,
+      hopLedger: CKUSDC_LEDGER, hopSymbol: 'USDC', hopDecimals: 6,
+      destSymbol: 'USDC', destNetwork: 'Ethereum', gasSymbol: 'ETH', gasDecimals: 18,
+      step: 'pending_withdrawal',
+      legPlan: [
+        {kind: 'approve', canister: ICP_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'swap', canister: 'pool', fee: '', state: 'confirmed'},
+        {kind: 'approve', canister: CKUSDC_LEDGER, fee: '10000', state: 'confirmed'},
+        {kind: 'approve_gas', canister: CKETH_LEDGER, fee: '2000000000000', state: 'confirmed'},
+        {kind: 'withdraw_erc20', canister: 'minter', fee: '', state: 'pending'},
+      ],
+    });
+    jest.mocked(convertResumeSnapshot).mockReturnValue({[cashOut.id]: cashOut});
+    const tree = await mountConvert('250000000', null);
+    const flat = (c: unknown): string =>
+      Array.isArray(c) ? c.map(flat).join('') : typeof c === 'string' || typeof c === 'number' ? String(c) : '';
+    const texts = tree.root.findAllByType(Text).map(n => flat(n.props.children)).filter(s => s.length > 0);
+    expect(texts).toContain(convertEn.multihop.routeHeadingCollapsed('VCHF', 'USDC', 'Ethereum'));
+    expect(texts).not.toContain(convertEn.multihop.routeHeading('VCHF', 'USDC', 'USDC', 'Ethereum'));
+  });
+
+  test('Max fills the amount that survives the fee overhead (F4)', async () => {
+    jest.mocked(convertResumeSnapshot).mockReturnValue({}); // fresh form, no engine record
+    // 1 VCHF above the hub three-fee overhead → Max present; tapping fills exactly 1 VCHF.
+    const tree = await mountHub('100030000');
+    expect(present(tree, 'btn-convert-max')).toBe(true);
+    await act(async () => { node(tree, 'btn-convert-max')!.props.onPress(); });
+    expect(node(tree, 'convert-amount')!.props.value).toBe('1');
+    expect(present(tree, 'convert-insufficient')).toBe(false);
+  });
 });
