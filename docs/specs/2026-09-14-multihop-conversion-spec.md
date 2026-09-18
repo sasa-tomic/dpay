@@ -219,3 +219,62 @@ IC legs never re-signed) and the stalled-attestation dead-end.
 
 **Non-goals (updated):** WalletConnect in-session signing (above), Route B/C on the CeFi
 provider rail, buying the ckETH gas slice in-intent, per-leg manual re-sign, any dpay fee.
+
+## 11. IC hub 2-hop widening (2026-09-18)
+
+Any IC-mainnet pair converts as ONE user intent even without a direct pool, routed over ONE
+intermediate hub asset through TWO registered `ic_amm` venues — four device-signed legs
+(approve+swap on venue1, approve+swap on venue2). Where a hub route exists beside a direct
+one, BOTH are offered; the user picks (no ranking). The engine is Rust-core-free: this is the
+app-side widening (`app/routes.ts`, `app/convert.ts`, `app/config/convert.ts`), test-surfaced
+in `app/__tests__/convertHub.test.ts`.
+
+**Route search (`hubRoutes(catalog, fromLedger, toLedger?)` in `app/routes.ts`):** walks
+`registeredVenues()` — NOT a hardcoded hub — enumerating registry-graph 2-leg paths
+from → H → dest, where H is any IC mainnet catalog ledger ≠ from/dest carrying a non-testnet
+`ic_amm` venue on each side. Fail-closed exactly like `multihopRoutesFrom`: a row missing
+fee/decimals/symbol/network on ANY endpoint removes every route through it (ckBTC's `fee: null`
+catalog row is excluded by this rule today; it gains hub routes only when its row carries a
+fee). Registry order; deduped on `(venue1, hub, venue2)`; `routeId =
+hub:<venue1>:<hubCurrency>:<venue2>`. `HubRoute = {routeId, legs: [{venueId, pool, fromLedger,
+toLedger}, …], from, hub, dest}` with `HubEndpoint = {currency, ledger, symbol, decimals, fee,
+network}`. `resolveConvertDestinations(ledger, isTestnet)` in `app/config/convert.ts` returns
+each reachable dest with `routes: [direct?, …hub]` in registry order — offered, never ranked;
+`resolveConvertDirection` is unchanged for its existing callers.
+
+**Record widening (all fields OPTIONAL — every pre-existing record hydrates byte-identically):**
+`venue2Id`, `destLedger`, `destCurrency`, `destDecimals`, `destFee` (the dest ledger's own
+transfer fee = swap2's out fee), `expectedGross2` / `expectedNet2` / `feeMillionths2` (quote2's
+verbatim echo), `destTx` (the DEST-ledger payout row that confirmed swap2). The record's
+`out*`/`hop*` fields still name the HUB — the first watchable ledger — so `dest*` is
+strictly additive. `convertRecordMinOut(record, swapLeg = 1)` keeps ONE derivation rule per
+swap leg: leg 2 re-derives through the compiled core on `expectedGross2` — the compounding
+floor `minOut2 = quote2 on minOut1 × (1−slippage)`. Floors only, never expected gross.
+
+**State machine (`prepareHubConvertRecord` + generalized `executePlannedConvert`):** four legs
+signed in ONE pass with frozen args and one shared envExpiry + allowanceExpiryNs; legPlan
+`[approve, swap, approve, swap]`; step `approving`; NO destAddress (destination is the user's
+own principal on the dest ledger — funds never touch a dpay-controlled address). The executor
+follows the FIRST non-confirmed swap leg: swap1's payout row (hub ledger) confirms leg 2 and
+opens legs 3–4; swap2's payout row (dest ledger) is TERMINAL — `done` with the SEEN dest
+amount (never the expected) + `outTx = destTx`. Probe windows stay `[minOutᵢ .. expectedGrossᵢ]`
+per swap leg.
+
+**Failure taxonomy deltas (vs §4's Route A table):** swap1 refusal → `failed_refunded` /
+`swap_refused` (input never converted — unchanged); approve2 or swap2 refusal → `failed_leg`
+(the input already converted; the HUB asset is in-wallet and the standalone Withdraw flow is
+the exit) with `failureCode` `withdraw_refused` / `swap_refused` respectively — swap2 is NEVER
+`failed_refunded`. Unknown swap2 outcome parks `stuck` as usual. Expiry trichotomy (arm b) for
+hub records probes the DEST payout first (seen → `done` with the seen amount — the swap
+executed even if its envelope expired), then the HUB payout (seen → `failed_leg` — swap1 ran,
+swap2 dead), else `stuck`; the resume engine (`probeStuckOnce`) applies the same trichotomy.
+
+**Hydration quadrants:** a 4-leg `approve,swap,approve,swap` plan is a hub record and REQUIRES
+the full dest/venue2/quote2 fact set (fail-closed refusal otherwise — e.g. a swap2 without
+`destLedger`); `destAddress` is NOT required on it. Any other plan shape keeps the Route A
+rules verbatim (destAddress mandatory), so old single and Route A records stay byte-identical.
+
+**Non-goals (unchanged):** no dpay fee anywhere (each leg's quote stays attributed verbatim in
+the record; a composed rate may be DERIVED for display), no new signing surface (the same
+`icpApproveArg`/`icpDepositAndSwapArg` builders sign all four legs), identical-envelope
+discipline on recovery.
