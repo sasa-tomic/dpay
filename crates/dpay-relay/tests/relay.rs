@@ -44,8 +44,8 @@ use dpay_icp::envelope::{
 };
 use dpay_icp::icrc::{
     approve_arg, decode_approve_result, decode_legacy_transfer_result, decode_swap_result,
-    deposit_and_swap_arg, legacy_transfer_arg, transfer_arg, ApproveResult, LegacyTransferError,
-    LegacyTransferResult, PoolSwapError,
+    deposit_and_swap_arg, legacy_transfer_arg, transfer_arg, ApproveError, ApproveResult,
+    LegacyTransferError, LegacyTransferResult, PoolSwapError,
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{decode_read_state_tree, request_status, RequestStatus};
@@ -4797,6 +4797,23 @@ async fn set_swap_pool_knobs(state: &AppState, pool: &str, knobs: serde_json::Va
     assert_eq!(json["ok"], true);
 }
 
+/// POST a raw JSON test knob (e.g. `/api/v1/test/approve_fail`) and return the status + body
+/// WITHOUT asserting success — the knob tests assert the refusal shapes (400 named errors)
+/// themselves.
+async fn post_test_knob(
+    state: &AppState,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    call(state, req).await
+}
+
 fn swap_quote_uri(pool: &str, token_in: &str, token_out: &str, amount_in: u64) -> String {
     format!("/api/v1/swap_quote?pool={pool}&token_in={token_in}&token_out={token_out}&amount_in={amount_in}")
 }
@@ -5221,6 +5238,16 @@ fn swap_result_or_approve(outcome: &RequestStatus) -> ApproveCheck {
     }
 }
 
+/// The FULL ApproveResult a replied icrc2_approve outcome carries — the twin of
+/// [`swap_result`] for the approve side ([`swap_result_or_approve`] stays for the tests that
+/// only care about success).
+fn approve_result(outcome: RequestStatus) -> ApproveResult {
+    match outcome {
+        RequestStatus::Replied(arg) => decode_approve_result(&arg).expect("approve reply decodes"),
+        other => panic!("expected a replied outcome, got {other:?}"),
+    }
+}
+
 /// The pending_withdrawal knob (spec §4): with `fail_withdrawal` armed, a successful swap
 /// consumes the input and reserves but QUEUES the output — the reply is still ok(amountOut),
 /// the VCHF balance does NOT move. `settle_pending` is the resolution: the queue drains and
@@ -5275,11 +5302,97 @@ async fn fail_withdrawal_knob_queues_output_and_settle_resolves_it() {
     assert_eq!(u128::from(fake.balance_for(VCHF, &owner)), queued_out);
 }
 
-/// Allowances are EXPIRY-AWARE at every read (spec §3: expires_at is enforced, not recorded):
-/// an approval whose expiry already passed reads as zero and the pool refuses the pull —
-/// nothing moves.
+/// The 2026-09 expected_allowance bug, replayed at the fake: an approve arg claiming a
+/// NONZERO `expected_allowance` on a pair with no stored allowance is refused
+/// `AllowanceChanged { current_allowance: 0 }` — exactly what the real ic-icrc1-ledger
+/// replies (reference: `ic_ledger_core::approvals::AllowanceTable::approve`: expected must
+/// equal the EFFECTIVE allowance, which is 0 for a fresh pair). The app used to ship this
+/// shape; the real ledgers refused it on every first conversion while the offline fake waved
+/// it through. A refused approve stores nothing and charges nothing.
 #[tokio::test]
-async fn expired_allowance_blocks_the_swap() {
+async fn approve_with_mismatched_expected_allowance_refuses_allowance_changed() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
+    // The pre-fix app shape: expected_allowance set to the approve amount on a FRESH pair.
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        Some(100_000_000),
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert_eq!(
+        approve_result(outcome),
+        ApproveResult::Err(ApproveError::AllowanceChanged { current_allowance: 0 }),
+    );
+    assert_eq!(
+        fake.balance_for(ICP, &owner),
+        10_000_000_000,
+        "a refused approve charges nothing, not even its fee"
+    );
+}
+
+/// The approve-again shape: once an allowance is stored, an approve carrying
+/// `expected_allowance` EQUAL to the stored amount succeeds and replaces it — the race guard
+/// the real ledger runs, now enforced at the fake too.
+#[tokio::test]
+async fn approve_with_matching_expected_allowance_succeeds() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
+    // First approve, no expectation (the plain shape) — the allowance now reads 100_000_000.
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    swap_result_or_approve(&outcome);
+
+    // Second approve WITH the matching expectation — the real ledger accepts it.
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(50_000_000),
+        Some(100_000_000),
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    swap_result_or_approve(&outcome);
+    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 20_000);
+}
+
+/// `Some(0)` as the expectation on a fresh pair is LEGAL (effective 0 == expected 0), the
+/// same subtlety the reference implementation carries — but on a pair that already holds an
+/// allowance it refuses with the STORED amount. And the plain no-expectation approve — the
+/// shape every existing flow sends — keeps succeeding: the gate only fires on a MISMATCH.
+#[tokio::test]
+async fn approve_without_or_with_zero_expected_allowance_succeeds() {
     let (state, _led, fake) = state_with_fake(ledger()).await;
     let payer = keypair();
     let owner = user_principal(&pubkey(&payer));
@@ -5294,6 +5407,65 @@ async fn expired_allowance_blocks_the_swap() {
         &spender,
         Some(100_000_000),
         None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    swap_result_or_approve(&outcome);
+
+    // Now with Some(0) on the SAME pair: 0 != 100_000_000 → refused with the stored amount.
+    // (Zero expectations only pass while the effective allowance IS zero — the fresh-pair
+    // case, covered by the fresh-pair leg of the knob test's plain approvals.)
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        Some(0),
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert_eq!(
+        approve_result(outcome),
+        ApproveResult::Err(ApproveError::AllowanceChanged {
+            current_allowance: 100_000_000
+        }),
+    );
+    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 10_000);
+}
+
+/// Allowances are EXPIRY-AWARE at every read AND at approve time now — the real-ledger
+/// comparison is `expires_at <= now` (reference `ic_ledger_core::approvals`, which checks the
+/// arg's own expiry BEFORE it touches the allowance table):
+///  1. an approve whose `expires_at` is already past is refused `Expired { ledger_time }` —
+///     never stored, nothing charged (the OLD fake stored it and this test relied on that,
+///     hiding the real-ledger refusal from the offline loop);
+///  2. an allowance that expires AFTER being granted (via the `expire_allowance` time-travel
+///     seam — the fake clock is the host clock) reads as ZERO everywhere: the pool pull
+///     refuses, and a re-approve carrying the original amount as `expected_allowance` is
+///     refused `AllowanceChanged { current_allowance: 0 }` — the exact reply the app must
+///     handle as "approve fresh, don't top up".
+#[tokio::test]
+async fn expired_allowance_blocks_the_swap() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
+    // (1) An already-expired approve is refused Expired, exactly like the real ledger.
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
         Some(now_ns() - 1_000_000_000), // already expired
         None,
         None,
@@ -5301,17 +5473,137 @@ async fn expired_allowance_blocks_the_swap() {
     );
     let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
     assert!(matches!(
-        swap_result_or_approve(&outcome),
-        ApproveCheck::Approved
+        approve_result(outcome),
+        ApproveResult::Err(ApproveError::Expired { .. })
     ));
+    assert_eq!(
+        fake.balance_for(ICP, &owner),
+        10_000_000_000,
+        "a refused approve charges nothing, not even its fee"
+    );
+
+    // (2) Granted now, then expired by time-travel.
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    swap_result_or_approve(&outcome);
+
+    assert!(
+        fake.expire_allowance(ICP_LEDGER, &owner, &spender.owner),
+        "the granted allowance exists"
+    );
 
     let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
     let outcome = signed_call_outcome(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
     assert_eq!(swap_result(outcome), Err(PoolSwapError::InsufficientFunds));
-    // Only the two approve fees ever left (approve itself, then nothing): balance untouched by
-    // the refused swap — input, not even a partial leg, moved.
+
+    // The re-approve carrying the ORIGINAL amount as expected_allowance now refuses with the
+    // effective (expired → 0) allowance.
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        Some(100_000_000),
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert_eq!(
+        approve_result(outcome),
+        ApproveResult::Err(ApproveError::AllowanceChanged { current_allowance: 0 }),
+    );
+
+    // Input never moved beyond the ONE successful approve fee: the refused legs charge nothing.
     assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 10_000);
     assert_eq!(fake.balance_for(VCHF, &owner), 0);
+}
+
+/// The approve-failure knob (`POST /api/v1/test/approve_fail`): the armed refusals on a
+/// ledger reply `AllowanceChanged { current_allowance: 0 }` regardless of state, the knob is
+/// CONSUMED (the following approve succeeds again), and an unknown ledger is refused by name —
+/// the same named-refusal shape the swap-pool knobs make. The e2e/jest suites drive the same
+/// route to force the refusal class the happy path cannot produce on demand.
+#[tokio::test]
+async fn approve_fail_knob_forces_allowance_changed() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
+
+    // Shape: a knob without a ledger, and a knob on an unknown ledger, are refused by name.
+    let (status, json) =
+        post_test_knob(&state, "/api/v1/test/approve_fail", serde_json::json!({})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"], "ledger is required");
+    let (status, json) = post_test_knob(
+        &state,
+        "/api/v1/test/approve_fail",
+        serde_json::json!({ "ledger": "not-a-ledger" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"], "unknown_ledger");
+
+    // Arm ONE refusal on the ICP ledger; the next approve replies AllowanceChanged{0} even
+    // though the state would happily approve.
+    let (status, json) = post_test_knob(
+        &state,
+        "/api/v1/test/approve_fail",
+        serde_json::json!({ "ledger": ICP_LEDGER, "refusals": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["ok"], true);
+
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert_eq!(
+        approve_result(outcome),
+        ApproveResult::Err(ApproveError::AllowanceChanged { current_allowance: 0 }),
+    );
+    assert_eq!(
+        fake.balance_for(ICP, &owner),
+        10_000_000_000,
+        "the knob-forced refusal charges nothing"
+    );
+
+    // Consumed: the follow-up approve succeeds (and pays its fee).
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    swap_result_or_approve(&outcome);
+    assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 10_000);
 }
 
 /// The knobs shape the curve the pool itself serves: fee_millionths 0 quotes above the

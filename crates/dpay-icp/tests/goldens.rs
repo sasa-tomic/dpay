@@ -621,6 +621,36 @@ fn golden_decode_approve_results() {
 }
 
 #[test]
+fn golden_encode_approve_errors() {
+    // The two Err envelopes the fake-IC gateway emits for real-ledger approve semantics are
+    // pinned BYTE-FOR-BYTE against the same live-captured reply vectors the decoders read —
+    // encoder and decoder can never drift apart silently.
+    assert_eq!(
+        icrc::encode_approve_allowance_changed(5),
+        unhex(G_AR_ALLOWANCECHANGED),
+        "AllowanceChanged {{ current_allowance: 5 }}"
+    );
+    assert_eq!(
+        icrc::encode_approve_expired(EXPIRY + 99),
+        unhex(G_AR_EXPIRED),
+        "Expired {{ ledger_time: EXPIRY + 99 }}"
+    );
+    // Round-trip at the extremes: every encoder output decodes back through the rail decoder.
+    assert_eq!(
+        icrc::decode_approve_result(&icrc::encode_approve_allowance_changed(u128::MAX)).unwrap(),
+        ApproveResult::Err(ApproveError::AllowanceChanged {
+            current_allowance: u128::MAX
+        }),
+    );
+    assert_eq!(
+        icrc::decode_approve_result(&icrc::encode_approve_expired(u64::MAX)).unwrap(),
+        ApproveResult::Err(ApproveError::Expired {
+            ledger_time: u64::MAX
+        }),
+    );
+}
+
+#[test]
 fn golden_decode_int_replies() {
     // every integer prim the ICRC-1 read methods can return, plus signed edge cases
     let cases: [(&str, i128); 13] = [

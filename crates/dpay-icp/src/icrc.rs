@@ -1369,6 +1369,28 @@ pub fn encode_approve_ok(block_index: u64) -> Vec<u8> {
     out
 }
 
+/// Reply bytes for `Err(ApproveError::AllowanceChanged { current_allowance })` — the ICRC-2
+/// refusal a real ledger replies when `expected_allowance` does not match the effective
+/// allowance. Field index 4 of the ApproveError variant in hash order (the same order the
+/// table's type 1 declares), payload `record { current_allowance: nat }` = uleb.
+pub fn encode_approve_allowance_changed(current_allowance: u128) -> Vec<u8> {
+    let mut out = APPROVE_REPLY_TABLE.to_vec();
+    out.extend_from_slice(&[0x01, 0x00, 0x01, 0x04]);
+    out.extend_from_slice(&uleb_bytes(current_allowance));
+    out
+}
+
+/// Reply bytes for `Err(ApproveError::Expired { ledger_time })` — the ICRC-2 refusal a real
+/// ledger replies when the approve's `expires_at` is not in the future relative to ledger
+/// time. Field index 7 of the ApproveError variant in hash order, payload
+/// `record { ledger_time: nat64 }` = 8-byte LE (the same record shape `CreatedInFuture` shares).
+pub fn encode_approve_expired(ledger_time: u64) -> Vec<u8> {
+    let mut out = APPROVE_REPLY_TABLE.to_vec();
+    out.extend_from_slice(&[0x01, 0x00, 0x01, 0x07]);
+    out.extend_from_slice(&ledger_time.to_le_bytes());
+    out
+}
+
 /// Reply bytes for the minter retrieve/withdraw `Ok({block_index})` results — one shared
 /// table (production candid 0.10.22): variant Ok of a record with a nat64 block_index.
 pub fn encode_minter_ok(block_index: u64) -> Vec<u8> {

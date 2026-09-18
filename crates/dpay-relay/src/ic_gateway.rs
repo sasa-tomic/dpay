@@ -35,7 +35,8 @@ use dpay_icp::envelope::verify_envelope;
 use dpay_icp::icrc::{
     decode_account_arg, decode_approve_arg, decode_deposit_and_swap_arg,
     decode_legacy_transfer_arg, decode_minter_account_arg, decode_retrieve_btc_arg,
-    decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg, encode_approve_ok,
+    decode_transfer_arg, decode_withdraw_erc20_arg, decode_withdraw_eth_arg,
+    encode_approve_allowance_changed, encode_approve_expired, encode_approve_ok,
     encode_eip1559_price, encode_legacy_transfer_bad_fee,
     encode_legacy_transfer_insufficient_funds, encode_legacy_transfer_ok, encode_minter_ok,
     encode_nat8_reply, encode_nat_reply, encode_swap_result_err, encode_swap_result_ok,
@@ -109,6 +110,12 @@ struct FakeIcState {
     /// (the knob handler refuses everything else), and the whole knob exists only in the
     /// offline test build.
     served_fixture_venues: std::collections::HashSet<String>,
+    /// TEST KNOB (2026-09 approve semantics): ledger text → how many more `icrc2_approve`
+    /// calls on that ledger reply `AllowanceChanged { current_allowance: 0 }` regardless of
+    /// state (`POST /api/v1/test/approve_fail`; 0 = disarmed). The fake's stand-in for the
+    /// real-ledger refusal class the happy path cannot produce on demand — a stale/raced
+    /// approval expectation — which the offline fake used to wave straight through.
+    approve_fail: HashMap<String, u32>,
     requests: HashMap<[u8; 32], RequestState>,
     txns: Vec<FakeTxn>,
     next_block: u64,
@@ -363,6 +370,39 @@ impl FakeIc {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(rid, polls);
+    }
+
+    /// Test seam armer (see `FakeIcState::approve_fail`): force the next `refusals`
+    /// `icrc2_approve` calls on `ledger` to reply `AllowanceChanged { current_allowance: 0 }`
+    /// (`refusals: 0` disarms). `false` when `ledger` is not a seeded stub — the route refuses
+    /// unknown ledgers by name, exactly like the swap-pool knobs refuse unknown pools.
+    pub fn arm_approve_fail(&self, ledger: &str, refusals: u32) -> bool {
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if !s.ledgers.contains_key(ledger) {
+            return false;
+        }
+        s.approve_fail.insert(ledger.to_string(), refusals);
+        true
+    }
+
+    /// Test seam: force the STORED expiry of one allowance into the past — the time-travel the
+    /// fake clock cannot do (it is the host's real clock), reaching the "granted, then
+    /// expired" state an expired `icrc2_approve` can no longer create (the fake now refuses
+    /// those at approve time, like the real ledger). `false` when no allowance is stored for
+    /// the (ledger, from, spender) pair.
+    pub fn expire_allowance(&self, ledger: &str, from: &Principal, spender: &Principal) -> bool {
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let key = (
+            (ledger.to_string(), (from.to_text(), [0u8; 32])),
+            (spender.to_text(), [0u8; 32]),
+        );
+        match s.allowances.get_mut(&key) {
+            Some(slot) => {
+                *slot = (slot.0, Some(now_ns().saturating_sub(1)));
+                true
+            }
+            None => false,
+        }
     }
 
     /// Per-currency balance map for an account across the catalog's ledgers (relay `/balances`).
@@ -768,6 +808,20 @@ impl FakeIc {
     }
 
     /// `icrc2_approve`: pay the (optional) fee, record the allowance for the named spender.
+    ///
+    /// Enforces the two ICRC-2 refusals a real ledger runs before storing — same check order
+    /// and same comparison directions as the reference implementation the mainnet
+    /// ic-icrc1-ledger wasm runs (`ic_ledger_core::approvals::AllowanceTable::approve`,
+    /// dfinity/ic `rs/ledger_suite/common/ledger_core/src/approvals.rs`):
+    ///   1. an `expires_at` at-or-before ledger now is refused `Expired { ledger_time }` — the
+    ///      reference compares `expires_at <= now` (an absent expiry is "remote future");
+    ///   2. an `expected_allowance` that differs from the EFFECTIVE allowance is refused
+    ///      `AllowanceChanged { current_allowance }`, where the effective allowance is the
+    ///      stored amount, or 0 when there is no entry or its expiry has passed. `Some(0)`
+    ///      on a fresh pair is legal (0 == 0), exactly as on the real ledger.
+    /// Ignoring both is what let the app ship an approve arg that refused on every real first
+    /// conversion while the offline fake waved it through (the 2026-09 expected_allowance bug):
+    /// the fake must tell the truth so the tests can see this class of bug.
     fn icrc2_approve(
         s: &mut FakeIcState,
         canister: &str,
@@ -787,13 +841,21 @@ impl FakeIc {
                 message: "malformed icrc2_approve arg".into(),
             };
         };
-        let fee = arg.fee.unwrap_or(0);
+        // TEST KNOB (POST /api/v1/test/approve_fail): the next armed refusals on this ledger
+        // reply AllowanceChanged{0} regardless of state — see `FakeIcState::approve_fail`.
+        if s.approve_fail.get(canister).copied().unwrap_or(0) > 0 {
+            *s.approve_fail.get_mut(canister).unwrap() -= 1;
+            return RequestState::Replied(encode_approve_allowance_changed(0));
+        }
         let ApproveArg {
             from_subaccount,
             spender,
             amount,
+            expected_allowance,
+            expires_at_ns,
             ..
         } = arg;
+        let fee = arg.fee.unwrap_or(0);
         let from = (
             canister.to_string(),
             (sender.to_text(), from_subaccount.unwrap_or([0u8; 32])),
@@ -807,13 +869,24 @@ impl FakeIc {
         if bal < fee {
             return RequestState::Replied(encode_transfer_insufficient_funds(bal));
         }
+        // Real-ledger order: the arg's own expiry is checked BEFORE the allowance table is
+        // touched (the reference returns ExpiredApproval before it reads the stored entry).
+        if let Some(expires_at) = expires_at_ns {
+            if expires_at <= now_ns() {
+                return RequestState::Replied(encode_approve_expired(now_ns()));
+            }
+        }
+        let akey = (from.clone(), account_owner(&spender));
+        let (effective, _) = effective_allowance(s, &akey);
+        if let Some(expected) = expected_allowance {
+            if expected != effective {
+                return RequestState::Replied(encode_approve_allowance_changed(effective));
+            }
+        }
         if fee > 0 {
             *s.balances.entry(from.clone()).or_insert(0) -= fee;
         }
-        s.allowances.insert(
-            (from, account_owner(&spender)),
-            (amount.unwrap_or(0), arg.expires_at_ns),
-        );
+        s.allowances.insert(akey, (amount.unwrap_or(0), expires_at_ns));
         RequestState::Replied(encode_approve_ok(block))
     }
 

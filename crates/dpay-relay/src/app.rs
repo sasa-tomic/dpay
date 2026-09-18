@@ -429,6 +429,12 @@ pub fn app(state: AppState) -> Router {
     // its resolution (`settle_pending`). See `FakeIc::set_swap_pool_knobs`.
     #[cfg(feature = "test-helpers")]
     let api = api.route("/test/swap_pool", axum::routing::post(test_swap_pool));
+    // Test seam for the fake-IC ledger's approve refusals (2026-09 approve semantics): arm
+    // "the next N icrc2_approve calls on this ledger reply AllowanceChanged" — the
+    // ledger-refusal class the happy-path fake cannot produce on demand otherwise. See
+    // `FakeIcState::approve_fail`.
+    #[cfg(feature = "test-helpers")]
+    let api = api.route("/test/approve_fail", axum::routing::post(test_approve_fail));
     // Test seam for the two-venue chooser world (multi-venue readiness V5): arm/disarm SERVING
     // a `test_helpers_served` fixture venue from GET /api/v1/venues. OFFLINE test build only —
     // the agent (prod) build has no knob at all, so it structurally can never serve an
@@ -889,6 +895,34 @@ async fn test_swap_pool(State(state): State<AppState>, Json(req): Json<SwapPoolK
         req.settle_pending,
     ) {
         return err(StatusCode::BAD_REQUEST, "unknown_pool");
+    }
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/test/approve_fail` JSON `{ledger, refusals?}` → `{ok: true}` (test-helpers
+/// only) — the fake-IC ledger's approve-refusal knob: the next `refusals` (default 1, capped
+/// at 64) `icrc2_approve` calls on THAT ledger reply `AllowanceChanged { current_allowance: 0 }`
+/// regardless of state. Stands in for the real-ledger refusal class (stale/raced approval
+/// expectation) the happy-path fake could never produce on demand — the class the 2026-09
+/// expected_allowance bug hid. `refusals: 0` disarms. An unknown `ledger` is a 400
+/// `unknown_ledger`, same named refusal the swap-pool knobs make.
+#[cfg(feature = "test-helpers")]
+async fn test_approve_fail(
+    State(state): State<AppState>,
+    Json(req): Json<ApproveFailKnob>,
+) -> Response {
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fake-IC gateway not attached",
+        );
+    };
+    let Some(ledger) = req.ledger.as_deref() else {
+        return err(StatusCode::BAD_REQUEST, "ledger is required");
+    };
+    let refusals = req.refusals.unwrap_or(1).min(64);
+    if !fake.arm_approve_fail(ledger, refusals) {
+        return err(StatusCode::BAD_REQUEST, "unknown_ledger");
     }
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
@@ -2298,6 +2332,20 @@ struct SwapPoolKnobs {
     /// `true` = drain the queued outputs now (the pending_withdrawal resolution).
     #[serde(default)]
     settle_pending: bool,
+}
+
+/// Body for `POST /api/v1/test/approve_fail` (test-helpers only) — the fake-IC ledger's
+/// approve-refusal knob.
+#[cfg(feature = "test-helpers")]
+#[derive(Deserialize)]
+struct ApproveFailKnob {
+    /// WHICH ledger the knob targets, by principal text — required (the gateway hosts one
+    /// ledger per catalog currency; a silent default could land on the wrong one).
+    ledger: Option<String>,
+    /// How many subsequent `icrc2_approve` calls on that ledger are refused with
+    /// `AllowanceChanged { current_allowance: 0 }`. Default 1, capped at 64; 0 disarms.
+    #[serde(default)]
+    refusals: Option<u32>,
 }
 
 /// Body for `POST /api/v1/test/venue` (offline test build only) — the venue-serving knob of
