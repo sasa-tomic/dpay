@@ -191,3 +191,85 @@ export function multihopRoutesFrom(
   }
   return routes;
 }
+
+// --- IC hub 2-hop routes (2026-09-18 widening of the multihop spec) ---------------------------------
+
+/** One leg of a hub route: the registered venue that executes it and the ledger pair it
+ *  trades, ordered along the route's direction. The pool is the venue's endpoint — the
+ *  prepare step re-proves endpoint === quoted pool before anything signs. */
+export type HubLeg = {venueId: string; pool: string; fromLedger: string; toLedger: string};
+
+/** One IC-mainnet endpoint of a hub route: every number the leg args and the record's
+ *  fail-closed bookkeeping need, straight from the catalog row. */
+export type HubEndpoint = {
+  currency: number;
+  ledger: string;
+  symbol: string;
+  decimals: number;
+  fee: string;
+  network: string;
+};
+
+/** A 2-leg IC-mainnet route from → hub → dest over TWO registered ic_amm venues: any IC
+ *  mainnet catalog ledger H ≠ from/dest with a non-testnet ic_amm venue on each side.
+ *  NOTHING here hardcodes a hub — the walk finds hubs in the registry itself (today that
+ *  is ICP; a second asset becomes a hub the moment a venue pairs it twice). No ranking:
+ *  where a 2-hop path exists beside a direct pair, both are simply offered. */
+export type HubRoute = {
+  routeId: string;
+  legs: [HubLeg, HubLeg];
+  from: HubEndpoint;
+  hub: HubEndpoint;
+  dest: HubEndpoint;
+};
+
+function hubEndpointOf(catalog: CurrencyDescriptor[], ledger: string): HubEndpoint | null {
+  const row = catalog.find(c => c.ledger === ledger && !c.testnet);
+  if (row == null || row.fee == null || row.decimals == null || row.network == null) return null;
+  const symbol = symbolOf(row);
+  if (symbol == null) return null; // a leg that cannot be NAMED cannot be shown — fail closed
+  return {currency: row.currency, ledger: row.ledger, symbol, decimals: row.decimals, fee: row.fee, network: row.network};
+}
+
+/** Every 2-leg IC-mainnet hub route from `fromLedger` (optionally narrowed to one
+ *  `toLedger`). Same posture as multihopRoutesFrom: walk the registry (ic_amm, non-testnet,
+ *  registry order), fail closed on any missing number (fee/decimals/symbol/network) on any
+ *  of the three rows — a route whose legs cannot be priced is not a route — and dedupe on
+ *  (venue1, hub, venue2). Each v1 pairs `from` with exactly one hub, so order is
+ *  deterministic: v1 outer, v2 inner. */
+export function hubRoutes(
+  catalog: CurrencyDescriptor[],
+  fromLedger: string,
+  toLedger?: string,
+): HubRoute[] {
+  const from = hubEndpointOf(catalog, fromLedger);
+  if (from == null) return [];
+  const routes: HubRoute[] = [];
+  const seen = new Set<string>();
+  for (const v1 of registeredVenues()) {
+    if (v1.kind !== 'ic_amm' || v1.testnet || !v1.pair_ledgers.includes(fromLedger)) continue;
+    const hubLedger = v1.pair_ledgers.find(l => l !== fromLedger);
+    if (hubLedger == null) continue;
+    const hub = hubEndpointOf(catalog, hubLedger);
+    if (hub == null) continue;
+    for (const v2 of registeredVenues()) {
+      if (v2.kind !== 'ic_amm' || v2.testnet || !v2.pair_ledgers.includes(hubLedger)) continue;
+      const destLedger = v2.pair_ledgers.find(l => l !== hubLedger);
+      if (destLedger == null || destLedger === fromLedger) continue;
+      const dest = hubEndpointOf(catalog, destLedger);
+      if (dest == null) continue;
+      const key = `${v1.venue_id}:${hubLedger}:${v2.venue_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      routes.push({
+        routeId: `hub:${v1.venue_id}:${hub.currency}:${v2.venue_id}`,
+        legs: [
+          {venueId: v1.venue_id, pool: v1.endpoint, fromLedger, toLedger: hubLedger},
+          {venueId: v2.venue_id, pool: v2.endpoint, fromLedger: hubLedger, toLedger: destLedger},
+        ],
+        from, hub, dest,
+      });
+    }
+  }
+  return toLedger == null ? routes : routes.filter(r => r.dest.ledger === toLedger);
+}
