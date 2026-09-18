@@ -212,8 +212,9 @@ export type HubEndpoint = {
 
 /** A 2-leg IC-mainnet route from → hub → dest over TWO registered ic_amm venues: any IC
  *  mainnet catalog ledger H ≠ from/dest with a non-testnet ic_amm venue on each side.
- *  NOTHING here hardcodes a hub — the walk finds hubs in the registry itself (today that
- *  is ICP; a second asset becomes a hub the moment a venue pairs it twice). No ranking:
+ *  NOTHING here hardcodes a hub — the walk finds hubs in the registry itself (today ICP
+ *  and — since the ckBTC row carried the measured ledger fee, 2026-09-18 — ckBTC; a
+ *  further asset becomes a hub the moment a venue pairs it twice). No ranking:
  *  where a 2-hop path exists beside a direct pair, both are simply offered. */
 export type HubRoute = {
   routeId: string;

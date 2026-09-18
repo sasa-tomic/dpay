@@ -170,11 +170,12 @@ function mockRows(byCurrency: Record<number, unknown[]>): void {
 }
 
 describe('hubRoutes — the pure registry walk (no hardcoded hub)', () => {
-  test('VCHF reaches exactly THREE hub routes: two over ICP, one over the ckUSDC hub', () => {
+  test('VCHF reaches exactly FOUR hub routes: three over ICP, one over the ckUSDC hub', () => {
     const routes = hubRoutes(BUNDLED, VCHF_LEDGER);
     expect(routes.map(r => r.routeId)).toEqual([
       `hub:icpswap:8:icpswap-ckusdc`, // VCHF → ICP → ckUSDC
       `hub:icpswap:8:icpswap-cketh`, // VCHF → ICP → ckETH
+      `hub:icpswap:8:icpswap-ckbtc`, // VCHF → ICP → ckBTC (admitted by the MEASURED 2026-09-18 ckBTC fee)
       `hub:icpswap-vchf-ckusdc:2:icpswap-ckusdc`, // VCHF → ckUSDC → ICP (ckUSDC IS a real hub — the VCHF↔ckUSDC pool is registered)
     ]);
     const r = routes[1];
@@ -187,30 +188,43 @@ describe('hubRoutes — the pure registry walk (no hardcoded hub)', () => {
     expect(r.dest).toEqual({currency: 6, ledger: CKETH_LEDGER, symbol: 'ETH', decimals: 18, fee: '2000000000000', network: 'Ethereum'});
   });
 
-  test('ckUSDC reaches THREE hub routes — ICP is a hub on BOTH sides, VCHF becomes one too', () => {
+  test('ckUSDC reaches FOUR hub routes — ICP is a hub on BOTH sides, VCHF becomes one too', () => {
     const routes = hubRoutes(BUNDLED, CKUSDC_LEDGER);
     expect(routes.map(r => r.routeId)).toEqual([
       'hub:icpswap-ckusdc:8:icpswap', // ckUSDC → ICP → VCHF
       'hub:icpswap-ckusdc:8:icpswap-cketh', // ckUSDC → ICP → ckETH
+      'hub:icpswap-ckusdc:8:icpswap-ckbtc', // ckUSDC → ICP → ckBTC (admitted by the MEASURED 2026-09-18 ckBTC fee)
       'hub:icpswap-vchf-ckusdc:7:icpswap', // ckUSDC → VCHF → ICP
     ]);
   });
 
-  test('ICP itself walks back over TWO hubs (VCHF and ckUSDC) — the walk is symmetric', () => {
+  test('ICP itself walks back over FOUR hubs (VCHF, ckUSDC, ckETH, ckBTC) — the walk is symmetric', () => {
     const routes = hubRoutes(BUNDLED, ICP_LEDGER);
     expect(routes.map(r => r.routeId)).toEqual([
       'hub:icpswap:7:icpswap-vchf-ckusdc', // ICP → VCHF → ckUSDC
       'hub:icpswap-ckusdc:2:icpswap-vchf-ckusdc', // ICP → ckUSDC → VCHF
+      'hub:icpswap-cketh:6:icpswap-ckbtc-cketh', // ICP → ckETH → ckBTC
+      'hub:icpswap-ckbtc:1:icpswap-ckbtc-cketh', // ICP → ckBTC → ckETH (ckBTC IS a hub — two venues pair it)
     ]);
   });
 
-  test('ckBTC-involving routes FAIL CLOSED: the bundled catalog carries no ckBTC fee yet', () => {
-    // ckBTC's row is fee:null today — a leg that cannot be priced is not a route. The venue
-    // icpswap-ckbtc exists, so this is the catalog's honesty gate, not a registry gap; the
-    // walk picks ckBTC routes up the moment its row carries a fee (no code change).
-    expect(hubRoutes(BUNDLED, CKBTC_LEDGER)).toEqual([]);
-    expect(hubRoutes(BUNDLED, CKUSDC_LEDGER, CKBTC_LEDGER)).toEqual([]);
-    expect(hubRoutes(BUNDLED, VCHF_LEDGER, CKBTC_LEDGER)).toEqual([]);
+  test('ckBTC composes hub routes once its row carries the MEASURED fee (2026-09-18 icrc1_fee → 10)', () => {
+    // The venue icpswap-ckbtc existed all along; the row's fee:null was the catalog's honesty
+    // gate, and the walk picks ckBTC up the moment the fee lands — exactly the no-code-change
+    // pick-up the old fail-closed test promised. No hardcoded hub: ckBTC routes over ICP AND
+    // composes ckBTC itself as a hub (two venues pair it).
+    expect(hubRoutes(BUNDLED, CKBTC_LEDGER).map(r => r.routeId)).toEqual([
+      'hub:icpswap-ckbtc:8:icpswap', // ckBTC → ICP → VCHF
+      'hub:icpswap-ckbtc:8:icpswap-ckusdc', // ckBTC → ICP → ckUSDC
+      'hub:icpswap-ckbtc:8:icpswap-cketh', // ckBTC → ICP → ckETH
+      'hub:icpswap-ckbtc-cketh:6:icpswap-cketh', // ckBTC → ckETH → ICP
+    ]);
+    expect(hubRoutes(BUNDLED, VCHF_LEDGER, CKBTC_LEDGER).map(r => r.routeId)).toEqual([
+      'hub:icpswap:8:icpswap-ckbtc', // VCHF → ICP → ckBTC
+    ]);
+    expect(hubRoutes(BUNDLED, CKUSDC_LEDGER, CKBTC_LEDGER).map(r => r.routeId)).toEqual([
+      'hub:icpswap-ckusdc:8:icpswap-ckbtc', // ckUSDC → ICP → ckBTC
+    ]);
   });
 
   test('VEUR gets NO routes (no venue pairs it) and DEMO gets none (fee null on the row)', () => {
@@ -244,25 +258,28 @@ describe('hubRoutes — the pure registry walk (no hardcoded hub)', () => {
 
   test('a catalog row missing fee/symbol/network on ANY of the three legs fails the route closed', () => {
     // The descriptor type admits only string fees/networks, but the RUNTIME rows carry
-    // nulls (ckBTC's fee IS null today) — the strip writes through that honesty gap.
+    // nulls (DEMO's fee is null by design — faucet asset) — the strip writes through that
+    // honesty gap. ckBTC's fee, once pinned, strips the same way: the gate is structural.
     const strip = (currency: number, over: Record<string, unknown>) =>
       BUNDLED.map(c => (c.currency === currency ? {...c, ...over} : c)) as CurrencyDescriptor[];
     // hub unpriceable / unnamed:
     expect(hubRoutes(strip(8, {fee: null}), VCHF_LEDGER)).toEqual([]);
     expect(hubRoutes(strip(8, {backing_symbol: null, symbol: null}), VCHF_LEDGER)).toEqual([]);
-    // dest unpriceable / unplaceable: the ckETH-dest route drops; ckUSDC and ICP remain
-    // (the ckUSDC-hub route's DEST is ICP itself).
-    expect(hubRoutes(strip(6, {fee: null}), VCHF_LEDGER).map(r => r.dest.currency)).toEqual([2, 8]);
-    expect(hubRoutes(strip(6, {network: null}), VCHF_LEDGER).map(r => r.dest.currency)).toEqual([2, 8]);
+    // dest unpriceable / unplaceable: the ckETH-dest route drops; ckUSDC, ckBTC and ICP
+    // remain (the ckUSDC-hub route's DEST is ICP itself).
+    expect(hubRoutes(strip(6, {fee: null}), VCHF_LEDGER).map(r => r.dest.currency)).toEqual([2, 1, 8]);
+    expect(hubRoutes(strip(6, {network: null}), VCHF_LEDGER).map(r => r.dest.currency)).toEqual([2, 1, 8]);
     // the FROM row missing its fee → no routes at all:
     expect(hubRoutes(strip(7, {fee: null}), VCHF_LEDGER)).toEqual([]);
+    // and stripping ckBTC's own fee again closes exactly the routes the pin opened:
+    expect(hubRoutes(strip(1, {fee: null}), VCHF_LEDGER).map(r => r.dest.currency)).toEqual([2, 6, 8]);
   });
 });
 
 describe('resolveConvertDestinations — the widened Convert-entry enumeration', () => {
-  test('VCHF: two direct destinations, both gain hub routes, ckETH is hub-only', () => {
+  test('VCHF: two direct destinations, both gain hub routes, ckETH and ckBTC are hub-only', () => {
     const dests = resolveConvertDestinations(VCHF_LEDGER, false);
-    expect(dests.map(d => d.destLedger)).toEqual([ICP_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER]);
+    expect(dests.map(d => d.destLedger)).toEqual([ICP_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER, CKBTC_LEDGER]);
     // Direct FIRST, then the hub alternative — offered, never ranked. ICP itself is reachable
     // over the ckUSDC hub (the direct VCHF↔ICP pool beside it).
     expect(dests[0].routes).toEqual([
@@ -276,15 +293,19 @@ describe('resolveConvertDestinations — the widened Convert-entry enumeration',
     expect(dests[2].routes).toEqual([
       {kind: 'hub', routeId: 'hub:icpswap:8:icpswap-cketh', venue1Id: 'icpswap', venue2Id: 'icpswap-cketh', hubLedger: ICP_LEDGER},
     ]);
+    // ckBTC — hub-only (no venue pairs VCHF with it directly), admitted by the MEASURED
+    // 2026-09-18 fee on its row.
+    expect(dests[3].routes).toEqual([
+      {kind: 'hub', routeId: 'hub:icpswap:8:icpswap-ckbtc', venue1Id: 'icpswap', venue2Id: 'icpswap-ckbtc', hubLedger: ICP_LEDGER},
+    ]);
   });
 
   test('ICP keeps every direct pair and gains hub alternatives beside the direct ones', () => {
     const dests = resolveConvertDestinations(ICP_LEDGER, false);
-    // Registry order: icpswap (VCHF) is the FIRST venue pairing ICP, so VCHF leads.
-    // ckBTC is NOT a destination: its catalog row carries fee:null, and a destination the
-    // catalog cannot fully price is not offered (fail-closed, same bar as hubRoutes' own
-    // endpoints) — the icpswap-ckbtc venue yields nothing.
-    expect(dests.map(d => d.destLedger)).toEqual([VCHF_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER]);
+    // Registry order: icpswap (VCHF) is the FIRST venue pairing ICP, so VCHF leads; ckBTC
+    // trails (icpswap-ckbtc is the fourth pairing venue), admitted once its row carried the
+    // measured fee.
+    expect(dests.map(d => d.destLedger)).toEqual([VCHF_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER, CKBTC_LEDGER]);
     // VCHF: direct + hub over ckUSDC. ckUSDC: direct + hub over VCHF. Each destination lists
     // direct first, then hub — offered, never ranked.
     expect(dests[0].routes).toEqual([
@@ -295,7 +316,16 @@ describe('resolveConvertDestinations — the widened Convert-entry enumeration',
       {kind: 'direct', venueId: 'icpswap-ckusdc'},
       {kind: 'hub', routeId: 'hub:icpswap:7:icpswap-vchf-ckusdc', venue1Id: 'icpswap', venue2Id: 'icpswap-vchf-ckusdc', hubLedger: VCHF_LEDGER},
     ]);
-    expect(dests.some(d => d.destLedger === CKBTC_LEDGER)).toBe(false); // fee:null — never offered
+    // ckETH: direct + a hub alternative over the ckBTC hub (ICP → ckBTC → ckETH).
+    expect(dests[2].routes).toEqual([
+      {kind: 'direct', venueId: 'icpswap-cketh'},
+      {kind: 'hub', routeId: 'hub:icpswap-ckbtc:1:icpswap-ckbtc-cketh', venue1Id: 'icpswap-ckbtc', venue2Id: 'icpswap-ckbtc-cketh', hubLedger: CKBTC_LEDGER},
+    ]);
+    // ckBTC: DIRECT (icpswap-ckbtc) + a hub alternative over ckETH (ICP → ckETH → ckBTC).
+    expect(dests[3].routes).toEqual([
+      {kind: 'direct', venueId: 'icpswap-ckbtc'},
+      {kind: 'hub', routeId: 'hub:icpswap-cketh:6:icpswap-ckbtc-cketh', venue1Id: 'icpswap-cketh', venue2Id: 'icpswap-ckbtc-cketh', hubLedger: CKETH_LEDGER},
+    ]);
   });
 
   test('testnet rows and unregistered assets get NOTHING (same posture as resolveConvertDirection)', () => {

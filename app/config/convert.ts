@@ -166,10 +166,11 @@ export function resolveConvertDestinations(
     if (i < 0) continue;
     const other = venue.pair_ledgers[i === 0 ? 1 : 0];
     // Fail closed on the counter-row too: a destination the catalog cannot fully price
-    // (no row, a fee-less row like ckBTC, missing decimals or symbol) is not a
-    // destination this build offers. hubRoutes' own endpoints already fail closed this
-    // way (app/routes.ts hubEndpointOf) — the direct side must hold the same bar, or a
-    // ckBTC venue would offer a destination every downstream surface refuses to price.
+    // (no row, a fee-less row, missing decimals or symbol) is not a destination this
+    // build offers. hubRoutes' own endpoints already fail closed this way (app/routes.ts
+    // hubEndpointOf) — the direct side must hold the same bar, or a venue would offer a
+    // destination every downstream surface refuses to price. (ckBTC sat behind this gate
+    // on its null fee until the MEASURED 2026-09-18 icrc1_fee → 10 landed on the row.)
     const otherRow = catalog.find(c => c.ledger === other && !c.testnet);
     if (otherRow == null || otherRow.fee == null || otherRow.decimals == null
       || (otherRow.backing_symbol ?? otherRow.symbol) == null) continue;

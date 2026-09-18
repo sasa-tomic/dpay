@@ -1376,9 +1376,13 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(present(tree, 'convert-dest')).toBe(true);
     // ckETH's own direct pair (icpswap-cketh → ICP) stays the standing row…
     expect(present(tree, 'convert-dest-direct')).toBe(true);
-    // …and the hub-only destinations (ckUSDC, VCHF — reachable only through the ICP hub,
-    // no direct venue pairs them with ckETH) render as plain in-wallet rows (D2).
+    // …the hub-only destinations (ckUSDC, VCHF — reachable only through the ICP hub,
+    // no direct venue pairs them with ckETH) render as plain in-wallet rows (D2)…
     expect(present(tree, 'convert-dest-inwallet-2')).toBe(true);
     expect(present(tree, 'convert-dest-inwallet-7')).toBe(true);
+    // …and ckBTC is a NEW destination beside them (its row carries the MEASURED 2026-09-18
+    // fee): a DIRECT pair (icpswap-ckbtc-cketh), rendered as a second in-wallet row — the
+    // standing `convert-dest-direct` slot stays with ICP, the first direct destination.
+    expect(present(tree, 'convert-dest-inwallet-1')).toBe(true);
   });
 });
