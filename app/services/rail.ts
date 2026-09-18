@@ -416,11 +416,12 @@ export type OfframpStep = {ledger: string; envelopeHex: string; requestIdHex: st
  * `variant { Ok(nat) }`. Decoded by the platform core (dpay-icp `decode_minter_ok`, single
  * source — the same Rust knowledge that ENCODES the frozen reply shape in the e2e fake gateway
  * via `encode_minter_ok`), exposed as DpayCore.icpDecodeMinterOk on BOTH rails (UniFFI on
- * Android, wasm on web). The approve steps on the LEDGERS are DELIBERATELY decoded
- * transfer-shaped and go through `icpDecodeTransferResult` (dpay-icp's dedicated
- * `decode_approve_result` intentionally does not cross the bridge — smaller ABI surface, and
- * the ledger's approve replies carry the same variant names); a reply that matches NEITHER
- * shape throws (caller surfaces it). */
+ * Android, wasm on web). The approve steps on the LEDGERS decode through
+ * `icpDecodeApproveResult` (dpay-icp's dedicated `decode_approve_result`, both rails):
+ * ApproveError carries variants the transfer table cannot read (`AllowanceChanged`,
+ * `Expired`), and a transfer-shaped decode of an approve refusal THREW on those labels —
+ * the 2026-09-19 live defect that left every first conversion spinning on Approving.
+ * A reply that matches NEITHER shape throws (caller surfaces it). */
 async function decodeMinterReply(replyArgHex: string): Promise<RailReplyOutcome> {
   return DpayCore.icpDecodeMinterOk(replyArgHex);
 }

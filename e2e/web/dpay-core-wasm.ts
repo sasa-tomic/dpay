@@ -772,6 +772,17 @@ async function icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutco
   return jsonOut(ex, len, out, 'icp_decode_transfer_result') as IcpTransferOutcomeOut;
 }
 
+/** The icrc2_approve reply — same outcome shape; ApproveError carries approve-only variants
+ *  (AllowanceChanged, Expired) the transfer decoder cannot read. */
+async function icpDecodeApproveResult(argHex: string): Promise<IcpTransferOutcomeOut> {
+  const ex = await core();
+  const arg = hex(argHex);
+  const argP = put(ex, arg);
+  const out = outBuf(ex, ICP_JSON_CAP, 'icp_decode_approve_result');
+  const len = ex.w_icp_decode_approve_result(argP, arg.length, out, ICP_JSON_CAP);
+  return jsonOut(ex, len, out, 'icp_decode_approve_result') as IcpTransferOutcomeOut;
+}
+
 /** The pull's reply — same outcome shape, plus `InsufficientAllowance`, the one failure only a
  *  pull can have (its detail is the allowance the ledger actually holds). */
 async function icpDecodeTransferFromResult(argHex: string): Promise<IcpTransferOutcomeOut> {
@@ -890,6 +901,7 @@ export const DpayCore = {
   icpDecodeQuery,
   icpDecodeReadState,
   icpDecodeTransferResult,
+  icpDecodeApproveResult,
   icpDecodeTransferFromResult,
   icpDecodeMinterOk,
   icpDecodeInt,

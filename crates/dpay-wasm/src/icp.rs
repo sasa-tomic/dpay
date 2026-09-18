@@ -20,11 +20,13 @@ use dpay_icp::envelope::{
 };
 use dpay_icp::icrc::{
     approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
+    decode_approve_result as icrc_decode_approve_result,
     decode_legacy_transfer_result as icrc_decode_legacy_transfer_result,
     decode_minter_ok as icrc_decode_minter_ok,
     decode_transfer_result as icrc_decode_transfer_result,
     legacy_transfer_arg as icrc_legacy_transfer_arg, transfer_arg as icrc_transfer_arg,
-    LegacyTransferError, LegacyTransferResult, PoolSwapError, TransferError, TransferResult,
+    ApproveError, ApproveResult, LegacyTransferError, LegacyTransferResult, PoolSwapError,
+    TransferError, TransferResult,
 };
 use dpay_icp::principal::{Account, AccountIdentifier, Principal};
 use dpay_icp::reply::{
@@ -965,6 +967,52 @@ pub extern "C" fn w_icp_decode_transfer_result(arg_ptr: u32, arg_len: u32, out_p
         }
     }
     write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+/// Decode an `icrc2_approve` reply — the APPROVE's outcome, same compact JSON shape as
+/// `w_icp_decode_transfer_result` so the JS shim marshals both identically. `ApproveError`
+/// carries variants the transfer table lacks (`AllowanceChanged`, `Expired`); a
+/// transfer-shaped decode of an approve refusal THREW on those labels — the 2026-09-19
+/// live defect that left every first conversion spinning on Approving.
+#[no_mangle]
+pub extern "C" fn w_icp_decode_approve_result(arg_ptr: u32, arg_len: u32, out_ptr: u32, cap: u32) -> u32 {
+    if !in_bounds(arg_ptr, arg_len) || arg_len > 512 {
+        return BAD_LEN;
+    }
+    let arg = unsafe { slice_at(arg_ptr, arg_len) };
+    let result = match icrc_decode_approve_result(arg) {
+        Ok(r) => r,
+        Err(_) => return BAD_UTF8,
+    };
+    let mut json = String::with_capacity(96);
+    match result {
+        ApproveResult::Ok(idx) => {
+            json.push_str(&format!("{{\"ok\":true,\"blockIndex\":\"{idx}\"}}"));
+        }
+        ApproveResult::Err(e) => {
+            let (variant, detail) = approve_error_parts(&e);
+            json.push_str("{\"ok\":false,\"errVariant\":");
+            push_json_str(variant, &mut json);
+            json.push_str(",\"errDetail\":");
+            push_json_str(&detail, &mut json);
+            json.push('}');
+        }
+    }
+    write_str_out(json.as_bytes(), out_ptr, cap)
+}
+
+fn approve_error_parts(e: &ApproveError) -> (&'static str, String) {
+    match e {
+        ApproveError::BadFee { expected_fee } => ("BadFee", expected_fee.to_string()),
+        ApproveError::InsufficientFunds { balance } => ("InsufficientFunds", balance.to_string()),
+        ApproveError::AllowanceChanged { current_allowance } => ("AllowanceChanged", current_allowance.to_string()),
+        ApproveError::Expired { ledger_time } => ("Expired", ledger_time.to_string()),
+        ApproveError::CreatedInFuture { ledger_time } => ("CreatedInFuture", ledger_time.to_string()),
+        ApproveError::Duplicate { duplicate_of } => ("Duplicate", duplicate_of.to_string()),
+        ApproveError::TemporarilyUnavailable => ("TemporarilyUnavailable", String::new()),
+        ApproveError::TooOld => ("TooOld", String::new()),
+        ApproveError::GenericError { error_code, message } => ("GenericError", format!("{error_code}: {message}")),
+    }
 }
 
 /// Decode an `icrc2_transfer_from` reply — the PULL's outcome, in the SAME compact JSON shape the

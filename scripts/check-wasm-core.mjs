@@ -338,7 +338,8 @@ for (const c of CASES) {
     'w_icp_decode_text', 'w_icp_decode_eip1559_price',
     'w_icp_sign_update', 'w_icp_sign_query', 'w_icp_sign_read_state',
     'w_icp_envelope_request_id', 'w_icp_decode_query', 'w_icp_decode_read_state',
-    'w_icp_decode_transfer_result', 'w_icp_decode_minter_ok', 'w_icp_decode_int',
+    'w_icp_decode_transfer_result', 'w_icp_decode_approve_result', 'w_icp_decode_minter_ok',
+    'w_icp_decode_int',
     // Send-to-address destination parsing + the ICP-ledger-only legacy `transfer` path (the only
     // way to pay a 64-hex account identifier — see AccountIdentifier in crates/dpay-icp).
     'w_icp_validate_icrc_account', 'w_icp_validate_account_id', 'w_icp_account_id_from_principal',
@@ -635,6 +636,29 @@ for (const c of CASES) {
     decodeSwap(golden('G_SWAP_RESULT_OK').slice(0, -2))[0] === 2);
   check('w_icp_decode_swap_result(oob arg_ptr) == BAD_LEN(1)',
     ex.w_icp_decode_swap_result(0xffff0000, 32, ex.w_alloc(CAP), CAP) === 1);
+
+  // The APPROVE's own reply — ApproveError carries variants the transfer table cannot read
+  // (AllowanceChanged/Expired); a transfer-shaped decode of an approve refusal THREW on those
+  // labels (the 2026-09-19 live defect that left every first conversion spinning on Approving).
+  // Goldens straight from the Rust single source (crates/dpay-icp/tests/goldens.rs).
+  const decodeApprove = hexStr => {
+    const bytes = fromHex(hexStr);
+    const out = ex.w_alloc(CAP);
+    const n = ex.w_icp_decode_approve_result(writeBytes(bytes), bytes.length, out, CAP);
+    return [n, n > 3 ? readStr(out, n) : ''];
+  };
+  const approveCases = [
+    ['G_AR_OK', {ok: true, blockIndex: '7'}],
+    ['G_AR_ALLOWANCECHANGED', {ok: false, errVariant: 'AllowanceChanged', errDetail: '5'}],
+  ];
+  for (const [name, want] of approveCases) {
+    const [n, s] = decodeApprove(golden(name));
+    check(`w_icp_decode_approve_result(${name}) == ${JSON.stringify(want)}`,
+      n > 3 && canon(JSON.parse(s)) === canon(want), `n=${n} s=${s}`);
+  }
+  check('w_icp_decode_approve_result(G_AR_EXPIRED) carries the Expired variant',
+    (() => { const [n, s] = decodeApprove(golden('G_AR_EXPIRED')); return n > 3 && JSON.parse(s).errVariant === 'Expired'; })());
+  check('w_icp_decode_approve_result(non-DIDL garbage) == BAD_UTF8(2)', decodeApprove('deadbeef')[0] === 2);
 }
 
 // --- w_till_open_sig / w_till_open_sig_note: the ring-up proof, against the Rust-emitted golden -

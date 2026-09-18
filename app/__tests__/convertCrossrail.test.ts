@@ -25,6 +25,7 @@ jest.mock('../services/native', () => ({
     icpWithdrawErc20Arg: jest.fn(),
     icpSignUpdate: jest.fn(),
     icpDecodeSwapResult: jest.fn(),
+    icpDecodeApproveResult: jest.fn(),
     icpDecodeMinterOk: jest.fn(),
   },
   sha256: jest.fn(),

@@ -16,6 +16,7 @@ jest.mock('../services/native', () => ({
     icpSwapMinOut: jest.fn(),
     icpApproveArg: jest.fn(),
     icpDepositAndSwapArg: jest.fn(),
+    icpDecodeApproveResult: jest.fn(),
     icpSignUpdate: jest.fn(),
     icpPrincipalFromPubkey: jest.fn(),
   },
@@ -636,7 +637,7 @@ describe('hydrateConvertStore — the dpay.convert.v2 record round-trip', () => 
 });
 
 describe('prepareConvertRecord — both envelopes built + signed exactly once, up front', () => {
-  test('approve amount = amountIn + input fee, expected_allowance present; legs die at the envelopes\' OWN ingress expiry', async () => {
+  test('approve amount = amountIn + input fee, expected_allowance ABSENT; legs die at the envelopes\' OWN ingress expiry', async () => {
     jest.mocked(icStampExpiry).mockResolvedValue('1700000000000000000' as never);
     jest.mocked(DpayCore.icpApproveArg).mockResolvedValue('approve-arg-hex' as never);
     jest.mocked(DpayCore.icpDepositAndSwapArg).mockResolvedValue('swap-arg-hex' as never);
@@ -646,7 +647,9 @@ describe('prepareConvertRecord — both envelopes built + signed exactly once, u
     const math = await deriveConvertMath(quote(), '10000', '10000', 100);
     const rec = await prepareConvertRecord({secretHex: 'sec', relayUrl: 'http://r', quote: quote(), math, inDesc: ICP_DESC, outDesc: VCHF_DESC});
     expect(DpayCore.icpApproveArg).toHaveBeenCalledWith(
-      POOL, '', '', '100010000', '100010000', '1700000000000000000', '', '10000',
+      // expected_allowance stays ABSENT: ICRC-2 compares it with the CURRENT allowance, so any
+      // value here refuses with AllowanceChanged — the first-ever approve included (2026-09-19).
+      POOL, '', '', '100010000', '', '1700000000000000000', '', '10000',
     );
     expect(DpayCore.icpDepositAndSwapArg).toHaveBeenCalledWith('100000000', '188000000', '10000', '10000', true);
     expect(DpayCore.icpSignUpdate).toHaveBeenCalledWith('sec', ICP_DESC.ledger, 'icrc2_approve', 'approve-arg-hex', '1700000000000000000');

@@ -842,6 +842,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // For large crates we prevent `MethodTooLargeException` (see #2340)
 // N.B. the name of the extension is very misleading, since it is 
 // rather `InterfaceTooLargeException`, caused by too many methods 
@@ -870,6 +872,8 @@ fun uniffi_dpay_ffi_checksum_func_icp_account_id_from_principal(
 fun uniffi_dpay_ffi_checksum_func_icp_approve_arg(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_balance_of_arg(
+): Short
+fun uniffi_dpay_ffi_checksum_func_icp_decode_approve_result(
 ): Short
 fun uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price(
 ): Short
@@ -1087,6 +1091,8 @@ fun uniffi_dpay_ffi_fn_func_icp_account_id_from_principal(`ownerText`: RustBuffe
 fun uniffi_dpay_ffi_fn_func_icp_approve_arg(`spenderOwnerText`: RustBuffer.ByValue,`spenderSubaccountHex`: RustBuffer.ByValue,`fromSubaccountHex`: RustBuffer.ByValue,`amount`: RustBuffer.ByValue,`expectedAllowance`: RustBuffer.ByValue,`expiresAtNs`: RustBuffer.ByValue,`memoHex`: RustBuffer.ByValue,`fee`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_balance_of_arg(`ownerText`: RustBuffer.ByValue,`subaccountHex`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+fun uniffi_dpay_ffi_fn_func_icp_decode_approve_result(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 fun uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price(`arg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1311,6 +1317,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_approve_result() != 28477.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price() != 39786.toShort()) {
@@ -3806,6 +3815,26 @@ public object FfiConverterSequenceTypeIcpRequestStatus: FfiConverterRustBuffer<L
     uniffiRustCallWithError(DpayException) { _status ->
     UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_balance_of_arg(
         FfiConverterString.lower(`ownerText`),FfiConverterOptionalString.lower(`subaccountHex`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Decode an `icrc2_approve` reply — the APPROVE's outcome, flattened to the SAME
+         * `IcpTransferOutcome` the transfer decoder produces, so a caller handles one shape. The
+         * transfer decoder CANNOT read these replies: `ApproveError` carries variants its table
+         * does not know (`AllowanceChanged`, `Expired`) and an unknown label makes it THROW —
+         * which is how a refused approve used to die as an endless Approving spinner (2026-09-19
+         * live defect: the real ledgers refuse with AllowanceChanged, the fake gateway never did).
+         * `Duplicate` keeps its own tag — an identical approval already exists, the caller treats
+         * it as settled by the same rule as a transfer replay.
+         */
+    @Throws(DpayException::class) fun `icpDecodeApproveResult`(`arg`: kotlin.ByteArray): IcpTransferOutcome {
+            return FfiConverterTypeIcpTransferOutcome.lift(
+    uniffiRustCallWithError(DpayException) { _status ->
+    UniffiLib.INSTANCE.uniffi_dpay_ffi_fn_func_icp_decode_approve_result(
+        FfiConverterByteArray.lower(`arg`),_status)
 }
     )
     }

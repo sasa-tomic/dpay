@@ -474,6 +474,8 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg() != 1118:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_dpay_ffi_checksum_func_icp_decode_approve_result() != 28477:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price() != 39786:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_dpay_ffi_checksum_func_icp_decode_int() != 39665:
@@ -852,6 +854,11 @@ _UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_balance_of_arg.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_approve_result.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_approve_result.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_eip1559_price.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1394,6 +1401,9 @@ _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_approve_arg.restype = ctypes.c_uint
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_balance_of_arg.restype = ctypes.c_uint16
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_approve_result.argtypes = (
+)
+_UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_approve_result.restype = ctypes.c_uint16
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price.argtypes = (
 )
 _UniffiLib.uniffi_dpay_ffi_checksum_func_icp_decode_eip1559_price.restype = ctypes.c_uint16
@@ -3610,6 +3620,24 @@ def icp_balance_of_arg(owner_text: "str",subaccount_hex: "typing.Optional[str]")
         _UniffiConverterOptionalString.lower(subaccount_hex)))
 
 
+def icp_decode_approve_result(arg: "bytes") -> "IcpTransferOutcome":
+    """
+    Decode an `icrc2_approve` reply — the APPROVE's outcome, flattened to the SAME
+    `IcpTransferOutcome` the transfer decoder produces, so a caller handles one shape. The
+    transfer decoder CANNOT read these replies: `ApproveError` carries variants its table
+    does not know (`AllowanceChanged`, `Expired`) and an unknown label makes it THROW —
+    which is how a refused approve used to die as an endless Approving spinner (2026-09-19
+    live defect: the real ledgers refuse with AllowanceChanged, the fake gateway never did).
+    `Duplicate` keeps its own tag — an identical approval already exists, the caller treats
+    it as settled by the same rule as a transfer replay.
+    """
+
+    _UniffiConverterBytes.check_lower(arg)
+    
+    return _UniffiConverterTypeIcpTransferOutcome.lift(_uniffi_rust_call_with_error(_UniffiConverterTypeDpayError,_UniffiLib.uniffi_dpay_ffi_fn_func_icp_decode_approve_result,
+        _UniffiConverterBytes.lower(arg)))
+
+
 def icp_decode_eip1559_price(arg: "bytes") -> "IcpEip1559Price":
     _UniffiConverterBytes.check_lower(arg)
     
@@ -4304,6 +4332,7 @@ __all__ = [
     "icp_account_id_from_principal",
     "icp_approve_arg",
     "icp_balance_of_arg",
+    "icp_decode_approve_result",
     "icp_decode_eip1559_price",
     "icp_decode_int",
     "icp_decode_legacy_transfer_result",

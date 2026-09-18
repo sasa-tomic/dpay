@@ -20,6 +20,7 @@ jest.mock('../services/native', () => ({
     icpSignUpdate: jest.fn(),
     icpPrincipalFromPubkey: jest.fn(),
     icpDecodeSwapResult: jest.fn(),
+    icpDecodeApproveResult: jest.fn(),
     icpDecodeMinterOk: jest.fn(),
   },
 }));
@@ -214,8 +215,9 @@ describe('prepareMultihopConvertRecord — one intent, five legs, signed once up
     await plannedRecord();
     const approve = jest.mocked(DpayCore.icpApproveArg).mock.calls;
     expect(approve).toHaveLength(3);
-    // Leg 1 — pool pull: amountIn + input fee, expected_allowance + allowance expiry (convert shape).
-    expect(approve[0]).toEqual([POOL, '', '', '100010000', '100010000', STAMP_NS, '', '10000']);
+    // Leg 1 — pool pull: amountIn + input fee + allowance expiry; expected_allowance ABSENT
+    // (ICRC-2 compares it with the CURRENT allowance — any value refuses AllowanceChanged).
+    expect(approve[0]).toEqual([POOL, '', '', '100010000', '', STAMP_NS, '', '10000']);
     // Leg 3 — burn approval on ckUSDC: min-out, minter shape (no expected allowance, no expiry).
     expect(approve[1]).toEqual([MINTER, '', '', '188100000', '', '', '', '10000']);
     // Leg 4 — gas approval on ckETH: the minter's live gas figure + the gas ledger's own fee.

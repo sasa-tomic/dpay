@@ -502,6 +502,19 @@ class DpayCoreModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /** Decode an icrc2_approve reply — the APPROVE's outcome in the shared IcpTransferOutcome
+     *  shape. ApproveError carries variants the transfer decoder cannot read (AllowanceChanged,
+     *  Expired); decoding an approve refusal transfer-shaped THREW on those labels and left a
+     *  conversion spinning on Approving (the 2026-09-19 live defect). */
+    @ReactMethod
+    fun icpDecodeApproveResult(argHex: String, promise: Promise) {
+        try {
+            promise.resolve(transferOutcomeMap(uniffi.dpay_ffi.icpDecodeApproveResult(unhex(argHex))))
+        } catch (e: Throwable) {
+            promise.reject("dpay_core", e)
+        }
+    }
+
     /** DIDL arg for icrc1_balance_of (signed-query balance rail). */
     @ReactMethod
     fun icpBalanceOfArg(ownerText: String, subaccountHex: String, promise: Promise) {

@@ -22,6 +22,7 @@ jest.mock('../services/native', () => ({
     icpSignUpdate: jest.fn(),
     icpPrincipalFromPubkey: jest.fn(),
     icpDecodeSwapResult: jest.fn(),
+    icpDecodeApproveResult: jest.fn(),
     icpDecodeMinterOk: jest.fn(),
   },
 }));
@@ -380,11 +381,12 @@ describe('prepareHubConvertRecord — one intent, four legs, signed once up fron
     await hubRecord();
     const approve = jest.mocked(DpayCore.icpApproveArg).mock.calls;
     expect(approve).toHaveLength(2);
-    // Leg 1 — pool pull on VCHF: amountIn + the from ledger's fee (convert shape).
-    expect(approve[0]).toEqual([POOL1, '', '', '100010000', '100010000', STAMP_NS, '', '10000']);
+    // Leg 1 — pool pull on VCHF: amountIn + the from ledger's fee; expected_allowance ABSENT
+    // (ICRC-2 compares it with the CURRENT allowance — any value refuses AllowanceChanged).
+    expect(approve[0]).toEqual([POOL1, '', '', '100010000', '', STAMP_NS, '', '10000']);
     // Leg 3 — pool pull on ICP: the HUB FLOOR (minOut1) + the hub ledger's fee. swap2 pulls
     // whatever swap1's floor delivers, so the allowance is sized on the floor, never the gross.
-    expect(approve[1]).toEqual([POOL2, '', '', '118810000', '118810000', STAMP_NS, '', '10000']);
+    expect(approve[1]).toEqual([POOL2, '', '', '118810000', '', STAMP_NS, '', '10000']);
     expect(jest.mocked(DpayCore.icpDepositAndSwapArg).mock.calls).toEqual([
       ['100000000', '118800000', '10000', '10000', true], // swap1: in=1 VCHF, min=minOut1, fees VCHF→ICP
       ['118800000', '2970000000000', '10000', '2000000000000', false], // swap2: in=minOut1, min=minOut2 (its OWN floor), fees ICP→ckETH

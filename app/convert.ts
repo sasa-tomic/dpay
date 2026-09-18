@@ -1205,8 +1205,12 @@ export async function prepareConvertRecord(args: {
   // The approve amount covers the swap pull AND the ledger's own approve fee (caller-side rule).
   const approveAmount = (BigInt(amountIn) + BigInt(math.inFee)).toString();
   const allowanceExpiryNs = await icStampExpiry(secretHex, CONVERT_APPROVE_LIFETIME_S);
+  // expected_allowance stays ABSENT: ICRC-2 compares it with the CURRENT allowance, so any
+  // value here refuses with AllowanceChanged whenever it differs — the first-ever approve
+  // included (current 0 ≠ amount): every conversion on a real ledger (2026-09-19 live defect;
+  // the fake gateway ignored the field, which is why offline never saw it).
   const approveArgHex = await DpayCore.icpApproveArg(
-    pool, '', '', approveAmount, approveAmount, allowanceExpiryNs, '', math.inFee,
+    pool, '', '', approveAmount, '', allowanceExpiryNs, '', math.inFee,
   );
   const swapArgHex = await DpayCore.icpDepositAndSwapArg(
     amountIn, math.minOut, math.inFee, math.outFee, quote.zeroForOne,
@@ -1436,8 +1440,9 @@ export async function prepareMultihopConvertRecord(args: {
   const expiresAtMs = Number(BigInt(envExpiry) / 1_000_000n);
 
   // Legs 1–2: the direct flow's exact approve+swap pair (spender/pull semantics identical).
+  // Same absent expected_allowance rule as the direct flow above.
   const approveInArgHex = await DpayCore.icpApproveArg(
-    pool, '', '', approveAmount, approveAmount, allowanceExpiryNs, '', math.inFee,
+    pool, '', '', approveAmount, '', allowanceExpiryNs, '', math.inFee,
   );
   const approveInSigned = await DpayCore.icpSignUpdate(secretHex, route.from.ledger, 'icrc2_approve', approveInArgHex, envExpiry);
   const swapArgHex = await DpayCore.icpDepositAndSwapArg(
@@ -1572,7 +1577,7 @@ export async function prepareHubConvertRecord(args: {
 
   // Legs 1–2: the direct flow's exact approve+swap pair, on route leg 1.
   const approve1ArgHex = await DpayCore.icpApproveArg(
-    route.legs[0].pool, '', '', approve1Amount, approve1Amount, allowanceExpiryNs, '', math1.inFee,
+    route.legs[0].pool, '', '', approve1Amount, '', allowanceExpiryNs, '', math1.inFee,
   );
   const approve1Signed = await DpayCore.icpSignUpdate(secretHex, route.from.ledger, 'icrc2_approve', approve1ArgHex, envExpiry);
   const swap1ArgHex = await DpayCore.icpDepositAndSwapArg(
@@ -1582,7 +1587,7 @@ export async function prepareHubConvertRecord(args: {
   // Legs 3–4: the same pair again, on route leg 2 — pool-pull approve shape (the hub floor
   // is spendable by venue2's pool), then swap2 with its own compounding floor.
   const approve2ArgHex = await DpayCore.icpApproveArg(
-    route.legs[1].pool, '', '', approve2Amount, approve2Amount, allowanceExpiryNs, '', route.hub.fee,
+    route.legs[1].pool, '', '', approve2Amount, '', allowanceExpiryNs, '', route.hub.fee,
   );
   const approve2Signed = await DpayCore.icpSignUpdate(secretHex, route.hub.ledger, 'icrc2_approve', approve2ArgHex, envExpiry);
   const swap2ArgHex = await DpayCore.icpDepositAndSwapArg(
@@ -2108,13 +2113,18 @@ async function executePlannedConvert(
     const decodeReply: ((replyArgHex: string) => Promise<{ok: boolean; errVariant?: string; errDetail?: string}>) | undefined =
       plan.kind === 'swap'
         ? (h: string) => DpayCore.icpDecodeSwapResult(h)
-        : plan.kind === 'withdraw_erc20'
-          ? async (h: string) => {
-              const out = await DpayCore.icpDecodeMinterOk(h);
-              if (out.ok && out.blockIndex != null) legBlockIndex = out.blockIndex;
-              return out;
-            }
-          : undefined;
+        : plan.kind === 'approve'
+          // ApproveError carries variants the transfer decoder cannot read (AllowanceChanged,
+          // Expired) — a transfer-shaped decode of an approve refusal THREW on those labels,
+          // which is how a refused approve used to die as an endless Approving spinner.
+          ? (h: string) => DpayCore.icpDecodeApproveResult(h)
+          : plan.kind === 'withdraw_erc20'
+            ? async (h: string) => {
+                const out = await DpayCore.icpDecodeMinterOk(h);
+                if (out.ok && out.blockIndex != null) legBlockIndex = out.blockIndex;
+                return out;
+              }
+            : undefined;
     const outcome = await tools.submitEnvelope(leg.canister, leg.envelopeHex, leg.requestIdHex, decodeReply);
     if (outcome === 'unknown') {
       // Bytes submitted, outcome unknowable: park stuck. The plan keeps the leg at `sent`
@@ -2298,7 +2308,8 @@ export async function executeConvert(
     // name was known only here — record it against the leg's request id hex (the per-leg nonce;
     // the row-memo join where the venue ledger echoes one). Best-effort by contract.
     void saveTxNote(deps.publicHex, {k: rec.legs[0].requestIdHex, who: venueDisplayName(rec.venueId)}, nowMs);
-    const outcome = await submitEnvelope(rec.legs[0].canister, rec.legs[0].envelopeHex, rec.legs[0].requestIdHex);
+    const outcome = await submitEnvelope(rec.legs[0].canister, rec.legs[0].envelopeHex, rec.legs[0].requestIdHex,
+      (replyArgHex: string) => DpayCore.icpDecodeApproveResult(replyArgHex));
     if (outcome === 'settled') {
       rec = await advance({...rec, step: 'approved'});
     } else if (outcome === 'unknown') {

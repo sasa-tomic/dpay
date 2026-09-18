@@ -16,8 +16,10 @@ use crate::DpayError;
 use dpay_icp::envelope::{ingress_expiry as icp_ingress_expiry_ns, sign_query, sign_read_state, sign_update, CallRequest};
 use dpay_icp::icrc::{
     approve_arg as icrc_approve_arg, balance_of_arg as icrc_balance_of_arg,
+    decode_approve_result as icrc_decode_approve_result,
     decode_transfer_result as icrc_decode_transfer_result, transfer_arg as icrc_transfer_arg,
-    transfer_from_arg as icrc_transfer_from_arg, TransferError, TransferResult,
+    transfer_from_arg as icrc_transfer_from_arg, ApproveError, ApproveResult, TransferError,
+    TransferResult,
 };
 use dpay_icp::principal::{Account, Principal};
 use dpay_icp::reply::{decode_query_response, decode_read_state_tree, read_state_time, request_status, QueryOutcome, RequestStatus as RailStatus};
@@ -711,6 +713,39 @@ pub fn icp_decode_transfer_result(arg: Vec<u8>) -> Result<IcpTransferOutcome, Dp
     }
 }
 
+fn approve_error_parts(e: &ApproveError) -> (&'static str, String) {
+    match e {
+        ApproveError::BadFee { expected_fee } => ("BadFee", expected_fee.to_string()),
+        ApproveError::InsufficientFunds { balance } => ("InsufficientFunds", balance.to_string()),
+        ApproveError::AllowanceChanged { current_allowance } => ("AllowanceChanged", current_allowance.to_string()),
+        ApproveError::Expired { ledger_time } => ("Expired", ledger_time.to_string()),
+        ApproveError::CreatedInFuture { ledger_time } => ("CreatedInFuture", ledger_time.to_string()),
+        ApproveError::Duplicate { duplicate_of } => ("Duplicate", duplicate_of.to_string()),
+        ApproveError::TemporarilyUnavailable => ("TemporarilyUnavailable", "ledger temporarily unavailable".into()),
+        ApproveError::TooOld => ("TooOld", String::new()),
+        ApproveError::GenericError { error_code, message } => ("GenericError", format!("[{error_code}] {message}")),
+    }
+}
+
+/// Decode an `icrc2_approve` reply — the APPROVE's outcome, flattened to the SAME
+/// `IcpTransferOutcome` the transfer decoder produces, so a caller handles one shape. The
+/// transfer decoder CANNOT read these replies: `ApproveError` carries variants its table
+/// does not know (`AllowanceChanged`, `Expired`) and an unknown label makes it THROW —
+/// which is how a refused approve used to die as an endless Approving spinner (2026-09-19
+/// live defect: the real ledgers refuse with AllowanceChanged, the fake gateway never did).
+/// `Duplicate` keeps its own tag — an identical approval already exists, the caller treats
+/// it as settled by the same rule as a transfer replay.
+#[uniffi::export]
+pub fn icp_decode_approve_result(arg: Vec<u8>) -> Result<IcpTransferOutcome, DpayError> {
+    match icrc_decode_approve_result(&arg).map_err(bad)? {
+        ApproveResult::Ok(idx) => Ok(IcpTransferOutcome { ok: true, block_index: Some(idx.to_string()), err_variant: String::new(), err_detail: String::new() }),
+        ApproveResult::Err(e) => {
+            let (variant, detail) = approve_error_parts(&e);
+            Ok(IcpTransferOutcome { ok: false, block_index: None, err_variant: variant.into(), err_detail: detail })
+        }
+    }
+}
+
 /// Decode an `icrc2_transfer_from` reply — the PULL's outcome.
 ///
 /// Flattens to the SAME `IcpTransferOutcome` the other two decoders produce, so a caller handles
@@ -1023,6 +1058,26 @@ mod tests {
         let arg = icp_balance_of_arg(owner, Some("00".repeat(32))).unwrap();
         assert!(!arg.is_empty());
         let _ = hex(&arg);
+    }
+
+    #[test]
+    fn approve_result_decodes() {
+        // Approve replies need their OWN decoder: ApproveError carries variants the transfer
+        // table cannot read (AllowanceChanged/Expired — a transfer-shaped decode THREW on
+        // those labels, the 2026-09-19 live defect that spun every first conversion).
+        let out = icp_decode_approve_result(dpay_icp::icrc::encode_approve_ok(77)).unwrap();
+        assert!(out.ok);
+        assert_eq!(out.block_index.as_deref(), Some("77"));
+        let out = icp_decode_approve_result(dpay_icp::icrc::encode_approve_allowance_changed(5)).unwrap();
+        assert!(!out.ok);
+        assert_eq!(out.err_variant, "AllowanceChanged");
+        assert_eq!(out.err_detail, "5");
+        let out = icp_decode_approve_result(dpay_icp::icrc::encode_approve_expired(1_234)).unwrap();
+        assert!(!out.ok);
+        assert_eq!(out.err_variant, "Expired");
+        assert_eq!(out.err_detail, "1234");
+        // Non-DIDL bytes are a typed error, same as the transfer decoder.
+        assert!(icp_decode_approve_result(b"not DIDL".to_vec()).is_err());
     }
 
     #[test]

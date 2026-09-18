@@ -200,6 +200,9 @@ export type DpayCoreApi = {
   icpDecodeQuery(bodyHex: string): Promise<IcpQueryReply>;
   icpDecodeReadState(bodyHex: string, requestIdsHex: string[]): Promise<IcpStateRead>;
   icpDecodeTransferResult(argHex: string): Promise<IcpTransferOutcome>;
+  /** icrc2_approve reply — same outcome shape; ApproveError carries approve-only variants
+   *  (AllowanceChanged, Expired) the transfer decoder cannot read. */
+  icpDecodeApproveResult(argHex: string): Promise<IcpTransferOutcome>;
   /** The pull's reply — same outcome shape, plus `InsufficientAllowance`: the payer approved less
    *  than the charge needs, or their approval has expired (an ICRC-2 ledger reports both as an
    *  allowance, and the detail carries the number it actually holds). */
