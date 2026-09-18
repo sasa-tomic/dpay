@@ -166,8 +166,13 @@ export function resolveConvertDestinations(
     if (i < 0) continue;
     const other = venue.pair_ledgers[i === 0 ? 1 : 0];
     // Fail closed on the counter-row too: a destination the catalog cannot fully price
-    // (e.g. a fee-less row) is not a destination this build offers.
-    if (!catalog.some(c => c.ledger === other && !c.testnet)) continue;
+    // (no row, a fee-less row like ckBTC, missing decimals or symbol) is not a
+    // destination this build offers. hubRoutes' own endpoints already fail closed this
+    // way (app/routes.ts hubEndpointOf) — the direct side must hold the same bar, or a
+    // ckBTC venue would offer a destination every downstream surface refuses to price.
+    const otherRow = catalog.find(c => c.ledger === other && !c.testnet);
+    if (otherRow == null || otherRow.fee == null || otherRow.decimals == null
+      || (otherRow.backing_symbol ?? otherRow.symbol) == null) continue;
     push(other, {kind: 'direct', venueId: venue.venue_id});
   }
   for (const hr of hubRoutes(catalog, ledger)) {

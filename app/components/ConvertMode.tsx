@@ -48,7 +48,10 @@ import type {SelectableAsset} from '../config/assets';
 import {
   CONVERT_SLIPPAGE_BPS_DEFAULT,
   CONVERT_SLIPPAGE_BPS_OPTIONS,
+  resolveConvertDestinations,
   resolveConvertDirection,
+  type ConvertDestination,
+  type ConvertRouteOption,
 } from '../config/convert';
 import {BUNDLED_VENUES, cefiOtherSide, cefiVenuesForLedger, venueDisplayName, venueEndpointOf, venueOfId, venuesForPair, type VenueEntry} from '../config/venues';
 import {
@@ -87,7 +90,7 @@ import {fetchJupiterQuote, type JupiterQuote} from '../services/jupiter';
 import {createSideShiftFixedShift, fetchSideShiftQuote, type SideShiftQuoteResult} from '../services/sideshift';
 import {deriveSolanaAddress} from '../solana/identity';
 import {fetchGasFeeWei, fetchLedgerFee} from '../services/rail';
-import {multihopRoutesFrom} from '../routes';
+import {hubRoutes, multihopRoutesFrom, type HubRoute, type MultihopRoute} from '../routes';
 import {solanaVenuesForMint} from '../config/venues';
 import {SOLANA_TOKENS, USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, WRAPPED_SOL_TOKEN} from '../solana/tokens';
 import {formatClock} from '../i18n/intl';
@@ -115,6 +118,151 @@ type ConvertLegs = {
   /** Raw-unit ledger fees straight from the catalog fee fields (never hardcoded literals). */
   inFee: string;
   outFee: string;
+};
+
+// --- destination GROUPS (2026-09-18 hub UX guidance D1–D6): the picker shows ONE row per
+//     destination ASSET — the direct pair first (the standing default), then every other
+//     in-wallet asset, then every external destination. Where a destination is reachable by
+//     MORE than one mechanism (direct pool vs via-hub; CCTP vs a CeFi venue — two routes to
+//     the same landing spot), selecting the row reveals an indented MECHANISM sub-picker:
+//     registry order, direct first, never ranked, nothing preselected beyond that order
+//     (the V5 venue rules one level down). Quotes fetch for the SELECTED mechanism only.
+/** One user pick in the mechanism sub-picker (what a row resolves to). */
+type DestMechPick =
+  | {kind: 'direct'}
+  | {kind: 'hub'; routeId: string}
+  | {kind: 'route'; routeId: string}
+  | {kind: 'cefi'; venueId: string};
+
+/** The render-side option behind a mechanism row: the pick plus the object its copy and
+ *  its quote flow need. */
+type DestMechOption =
+  | {kind: 'direct'}
+  | {kind: 'hub'; route: HubRoute}
+  | {kind: 'route'; route: MultihopRoute}
+  | {kind: 'cefi'; venue: VenueEntry};
+
+/** One destination-asset row: a stable identity key, the row's testID, its label, and the
+ *  mechanisms that reach it (ONE mechanism = no sub-picker; more = the D2 sub-picker). */
+type DestGroup = {
+  key: string;
+  testID: string;
+  label: string;
+  mechs: DestMechOption[];
+  /** For in-wallet groups: the destination ledger this row resolves to (the direct
+   *  mechanism's output leg). Absent for the standing group and external groups. */
+  destLedger?: string;
+};
+
+const mechPickOf = (m: DestMechOption): DestMechPick =>
+  m.kind === 'direct' ? {kind: 'direct'}
+  : m.kind === 'hub' ? {kind: 'hub', routeId: m.route.routeId}
+  : m.kind === 'route' ? {kind: 'route', routeId: m.route.routeId}
+  : {kind: 'cefi', venueId: m.venue.venue_id};
+
+const mechIdOf = (p: DestMechPick): string =>
+  p.kind === 'direct' ? 'direct'
+  : p.kind === 'cefi' ? p.venueId
+  : p.routeId;
+
+/** The D1 destination groups for one asset, in render order: the direct pair (standing
+ *  default) first, then every other in-wallet asset, then every external destination.
+ *  Mechanisms inside a group keep registry order — direct first, hub/CCTP/CeFi after —
+ *  never ranked, nothing preselected beyond that order (V5 one level down). External
+ *  routes and CeFi venues that land on the SAME asset merge into ONE group (D4):
+ *  USDC-on-Solana via CCTP and via a CeFi venue are two mechanisms, one destination. */
+const buildDestGroups = (
+  catalog: CurrencyDescriptor[],
+  legs: ConvertLegs,
+  convDests: ConvertDestination[],
+  hubRoutesAll: HubRoute[],
+  routes: MultihopRoute[],
+  cefiVenues: readonly VenueEntry[],
+): DestGroup[] => {
+  const inLedger = legs.inDesc.ledger;
+  if (inLedger == null) return [];
+  const symOf = (row: CurrencyDescriptor): string => row.backing_symbol ?? row.symbol ?? '';
+  const optOf = (o: ConvertRouteOption): DestMechOption | null => {
+    if (o.kind === 'direct') return {kind: 'direct'};
+    const hr = o.kind === 'hub' ? hubRoutesAll.find(r => r.routeId === o.routeId) : null;
+    return hr != null ? {kind: 'hub', route: hr} : null;
+  };
+  const mechsOf = (routes: ConvertRouteOption[]): DestMechOption[] => {
+    const mechs: DestMechOption[] = [];
+    for (const o of routes) {
+      const m = optOf(o);
+      if (m != null) mechs.push(m);
+    }
+    return mechs;
+  };
+  const groups: DestGroup[] = [];
+  const byKey = new Map<string, DestGroup>();
+  const push = (g: DestGroup): void => {
+    groups.push(g);
+    byKey.set(g.key, g);
+  };
+  // 1 — the STANDING group: the direct pair's other leg, the pinned `convert-dest-direct`
+  //     row. Every mechanism that reaches the SAME ledger (its direct venue + any via-hub
+  //     route) merges under it, direct first.
+  const standing = legs.outDesc;
+  const standingDests = convDests.find(d => d.destLedger === standing.ledger)
+    ?? ({destLedger: standing.ledger, routes: []} as ConvertDestination);
+  push({
+    key: 'direct',
+    testID: 'convert-dest-direct',
+    label: M.convert.multihop.destDirect(symOf(standing)),
+    mechs: mechsOf(standingDests.routes),
+  });
+  // 2 — every OTHER in-wallet destination (direct venue or via-hub — both land here).
+  for (const d of convDests) {
+    if (d.destLedger === standing.ledger) continue;
+    const row = catalog.find(c => c.ledger === d.destLedger);
+    if (row == null) continue;
+    push({
+      key: `ic:${row.currency}`,
+      destLedger: d.destLedger,
+      testID: `convert-dest-inwallet-${row.currency}`,
+      label: M.convert.multihop.destInWallet(symOf(row)),
+      mechs: mechsOf(d.routes),
+    });
+  }
+  // 3 — external destinations, merged by where they LAND (`ext:<symbol>:<network>`):
+  //     composed routes first (their pinned `convert-dest-route-<routeId>` testIDs are the
+  //     group's identity), then CeFi venues folding into an existing landing spot or forming
+  //     their own group.
+  for (const r of routes) {
+    const key = `ext:${r.dest.symbol}:${r.dest.network}`;
+    const existing = byKey.get(key);
+    if (existing != null) {
+      existing.mechs.push({kind: 'route', route: r});
+      continue;
+    }
+    push({
+      key,
+      testID: `convert-dest-route-${r.routeId}`,
+      label: M.convert.multihop.destRoute(r.dest.symbol, r.dest.network),
+      mechs: [{kind: 'route', route: r}],
+    });
+  }
+  for (const v of cefiVenues) {
+    const mint = cefiOtherSide(v, inLedger);
+    if (mint == null) continue;
+    const asset = solAssetOfMint(mint);
+    if (asset == null) continue;
+    const key = `ext:${asset.symbol}:Solana`;
+    const existing = byKey.get(key);
+    if (existing != null) {
+      existing.mechs.push({kind: 'cefi', venue: v});
+      continue;
+    }
+    push({
+      key,
+      testID: `convert-dest-cefi-${v.venue_id}`,
+      label: M.convert.cefi.destRow(asset.symbol, 'Solana', v.display_name),
+      mechs: [{kind: 'cefi', venue: v}],
+    });
+  }
+  return groups;
 };
 
 type Props = {
@@ -205,14 +353,13 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // The one Details disclosure on the quote-ready surface (10x-verbosity pass 2026-09-16):
   // the venue/fee/signing census collapses behind it, default CLOSED for everyone.
   const [detailsOpen, setDetailsOpen] = useState(false);
-  // --- multi-hop destinations (2026-09-14 spec §7): the direct pair stays the standing
-  //     default; every composed route is an EXPLICIT opt-in row — never preselected, never
-  //     auto-chosen (a route chooser arrives with a second route, under the V5 rules).
-  const [destRouteId, setDestRouteId] = useState<string | null>(null);
-  // --- CeFi destinations (founder decision 3, 2026-09-14 — SideShift first adapter): a
-  //     cefi venue row is a destination of the same rank as a composed route — an EXPLICIT
-  //     pick in the same picker, never preselected (the V5 rules, verbatim).
-  const [destCefiVenueId, setDestCefiVenueId] = useState<string | null>(null);
+  // --- destination groups (2026-09-18 hub UX guidance D1–D6): the direct pair stays the
+  //     standing default; every destination is an EXPLICIT row pick — never preselected,
+  //     never auto-chosen. A multi-mechanism destination additionally gates its quote flow
+  //     on a MECHANISM pick (the V5 rules one level down): `destMech` is that pick, null
+  //     until a sub-row is tapped.
+  const [destSel, setDestSel] = useState<string | null>(null);
+  const [destMech, setDestMech] = useState<DestMechPick | null>(null);
   const [destAddress, setDestAddress] = useState('');
   // The minter's live gas quote for the census + preflight — refreshed per route, re-queried
   // fresh inside prepare at confirm (the signed number is never this cached one).
@@ -240,27 +387,62 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const legs: ConvertLegs | null = selectedAsset != null && selectedAsset.protocol === 'ic'
     ? resolveLegs(catalog, selectedAsset)
     : null;
-  // The chooser's candidate rows: every venue this pair (registry order, unordered-set match).
-  // `chooserMode` (2+ rows) switches the screen to the chooser layout; ONE row = today's screen.
-  const pairVenues = legs != null ? venuesForPair(legs.inDesc.ledger, legs.outDesc.ledger) : [];
-  const chooserVenues = pairVenues.length > 1 ? pairVenues : null;
   // Composed routes out of this asset (app/routes.ts — pure registry walk). The venue chooser
   // never coexists with a route pick: a route IS a destination choice, and its swap hop runs
   // through the route's own single registered venue.
   const routes = legs != null ? multihopRoutesFrom(catalog, legs.inDesc.currency) : [];
-  const activeRoute = destRouteId != null ? routes.find(r => r.routeId === destRouteId) ?? null : null;
-  const routeMode = activeRoute != null;
-  // --- the CeFi destination (SideShift today): rows from the registry's cefi entries whose
-  //     pair carries this asset's ledger as one side. The pair is CROSS-RAIL (IC ledger id +
-  //     Solana mint), so the out leg resolves through solAssetOfMint — the IC catalog has no
-  //     SOL currency, which is exactly why cefi records carry no outCurrency (convert.ts
-  //     pins the hydration exemption). A venue pick suppresses the ic_amm chooser just as a
-  //     route pick does: a CeFi venue IS a destination choice.
+  // --- the CeFi destination venues (SideShift today): rows from the registry's cefi entries
+  //     whose pair carries this asset's ledger as one side. A CeFi venue is a MECHANISM of the
+  //     destination it pays out to — merged by landing spot in the D1 groups below.
   const cefiVenues = legs != null ? cefiVenuesForLedger(legs.inDesc.ledger) : [];
-  const activeCefiVenue = destCefiVenueId != null
-    ? cefiVenues.find(v => v.venue_id === destCefiVenueId) ?? null
+  // --- the destination GROUPS (D1–D4) and the user's selection. The standing group is the
+  //     default (`destSel == null`), and a single-mechanism group self-resolves its mechanism
+  //     — only a multi-mechanism group waits for an explicit sub-pick (D2/D5, V5 rules).
+  const convDests = legs != null
+    ? resolveConvertDestinations(legs.inDesc.ledger, legs.inDesc.testnet)
+    : [];
+  const hubRoutesAll = legs != null ? hubRoutes(catalog, legs.inDesc.ledger) : [];
+  const destGroups = legs != null
+    ? buildDestGroups(catalog, legs, convDests, hubRoutesAll, routes, cefiVenues)
+    : [];
+  const selGroup: DestGroup | null = destSel != null
+    ? destGroups.find(g => g.key === destSel) ?? null
+    : destGroups.find(g => g.key === 'direct') ?? null;
+  const selMechPick: DestMechPick | null =
+    selGroup == null ? null
+    : selGroup.mechs.length === 1 ? mechPickOf(selGroup.mechs[0])
+    : destMech != null
+      && selGroup.mechs.some(m => mechIdOf(mechPickOf(m)) === mechIdOf(destMech))
+      ? destMech
+      // D2's sub-picker DEFAULTS to the direct pool (UX §6 red line 9): the direct pair is
+      // the standing surface for the same reason it is the first row — a hub mechanism is
+      // an explicit switch away, never an upgrade the screen chose for the user. Only a
+      // group with NO direct mechanism (multi-hub) waits for an explicit pick.
+      : selGroup.mechs.some(m => m.kind === 'direct') ? {kind: 'direct'}
+      : null;
+  const mechUnpicked = selGroup != null && selGroup.mechs.length > 1 && selMechPick == null;
+  const activeMech = selMechPick;
+  const hubRoute: HubRoute | null = activeMech?.kind === 'hub'
+    ? hubRoutesAll.find(r => r.routeId === activeMech.routeId) ?? null
+    : null;
+  const hubMode = hubRoute != null;
+  const activeRoute: MultihopRoute | null = activeMech?.kind === 'route'
+    ? routes.find(r => r.routeId === activeMech.routeId) ?? null
+    : null;
+  const routeMode = activeRoute != null;
+  const activeCefiVenue: VenueEntry | null = activeMech?.kind === 'cefi'
+    ? cefiVenues.find(v => v.venue_id === activeMech.venueId) ?? null
     : null;
   const cefiMode = activeCefiVenue != null;
+  // The output leg a DIRECT mechanism converts into: the standing pair's other leg for the
+  // default row, the picked catalog row for an in-wallet direct pick, null otherwise (hub/
+  // route/cefi picks carry their own output facts). Everything downstream that named
+  // `legs.outDesc` names `effOut` — the pair surface is now one destination among many.
+  const effOut: CurrencyDescriptor | null =
+    legs == null ? null
+    : activeMech?.kind === 'direct' && selGroup != null && selGroup.key !== 'direct' && selGroup.destLedger != null
+      ? catalog.find(c => c.ledger === selGroup.destLedger) ?? null
+      : legs.outDesc;
   const cefiOutMint = activeCefiVenue != null && legs != null
     ? cefiOtherSide(activeCefiVenue, legs.inDesc.ledger)
     : null;
@@ -272,7 +454,17 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     () => (cefiMode ? deriveSolanaAddress(identity.secretHex) : null),
     [cefiMode, identity.secretHex],
   );
-  const chooserMode = !routeMode && !cefiMode && chooserVenues != null;
+  // The chooser's candidate rows — only under a DIRECT mechanism pick with 2+ registered
+  // venues on that pair (registry order, unordered-set match). 2+ rows switch the screen to
+  // the chooser layout; ONE row = the plain single-venue surface. A hub/route/cefi pick
+  // suppresses the chooser just as a route pick always did: the destination mechanism owns
+  // the venue choice.
+  const directMechOn = activeMech?.kind === 'direct';
+  const pairVenues = legs != null && directMechOn && effOut != null
+    ? venuesForPair(legs.inDesc.ledger, effOut.ledger)
+    : [];
+  const chooserVenues = directMechOn && pairVenues.length > 1 ? pairVenues : null;
+  const chooserMode = chooserVenues != null;
   // The user's pick, re-resolved against the CURRENT rows every render — if the venue it named
   // stops serving the pair, the selection silently becomes "none" (never re-picks for the user).
   const selectedVenue = selectedVenueId != null
@@ -289,7 +481,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   // honest attribution: falling back to the registered default here used to name venue A (and
   // its pool) under a venue B pick, misattributing the pre-sign disclosure.
   const counterVenueId = activeQuote?.venueId ?? selectedVenue?.venue_id
-    ?? (cefiMode && destCefiVenueId != null ? destCefiVenueId
+    ?? (cefiMode && activeCefiVenue != null ? activeCefiVenue.venue_id
       : activeRoute != null ? activeRoute.swapVenueId : REGISTERED_VENUE_ID);
 
   // --- the engine view (V6): pick the record to render, then follow it. The resume engine
@@ -353,6 +545,19 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       setVenueQuoteErrs({});
       return;
     }
+    if (mechUnpicked || hubMode) {
+      // D5 (2026-09-18 hub UX): a multi-mechanism destination fetches NOTHING until a
+      // mechanism sub-row is picked — the venue-chooser precedent one level up; an unpicked
+      // sub-row carries its label only, never another mechanism's live number. A picked HUB
+      // mechanism is quoted by its own two-quote flow (the hub branch, this effect's successor).
+      setQuote(null);
+      setMath(null);
+      setQuoteErr(null);
+      setQuoteChanged(null);
+      setVenueQuotes({});
+      setVenueQuoteErrs({});
+      return;
+    }
     if (cefiMode && legs != null) {
       // CeFI MODE: one quote through the relay's partner-key proxy — the venue's own
       // settleAmount verbatim, attributed + timestamped. An unresolvable out rail id is a
@@ -360,7 +565,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       if (activeCefiVenue == null || cefiOutMint == null || cefiOut == null) {
         setQuote(null);
         setMath(null);
-        setQuoteErr(M.convert.errors.quoteUnavailable(venueDisplayName(destCefiVenueId ?? 'venue')));
+        setQuoteErr(M.convert.errors.quoteUnavailable(venueDisplayName(activeCefiVenue?.venue_id ?? 'venue')));
         return;
       }
       let cancelled = false;
@@ -413,7 +618,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         cancelled = true;
       };
     }
-    const rows = venuesForPair(legs.inDesc.ledger, legs.outDesc.ledger);
+    const rows = venuesForPair(legs.inDesc.ledger, effOut!.ledger);
     if (rows.length > 1) {
       // CHOOSER MODE: one quote PER venue, fetched in parallel — each row owns its venue's own
       // number (attributed + timestamped in the row). Row order is `rows` order, untouched by
@@ -426,7 +631,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       setVenueQuoteErrs({});
       void (async () => {
         const settled = await Promise.allSettled(
-          rows.map(v => fetchConvertQuote(relayUrl, legs.inDesc.ledger, legs.outDesc.ledger, parsed.raw, {venue: v})),
+          rows.map(v => fetchConvertQuote(relayUrl, legs.inDesc.ledger, effOut!.ledger, parsed.raw, {venue: v})),
         );
         if (cancelled || !mountedRef.current) return;
         const qs: Record<string, ConvertQuote> = {};
@@ -448,7 +653,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     setQuoteErr(null);
     void (async () => {
       try {
-        const q = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, legs.outDesc.ledger, parsed.raw);
+        const q = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, effOut!.ledger, parsed.raw);
         if (!cancelled && mountedRef.current) setQuote(q);
       } catch (e) {
         if (!cancelled && mountedRef.current) {
@@ -465,9 +670,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     // slippageBps deliberately NOT a dependency: it changes the minimum, not the quote.
     // `venueList` IS one: when the relay's served registry lands (e.g. the offline two-venue
     // world) the rows re-fetch per venue. The route's own hop ledger likewise re-keys the
-    // fetch when a destination row is picked — and so does the CeFi venue pick.
+    // fetch when a destination row is picked — and so does the CeFi venue pick. `destMech`
+    // re-keys on a mechanism sub-pick; `mechUnpicked` gates the fetch off entirely (D5).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amountText, legs?.inDesc.ledger, legs?.outDesc.ledger, relayUrl, record != null && isLiveRecord(record), venueList, activeRoute?.routeId, activeRoute?.hop.ledger, destCefiVenueId]);
+  }, [amountText, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), venueList, activeRoute?.routeId, activeRoute?.hop.ledger, destMech, mechUnpicked, selGroup?.key, hubMode]);
 
   // --- stale refresh: >30 s old (test-seam overridable via __DPAY_TEST_CONVERT_STALE_MS) → fetch
   //     a fresh quote in place; a moved amount is surfaced as a review line, never silently kept.
@@ -488,7 +694,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             )
             : await fetchConvertQuote(
               relayUrl, legs.inDesc.ledger,
-              activeRoute != null ? activeRoute.hop.ledger : legs.outDesc.ledger,
+              activeRoute != null ? activeRoute.hop.ledger : effOut!.ledger,
               quote.amountIn,
               activeRoute != null ? {venue: venueOfId(activeRoute.swapVenueId) ?? undefined} : {},
             );
@@ -506,7 +712,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, activeRoute?.routeId, activeRoute?.hop.ledger, destCefiVenueId]);
+  }, [quote?.fetchedAtMs, quote?.amountIn, staleRefreshing, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), chooserMode, activeRoute?.routeId, activeRoute?.hop.ledger, destMech, mechUnpicked, selGroup?.key, hubMode]);
 
   // --- stale refresh, CHOOSER MODE: every stale row refreshes its OWN quote (row order and the
   //     user's selection are inputs here, never outputs). A moved SELECTED quote is surfaced as
@@ -525,7 +731,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         try {
           const settled = await Promise.allSettled(
             staleRows.map(v =>
-              fetchConvertQuote(relayUrl, legs.inDesc.ledger, legs.outDesc.ledger, venueQuotes[v.venue_id].amountIn, {venue: v}),
+              fetchConvertQuote(relayUrl, legs.inDesc.ledger, effOut!.ledger, venueQuotes[v.venue_id].amountIn, {venue: v}),
             ),
           );
           if (!mountedRef.current) return;
@@ -549,7 +755,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     }, 1000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chooserMode, venueQuotes, selectedVenueId, staleRefreshing, legs?.inDesc.ledger, relayUrl, record != null && isLiveRecord(record)]);
+  }, [chooserMode, venueQuotes, selectedVenueId, staleRefreshing, legs?.inDesc.ledger, effOut?.ledger, relayUrl, record != null && isLiveRecord(record), destMech]);
 
   // --- derivations (min-out is computed by the tested core — DpayCore.icpSwapMinOut — never in TS).
   //     Derived from the ACTIVE quote — in chooser mode that is the picked row's own quote.
@@ -568,7 +774,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         // relay-side), so the honest figure is zero, not the direct pair's VCHF fee.
         const m = await deriveConvertMath(
           activeQuote, legs.inFee,
-          activeRoute != null ? activeRoute.hop.fee : cefiMode ? '0' : legs.outFee,
+          activeRoute != null ? activeRoute.hop.fee : cefiMode ? '0' : effOut?.fee ?? legs.outFee,
           slippageBps,
         );
         if (!cancelled && mountedRef.current) setMath(m);
@@ -587,7 +793,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeQuote?.venueId, activeQuote?.fetchedAtMs, activeQuote?.amountOutGross, slippageBps, legs?.inDesc.ledger, activeRoute?.routeId]);
+  }, [activeQuote?.venueId, activeQuote?.fetchedAtMs, activeQuote?.amountOutGross, slippageBps, legs?.inDesc.ledger, effOut?.fee, activeRoute?.routeId]);
 
   // --- the route's live gas quote (2026-09-14 spec §5/§6): the minter's OWN eip-1559 figure,
   //     fetched through the same service the standalone Withdraw flow uses — shown as its own
@@ -658,6 +864,9 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
 
   const onConfirm = async () => {
     if (legs == null || activeQuote == null || math == null || confirmBusy) return;
+    // A multi-mechanism destination signs NOTHING until a mechanism sub-row is picked (D2/D5) —
+    // same rule as the venue chooser's never-preselected confirm gate, one level down.
+    if (mechUnpicked || hubMode) return;
     // Chooser mode: the confirm executes through the PICKED row's venue — the fresh quote, the
     // record's venueId and the signed legs all follow that one pick (Wave-1 pool-keyed legs).
     const venueOpt = chooserMode ? {venue: selectedVenue ?? undefined} : {};
@@ -764,9 +973,10 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     setConfirmBusy(true);
     setConfirmErr(null);
     setQuoteChanged(null);
+    const outDesc = effOut ?? legs.outDesc;
     try {
       // Re-quote at confirm (spec §5): a moved market must be reviewed, never silently submitted.
-      const fresh = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, legs.outDesc.ledger, reviewed.amountIn, venueOpt);
+      const fresh = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, outDesc.ledger, reviewed.amountIn, venueOpt);
       if (fresh.amountOutGross !== reviewed.amountOutGross) {
         if (chooserMode && selectedVenue != null) {
           setVenueQuotes(prev => ({...prev, [selectedVenue.venue_id]: fresh}));
@@ -782,7 +992,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
         quote: fresh,
         math,
         inDesc: legs.inDesc,
-        outDesc: legs.outDesc,
+        outDesc,
       });
       if (!mountedRef.current) return;
       // Hand the record to the ENGINE (V6): it persists, surfaces, and drives it — this screen
@@ -811,7 +1021,16 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
       : <StatePanel record={record} onBack={onBack} />;
   }
 
-  const {inSym, outSym, inDecimals, outDecimals} = legs;
+  const {inSym, inDecimals} = legs;
+  // The OUTPUT leg the form names/quotes: under a non-standing in-wallet direct pick it is
+  // THAT row (effOut); otherwise the standing pair's other leg — byte-identical to the
+  // pre-groups surface for every pinned direct flow.
+  const effOutDesc = effOut ?? legs.outDesc;
+  // The standing leg's own validated fields; an eff row was fail-closed priced by the
+  // destination engine (fee/decimals/symbol), and falls back to the standing values —
+  // never a literal — so the form's money lines stay ledger-denominated either way.
+  const outSym = effOutDesc.backing_symbol ?? effOutDesc.symbol ?? legs.outSym;
+  const outDecimals = effOutDesc.decimals ?? legs.outDecimals;
   const balanceRaw = selectedAsset != null && selectedAsset.protocol === 'ic' ? assetBalances[selectedAsset.currency] : undefined;
   const balanceN = balanceRaw != null ? BigInt(balanceRaw) : null;
   const balanceStr = balanceRaw != null ? fmtAssetCompact(balanceRaw, inDecimals, inSym) : null;
@@ -1045,7 +1264,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
   const gasNeededStr = gasNeededN != null && activeRoute != null
     ? fmtAssetCompact(gasNeededN.toString(), activeRoute.burn.gasDecimals, activeRoute.burn.gasSymbol)
     : null;
-  const canConfirm = activeQuote != null && math != null && !quoteBusy && !confirmBusy && !insufficient
+  const canConfirm = activeQuote != null && math != null && !quoteBusy && !confirmBusy && !insufficient && !mechUnpicked
     && (!routeMode || (destValid && routeGas != null && routeGasErr == null && !gasShort))
     // Cross-rail routes also need Circle's fee on the table before confirm (fail-closed).
     && (activeRoute == null || activeRoute.crossRail == null || crossFee != null);
@@ -1086,91 +1305,86 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
         </Text>
       ) : null}
 
-      {/* The destination picker (multi-hop, 2026-09-14 spec §7): the direct pair as the
-          standing default row, plus every composed route the registry walks out of this asset.
-          A destination is a decision of the same rank as a venue, so the rows use the venue
-          chooser's own visual language — and the same red lines: registry order, explicit pick,
-          never chosen for the user. */}
-      {routes.length > 0 || cefiVenues.length > 0 ? (
+      {/* The destination picker (2026-09-18 hub UX guidance D1–D6): ONE row per destination
+          ASSET — the direct pair as the standing default row first, then every other in-wallet
+          asset, then every external destination (routes + CeFi venues merged by where they
+          LAND). A destination with more than one mechanism reveals an indented MECHANISM
+          sub-picker on selection: direct pool first, then via-hub / CCTP / venue rows in
+          registry order — never ranked, nothing preselected beyond that order, and no quote
+          until a mechanism is picked (the venue chooser's red lines, one level down). */}
+      {destGroups.length > 1 ? (
         <View testID="convert-dest">
           <Text style={S.convertSlippageLabel}>{M.convert.multihop.destLabel}</Text>
-          <Pressable
-            testID="convert-dest-direct"
-            style={[S.convertVenueRow, !routeMode && !cefiMode && S.convertVenueRowOn]}
-            onPress={() => {
-              setDestRouteId(null);
-              setDestCefiVenueId(null);
-              setQuoteChanged(null);
-            }}
-            accessibilityRole="radio"
-            accessibilityState={{checked: !routeMode && !cefiMode}}
-            accessibilityLabel={M.convert.multihop.destDirect(outSym)}>
-            <View style={[S.convertVenueRadio, !routeMode && !cefiMode && S.convertVenueRadioOn]}>
-              {!routeMode && !cefiMode ? <View style={S.convertVenueRadioDot} /> : null}
-            </View>
-            <View style={S.convertVenueRowText}>
-              <Text style={[S.convertVenueName, !routeMode && !cefiMode && S.convertVenueNameOn]}>{M.convert.multihop.destDirect(outSym)}</Text>
-            </View>
-          </Pressable>
-          {routes.map(r => {
-            const on = activeRoute?.routeId === r.routeId;
+          {destGroups.map(g => {
+            const groupOn = selGroup != null && selGroup.key === g.key;
+            const single = g.mechs.length === 1;
             return (
-              <Pressable
-                key={r.routeId}
-                testID={`convert-dest-route-${r.routeId}`}
-                style={[S.convertVenueRow, on && S.convertVenueRowOn]}
-                onPress={() => {
-                  setDestRouteId(r.routeId);
-                  setDestCefiVenueId(null);
-                  setQuoteChanged(null);
-                }}
-                accessibilityRole="radio"
-                accessibilityState={{checked: on}}
-                accessibilityLabel={M.convert.multihop.destRoute(r.dest.symbol, r.dest.network)}>
-                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
-                  {on ? <View style={S.convertVenueRadioDot} /> : null}
-                </View>
-                <View style={S.convertVenueRowText}>
-                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>
-                    {M.convert.multihop.destRoute(r.dest.symbol, r.dest.network)}
-                  </Text>
-                </View>
-              </Pressable>
-            );
-          })}
-          {/* One-route honesty (spec §7): no chooser. The copy line itself is GONE (10x-verbosity
-              pass 2026-09-16 — UI meta-commentary); the absence of a route list IS the honesty. */}
-          {/* CeFi venue rows (founder decision 3): the same picker's venue-language rows,
-              registry order, explicit pick, never preselected — labeled by what the venue
-              SETTLES on the other rail ("SOL on Solana — via SideShift (exchange service)")
-              so the counterparty is named as an exchange service, not a pool. */}
-          {cefiVenues.map(v => {
-            const on = destCefiVenueId === v.venue_id;
-            const mint = cefiOtherSide(v, legs.inDesc.ledger);
-            const asset = mint != null ? solAssetOfMint(mint) : null;
-            const sym = asset != null ? asset.symbol : 'SOL';
-            return (
-              <Pressable
-                key={v.venue_id}
-                testID={`convert-dest-cefi-${v.venue_id}`}
-                style={[S.convertVenueRow, on && S.convertVenueRowOn]}
-                onPress={() => {
-                  setDestCefiVenueId(v.venue_id);
-                  setDestRouteId(null);
-                  setQuoteChanged(null);
-                }}
-                accessibilityRole="radio"
-                accessibilityState={{checked: on}}
-                accessibilityLabel={M.convert.cefi.destRow(sym, 'Solana', v.display_name)}>
-                <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
-                  {on ? <View style={S.convertVenueRadioDot} /> : null}
-                </View>
-                <View style={S.convertVenueRowText}>
-                  <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>
-                    {M.convert.cefi.destRow(sym, 'Solana', v.display_name)}
-                  </Text>
-                </View>
-              </Pressable>
+              <View key={g.key}>
+                <Pressable
+                  testID={g.testID}
+                  style={[S.convertVenueRow, groupOn && S.convertVenueRowOn]}
+                  onPress={() => {
+                    setDestSel(g.key);
+                    setDestMech(single ? mechPickOf(g.mechs[0]) : null);
+                    setQuoteChanged(null);
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityState={{checked: groupOn}}
+                  accessibilityLabel={g.label}>
+                  <View style={[S.convertVenueRadio, groupOn && S.convertVenueRadioOn]}>
+                    {groupOn ? <View style={S.convertVenueRadioDot} /> : null}
+                  </View>
+                  <View style={S.convertVenueRowText}>
+                    <Text style={[S.convertVenueName, groupOn && S.convertVenueNameOn]}>{g.label}</Text>
+                  </View>
+                </Pressable>
+                {groupOn && !single ? (
+                  <View testID="convert-dest-mechs" style={S.convertMechGroup}>
+                    {g.mechs.map(m => {
+                      const pick = mechPickOf(m);
+                      const id = mechIdOf(pick);
+                      const on = activeMech != null && mechIdOf(activeMech) === id;
+                      const mechLabel =
+                        m.kind === 'direct' ? M.convert.multihop.mechDirect
+                        : m.kind === 'hub' ? M.convert.multihop.mechViaHub(m.route.hub.symbol)
+                        : m.kind === 'route' ? (
+                          m.route.crossRail != null ? M.convert.multihop.mechViaCctp : M.convert.multihop.mechDirect
+                        )
+                        : M.convert.multihop.mechViaVenue(m.venue.display_name);
+                      return (
+                        <Pressable
+                          key={id}
+                          testID={`convert-dest-mech-${id}`}
+                          style={[S.convertVenueRow, on && S.convertVenueRowOn]}
+                          onPress={() => {
+                            setDestMech(pick);
+                            setQuoteChanged(null);
+                          }}
+                          accessibilityRole="radio"
+                          accessibilityState={{checked: on}}
+                          accessibilityLabel={mechLabel}>
+                          <View style={[S.convertVenueRadio, on && S.convertVenueRadioOn]}>
+                            {on ? <View style={S.convertVenueRadioDot} /> : null}
+                          </View>
+                          <View style={S.convertVenueRowText}>
+                            <Text style={[S.convertVenueName, on && S.convertVenueNameOn]}>{mechLabel}</Text>
+                            {/* D5: an UNPICKED mechanism carries its label + a static shape
+                                line, never another mechanism's live number. */}
+                            {!on && m.kind === 'hub' ? (
+                              <Text style={S.convertMetaLine}>{M.convert.multihop.viaHub(m.route.hub.symbol)}</Text>
+                            ) : null}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                    {mechUnpicked ? (
+                      <Text testID="convert-dest-mech-none" style={S.convertMetaLine}>
+                        {M.convert.multihop.mechNoneSelected}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
             );
           })}
         </View>

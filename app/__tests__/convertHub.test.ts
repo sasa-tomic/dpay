@@ -281,7 +281,10 @@ describe('resolveConvertDestinations — the widened Convert-entry enumeration',
   test('ICP keeps every direct pair and gains hub alternatives beside the direct ones', () => {
     const dests = resolveConvertDestinations(ICP_LEDGER, false);
     // Registry order: icpswap (VCHF) is the FIRST venue pairing ICP, so VCHF leads.
-    expect(dests.map(d => d.destLedger)).toEqual([VCHF_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER, CKBTC_LEDGER]);
+    // ckBTC is NOT a destination: its catalog row carries fee:null, and a destination the
+    // catalog cannot fully price is not offered (fail-closed, same bar as hubRoutes' own
+    // endpoints) — the icpswap-ckbtc venue yields nothing.
+    expect(dests.map(d => d.destLedger)).toEqual([VCHF_LEDGER, CKUSDC_LEDGER, CKETH_LEDGER]);
     // VCHF: direct + hub over ckUSDC. ckUSDC: direct + hub over VCHF. Each destination lists
     // direct first, then hub — offered, never ranked.
     expect(dests[0].routes).toEqual([
@@ -292,7 +295,7 @@ describe('resolveConvertDestinations — the widened Convert-entry enumeration',
       {kind: 'direct', venueId: 'icpswap-ckusdc'},
       {kind: 'hub', routeId: 'hub:icpswap:7:icpswap-vchf-ckusdc', venue1Id: 'icpswap', venue2Id: 'icpswap-vchf-ckusdc', hubLedger: VCHF_LEDGER},
     ]);
-    expect(dests[3].routes).toEqual([{kind: 'direct', venueId: 'icpswap-ckbtc'}]); // ckBTC: direct only (catalog fee gate)
+    expect(dests.some(d => d.destLedger === CKBTC_LEDGER)).toBe(false); // fee:null — never offered
   });
 
   test('testnet rows and unregistered assets get NOTHING (same posture as resolveConvertDirection)', () => {

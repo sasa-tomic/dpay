@@ -183,6 +183,20 @@ export type ConvertMessages = {
     destLabel: string;
     destDirect: (sym: string) => string;
     destRoute: (sym: string, network: string) => string;
+    /** Destination rows are ONE per destination ASSET (hub UX guidance D1/D2): an in-wallet
+     *  destination with no qualifier of its own (hub-only rows; the mechanism sub-picker
+     *  carries the mechanism names). */
+    destInWallet: (sym: string) => string;
+    /** Mechanism sub-picker rows (D2/D5), revealed only when a destination has more than
+     *  one: registry order, direct first (the standing default), never ranked beyond that. */
+    mechDirect: string;
+    mechViaHub: (hubSym: string) => string;
+    mechViaCctp: string;
+    mechViaVenue: (venue: string) => string;
+    /** Same slot as venueNoneSelected, one level down: confirm waits for an explicit pick. */
+    mechNoneSelected: string;
+    /** The route chip under the headline (D8): which hub, how many swaps. */
+    viaHub: (hubSym: string) => string;
     destAddressLabel: string;
     destAddressInvalid: string;
     /** The confirm-time route summary: ordered legs, fee census per leg (INV-6 style), no dpay cut. */
@@ -454,6 +468,13 @@ export const convertEn: ConvertMessages = {
     legStateSent: 'Sent',
     legStateConfirmed: 'Confirmed',
     legStateFailed: 'Refused',
+    destInWallet: sym => `${sym} — in this wallet`,
+    mechDirect: 'Direct pool',
+    mechViaHub: hubSym => `Via ${hubSym}`,
+    mechViaCctp: 'Via Circle CCTP',
+    mechViaVenue: venue => `Via ${venue}`,
+    mechNoneSelected: 'Pick a mechanism above to see the quote.',
+    viaHub: hubSym => `via ${hubSym} · 2 swaps`,
     gasFeeLine: amount => `Cash-out gas (the minter\u2019s live quote): ${amount}`,
     routeMinLine: (amount, pct) => `At least ${amount} at your address (slippage floor ${pct})`,
     routeSurplusNote: hopSym => `If the swap pays above the floor, the surplus stays in this wallet as ${hopSym}.`,

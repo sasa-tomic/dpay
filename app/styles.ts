@@ -339,6 +339,7 @@ function buildStyles(p: Palette) {
   convertVenueRadio: {width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: p.line2, marginTop: 1, marginRight: 10, alignItems: 'center', justifyContent: 'center'},
   convertVenueRadioOn: {borderColor: p.brand},
   convertVenueRadioDot: {width: 10, height: 10, borderRadius: 5, backgroundColor: p.brand},
+  convertMechGroup: {marginTop: 4, marginLeft: 22, alignSelf: 'stretch'},
   convertVenueRowText: {flex: 1},
   convertVenueName: {fontSize: 15, color: p.ink, fontFamily: FONT.sansMedium},
   convertVenueNameOn: {fontFamily: FONT.sansBold},
