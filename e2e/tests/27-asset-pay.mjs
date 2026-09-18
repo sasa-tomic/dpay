@@ -23,7 +23,10 @@
 //   - The review names the merchant "Bob" (from the request bytes).
 //   - the per-asset balance gate (60_000 ≥ 50_000 sats) lets the AUTO-SIGN through → Paid.
 //   - B's ckBTC balance (currency 1) grew by 50000 sats (correct ledger settlement at the principal).
-//   - The payer's Ledger row renders the ckBTC units ("0.0005 BTC" compact, no `$`).
+//   - The payer's Ledger row renders the FEE-INCLUSIVE net debit in ckBTC units
+//     ("−0.0005001 BTC" = 50_000 sats + the pinned 10-sat ledger fee, compact, no `$`)
+//     plus the "− 0.0000001 BTC fees" annotation line (fees ride the row ONLY as the
+//     annotation, founder rule 2026-09-14).
 //
 // Selector contract: `balance` (header → Balances), `asset-ckbtc` (the BTC row in Balances),
 // `pay-amount` (transient sign status). Camera seam: `window.__DPAY_TEST_SCAN(qr)`.
@@ -114,18 +117,22 @@ export async function run() {
     console.log(`[27-asset-pay] ✓ B credited ${bobAfter} ckBTC sats on currency 1`);
 
     // --- Ledger row exact units (closes the MC5 coverage gap): the payer's transaction history row
-    //     must render the ckBTC payment in its OWN asset's units — "−0.0005 BTC" (Ledger.tsx
-    //     composes the U+2212 minus + fmtCurrencyAmount) — NOT a misleading dollar amount. The
+    //     must render the ckBTC payment in its OWN asset's units — the FEE-INCLUSIVE net debit
+    //     "−0.0005001 BTC" (50_000 sats + the pinned 10-sat ckBTC ledger fee, MEASURED 2026-09-18;
+    //     the row headlines note.gross per HistoryRow.tsx, U+2212 minus through fmtCurrencyAmount)
+    //     — NOT a misleading dollar amount. The fee rides ONLY as the annotation line
+    //     ("− 0.0000001 BTC fees"), never inside the headline (founder rule 2026-09-14). The
     //     history hook fetches EVERY catalog currency, so the currency-1 rail row lands regardless
     //     of the active asset. 'RECENT' is uppercased via CSS text-transform (matches flow 07's
     //     anchor).
     assert(await openHistory(driver, { timeoutMs: 5_000 }), 'the Ledger should render the ckBTC payment row once it lands in history');
     const ledgerBody = await driver.bodyText();
-    assertIncludes(ledgerBody, '0.0005 BTC', 'Ledger row must show the ckBTC units (−0.0005 BTC), not a $ amount');
+    assertIncludes(ledgerBody, '0.0005001 BTC', 'Ledger row must show the fee-inclusive net ckBTC debit (−0.0005001 BTC = 50_000 sats + the pinned 10-sat ledger fee), not a $ amount');
+    assertIncludes(ledgerBody, '0.0000001 BTC fees', 'Ledger row must annotate the pinned 10-sat ckBTC ledger fee (− 0.0000001 BTC fees), never inside the headline');
     // The row must not leak a dollar figure for this ckBTC payment (the header's ∂ glyph is not '$',
     // so any '$' here would be a cross-asset formatting bug).
     assert(!ledgerBody.includes('$'), 'Ledger must not show a dollar amount for a ckBTC payment row');
-    console.log('[27-asset-pay] ✓ Ledger row shows the ckBTC units (−0.0005 BTC, no $)');
+    console.log('[27-asset-pay] ✓ Ledger row shows the ckBTC units (−0.0005001 BTC net + fee annotation, no $)');
 
     await driver.screenshot('27-asset-pay');
 
