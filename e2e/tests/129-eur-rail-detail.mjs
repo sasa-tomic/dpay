@@ -93,10 +93,10 @@ export async function run() {
       'EURC\'s deep tier states plainly (no caution icon on a good fact)');
     assertIncludes(await driver.readText('rail-detail-liquidity-veur'), 'Very little VEUR exists on-chain today',
       'VEUR\'s thin tier warns, naming the LEDGER token (VEUR, never a bare "EUR")');
-    assertIncludes(await driver.readText('rail-detail-ramp-veur'), 'DFX lists this token as sellable; buying is not available today.',
+    assertIncludes(await driver.readText('rail-detail-ramp-veur'), 'DFX — sell only today.',
       'VEUR\'s ramp fact: Partner offramp naming DFX, onramp Unavailable — sell-only, stated as such');
     assertEq((await driver.readText('rail-detail-ramp-sol-eurc')).trim(),
-      'No fiat ramp today — it moves wallet to wallet.',
+      'No fiat ramp — wallet to wallet only.',
       'EURC\'s ramp fact: no ramp claimed where none exists');
     await driver.screenshot('129-eur-detail-panel');
     console.log('[129-eur-rail-detail] ✓ per-rail facts: fees in own units, liquidity tiers, ramp capabilities');
