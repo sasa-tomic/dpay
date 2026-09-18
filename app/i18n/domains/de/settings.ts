@@ -15,13 +15,12 @@ const copyWordsDe: CopyWordsCopy = {
 export const settingsDe: SettingsMessages = {
   title: 'Einstellungen',
   close: 'Einstellungen schließen',
-  escToClose: 'Esc drücken zum Schließen',
 
   backup: {
     ...copyWordsDe,
     label: 'Backup',
     warning:
-      'Dieser Seed stellt SOWOHL dein IC- als auch dein Solana-Guthaben wieder her. Bewahre ihn sicher auf. Teile ihn niemals.',
+      'Dieser Seed stellt SOWOHL dein IC- als auch dein Solana-Guthaben wieder her. Bewahre ihn sicher auf, teile ihn niemals.',
     copyWordsHint: 'Kopiert deine 24 Wiederherstellungswörter in die Zwischenablage',
     copySeed: 'Seed kopieren',
     seedCopied: 'Seed kopiert',
@@ -29,10 +28,8 @@ export const settingsDe: SettingsMessages = {
     copySeedHint: 'Kopiert deinen Wiederherstellungs-Seed in die Zwischenablage',
     showAsHex: 'Als Hex zeigen',
     showAsHexA11y: 'Seed als Hex zeigen',
-    showAsHexHint: 'Wechselt zur Ansicht des rohen 64-Hex-Seeds',
     showAsWords: 'Als Wörter zeigen',
     showAsWordsA11y: 'Seed als Wörter zeigen',
-    showAsWordsHint: 'Wechselt zur Ansicht der 24-Wort-Wiederherstellungsphrase',
     hide: 'Verbergen',
     hideA11y: 'Seed verbergen',
     reveal: 'Seed anzeigen',
@@ -41,23 +38,22 @@ export const settingsDe: SettingsMessages = {
     cancelA11y: 'Backup abbrechen',
     action: 'Wallet sichern',
     entry: 'Wallet sichern…',
-    entryHint: 'Zeigt deinen Wiederherstellungs-Seed — sichert dein IC- und dein Solana-Guthaben',
+    entryHint: 'Zeigt deinen Wiederherstellungs-Seed',
   },
 
   restore: {
     label: 'Wiederherstellen',
     warning:
-      'Das ersetzt deine aktuelle Wallet durch die aus diesem Seed wiederhergestellte. Sichere zuerst deine aktuelle Wallet, falls noch nicht geschehen — ihr Guthaben ist nur über ihren eigenen Seed erreichbar.',
+      'Ersetzt deine aktuelle Wallet durch die aus diesem Seed. Sichere zuerst die aktuelle, falls noch nicht geschehen — ihr Guthaben ist nur über ihren eigenen Seed erreichbar.',
     seedPlaceholder: '24 Wiederherstellungswörter oder 64 Hex-Zeichen',
     seedA11y: 'Wiederherstellungs-Seed',
-    seedHint:
-      'Deine 24 Wiederherstellungswörter (oder der 64-Hex-Seed aus dem Backup), die deine Wallet wiederherstellen',
+    seedHint: 'Deine 24 Wiederherstellungswörter oder der 64-Hex-Seed aus dem Backup',
     action: 'Wallet wiederherstellen',
-    actionHint: 'Ersetzt deine aktuelle Wallet durch die aus diesem Seed wiederhergestellte',
+    actionHint: 'Ersetzt deine aktuelle Wallet',
     busy: 'Wird wiederhergestellt…',
     cancelA11y: 'Wiederherstellung abbrechen',
     entry: 'Wallet wiederherstellen…',
-    entryHint: 'Importiert eine Wallet aus deinem 64-Hex-Seed — ersetzt deine aktuelle Wallet',
+    entryHint: 'Importiert eine Wallet aus einem Seed — ersetzt deine aktuelle Wallet',
     errEmpty: 'Gib deine 24 Wiederherstellungswörter oder den 64-Hex-Seed ein.',
     errWords:
       'Einige Wörter sind falsch oder fehlen. Prüfe, ob alle 24 Wörter richtig geschrieben sind — oder füge stattdessen den 64-Hex-Seed ein.',
@@ -66,26 +62,25 @@ export const settingsDe: SettingsMessages = {
   reset: {
     label: 'Zurücksetzen',
     warning:
-      'Das löscht deine Wallet-Identität von diesem Gerät. Guthaben an dieser Adresse ist dann unwiederbringlich verloren. Das lässt sich nicht rückgängig machen.',
+      'Das löscht deine Wallet-Identität von diesem Gerät. Guthaben an dieser Adresse ist dann unwiederbringlich verloren.',
     confirm: 'Ja, alles zurücksetzen',
-    confirmHint: 'Löscht deine Wallet dauerhaft von diesem Gerät — Guthaben wird unwiederbringlich',
     cancelA11y: 'Zurücksetzen abbrechen',
     action: 'Wallet zurücksetzen',
     entry: 'Wallet zurücksetzen…',
-    entryHint: 'Öffnet eine Bestätigung — löscht deine Wallet dauerhaft von diesem Gerät',
+    entryHint: 'Löscht deine Wallet dauerhaft von diesem Gerät',
   },
 
   learn: {
     label: 'Lernen',
-    passportHint: 'Zeigt deinen Reisebereitschafts-Pass — die vier Stempel',
+    passportHint: 'Zeigt deinen Reisebereitschafts-Pass',
     passportCount: filled => `${filled}/4`,
-    howItWorksHint: 'Spielt die drei Szenen noch einmal ab, die zeigen, wie dpay bezahlt',
+    howItWorksHint: 'Spielt die Anleitung noch einmal ab, wie dpay bezahlt',
   },
 
   addressBook: {
     label: 'Adressbuch',
     entry: 'Gespeicherte Adressen…',
-    entryHint: 'Adressen, an die du gesendet hast, anzeigen, benennen und entfernen',
+    entryHint: 'Adressen, an die du gesendet hast, benennen, hinzufügen und entfernen',
   },
 
   theme: {
@@ -107,33 +102,27 @@ export const settingsDe: SettingsMessages = {
     show: 'Erweiterte Einstellungen zeigen',
     hide: 'Erweiterte Einstellungen verbergen',
     hint: 'Server- und Netzwerk-Endpunkte, mit denen diese Wallet spricht',
-    serverNote: 'Die Server, mit denen deine Wallet spricht, eine Adresse pro Zeile in Prioritätsreihenfolge. Ist der erste nicht erreichbar, wird der nächste verwendet. Änderungen gelten, wenn du auf Übernehmen tippst.',
+    serverNote: 'Eine Adresse pro Zeile — verwendet wird die erste, die antwortet. Gilt beim Tippen auf Übernehmen.',
     serverLabel: 'Server',
     serverPlaceholder: 'http://<ip>:8787',
-    serverHint: 'Der Server, mit dem deine Wallet spricht',
     apply: 'Übernehmen',
     applyA11y: 'Server-URL übernehmen',
-    applyHint: 'Schaltet deine Wallet auf die eingegebene Server-URL um',
-    solanaNote: 'Der Solana-Endpunkt, über den diese Wallet Guthaben liest und Zahlungen sendet. Leer lassen, um dem Relay deiner Serverliste zu folgen; gib deinen eigenen Anbieter an, um dpay aus dem Pfad zu nehmen.',
+    solanaNote: 'Liest Guthaben und sendet Zahlungen über Solana. Leer folgt deine Serverliste; ein eigener Anbieter nimmt dpay aus dem Pfad.',
     solanaLabel: 'Solana-Endpunkt',
     solanaPlaceholder: 'https://<anbieter>/?api-key=<schlüssel>',
-    solanaHint: 'Der Solana-RPC-Endpunkt, den diese Wallet nutzt',
     solanaApplyA11y: 'Solana-Endpunkt übernehmen',
-    solanaApplyHint: 'Schaltet diese Wallet auf den eingegebenen Solana-Endpunkt um',
     // F2 — der IC-Gateway-Override. Nur für Betreiber (Demos/Tests gegen eine lokale Replica),
     // kein Nutzer-Feature; der Hinweis sagt es ehrlich, wie die Solana-Zeile darüber.
-    icGatewayNote: 'Nur für Betreiber: die Basis-URL, an die diese Wallet Internet-Computer-Transaktionen sendet. Leer lassen, um das öffentliche IC-Gateway zu verwenden; eine lokale Replica-Adresse eintragen (z. B. für eine Demo oder Tests gegen ein lokales Netzwerk), um Zahlungen und Guthabenabfragen dorthin zu lenken. Für die normale Nutzung nicht nötig.',
+    icGatewayNote: 'Nur für Betreiber: die Basis-URL, an die diese Wallet IC-Transaktionen sendet. Leer nutzt das öffentliche Gateway; eine lokale Replica-Adresse lenkt Demos und Tests dorthin.',
     icGatewayLabel: 'IC-Gateway',
     icGatewayPlaceholder: 'http://10.0.2.2:4943',
-    icGatewayHint: 'Das IC-Gateway, an das diese Wallet Transaktionen sendet',
     icGatewayApplyA11y: 'IC-Gateway übernehmen',
-    icGatewayApplyHint: 'Schaltet diese Wallet auf das eingegebene IC-Gateway um',
   },
 
   about: {
     label: 'Über dpay',
     custody:
-      'dpay ist nicht verwahrend. Dein Geld wird allein durch den Schlüssel auf diesem Gerät kontrolliert. Es gibt kein dpay-Konto, und dpay kann dein Guthaben weder bewegen noch einfrieren noch wiederherstellen. Deine 24 Backup-Wörter sind der einzige Weg zurück.',
+      'dpay ist nicht verwahrend: Dein Geld wird allein durch den Schlüssel auf diesem Gerät kontrolliert. Es gibt kein dpay-Konto, und dpay kann dein Guthaben weder bewegen noch einfrieren noch wiederherstellen — deine 24 Backup-Wörter sind der einzige Weg zurück.',
     privacy: 'Datenschutzerklärung',
   },
 };
@@ -143,44 +132,39 @@ export const onboardingDe: OnboardingMessages = {
   custody: 'Kein Konto. Dein Schlüssel verlässt dieses Handy nie. Nicht einmal dpay kann dein Geld bewegen.',
   continue: 'Weiter',
   errOwnSeed:
-    'Dieser Seed sieht nicht richtig aus. Füge deine 24 Wiederherstellungswörter oder den 64-Hex-Seed genau so ein, wie du sie notiert hast.',
+    'Dieser Seed sieht nicht richtig aus — füge deine 24 Wiederherstellungswörter oder den 64-Hex-Seed genau so ein, wie notiert.',
   errWords: 'Einige Wörter sind falsch oder fehlen. Prüfe, ob alle 24 Wörter richtig geschrieben sind.',
-  errSaveWallet: 'Dieses Handy konnte deine Wallet nicht speichern, sie wurde also noch nicht erstellt. Deine Wörter stehen weiterhin auf dem Bildschirm — tippe erneut auf Weiter. Wenn es weiter fehlschlägt, gib Speicherplatz auf dem Handy frei.',
+  errSaveWallet: 'Dieses Handy konnte deine Wallet nicht speichern, sie wurde also noch nicht erstellt. Tippe erneut auf Weiter — wenn es weiter fehlschlägt, gib Speicherplatz auf dem Handy frei.',
 
   recoverySaved: {
     stamp: 'Backup gesichert',
     line: 'Nur diese Wörter holen deine Wallet zurück.',
-    sub: 'Du hast sie. Sonst niemand.',
   },
 
   backup: {
     ...copyWordsDe,
     title: 'Sichere deine Wallet',
-    ritual: 'Ab jetzt gehört die Wallet wirklich dir — nur diese Wörter holen dein Geld zurück.',
     warning:
-      'Schreib diese 24 Wörter auf und bewahre sie sicher auf. Sie sind der EINZIGE Weg, deine Wallet wiederherzustellen, wenn du dieses Gerät verlierst. Es gibt kein dpay-Konto, in das du dich zurück einloggen kannst. Verlierst du diese Wörter und dieses Handy, ist dein Geld weg. Nicht einmal wir können es zurückholen.',
-    copyWordsHint: 'Kopiert alle 24 Wiederherstellungswörter ohne die Positionsnummern in die Zwischenablage',
+      'Schreib diese 24 Wörter auf und bewahre sie sicher auf — sie sind der EINZIGE Weg, deine Wallet wiederherzustellen, wenn du dieses Gerät verlierst. Es gibt kein dpay-Konto zum Zurück einloggen, und nicht einmal dpay kann sie wiederherstellen.',
+    copyWordsHint: 'Kopiert alle 24 Wörter ohne die Positionsnummern',
     ack: 'Ich habe alle 24 Wörter aufgeschrieben',
   },
 
   restore: {
     phraseLabel: 'Wiederherstellungsphrase',
     phrasePlaceholder: 'Gib deine 24 Wiederherstellungswörter ein',
-    phraseHint: 'Die 24 Wiederherstellungswörter aus deinem Backup',
-    phraseNote: 'Gib die 24 Wörter aus deinem Backup ein. Ein Seed stellt dein IC- und dein Solana-Guthaben wieder her.',
+    phraseNote: 'Ein Seed stellt dein IC- und dein Solana-Guthaben wieder her.',
     seedLabel: 'Wiederherstellungs-Seed',
     seedPlaceholder: '64 Hex-Zeichen',
-    seedHint: 'Der 64-Hex-Seed aus dem Backup, der deine Wallet wiederherstellt',
+    seedHint: 'Der 64-Hex-Seed aus dem Backup',
     seedNote: 'Ein Seed stellt dein IC- und dein Solana-Guthaben wieder her.',
     enterHex: 'Stattdessen Hex eingeben',
     enterWords: 'Stattdessen Wörter eingeben',
     action: 'Wallet wiederherstellen',
     busy: 'Wird wiederhergestellt…',
-    hintMnemonic: 'Stellt deine Wallet aus deinen 24 Wiederherstellungswörtern wieder her',
-    hintHex: 'Stellt deine Wallet aus dem Wiederherstellungs-Seed wieder her',
     cancelA11y: 'Wiederherstellung abbrechen',
     cancelHint: 'Zurück zum Erstellen einer neuen Wallet',
-    entryHint: 'Stellt eine Wallet aus deiner 24-Wort-Wiederherstellungsphrase wieder her',
+    entryHint: 'Stellt eine Wallet aus deinem Backup wieder her',
   },
 
   usernameLabel: 'Wähle einen Benutzernamen',
@@ -191,18 +175,16 @@ export const onboardingDe: OnboardingMessages = {
   ownSeed: {
     useOwn: 'Stattdessen eigenen Seed nutzen',
     useRandom: 'Stattdessen zufälligen Seed erzeugen',
-    toggleHint:
-      'Zeigt ein Feld, in das du die 24 Wiederherstellungswörter oder den 64-Hex-Seed einer bestehenden Wallet einfügst, statt einen neuen zu erzeugen',
+    toggleHint: 'Füge den Seed einer bestehenden Wallet ein, statt einen neuen zu erzeugen',
     placeholder: 'Deine 24 Wörter oder der 64-Hex-Seed',
     a11y: 'Eigener Seed',
-    hint: 'Optional: die 24 Wiederherstellungswörter oder der 64-Hex-Seed, aus dem diese Wallet gebaut wird, statt eines neuen zufälligen',
+    hint: 'Optional: der Seed, aus dem diese Wallet gebaut wird',
     note: 'Leer lassen, um einen neuen zufälligen Seed zu erzeugen.',
   },
 
   create: {
     action: 'Wallet erstellen',
     busy: 'Wird erstellt…',
-    hint: 'Erstellt einen Wallet-Schlüssel auf diesem Gerät; keine Einzahlung und kein Kauf nötig',
   },
 
   demoNote: 'Beim Erstellen der Wallet wird kein Geld eingezahlt, gekauft oder bewegt.',
