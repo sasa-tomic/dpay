@@ -49,7 +49,6 @@ import {
   CONVERT_SLIPPAGE_BPS_DEFAULT,
   CONVERT_SLIPPAGE_BPS_OPTIONS,
   resolveConvertDestinations,
-  resolveConvertDirection,
   type ConvertDestination,
   type ConvertRouteOption,
 } from '../config/convert';
@@ -107,7 +106,9 @@ import {InstructionPanel} from './InstructionPanel';
 /** Everything the quote panel needs about the two legs, resolved + validated from the bundled catalog. */
 type ConvertLegs = {
   inDesc: CurrencyDescriptor;
-  outDesc: CurrencyDescriptor;
+  /** The STANDING pair's other leg — null for a hub-only asset (it converts with no direct
+   *  pair; every rendered number names the SELECTED destination instead). */
+  outDesc: CurrencyDescriptor | null;
   /** The catalog's BACKING symbol for each leg (`backing_symbol`, falling back to `symbol`) — the
    *  same string every other surface shows for that asset. For the PoC pair that is 'ICP' and
    *  'VCHF': VCHF's own backing symbol IS "VCHF", because it is a third party's franc-denominated
@@ -204,19 +205,22 @@ const buildDestGroups = (
   };
   // 1 — the STANDING group: the direct pair's other leg, the pinned `convert-dest-direct`
   //     row. Every mechanism that reaches the SAME ledger (its direct venue + any via-hub
-  //     route) merges under it, direct first.
-  const standing = legs.outDesc;
-  const standingDests = convDests.find(d => d.destLedger === standing.ledger)
-    ?? ({destLedger: standing.ledger, routes: []} as ConvertDestination);
-  push({
-    key: 'direct',
-    testID: 'convert-dest-direct',
-    label: M.convert.multihop.destDirect(symOf(standing)),
-    mechs: mechsOf(standingDests.routes),
-  });
+  //     route) merges under it, direct first. A hub-only asset has NO direct pair — no
+  //     standing row exists; its destinations render as plain in-wallet rows (D2).
+  if (legs.outDesc != null) {
+    const standing = legs.outDesc;
+    const standingDests = convDests.find(d => d.destLedger === standing.ledger)
+      ?? ({destLedger: standing.ledger, routes: []} as ConvertDestination);
+    push({
+      key: 'direct',
+      testID: 'convert-dest-direct',
+      label: M.convert.multihop.destDirect(symOf(standing)),
+      mechs: mechsOf(standingDests.routes),
+    });
+  }
   // 2 — every OTHER in-wallet destination (direct venue or via-hub — both land here).
   for (const d of convDests) {
-    if (d.destLedger === standing.ledger) continue;
+    if (legs.outDesc != null && d.destLedger === legs.outDesc.ledger) continue;
     const row = catalog.find(c => c.ledger === d.destLedger);
     if (row == null) continue;
     push({
@@ -442,6 +446,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     : [];
   const selGroup: DestGroup | null = destSel != null
     ? destGroups.find(g => g.key === destSel) ?? null
+    : destGroups.length === 1 ? destGroups[0] // a single-destination asset selects its only row
     : destGroups.find(g => g.key === 'direct') ?? null;
   const selMechPick: DestMechPick | null =
     selGroup == null ? null
@@ -1138,6 +1143,12 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
     setConfirmErr(null);
     setQuoteChanged(null);
     const outDesc = effOut ?? legs.outDesc;
+    // Unreachable for a direct pick (a direct row is always a priced catalog row) — kept
+    // fail-closed so the prepare call can never see a leg-less record.
+    if (outDesc == null) {
+      setConfirmBusy(false);
+      return;
+    }
     try {
       // Re-quote at confirm (spec §5): a moved market must be reviewed, never silently submitted.
       const fresh = await fetchConvertQuote(relayUrl, legs.inDesc.ledger, outDesc.ledger, reviewed.amountIn, venueOpt);
@@ -1188,13 +1199,14 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   const {inSym, inDecimals} = legs;
   // The OUTPUT leg the form names/quotes: under a non-standing in-wallet direct pick it is
   // THAT row (effOut); otherwise the standing pair's other leg — byte-identical to the
-  // pre-groups surface for every pinned direct flow.
+  // pre-groups surface for every pinned direct flow. Null for a hub-only asset, whose out*
+  // fallbacks (input row's own facts) never reach a rendered money line.
   const effOutDesc = effOut ?? legs.outDesc;
   // The standing leg's own validated fields; an eff row was fail-closed priced by the
   // destination engine (fee/decimals/symbol), and falls back to the standing values —
   // never a literal — so the form's money lines stay ledger-denominated either way.
-  const outSym = effOutDesc.backing_symbol ?? effOutDesc.symbol ?? legs.outSym;
-  const outDecimals = effOutDesc.decimals ?? legs.outDecimals;
+  const outSym = effOutDesc?.backing_symbol ?? effOutDesc?.symbol ?? legs.outSym;
+  const outDecimals = effOutDesc?.decimals ?? legs.outDecimals;
   const balanceRaw = selectedAsset != null && selectedAsset.protocol === 'ic' ? assetBalances[selectedAsset.currency] : undefined;
   const balanceN = balanceRaw != null ? BigInt(balanceRaw) : null;
   const balanceStr = balanceRaw != null ? fmtAssetCompact(balanceRaw, inDecimals, inSym) : null;
@@ -1223,7 +1235,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
   if (balanceN === 0n) {
     // The pair's OTHER leg, formatted, iff it holds something. A balance that has not been read
     // (undefined) is not a zero and is not offered — the same fail-open rule the gate above uses.
-    const otherRaw = assetBalances[legs.outDesc.currency];
+    const otherRaw = legs.outDesc != null ? assetBalances[legs.outDesc.currency] : null;
     const otherHeld = otherRaw != null && BigInt(otherRaw) > 0n
       ? fmtAssetCompact(otherRaw, outDecimals, outSym)
       : null;
@@ -1249,7 +1261,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
             is provably no account to point at and the deposit route above is the whole answer.
             Switching swaps the direction (the venue serves both), so the user converts what they
             have into what they were standing on. */}
-        {otherHeld != null ? (
+        {otherHeld != null && legs.outDesc != null ? (
           <View testID="convert-fund-other">
             <Text testID="convert-fund-other-holds" style={S.convertMetaLine}>
               {M.convert.fundOtherHolds(otherHeld, inSym)}
@@ -1258,7 +1270,7 @@ export function ConvertMode({identity, relayUrl, catalog, selectedAsset, assetBa
               <Pressable
                 testID="btn-convert-fund-other"
                 style={S.linkBtn}
-                onPress={() => onSwitchAsset(`ic:${legs.outDesc.currency}`)}
+                onPress={() => onSwitchAsset(`ic:${legs.outDesc!.currency}`)}
                 accessibilityRole="button"
                 accessibilityLabel={M.convert.fundOtherSwitch(outSym)}
                 accessibilityState={{disabled: false}}
@@ -1580,7 +1592,7 @@ function RouteStatePanel({record, onBack}: {record: ConvertRecord; onBack: () =>
           sub-picker on selection: direct pool first, then via-hub / CCTP / venue rows in
           registry order — never ranked, nothing preselected beyond that order, and no quote
           until a mechanism is picked (the venue chooser's red lines, one level down). */}
-      {destGroups.length > 1 ? (
+      {destGroups.length > 0 ? (
         <View testID="convert-dest">
           <Text style={S.convertSlippageLabel}>{M.convert.multihop.destLabel}</Text>
           {destGroups.map(g => {
@@ -3065,24 +3077,33 @@ function StatePanel({record, onBack}: {record: ConvertRecord; onBack: () => void
 function resolveLegs(catalog: CurrencyDescriptor[], asset: Extract<SelectableAsset, {protocol: 'ic'}>): ConvertLegs | null {
   const inDesc = catalog.find((c) => c.currency === asset.currency);
   if (inDesc == null || inDesc.ledger == null) return null;
-  const direction = resolveConvertDirection(inDesc.ledger, inDesc.testnet);
-  if (direction == null) return null;
-  const outDesc = catalog.find((c) => c.ledger === direction.otherLedger);
-  if (outDesc == null) return null;
+  // The entry gate (2026-09-18 hub widening): an asset converts when it has AT LEAST ONE
+  // destination — a direct pool pair OR any hub route (registry-derived, fail-closed on the
+  // same bar the engine prices at). A venue-less asset keeps the derived unavailable copy.
+  const dests = resolveConvertDestinations(inDesc.ledger, inDesc.testnet);
+  if (dests.length === 0) return null;
   const inSym = inDesc.backing_symbol ?? inDesc.symbol;
-  const outSym = outDesc.backing_symbol ?? outDesc.symbol;
-  if (inSym == null || outSym == null) return null;
-  if (inDesc.decimals == null || outDesc.decimals == null) return null;
-  if (inDesc.fee == null || outDesc.fee == null) return null;
+  if (inSym == null || inDesc.decimals == null || inDesc.fee == null) return null;
+  // The standing output leg is the FIRST direct destination, where one exists. A hub-only
+  // asset (ckETH today: hub-reachable from VCHF/ckUSDC, no direct venue) converts with NO
+  // standing out leg — the out* fields below carry the input row's own facts as inert
+  // fallbacks; no direct surface renders without a direct row, and every number such a
+  // screen shows names the selected hub destination.
+  const standing = dests.find((d) => d.routes.some((r) => r.kind === 'direct'));
+  const outDesc = standing != null
+    ? catalog.find((c) => c.ledger === standing.destLedger) ?? null
+    : null;
+  const outSym = outDesc?.backing_symbol ?? outDesc?.symbol ?? null;
+  if (outDesc != null && (outSym == null || outDesc.decimals == null || outDesc.fee == null)) return null;
   return {
     inDesc,
     outDesc,
     inSym,
-    outSym,
+    outSym: outSym ?? inSym,
     inDecimals: inDesc.decimals,
-    outDecimals: outDesc.decimals,
+    outDecimals: outDesc?.decimals ?? inDesc.decimals,
     inFee: inDesc.fee,
-    outFee: outDesc.fee,
+    outFee: outDesc?.fee ?? inDesc.fee,
   };
 }
 

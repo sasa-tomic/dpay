@@ -1367,4 +1367,18 @@ describe('hub destination — the two-quote composed surface (2026-09-18 hub UX 
     expect(node(tree, 'convert-amount')!.props.value).toBe('1');
     expect(present(tree, 'convert-insufficient')).toBe(false);
   });
+
+  test('hub-reachable input: ckETH converts — direct ICP row PLUS hub-only in-wallet rows', async () => {
+    const CKETH_ASSET = ASSETS.find(a => a.protocol === 'ic' && a.currency === 6)!;
+    jest.mocked(convertResumeSnapshot).mockReturnValue({});
+    const tree = await mountConvert('1000000000000000000', null,
+      {selectedAsset: CKETH_ASSET, assetBalances: {6: '1000000000000000000'}});
+    expect(present(tree, 'convert-dest')).toBe(true);
+    // ckETH's own direct pair (icpswap-cketh → ICP) stays the standing row…
+    expect(present(tree, 'convert-dest-direct')).toBe(true);
+    // …and the hub-only destinations (ckUSDC, VCHF — reachable only through the ICP hub,
+    // no direct venue pairs them with ckETH) render as plain in-wallet rows (D2).
+    expect(present(tree, 'convert-dest-inwallet-2')).toBe(true);
+    expect(present(tree, 'convert-dest-inwallet-7')).toBe(true);
+  });
 });
