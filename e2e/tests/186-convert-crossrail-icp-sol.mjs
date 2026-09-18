@@ -214,6 +214,11 @@ export async function run() {
     assert(await driver.findByTestID(ROUTE_C_ROW, {timeoutMs: 3_000}) != null, 'the Route C row is offered beside the direct pair');
     assert(await driver.isPresent('convert-route-note') === false, 'the one-route honesty line is HIDDEN (three routes exist)');
     await driver.click(ROUTE_C_ROW);
+    // D2 merge (2026-09-18): the SOL destination group now carries TWO mechanisms (the
+    // Route C cross-rail + the SideShift cefi venue). A group with NO direct mechanism
+    // waits for an explicit pick — nothing is preselected — so select the route mech;
+    // only then does the destination address input appear.
+    await driver.click('convert-dest-mech-multihop:icpswap-ckusdc:2:cctp:jupiter', {timeoutMs: 4_000});
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 15_000});
     assertIncludes(await driver.readText('convert-dest-cross-note'), 'also the wallet that signs',
