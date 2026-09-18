@@ -263,19 +263,22 @@ CODEBASE_ANALYSIS.md, memory/glossary.md, the till specs). "Ring up" gets plain 
 the scan-audience label `M.pay.till.tillCode` now reads "OpenCryptoPay (OCP), Binance Pay, MoonPay
 app [Payer must be Online]" (four locales). Value 6, effort L.
 
-**7. IC hub 2-hop generalization — route any IC pair over a hub asset (value 6, effort M,
-UNBLOCKED).** Every registered IC venue is a DIRECT pair, so a pair like VCHF→ckETH has no route
-even though VCHF↔ICP and ICP↔ckETH both exist — today the user runs two conversions and pays
-twice. Generalize what the multihop machinery already proves (flow 184 composes device-signed
-legs into ONE intent with per-leg recovery): at quote time, when no direct venue answers the
-pair, search one intermediate hub (ICP, or ckUSDC where it is deeper), compose the two best
-venue legs into one record, present the composed rate and the combined fee honestly, and execute
-through the existing engine — a failed second leg leaves the first leg's output in the user's
-own wallet, which is exactly the flow-184 recovery story, already built. Scope: a registry-graph
-route search in `app/convert.ts`, the composition surface + disclosure copy, one e2e flow; the
-relay is unchanged (every hop is already a real venue quote). Not blocked on anything external.
+**7. IC hub 2-hop generalization — DONE (2026-09-18, closed by the convert-hub slice).** What
+shipped: `hubRoutes(catalog, fromLedger)` in `app/routes.ts` walks the REGISTRY (no hardcoded
+hub) for every 2-leg IC path and is exposed through `resolveConvertDestinations` (direct first,
+hubs after, registry order, never ranked); `prepareHubConvertRecord` signs all four legs in ONE
+pass (approve→swap→approve→swap, shared expiries, every quote verbatim attributed+timestamped,
+no dpay cut); execution follows the multihop recovery story exactly — a failed second leg leaves
+the first leg's output in the user's own wallet (`failed_leg`/`swap_refused`), the hop watcher
+settles on a ledger row, and the ckETH-gas preflight stays fail-closed. The D1–D6 destination
+UX (one row per ASSET, mechanism sub-picker on selection, nothing preselected but registry
+order) landed with it; the ckBTC fee was measured live (icrc1_fee → 10 sats, 2026-09-18) and
+pinned end-to-end so its hub pairs stop fail-closing. Covered by jest `convertHub.test.ts`
+(33 tests) and e2e flow 190 (happy 4-leg run + deterministic swap2-refusal choreography).
+Residual (not a blocker): the fee pin is AHEAD of the prod relay's `/api/v1/currencies` row
+until the founder-run redeploy; prod display unaffected (relay sole catalog authority).
 
-Beyond items 6–7 the remaining list is the physical/outer-loop gates (below, founder-run) and the
+Beyond item 6 (item 7 is DONE, above) the remaining list is the physical/outer-loop gates (below, founder-run) and the
 DO-NOT-NAG set.
 
 **Objective state (compressed history — the currency-first frame, founder 2026-09-04):**
