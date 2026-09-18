@@ -217,7 +217,9 @@ describe('HomeTab — the accounts affordance IS the headline (2026-09-14)', () 
     // (a second copy of the balance would be an announcement with no action attached to it).
     const btn = tree.root.findAll(n => n.props?.testID === 'btn-home-accounts')[0]!;
     expect(String(btn.props.accessibilityLabel)).toBe(M.wallet.home.accounts.openLabel);
-    expect(String(btn.props.accessibilityHint)).toBe(M.wallet.home.accounts.openHint);
+    // No a11y hint: the label names the action, a hint would only restate it (verbosity pass
+    // 2026-09-17 — hints that restate the label are cut everywhere in the wallet domain).
+    expect(btn.props.accessibilityHint).toBeUndefined();
     // The amount stays inside the tappable — the founder's rule was that TAPPING THE BALANCE is
     // the gesture, so shrinking the target to the pill again would quietly undo it. (findAll
     // counts the Text wrapper AND its host instance — presence, not count, is the contract.)
@@ -300,9 +302,10 @@ describe('HomeTab — the inline activity feed', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('an empty ledger renders the honest empty line plus the See-all link', () => {
+  test('an empty ledger still offers the See-all link — no narrating empty line (verbosity pass 2026-09-17)', () => {
     const tree = mountHome({history: []});
-    expect(texts(tree)).toContain(M.wallet.home.activity.empty);
+    expect(texts(tree)).not.toContain('No payments yet.');
+    expect(testIDs(tree)).not.toContain('home-hist-time-0');
     expect(testIDs(tree)).toContain('btn-home-activity-all');
     act(() => { tree.unmount(); });
   });

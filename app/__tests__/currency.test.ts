@@ -321,13 +321,13 @@ describe('rail health + ramp lines — catalog facts or silence', () => {
 
   it('derives the ramp line from the capabilities, and stays silent otherwise', () => {
     // VEUR: Unavailable onramp + Partner offramp naming DFX — the partner comes from the row.
-    expect(railRampLine(veur)).toBe('DFX lists this token as sellable; buying is not available today.');
+    expect(railRampLine(veur)).toBe('DFX — sell only today.');
     // VCHF/EURC/SOL: Unavailable both ways ⇒ wallet-to-wallet, no ramp implied.
-    expect(railRampLine(vchf)).toBe('No fiat ramp today — it moves wallet to wallet.');
-    expect(railRampLine(eurc)).toBe('No fiat ramp today — it moves wallet to wallet.');
-    expect(railRampLine(sol)).toBe('No fiat ramp today — it moves wallet to wallet.');
+    expect(railRampLine(vchf)).toBe('No fiat ramp — wallet to wallet only.');
+    expect(railRampLine(eurc)).toBe('No fiat ramp — wallet to wallet only.');
+    expect(railRampLine(sol)).toBe('No fiat ramp — wallet to wallet only.');
     // ckUSDC: Direct both ways ⇒ the wired deposit/cash-out statement.
-    expect(railRampLine(ckusdc)).toBe('Deposit and cash-out to its native chain are wired in dpay.');
+    expect(railRampLine(ckusdc)).toBe('Deposit and cash-out are wired in.');
   });
 
   it('renders NO ramp line for shapes the catalog does not carry today', () => {

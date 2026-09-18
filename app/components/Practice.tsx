@@ -268,7 +268,6 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
       onPress={onDone}
       accessibilityRole="button"
       accessibilityLabel={P.continue}
-      accessibilityHint={P.continueHint}
       accessibilityState={{disabled: false}}>
       <Text style={S.primaryText}>{P.continue}</Text>
     </Pressable>
@@ -279,7 +278,6 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
       onPress={() => void openReview()}
       accessibilityRole="button"
       accessibilityLabel={P.review}
-      accessibilityHint={P.reviewHint}
       accessibilityState={{disabled: false}}>
       <Text style={S.primaryText}>{P.review}</Text>
     </Pressable>
@@ -302,7 +300,6 @@ export function Practice({identity, relayUrl, onDone}: {identity: Identity; rela
             onPress={onDone}
             accessibilityRole="button"
             accessibilityLabel={P.skip}
-            accessibilityHint={P.skipHint}
             accessibilityState={{disabled: false}}>
             <IconClose size={18} color={C.sub} />
           </Pressable>

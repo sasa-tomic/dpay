@@ -33,20 +33,16 @@ export type WalletMessages = {
   /** Header utility cluster: the gear and the theme flip. */
   header: {
     settings: string;
-    settingsHint: string;
     /** `target` is the mode one tap lands in (Light/Dark) — the icon names the TARGET. */
     themeSwitch: (target: string) => string;
-    themeSwitchHint: string;
     /** The web wordmark's back-link to the marketing site (web build only). */
     home: string;
-    homeHint: string;
   };
 
   /** The header balance pressable (opens the Balances sheet). */
   balance: {
     label: string;
-    hint: string;
-    /** Shown instead of `hint` while a pay engine holds the selection lock. */
+    /** Shown as the chip's hint while a pay engine holds the selection lock. */
     lockedHint: string;
     /** Online: the polled balance is authoritative. Offline: the honest approximation. */
     of: (asset: string) => string;
@@ -135,21 +131,17 @@ export type WalletMessages = {
       receive: string;
       receiveHint: string;
       addMoney: string;
-      addMoneyHint: string;
     };
     /** The inline activity feed — the newest ledger rows, capped, with the see-all link. */
     activity: {
       title: string;
       seeAll: string;
-      seeAllHint: string;
-      empty: string;
     };
     /** The headline block IS the affordance that opens the ACCOUNTS route (founder, 2026-09-14:
      *  tapping the balance goes to the accounts and balances). `openLabel` names the ACTION for
      *  the screen reader — never a second copy of the eyebrow sentence, which would drift. */
     accounts: {
       openLabel: string;
-      openHint: string;
     };
   };
 
@@ -160,7 +152,6 @@ export type WalletMessages = {
     title: string;
     intro: string;
     back: string;
-    backHint: string;
     /** The divider that separates the practice rail from the accounts holding real value. Whole
      *  sentence, never a glyph (anti-scam rule R3: play money is labelled wherever it appears). */
     practice: string;
@@ -179,11 +170,9 @@ export type WalletMessages = {
      *  sync) — the same honesty the custody statement makes. */
     intro: string;
     back: string;
-    backHint: string;
     /** The honest empty line + its way out (founder rule: every state says what to do next). */
     empty: string;
     addEntry: string;
-    addEntryHint: string;
     /** The add form's asset chooser heading. */
     assetLabel: string;
     addressLabel: string;
@@ -191,9 +180,7 @@ export type WalletMessages = {
     addressHint: string;
     nameLabel: string;
     namePlaceholder: string;
-    nameHint: string;
     save: string;
-    saveHint: string;
     rename: string;
     /** `who` is the entry's current label, or its short address when unnamed. */
     renameHint: (who: string) => string;
@@ -222,8 +209,6 @@ export type WalletMessages = {
     selectSolanaHint: (symbol: string) => string;
     showTestnet: string;
     hideTestnet: string;
-    showTestnetHint: string;
-    hideTestnetHint: string;
   };
 
   /** The Transactions tab. */
@@ -293,16 +278,12 @@ export type WalletMessages = {
 export const walletEn: WalletMessages = {
   header: {
     settings: 'Settings',
-    settingsHint: 'Open relay, reset, and advanced settings',
     themeSwitch: target => `Switch theme to ${target}`,
-    themeSwitchHint: 'Toggles the theme between Light and Dark; set Auto in Settings',
     home: 'dpay home',
-    homeHint: 'Open the main dpay site',
   },
 
   balance: {
-    label: 'Balances — switch currency or receive',
-    hint: 'Open the Home tab to see every asset, switch the displayed currency, or receive',
+    label: 'Balances',
     lockedHint: 'Finish or cancel the current payment first',
     of: asset => `${asset} balance`,
     approx: asset => `~ ${asset} approx.`,
@@ -313,7 +294,7 @@ export const walletEn: WalletMessages = {
   homeCurrency: {
     name: {CHF: 'Swiss francs', USD: 'US dollars', EUR: 'Euros'},
     chooseTitle: 'Which currency do you think in?',
-    chooseBody: 'Choose which currency appears first. This changes display and defaults only.',
+    chooseBody: 'Sets the currency shown first — display only.',
     railReason: {destination: 'the payment asks for this rail', funded: 'you hold a balance here'},
     railWithReason: (line, reason) => `${line} — ${reason}`,
     mainBadge: 'Main',
@@ -321,7 +302,7 @@ export const walletEn: WalletMessages = {
     settingsTitle: 'Main currency',
     settingsHint: 'The currency dpay shows first and pays in by default',
     confirm: 'Continue',
-    pickFirst: 'Tap the currency you want first, then Continue.',
+    pickFirst: 'Pick a currency first.',
     noneAvailable: 'No currencies could be loaded. Check the server address in Settings, then reopen dpay.',
     a11y: currency => `Choose ${currency}`,
   },
@@ -333,9 +314,9 @@ export const walletEn: WalletMessages = {
 
   railDetail: {
     back: 'Back',
-    rampNone: 'No fiat ramp today — it moves wallet to wallet.',
-    rampSellPartner: partner => `${partner} lists this token as sellable; buying is not available today.`,
-    rampBothDirect: 'Deposit and cash-out to its native chain are wired in dpay.',
+    rampNone: 'No fiat ramp — wallet to wallet only.',
+    rampSellPartner: partner => `${partner} — sell only today.`,
+    rampBothDirect: 'Deposit and cash-out are wired in.',
   },
 
   tab: {pay: 'Pay', receive: 'Receive', transactions: 'Transactions', home: 'Home'},
@@ -343,50 +324,41 @@ export const walletEn: WalletMessages = {
   home: {
     actions: {
       pay: 'Pay',
-      payHint: 'Scan a code or tap a phone to pay',
+      payHint: 'Scan a code or tap a phone',
       receive: 'Receive',
-      receiveHint: 'Request a payment or show your address',
+      receiveHint: 'Request or show your address',
       addMoney: 'Add money',
-      addMoneyHint: 'Add funds to this wallet',
     },
     activity: {
       title: 'Activity',
       seeAll: 'See all',
-      seeAllHint: 'Open the full transactions list',
-      empty: 'No payments yet.',
     },
     accounts: {
       openLabel: 'Open accounts',
-      openHint: 'See every account this wallet can hold',
     },
   },
 
   accounts: {
     title: 'Accounts',
-    intro: 'Tap an account to use it in the Pay and Receive tabs. Your home screen keeps showing your main currency.',
+    intro: 'Tap an account to use it in Pay and Receive.',
     back: 'Back',
-    backHint: 'Return to where you were',
     practice: 'Practice money — it only works inside dpay, and no shop will take it.',
-    convertHint: 'Convert this account’s balance at an outside venue you sign with yourself',
+    convertHint: 'Convert at an outside venue',
   },
 
   addressBook: {
     title: 'Address book',
-    intro: 'Every destination you have sent to, most recently used first — saved on this device only.',
+    intro: 'Addresses you’ve sent to, saved on this device only.',
     back: 'Back',
-    backHint: 'Return to where you were',
-    empty: 'No saved addresses yet. Every address you send to is saved here automatically — or add one now.',
+    empty: 'No saved addresses yet — addresses you send to are saved here automatically.',
     addEntry: 'Add an address',
-    addEntryHint: 'Save a destination you send to often',
     assetLabel: 'For',
     addressLabel: 'Address',
-    addressPlaceholder: 'Paste the destination address',
-    addressHint: 'The destination exactly as you would send to it',
+    addressPlaceholder: 'Paste address',
+    addressHint: 'Exactly as you would send to it',
     nameLabel: 'Name',
     namePlaceholder: 'e.g. Alice (optional)',
-    nameHint: 'What you call this destination — optional',
     save: 'Save address',
-    saveHint: 'Adds this address to the address book',
     rename: 'Rename',
     renameHint: who => `Rename ${who}`,
   },
@@ -403,15 +375,13 @@ export const walletEn: WalletMessages = {
   balances: {
     demoFunds: 'Demo funds',
     demoFundsLabel: 'Get demo funds',
-    demoFundsHint: 'Add ∂100 of demo money to this wallet',
+    demoFundsHint: 'Adds ∂100 demo money',
     needsSetup: 'Needs setup',
     select: symbol => `Select ${symbol}`,
-    selectHint: "Show this asset's balance on your home screen",
-    selectSolanaHint: symbol => `Show ${symbol} on your home screen and use the Solana rail for Pay/Receive`,
+    selectHint: 'Show on your home screen',
+    selectSolanaHint: symbol => `Show ${symbol} on home; Pay and Receive use Solana`,
     showTestnet: 'Show testnet assets',
     hideTestnet: 'Hide testnet assets',
-    showTestnetHint: 'Reveal testnet currencies in this list',
-    hideTestnetHint: 'Hide testnet currencies from this list',
   },
 
   ledger: {
@@ -458,14 +428,9 @@ export type EducationMessages = {
     stageTags: readonly [string, string, string];
     close: string;
     skip: string;
-    skipHint: string;
     back: string;
-    backLabel: string;
     next: string;
-    nextLabel: string;
-    nextHint: string;
     getStarted: string;
-    getStartedHint: string;
     /** The scene-3 illustration's request-card eyebrow. */
     shopRequests: string;
   };
@@ -499,9 +464,7 @@ export type EducationMessages = {
     /** The real, polled practice balance above the card. */
     balance: (amount: string) => string;
     review: string;
-    reviewHint: string;
     skip: string;
-    skipHint: string;
     /**
      * The one line practice adds to the real review: why practising needs a connection when the
      * product does not. Both halves in one sentence — the exception and the rule.
@@ -517,7 +480,6 @@ export type EducationMessages = {
     refusedBody: string;
     /** The ONE exit from every outcome — practice never blocks the first run. */
     continue: string;
-    continueHint: string;
     /** The permanent footer: play money, and nothing is being sold. */
     punchline: string;
     /**
@@ -547,10 +509,8 @@ export type EducationMessages = {
     /** The archive's only number. */
     count: (filled: number) => string;
     goToStep: (hint: string) => string;
-    goToStepHint: string;
     nextTag: string;
     nextLabel: (hint: string) => string;
-    nextHint: string;
     doneHint: string;
     /** The durable TRIP READY mark (also the strip's complete-state hint). */
     ready: string;
@@ -594,14 +554,9 @@ export const educationEn: EducationMessages = {
     stageTags: ['01 — SIGNAL', '02 — KEY', '03 — ASSET'],
     close: 'Close how dpay works',
     skip: 'Skip walkthrough',
-    skipHint: 'Go straight to creating your wallet',
     back: 'Back',
-    backLabel: 'Previous scene',
     next: 'Next',
-    nextLabel: 'Next scene',
-    nextHint: 'Show the next scene',
     getStarted: 'Get started',
-    getStartedHint: 'Continue to creating your wallet',
     shopRequests: 'Shop requests',
   },
 
@@ -610,43 +565,40 @@ export const educationEn: EducationMessages = {
     eyebrow: 'PRACTICE',
     payeeName: 'Practice shop',
     title: 'Make one payment, for real',
-    cardLine: 'This is the code a shop would show you.',
+    cardLine: 'The code a shop would show you.',
     balance: amount => `You have ${amount} of practice money.`,
     review: 'Review payment',
-    reviewHint: 'See the amount and the recipient before you approve',
     skip: 'Skip practice',
-    skipHint: 'Skip the practice payment and choose your main currency',
-    bothSides: 'Your phone is playing both sides here, so this practice needs a connection. On a trip, only the shop needs one.',
-    settledBody: 'That was a real payment on the practice ledger — your phone signed it and the ledger settled it.',
+    bothSides: 'Practice needs a connection — your phone plays both sides. On a trip, only the shop does.',
+    settledBody: 'A real payment: your phone signed it and the practice ledger settled it.',
     settledBalance: amount => `${amount} of practice money left.`,
-    pendingBody: 'The payment was signed and sent. dpay has not seen it settle yet, so nothing is confirmed. This is exactly what a real pending payment looks like.',
+    pendingBody: 'Signed and sent, not yet settled — nothing is confirmed. This is what a real pending payment looks like.',
     refusedTitle: 'The ledger refused it',
     refusedBody: 'Nothing moved.',
     continue: 'Continue setup',
-    continueHint: 'Go on to choosing your main currency',
-    punchline: 'Practice money has no cash value — it only exists to let you try the app.',
+    punchline: 'Practice money has no cash value.',
     noFaucet: {
       title: 'No practice money here',
-      body: 'This server is not handing out practice money, so there is nothing to practise with. Nothing is missing from your wallet — carry on and pick your currency, and you can make your first real payment whenever you like.',
+      body: 'This server isn’t handing out practice money. Nothing is wrong — carry on and pick your currency.',
     },
     cooldown: {
       title: 'Practice money, in a moment',
-      body: reason => `This server hands out practice money once in a while, and it has just done so. It said: ${reason} Carry on with setup — you can come back and pay any time.`,
+      body: reason => `This server hands out practice money once in a while — it just did. It said: ${reason} Carry on with setup; come back and pay any time.`,
     },
     offline: {
       title: 'This practice needs a connection',
-      body: 'Your phone is playing both the shop and the payer here, so it has to reach the ledger itself. A real payment does not: the shop is the one that needs a connection. Reconnect and try again, or carry on with setup.',
+      body: 'Practice needs a connection — your phone plays both the shop and the payer; a real payment does not. Reconnect and try again, or carry on with setup.',
     },
     empty: {
       title: 'Nothing to practise with yet',
-      body: 'Your practice balance is empty, so there is nothing to pay with. Nothing is wrong with your wallet — carry on and pick your currency.',
+      body: 'Your practice balance is empty. Nothing is wrong — carry on and pick your currency.',
     },
   },
 
   coachTips: {
     receiveRequest: {
-      title: 'Show your request code',
-      body: "Show this code to your customer. Their phone scans it and approves; your connection confirms.",
+      title: 'Show it to your customer',
+      body: 'Their phone scans and approves; your connection confirms.',
     },
     offlineQr: {
       title: 'Signed — not settled',
@@ -654,7 +606,7 @@ export const educationEn: EducationMessages = {
     },
     pendingOutcome: {
       title: 'Still pending',
-      body: "Pending means the outcome isn't known yet. Never assume it succeeded — check back here.",
+      body: "The outcome isn't known yet — never assume success; check back here.",
     },
   },
   coachDismiss: title => `Dismiss tip: ${title}`,
@@ -672,11 +624,9 @@ export const educationEn: EducationMessages = {
     stripLabel: filled => `Trip readiness ${filled} of 4`,
     count: filled => `${filled} OF 4`,
     goToStep: hint => `Go: ${hint}`,
-    goToStepHint: 'Open the surface where this step happens',
     nextTag: 'Next',
     nextLabel: hint => `Next: ${hint}`,
-    nextHint: 'Go to the surface where this step happens',
-    doneHint: 'Retire the trip readiness strip',
+    doneHint: 'Retire the strip',
     ready: 'Trip ready',
     readyLine: 'You can pay even when your phone has no signal.',
     capstone: 'Trip\nReady',

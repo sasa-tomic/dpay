@@ -93,7 +93,7 @@ export async function run() {
 
     assertEq(
       await driver.readText('practice-outcome-body'),
-      'The payment was signed and sent. dpay has not seen it settle yet, so nothing is confirmed. This is exactly what a real pending payment looks like.',
+      'Signed and sent, not yet settled — nothing is confirmed. This is what a real pending payment looks like.',
       'an unknown outcome states exactly that, and nothing more',
     );
     const unknownScreen = await driver.readText('practice-outcome');

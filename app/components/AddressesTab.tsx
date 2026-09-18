@@ -177,7 +177,6 @@ export function AddressesTab({
           onPress={onBack}
           accessibilityRole="button"
           accessibilityLabel={M.wallet.addressBook.back}
-          accessibilityHint={M.wallet.addressBook.backHint}
           accessibilityState={{disabled: false}}>
           <IconChevronLeft size={26} color={C.sub2} />
         </Pressable>
@@ -232,7 +231,6 @@ export function AddressesTab({
           <TextInput
             testID="addr-add-name-input"
             accessibilityLabel={M.wallet.addressBook.nameLabel}
-            accessibilityHint={M.wallet.addressBook.nameHint}
             style={S.withdrawAddrInput}
             value={addName}
             onChangeText={setAddName}
@@ -248,7 +246,6 @@ export function AddressesTab({
             onPress={commitAdd}
             accessibilityRole="button"
             accessibilityLabel={M.wallet.addressBook.save}
-            accessibilityHint={M.wallet.addressBook.saveHint}
             accessibilityState={{disabled: !addOk}}>
             <Text style={[S.secondaryBtnText, !addOk && S.disabledText]}>{M.wallet.addressBook.save}</Text>
           </Pressable>
@@ -269,7 +266,6 @@ export function AddressesTab({
           onPress={() => startAdd(assets[0]?.id ?? null)}
           accessibilityRole="button"
           accessibilityLabel={M.wallet.addressBook.addEntry}
-          accessibilityHint={M.wallet.addressBook.addEntryHint}
           accessibilityState={{disabled: false}}>
           <IconPlus size={18} color={C.brandText} />
           <Text style={S.ghostBtnText}>{M.wallet.addressBook.addEntry}</Text>
@@ -300,7 +296,6 @@ export function AddressesTab({
                       <TextInput
                         testID={`addr-rename-input-${a.testKey}`}
                         accessibilityLabel={M.wallet.addressBook.nameLabel}
-                        accessibilityHint={M.wallet.addressBook.nameHint}
                         style={S.renameInput}
                         value={renameText}
                         onChangeText={setRenameText}

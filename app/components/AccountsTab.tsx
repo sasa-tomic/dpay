@@ -91,7 +91,6 @@ export function AccountsTab({
           onPress={onBack}
           accessibilityRole="button"
           accessibilityLabel={M.wallet.accounts.back}
-          accessibilityHint={M.wallet.accounts.backHint}
           accessibilityState={{disabled: false}}>
           <IconChevronLeft size={26} color={C.ink} />
         </Pressable>
@@ -221,7 +220,6 @@ export function AccountsTab({
             onPress={onToggleTestnet}
             accessibilityRole="button"
             accessibilityLabel={showTestnet ? M.wallet.balances.hideTestnet : M.wallet.balances.showTestnet}
-            accessibilityHint={showTestnet ? M.wallet.balances.hideTestnetHint : M.wallet.balances.showTestnetHint}
             accessibilityState={{disabled: false}}>
             <Text style={S.testnetToggleText}>{showTestnet ? M.wallet.balances.hideTestnet : M.wallet.balances.showTestnet}</Text>
           </Pressable>

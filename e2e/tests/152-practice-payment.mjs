@@ -85,7 +85,7 @@ export async function run() {
     const body = await driver.readText('practice-outcome-body');
     assertEq(
       body,
-      'That was a real payment on the practice ledger — your phone signed it and the ledger settled it.',
+      'A real payment: your phone signed it and the practice ledger settled it.',
       'the settled outcome says what actually happened',
     );
     assertIncludes(await driver.readText('practice-left'), '∂99.00', 'the remaining balance is measured, not assumed');

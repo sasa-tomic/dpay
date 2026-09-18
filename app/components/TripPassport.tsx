@@ -198,7 +198,6 @@ export function PassportArchive({onClose, onNext, onStep}: {
                     onPress={() => onStep(s.key)}
                     accessibilityRole="button"
                     accessibilityLabel={M.education.passport.goToStep(s.hint)}
-                    accessibilityHint={M.education.passport.goToStepHint}
                     accessibilityState={{disabled: false}}>
                     {slot}
                   </Pressable>
@@ -228,7 +227,6 @@ export function PassportArchive({onClose, onNext, onStep}: {
                 }}
                 accessibilityRole="button"
                 accessibilityLabel={M.education.passport.nextLabel(readiness.next?.hint ?? '')}
-                accessibilityHint={M.education.passport.nextHint}
                 accessibilityState={{disabled: false}}>
                 <Text style={S.passportHintTag}>{M.education.passport.nextTag}</Text>
                 <Text testID="passport-hint" style={S.passportHintText}>{readiness.next?.hint}</Text>
