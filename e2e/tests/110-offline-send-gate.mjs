@@ -75,7 +75,7 @@ export async function run() {
     );
     const panel = await driver.readText('pay-send-offline');
     assertIncludes(panel, 'connection', 'the offline instruction names the constraint');
-    assertIncludes(panel, 'scan', 'the offline instruction names the rail that still works');
+    assertIncludes(panel, 'Scan the merchant', 'the offline instruction names the rail that still works');
     console.log(`[110-offline-send-gate] ✓ offline: form replaced by an instruction — "${panel.slice(0, 80)}…"`);
     await driver.screenshot('110-offline-send-gate');
 
