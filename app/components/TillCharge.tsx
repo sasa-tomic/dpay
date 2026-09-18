@@ -567,7 +567,6 @@ export function TillCharge({identity, relayUrl, asset, assets, catalog, nfcStatu
           onPress={cancel}
           accessibilityRole="button"
           accessibilityLabel={M.receive.till.cancel}
-          accessibilityHint={M.receive.till.cancelHint}
           accessibilityState={{disabled: cancelling}}>
           <Text style={[S.ghostBtnText, cancelling && S.disabledText]}>{cancelling ? M.receive.till.cancelling : M.receive.till.cancel}</Text>
         </Pressable>

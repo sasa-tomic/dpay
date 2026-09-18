@@ -7,9 +7,8 @@ import type {PayMessages, ReceiveMessages} from '../../keys';
 export const payDe: PayMessages = {
   notAPaymentCode: 'Das ist kein dpay-Zahlungscode',
   scannedCoinRequest: (coin, uri) =>
-    `Das ist eine Zahlungsanfrage für ${coin} (${uri}…). dpay kann sie nicht bezahlen — diese Wallet wickelt auf dem Internet Computer und Solana ab, nicht im ${coin}-Netzwerk. Bezahle sie mit einer Wallet, die ${coin} unterstützt.`,
+    `Das ist eine Zahlungsanfrage für ${coin} (${uri}…). Diese Wallet wickelt auf dem Internet Computer und Solana ab — bezahle sie mit einer Wallet, die ${coin} unterstützt.`,
   requestExpired: 'Diese Anfrage ist abgelaufen — bitte den Händler um einen neuen QR-Code',
-  solRequestExpired: 'Diese Zahlungsanfrage ist abgelaufen. Bitte den Händler um einen neuen QR-Code.',
 
   sent: amount => (amount ? `${amount} gesendet` : 'Gesendet'),
   alreadyPaid: 'Bereits bezahlt',
@@ -18,13 +17,9 @@ export const payDe: PayMessages = {
   alreadyNotCharged: (amount, who) => `${amount} an ${who} · nicht erneut belastet`,
   solAwaiting: who =>
     who ? `an ${who} · warte auf die Bestätigung des Händlers` : 'warte auf die Bestätigung des Händlers',
-  balanceUpdatesOnSettle: 'Dein Guthaben aktualisiert sich, sobald der Händler die Zahlung on-chain abwickelt.',
   newPayment: 'Neue Zahlung',
 
   shareReceipt: 'Beleg teilen',
-  shareReceiptHint: 'Teilt den Zahlungsnachweis als Link, den der Händler zur Bestätigung öffnen kann',
-  shareAuthCode: 'Freigabecode teilen',
-  shareSignedPayment: 'Signierte Zahlung teilen',
   shareSignedCode: 'Signierten Code teilen',
   linkCopied: 'Link kopiert ✓',
   copied: 'Kopiert ✓',
@@ -46,7 +41,7 @@ export const payDe: PayMessages = {
 
   unsupportedAsset: 'Asset nicht unterstützt',
   unsupportedAssetBody: currency =>
-    `Diese Zahlung verlangt ein Asset, das diese Wallet nicht bezahlen kann (Währung ${currency}). dpay tauscht nie um, deshalb gibt es keinen Ausweg. Bitte den Händler, ein unterstütztes Asset anzufordern.`,
+    `Diese Zahlung verlangt ein Asset, das diese Wallet nicht bezahlen kann (Währung ${currency}) — dpay tauscht nie um. Bitte den Händler, ein unterstütztes Asset anzufordern.`,
   paying: 'Du zahlst',
   payAmount: amount => `${amount} bezahlen`,
   notEnoughBalance: 'Dein Guthaben reicht für diese Zahlung nicht aus.',
@@ -62,9 +57,9 @@ export const payDe: PayMessages = {
     part: {recipient: 'das Empfängerkonto', asset: 'der Vermögenswert', network: 'das Netzwerk', amount: 'der Betrag', ref: 'die Referenz'},
     malformed: part => `Im Link fehlt ${part} oder der Wert ist beschädigt. Bitte den Absender um einen neuen Link.`,
     unknownAsset: (token, network) =>
-      `Der Link verlangt ${token} auf ${network}. Diese Wallet kennt diesen Wert nicht, und dpay tauscht nie um — es gibt keinen Ersatz. Bitte den Absender um einen Link in einem Wert, den du hältst.`,
+      `Der Link verlangt ${token} auf ${network}. Diese Wallet kennt diesen Wert nicht, und dpay tauscht nie um. Bitte den Absender um einen Link in einem Wert, den du hältst.`,
     wrongNetwork: (token, network) =>
-      `Der Link verlangt ${token} auf ${network}. Du hältst ${token} auf einem anderen Netzwerk — das ist ein anderer Vermögenswert, und die Zahlung ginge auf die falsche Chain. Bitte den Absender um einen Link auf einem Netzwerk, das du hältst.`,
+      `Der Link verlangt ${token} auf ${network}. Du hältst ${token} auf einem anderen Netzwerk — die Zahlung ginge auf die falsche Chain. Bitte den Absender um einen Link auf einem Netzwerk, das du hältst.`,
     hiddenAsset: token =>
       `Der Link verlangt ${token}, einen Testnetz-Wert. Öffne „Guthaben“, aktiviere „Testnetz-Werte anzeigen“ und öffne den Link erneut.`,
     unsupportedAsset: token =>
@@ -91,7 +86,7 @@ export const payDe: PayMessages = {
     quoteExpired:
       'Der Preis dieser Kasse ist abgelaufen — er gilt jeweils rund fünf Minuten. Scanne den Code erneut für einen frischen Preis.',
     notEnoughTime:
-      'Dieser Preis läuft zu bald ab, um sicher damit zu zahlen. Dein Geld würde abgehen, bevor der Zahlungsanbieter des Händlers davon erfahren kann, und er würde den Verkauf danach ablehnen. Scanne den Code erneut für einen frischen Preis.',
+      'Dieser Preis läuft zu bald ab, um sicher damit zu zahlen. Scanne den Code erneut für einen frischen Preis.',
     unreportable: host =>
       `${host} hat dpay keinen Weg genannt, eine Zahlung dorthin zu melden — eine Zahlung hier würde also dein Geld kosten, ohne dass der Verkauf gutgeschrieben wird. Es wurde nichts bezahlt. Erneutes Scannen ändert daran nichts — bitte den Händler um eine andere Zahlungsmöglichkeit.`,
     proofElsewhere: (quoteHost, proofHost) =>
@@ -146,10 +141,10 @@ export const payDe: PayMessages = {
   fundTitle: symbol => `Kein ${symbol} verfügbar`,
   fundBody: (symbol, action) =>
     action === 'pay'
-      ? `Diese Wallet hat kein ${symbol}. Um eine ${symbol}-Anfrage zu bezahlen, empfange zuerst ${symbol} an deiner Adresse.`
-      : `Diese Wallet hat kein ${symbol}. Um ${symbol} zu senden, empfange zuerst ${symbol} an deiner Adresse.`,
+      ? `Um eine ${symbol}-Anfrage zu bezahlen, empfange zuerst ${symbol} an deiner Adresse.`
+      : `Um ${symbol} zu senden, empfange zuerst ${symbol} an deiner Adresse.`,
   fundBodyNoDeposits: symbol =>
-    `Diese Wallet hat kein ${symbol}, und dpay kann dafür keine Einzahlungsadresse anzeigen. Empfange ${symbol} von einer anderen Wallet, bevor du es ausgibst.`,
+    `dpay kann dafür keine Einzahlungsadresse anzeigen. Empfange ${symbol} von einer anderen Wallet, bevor du es ausgibst.`,
   fundBodyToken: symbol => `Sende ${symbol} (Solana) an deine ${symbol}-Adresse. Behalte etwas SOL in der Wallet für Netzwerkgebühren.`,
   showMyAddress: symbol => `Meine ${symbol}-Adresse zeigen`,
   createTokenAccount: symbol => `Mein ${symbol}-Konto erstellen`,
@@ -158,13 +153,13 @@ export const payDe: PayMessages = {
     switchTo: network => `Wechseln zu ${network}`,
     switchToAsset: asset => `Wechseln zu ${asset}`,
     practice: amount =>
-      `Du hast ${amount} Übungsgeld. Damit kannst du eine Zahlung üben — es hat keinen Gegenwert und kann kein echtes Geschäft bezahlen.`,
+      `Du hast ${amount} Übungsgeld — damit kannst du eine Zahlung üben; es hat keinen Gegenwert und kann kein echtes Geschäft bezahlen.`,
     switchToPractice: 'Zum Übungsgeld wechseln',
   },
 
   offlineSendTitle: 'Senden an eine Adresse braucht eine Verbindung',
   offlineSendBody: symbol =>
-    `Beim Senden an eine Adresse reicht dein Handy die Zahlung selbst ein — dafür muss es online sein. Um offline zu bezahlen, scanne stattdessen den Zahlungscode des Händlers: sein Handy reicht deine ${symbol}-Zahlung für dich ein.`,
+    `Scanne stattdessen den Zahlungscode des Händlers: sein Handy reicht deine ${symbol}-Zahlung ein, während du offline bist.`,
   scannedAddressNotSendable: symbol =>
     `Das ist eine Wallet-Adresse. ${symbol} kann nicht an eine Adresse gesendet werden — scanne den Zahlungscode des Händlers, um zu bezahlen.`,
 
@@ -177,7 +172,7 @@ export const payDe: PayMessages = {
     badSplToken: 'Der Token-Mint in diesem Solana-Pay-Code ist ungültig. Bitte den Händler um einen neuen QR-Code.',
     badReference: 'Die Zahlungsreferenz in diesem Solana-Pay-Code ist ungültig. Bitte den Händler um einen neuen QR-Code.',
     unexpectedParam: param =>
-      `Dieser Solana-Pay-Code trägt einen Parameter, den dpay nicht kennt (${param}) — ihn zu zahlen hieße, Bedeutung zu unterschreiben, die dpay nicht prüfen kann. Bitte den Händler um einen Code ohne ihn.`,
+      `Dieser Solana-Pay-Code trägt einen Parameter, den dpay nicht kennt (${param}) — dpay kann nicht prüfen, was ihn zu zahlen unterschreiben würde. Bitte den Händler um einen Code ohne ihn.`,
     memoTooLong: 'Das Memo in diesem Solana-Pay-Code ist zu lang für eine Solana-Transaktion. Bitte den Händler um einen neuen QR-Code.',
     unknownMint: mint =>
       `Dieser Solana-Pay-Code verlangt einen Token, den dpay noch nicht führt (Mint ${mint}). Zahl ihn mit einer Wallet, die ihn unterstützt.`,
@@ -192,7 +187,6 @@ export const payDe: PayMessages = {
   scanToPay: 'Scannen & zahlen',
   sendToAddress: 'An Adresse senden',
   tapOrScanToPay: 'Auflegen oder scannen',
-  scanQrToPay: 'Scanne den QR-Code, um zu bezahlen.',
   solScanHint: 'Scanne den Zahlungscode des Händlers, um offline zu bezahlen.',
   payNow: 'Jetzt zahlen',
   payNowA11y: 'Jetzt zahlen',
@@ -204,26 +198,20 @@ export const payDe: PayMessages = {
 
   noCameraFound: 'Auf diesem Gerät wurde keine Kamera gefunden.',
   pointCamera: 'Richte deine Kamera auf einen Zahlungscode, um zu bezahlen',
-  cameraPrivacy: 'dpay nutzt deine Kamera nur zum Scannen von Codes — nichts wird aufgezeichnet oder hochgeladen.',
+  cameraPrivacy: 'Nur zum Scannen von Codes — nichts wird aufgezeichnet oder hochgeladen.',
   allowCameraScan: 'Kamera erlauben',
-  allowCameraScanHint: 'Erlaubnis, deine Kamera zu nutzen, damit du Zahlungscodes scannen kannst',
 };
 
 export const receiveDe: ReceiveMessages = {
   amountToReceive: 'Zu empfangender Betrag',
-  amountHint: 'Der Betrag, den der Zahler dir sendet',
   amountPlaceholder: '0.00',
   solAmountPlaceholder: '0.025',
   memo: 'Notiz',
-  memoHint: 'Eine optionale Notiz zu dieser Zahlungsanfrage',
   memoPlaceholder: 'Notiz hinzufügen (optional)',
   chooseCurrency: 'Abwicklungswährung wählen',
   chooseCurrencyHint: 'Wähle, welches Asset der Zahler dir sendet',
-  chooseAssetHint: 'Wähle das Asset, das der Zahler dir sendet',
   request: 'Code anzeigen',
-  requestHint: 'Zeigt deinen QR-Code, damit der Zahler ihn scannen und dich bezahlen kann',
   creating: 'Wird erstellt…',
-  creatingRequest: 'Anfrage wird erstellt…',
   solanaOffline: 'Solana ist offline — geh online, um eine Zahlungsanfrage zu erstellen.',
   solAmountUnderFee: fee =>
     `Eine SOL-Anfrage muss über der Netzwerkgebühr liegen (${fee}). Die Gebühr trägst du — der Zahler zahlt exakt den Betrag, den du eingibst.`,
@@ -251,11 +239,7 @@ export const receiveDe: ReceiveMessages = {
   waitingForSign: 'Warte darauf, dass der Zahler offline signiert…',
   offlineCantSubmit: 'Offline — Zahlungen können erst nach erneuter Verbindung eingereicht werden',
   shareRequestLink: 'Anfrage-Link teilen',
-  shareRequestHint: 'Teilt diese Anfrage als Link, den der Zahler zum Bezahlen öffnen kann',
   linkUnavailable: 'Dieser Wert lässt sich nicht in einem Zahlungscode benennen. Wähle einen anderen Wert, um eine Zahlung anzufragen.',
-  scanPayerSignedQr: 'Signierten QR des Zahlers scannen',
-  scanPayerSignedQrPrompt: 'Scanne den signierten QR des Zahlers',
-  scanPayerSignedQrHint: 'Scannt den signierten QR des Zahlers, um seine Offline-Zahlung einzureichen',
   scanPayerSignedCode: 'Signierten Code des Zahlers scannen',
   confirmWithTheirPhone:
     'Wenn der Zahler ohne Scan deines Codes bezahlt hat, tippe hier, um es mit seinem Handy zu bestätigen.',
@@ -351,7 +335,6 @@ export const receiveDe: ReceiveMessages = {
     expiredWatching:
       'Dieser Code ist abgelaufen, neu bezahlen kann ihn niemand mehr. Falls die Kundschaft das Geld schon geschickt hat, kann es noch eintreffen — es wird noch einen Moment beobachtet.',
     cancel: 'Buchung stornieren',
-    cancelHint: 'Diese Buchung löschen, damit der Code kein Geld mehr annimmt',
     cancelling: 'Wird storniert…',
     cancelFailed: said =>
       `Die Buchung wurde NICHT storniert: „${said}“ Sie kann weiterhin bezahlbar sein — lies das und entscheide dann, ob du etwas herausgibst.`,

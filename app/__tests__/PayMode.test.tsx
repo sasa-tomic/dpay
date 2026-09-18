@@ -453,15 +453,15 @@ describe("PayMode — offline, the total falls back to the ledger's own past ans
 });
 
 describe('PayMode — share feedback (U-F1)', () => {
-  test('offline QR screen (web): "Share auth code" flips to "Copied ✓" after the share resolves', async () => {
+  test('offline QR screen (web): "Share signed code" flips to "Copied ✓" after the share resolves', async () => {
     asWeb();
     const tree = mountPay({online: false});
     await scanToSign(tree, REQ); // auto-sign → prepareTransfer → the qr phase (submit unknown by default)
-    expect(texts(tree)).toContain('Share auth code');
-    await pressByLabel(tree, 'Share auth code');
+    expect(texts(tree)).toContain('Share signed code');
+    await pressByLabel(tree, 'Share signed code');
     expect(shareSpy).toHaveBeenCalledWith({message: `QR:${'ee'.repeat(4)}`});
     expect(texts(tree)).toContain('Copied ✓');
-    expect(texts(tree)).not.toContain('Share auth code');
+    expect(texts(tree)).not.toContain('Share signed code');
     act(() => {
       tree.unmount();
     });
@@ -485,7 +485,7 @@ describe('PayMode — share feedback (U-F1)', () => {
   test('native: a completed Share sheet flips to "Shared ✓" — never "Copied ✓" (nothing was copied)', async () => {
     const tree = mountPay({online: false});
     await scanToSign(tree, REQ);
-    await pressByLabel(tree, 'Share auth code');
+    await pressByLabel(tree, 'Share signed code');
     expect(texts(tree)).toContain('Shared ✓');
     expect(texts(tree)).not.toContain('Copied ✓');
     act(() => {
@@ -497,8 +497,8 @@ describe('PayMode — share feedback (U-F1)', () => {
     shareSpy.mockResolvedValue({action: 'dismissedAction' as const});
     const tree = mountPay({online: false});
     await scanToSign(tree, REQ);
-    await pressByLabel(tree, 'Share auth code');
-    expect(texts(tree)).toContain('Share auth code');
+    await pressByLabel(tree, 'Share signed code');
+    expect(texts(tree)).toContain('Share signed code');
     expect(texts(tree)).not.toContain('Copied ✓');
     act(() => {
       tree.unmount();
@@ -1487,7 +1487,7 @@ describe('PayMode — the fund-first surfaces: the camera, and the funded accoun
   test('X3: the SEND sub-mode keeps its full gate — there is no request to read there', () => {
     const tree = unfunded({subMode: 'send', withdrawFamily: 'CkEthErc20'});
     expect(hasTestID(tree, 'pay-fund')).toBe(true);
-    expect(texts(tree)).toContain('This wallet has no USDC. To send USDC, first receive USDC at your address.');
+    expect(texts(tree)).toContain('To send USDC, first receive USDC at your address.');
     act(() => { tree.unmount(); });
   });
 

@@ -515,16 +515,15 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
               }}
               accessibilityRole="button"
               accessibilityLabel={M.receive.shareRequestLink}
-              accessibilityHint={M.receive.shareRequestHint}
               accessibilityState={{disabled: false}}>
               <IconShare size={16} color={C.sub}/>
               <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
             </Pressable>
             {scanning ? (
-              <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>{M.receive.scanPayerSignedQrPrompt}</Text></>
+              <><QrScanner onScan={onSignedQr} /><Text style={S.dim2}>{M.receive.scanPayerSignedCode}</Text></>
             ) : (
               <>
-                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedQr} accessibilityHint={M.receive.scanPayerSignedQrHint} accessibilityState={{disabled: false}}><IconQr size={16} color={C.sub}/><Text style={S.ghostBtnText}>{M.receive.scanPayerSignedQr}</Text></Pressable>
+                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedCode} accessibilityState={{disabled: false}}><IconQr size={16} color={C.sub}/><Text style={S.ghostBtnText}>{M.receive.scanPayerSignedCode}</Text></Pressable>
                 <Text style={S.dim2}>{M.receive.confirmWithTheirPhone}</Text>
               </>
             )}
@@ -718,7 +717,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
                 hardware keyboard attached to a phone. The DPAY form only: a ring-up is signed and
                 supersedes the live charge, so the shared field does not submit while the till
                 checkbox is checked — the till's own button is the one that rings up. */}
-            <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} accessibilityHint={M.receive.amountHint} onSubmitEditing={(tillAvailable || tillHeld) && codeForm === 'till' ? undefined : makeRequest} returnKeyType="done" />
+            <TextInput testID="amount-input" style={S.amountInput} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder={M.receive.amountPlaceholder} placeholderTextColor={C.sub} accessibilityLabel={M.receive.amountToReceive} onSubmitEditing={(tillAvailable || tillHeld) && codeForm === 'till' ? undefined : makeRequest} returnKeyType="done" />
           </View>
           {/* The ONE message box — mounted in BOTH code forms (founder 2026-09-14): same component,
               same place under the shared amount row, same text across the till-checkbox toggle. In
@@ -734,7 +733,6 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
             placeholder={M.receive.memoPlaceholder}
             placeholderTextColor={C.sub}
             accessibilityLabel={M.receive.memo}
-            accessibilityHint={M.receive.memoHint}
             maxLength={32}
             onSubmitEditing={((tillAvailable || tillHeld) && codeForm === 'till') ? undefined : makeRequest}
             returnKeyType="done"
@@ -772,7 +770,7 @@ export function ReceiveMode({identity, relayUrl, online, nfcStatus, onReceived, 
         />
       ) : (
         <>
-          <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel={M.receive.request} accessibilityHint={M.receive.requestHint} accessibilityState={{disabled: false}}><Text style={S.primaryText}>{M.receive.request}</Text></Pressable>
+          <Pressable testID="btn-request" style={S.primaryWide} onPress={makeRequest} accessibilityRole="button" accessibilityLabel={M.receive.request} accessibilityState={{disabled: false}}><Text style={S.primaryText}>{M.receive.request}</Text></Pressable>
           {err ? <Text style={S.err}>{err}</Text> : null}
           <AssetPicker
             open={pickOpen}

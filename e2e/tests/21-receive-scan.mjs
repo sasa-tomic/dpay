@@ -1,7 +1,7 @@
 // Flow 21 — receive-scan (IC rail): the MERCHANT confirms a payer's offline hand-off by scanning
 // the payer's signed QR. Alice (an offline payer) signs a REAL icrc1_transfer envelope whose memo
 // is the REQUEST's nonce (the reconciliation key binding payment→request), base64url-wraps it, and
-// we inject it through the camera seam into the merchant B's "Scan payer's signed QR" affordance.
+// we inject it through the camera seam into the merchant B's "Scan the payer's signed code" affordance.
 // B's app derives the request_id from the envelope, SUBMITS it to the fake-IC /api/v2 gateway
 // (POST /call), then polls read_state until replied — the "Received" flip is ledger-sourced
 // (submitted by B's own app), exactly the production confirm path.
@@ -87,13 +87,13 @@ export async function run() {
   }
 }
 
-/** Open ReceiveMode's "Scan payer's signed QR" affordance (the offline-payer confirm path). The
+/** Open ReceiveMode's "Scan the payer's signed code" affordance (the offline-payer confirm path). The
  *  button has no testID — find the exact label text node and walk up, clicking each wrapper (RNW
  *  renders Pressables as plain elements). */
 async function openPayerScan(driver) {
   await driver.eval(() => {
     const nodes = Array.from(document.querySelectorAll('text, span, div, a, button, [role]'));
-    const target = nodes.find((e) => (e.textContent || '').trim() === "Scan payer's signed QR" && e.children.length === 0);
+    const target = nodes.find((e) => (e.textContent || '').trim() === "Scan the payer's signed code" && e.children.length === 0);
     if (!target) throw new Error('affordance button label node not found');
     let el = target;
     for (let i = 0; i < 5 && el; i++) {
@@ -101,7 +101,7 @@ async function openPayerScan(driver) {
       el = el.parentElement;
     }
   });
-  const scanning = await driver.waitForText("Scan the payer's signed QR", {timeoutMs: 5_000});
+  const scanning = await driver.waitForText("Scan the payer's signed code", {timeoutMs: 5_000});
   assert(scanning, 'B should mount the payer-QR scanner after the affordance tap');
 }
 

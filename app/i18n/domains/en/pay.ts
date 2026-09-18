@@ -26,7 +26,6 @@ export type PayMessages = {
    *  freely. The instruction is the point: name the coin, say dpay can't pay it, point elsewhere. */
   scannedCoinRequest: (coin: string, uri: string) => string;
   requestExpired: string;
-  solRequestExpired: string;
 
   // --- the outcome (paid) screen ------------------------------------------------------------
   /** Pending hand-off headline. `amount` is null when an NFC pay left no decoded request behind. */
@@ -37,14 +36,11 @@ export type PayMessages = {
   alreadyNotCharged: (amount: string, who: string) => string;
   /** SOL twin of toWhoAwaiting; `who` is null when the payment arrived over NFC (no request state). */
   solAwaiting: (who: string | null) => string;
-  balanceUpdatesOnSettle: string;
   newPayment: string;
 
   // --- share affordances --------------------------------------------------------------------
+  /** One label for every share-a-signed-code button, both rails (was three near-identical keys). */
   shareReceipt: string;
-  shareReceiptHint: string;
-  shareAuthCode: string;
-  shareSignedPayment: string;
   shareSignedCode: string;
   /** Confirmation labels handed to shareConfirmLabel()/useCopyFeedback. */
   linkCopied: string;
@@ -291,7 +287,6 @@ export type PayMessages = {
   scanToPay: string;
   sendToAddress: string;
   tapOrScanToPay: string;
-  scanQrToPay: string;
   solScanHint: string;
   payNow: string;
   payNowA11y: string;
@@ -306,15 +301,13 @@ export type PayMessages = {
   pointCamera: string;
   cameraPrivacy: string;
   allowCameraScan: string;
-  allowCameraScanHint: string;
 };
 
 export const payEn: PayMessages = {
   notAPaymentCode: "This isn't a dpay payment code",
   scannedCoinRequest: (coin, uri) =>
-    `That's a payment request for ${coin} (${uri}…). dpay can't pay it — this wallet settles on the Internet Computer and Solana, not on the ${coin} network. Pay it with a wallet that supports ${coin}.`,
+    `That's a payment request for ${coin} (${uri}…). This wallet settles on the Internet Computer and Solana — pay it with a ${coin} wallet.`,
   requestExpired: 'This request expired — ask the merchant for a fresh QR',
-  solRequestExpired: 'This payment request has expired. Ask the merchant for a fresh QR.',
 
   sent: amount => (amount ? `Sent ${amount}` : 'Sent'),
   alreadyPaid: 'Already paid',
@@ -323,13 +316,9 @@ export const payEn: PayMessages = {
   alreadyNotCharged: (amount, who) => `${amount} to ${who} · not charged again`,
   solAwaiting: who =>
     who ? `to ${who} · awaiting the merchant's confirmation` : "awaiting the merchant's confirmation",
-  balanceUpdatesOnSettle: 'Your balance updates when the merchant settles this on-chain.',
   newPayment: 'New payment',
 
   shareReceipt: 'Share receipt',
-  shareReceiptHint: 'Share the payment proof as a link the merchant can open to confirm',
-  shareAuthCode: 'Share auth code',
-  shareSignedPayment: 'Share signed payment',
   shareSignedCode: 'Share signed code',
   linkCopied: 'Link copied ✓',
   copied: 'Copied ✓',
@@ -350,7 +339,7 @@ export const payEn: PayMessages = {
 
   unsupportedAsset: 'Unsupported asset',
   unsupportedAssetBody: currency =>
-    `This payment requests an asset this wallet can’t pay (currency ${currency}). dpay never swaps, so there’s no fallback. Ask the merchant to request a supported asset.`,
+    `This payment requests an asset this wallet can’t pay (currency ${currency}) — dpay never swaps. Ask the merchant to request a supported asset.`,
   paying: 'Paying',
   payAmount: amount => `Pay ${amount}`,
   notEnoughBalance: 'Not enough balance to cover this payment.',
@@ -366,13 +355,13 @@ export const payEn: PayMessages = {
     part: {recipient: 'the account to pay', asset: 'the asset', network: 'the network', amount: 'the amount', ref: 'the reference'},
     malformed: part => `The link is missing or has a damaged value for ${part}. Ask the sender to send you a new link.`,
     unknownAsset: (token, network) =>
-      `The link asks for ${token} on ${network}. This wallet has no such asset, and dpay never swaps, so it can’t pay it with anything else. Ask the sender for a link in an asset you hold.`,
+      `The link asks for ${token} on ${network}. This wallet has no such asset, and dpay never swaps. Ask the sender for a link in an asset you hold.`,
     wrongNetwork: (token, network) =>
-      `The link asks for ${token} on ${network}. You hold ${token} on a different network — that is a different asset, and paying it would send your money to the wrong chain. Ask the sender for a link on a network you hold.`,
+      `The link asks for ${token} on ${network}. You hold ${token} on a different network — paying it would send your money to the wrong chain. Ask the sender for a link on a network you hold.`,
     hiddenAsset: token =>
       `The link asks for ${token}, a test-network asset. Open Balances, turn on “Show testnet assets”, then open the link again.`,
     unsupportedAsset: token =>
-      `The link asks for ${token}, which this wallet can’t pay. dpay never swaps, so there’s no fallback. Ask the sender for a link in an asset you hold.`,
+      `The link asks for ${token}, which this wallet can’t pay. dpay never swaps. Ask the sender for a link in an asset you hold.`,
     badAmount: (amount, token) =>
       `“${amount}” isn’t a valid ${token} amount — it may have more decimal places than ${token} has. Ask the sender for a new link.`,
     badAccount: network =>
@@ -395,7 +384,7 @@ export const payEn: PayMessages = {
     quoteExpired:
       'This till’s price has expired — each one lasts about five minutes. Scan the code again for a fresh price.',
     notEnoughTime:
-      'This price runs out too soon to pay it safely. Your money would move before the merchant’s payment provider could be told, and it would then refuse the sale. Scan the code again for a fresh price.',
+      'This price runs out too soon to pay it safely. Scan the code again for a fresh price.',
     unreportable: host =>
       `${host} gave dpay no way to report a payment back to it, so paying here would take your money without the sale being credited. Nothing has been paid. Scanning again won’t change this — ask the merchant for another way to pay.`,
     proofElsewhere: (quoteHost, proofHost) =>
@@ -450,10 +439,10 @@ export const payEn: PayMessages = {
   fundTitle: symbol => `No ${symbol} available`,
   fundBody: (symbol, action) =>
     action === 'pay'
-      ? `This wallet has no ${symbol}. To pay a ${symbol} request, first receive ${symbol} at your address.`
-      : `This wallet has no ${symbol}. To send ${symbol}, first receive ${symbol} at your address.`,
+      ? `To pay a ${symbol} request, first receive ${symbol} at your address.`
+      : `To send ${symbol}, first receive ${symbol} at your address.`,
   fundBodyNoDeposits: symbol =>
-    `This wallet has no ${symbol}, and dpay cannot show a deposit address for it. Receive ${symbol} from another wallet before spending it.`,
+    `dpay cannot show a deposit address for ${symbol}. Receive it from another wallet before spending it.`,
   fundBodyToken: symbol => `Send ${symbol} (Solana) to your ${symbol} address. Keep a little SOL in the wallet for network fees.`,
   showMyAddress: symbol => `Show my ${symbol} address`,
   createTokenAccount: symbol => `Create my ${symbol} account`,
@@ -462,13 +451,13 @@ export const payEn: PayMessages = {
     switchTo: network => `Switch to ${network}`,
     switchToAsset: asset => `Switch to ${asset}`,
     practice: amount =>
-      `You have ${amount} in practice money. You can practise a payment with it — it has no cash value and cannot pay a real merchant.`,
+      `You have ${amount} in practice money — practise a payment with it; it has no cash value and cannot pay a real merchant.`,
     switchToPractice: 'Switch to practice money',
   },
 
   offlineSendTitle: 'Sending to an address needs a connection',
   offlineSendBody: symbol =>
-    `Your phone submits an address send itself, so it has to be online. To pay while you're offline, scan the merchant's payment code instead — their phone submits your ${symbol} payment for you.`,
+    `Scan the merchant's payment code instead — their phone submits your ${symbol} payment while you're offline.`,
   scannedAddressNotSendable: symbol =>
     `That's a wallet address. ${symbol} can't be sent to an address — scan the merchant's payment code to pay.`,
 
@@ -481,7 +470,7 @@ export const payEn: PayMessages = {
     badSplToken: "The token mint in this Solana Pay code isn't valid. Ask the merchant for a fresh QR.",
     badReference: "The payment reference in this Solana Pay code isn't valid. Ask the merchant for a fresh QR.",
     unexpectedParam: param =>
-      `This Solana Pay code carries a parameter dpay doesn't know (${param}) — paying it would sign meaning dpay can't review. Ask the merchant for a code without it.`,
+      `This Solana Pay code carries a parameter dpay doesn't know (${param}) — dpay can't review what paying it would sign. Ask the merchant for a code without it.`,
     memoTooLong: 'The memo in this Solana Pay code is too long for a Solana transaction. Ask the merchant for a fresh QR.',
     unknownMint: mint =>
       `This Solana Pay code asks for a token dpay doesn't carry yet (mint ${mint}). Pay it with a wallet that supports it.`,
@@ -496,7 +485,6 @@ export const payEn: PayMessages = {
   scanToPay: 'Scan to pay',
   sendToAddress: 'Send to address',
   tapOrScanToPay: 'Tap or scan to pay',
-  scanQrToPay: 'Scan the QR code to pay.',
   solScanHint: "Scan the merchant's payment code to pay offline.",
   payNow: 'Pay Now',
   payNowA11y: 'Pay now',
@@ -508,27 +496,21 @@ export const payEn: PayMessages = {
 
   noCameraFound: 'No camera found on this device.',
   pointCamera: 'Point your camera at a payment code to pay',
-  cameraPrivacy: 'dpay uses your camera only to scan codes — never records or uploads.',
+  cameraPrivacy: 'Only used to scan codes — never recorded or uploaded.',
   allowCameraScan: 'Allow camera scan',
-  allowCameraScanHint: 'Permission to use your camera so you can scan payment codes',
 };
 
 export type ReceiveMessages = {
   // --- the request form ----------------------------------------------------------------------
   amountToReceive: string;
-  amountHint: string;
   amountPlaceholder: string;
   solAmountPlaceholder: string;
   memo: string;
-  memoHint: string;
   memoPlaceholder: string;
   chooseCurrency: string;
   chooseCurrencyHint: string;
-  chooseAssetHint: string;
   request: string;
-  requestHint: string;
   creating: string;
-  creatingRequest: string;
   solanaOffline: string;
   /** NATIVE-SOL request, typed price at or under the one-signature fee: netting would leave
    *  nothing (or less) on the wire, so no request is built. `fee` is the network fee, ALREADY
@@ -572,12 +554,10 @@ export type ReceiveMessages = {
   waitingForSign: string;
   offlineCantSubmit: string;
   shareRequestLink: string;
-  shareRequestHint: string;
   /** Fail-closed gate: a request whose asset or destination cannot be named in a link never opens. */
   linkUnavailable: string;
-  scanPayerSignedQr: string;
-  scanPayerSignedQrPrompt: string;
-  scanPayerSignedQrHint: string;
+  /** ONE label for the submit-their-offline-payment button AND the under-scanner line, both rails
+   *  (was four near-identical QR/code keys). */
   scanPayerSignedCode: string;
   confirmWithTheirPhone: string;
   newRequest: string;
@@ -682,7 +662,6 @@ export type ReceiveMessages = {
     /** Expired, and still watching: an offline payer's transfer can land after the deadline. */
     expiredWatching: string;
     cancel: string;
-    cancelHint: string;
     cancelling: string;
     /** A cancellation that did not clear the till — the charge is still payable in every case. */
     cancelFailed: (said: string) => string;
@@ -705,19 +684,14 @@ export type ReceiveMessages = {
 
 export const receiveEn: ReceiveMessages = {
   amountToReceive: 'Amount to receive',
-  amountHint: 'The amount the payer will send you',
   amountPlaceholder: '0.00',
   solAmountPlaceholder: '0.025',
   memo: 'Memo',
-  memoHint: 'An optional note attached to this payment request',
   memoPlaceholder: 'Add a note (optional)',
   chooseCurrency: 'Choose settlement currency',
   chooseCurrencyHint: 'Pick which asset the payer will send you',
-  chooseAssetHint: 'Choose which asset the payer will send you',
   request: 'Show code',
-  requestHint: 'Show your QR code so the payer can scan it to pay you',
   creating: 'Creating…',
-  creatingRequest: 'Creating request…',
   solanaOffline: 'Solana is offline — go online to create a payment request.',
   solAmountUnderFee: fee =>
     `A SOL request has to be for more than the network fee (${fee}). The fee is yours — the payer pays exactly what you type.`,
@@ -745,11 +719,7 @@ export const receiveEn: ReceiveMessages = {
   waitingForSign: 'Waiting for the payer to sign offline…',
   offlineCantSubmit: 'Offline — can’t submit payments until reconnected',
   shareRequestLink: 'Share request link',
-  shareRequestHint: 'Share this request as a link the payer can open to pay',
   linkUnavailable: 'This asset can’t be named in a payment code. Pick another asset to request a payment.',
-  scanPayerSignedQr: "Scan payer's signed QR",
-  scanPayerSignedQrPrompt: "Scan the payer's signed QR",
-  scanPayerSignedQrHint: "Scan the payer's signed QR to submit their offline payment",
   scanPayerSignedCode: "Scan the payer's signed code",
   confirmWithTheirPhone: 'If the payer paid without scanning your code, tap here to confirm with their phone.',
   newRequest: 'New request',
@@ -838,7 +808,6 @@ export const receiveEn: ReceiveMessages = {
     expiredWatching:
       'This code has expired, so nobody new can pay it. If the customer already sent the money it can still land — watching a moment longer.',
     cancel: 'Cancel charge',
-    cancelHint: 'Clear this charge so the code stops taking money',
     cancelling: 'Cancelling…',
     cancelFailed: said =>
       `The charge was NOT cancelled: “${said}” It may still be payable — read that, then decide whether to hand anything over.`,

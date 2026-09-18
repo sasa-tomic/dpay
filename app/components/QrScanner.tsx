@@ -54,7 +54,7 @@ export function QrScanner({onScan}: {onScan: (v: string) => void}) {
               testID like every other gate in the app: `e2e/web-scan-smoke.mjs` had to address it
               by its localised aria-label, which is exactly the coupling Tab.tsx refuses for the
               same reason — the selector renames itself the moment a locale lands. */}
-          <Pressable testID="btn-allow-camera" style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={M.pay.allowCameraScan} accessibilityHint={M.pay.allowCameraScanHint} accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>{M.pay.allowCameraScan}</Text></Pressable>
+          <Pressable testID="btn-allow-camera" style={S.smallBtn} onPress={requestPermission} accessibilityRole="button" accessibilityLabel={M.pay.allowCameraScan} accessibilityState={{disabled: false}}><Text style={S.smallBtnText}>{M.pay.allowCameraScan}</Text></Pressable>
         </Pressable>
       )}
     </View>

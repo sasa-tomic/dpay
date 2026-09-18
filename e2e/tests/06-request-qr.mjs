@@ -60,10 +60,10 @@ export async function run() {
     // 3. The request QR renders (the `request-qr` container is the gate).
     await driver.findByTestID('request-qr', { timeoutMs: 5_000 });
 
-    // L4 + D5: the offline-payer affordance is a CONCISE button label ("Scan payer's signed QR")
+    // L4 + D5: the offline-payer affordance is a CONCISE button label ("Scan the payer's signed code")
     // with the explanatory sentence as smaller help-text below it (not as the button label).
     const reqBody = await driver.bodyText();
-    assert(/Scan payer's signed QR/i.test(reqBody),
+    assert(/Scan the payer's signed code/i.test(reqBody),
       `request screen should show the concise affordance button label (D5). body excerpt:\n${reqBody.slice(0, 400)}`);
     assert(/paid without scanning/i.test(reqBody) && /confirm with their phone/i.test(reqBody),
       `request screen should show the explanatory help-text below the affordance (D5). body excerpt:\n${reqBody.slice(0, 400)}`);

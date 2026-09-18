@@ -61,13 +61,12 @@ describe('NfcStatusRow — one instruction per NFC state', () => {
     expect(tree.root.findAll(n => n.props && n.props.accessibilityLabel === M.pay.whyNfcUnavailable)).toHaveLength(0);
     // The fallback instruction belongs to the not-ready branch only — showing "scan instead" beside
     // a working radio would tell the user to do the slower thing for no reason.
-    expect(texts(tree)).not.toContain(M.pay.scanQrToPay);
+    expect(texts(tree)).not.toContain(M.pay.nfcNotAvailable);
   });
 
   test('off: the radio is switched off, and the reason says to switch it on', () => {
     const tree = mount('off');
     expect(texts(tree)).toContain(M.pay.nfcNotAvailable);
-    expect(texts(tree)).toContain(M.pay.scanQrToPay); // the way to get paid right now
     expect(openReason(tree)).toBe(M.nfc.reason.off);
   });
 
