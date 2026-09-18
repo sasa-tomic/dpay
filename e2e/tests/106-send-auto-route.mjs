@@ -102,12 +102,13 @@ export async function run() {
     // rails genuinely have different rules, and the right one is being applied.
     await driver.type('send-amount-input', SEND_TEXT, { timeoutMs: 4_000 });
     await driver.findByTestID('send-review-amount', { timeoutMs: 4_000 });
-    // The fee shown is the one the LEDGER reported (icrc1_fee), not the catalog's — ckBTC's row
-    // carries none at all, so a catalog-sourced screen would have printed a fabricated 0. This
-    // ledger charges nothing, and a zero fee is stated in words: a money screen never shows
-    // "0.00000000 BTC", which reads as a malfunction rather than as good news.
+    // The fee shown is the one the LEDGER reported (icrc1_fee), not invented by the screen.
+    // ckBTC's row pins the measured fee — 10 sats, read off the real ledger 2026-09-18 — so the
+    // fake ledger reports it and the cell states it exactly. A money screen never shows a
+    // fabricated "0.00000000 BTC"; a genuinely-fee-less row still reads in words ("set by the
+    // ledger"), covered by the ledgerFees structural jest seam.
     const feeCell = await driver.readText('send-review-fee');
-    assertEq(feeCell, 'none', 'a genuinely-zero ledger fee reads as "none", never as 0.00000000 BTC');
+    assertEq(feeCell, '0.0000001 BTC', 'the fee cell states the ledger-reported fee exactly (10 sats), never a fabricated zero');
     await driver.click('btn-send-confirm', { timeoutMs: 5_000 });
     const sent = await driver.waitForText('Sent', { timeoutMs: 15_000 });
     const body = await driver.bodyText();
@@ -122,7 +123,10 @@ export async function run() {
     assertEq(recipientAfter, String(SEND_SATS), 'recipient credited on the ckBTC ledger (an ICRC-1 transfer, not a burn)');
     // ckBTC's catalog row carries no registered fee, so the sender's debit is exactly the amount.
     const senderAfter = await getBalance(relayBaseURL, accountHex, CURRENCY);
-    assertEq(senderAfter, String(SEED_SATS - SEND_SATS), 'sender debited by the amount');
+    // The IC transfer costs the amount plus the LEDGER's own fee — 10 sats, the value measured
+    // off the real ckBTC ledger (icrc1_fee) and pinned in the catalog 2026-09-18.
+    const CKBTC_LEDGER_FEE = 10n;
+    assertEq(senderAfter, String(SEED_SATS - SEND_SATS - Number(CKBTC_LEDGER_FEE)), 'sender debited by the amount plus the ledger fee');
     console.log(`[106-send-auto-route] ✓ ckBTC moved on the IC: sender ${senderBefore} → ${senderAfter}, recipient 0 → ${recipientAfter} sats`);
 
     await driver.screenshot('106-send-auto-route');
