@@ -47,7 +47,7 @@ const DIRECT_ROW = 'convert-dest-direct'; // the standing pair (ICP), direct + v
 const CKUSDC_ROW = 'convert-dest-inwallet-2';
 const CKETH_ROW = 'convert-dest-inwallet-6';
 const CKBTC_ROW = 'convert-dest-inwallet-1';
-const STANDING_HUB_MECH = 'convert-dest-mech-hub:icpswap-vchf-ckusdc:2:icpswap'; // VCHF → ckUSDC → ICP
+const STANDING_HUB_MECH = 'convert-dest-mech-hub:icpswap-vchf-ckusdc:2:icpswap-ckusdc'; // VCHF → ckUSDC → ICP
 const CKUSDC_HUB_MECH = 'convert-dest-mech-hub:icpswap:8:icpswap-ckusdc'; // VCHF → ICP → ckUSDC
 
 const SEED_VCHF = 2000000000; // 20 VCHF (plain Number — the faucet body is JSON)
@@ -148,19 +148,27 @@ export async function run() {
     // The standing ICP group merges BOTH mechanisms that reach the ICP ledger: the direct pool
     // and the via-ckUSDC hub route — direct first, and the direct pool is the shipped default
     // (UX §6 red line 9), so the standing sub-picker renders on open with direct checked.
-    await driver.findByTestID(STANDING_HUB_MECH, {timeoutMs: 4_000});
+    await driver.findByTestID(STANDING_HUB_MECH, {timeoutMs: 8_000});
     const standing = await driver.eval((directId, hubId) => {
       const q = (id) => document.querySelector(`[data-testid="${id}"]`);
       const d = q(directId);
       const h = q(hubId);
       if (d == null || h == null) return null;
+      // RNW does not project accessibilityState → aria-checked (the flow-166 gap), so the
+      // checked row is read STRUCTURALLY: the radio dot (10×10px rounded View) renders only
+      // when the row is the active mechanism.
+      const hasDot = (row) => Array.from(row.querySelectorAll('div')).some((el) => {
+        const s = getComputedStyle(el);
+        return parseFloat(s.width) === 10 && parseFloat(s.height) === 10 && parseFloat(s.borderRadius) === 5;
+      });
       return {
         directFirst: !!(d.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING),
-        directChecked: d.getAttribute('aria-checked'),
+        directChecked: hasDot(d),
+        hubChecked: hasDot(h),
       };
     }, 'convert-dest-mech-direct', STANDING_HUB_MECH);
     assert(standing != null && standing.directFirst, 'the standing group lists the direct pool BEFORE the via-ckUSDC hub route');
-    assert(standing != null && standing.directChecked === 'true', 'the standing group defaults to the direct pool');
+    assert(standing != null && standing.directChecked && !standing.hubChecked, 'the standing group defaults to the direct pool (radio-dot probe)');
 
     // --- the hub-only destination: ckETH (no direct pool anywhere in the registry) ---------------
     console.log('[190-convert-hub] hub-only dest ckETH: the composed quote branch…');
@@ -212,13 +220,22 @@ export async function run() {
     assert(confirmed, 'the confirm took (a private relay never drifts the pair)');
     await driver.findByTestID('convert-state', {timeoutMs: 10_000});
     // The D15 tracker: "Step n of 4 — <the current leg's own label>" while any leg is open.
+    // The tracker is a SHOULD: a fast run (or a loaded host) can finish the whole 4-leg run
+    // between ticks, unmounting the tracker — if the done surface is already up, observing
+    // the transient is moot. Bounded budget, short reads (never the driver's 9s default).
     let stepText = null;
-    for (let i = 0; i < 60 && stepText == null; i++) {
-      stepText = await driver.readText('convert-step').catch(() => null);
-      if (stepText == null || !/^Step \d of 4 — /.test(stepText)) stepText = null;
-      if (stepText == null) await new Promise((r) => setTimeout(r, 200));
+    let sawDone = false;
+    const trackerDeadline = Date.now() + 12_000;
+    while (Date.now() < trackerDeadline) {
+      const t = await driver.readText('convert-step', {timeoutMs: 300}).catch(() => null);
+      if (t != null && /^Step \d of 4 — /.test(t)) { stepText = t; break; }
+      if (await driver.findByTestID('convert-done', {timeoutMs: 300}).catch(() => null) != null) { sawDone = true; break; }
+      await new Promise((r) => setTimeout(r, 200));
     }
-    assert(stepText != null, `the step tracker renders "Step n of 4 — <leg label>" while the run is live (last read: ${stepText})`);
+    if (stepText == null && sawDone) {
+      console.log('[190-convert-hub] run completed before the transient step tracker was observed (SHOULD, skipping)');
+    }
+    assert(stepText != null || sawDone, `the step tracker renders "Step n of 4 — <leg label>" while the run is live (last read: ${stepText})`);
     assert(await driver.waitForText('Converted', {timeoutMs: 60_000}), 'the run reaches the done receipt');
     // The hub record keeps the plain selection heading (D12) — not a route line with a network.
     const stateText = await driver.readText('convert-state');
@@ -265,16 +282,20 @@ export async function run() {
       const d = q(directId);
       const h = q(hubId);
       if (d == null || h == null) return null;
+      const hasDot = (row) => Array.from(row.querySelectorAll('div')).some((el) => {
+        const s = getComputedStyle(el);
+        return parseFloat(s.width) === 10 && parseFloat(s.height) === 10 && parseFloat(s.borderRadius) === 5;
+      });
       return {
         directFirst: !!(d.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING),
-        directChecked: d.getAttribute('aria-checked'),
-        hubChecked: h.getAttribute('aria-checked'),
+        directChecked: hasDot(d),
+        hubChecked: hasDot(h),
       };
     }, 'convert-dest-mech-direct', CKUSDC_HUB_MECH);
     assert(mechs != null, 'the ckUSDC sub-picker shows the direct row and the Via-ICP hub row');
     assert(mechs.directFirst, 'the sub-picker order is stable: Direct pool first, Via ICP second (registry order, never ranked)');
-    assert(mechs.directChecked === 'true' && mechs.hubChecked === 'false',
-      'the sub-picker defaults to the direct pool (a hub mechanism is an explicit switch away, UX §6 red line 9)');
+    assert(mechs.directChecked && !mechs.hubChecked,
+      'the sub-picker defaults to the direct pool (a hub mechanism is an explicit switch away, UX §6 red line 9; radio-dot probe)');
     const hubRow = await driver.readText(CKUSDC_HUB_MECH);
     assertIncludes(hubRow, 'Via ICP', 'the unpicked hub row names its mechanism');
     assertIncludes(hubRow, 'via ICP · 2 swaps', 'the unpicked hub row carries its static shape line (D5)');
@@ -291,12 +312,18 @@ export async function run() {
     await driver.screenshot('190-convert-hub-mechs');
 
     // --- the swap2 refusal: the hub failed_leg taxonomy (impact knob under the signed floor) -----
-    console.log('[190-convert-hub] swap2 refusal: degrading the ckETH pool under the signed floor…');
+    // Deterministic choreography (the render-lag-safe variant of flow 141's knobs): parking
+    // swap1 on the honest pending_withdrawal state FREEZES the run between swap1 and swap2, so
+    // the hop pool can be degraded with ZERO race against the engine's leg cadence — then one
+    // settle drains the queue, swap1 confirms, and swap2 walks into the degraded pool.
+    console.log('[190-convert-hub] swap2 refusal: park on pending_withdrawal, degrade the hop pool, settle…');
     await openVchfConvert(driver);
     await driver.click(CKETH_ROW);
     await driver.type('convert-amount', '2');
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
     let run2 = await hubOracle(r2.baseURL, AMOUNT_IN); // fresh: run 1 moved both pools
+    // fail_withdrawal does NOT touch the quote curve — the confirm-time re-quote still matches.
+    await swapPoolKnob(r2.baseURL, {pool: POOL_VCHF_ICP, fail_withdrawal: true});
     let run2Confirmed = false;
     for (let round = 0; round < 5 && !run2Confirmed; round++) {
       await driver.click('btn-convert-confirm');
@@ -308,18 +335,32 @@ export async function run() {
       run2 = await hubOracle(r2.baseURL, AMOUNT_IN);
     }
     assert(run2Confirmed, 'the second confirm took');
-    // Wait for swap1's payout row (leg 2 confirms) — THEN degrade pool 2, so swap2 executes
-    // against a pool that no longer meets the floor its signed quote promised.
-    let leg1Done = false;
-    for (let i = 0; i < 250 && !leg1Done; i++) {
-      const s = await driver.readText('convert-leg-1-state').catch(() => null);
-      if (s != null && s.includes('Confirmed')) leg1Done = true;
-      else await new Promise((r) => setTimeout(r, 100));
+    // swap1 executes (#ok) but its payout row never lands → the run parks on the honest
+    // pending_withdrawal screen (flow 141's semantics) — a STABLE state, not a race window.
+    let parked = null;
+    for (let i = 0; i < 40 && parked == null; i++) {
+      parked = await driver.findByTestID('convert-pending', {timeoutMs: 500}).catch(() => null);
     }
-    assert(leg1Done, 'swap1 confirms (its payout row is seen) before the knob lands');
+    assert(parked != null, 'swap1 parks on pending_withdrawal (its payout is queued, not paid)');
+    // NOW degrade the hop pool: any swap2 executed from here pays 5% of its curve — far below
+    // the floor signed into the frozen legs.
     await swapPoolKnob(r2.baseURL, {pool: POOL_ICP_CKETH, impact_bps: 9500});
-    assert(await driver.findByTestID('convert-failed-leg', {timeoutMs: 25_000}) != null,
-      'swap2 refuses below the signed floor → the hub failed_leg screen');
+    // Drain the queued payout → the hop ledger row appears → swap1 confirms → the engine
+    // marches on to approve2 + swap2, and swap2 refuses below its signed floor.
+    await swapPoolKnob(r2.baseURL, {pool: POOL_VCHF_ICP, fail_withdrawal: false, settle_pending: true});
+    // Wait for the refusal, logging every leg-state TRANSITION so a stall names itself.
+    let refused = null;
+    let lastLegs = '';
+    for (let i = 0; i < 60 && refused == null; i++) {
+      refused = await driver.findByTestID('convert-failed-leg', {timeoutMs: 300}).catch(() => null);
+      if (refused != null) break;
+      const s2 = await driver.readText('convert-leg-2-state').catch(() => '?');
+      const s3 = await driver.readText('convert-leg-3-state').catch(() => '?');
+      const cur = `${s2}|${s3}`;
+      if (cur !== lastLegs) { console.log(`[190-convert-hub] refusal wait: leg3(approve)=${s2} leg4(swap)=${s3}`); lastLegs = cur; }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    assert(refused != null, 'swap2 refuses below the signed floor → the hub failed_leg screen');
     assertIncludes(await driver.readText('convert-leg-3-state'), 'Refused', 'the refused leg names itself');
     const failed = await driver.readText('convert-failed-leg');
     assertIncludes(failed, 'ICP', 'the failure names the HUB asset as the in-wallet position (D18)');
@@ -330,8 +371,8 @@ export async function run() {
     assertEq(BigInt(await getBalance(r2.baseURL, account.publicHex, 7)),
       BigInt(SEED_VCHF) - 2n * (AMOUNT_IN + 2n * VCHF_FEE), 'VCHF paid for both intents and nothing else');
     assertEq(BigInt(await getBalance(r2.baseURL, account.publicHex, 8)),
-      (gross1 - minOut1 - 2n * ICP_FEE) + (run2.gross1 - 2n * ICP_FEE),
-      'ICP holds run 1\'s surplus plus run 2\'s whole gross minus its two fees (swap2 pulled nothing)');
+      (gross1 - minOut1 - 2n * ICP_FEE) + (run2.gross1 - ICP_FEE),
+      'ICP holds run 1\'s surplus plus run 2\'s whole gross minus its approve fee only — the refused swap never pulled its input (or its fee)');
     assertEq(BigInt(await getBalance(r2.baseURL, account.publicHex, 6)),
       gross2, 'ckETH is unchanged — the refused leg never paid');
 

@@ -373,7 +373,9 @@ export function assert(cond, msg) {
 /** Assert `actual === expected`; the message includes both values for fast triage. */
 export function assertEq(actual, expected, label) {
   if (actual !== expected) {
-    throw new Error(`[assert] ${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    // BigInt-safe: balances are asserted as BigInts, and JSON.stringify throws on them.
+    const show = (v) => JSON.stringify(v, (_, x) => typeof x === 'bigint' ? `${x}` : x);
+    throw new Error(`[assert] ${label}: expected ${show(expected)}, got ${show(actual)}`);
   }
 }
 
