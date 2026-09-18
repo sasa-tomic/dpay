@@ -56,7 +56,7 @@ import {submitTransfer as railSubmitTransfer, fetchGasFeeWei, fetchLedgerFee} fr
 import {icStampExpiry} from './services/icp';
 import {randNonceHex, rawToDecimal, toUnits} from './lib/format';
 import {isValidDestinationAddress, type CurrencyDescriptor} from './config/catalog';
-import type {MultihopRoute} from './routes';
+import type {HubRoute, MultihopRoute} from './routes';
 import {
   CONVERT_APPROVE_LIFETIME_S,
   CONVERT_LEGACY_STORAGE_KEY,
@@ -561,6 +561,21 @@ export type ConvertRecord = {
   /** Durable identity of the hop-ledger payout row that confirmed the swap leg (the
    *  ledger-watch evidence — never the #ok alone, spec §4). Set when the row is SEEN. */
   hopTx?: string;
+  /** The IC hub 2-hop widening (2026-09-18, spec §11): the SECOND swap's facts — its venue,
+   *  the destination ledger, and the quote figures its own watch + min-out derive from.
+   *  Present iff the record was prepared on a hub route (legPlan = approve/swap/approve/swap).
+   *  All optional: direct + Route A/B/C records never carry them (byte-identical history). */
+  venue2Id?: string;
+  destLedger?: string;
+  destCurrency?: number;
+  destDecimals?: number;
+  destFee?: string; // the DEST ledger's own transfer fee — swap2's out fee
+  expectedGross2?: string; // quote2's gross (quoted on minOut1 as its input — the compounding floor)
+  expectedNet2?: string; // gross2 − destFee
+  feeMillionths2?: number; // venue2's own fee tier, echoed verbatim
+  /** Durable identity of the DEST-ledger payout row that confirmed swap2 — `outTx`'s twin
+   *  for a hub record (whose `out*` fields name the HUB, the first watchable ledger). */
+  destTx?: string;
   providerRef?: ProviderRef; // required when legs is empty; ignored otherwise
   /** The CeFi handoff block — present iff the record was prepared as a CeFi order
    *  (empty legs + providerRef): the venue's deposit facts the state screen shows
@@ -658,9 +673,15 @@ const SOLANA_CONVERT_STEPS: ReadonlySet<ConvertStep> = new Set([
 
 /** The min-out a record's swap leg signed, re-derived from the record's OWN frozen quote and
  *  slippage through the compiled core — deterministic, so this is the same figure
- *  `prepareConvertRecord` baked into the arg, not a new opinion. */
-export async function convertRecordMinOut(record: ConvertRecord): Promise<string> {
-  return DpayCore.icpSwapMinOut(record.expectedGross, record.slippageBps);
+ *  `prepareConvertRecord` baked into the arg, not a new opinion. The hub widening (2026-09-18,
+ *  spec §11) adds the leg discriminator: ONE derivation rule PER swap leg — leg 2's floor is
+ *  its OWN frozen gross (`expectedGross2`, quoted on leg 1's min-out) × (1−slippage), floors
+ *  only, never an expected gross. A hub record always carries expectedGross2 (hydration
+ *  refuses otherwise); anything else is a caller bug and throws fail-closed. */
+export async function convertRecordMinOut(record: ConvertRecord, swapLeg: 1 | 2 = 1): Promise<string> {
+  const gross = swapLeg === 2 ? record.expectedGross2 : record.expectedGross;
+  if (gross == null) throw new Error('record carries no quote for that swap leg');
+  return DpayCore.icpSwapMinOut(gross, record.slippageBps);
 }
 
 /** Migrate a pre-legs (v1 store) record to the legs schema: the two old envelope pairs become
@@ -845,18 +866,49 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
       if (tail[0] !== 'cctp_burn') return null;
       if (crossRail.kind === 'cctp_sol' && tail[1] !== 'sol_swap') return null;
     } else if (parsed.length !== legs.length || parsed.length < 2) return null;
+    // The HUB shape (2026-09-18, spec §11): exactly four IC legs in the approve/swap/approve/
+    // swap order. Its destination is the user's own principal on the dest IC ledger —
+    // `destAddress` is NOT part of this shape — but every number its executor, watch, and
+    // min-out re-derivation need must be frozen on the record. A swap2 the record cannot
+    // watch or re-price is corrupt: refuse the quadrant, never improvise a number.
+    const isHubPlan = legs.length === 4
+      && parsed[0].kind === 'approve' && parsed[1].kind === 'swap'
+      && parsed[2].kind === 'approve' && parsed[3].kind === 'swap';
     // A planned record must be able to name its destination and its hop asset — every state
     // screen it can ever render keys off those facts (spec §4: name what the user holds,
     // where the exit is). A plan that cannot be NAMED fails hydration, like every other
     // shape that would render a nameless screen.
-    const hopStr = (k: 'destAddress' | 'destSymbol' | 'destNetwork' | 'hopLedger' | 'hopSymbol'): string | null =>
+    const hopStr = (k: 'destAddress' | 'destSymbol' | 'destNetwork' | 'hopLedger' | 'hopSymbol' | 'destLedger' | 'venue2Id' | 'expectedGross2' | 'expectedNet2' | 'destFee'): string | null =>
       typeof r[k] === 'string' && (r[k] as string).length > 0 ? r[k] as string : null;
-    if (hopStr('destAddress') == null || hopStr('destSymbol') == null || hopStr('destNetwork') == null
+    if (hopStr('destSymbol') == null || hopStr('destNetwork') == null
       || hopStr('hopLedger') == null || hopStr('hopSymbol') == null) return null;
     if (typeof r.hopCurrency !== 'number' || typeof r.hopDecimals !== 'number') return null;
+    if (isHubPlan) {
+      if (hopStr('destLedger') == null || hopStr('venue2Id') == null
+        || hopStr('expectedGross2') == null || hopStr('expectedNet2') == null
+        || hopStr('destFee') == null) return null;
+      const destCurrency = r.destCurrency;
+      const destDecimals = r.destDecimals;
+      const feeMillionths2 = r.feeMillionths2;
+      if (typeof destCurrency !== 'number' || typeof destDecimals !== 'number'
+        || typeof feeMillionths2 !== 'number') return null;
+      if (r.destTx != null && (typeof r.destTx !== 'string' || (r.destTx as string).length === 0)) return null;
+    } else if (hopStr('destAddress') == null) return null;
     legPlan = parsed;
     rec.legPlan = legPlan;
-    rec.destAddress = hopStr('destAddress') ?? undefined;
+    if (isHubPlan) {
+      rec.destLedger = hopStr('destLedger') ?? undefined;
+      rec.destCurrency = r.destCurrency as number;
+      rec.destDecimals = r.destDecimals as number;
+      rec.destFee = hopStr('destFee') ?? undefined;
+      rec.venue2Id = hopStr('venue2Id') ?? undefined;
+      rec.expectedGross2 = hopStr('expectedGross2') ?? undefined;
+      rec.expectedNet2 = hopStr('expectedNet2') ?? undefined;
+      rec.feeMillionths2 = r.feeMillionths2 as number;
+      if (r.destTx != null) rec.destTx = r.destTx as string;
+    } else {
+      rec.destAddress = hopStr('destAddress') ?? undefined;
+    }
     rec.destSymbol = hopStr('destSymbol') ?? undefined;
     rec.destNetwork = hopStr('destNetwork') ?? undefined;
     rec.hopLedger = hopStr('hopLedger') ?? undefined;
@@ -1034,6 +1086,17 @@ export function isTerminalConvertStep(step: ConvertStep): boolean {
  *  bytes must never be re-submitted (V6 trichotomy arm (b)). */
 export function convertLegsExpired(record: ConvertRecord, nowMs: number = Date.now()): boolean {
   return record.legs.length > 0 && record.legs.every(l => l.expiresAtMs <= nowMs);
+}
+
+/** The IC hub 2-hop record shape (2026-09-18, spec §11): planned, non-cross-rail, four IC
+ *  legs in the approve/swap/approve/swap order, with the dest ledger named. Hydration
+ *  enforces exactly this shape AND its frozen facts; this predicate is the executor's and
+ *  resume engine's cheap discriminator for the hub-specific state machine. */
+export function isHubConvertRecord(rec: ConvertRecord): boolean {
+  const plan = rec.legPlan;
+  return rec.destLedger != null && rec.crossRail == null && plan != null && plan.length === 4
+    && plan[0].kind === 'approve' && plan[1].kind === 'swap'
+    && plan[2].kind === 'approve' && plan[3].kind === 'swap';
 }
 
 export async function loadConvertRecords(publicHex: string): Promise<Record<string, ConvertRecord>> {
@@ -1448,6 +1511,136 @@ export async function prepareMultihopConvertRecord(args: {
   };
 }
 
+/** Prepare ONE IC hub 2-hop intent as a single signed record (2026-09-18, spec §11): from →
+ *  hub → dest over TWO registered ic_amm venues — approve+swap on venue1, approve+swap on
+ *  venue2 — ALL FOUR legs signed here, in one pass, with frozen args and one shared
+ *  envExpiry + allowanceExpiryNs. No destAddress: the destination is the user's OWN
+ *  principal on the dest IC ledger (funds never touch a dpay-controlled address).
+ *  The floors compound with one derivation rule per swap leg (spec §5 honesty): quote2 is
+ *  quoted on math1.minOut — the least leg 1 can deliver, enforced below — and swap2's signed
+ *  minimum is math2.minOut, quote2's own slippage floor. Floors only, never expected gross.
+ *  Same red lines as every prepare, per leg (the phone signs, so the phone enforces): each
+ *  quote's venue registered with its endpoint AS the quoted pool, each quote FOR its route
+ *  leg, and no dpay-owned canister anywhere in the five-leg-target set. */
+export async function prepareHubConvertRecord(args: {
+  secretHex: string;
+  /** Leg 1's re-quoted quote (from → hub), verbatim from the venue. */
+  quote1: ConvertQuote;
+  /** Leg 2's quote (hub → dest), quoted on `math1.minOut` — enforced below. */
+  quote2: ConvertQuote;
+  /** Leg 1's math; `minOut` is the hub floor legs 3–4 are sized on. */
+  math1: ConvertMath;
+  /** Leg 2's math (derived on quote2 with the hub + dest ledger fees). */
+  math2: ConvertMath;
+  route: HubRoute;
+}): Promise<ConvertRecord> {
+  const {secretHex, quote1, quote2, math1, math2, route} = args;
+  if (quote1.zeroForOne == null || quote2.zeroForOne == null) {
+    throw new Error(M.convert.errors.quoteUnavailable('direction'));
+  }
+  const venue1 = venueOfId(quote1.venueId);
+  const venue2 = venueOfId(quote2.venueId);
+  if (venue1 == null || venue1.endpoint !== quote1.pool || quote1.pool !== route.legs[0].pool
+    || venue2 == null || venue2.endpoint !== quote2.pool || quote2.pool !== route.legs[1].pool) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  if (quote1.tokenInLedger !== route.from.ledger || quote1.tokenOutLedger !== route.hub.ledger
+    || quote2.tokenInLedger !== route.hub.ledger || quote2.tokenOutLedger !== route.dest.ledger) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  // The composition floor: leg 2's quote must be quoted on EXACTLY leg 1's min-you'll-receive —
+  // swap2 pulls whatever swap1's floor delivers, so a differently-sized quote2 is a
+  // different trade than the one the user confirmed.
+  if (quote2.amountIn !== math1.minOut) {
+    throw new Error(M.convert.errors.quoteUnavailable('pool'));
+  }
+  for (const target of [route.from.ledger, route.legs[0].pool, route.hub.ledger, route.legs[1].pool, route.dest.ledger]) {
+    if (DPAY_CANISTER_PRINCIPALS.includes(target)) {
+      throw new Error(M.convert.errors.quoteUnavailable('venue'));
+    }
+  }
+
+  const amountIn = quote1.amountIn;
+  // Approve sizing follows the direct flow's caller-side rule, one hop over: approve1 covers
+  // the swap input + the from-ledger's own approve fee; approve2 covers the hub FLOOR (what
+  // swap2 will actually pull) + the hub ledger's own approve fee.
+  const approve1Amount = (BigInt(amountIn) + BigInt(math1.inFee)).toString();
+  const approve2Amount = (BigInt(math1.minOut) + BigInt(route.hub.fee)).toString();
+  const allowanceExpiryNs = await icStampExpiry(secretHex, CONVERT_APPROVE_LIFETIME_S);
+  const envExpiry = await icStampExpiry(secretHex);
+  const expiresAtMs = Number(BigInt(envExpiry) / 1_000_000n);
+
+  // Legs 1–2: the direct flow's exact approve+swap pair, on route leg 1.
+  const approve1ArgHex = await DpayCore.icpApproveArg(
+    route.legs[0].pool, '', '', approve1Amount, approve1Amount, allowanceExpiryNs, '', math1.inFee,
+  );
+  const approve1Signed = await DpayCore.icpSignUpdate(secretHex, route.from.ledger, 'icrc2_approve', approve1ArgHex, envExpiry);
+  const swap1ArgHex = await DpayCore.icpDepositAndSwapArg(
+    amountIn, math1.minOut, math1.inFee, route.hub.fee, quote1.zeroForOne,
+  );
+  const swap1Signed = await DpayCore.icpSignUpdate(secretHex, route.legs[0].pool, 'depositFromAndSwap', swap1ArgHex, envExpiry);
+  // Legs 3–4: the same pair again, on route leg 2 — pool-pull approve shape (the hub floor
+  // is spendable by venue2's pool), then swap2 with its own compounding floor.
+  const approve2ArgHex = await DpayCore.icpApproveArg(
+    route.legs[1].pool, '', '', approve2Amount, approve2Amount, allowanceExpiryNs, '', route.hub.fee,
+  );
+  const approve2Signed = await DpayCore.icpSignUpdate(secretHex, route.hub.ledger, 'icrc2_approve', approve2ArgHex, envExpiry);
+  const swap2ArgHex = await DpayCore.icpDepositAndSwapArg(
+    math1.minOut, math2.minOut, route.hub.fee, route.dest.fee, quote2.zeroForOne,
+  );
+  const swap2Signed = await DpayCore.icpSignUpdate(secretHex, route.legs[1].pool, 'depositFromAndSwap', swap2ArgHex, envExpiry);
+
+  return {
+    id: randNonceHex(),
+    createdAtMs: Date.now(),
+    step: 'approving',
+    venueId: quote1.venueId,
+    venue2Id: quote2.venueId,
+    inCurrency: route.from.currency,
+    // The FIRST watchable ledger is the hub (swap1's payout) — the record's out* fields name
+    // it, exactly as a direct record's out* names its swap output; the DEST lives in dest*.
+    outCurrency: route.hub.currency,
+    inLedger: route.from.ledger,
+    outLedger: route.hub.ledger,
+    inSymbol: route.from.symbol,
+    outSymbol: route.hub.symbol,
+    inDecimals: route.from.decimals,
+    outDecimals: route.hub.decimals,
+    amountIn,
+    expectedGross: quote1.amountOutGross,
+    expectedNet: math1.netOut,
+    inFee: math1.inFee,
+    outFee: route.hub.fee,
+    slippageBps: math1.slippageBps,
+    legs: [
+      {canister: route.from.ledger, method: 'icrc2_approve', argHex: approve1ArgHex, envelopeHex: approve1Signed.envelopeHex, requestIdHex: approve1Signed.requestIdHex, expiresAtMs},
+      {canister: route.legs[0].pool, method: 'depositFromAndSwap', argHex: swap1ArgHex, envelopeHex: swap1Signed.envelopeHex, requestIdHex: swap1Signed.requestIdHex, expiresAtMs},
+      {canister: route.hub.ledger, method: 'icrc2_approve', argHex: approve2ArgHex, envelopeHex: approve2Signed.envelopeHex, requestIdHex: approve2Signed.requestIdHex, expiresAtMs},
+      {canister: route.legs[1].pool, method: 'depositFromAndSwap', argHex: swap2ArgHex, envelopeHex: swap2Signed.envelopeHex, requestIdHex: swap2Signed.requestIdHex, expiresAtMs},
+    ],
+    legPlan: [
+      {kind: 'approve', canister: route.from.ledger, fee: math1.inFee, state: 'pending'},
+      {kind: 'swap', canister: route.legs[0].pool, fee: '', state: 'pending'},
+      {kind: 'approve', canister: route.hub.ledger, fee: route.hub.fee, state: 'pending'},
+      {kind: 'swap', canister: route.legs[1].pool, fee: '', state: 'pending'},
+    ],
+    destSymbol: route.dest.symbol,
+    destNetwork: route.dest.network,
+    hopLedger: route.hub.ledger,
+    hopSymbol: route.hub.symbol,
+    hopCurrency: route.hub.currency,
+    hopDecimals: route.hub.decimals,
+    destLedger: route.dest.ledger,
+    destCurrency: route.dest.currency,
+    destDecimals: route.dest.decimals,
+    destFee: route.dest.fee,
+    expectedGross2: quote2.amountOutGross,
+    expectedNet2: math2.netOut,
+    feeMillionths: quote1.feeMillionths,
+    feeMillionths2: quote2.feeMillionths,
+  };
+}
+
 // --- the CCTP leg: build the burn for the USER's wallet, then watch Circle attest and mint ---
 
 /** Circle's published fee endpoints (CCTP V2). The burn lane is fixed by the route: USDC
@@ -1731,39 +1924,49 @@ export async function probeConvertSettlement(args: {
 }
 
 /** The HOP-ledger payout probe (multi-hop twin of the settlement probe): the swap leg of a
- *  route pays ck<HOP> to the user's principal FROM THE POOL — that row is the swap leg's
- *  CONFIRMATION (spec §4: never the #ok alone). Range = [minOut .. expectedGross] — the burn
- *  amount is the min-you'll-receive, so anything the pool actually paid lands inside; the
- *  SEEN amount is recorded, never the expected one. Returns null on no-match or any failure
- *  (an unreadable ledger proves nothing either way). */
+ *  route pays the out asset to the user's principal FROM THE POOL — that row is the swap
+ *  leg's CONFIRMATION (spec §4: never the #ok alone). Range = [minOut .. expectedGross] —
+ *  the min you signed is the least you'll receive, so anything the pool actually paid lands
+ *  inside; the SEEN amount is recorded, never the expected one. Returns null on no-match or
+ *  any failure (an unreadable ledger proves nothing either way).
+ *  The hub widening (2026-09-18, spec §11): `swapLeg` says WHICH swap's payout to watch —
+ *  1 (the default) is the record's own hop watch, byte-identical behavior to before; 2 is
+ *  the SECOND swap's DEST payout, on the hub record's own facts (dest currency, venue2's
+ *  endpoint, the [minOut2 .. expectedGross2] window). A record missing any leg-2 fact
+ *  proves nothing — null, never a guessed window. */
 export async function probeHopPayout(args: {
   relayUrl: string;
   publicHex: string;
   myPrincipalLower: string;
   record: ConvertRecord;
   excludeOutTx?: ReadonlySet<string>;
+  swapLeg?: 1 | 2;
 }): Promise<{amount: string; tx: string} | null> {
   const {relayUrl, publicHex, myPrincipalLower, record} = args;
+  const leg = args.swapLeg ?? 1;
+  const outCurrency = leg === 2 ? record.destCurrency : record.outCurrency;
+  const venueId = leg === 2 ? record.venue2Id : record.venueId;
+  const maxGross = leg === 2 ? record.expectedGross2 : record.expectedGross;
   // Same fail-closed guard as probeConvertSettlement: no numeric currency, no IC ledger window.
-  if (record.outCurrency == null) return null;
+  if (outCurrency == null || venueId == null || maxGross == null) return null;
   const exclude = args.excludeOutTx ?? new Set<string>();
   try {
-    const minOut = await convertRecordMinOut(record);
+    const minOut = await convertRecordMinOut(record, leg);
     const lo = BigInt(minOut);
-    const hi = BigInt(record.expectedGross);
+    const hi = BigInt(maxGross);
     const r = await relayFetch(
       relayUrl,
-      `/api/v1/transactions/${publicHex}?currency=${record.outCurrency}&limit=${CONVERT_PROBE_WINDOW_ROWS}`,
+      `/api/v1/transactions/${publicHex}?currency=${outCurrency}&limit=${CONVERT_PROBE_WINDOW_ROWS}`,
       undefined,
       6000,
     );
     if (!r.ok) return null;
     const body = await r.json().catch(() => null) as {transactions?: TransactionsRowLike[]} | null;
-    const pool = venueEndpointOf(record.venueId).toLowerCase();
+    const pool = venueEndpointOf(venueId).toLowerCase();
     for (const row of body?.transactions ?? []) {
       const tx = rowIdentity(row);
       const n = row.amount == null ? null : BigInt(row.amount);
-      if (row.currency === record.outCurrency
+      if (row.currency === outCurrency
         && row.to?.toLowerCase() === myPrincipalLower
         && row.from?.toLowerCase() === pool
         && n != null && (n === lo || n === hi || (n >= lo && n <= hi))
@@ -1798,14 +2001,22 @@ function withLegState(rec: ConvertRecord, i: number, state: LegState, patch: Par
  *  dedup makes that safe on the boundary node and the fake gateway alike).
  *
  *  - swap leg: `#ok` parks the record on `pending_withdrawal` — the leg confirms only when
- *    the hop payout ROW is seen (probeHopPayout); a resume parked there resolves the row
- *    before touching any burn leg.
+ *    its payout ROW is seen (probeHopPayout); a resume parked there resolves the row
+ *    before touching any later leg. On a HUB record (2026-09-18, spec §11) the watch follows
+ *    the first non-confirmed swap: swap1's row confirms the hub leg; swap2's DEST row is the
+ *    terminal evidence — done, the SEEN dest amount (the dest asset IS in the wallet, unlike
+ *    Route A's "on its way"), with the payout row as destTx.
  *  - withdraw_erc20 leg: the minter's `#ok` block index is the terminal evidence → done,
  *    with the burn amount as outAmountNet ("at least X on its way" — delivery is on Ethereum,
  *    asynchronously; dpay cannot watch it and the copy says so).
  *  - refusals: legs 1–2 refuse exactly like the direct flow (input never left / pool refused
  *    atomically); legs 3–5 refuse into `failed_leg` — the hop asset is in-wallet and the
- *    standalone Withdraw flow is the exit, which the failure screen names.
+ *    standalone Withdraw flow is the exit, which the failure screen names. On a hub record,
+ *    approve2/swap2 refuse into `failed_leg` the same way (the HUB asset is in-wallet; a
+ *    swap2 refusal is never failed_refunded — the input already converted).
+ *  - expiry (arm b): a hub record probes the DEST payout first (seen → done, the swap
+ *    executed even if its envelope expired), then the HUB payout (seen → failed_leg), else
+ *    stuck; every other planned shape probes the hop only.
  *  - unknown outcomes park on `stuck` (the honest unknown; the resume engine's slow watch
  *    resolves a hop row into `failed_leg`, never done — spec §8). */
 async function executePlannedConvert(
@@ -1817,33 +2028,63 @@ async function executePlannedConvert(
   let rec: ConvertRecord = {...start};
   if (isTerminalConvertStep(rec.step)) return rec;
   const myPrincipalLower = (await DpayCore.icpPrincipalFromPubkey(deps.publicHex)).toLowerCase();
-  const probeHop = (r: ConvertRecord) => probeHopPayout({
-    relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower, record: r, excludeOutTx: deps.claimedOutTx,
+  const probeHop = (r: ConvertRecord, swapLeg: 1 | 2 = 1) => probeHopPayout({
+    relayUrl: deps.relayUrl, publicHex: deps.publicHex, myPrincipalLower, record: r, excludeOutTx: deps.claimedOutTx, swapLeg,
   });
   // The resume cursor counts IC legs ONLY — the cctp_burn/sol_swap tail entries are driven
   // by the cross-rail drivers, never by this loop, so a cross-rail record whose IC legs are
   // all confirmed reads as complete here (the loop body never indexes past `legs`).
   const firstIncomplete = () => (rec.legPlan ?? []).findIndex(l => l.state !== 'confirmed' && l.kind !== 'cctp_burn' && l.kind !== 'sol_swap');
+  // A swap leg's ordinal among the plan's swap entries (0-based): 0 = the record's own hop
+  // swap (the record's out*/hop* facts), 1 = a HUB record's SECOND swap (the dest* facts).
+  const swapOrdinalOf = (idx: number): number =>
+    (rec.legPlan ?? []).slice(0, idx).filter(l => l.kind === 'swap').length;
 
   // Parked mid-route on the hop watch: resolve the row FIRST — it is the swap leg's
-  // confirmation and the gate every burn leg waits behind.
+  // confirmation and the gate every later leg waits behind. The hub widening (2026-09-18):
+  // the watch targets the FIRST NON-CONFIRMED swap — on a hub record that can be swap2, and
+  // its payout row IS the terminal evidence: the dest asset is in the wallet, done, with the
+  // SEEN amount (never the expected) and the payout row as the durable proof (destTx).
   if (rec.step === 'pending_withdrawal') {
-    const seen = await probeHop(rec);
+    const plan = rec.legPlan ?? [];
+    const pendingSwap = plan.findIndex(l => l.kind === 'swap' && l.state !== 'confirmed');
+    const swapIdx = pendingSwap >= 0 ? pendingSwap : plan.findIndex(l => l.kind === 'swap');
+    const leg: 1 | 2 = swapOrdinalOf(swapIdx) >= 1 ? 2 : 1;
+    const seen = await probeHop(rec, leg);
     if (seen == null) {
       if (convertLegsExpired(rec, opts.nowMs)) {
         return tools.advance({...rec, step: 'stuck', failureCode: 'unknown'});
       }
       return tools.advance({...rec, step: 'pending_withdrawal'}); // still watching — re-arm and come back
     }
-    const swapIdx = (rec.legPlan ?? []).findIndex(l => l.kind === 'swap');
-    rec = await tools.advance(withLegState(rec, swapIdx, 'confirmed', {hopTx: seen.tx}));
+    if (leg === 2) {
+      rec = await tools.advance(withLegState(rec, swapIdx, 'confirmed', {
+        step: 'done', outAmountNet: seen.amount, outTx: seen.tx, destTx: seen.tx,
+      }));
+    } else {
+      rec = await tools.advance(withLegState(rec, swapIdx, 'confirmed', {hopTx: seen.tx}));
+    }
   }
 
   // V6 trichotomy arm (b), planned form: an unconfirmed leg whose signed bytes have ALL died
-  // is never resubmitted. The one thing that can still resolve is the hop payout: SEEN means
-  // the swap ran and the burn legs are dead → failed_leg (hop asset in-wallet, standalone
-  // Withdraw is the exit); UNSEEN means nothing is known → the honest unknown, stuck.
+  // is never resubmitted. The one thing that can still resolve is a payout row: SEEN means
+  // the swap ran and the remaining legs are dead → failed_leg; UNSEEN means nothing is known
+  // → the honest unknown, stuck. The hub record's trichotomy (2026-09-18) probes the DEST
+  // payout FIRST — the final swap may have executed even though its envelope expired, and a
+  // seen dest row means the dest asset IS in the wallet (done, the SEEN amount). Only then
+  // the hub payout: swap1 ran, swap2's bytes are dead — the user holds the hub asset
+  // (failed_leg), never done on a mid-route row.
   if (firstIncomplete() >= 0 && convertLegsExpired(rec, opts.nowMs)) {
+    if (isHubConvertRecord(rec)) {
+      const dest = await probeHop(rec, 2);
+      if (dest != null) {
+        return tools.advance({...rec, step: 'done', outAmountNet: dest.amount, outTx: dest.tx, destTx: dest.tx});
+      }
+      const hub = await probeHop(rec, 1);
+      return tools.advance(hub != null
+        ? {...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: hub.tx}
+        : {...rec, step: 'stuck', failureCode: 'unknown'});
+    }
     const seen = await probeHop(rec);
     return tools.advance(seen != null
       ? {...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: seen.tx}
@@ -1857,8 +2098,11 @@ async function executePlannedConvert(
     rec = await tools.advance(withLegState(rec, i, 'sent'));
     // Device-saved annotation for the swap-side legs only — the burn-side legs are the
     // Withdraw flow's own calls and carry no venue row to name (parity with WithdrawSheet).
+    // On a hub record legs 3–4 are venue2's business (their ordinal ≥ 1); a Route A record
+    // has no venue2Id, so the ?? falls back to the same venue it always named.
     if (plan.kind === 'approve' || plan.kind === 'swap') {
-      void saveTxNote(deps.publicHex, {k: leg.requestIdHex, who: venueDisplayName(rec.venueId)}, opts.nowMs);
+      const venue = swapOrdinalOf(i) >= 1 ? (rec.venue2Id ?? rec.venueId) : rec.venueId;
+      void saveTxNote(deps.publicHex, {k: leg.requestIdHex, who: venueDisplayName(venue)}, opts.nowMs);
     }
     let legBlockIndex: string | null = null;
     const decodeReply: ((replyArgHex: string) => Promise<{ok: boolean; errVariant?: string; errDetail?: string}>) | undefined =
@@ -1885,6 +2129,13 @@ async function executePlannedConvert(
         return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_refunded', failureCode: 'approve_refused', failureDetail: outcome.rejected.detail}));
       }
       if (plan.kind === 'swap') {
+        if (swapOrdinalOf(i) >= 1) {
+          // The SECOND swap refused (hub taxonomy, 2026-09-18): the input ALREADY converted —
+          // swap1 confirmed and the user holds the HUB asset in-wallet. This is never
+          // failed_refunded (there is no input to refund); failed_leg names the position,
+          // and the hub asset is the in-wallet exit the copy names.
+          return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'swap_refused', failureDetail: detail}));
+        }
         // The pool's atomic refusal: input stays in the wallet, allowance dies at expiry.
         return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_refunded', failureCode: 'swap_refused', failureDetail: detail}));
       }
@@ -1895,16 +2146,25 @@ async function executePlannedConvert(
       return tools.advance(withLegState(rec, i, 'failed', {step: 'failed_leg', failureCode: 'withdraw_refused', failureDetail: detail}));
     }
     if (plan.kind === 'swap') {
-      // #ok: input spent, hop output owed — NOT confirmed. Watch the hop ledger before any
-      // burn leg may run; exhaustion parks on pending_withdrawal (the pool DID accept).
+      // #ok: input spent, output owed — NOT confirmed. Watch the payout ledger before any
+      // later leg may run; exhaustion parks on pending_withdrawal (the pool DID accept).
+      // The hub widening: WHICH ledger follows the swap's ordinal — leg 1 watches the hub
+      // (the record's out* facts), leg 2 watches the DEST, and a seen dest row IS the
+      // terminal evidence (dest asset in-wallet: done, the SEEN amount, destTx).
+      const leg: 1 | 2 = swapOrdinalOf(i) >= 1 ? 2 : 1;
       let seen: {amount: string; tx: string} | null = null;
       for (let k = 0; k < opts.settleAttempts && seen == null; k += 1) {
-        seen = await probeHop(rec);
+        seen = await probeHop(rec, leg);
         if (seen == null && k < opts.settleAttempts - 1 && opts.settleIntervalMs > 0) {
           await new Promise<void>((resolve) => setTimeout(resolve, opts.settleIntervalMs));
         }
       }
       if (seen == null) return tools.advance({...rec, step: 'pending_withdrawal'});
+      if (leg === 2) {
+        return tools.advance(withLegState(rec, i, 'confirmed', {
+          step: 'done', outAmountNet: seen.amount, outTx: seen.tx, destTx: seen.tx,
+        }));
+      }
       rec = await tools.advance(withLegState(rec, i, 'confirmed', {hopTx: seen.tx}));
       continue;
     }

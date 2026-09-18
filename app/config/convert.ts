@@ -15,6 +15,8 @@
  * fact; the execution protection is the venue's own amounts plus the signed minimum-out.
  */
 import {BUNDLED_VENUES} from './venues';
+import {hubRoutes} from '../routes';
+import {BUNDLED_NETWORKS, icpCatalogOf, type CurrencyDescriptor} from './catalog';
 
 /** Slippage choices on the Convert screen (spec §5): 0.5% / 1% / 3%, default 1%. */
 export const CONVERT_SLIPPAGE_BPS_OPTIONS = [50, 100, 300] as const;
@@ -120,4 +122,62 @@ export function resolveConvertDirection(
     if (i >= 0) return {otherLedger: venue.pair_ledgers[i === 0 ? 1 : 0]};
   }
   return null;
+}
+
+// --- the IC hub 2-hop widening (2026-09-18, spec §11): destination enumeration ---------------------
+
+/** ONE route option from an asset to ONE destination ledger, in the shape the Convert screen
+ *  renders: `direct` = a single registered ic_amm venue for the pair (today's standing
+ *  behavior); `hub` = a 2-leg from→hub→dest composition over two venues (app/routes.ts
+ *  hubRoutes). Registry order throughout — direct routes before hub routes, never ranked. */
+export type ConvertRouteOption =
+  | {kind: 'direct'; venueId: string}
+  | {kind: 'hub'; routeId: string; venue1Id: string; venue2Id: string; hubLedger: string};
+
+/** One hub-reachable destination: the dest IC ledger + every route that reaches it. */
+export type ConvertDestination = {
+  destLedger: string;
+  routes: ConvertRouteOption[];
+};
+
+/** Every IC destination an asset can convert to — directly OR over one hub leg. This is the
+ *  Convert-entry enablement widened from "a direct venue exists" to "ANY route exists": an
+ *  asset with no direct pool but a hub path (e.g. VCHF → ckETH via ICP) converts as ONE
+ *  intent, and where both shapes exist both are OFFERED, never ranked. Same posture as
+ *  resolveConvertDirection (kept above, unchanged, for its existing callers): the BUNDLED
+ *  registry is the truth, mainnet rows only, and hubRoutes fails closed on any missing
+ *  number (a leg that cannot be priced is not a route). First-encounter destination order. */
+export function resolveConvertDestinations(
+  ledger: string | undefined,
+  isTestnet: boolean,
+): ConvertDestination[] {
+  if (!ledger || isTestnet) return [];
+  const catalog: CurrencyDescriptor[] = icpCatalogOf(BUNDLED_NETWORKS);
+  if (!catalog.some(c => c.ledger === ledger && !c.testnet)) return [];
+  const byDest = new Map<string, ConvertDestination>();
+  const push = (destLedger: string, route: ConvertRouteOption): void => {
+    let d = byDest.get(destLedger);
+    if (d == null) { d = {destLedger, routes: []}; byDest.set(destLedger, d); }
+    d.routes.push(route);
+  };
+  for (const venue of BUNDLED_VENUES) {
+    if (venue.kind !== 'ic_amm' || venue.testnet) continue;
+    const i = venue.pair_ledgers.indexOf(ledger);
+    if (i < 0) continue;
+    const other = venue.pair_ledgers[i === 0 ? 1 : 0];
+    // Fail closed on the counter-row too: a destination the catalog cannot fully price
+    // (e.g. a fee-less row) is not a destination this build offers.
+    if (!catalog.some(c => c.ledger === other && !c.testnet)) continue;
+    push(other, {kind: 'direct', venueId: venue.venue_id});
+  }
+  for (const hr of hubRoutes(catalog, ledger)) {
+    push(hr.dest.ledger, {
+      kind: 'hub',
+      routeId: hr.routeId,
+      venue1Id: hr.legs[0].venueId,
+      venue2Id: hr.legs[1].venueId,
+      hubLedger: hr.hub.ledger,
+    });
+  }
+  return [...byDest.values()];
 }

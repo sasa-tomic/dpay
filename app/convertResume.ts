@@ -50,6 +50,7 @@ import {
   prepareCrossRailSolLeg,
   probeConvertSettlement,
   probeHopPayout,
+  isHubConvertRecord,
   saveConvertRecord,
   type ConvertRecord,
   type ConvertStep,
@@ -309,15 +310,34 @@ async function probeStuckOnce(rec: ConvertRecord, ctx: EngineCtx): Promise<Conve
   // burn legs' bytes are dead or unknown — the hop asset is in-wallet, so the resolution is
   // failed_leg (exit: standalone Withdraw), NEVER done. The engine cannot complete a route
   // it cannot re-sign; it can only name where the funds stand.
+  // The HUB record's slow watch (2026-09-18, spec §11) resolves by the same trichotomy as
+  // its expiry arm: DEST payout seen → done (the final swap executed — the dest asset IS in
+  // the wallet, the SEEN amount); else HUB payout seen → failed_leg (swap1 ran, swap2's
+  // bytes are dead); else it stays stuck, still unknown.
   if (rec.legPlan != null) {
     const myPrincipal = (await DpayCore.icpPrincipalFromPubkey(ctx.publicHex)).toLowerCase();
-    const seen = await probeHopPayout({
+    const probe = (swapLeg: 1 | 2) => probeHopPayout({
       relayUrl: ctx.relayUrl,
       publicHex: ctx.publicHex,
       myPrincipalLower: myPrincipal,
       record: rec,
       excludeOutTx: claimedOutTxFor(rec.id),
+      swapLeg,
     });
+    if (isHubConvertRecord(rec)) {
+      const dest = await probe(2);
+      if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
+      if (dest != null) {
+        return commit({...rec, step: 'done', outAmountNet: dest.amount, outTx: dest.tx, destTx: dest.tx});
+      }
+      const hub = await probe(1);
+      if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
+      if (hub != null) {
+        return commit({...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: hub.tx});
+      }
+      return rec;
+    }
+    const seen = await probe(1);
     if (state.ctx !== ctx) return rec; // stale drive — resolve nothing under the new identity
     if (seen != null) {
       return commit({...rec, step: 'failed_leg', failureCode: 'unknown', hopTx: seen.tx});
