@@ -13,7 +13,7 @@
 // native modules emit; the radio hop itself stays a physical-device gate):
 //   IC payer card (NfcTap):  idle armed pay surface · linking · exchanging · settling · the
 //                            success terminal ("Paid ✓") · the auto-sign exchanging status with
-//                            the honest asset disclosure ("Paying 0.0005 BTC on Bitcoin",
+//                            the honest asset disclosure ("Paying 0.0005001 BTC on Bitcoin",
 //                            flow-32 shape — money moving, the strongest place for a CTA to
 //                            creep in) · the declined terminal · the error terminal ("Tap
 //                            failed").
@@ -162,10 +162,13 @@ export async function run() {
     });
     assert(await driver.waitForText('Communicating', {timeoutMs: 6_000}), 'a payable request should auto-sign → exchanging');
     {
-      const body = await driver.bodyText();
-      assert(body.includes('Paying 0.0005 BTC on Bitcoin'), 'the honest asset disclosure rides the status (pre-condition)');
+      // GROSS (founder rule 2026-09-14): 50_000 sats + the pinned 10-sat ckBTC fee = 0.0005001.
+      // cardFee resolves ASYNC after the request lands (live fee chain → persisted → catalog),
+      // so WAIT for the settled gross line instead of asserting the first instantaneous frame.
+      assert(await driver.waitForText('Paying 0.0005001 BTC on Bitcoin', {timeoutMs: 8_000}),
+        'the honest asset disclosure rides the status (fee-inclusive gross)');
     }
-    await zeroConvert('IC auto-sign exchanging (Paying 0.0005 BTC on Bitcoin)');
+    await zeroConvert('IC auto-sign exchanging (Paying 0.0005001 BTC on Bitcoin)');
     await dispatch({type: 'phase', role: 'card', phase: 'declined'}); // terminal cleanup (flow-32 pattern)
     await driver.waitForText('Declined', {timeoutMs: 5_000});
     await zeroConvert('IC declined terminal');
