@@ -22,14 +22,14 @@ export const receiptDe: ReceiptMessages = {
   blockLabel: 'Ledger-Block',
   signatureLabel: 'Transaktionssignatur',
 
-  noAccount: 'Das Ledger hat für diese Seite der Überweisung kein Konto festgehalten.',
-  noReferenceIc: 'Keine Referenz — diese Überweisung trug kein Memo. Eine dpay-Zahlungsanfrage setzt immer eine.',
-  noReferenceSolana: 'Eine Solana-Überweisung trägt keine dpay-Referenz. Die Signatur unten identifiziert sie.',
+  noAccount: 'Das Ledger hat für diese Seite kein Konto festgehalten.',
+  noReferenceIc: 'Keine Referenz — diese Überweisung trug kein Memo (eine dpay-Zahlungsanfrage setzt immer eine).',
+  noReferenceSolana: 'Eine Solana-Überweisung trägt keine dpay-Referenz — die Signatur unten identifiziert sie.',
   pendingProof: 'Noch nicht bestätigt — diese Zahlung wird später im Ledger verbucht.',
 
   copy: 'Beleg kopieren',
   copied: 'Kopiert ✓',
-  copyHint: 'Kopiert alle Zeilen oben als Text zum Einfügen oder Versenden',
-  source: 'Jeder Wert oben wurde aus dem Ledger gelesen.',
-  sourceAnnotated: 'Werte aus dem Ledger gelesen · Name und Notiz wurden beim Tätigen der Zahlung auf diesem Gerät gespeichert.',
+  copyHint: 'Kopiert alle Zeilen oben als Text',
+  source: 'Alle Werte wurden aus dem Ledger gelesen.',
+  sourceAnnotated: 'Werte aus dem Ledger gelesen · Name und Notiz wurden bei der Zahlung auf diesem Gerät gespeichert.',
 };

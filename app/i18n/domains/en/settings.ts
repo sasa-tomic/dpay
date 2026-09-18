@@ -40,8 +40,6 @@ const copyWordsEn: CopyWordsCopy = {
 export type SettingsMessages = {
   title: string;
   close: string;
-  /** Web-only footer hint; the Esc key closes the sheet. */
-  escToClose: string;
 
   /** Reveal the recovery seed — words by default, raw hex behind a toggle. */
   backup: CopyWordsCopy & {
@@ -55,10 +53,8 @@ export type SettingsMessages = {
     copySeedHint: string;
     showAsHex: string;
     showAsHexA11y: string;
-    showAsHexHint: string;
     showAsWords: string;
     showAsWordsA11y: string;
-    showAsWordsHint: string;
     hide: string;
     hideA11y: string;
     reveal: string;
@@ -95,7 +91,6 @@ export type SettingsMessages = {
     label: string;
     warning: string;
     confirm: string;
-    confirmHint: string;
     cancelA11y: string;
     action: string;
     entry: string;
@@ -152,10 +147,8 @@ export type SettingsMessages = {
     /** The input's heading AND its accessibilityLabel. */
     serverLabel: string;
     serverPlaceholder: string;
-    serverHint: string;
     apply: string;
     applyA11y: string;
-    applyHint: string;
     /**
      * The Solana RPC endpoint (`setSolanaRpcUrl`, config/constants.ts). It was configurable in code
      * and applied at boot from storage, but reachable from NO screen — so on a phone a dead
@@ -171,15 +164,11 @@ export type SettingsMessages = {
     /** The input's heading AND its accessibilityLabel. */
     solanaLabel: string;
     solanaPlaceholder: string;
-    solanaHint: string;
     solanaApplyA11y: string;
-    solanaApplyHint: string;
     icGatewayNote: string;
     icGatewayLabel: string;
     icGatewayPlaceholder: string;
-    icGatewayHint: string;
     icGatewayApplyA11y: string;
-    icGatewayApplyHint: string;
   };
 
   about: {
@@ -194,12 +183,11 @@ export type SettingsMessages = {
 export const settingsEn: SettingsMessages = {
   title: 'Settings',
   close: 'Close settings',
-  escToClose: 'Press Esc to close',
 
   backup: {
     ...copyWordsEn,
     label: 'Backup',
-    warning: 'This seed recovers BOTH your IC and Solana funds. Store it safely. Never share it.',
+    warning: 'This seed recovers BOTH your IC and Solana funds. Store it safely — never share it.',
     copyWordsHint: 'Copies your 24 recovery words to the clipboard',
     copySeed: 'Copy seed',
     seedCopied: 'Seed copied',
@@ -207,10 +195,8 @@ export const settingsEn: SettingsMessages = {
     copySeedHint: 'Copies your recovery seed to the clipboard',
     showAsHex: 'Show as hex',
     showAsHexA11y: 'Show seed as hex',
-    showAsHexHint: 'Switches to the raw 64-hex recovery seed view',
     showAsWords: 'Show as words',
     showAsWordsA11y: 'Show seed as words',
-    showAsWordsHint: 'Switches to the 24-word recovery phrase view',
     hide: 'Hide',
     hideA11y: 'Hide seed',
     reveal: 'Reveal seed',
@@ -219,22 +205,22 @@ export const settingsEn: SettingsMessages = {
     cancelA11y: 'Cancel backup',
     action: 'Back up wallet',
     entry: 'Back up wallet…',
-    entryHint: 'Reveals your recovery seed — backs up both your IC and Solana funds',
+    entryHint: 'Reveals your recovery seed',
   },
 
   restore: {
     label: 'Restore',
     warning:
-      "This replaces your current wallet with the one recovered from this seed. Back up your current wallet first if you haven't — its funds are only reachable via its own seed.",
+      "Replaces your current wallet with the one from this seed. Back up your current wallet first if you haven't — its funds are only reachable via its own seed.",
     seedPlaceholder: '24 recovery words or 64 hex characters',
     seedA11y: 'Recovery seed',
-    seedHint: 'Your 24 recovery words (or the 64-hex seed from Backup) that recover your wallet',
+    seedHint: 'Your 24 recovery words, or the 64-hex seed from Backup',
     action: 'Restore wallet',
-    actionHint: 'Replaces your current wallet with the one recovered from this seed',
+    actionHint: 'Replaces your current wallet',
     busy: 'Restoring…',
     cancelA11y: 'Cancel restore',
     entry: 'Restore wallet…',
-    entryHint: 'Import a wallet from your 64-hex recovery seed — replaces your current wallet',
+    entryHint: 'Import a wallet from a seed — replaces your current wallet',
     errEmpty: 'Enter your 24 recovery words or 64-hex seed.',
     errWords:
       'Some words are wrong or missing. Check you have all 24 words spelled correctly — or paste the 64-hex seed instead.',
@@ -243,26 +229,25 @@ export const settingsEn: SettingsMessages = {
   reset: {
     label: 'Reset',
     warning:
-      'This erases your wallet identity from this device. Funds at this address become irrecoverable. This cannot be undone.',
+      'This erases your wallet identity from this device. Funds at this address become irrecoverable.',
     confirm: 'Yes, reset everything',
-    confirmHint: 'Permanently erase your wallet from this device — funds become irrecoverable',
     cancelA11y: 'Cancel reset',
     action: 'Reset wallet',
     entry: 'Reset wallet…',
-    entryHint: 'Opens a confirmation dialog — permanently erases your wallet from this device',
+    entryHint: 'Permanently erases your wallet from this device',
   },
 
   learn: {
     label: 'Learn',
-    passportHint: 'Shows your trip readiness passport — the four capability stamps',
+    passportHint: 'Shows your trip readiness passport',
     passportCount: filled => `${filled}/4`,
-    howItWorksHint: 'Replays the three-scene walkthrough of how dpay pays',
+    howItWorksHint: 'Replays the walkthrough of how dpay pays',
   },
 
   addressBook: {
     label: 'Address book',
     entry: 'Saved addresses…',
-    entryHint: 'Browse, name, add and remove the destinations you have sent to',
+    entryHint: 'Name, add and remove the destinations you have sent to',
   },
 
   theme: {
@@ -284,33 +269,27 @@ export const settingsEn: SettingsMessages = {
     show: 'Show advanced settings',
     hide: 'Hide advanced settings',
     hint: 'Server and network endpoints this wallet talks to',
-    serverNote: 'The servers your wallet talks to, one address per line in priority order. If the first is unreachable, the next one is used. Changes apply when you tap Apply.',
+    serverNote: 'One address per line — the first that answers is used. Applies when you tap Apply.',
     serverLabel: 'Server',
     serverPlaceholder: 'http://<ip>:8787',
-    serverHint: 'The server your wallet talks to',
     apply: 'Apply',
     applyA11y: 'Apply server URL',
-    applyHint: 'Switch your wallet to the entered server URL',
-    solanaNote: 'The Solana endpoint this wallet reads balances from and sends payments through. Leave it empty to follow the relay of your server list; set your own provider to take dpay out of the path.',
+    solanaNote: 'Reads balances and sends payments through Solana. Empty follows your server list; your own provider takes dpay out of the path.',
     solanaLabel: 'Solana endpoint',
     solanaPlaceholder: 'https://<provider>/?api-key=<key>',
-    solanaHint: 'The Solana RPC endpoint this wallet uses',
     solanaApplyA11y: 'Apply Solana endpoint',
-    solanaApplyHint: 'Switch this wallet to the entered Solana endpoint',
     // F2 — the IC gateway override. Operator-facing (demos/testing against a local replica), not a
     // user feature; the note says so honestly, mirroring the Solana endpoint row's disclosure.
-    icGatewayNote: 'Operator only: the base URL this wallet sends Internet Computer transactions to. Leave it empty to use the public IC gateway; set a local replica address (for example when running a demo or testing a local network) to point payments and balance reads at it. Not needed for normal use.',
+    icGatewayNote: 'Operator only: the base URL this wallet sends IC transactions to. Empty uses the public gateway; set a local replica address to point demos and tests at it.',
     icGatewayLabel: 'IC gateway',
     icGatewayPlaceholder: 'http://10.0.2.2:4943',
-    icGatewayHint: 'The IC gateway this wallet sends transactions to',
     icGatewayApplyA11y: 'Apply IC gateway',
-    icGatewayApplyHint: 'Point this wallet at the entered IC gateway',
   },
 
   about: {
     label: 'About',
     custody:
-      'dpay is non-custodial. Your money is controlled only by the key on this device. There is no dpay account, and dpay cannot move, freeze, or recover your funds. Your 24 backup words are the only recovery.',
+      'dpay is non-custodial: only the key on this device controls your money. There is no dpay account, and dpay cannot move, freeze, or recover your funds — your 24 backup words are the only recovery.',
     privacy: 'Privacy policy',
   },
 };
@@ -336,14 +315,11 @@ export type OnboardingMessages = {
   recoverySaved: {
     stamp: string;
     line: string;
-    sub: string;
   };
 
   /** The BIP-39 backup gate — the words, the warning, and the acknowledgement. */
   backup: CopyWordsCopy & {
     title: string;
-    /** The ownership line, above the warning. */
-    ritual: string;
     warning: string;
     copyWordsHint: string;
     /** The checkbox's visible text AND its accessibilityLabel. */
@@ -354,7 +330,6 @@ export type OnboardingMessages = {
   restore: {
     phraseLabel: string;
     phrasePlaceholder: string;
-    phraseHint: string;
     phraseNote: string;
     seedLabel: string;
     seedPlaceholder: string;
@@ -364,8 +339,6 @@ export type OnboardingMessages = {
     enterWords: string;
     action: string;
     busy: string;
-    hintMnemonic: string;
-    hintHex: string;
     cancelA11y: string;
     cancelHint: string;
     entryHint: string;
@@ -390,7 +363,6 @@ export type OnboardingMessages = {
   create: {
     action: string;
     busy: string;
-    hint: string;
   };
 
   /** What the new wallet starts with, and what the demo-dollar glyph means. */
@@ -404,45 +376,39 @@ export const onboardingEn: OnboardingMessages = {
   custody: 'No account. Your key never leaves this phone. Not even dpay can move your money.',
   continue: 'Continue',
   errOwnSeed:
-    "That seed doesn't look right. Paste your 24 recovery words or the 64-hex seed exactly as you wrote it down.",
+    "That seed doesn't look right — paste your 24 recovery words or 64-hex seed exactly as written down.",
   errWords: 'Some words are wrong or missing. Check you have all 24 words spelled correctly.',
-  errSaveWallet: 'This phone could not save your wallet, so it has not been created yet. Your words are still on screen — tap Continue again to retry. If it keeps failing, free up some storage space on the phone.',
+  errSaveWallet: 'This phone could not save your wallet, so it has not been created yet. Tap Continue again to retry — if it keeps failing, free up some storage space on the phone.',
 
   recoverySaved: {
     stamp: 'Recovery saved',
     line: 'Only these words can bring your wallet back.',
-    sub: 'You have them. Nobody else does.',
   },
 
   backup: {
     ...copyWordsEn,
     title: 'Back up your wallet',
-    ritual:
-      'This is the moment your wallet becomes truly yours — only these words can bring your money back.',
     warning:
-      "Write down these 24 words and store them safely. They're the ONLY way to recover your wallet if you lose this device. There is no dpay account to sign back into. Lose these words and this phone, and your money is gone. Not even we can recover it.",
-    copyWordsHint: 'Copies all 24 recovery words to the clipboard, without the position numbers',
+      "Write down these 24 words and store them safely — they are the ONLY way to recover your wallet if you lose this device. There is no dpay account to sign back into, and not even dpay can recover them.",
+    copyWordsHint: 'Copies all 24 words without the position numbers',
     ack: "I've written down all 24 words",
   },
 
   restore: {
     phraseLabel: 'Recovery phrase',
     phrasePlaceholder: 'Enter your 24 recovery words',
-    phraseHint: 'The 24 recovery words from your backup',
-    phraseNote: 'Enter the 24 words from your backup. One seed recovers both your IC and Solana funds.',
+    phraseNote: 'One seed recovers both your IC and Solana funds.',
     seedLabel: 'Recovery seed',
     seedPlaceholder: '64 hex characters',
-    seedHint: 'The 64-hex seed shown by Backup that recovers your wallet',
+    seedHint: 'The 64-hex seed shown by Backup',
     seedNote: 'One seed recovers both your IC and Solana funds.',
     enterHex: 'Enter hex instead',
     enterWords: 'Enter words instead',
     action: 'Restore wallet',
     busy: 'Restoring…',
-    hintMnemonic: 'Recover your wallet from your 24 recovery words',
-    hintHex: 'Recover your wallet from the recovery seed',
     cancelA11y: 'Cancel restore',
     cancelHint: 'Go back to creating a new wallet',
-    entryHint: 'Recover a wallet from your 24-word recovery phrase',
+    entryHint: 'Recover a wallet from your backup',
   },
 
   usernameLabel: 'Choose a username',
@@ -453,18 +419,16 @@ export const onboardingEn: OnboardingMessages = {
   ownSeed: {
     useOwn: 'Use my own seed instead',
     useRandom: 'Generate a random seed instead',
-    toggleHint:
-      'Show a field to paste the 24 recovery words or 64-hex seed of an existing wallet, instead of generating a fresh one',
+    toggleHint: 'Paste the seed of an existing wallet instead of generating one',
     placeholder: 'Your 24 words or 64-hex seed',
     a11y: 'Own seed',
-    hint: 'Optional: the 24 recovery words or 64-hex seed to build this wallet from, instead of a new random one',
+    hint: 'Optional: the seed to build this wallet from',
     note: 'Leave empty to generate a fresh random seed.',
   },
 
   create: {
     action: 'Create wallet',
     busy: 'Creating…',
-    hint: 'Create a wallet key on this device; no deposit or purchase is required',
   },
 
   demoNote: 'Creating a wallet does not deposit, buy, or move any money.',

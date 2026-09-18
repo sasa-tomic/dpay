@@ -82,14 +82,14 @@ export const receiptEn: ReceiptMessages = {
   blockLabel: 'Ledger block',
   signatureLabel: 'Transaction signature',
 
-  noAccount: 'The ledger recorded no account on that side of this transfer.',
-  noReferenceIc: 'No reference — this transfer carried no memo. A dpay payment request always sets one.',
-  noReferenceSolana: 'A Solana transfer carries no dpay reference. The signature below identifies it.',
+  noAccount: 'The ledger recorded no account on that side.',
+  noReferenceIc: 'No reference — this transfer carried no memo (a dpay payment request always sets one).',
+  noReferenceSolana: 'A Solana transfer carries no dpay reference — the signature below identifies it.',
   pendingProof: 'Not confirmed yet — this payment settles on the ledger later.',
 
   copy: 'Copy receipt',
   copied: 'Copied ✓',
-  copyHint: 'Copies every line above as text you can paste or send',
-  source: 'Every value above was read from the ledger.',
-  sourceAnnotated: 'Values read from the ledger · the name and note were saved on this device when the payment was made.',
+  copyHint: 'Copies every line above as text',
+  source: 'All values were read from the ledger.',
+  sourceAnnotated: 'Values read from the ledger · the name and note were saved on this device when paying.',
 };

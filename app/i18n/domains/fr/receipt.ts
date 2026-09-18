@@ -22,14 +22,14 @@ export const receiptFr: ReceiptMessages = {
   blockLabel: 'Bloc du registre',
   signatureLabel: 'Signature de la transaction',
 
-  noAccount: 'Le registre n’a enregistré aucun compte de ce côté du transfert.',
-  noReferenceIc: 'Aucune référence — ce transfert ne portait pas de mémo. Une demande de paiement dpay en met toujours une.',
-  noReferenceSolana: 'Un transfert Solana ne porte aucune référence dpay. La signature ci-dessous l’identifie.',
+  noAccount: 'Le registre n’a enregistré aucun compte de ce côté.',
+  noReferenceIc: 'Aucune référence — ce transfert ne portait pas de mémo (une demande de paiement dpay en met toujours une).',
+  noReferenceSolana: 'Un transfert Solana ne porte aucune référence dpay — la signature ci-dessous l’identifie.',
   pendingProof: 'Pas encore confirmé — ce paiement sera réglé dans le registre plus tard.',
 
   copy: 'Copier le reçu',
   copied: 'Copié ✓',
-  copyHint: 'Copie toutes les lignes ci-dessus sous forme de texte à coller ou à envoyer',
-  source: 'Chaque valeur ci-dessus a été lue dans le registre.',
+  copyHint: 'Copie toutes les lignes ci-dessus sous forme de texte',
+  source: 'Toutes les valeurs ont été lues dans le registre.',
   sourceAnnotated: 'Valeurs lues dans le registre · le nom et la note ont été enregistrés sur cet appareil lors du paiement.',
 };

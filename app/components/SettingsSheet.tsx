@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
+import {Linking, Pressable, SafeAreaView, ScrollView, StatusBar, Text, TextInput, View} from 'react-native';
 import {C} from '../config/palette';
 import {PRIVACY_URL, icGatewayUrl, solanaRpcUrl} from '../config/constants';
 import {S, isDark} from '../styles';
@@ -408,7 +408,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                       onPress={() => setSeedFormat('hex')}
                       accessibilityRole="button"
                       accessibilityLabel={M.settings.backup.showAsHexA11y}
-                      accessibilityHint={M.settings.backup.showAsHexHint}
                       accessibilityState={{disabled: false}}>
                       <Text style={S.linkTextMuted}>{M.settings.backup.showAsHex}</Text>
                     </Pressable>
@@ -434,7 +433,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                       onPress={() => setSeedFormat('mnemonic')}
                       accessibilityRole="button"
                       accessibilityLabel={M.settings.backup.showAsWordsA11y}
-                      accessibilityHint={M.settings.backup.showAsWordsHint}
                       accessibilityState={{disabled: false}}>
                       <Text style={S.linkTextMuted}>{M.settings.backup.showAsWords}</Text>
                     </Pressable>
@@ -555,7 +553,7 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
             {confirmReset ? (
               <View style={S.resetConfirmBox}>
                 <Text style={S.warnNote}>{M.settings.reset.warning}</Text>
-                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel={M.settings.reset.confirm} accessibilityHint={M.settings.reset.confirmHint} accessibilityState={{disabled: false}}>
+                <Pressable testID="btn-reset-confirm" style={[S.primaryWide, {backgroundColor: C.bad, marginTop: 16}]} onPress={onReset} accessibilityRole="button" accessibilityLabel={M.settings.reset.confirm} accessibilityState={{disabled: false}}>
                   <Text style={S.primaryText}>{M.settings.reset.confirm}</Text>
                 </Pressable>
                 <Pressable testID="btn-reset-cancel" style={S.linkBtn} onPress={() => setConfirmReset(false)} accessibilityRole="button" accessibilityLabel={M.settings.reset.cancelA11y} accessibilityState={{disabled: false}}>
@@ -758,7 +756,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   placeholder={M.settings.advanced.serverPlaceholder}
                   placeholderTextColor={C.sub2}
                   accessibilityLabel={M.settings.advanced.serverLabel}
-                  accessibilityHint={M.settings.advanced.serverHint}
                 />
                 {/* Build drift (R1): replicas in the list run different builds — the walk REFUSES to
                     mix them and this is where the operator lands to fix the list. Loud, by name.
@@ -773,7 +770,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   onPress={applyRelay}
                   accessibilityRole="button"
                   accessibilityLabel={M.settings.advanced.applyA11y}
-                  accessibilityHint={M.settings.advanced.applyHint}
                   accessibilityState={{disabled: !relayApplyEnabled}}>
                   <Text style={[S.applyBtnText, !relayApplyEnabled && S.disabledText]}>{M.settings.advanced.apply}</Text>
                 </Pressable>
@@ -793,7 +789,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   placeholder={M.settings.advanced.solanaPlaceholder}
                   placeholderTextColor={C.sub2}
                   accessibilityLabel={M.settings.advanced.solanaLabel}
-                  accessibilityHint={M.settings.advanced.solanaHint}
                 />
                 {solRpcErr ? <Text testID="settings-sol-rpc-err" style={S.err}>{solRpcErr}</Text> : null}
                 <Pressable
@@ -803,7 +798,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   onPress={applySolRpc}
                   accessibilityRole="button"
                   accessibilityLabel={M.settings.advanced.solanaApplyA11y}
-                  accessibilityHint={M.settings.advanced.solanaApplyHint}
                   accessibilityState={{disabled: !solRpcDirty}}>
                   <Text style={[S.applyBtnText, !solRpcDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
                 </Pressable>
@@ -824,7 +818,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   placeholder={M.settings.advanced.icGatewayPlaceholder}
                   placeholderTextColor={C.sub2}
                   accessibilityLabel={M.settings.advanced.icGatewayLabel}
-                  accessibilityHint={M.settings.advanced.icGatewayHint}
                 />
                 {icGwErr ? <Text testID="settings-ic-gateway-err" style={S.err}>{icGwErr}</Text> : null}
                 <Pressable
@@ -834,7 +827,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
                   onPress={applyIcGw}
                   accessibilityRole="button"
                   accessibilityLabel={M.settings.advanced.icGatewayApplyA11y}
-                  accessibilityHint={M.settings.advanced.icGatewayApplyHint}
                   accessibilityState={{disabled: !icGwDirty}}>
                   <Text style={[S.applyBtnText, !icGwDirty && S.disabledText]}>{M.settings.advanced.apply}</Text>
                 </Pressable>
@@ -863,7 +855,6 @@ export function SettingsSheet({relayUrls, setRelayUrls, setSolanaRpc, onSolanaRp
             </Pressable>
           </View>
 
-          {Platform.OS === 'web' ? <Text style={S.dim2}>{M.settings.escToClose}</Text> : null}
         </ScrollView>
       </SafeAreaView>
 

@@ -164,6 +164,6 @@ describe('SettingsSheet — the Solana endpoint row', () => {
     const labels = t.root.findAll(n => typeof n.props?.children === 'string').map(n => String(n.props.children));
     expect(labels).toContain(M.settings.advanced.solanaLabel);
     expect(labels).toContain(M.settings.advanced.solanaNote);
-    expect(M.settings.advanced.solanaNote).toContain('empty');
+    expect(M.settings.advanced.solanaNote.toLowerCase()).toContain('empty');
   });
 });

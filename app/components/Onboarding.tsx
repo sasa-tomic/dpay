@@ -266,7 +266,6 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
             <Text style={S.inkStampText}>{M.onboarding.recoverySaved.stamp}</Text>
           </Animated.View>
           <Text style={S.inkBeatLine}>{M.onboarding.recoverySaved.line}</Text>
-          <Text style={S.inkBeatSub}>{M.onboarding.recoverySaved.sub}</Text>
         </View>
       ) : (
       <KeyboardAvoidingView
@@ -281,9 +280,6 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
           {backupMnemonic ? (
             <>
               <Text style={S.wordmarkBig}>{M.onboarding.backup.title}</Text>
-              {/* Trip Ready J2 — the ownership ritual line. ABOVE the warning, in ink: the moment
-                  reads as ownership first, risk second. The gate below stays EXACTLY as strong. */}
-              <Text style={S.backupRitualNote}>{M.onboarding.backup.ritual}</Text>
               <Text style={S.warnNote}>{M.onboarding.backup.warning}</Text>
               <SeedWords words={backupMnemonic} testID="mnemonic-backup" />
               <Pressable testID="btn-mnemonic-copy" style={S.linkBtn} onPress={() => { if (backupMnemonic) void doCopy(wordsToString(backupMnemonic)); }}
@@ -325,7 +321,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
               {restoreMode === 'mnemonic' ? (
                 <>
                   <Text style={S.label}>{M.onboarding.restore.phraseLabel}</Text>
-                  <TextInput testID="restore-mnemonic-input" style={S.seedInput} value={mnemonicText} onChangeText={setMnemonicText} placeholder={M.onboarding.restore.phrasePlaceholder} placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel={M.onboarding.restore.phraseLabel} accessibilityHint={M.onboarding.restore.phraseHint} />
+                  <TextInput testID="restore-mnemonic-input" style={S.seedInput} value={mnemonicText} onChangeText={setMnemonicText} placeholder={M.onboarding.restore.phrasePlaceholder} placeholderTextColor={C.sub2} autoCapitalize="none" autoCorrect={false} multiline accessibilityLabel={M.onboarding.restore.phraseLabel} />
                   <Text style={S.dim2}>{M.onboarding.restore.phraseNote}</Text>
                 </>
               ) : (
@@ -343,7 +339,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
               <TextInput testID="username-input" style={S.usernameInput} value={username} onChangeText={setUsername} placeholder={M.onboarding.usernamePlaceholder} placeholderTextColor={C.sub2} autoCapitalize="words" autoCorrect={false} accessibilityLabel={M.onboarding.usernameA11y} accessibilityHint={M.onboarding.usernameHint} />
               {err ? <Text style={S.err}>{err}</Text> : null}
                   <Pressable testID="btn-restore-confirm" style={[S.primary, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.disabledFlat]} disabled={busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''} onPress={restore}
-                accessibilityRole="button" accessibilityLabel={M.onboarding.restore.action} accessibilityHint={restoreMode === 'mnemonic' ? M.onboarding.restore.hintMnemonic : M.onboarding.restore.hintHex} accessibilityState={{disabled: busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''}}>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.restore.action} accessibilityState={{disabled: busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === ''}}>
                 <Text style={[S.primaryText, (busy || (restoreMode === 'mnemonic' ? mnemonicText : seed).trim() === '') && S.disabledText]}>{busy ? M.onboarding.restore.busy : M.onboarding.restore.action}</Text>
               </Pressable>
               <Pressable testID="btn-restore-cancel" style={S.linkBtn} onPress={() => { setMode('create'); setSeed(''); setMnemonicText(''); setRestoreMode('mnemonic'); setErr(null); }}
@@ -372,7 +368,7 @@ export function Onboarding({relayUrl, onCreated, onRestored}: {relayUrl: string;
               ) : null}
               {err ? <Text style={S.err}>{err}</Text> : null}
               <Pressable testID="btn-create" style={[S.primary, busy && S.disabledFlat]} disabled={busy} onPress={create}
-                accessibilityRole="button" accessibilityLabel={M.onboarding.create.action} accessibilityHint={M.onboarding.create.hint} accessibilityState={{disabled: busy}}>
+                accessibilityRole="button" accessibilityLabel={M.onboarding.create.action} accessibilityState={{disabled: busy}}>
                 <Text style={[S.primaryText, busy && S.disabledText]}>{busy ? M.onboarding.create.busy : M.onboarding.create.action}</Text>
               </Pressable>
               {/* Restore entry — promoted (UX fix 2026-08-10) from a muted bottom link (S.linkBtn /
