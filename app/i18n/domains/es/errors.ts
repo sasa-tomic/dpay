@@ -19,11 +19,11 @@ export const errorsEs: ErrorMessages = {
     offline: 'Solana está sin conexión (no hay endpoint RPC configurado)',
     tokenUnavailable: asset => `El ${asset} de Solana no está disponible (no hay endpoint RPC configurado)`,
     senderNoTokenAccount: asset =>
-      `Tu billetera aún no tiene una cuenta de ${asset}. Conéctate una vez a internet y abre Recibir ▸ «Crear mi cuenta de ${asset}» para crearla — o paga a este comercio con un activo que ya tengas`,
+      `No tienes una cuenta de ${asset}. Conéctate una vez a internet y abre Recibir ▸ «Crear mi cuenta de ${asset}» — o paga con un activo que ya tengas`,
     senderTokenAccountUnverified: asset =>
-      `dpay no pudo comprobar si tu billetera tiene una cuenta de ${asset}. Si no la tiene, este pago no puede liquidarse. Conéctate una vez a internet y abre Recibir ▸ Mi dirección para comprobarlo o crear la cuenta.`,
+      `dpay no pudo comprobar si tienes una cuenta de ${asset}. Si no, este pago no puede liquidarse. Conéctate una vez a internet y abre Recibir ▸ Mi dirección para comprobarlo o crear la cuenta.`,
     senderTokenAccountUnverifiedRailDown: asset =>
-      `dpay no pudo comprobar si tu billetera tiene una cuenta de ${asset}: Solana no responde a esta billetera, así que tener más cobertura no ayudará. Si la cuenta no existe, este pago no puede liquidarse. Abre Recibir ▸ Mi dirección para comprobarlo o crearla cuando Solana vuelva a responder.`,
+      `dpay no pudo comprobar si tienes una cuenta de ${asset}: Solana no responde a esta billetera, así que tener más cobertura no ayudará. Si la cuenta no existe, este pago no puede liquidarse. Abre Recibir ▸ Mi dirección para comprobarla o crearla cuando Solana vuelva a responder.`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `Aún no tiene una cuenta de ${asset}: crearla requiere unos ${solAmount} en esta billetera (renta y comisión de una sola vez, las pagas tú); envía un poco de SOL aquí primero`,
     ownTokenAccountRent: (solAmount, asset) =>
@@ -51,7 +51,7 @@ export const errorsEs: ErrorMessages = {
       `Tu billetera respondió sin identificador de transacción (${received}), así que dpay no puede saber si se envió.`,
     sendTimedOut: 'Tu billetera no respondió, así que dpay no puede saber si la transacción se envió.',
     requestTimedOut:
-      'Tu billetera no respondió. Abre tu app de billetera, atiende cualquier solicitud pendiente y vuelve a intentarlo.',
+      'Tu billetera no respondió. Ábrela, atiende cualquier solicitud pendiente y vuelve a intentarlo.',
     pairingTimedOut: 'se agotó el tiempo de vinculación: ninguna billetera escaneó el código en 5 min',
     pairingFailed: detail => `Falló la vinculación con WalletConnect: ${detail}`,
     invalidChainId: value =>
@@ -59,7 +59,7 @@ export const errorsEs: ErrorMessages = {
     chainNotApproved: (requested, approved) =>
       approved === ''
         ? `Tu billetera se conectó, pero no autorizó ninguna red de Ethereum. Este depósito se liquida en la red ${requested}: cambia a ella en tu billetera y vuelve a conectar.`
-        : `Tu billetera autorizó la red ${approved}, pero este depósito se liquida en la red ${requested}. Cambia de red en tu billetera y vuelve a conectar.`,
+        : `Tu billetera autorizó la red ${approved}; este depósito se liquida en la red ${requested}. Cambia en tu billetera y vuelve a conectar.`,
   },
 
   tap: {
@@ -67,9 +67,9 @@ export const errorsEs: ErrorMessages = {
     couldntVerifyRequest: 'No se pudo verificar esta solicitud',
     couldntReturnResult: 'No se pudo devolver el resultado del pago: mantén los teléfonos juntos e inténtalo de nuevo',
     merchantRefusalUnverified:
-      'Según la respuesta del libro mayor, esta transferencia no se realizó, pero dpay no pudo verificar esa respuesta en este teléfono. No entregues la mercancía. Revisa en un momento tu saldo y tus transacciones: si el dinero sí llegó, aparecerá ahí.',
+      'Según el libro mayor, esta transferencia no se realizó, pero esa respuesta no se pudo verificar en este teléfono. No entregues la mercancía. Revisa en un momento tu saldo y tus transacciones: si el dinero sí llegó, aparecerá ahí.',
     merchantNothingArrived:
-      'No se recibió ningún pago. No entregues la mercancía. Una transferencia todavía puede llegar después del contacto y aparecerá en tu saldo y en tus transacciones. Pide al cliente que vuelva a acercar el teléfono solo si no aparece nada.',
+      'No se recibió ningún pago: no entregues la mercancía. Una transferencia todavía puede llegar y aparecerá en tu saldo y en tus transacciones; pide otro acercamiento solo si no aparece nada.',
     unsupportedAsset: currency => `Activo no admitido (moneda ${currency})`,
     cannotConfirmAsset: currency => `No se puede confirmar el activo (moneda ${currency})`,
     couldntReadRequest: 'No se pudo leer la solicitud de pago',

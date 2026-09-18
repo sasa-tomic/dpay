@@ -322,7 +322,7 @@ describe('useNfcTapState — auto-sign request dispatch, awaitingApproval mappin
     adapter.onRequest.mockImplementation((_e, c) => { ctx = c as typeof ctx; });
     const {tree} = mountCard();
     emit({role: 'card', type: 'request', wire: 'deadbeef'});
-    act(() => ctx!.finalize('declined' as never, 'This request expired — ask for a fresh request'));
+    act(() => ctx!.finalize('declined' as never, 'This request expired — ask for a fresh one'));
     expect(seen.phase).toBe('declined');
     emit({role: 'card', type: 'phase', phase: 'linking'});
     emit({role: 'card', type: 'request', wire: '0badc0de'});

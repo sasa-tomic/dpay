@@ -18,11 +18,11 @@ export const errorsDe: ErrorMessages = {
     offline: 'Solana ist offline (kein RPC-Endpunkt konfiguriert)',
     tokenUnavailable: asset => `Solana-${asset} ist nicht verfügbar (kein RPC-Endpunkt konfiguriert)`,
     senderNoTokenAccount: asset =>
-      `Deine Wallet hat noch kein ${asset}-Konto. Geh einmal online und öffne Empfangen ▸ „Mein ${asset}-Konto erstellen“, um es anzulegen — oder zahl diesem Händler mit einem Asset, das du schon hast`,
+      `Du hast noch kein ${asset}-Konto. Geh einmal online und öffne Empfangen ▸ „Mein ${asset}-Konto erstellen“ — oder zahl mit einem Asset, das du schon hast`,
     senderTokenAccountUnverified: asset =>
-      `dpay konnte nicht prüfen, ob deine Wallet ein ${asset}-Konto hat. Falls nicht, kann diese Zahlung nicht abgeschlossen werden. Geh einmal online und öffne Empfangen ▸ Meine Adresse, um es zu prüfen oder das Konto anzulegen.`,
+      `dpay konnte nicht prüfen, ob du ein ${asset}-Konto hast. Falls nicht, kann diese Zahlung nicht abgeschlossen werden. Geh einmal online und öffne Empfangen ▸ Meine Adresse, um es zu prüfen oder das Konto anzulegen.`,
     senderTokenAccountUnverifiedRailDown: asset =>
-      `dpay konnte nicht prüfen, ob deine Wallet ein ${asset}-Konto hat — Solana antwortet dieser Wallet nicht, mehr Empfang hilft also nicht. Falls das Konto nicht existiert, kann diese Zahlung nicht abgeschlossen werden. Öffne Empfangen ▸ Meine Adresse, um es zu prüfen oder anzulegen, sobald Solana wieder antwortet.`,
+      `dpay konnte nicht prüfen, ob du ein ${asset}-Konto hast — Solana antwortet dieser Wallet nicht, mehr Empfang hilft also nicht. Falls das Konto nicht existiert, kann diese Zahlung nicht abgeschlossen werden. Öffne Empfangen ▸ Meine Adresse, um es zu prüfen oder anzulegen, sobald Solana wieder antwortet.`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `Die Person hat noch kein ${asset}-Konto — zum Erstellen brauchst du etwa ${solAmount} in dieser Wallet (einmalige Kontomiete + Gebühr, von dir bezahlt) — sende zuerst etwas SOL hierher`,
     ownTokenAccountRent: (solAmount, asset) =>
@@ -50,7 +50,7 @@ export const errorsDe: ErrorMessages = {
       `Deine Wallet hat ohne Transaktions-ID geantwortet (${received}) — dpay kann daher nicht erkennen, ob die Transaktion gesendet wurde.`,
     sendTimedOut: 'Deine Wallet hat nicht geantwortet — dpay kann daher nicht erkennen, ob die Transaktion gesendet wurde.',
     requestTimedOut:
-      'Deine Wallet hat nicht geantwortet. Öffne deine Wallet-App, erledige eine dort wartende Anfrage und versuch es dann erneut.',
+      'Deine Wallet hat nicht geantwortet. Öffne sie, erledige eine dort wartende Anfrage und versuch es dann erneut.',
     pairingTimedOut: 'Zeitüberschreitung bei der Kopplung — innerhalb von 5 Min. hat keine Wallet gescannt',
     pairingFailed: detail => `WalletConnect-Kopplung fehlgeschlagen: ${detail}`,
     invalidChainId: value =>
@@ -58,7 +58,7 @@ export const errorsDe: ErrorMessages = {
     chainNotApproved: (requested, approved) =>
       approved === ''
         ? `Deine Wallet hat sich verbunden, aber kein Ethereum-Netzwerk freigegeben. Diese Einzahlung läuft über Netzwerk ${requested} — wechsle in deiner Wallet dorthin und verbinde erneut.`
-        : `Deine Wallet hat Netzwerk ${approved} freigegeben, diese Einzahlung läuft aber über Netzwerk ${requested}. Wechsle das Netzwerk in deiner Wallet und verbinde erneut.`,
+        : `Deine Wallet hat Netzwerk ${approved} freigegeben, diese Einzahlung läuft aber über Netzwerk ${requested}. Wechsle in deiner Wallet und verbinde erneut.`,
   },
 
   tap: {
@@ -67,13 +67,13 @@ export const errorsDe: ErrorMessages = {
     couldntReturnResult:
       'Das Zahlungsergebnis konnte nicht zurückgegeben werden — halte die Handys zusammen und versuche es erneut',
     merchantRefusalUnverified:
-      'Laut Antwort des Ledgers ist diese Überweisung nicht durchgegangen, aber dpay konnte diese Antwort auf diesem Handy nicht verifizieren. Gib die Ware nicht heraus. Prüfe gleich dein Guthaben und die Transaktionen — wenn das Geld doch angekommen ist, steht es dort.',
+      'Laut Ledger ist diese Überweisung nicht durchgegangen, aber diese Antwort konnte auf diesem Handy nicht verifiziert werden. Gib die Ware nicht heraus. Prüfe gleich dein Guthaben und die Transaktionen — wenn das Geld doch angekommen ist, steht es dort.',
     merchantNothingArrived:
-      'Es ist keine Zahlung eingegangen. Gib die Ware nicht heraus. Eine Überweisung kann auch nach dem Tap noch ankommen und erscheint dann in deinem Guthaben und in den Transaktionen. Bitte den Kunden nur dann, erneut zu tappen, wenn nichts auftaucht.',
+      'Es ist keine Zahlung eingegangen — gib die Ware nicht heraus. Eine Überweisung kann noch ankommen und erscheint dann in deinem Guthaben und in den Transaktionen; bitte nur dann um einen neuen Tap, wenn nichts auftaucht.',
     unsupportedAsset: currency => `Asset nicht unterstützt (Währung ${currency})`,
     cannotConfirmAsset: currency => `Asset kann nicht bestätigt werden (Währung ${currency})`,
     couldntReadRequest: 'Die Zahlungsanfrage konnte nicht gelesen werden',
-    requestExpired: 'Diese Anfrage ist abgelaufen — bitte um eine neue Anfrage',
+    requestExpired: 'Diese Anfrage ist abgelaufen — bitte um eine neue',
     couldntAuthorize: 'Zahlung konnte nicht freigegeben werden — versuche es erneut',
     noOpenRequest: 'Keine offene Anfrage',
     paymentRejected: 'Zahlung abgelehnt',

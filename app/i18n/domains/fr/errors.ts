@@ -20,11 +20,11 @@ export const errorsFr: ErrorMessages = {
     offline: 'Solana est hors ligne (aucun point d’accès RPC configuré)',
     tokenUnavailable: asset => `Le ${asset} Solana n’est pas disponible (aucun point d’accès RPC configuré)`,
     senderNoTokenAccount: asset =>
-      `Votre portefeuille n’a pas encore de compte ${asset}. Connectez-vous une fois à Internet et ouvrez Recevoir ▸ « Créer mon compte ${asset} » pour le créer — ou payez ce commerçant avec un actif que vous détenez déjà`,
+      `Vous n’avez pas encore de compte ${asset}. Connectez-vous une fois à Internet et ouvrez Recevoir ▸ « Créer mon compte ${asset} » — ou payez avec un actif que vous détenez déjà`,
     senderTokenAccountUnverified: asset =>
-      `dpay n’a pas pu vérifier si votre portefeuille possède un compte ${asset}. S’il n’en a pas, ce paiement ne pourra pas être réglé. Connectez-vous une fois à Internet et ouvrez Recevoir ▸ Mon adresse pour le vérifier ou créer le compte.`,
+      `dpay n’a pas pu vérifier si vous avez un compte ${asset}. Sinon, ce paiement ne pourra pas être réglé. Connectez-vous une fois à Internet et ouvrez Recevoir ▸ Mon adresse pour le vérifier ou créer le compte.`,
     senderTokenAccountUnverifiedRailDown: asset =>
-      `dpay n’a pas pu vérifier si votre portefeuille possède un compte ${asset} — Solana ne répond pas à ce portefeuille, un meilleur réseau n’y changera rien. Si le compte n’existe pas, ce paiement ne pourra pas être réglé. Ouvrez Recevoir ▸ Mon adresse pour le vérifier ou le créer dès que Solana répondra de nouveau.`,
+      `dpay n’a pas pu vérifier si vous avez un compte ${asset} — Solana ne répond pas à ce portefeuille, un meilleur réseau n’y changera rien. Si le compte n’existe pas, ce paiement ne pourra pas être réglé. Ouvrez Recevoir ▸ Mon adresse pour le vérifier ou le créer dès que Solana répondra de nouveau.`,
     recipientNoTokenAccount: (solAmount, asset) =>
       `Le destinataire n’a pas encore de compte ${asset} — le créer demande environ ${solAmount} dans ce portefeuille (loyer + frais, une seule fois, à votre charge) — envoyez d’abord un peu de SOL ici`,
     ownTokenAccountRent: (solAmount, asset) =>
@@ -52,7 +52,7 @@ export const errorsFr: ErrorMessages = {
       `Votre portefeuille a répondu sans identifiant de transaction (${received}) : dpay ne peut donc pas savoir si elle a été envoyée.`,
     sendTimedOut: 'Votre portefeuille n’a pas répondu : dpay ne peut donc pas savoir si la transaction a été envoyée.',
     requestTimedOut:
-      'Votre portefeuille n’a pas répondu. Ouvrez votre application de portefeuille, traitez la demande qui y attend, puis réessayez.',
+      'Votre portefeuille n’a pas répondu. Ouvrez-le, traitez toute demande en attente, puis réessayez.',
     pairingTimedOut: 'délai d’association dépassé — aucun portefeuille scanné en 5 min',
     pairingFailed: detail => `échec de l’association WalletConnect : ${detail}`,
     invalidChainId: value =>
@@ -60,7 +60,7 @@ export const errorsFr: ErrorMessages = {
     chainNotApproved: (requested, approved) =>
       approved === ''
         ? `Votre portefeuille s’est connecté sans autoriser aucun réseau Ethereum. Ce dépôt se règle sur le réseau ${requested} — passez-y dans votre portefeuille, puis reconnectez-vous.`
-        : `Votre portefeuille a autorisé le réseau ${approved}, mais ce dépôt se règle sur le réseau ${requested}. Changez de réseau dans votre portefeuille, puis reconnectez-vous.`,
+        : `Votre portefeuille a autorisé le réseau ${approved} ; ce dépôt se règle sur le réseau ${requested}. Changez dans votre portefeuille, puis reconnectez-vous.`,
   },
 
   tap: {
@@ -68,9 +68,9 @@ export const errorsFr: ErrorMessages = {
     couldntVerifyRequest: 'Impossible de vérifier cette demande',
     couldntReturnResult: 'Impossible de renvoyer le résultat du paiement — gardez les téléphones l’un contre l’autre et réessayez',
     merchantRefusalUnverified:
-      'D’après la réponse du registre, ce transfert n’est pas passé, mais dpay n’a pas pu vérifier cette réponse sur ce téléphone. Ne remettez pas la marchandise. Vérifiez dans un instant votre solde et vos transactions — si l’argent est bien arrivé, il y figure.',
+      'D’après le registre, ce transfert n’est pas passé, mais cette réponse n’a pas pu être vérifiée sur ce téléphone. Ne remettez pas la marchandise. Vérifiez dans un instant votre solde et vos transactions — si l’argent est bien arrivé, il y figure.',
     merchantNothingArrived:
-      'Aucun paiement reçu. Ne remettez pas la marchandise. Un transfert peut encore arriver après le contact ; il apparaîtra alors dans votre solde et vos transactions. Demandez au client de recommencer seulement si rien n’apparaît.',
+      'Aucun paiement reçu — ne remettez pas la marchandise. Un transfert peut encore arriver et apparaîtra dans votre solde et vos transactions ; demandez un nouveau contact seulement si rien n’apparaît.',
     unsupportedAsset: currency => `Actif non pris en charge (monnaie ${currency})`,
     cannotConfirmAsset: currency => `Impossible de confirmer l’actif (monnaie ${currency})`,
     couldntReadRequest: 'Impossible de lire la demande de paiement',
