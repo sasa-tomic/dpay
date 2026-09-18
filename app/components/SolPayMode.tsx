@@ -363,7 +363,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
       const r = decodeSolReq(raw);
       if (isSolReqV2Expired(r)) {
         setReq(null);
-        refuseScan(M.pay.solRequestExpired);
+        refuseScan(M.pay.requestExpired);
         return;
       }
       // Per-request-mint absent-ATA gate (OPEN_ISSUES 6(a)): the solreq names its OWN mint, which
@@ -1145,7 +1145,7 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
             <Text style={S.notPaidText}>{M.common.cancel}</Text>
           </Pressable>
         </View>
-        <Pressable style={S.ghostBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel={M.pay.shareSignedPayment} accessibilityState={{disabled: false}}>
+        <Pressable style={S.ghostBtn} onPress={() => share(solpayUri)} accessibilityRole="button" accessibilityLabel={M.pay.shareSignedCode} accessibilityState={{disabled: false}}>
           <IconShare size={16} color={C.sub}/>
           <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.copied) : M.pay.shareSignedCode}</Text>
         </Pressable>
@@ -1169,7 +1169,6 @@ export function SolPayMode({identity, online, nfcStatus, assets, catalog, homeCu
           pendingOutcome truth applies on every visit until dismissed. Reading-zone mount (under
           the headline it explains). Same seen-key as IC. */}
       <CoachTip tipKey="pendingOutcome" />
-      <Text style={S.dim2}>{M.pay.balanceUpdatesOnSettle}</Text>
       <Pressable testID="btn-sol-pay-done" style={[S.ghostBtn, S.ghostBtnMuted]} onPress={reset} accessibilityRole="button" accessibilityLabel={M.pay.newPayment} accessibilityState={{disabled: false}}>
         <Text style={S.ghostBtnText}>{M.pay.newPayment}</Text>
       </Pressable>

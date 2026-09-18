@@ -902,7 +902,6 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
             }}
             accessibilityRole="button"
             accessibilityLabel={M.pay.shareReceipt}
-            accessibilityHint={M.pay.shareReceiptHint}
             accessibilityState={{disabled: false}}>
             <IconShare size={16} color={C.sub}/>
             <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.pay.shareReceipt}</Text>
@@ -943,7 +942,7 @@ export function PayMode({identity, online, nfcStatus, onSettled, shownBalance, c
             </View>
           </>
         )}
-        <Pressable style={S.ghostBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel={M.pay.shareAuthCode} accessibilityState={{disabled: false}}><IconShare size={16} color={C.sub}/><Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.copied) : M.pay.shareAuthCode}</Text></Pressable>
+        <Pressable style={S.ghostBtn} onPress={() => share(qr.code)} accessibilityRole="button" accessibilityLabel={M.pay.shareSignedCode} accessibilityState={{disabled: false}}><IconShare size={16} color={C.sub}/><Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.copied) : M.pay.shareSignedCode}</Text></Pressable>
       </View>
     );
   }

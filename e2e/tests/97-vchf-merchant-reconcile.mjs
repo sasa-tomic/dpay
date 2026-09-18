@@ -179,13 +179,13 @@ export async function run() {
   }
 }
 
-/** Open ReceiveMode's "Scan payer's signed QR" affordance (the offline-payer confirm path). The
+/** Open ReceiveMode's "Scan the payer's signed code" affordance (the offline-payer confirm path). The
  *  button has no testID — find the exact label text node and walk up, clicking each wrapper (RNW
  *  renders Pressables as plain elements). Same pattern as flows 08/21. */
 async function openPayerScan(driver) {
   await driver.eval(() => {
     const nodes = Array.from(document.querySelectorAll('text, span, div, a, button, [role]'));
-    const target = nodes.find(e => (e.textContent || '').trim() === "Scan payer's signed QR" && e.children.length === 0);
+    const target = nodes.find(e => (e.textContent || '').trim() === "Scan the payer's signed code" && e.children.length === 0);
     if (!target) throw new Error('affordance button label node not found');
     let el = target;
     for (let i = 0; i < 5 && el; i++) {
@@ -193,7 +193,7 @@ async function openPayerScan(driver) {
       el = el.parentElement;
     }
   });
-  const scanning = await driver.waitForText("Scan the payer's signed QR", { timeoutMs: 5_000 });
+  const scanning = await driver.waitForText("Scan the payer's signed code", { timeoutMs: 5_000 });
   assert(scanning, 'clicking the affordance should mount the scanner (label swaps)');
 }
 

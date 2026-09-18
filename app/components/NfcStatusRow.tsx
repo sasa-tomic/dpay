@@ -54,7 +54,6 @@ export function NfcStatusRow({nfcStatus, testID}: {nfcStatus: NfcStatus; testID:
       ) : (
         <Text style={[S.nfcStatusLabel, {paddingTop: 16}]} testID={testID}>{M.pay.scanToPay}</Text>
       )}
-      {Platform.OS !== 'web' && !ready ? <Text style={S.dim2}>{M.pay.scanQrToPay}</Text> : null}
 
       <Modal visible={infoOpen} transparent animationType="fade" onRequestClose={() => setInfoOpen(false)}>
         <Pressable style={S.pickBackdrop} onPress={() => setInfoOpen(false)}>

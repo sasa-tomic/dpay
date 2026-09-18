@@ -567,12 +567,11 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
                   onPress={() => { share(payLink!); }}
                   accessibilityRole="button"
                   accessibilityLabel={M.receive.shareRequestLink}
-                  accessibilityHint={M.receive.shareRequestHint}
                   accessibilityState={{disabled: false}}>
                   <IconShare size={16} color={C.sub}/>
                   <Text style={S.ghostBtnText}>{shared ? shareConfirmLabel(M.pay.linkCopied) : M.receive.shareRequestLink}</Text>
                 </Pressable>
-                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedCode} accessibilityHint={M.receive.scanPayerSignedQrHint} accessibilityState={{disabled: false}}>
+                <Pressable style={S.ghostBtn} onPress={() => setScanning(true)} accessibilityRole="button" accessibilityLabel={M.receive.scanPayerSignedCode} accessibilityState={{disabled: false}}>
                   <IconQr size={16} color={C.sub}/>
                   <Text style={S.ghostBtnText}>{M.receive.scanPayerSignedCode}</Text>
                 </Pressable>
@@ -626,7 +625,6 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
           onPress={() => setPickOpen(true)}
           accessibilityRole="button"
           accessibilityLabel={M.receive.receiveIn(selectedToken)}
-          accessibilityHint={M.receive.chooseAssetHint}
           accessibilityState={{disabled: false}}>
           {/* • not ◎: no bundled face carries U+25CE (fonttools 2026-09-14) — the amount prefix
               must be a glyph the app's own fonts paint (AssetGlyph's sol family uses the same •). */}
@@ -711,7 +709,7 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
       {busy ? (
         <>
           <ActivityIndicator color={C.brandText} />
-          <Text style={S.dim2}>{M.receive.creatingRequest}</Text>
+          <Text style={S.dim2}>{M.receive.creating}</Text>
         </>
       ) : null}
       {err ? <Text style={S.err}>{err}</Text> : null}
@@ -726,7 +724,6 @@ export function SolReceiveMode({identity, relayUrl, nfcStatus, solAddress, subMo
             onPress={makeRequest}
             accessibilityRole="button"
             accessibilityLabel={M.receive.request}
-            accessibilityHint={M.receive.requestHint}
             accessibilityState={{disabled: blocked}}>
             <Text style={[S.primaryText, blocked && S.disabledText]}>{busy ? M.receive.creating : M.receive.request}</Text>
           </Pressable>

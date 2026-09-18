@@ -8,9 +8,8 @@ import type {PayMessages, ReceiveMessages} from '../../keys';
 export const payEs: PayMessages = {
   notAPaymentCode: 'Este no es un código de pago de dpay',
   scannedCoinRequest: (coin, uri) =>
-    `Esa es una solicitud de pago de ${coin} (${uri}…). dpay no puede pagarla: esta billetera liquida en Internet Computer y Solana, no en la red de ${coin}. Págala con una billetera que admita ${coin}.`,
+    `Esa es una solicitud de pago de ${coin} (${uri}…). Esta billetera liquida en Internet Computer y Solana: págala con una billetera que admita ${coin}.`,
   requestExpired: 'Esta solicitud caducó: pide al comercio un QR nuevo',
-  solRequestExpired: 'Esta solicitud de pago ha caducado. Pide al comercio un QR nuevo.',
 
   sent: amount => (amount ? `Enviado ${amount}` : 'Enviado'),
   alreadyPaid: 'Ya está pagado',
@@ -19,13 +18,9 @@ export const payEs: PayMessages = {
   alreadyNotCharged: (amount, who) => `${amount} a ${who} · no se cobró de nuevo`,
   solAwaiting: who =>
     who ? `a ${who} · esperando la confirmación del comercio` : 'esperando la confirmación del comercio',
-  balanceUpdatesOnSettle: 'Tu saldo se actualiza cuando el comercio lo confirme en la cadena.',
   newPayment: 'Nuevo pago',
 
   shareReceipt: 'Compartir recibo',
-  shareReceiptHint: 'Comparte el comprobante del pago como un enlace que el comercio puede abrir para confirmarlo',
-  shareAuthCode: 'Compartir código de autorización',
-  shareSignedPayment: 'Compartir pago firmado',
   shareSignedCode: 'Compartir código firmado',
   linkCopied: 'Enlace copiado ✓',
   copied: 'Copiado ✓',
@@ -46,7 +41,7 @@ export const payEs: PayMessages = {
 
   unsupportedAsset: 'Activo no admitido',
   unsupportedAssetBody: currency =>
-    `Este pago pide un activo que esta billetera no puede pagar (moneda ${currency}). dpay nunca cambia un activo por otro, así que no hay alternativa. Pide al comercio que solicite un activo admitido.`,
+    `Este pago pide un activo que esta billetera no puede pagar (moneda ${currency}) — dpay nunca convierte. Pide al comercio que solicite un activo admitido.`,
   paying: 'Pagando',
   payAmount: amount => `Pagar ${amount}`,
   notEnoughBalance: 'No tienes saldo suficiente para este pago.',
@@ -62,13 +57,13 @@ export const payEs: PayMessages = {
     part: {recipient: 'la cuenta que cobra', asset: 'el activo', network: 'la red', amount: 'el importe', ref: 'la referencia'},
     malformed: part => `Al enlace le falta ${part} o el valor está dañado. Pide un enlace nuevo a quien te lo envió.`,
     unknownAsset: (token, network) =>
-      `El enlace pide ${token} en ${network}. Esta cartera no tiene ese activo y dpay nunca convierte, así que no hay alternativa. Pide un enlace en un activo que tengas.`,
+      `El enlace pide ${token} en ${network}. Esta cartera no tiene ese activo y dpay nunca convierte. Pide un enlace en un activo que tengas.`,
     wrongNetwork: (token, network) =>
-      `El enlace pide ${token} en ${network}. Tú tienes ${token} en otra red: es un activo distinto y el pago iría a la cadena equivocada. Pide un enlace en una red que tengas.`,
+      `El enlace pide ${token} en ${network}. Tienes ${token} en otra red: el pago iría a la cadena equivocada. Pide un enlace en una red que tengas.`,
     hiddenAsset: token =>
       `El enlace pide ${token}, un activo de red de pruebas. Abre «Saldos», activa «Mostrar activos de prueba» y vuelve a abrir el enlace.`,
     unsupportedAsset: token =>
-      `El enlace pide ${token} y esta cartera no puede pagarlo. dpay nunca convierte, así que no hay alternativa. Pide un enlace en un activo que tengas.`,
+      `El enlace pide ${token} y esta cartera no puede pagarlo. dpay nunca convierte. Pide un enlace en un activo que tengas.`,
     badAmount: (amount, token) =>
       `«${amount}» no es un importe válido de ${token}: puede tener más decimales de los que admite ${token}. Pide un enlace nuevo.`,
     badAccount: network =>
@@ -91,7 +86,7 @@ export const payEs: PayMessages = {
     quoteExpired:
       'El precio de esta caja ha caducado: cada uno dura unos cinco minutos. Vuelve a escanear el código para obtener un precio nuevo.',
     notEnoughTime:
-      'Este precio caduca demasiado pronto para pagarlo con seguridad. Tu dinero saldría antes de que se pueda avisar al proveedor de pagos del comercio, y después él rechazaría la venta. Vuelve a escanear el código para obtener un precio nuevo.',
+      'Este precio caduca demasiado pronto para pagarlo con seguridad. Vuelve a escanear el código para obtener un precio nuevo.',
     unreportable: host =>
       `${host} no le ha dado a dpay ninguna forma de informarle de un pago, así que pagar aquí te costaría el dinero sin que se abone la venta. No se ha pagado nada. Volver a escanear no cambiará esto: pide al comercio otra forma de pago.`,
     proofElsewhere: (quoteHost, proofHost) =>
@@ -146,10 +141,10 @@ export const payEs: PayMessages = {
   fundTitle: symbol => `No hay ${symbol} disponible`,
   fundBody: (symbol, action) =>
     action === 'pay'
-      ? `Esta billetera no tiene ${symbol}. Para pagar una solicitud de ${symbol}, primero recibe ${symbol} en tu dirección.`
-      : `Esta billetera no tiene ${symbol}. Para enviar ${symbol}, primero recibe ${symbol} en tu dirección.`,
+      ? `Para pagar una solicitud de ${symbol}, primero recibe ${symbol} en tu dirección.`
+      : `Para enviar ${symbol}, primero recibe ${symbol} en tu dirección.`,
   fundBodyNoDeposits: symbol =>
-    `Esta billetera no tiene ${symbol} y dpay no puede mostrar una dirección de depósito. Recibe ${symbol} de otra billetera antes de gastarlo.`,
+    `dpay no puede mostrar una dirección de depósito para ${symbol}. Recíbelo de otra billetera antes de gastarlo.`,
   fundBodyToken: symbol => `Envía ${symbol} (Solana) a tu dirección de ${symbol}. Deja un poco de SOL en la billetera para las comisiones de red.`,
   showMyAddress: symbol => `Ver mi dirección de ${symbol}`,
   createTokenAccount: symbol => `Crear mi cuenta de ${symbol}`,
@@ -158,13 +153,13 @@ export const payEs: PayMessages = {
     switchTo: network => `Cambiar a ${network}`,
     switchToAsset: asset => `Cambiar a ${asset}`,
     practice: amount =>
-      `Tienes ${amount} en dinero de práctica. Puedes practicar un pago con él: no tiene valor y no puede pagar a un comercio real.`,
+      `Tienes ${amount} en dinero de práctica: puedes practicar un pago con él, no tiene valor y no puede pagar a un comercio real.`,
     switchToPractice: 'Cambiar al dinero de práctica',
   },
 
   offlineSendTitle: 'Enviar a una dirección necesita conexión',
   offlineSendBody: symbol =>
-    `Al enviar a una dirección es tu teléfono quien envía la operación, así que necesita estar en línea. Para pagar sin conexión, escanea el código de pago del comercio: su teléfono envía tu pago en ${symbol} por ti.`,
+    `Escanea el código de pago del comercio: su teléfono envía tu pago en ${symbol} mientras estás sin conexión.`,
   scannedAddressNotSendable: symbol =>
     `Eso es una dirección de billetera. ${symbol} no se puede enviar a una dirección: escanea el código de pago del comercio para pagar.`,
 
@@ -177,7 +172,7 @@ export const payEs: PayMessages = {
     badSplToken: 'El mint de token de este código de Solana Pay no es válido. Pide al comercio un QR nuevo.',
     badReference: 'La referencia de pago de este código de Solana Pay no es válida. Pide al comercio un QR nuevo.',
     unexpectedParam: param =>
-      `Este código de Solana Pay trae un parámetro que dpay no conoce (${param}) — pagarlo firmaría un significado que dpay no puede revisar. Pide al comercio un código sin él.`,
+      `Este código de Solana Pay trae un parámetro que dpay no conoce (${param}) — dpay no puede revisar lo que pagaría. Pide al comercio un código sin él.`,
     memoTooLong: 'El memo de este código de Solana Pay es demasiado largo para una transacción Solana. Pide al comercio un QR nuevo.',
     unknownMint: mint =>
       `Este código de Solana Pay pide un token que dpay aún no ofrece (mint ${mint}). Págalo con una billetera que lo admita.`,
@@ -192,7 +187,6 @@ export const payEs: PayMessages = {
   scanToPay: 'Escanear y pagar',
   sendToAddress: 'Enviar a dirección',
   tapOrScanToPay: 'Acerca o escanea para pagar',
-  scanQrToPay: 'Escanea el código QR para pagar.',
   solScanHint: 'Escanea el código de pago del comercio para pagar sin conexión.',
   payNow: 'Pagar ahora',
   payNowA11y: 'Pagar ahora',
@@ -204,26 +198,20 @@ export const payEs: PayMessages = {
 
   noCameraFound: 'No se encontró ninguna cámara en este dispositivo.',
   pointCamera: 'Apunta con la cámara a un código de pago para pagar',
-  cameraPrivacy: 'dpay usa la cámara solo para escanear códigos: nunca graba ni sube nada.',
+  cameraPrivacy: 'Solo para escanear códigos: nunca graba ni sube nada.',
   allowCameraScan: 'Permitir la cámara',
-  allowCameraScanHint: 'Permiso para usar la cámara y poder escanear códigos de pago',
 };
 
 export const receiveEs: ReceiveMessages = {
   amountToReceive: 'Importe a recibir',
-  amountHint: 'El importe que te enviará quien paga',
   amountPlaceholder: '0.00',
   solAmountPlaceholder: '0.025',
   memo: 'Nota',
-  memoHint: 'Una nota opcional que se adjunta a esta solicitud de pago',
   memoPlaceholder: 'Añade una nota (opcional)',
   chooseCurrency: 'Elige la moneda del pago',
   chooseCurrencyHint: 'Elige qué activo te enviará quien paga',
-  chooseAssetHint: 'Elige qué activo te va a enviar quien paga',
   request: 'Mostrar código',
-  requestHint: 'Muestra tu código QR para que quien paga lo escanee y te pague',
   creating: 'Creando…',
-  creatingRequest: 'Creando la solicitud…',
   solanaOffline: 'Solana está sin conexión: conéctate para crear una solicitud de pago.',
   solAmountUnderFee: fee =>
     `Una solicitud en SOL debe superar la comisión de red (${fee}). La comisión es tuya: quien paga paga exactamente lo que tú escribes.`,
@@ -251,11 +239,7 @@ export const receiveEs: ReceiveMessages = {
   waitingForSign: 'Esperando a que quien paga firme sin conexión…',
   offlineCantSubmit: 'Sin conexión: no se pueden enviar pagos hasta que vuelvas a conectarte',
   shareRequestLink: 'Compartir enlace de la solicitud',
-  shareRequestHint: 'Comparte esta solicitud como un enlace que quien paga puede abrir para pagar',
   linkUnavailable: 'Este activo no puede nombrarse en un código de pago. Elige otro activo para solicitar un pago.',
-  scanPayerSignedQr: 'Escanear el QR firmado',
-  scanPayerSignedQrPrompt: 'Escanea el QR firmado de quien paga',
-  scanPayerSignedQrHint: 'Escanea el QR firmado de quien paga para enviar su pago sin conexión',
   scanPayerSignedCode: 'Escanea el código firmado de quien paga',
   confirmWithTheirPhone: 'Si quien paga lo hizo sin escanear tu código, toca aquí para confirmarlo con su teléfono.',
   newRequest: 'Nueva solicitud',
@@ -344,7 +328,6 @@ export const receiveEs: ReceiveMessages = {
     expiredWatching:
       'Este código ha caducado, así que ya nadie puede pagarlo. Si el cliente ya envió el dinero, todavía puede llegar: se sigue vigilando un momento más.',
     cancel: 'Anular el cobro',
-    cancelHint: 'Borrar este cobro para que el código deje de aceptar dinero',
     cancelling: 'Anulando…',
     cancelFailed: said =>
       `El cobro NO se anuló: «${said}» Puede seguir siendo pagable: léelo y decide antes de entregar nada.`,

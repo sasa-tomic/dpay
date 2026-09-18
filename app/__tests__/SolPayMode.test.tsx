@@ -237,7 +237,7 @@ describe('SolPayMode — share signed code feedback (U-F1)', () => {
     const tree = mountSolPay();
     await scanToSign(tree, solReqUri()); // pure offline auto-sign → the qr phase
     expect(texts(tree)).toContain('Share signed code');
-    await pressByLabel(tree, 'Share signed payment');
+    await pressByLabel(tree, 'Share signed code');
     expect(shareSpy).toHaveBeenCalledWith(expect.objectContaining({message: expect.stringContaining('solpay:v2?')}));
     expect(texts(tree)).toContain('Copied ✓');
     expect(texts(tree)).not.toContain('Share signed code');
@@ -249,7 +249,7 @@ describe('SolPayMode — share signed code feedback (U-F1)', () => {
   test('native: a completed Share sheet flips to "Shared ✓" — never "Copied ✓" (nothing was copied)', async () => {
     const tree = mountSolPay();
     await scanToSign(tree, solReqUri());
-    await pressByLabel(tree, 'Share signed payment');
+    await pressByLabel(tree, 'Share signed code');
     expect(texts(tree)).toContain('Shared ✓');
     expect(texts(tree)).not.toContain('Copied ✓');
     act(() => {
@@ -261,7 +261,7 @@ describe('SolPayMode — share signed code feedback (U-F1)', () => {
     shareSpy.mockResolvedValue({action: 'dismissedAction' as const});
     const tree = mountSolPay();
     await scanToSign(tree, solReqUri());
-    await pressByLabel(tree, 'Share signed payment');
+    await pressByLabel(tree, 'Share signed code');
     expect(texts(tree)).toContain('Share signed code');
     expect(texts(tree)).not.toContain('Copied ✓');
     act(() => {
