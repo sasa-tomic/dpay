@@ -1,7 +1,7 @@
 # E2E Test Flows — Manifest
 
-> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **180 flows**
-> (179 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
+> The authoritative catalog of every user flow tested by the e2e harness (`e2e/`). **181 flows**
+> (180 in the default `just e2e` run, 1 optional capture-only flow via the dedicated recipe).
 > Each flow drives the **REAL** app (`app/App.tsx` via react-native-web) in a real headless Chrome
 > against a real test relay with an in-process fake-IC `/api/v2` gateway (offline). The app signs
 > real user-principal IC envelopes; the fake gateway verifies and settles them exactly like the
@@ -23,7 +23,7 @@ Flows grouped by user journey; within each table, every row lists what the flow 
 the behavior **covers** slugs (the latter are filterable: `DPAY_E2E_FILTER=<slug>`). Flows marked
 `optional` are render-only capture harnesses excluded from the default run.
 
-wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (17) · nfc (12) · system (35) · tour (6)
+wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw (11) · convert (18) · nfc (12) · system (35) · tour (6)
 
 ---
 
@@ -188,6 +188,7 @@ wire (1) · onboard (23) · pay (46) · offline (16) · deposit (13) · withdraw
 | 187 | convert-cefi-sideshift | The first CeFi venue converts ICP to SOL through SideShift with the partner key held on the relay: the quote and fixed order ride the relay proxy (upstream calls always credentialed, zero bare), the record parks at awaiting_deposit showing the venue's own deposit address and exact amount verbatim with the exchange-service disclosure and terms link, nothing is signed and the ICP ledger never moves, status advances device-direct over SideShift's keyless GET (waiting, multiple→processing, settled with the venue's own figures, expired and refunded dead-ends), and a mid-processing reload resumes without re-creating the order. | convert, cefi, sideshift, partner-key, relay-proxy, deposit-handoff, provider-status, venue-vocabulary, reload-recovery, no-re-sign, dead-end-honesty, disclosure, cross-rail |
 | 188 | convert-vchf-ckusdc-pair | The 2026-09-16 VCHF ↔ ckUSDC ICPSwap pool is live: the served registry lists all ten real venues in registry order, the DIRECT pair quotes both directions through the production route (VCHF in → zero_for_one true with a 6-decimal USDC out; ckUSDC in → zero_for_one false with an 8-decimal VCHF out), the app's VCHF direct form still resolves the row-0 VCHF ↔ ICP venue untouched, and the new pool surfaces as the VCHF → USDC(Ethereum) multihop route whose hop quotes through the SAME pool — the min-you'll-receive is the hop quote's 1% floor, and nothing executes. | convert, venues, icpswap, vchf, ckusdc, decimal-pairs, 8-decimal, 6-decimal, registry-order, multihop, route-a, destination-address, quote-only |
 | 189 | convert-jupiter-sol-eurc | With two Jupiter venues registered (jupiter, jupiter-eurc) the SOL convert surface renders an out-destination picker with one row per venue in registry order, the FIRST (USDC) preselected — the one-venue behavior unchanged — and picking the EURC row re-targets the pair: every quote GET asks wrapped-SOL → EURC on the jupiter-eurc venue. The EURC quote rides dpay's relay Jupiter proxy and is verbatim (estimate, floor, impact, attribution, https endpoint), confirm re-quotes, POSTs the verbatim quoteResponse, verifies the venue-built legacy tx against the user's own EURC ATA, signs on device, broadcasts exactly one transaction, and the done panel reports the REALIZED on-chain EURC credit with the payout record signature. | convert, solana-rail, venue:jupiter-eurc, out-destination, quote-verbatim, relay-proxy, beneficiary-check, execution, fees-honest, one-broadcast |
+| 190 | convert-hub | A hub 2-hop conversion VCHF → ICP → ETH runs as one intent over the composed picker: in-wallet destination rows carry in-wallet copy (never cash-out phrasing), the hub-only ckETH destination arms the two-venue quote surface (composed headline, via-ICP chip, in-wallet floor promise, two-hop census, no address input), four legs execute with per-leg status and the D15 tracker, the done receipt names the SEEN ETH in-wallet, the books match the fake-IC truth exactly, the ckUSDC mechanism sub-picker orders Direct-pool before Via-ICP and picking Via-ICP arms the same surface, and a swap2 refusal lands the hub failed_leg taxonomy with the ICP position named and the books proving it. | convert, hub, hub-route, two-hop, icpswap, vchf, icp, cketh, ckusdc, in-wallet-dest, dest-picker, mech-picker, composed-quote, hub-census, per-leg-status, in-wallet-receipt, ledger-truth, impact-knob-refusal |
 
 ### NFC (tap-to-pay)
 
