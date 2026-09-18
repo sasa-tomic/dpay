@@ -40,7 +40,6 @@ export const depositEs: DepositMessages = {
     feeMinLine: (fee, min) => `Comisión de red ${fee} · Depósito mín. ${min}`,
     feeNone: 'ninguna',
     minNone: 'sin mínimo',
-    custody: 'dpay nunca guarda tus claves: los fondos se emiten 1:1 en tu billetera al confirmarse.',
     copyDepositAddress: 'Copiar dirección de depósito',
     statusTitle: 'Estado',
     watching: 'Esperando tu depósito',
@@ -50,20 +49,17 @@ export const depositEs: DepositMessages = {
   },
 
   icrc: {
-    sendToAccount: (symbol, network) => [
+    whereFrom: (symbol, network) => [
       {t: 'Envía '},
       {t: symbol, em: true},
-      {t: ' desde cualquier billetera de '},
+      {t: ' desde cualquier app de billetera que lo tenga en '},
       {t: network, em: true},
-      {t: ' que lo soporte a tu cuenta de abajo.'},
+      {t: ' — o retíralo desde un exchange que admita la red.'},
     ],
-    whereFrom: (symbol, network) =>
-      `Envíalo desde cualquier app de billetera que tenga ${symbol} en ${network}, o retira ${symbol} de un exchange que admita la red ${network}.`,
     onlyAccepts: (symbol, network) =>
-      `Esta dirección recibe ${symbol} enviado por ${network}: nada más, y ningún pago con tarjeta ni transferencia bancaria.`,
-    noMemo: 'No hace falta memo ni referencia — una transferencia normal a esta cuenta es suficiente.',
+      `Esta dirección recibe ${symbol} enviado por ${network}: cualquier otra cosa no se acreditará.`,
+    noMemo: 'No hace falta memo ni referencia.',
     feeLine: fee => `Comisión de red ${fee}`,
-    custody: asset => `dpay nunca guarda tus claves ni convierte — ${asset} llega directamente a tu billetera.`,
     receivedAmount: amount => `${amount} recibidos`,
     alsoTitle: '¿Ya está en Internet Computer?',
     alsoBody: symbol => [
@@ -108,8 +104,8 @@ export const depositEs: DepositMessages = {
       {t: networkLabel, em: true},
       {t: '. Otros activos u otras cadenas enviados por aquí no se acreditarán y podrían perderse.'},
     ],
-    custody:
-      'dpay nunca guarda tus claves: firma tu billetera y el activo se emite 1:1 en ella al confirmarse (~20 min).',
+    mintLine: 'Tu depósito se emite 1:1 en tu billetera al confirmarse (~20 min).',
+    details: 'Detalles',
     gasNative: 'La comisión de red se paga en ETH: envía un poco más de lo que quieras depositar.',
     gasErc20: 'Necesitarás un poco de ETH para las comisiones de red de Ethereum.',
     scanToPair: 'Escanea con tu billetera para vincular',
@@ -117,14 +113,14 @@ export const depositEs: DepositMessages = {
     openNamedWallet: name => `Abrir ${name}`,
     otherWallet: 'Otra billetera',
     otherWalletHint:
-      'Con «Otra billetera» es tu teléfono quien elige la app. La vinculación funciona, pero después dpay no podrá volver a abrirla por ti: tendrás que cambiar a ella tú mismo para aprobar el depósito.',
+      'La vinculación funciona, pero después dpay no podrá volver a abrirla por ti: cambia a la billetera tú mismo para aprobar el depósito.',
     couldntOpenWallet: name =>
       `No se pudo abrir ${name}; puede que ya no esté instalada. Elige otra billetera abajo o escanea el QR con una billetera en otro dispositivo.`,
     walletList: 'MetaMask · Trust · Rabby · cualquier billetera compatible con WalletConnect',
     explainNative:
       'Envía ETH directamente al contrato de depósito: una sola transacción que firma tu billetera, con el importe del depósito como valor en ETH.',
     explainErc20: nativeAsset =>
-      `${nativeAsset} es un token de Ethereum: depositarlo requiere dos transacciones que firma tu billetera, no un envío a una dirección como en Bitcoin.`,
+      `${nativeAsset} es un token de Ethereum: depositarlo requiere dos transacciones que firma tu billetera — primero la aprobación y después el depósito.`,
     connectLabel: 'Conectar billetera de Ethereum',
     connect: 'Conectar billetera',
     amountPlaceholder: '0.00',
@@ -158,7 +154,6 @@ export const depositEs: DepositMessages = {
     ataUnverifiedUnreadable: asset =>
       `Tu dirección está bien; Solana respondió con datos que este monedero no puede leer, así que no se pudo confirmar tu cuenta de ${asset} en la cadena. No se ha movido nada; inténtalo de nuevo en un momento.`,
     retryAtaLabel: asset => `Reintentar la revisión de la cuenta de ${asset}`,
-    retryAtaHint: asset => `Vuelve a revisar si tu cuenta de ${asset} existe en la cadena`,
     checkAgain: 'Revisar de nuevo',
     backToRequest: 'Volver a la solicitud',
     sendToAddress: (asset, network) => [
@@ -168,20 +163,16 @@ export const depositEs: DepositMessages = {
       {t: network},
       {t: ' que aparece abajo.'},
     ],
-    custody: asset => `dpay nunca guarda tus claves: ${asset} llega directamente a tu billetera al confirmarse.`,
     devnetWarn: asset =>
       `Estás en la devnet de Solana. NO envíes ${asset} de mainnet aquí: no aparecerá. Usa solo ${asset} de devnet.`,
     waitingDeposit: 'Esperando tu depósito · se revisa cada pocos segundos',
-    checkNowHint: 'Vuelve a revisar tu saldo ahora mismo',
-    balanceAutoOnConfirm: 'Tu saldo se actualiza automáticamente cuando se confirme el envío.',
     copyAssetAddress: asset => `Copiar dirección de ${asset}`,
-    returnHint: 'Vuelve a la pestaña Pagar con este activo seleccionado',
   },
 
   ata: {
     absent: asset => `Todavía no tienes una cuenta de ${asset} en este dispositivo.`,
     cost: (setupCost, asset) =>
-      `Solana guarda tus ${asset} en una cuenta de token única, ligada a esta billetera. Crearla cuesta ${setupCost} (renta de la cuenta + comisión) de tu saldo de SOL. La cuenta es tuya y está bajo tus claves: dpay nunca las guarda.`,
+      `Crear tu cuenta de ${asset} cuesta ${setupCost} (renta única + comisión, de tu saldo de SOL) — la cuenta es tuya y está bajo tus claves.`,
     checkingSol: 'Revisando tu saldo de SOL…',
     needSol: setupCost =>
       `Primero necesitas unos ${setupCost} en esta billetera: recibe SOL en tu dirección y luego crea la cuenta.`,
@@ -203,7 +194,7 @@ export const depositEs: DepositMessages = {
       {t: token, em: true},
       {t: ' en cualquier exchange o proveedor de tarjeta que pague en '},
       {t: chain, em: true},
-      {t: ' y envíelo a la dirección de arriba. Llega a su propia cartera — dpay nunca lo recibe.'},
+      {t: ' y envíelo a la dirección de arriba.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
       {t: 'Para este no hay dirección. Compre '},
@@ -212,14 +203,14 @@ export const depositEs: DepositMessages = {
       {t: chain, em: true},
       {t: ' en una cartera suya, y guarde en ella un poco de '},
       {t: gasToken, em: true},
-      {t: ' para la comisión de red. Después vuelva aquí y conecte esa cartera: ella firma la transferencia, y dpay no custodia ninguna de las dos cosas.'},
+      {t: ' para la comisión de red. Después conecte esa cartera aquí: ella firma la transferencia.'},
     ],
     bridgeSelfGas: (token, chain) => [
       {t: 'Para este no hay dirección. Compre '},
       {t: token, em: true},
       {t: ' en '},
       {t: chain, em: true},
-      {t: ' en una cartera suya — un poco más de lo que quiera mover, porque la comisión de red sale de ahí. Después vuelva aquí y conecte esa cartera: ella firma la transferencia, y dpay nunca la custodia.'},
+      {t: ' en una cartera suya — un poco más de lo que quiera mover, porque la comisión de red sale de ahí. Después conecte esa cartera aquí: ella firma la transferencia.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'Ningún proveedor vende '},
@@ -228,7 +219,7 @@ export const depositEs: DepositMessages = {
       {t: viaToken, em: true},
       {t: ' con tarjeta, envíelo a la dirección de arriba y use Convertir para cambiarlo por '},
       {t: target, em: true},
-      {t: '. Ese cambio lo firma usted, y dpay no participa en él.'},
+      {t: '.'},
     ],
     testnetOnly: (symbol, chain) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${chain} y envíelo a la dirección de arriba.`,
     testnetOnlyWallet: (symbol, chain) => `${symbol} es dinero de prueba: no tiene valor y nadie lo vende. Consígalo gratis en un faucet público de ${chain} en una cartera suya y conecte esa cartera aquí.`,
@@ -252,7 +243,7 @@ export const depositEs: DepositMessages = {
     upTo: pct => `hasta ${pct}`,
     from: pct => `desde ${pct}`,
     attribution: readOn => `Cifras publicadas por cada proveedor, consultadas el ${readOn}. Son límites, no precios — su comisión exacta se muestra antes de pagar, y la mayoría de proveedores añade además un margen dentro del tipo que ofrece.`,
-    noEndorsement: 'Por orden alfabético. dpay no recomienda ninguno, ninguno le paga, y dpay no interviene en su compra.',
+    noEndorsement: 'Por orden alfabético. dpay no recomienda ninguno, ninguno le paga ni interviene en su compra.',
   },
 };
 

@@ -197,14 +197,15 @@ export function DepositSheet({identity, relayUrl, catalog, currency, display, fu
         </View>
       ) : (
         <>
-          {/* Complete, scannable instructions: network + asset + est. time + fee + min + the
-              one-line non-custody reassurance. All values come from `deposit_info` (never
-              hardcoded); the network/asset are the family's config (FAMILY_DISPLAY). */}
+          {/* Complete, scannable instructions: network + asset + est. time + fee + min.
+              All values come from `deposit_info` (never hardcoded); the network/asset are the
+              family's config (FAMILY_DISPLAY). The custody reassurance went with the 10x
+              verbosity pass (2026-09-17): it is stated at onboarding and in Settings and
+              changed no decision here. */}
           <View testID="deposit-instructions" style={S.instrCard}>
             <InstrLine runs={M.deposit.ck.sendToAddress(display.nativeAsset, display.networkLabel)} />
             <Text style={S.instrMeta}>{M.deposit.ck.confirmationLine(required, estMin)}</Text>
             <Text style={S.instrMeta}>{M.deposit.ck.feeMinLine(feeVal, minVal)}</Text>
-            <Text style={S.instrCustody}>{M.deposit.ck.custody}</Text>
           </View>
 
           <View testID="deposit-qr" style={S.qrCard}><QrCode value={address} size={QR_SIZE_SMALL} ecl="L" /></View>

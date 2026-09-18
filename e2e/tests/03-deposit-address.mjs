@@ -1,8 +1,8 @@
 // Flow 03 — Deposit (Receive "My address"): address + complete instructions (U1) + web deep link.
 //
 // Proves the on-chain deposit surface renders the per-account native address AND a complete,
-// reassuring instruction block (network name "Bitcoin", asset "BTC", est. time, fee, min, non-custody
-// line). The `?screen=deposit` deep link now lands a returning user (identity already in localStorage
+// decision-relevant instruction block (network name "Bitcoin", asset "BTC", est. time, fee, min —
+// the 10x pass 2026-09-17 dropped the non-custody line). The `?screen=deposit` deep link now lands a returning user (identity already in localStorage
 // from onboarding) directly on the Receive tab's "My address" sub-mode for ckBTC (the deposit/withdraw
 // surfaces moved OUT of the Balances per-row buttons INTO the Pay/Receive tabs). Values are read from
 // the REAL relay's `deposit_info` (FakeLedger: min_confirmations=1, deposit_fee=0,
@@ -64,12 +64,14 @@ export async function run() {
       'confirmation estimate': 'confirmation',
       'network fee line': 'fee',
       'minimum deposit line': 'Min',
-      'non-custody reassurance': 'never holds',
     };
+    // 10x-verbosity pass 2026-09-17: the one-line non-custody reassurance is GONE from the
+    // instruction card — it is stated at onboarding and in Settings and changed no decision
+    // here (the same founder cut that compacted the convert surfaces). Not asserted anymore.
     for (const [label, needle] of Object.entries(checks)) {
       assertIncludes(body, needle, `deposit instructions should include ${label}`);
     }
-    console.log('[03-deposit-address] ✓ instruction block complete (network/asset/time/fee/min/custody)');
+    console.log('[03-deposit-address] ✓ instruction block complete (network/asset/time/fee/min)');
 
     // C3: the INSTRUCTIONS block must NEVER render a raw "0.00000000". The FakeLedger/test minter
     // returns zero fee + zero min; the line now shows "—" for a zero value (instead of formatting

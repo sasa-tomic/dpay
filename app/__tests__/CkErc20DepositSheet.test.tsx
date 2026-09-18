@@ -154,6 +154,31 @@ describe('CkErc20DepositSheet — null-baseline watch honesty (P2#5)', () => {
     act(() => { tree.unmount(); });
   });
 
+  test('the why-a-wallet + mint census is FOLDED: one Details control, default CLOSED', async () => {
+    // 10x-verbosity pass 2026-09-17: the connect screen lost its always-on explain line and the
+    // persistent card lost its always-on custody line — both live behind ONE Details control
+    // (same pattern as the convert surfaces' convert-details), default CLOSED for everyone.
+    const tree = mountSheet();
+    await act(async () => { await Promise.resolve(); }); // settle the principal derivation effect
+    expect(has(tree, 'ckerc20-details')).toBe(true);
+    expect(has(tree, 'ckerc20-details-block')).toBe(false); // CLOSED by default — the census is not on-card copy
+    // The old always-on lines are gone from the open surface:
+    const bodyText = () => tree.root.findAll(n => typeof n.props?.children === 'string').map(n => n.props.children).join(' ');
+    expect(bodyText()).not.toContain('mints 1:1');
+    // Open it: the folded census carries the ERC-20 two-tx explain AND the mint mechanics+timing.
+    await act(async () => {
+      tree.root.findByProps({testID: 'ckerc20-details'}).props.onPress();
+    });
+    expect(tree.root.findByProps({testID: 'ckerc20-details'}).props.accessibilityState).toEqual({expanded: true});
+    const block = tree.root.findByProps({testID: 'ckerc20-details-block'})
+      .findAll(n => typeof n.props?.children === 'string')
+      .map(n => n.props.children).join(' ');
+    expect(block).toContain('two transactions'); // explainErc20 (nativeEth=false here)
+    expect(block).toContain('mints 1:1');        // mintLine — the old custody line's useful half
+    expect(block).toContain('~20 min');          // live timing expectation, decision-relevant
+    act(() => { tree.unmount(); });
+  });
+
   test('null baseline: the FIRST successful read SETS the baseline — never done, even with a pre-existing balance', async () => {
     // Snapshot fails at connect (null startBal); the wallet ALREADY holds 5 USDC. The first
     // watching read sees that balance — the old any-positive fallback would declare done here.

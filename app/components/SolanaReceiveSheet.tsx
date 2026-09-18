@@ -151,8 +151,7 @@ export function SolanaReceiveSheet({
             style={S.primaryWide}
             onPress={onRetryAta}
             accessibilityRole="button"
-            accessibilityLabel={M.deposit.sol.retryAtaLabel(assetLabel)}
-            accessibilityHint={M.deposit.sol.retryAtaHint(assetLabel)}>
+            accessibilityLabel={M.deposit.sol.retryAtaLabel(assetLabel)}>
             <Text style={S.primaryText}>{M.deposit.sol.checkAgain}</Text>
           </Pressable>
         ) : null}
@@ -173,7 +172,6 @@ export function SolanaReceiveSheet({
     <View style={S.sheetBody}>
       <View testID="sol-receive-instructions" style={S.instrCard}>
         <InstrLine runs={M.deposit.sol.sendToAddress(assetLabel, isSpl ? `Solana ${assetLabel}` : 'Solana')} />
-        <Text style={S.instrCustody}>{M.deposit.sol.custody(assetLabel)}</Text>
         {isSolanaDevnet() ? (
           // P4 pattern — '⚠' text glyph is a leading IconAlert (mirrors SolanaAtaSetupCard's
           // converted twin; testID on the wrapper).
@@ -189,10 +187,11 @@ export function SolanaReceiveSheet({
       <Text testID="sol-receive-address" style={S.sheetAddr} selectable={true}>{address}</Text>
 
       {/* Zero-funds waiting cue (2026-08-16 UX): when the balance is a KNOWN zero, the user is
-          actively funding — say so honestly (the 2.5s poll IS the watcher) instead of the generic
-          "updates automatically" line. Flips to the deposit-received confirmation as soon as the
-          poll sees a positive balance. Known-zero only: loading/error/unavailable keep the generic
-          line (never claim "waiting" on an unconfirmed state). */}
+          actively funding — say so honestly (the 2.5s poll IS the watcher). Flips to the
+          deposit-received confirmation as soon as the poll sees a positive balance. Known-zero
+          only: loading/error/unavailable render nothing (never claim "waiting" on an unconfirmed
+          state). The 10x pass (2026-09-17) removed the old generic "updates automatically" line —
+          it narrated the poll instead of changing a decision. */}
       {tokenZero ? (
         <>
           <Text testID="sol-receive-waiting" style={S.dim2}>{M.deposit.sol.waitingDeposit}</Text>
@@ -202,16 +201,13 @@ export function SolanaReceiveSheet({
               style={S.ghostBtn}
               onPress={onRetryAta}
               accessibilityRole="button"
-              accessibilityLabel={M.deposit.checkNow}
-              accessibilityHint={M.deposit.sol.checkNowHint}>
+              accessibilityLabel={M.deposit.checkNow}>
               <IconRefresh size={16} color={C.sub}/>
               <Text style={S.ghostBtnText}>{M.deposit.checkNow}</Text>
             </Pressable>
           ) : null}
         </>
-      ) : (
-        <Text style={S.dim2}>{M.deposit.sol.balanceAutoOnConfirm}</Text>
-      )}
+      ) : null}
 
       <Pressable
         testID="btn-sol-receive-copy"
@@ -241,8 +237,7 @@ export function SolanaReceiveSheet({
           style={[S.ghostBtn, S.ghostBtnMuted]}
           onPress={onReturn}
           accessibilityRole="button"
-          accessibilityLabel={returnLabel}
-          accessibilityHint={M.deposit.sol.returnHint}>
+          accessibilityLabel={returnLabel}>
           <Text style={S.ghostBtnText}>{returnLabel}</Text>
         </Pressable>
       ) : null}

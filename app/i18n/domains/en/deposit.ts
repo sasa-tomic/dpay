@@ -71,7 +71,6 @@ export type DepositMessages = {
     /** Words that stand in for a ZERO fee / minimum — a money screen never shows "0.00000000 BTC". */
     feeNone: string;
     minNone: string;
-    custody: string;
     copyDepositAddress: string;
     statusTitle: string;
     watching: string;
@@ -85,23 +84,22 @@ export type DepositMessages = {
    * user's own account (VCHF/ICP). Founder hard rule 2026-08-29: practical instructions always.
    */
   icrc: {
-    sendToAccount: (symbol: string, network: string) => InstrRun[];
     /**
-     * WHERE the money can come from. "Send it from any Internet Computer wallet" is a complete
-     * instruction only for someone who already has one — and the target user is a tourist who
-     * does not, is not told what one IS, and is given no second route. This line names the KIND of
-     * thing to look for and the other route that actually exists (an exchange withdrawal on this
-     * network), without naming a product: which wallet or exchange dpay would send a user to is a
-     * founder decision and is deliberately not made here.
+     * THE one instruction line (10x-verbosity pass 2026-09-17). It merged the old sendToAccount +
+     * whereFrom pair, which restated each other; the exchange route survives the merge because
+     * "send it from any wallet" is a complete instruction only for someone who already has one —
+     * the target user is a tourist who does not, and the exchange withdrawal is the second route
+     * that actually exists. No product is named: which wallet or exchange dpay would send a user
+     * to is a founder decision and is deliberately not made here.
      */
-    whereFrom: (symbol: string, network: string) => string;
-    /** What the address IS and IS NOT. A deposit address is not a card or bank payment, and a
-     *  first-time user has no way to know that from an address alone. */
+    whereFrom: (symbol: string, network: string) => InstrRun[];
+    /** The destination-only loss warning: what this address accepts, and that anything else sent
+     *  here won't credit. The old "no card or bank transfer" clause told a user holding a crypto
+     *  wallet nothing they could act on. */
     onlyAccepts: (symbol: string, network: string) => string;
     /** Practical instruction: no memo/reference gymnastics needed for a plain transfer. */
     noMemo: string;
     feeLine: (fee: string) => string;
-    custody: (asset: string) => string;
     /** Honest receive detection: ledger balance strictly above the watched baseline. */
     receivedAmount: (amount: string) => string;
     /** "Already on the IC?" section on the family deposit sheets (IcrcAccountSection). */
@@ -157,7 +155,15 @@ export type DepositMessages = {
      */
     allowanceStands: string;
     sendOnly: (nativeAsset: string, networkLabel: string) => InstrRun[];
-    custody: string;
+    /**
+     * The mint mechanics + timing, FOLDED (10x pass 2026-09-17) behind the sheet's ONE Details
+     * control together with `explainNative`/`explainErc20` — replaced the on-card custody line,
+     * whose non-custodial half is already stated at onboarding and in Settings and changed no
+     * user decision here.
+     */
+    mintLine: string;
+    /** The Details disclosure's label — the fold control for `mintLine` + the explain pair. */
+    details: string;
     /** Who pays gas: native ETH comes out of the sent amount; an ERC-20 needs ETH held separately. */
     gasNative: string;
     gasErc20: string;
@@ -179,7 +185,8 @@ export type DepositMessages = {
     /** A named wallet that would not open — say WHICH, and what is left to try. */
     couldntOpenWallet: (name: string) => string;
     walletList: string;
-    /** Why this rail asks for a wallet instead of showing an address. */
+    /** Why this rail asks for a wallet instead of showing an address. FOLDED behind the Details
+     *  control (10x pass 2026-09-17) — it is the mental model, not a step. */
     explainNative: string;
     explainErc20: (nativeAsset: string) => string;
     connectLabel: string;
@@ -230,18 +237,13 @@ export type DepositMessages = {
     ataUnverifiedUnreachable: (asset: string) => string;
     ataUnverifiedUnreadable: (asset: string) => string;
     retryAtaLabel: (asset: string) => string;
-    retryAtaHint: (asset: string) => string;
     checkAgain: string;
     backToRequest: string;
     sendToAddress: (asset: string, network: string) => InstrRun[];
-    custody: (asset: string) => string;
     /** Also rendered by the token-account setup card below. */
     devnetWarn: (asset: string) => string;
     waitingDeposit: string;
-    checkNowHint: string;
-    balanceAutoOnConfirm: string;
     copyAssetAddress: (asset: string) => string;
-    returnHint: string;
   };
 
   /** The one-tap token-account setup card (SolanaAtaSetupCard), shared by receive AND send. Every
@@ -361,7 +363,6 @@ export const depositEn: DepositMessages = {
     feeMinLine: (fee, min) => `Network fee ${fee} · Min deposit ${min}`,
     feeNone: 'none',
     minNone: 'no minimum',
-    custody: 'dpay never holds your keys — funds mint 1:1 to your wallet on confirmation.',
     copyDepositAddress: 'Copy deposit address',
     statusTitle: 'Status',
     watching: 'Watching for your deposit',
@@ -371,20 +372,17 @@ export const depositEn: DepositMessages = {
   },
 
   icrc: {
-    sendToAccount: (symbol, network) => [
+    whereFrom: (symbol, network) => [
       {t: 'Send '},
       {t: symbol, em: true},
-      {t: ' from any '},
+      {t: ' from any wallet app that holds it on '},
       {t: network, em: true},
-      {t: ' wallet that supports it to your account below.'},
+      {t: ' — or withdraw it from an exchange that supports the network.'},
     ],
-    whereFrom: (symbol, network) =>
-      `Send it from any wallet app that holds ${symbol} on ${network}, or withdraw ${symbol} from an exchange that supports the ${network} network.`,
     onlyAccepts: (symbol, network) =>
-      `This address receives ${symbol} sent on ${network} — nothing else, and no card or bank transfer.`,
-    noMemo: 'No memo or reference needed — a plain transfer to this account is enough.',
+      `This address receives ${symbol} sent on ${network} — anything else won't credit.`,
+    noMemo: 'No memo or reference needed.',
     feeLine: fee => `Network fee ${fee}`,
-    custody: asset => `dpay never holds your keys and never converts — ${asset} lands directly in your wallet.`,
     receivedAmount: amount => `${amount} received`,
     alsoTitle: 'Already on the Internet Computer?',
     alsoBody: symbol => [
@@ -429,8 +427,8 @@ export const depositEn: DepositMessages = {
       {t: networkLabel, em: true},
       {t: ". Other assets or chains sent this way won't credit and may be lost."},
     ],
-    custody:
-      'dpay never holds your keys — your wallet signs, and the chain-key asset mints 1:1 to your wallet on confirmation (~20 min).',
+    mintLine: 'Your deposit mints 1:1 to your wallet on confirmation (~20 min).',
+    details: 'Details',
     gasNative: 'The network fee is paid in ETH — send a little more than you want to deposit.',
     gasErc20: "You'll need a small amount of ETH for Ethereum network gas fees.",
     scanToPair: 'Scan with your wallet to pair',
@@ -438,14 +436,14 @@ export const depositEn: DepositMessages = {
     openNamedWallet: name => `Open ${name}`,
     otherWallet: 'Another wallet',
     otherWalletHint:
-      "Another wallet lets your phone pick the app. Pairing works, but dpay can't reopen it for you later — you'll have to switch to it yourself to approve the deposit.",
+      "Pairing works, but dpay can't reopen it later — switch to the wallet yourself to approve the deposit.",
     couldntOpenWallet: name =>
       `Couldn't open ${name} — it may no longer be installed. Pick another wallet below, or scan the QR with a wallet on another device.`,
     walletList: 'MetaMask · Trust · Rabby · any WalletConnect-compatible wallet',
     explainNative:
       'Send ETH directly to the deposit contract — one transaction your wallet signs, with your deposit amount as the ETH value.',
     explainErc20: nativeAsset =>
-      `${nativeAsset} is an Ethereum token — depositing it needs two transactions your wallet signs, not a send-to-address like Bitcoin.`,
+      `${nativeAsset} is an Ethereum token — depositing it needs two transactions your wallet signs: first the approval, then the deposit.`,
     connectLabel: 'Connect Ethereum wallet',
     connect: 'Connect wallet',
     amountPlaceholder: '0.00',
@@ -479,7 +477,6 @@ export const depositEn: DepositMessages = {
     ataUnverifiedUnreadable: asset =>
       `Your address is fine — Solana answered with data this wallet cannot read, so your ${asset} account could not be confirmed on-chain. Nothing moved; try again in a moment.`,
     retryAtaLabel: asset => `Retry checking ${asset} account`,
-    retryAtaHint: asset => `Re-check whether your ${asset} account exists on-chain`,
     checkAgain: 'Check again',
     backToRequest: 'Back to request',
     sendToAddress: (asset, network) => [
@@ -489,20 +486,16 @@ export const depositEn: DepositMessages = {
       {t: network},
       {t: ' address below.'},
     ],
-    custody: asset => `dpay never holds your keys — ${asset} lands directly in your wallet on confirmation.`,
     devnetWarn: asset =>
       `Connected to Solana devnet. Do NOT send mainnet ${asset} here — it will not appear. Use devnet ${asset} only.`,
     waitingDeposit: 'Waiting for your deposit · checks every few seconds',
-    checkNowHint: 'Re-check your balance right now',
-    balanceAutoOnConfirm: 'Your balance updates automatically once the send confirms.',
     copyAssetAddress: asset => `Copy ${asset} address`,
-    returnHint: 'Go back to the Pay tab with this asset selected',
   },
 
   ata: {
     absent: asset => `You don't have a ${asset} account on this device yet.`,
     cost: (setupCost, asset) =>
-      `Solana keeps your ${asset} in a one-time token account tied to this wallet. Creating it costs ${setupCost} (account rent + fee) from your SOL balance — it stays your account, on your keys. dpay never holds them.`,
+      `Creating your ${asset} account costs ${setupCost} (one-time rent + fee, from your SOL balance) — it stays yours, on your keys.`,
     checkingSol: 'Checking your SOL balance…',
     needSol: setupCost =>
       `You need about ${setupCost} in this wallet first — receive SOL at your address, then create the account.`,
@@ -524,7 +517,7 @@ export const depositEn: DepositMessages = {
       {t: token, em: true},
       {t: ' from any exchange or card provider that pays out on '},
       {t: chain, em: true},
-      {t: ', then send it to the address above. It arrives in your own wallet — dpay never receives it.'},
+      {t: ', then send it to the address above.'},
     ],
     bridgeWithGas: (token, chain, gasToken) => [
       {t: 'There is no address for this one. Buy '},
@@ -533,14 +526,14 @@ export const depositEn: DepositMessages = {
       {t: chain, em: true},
       {t: ' into a wallet you control, and keep a little '},
       {t: gasToken, em: true},
-      {t: ' in it for the network fee. Then come back here and connect that wallet — it signs the transfer, and dpay never holds either one.'},
+      {t: ' in it for the network fee. Then connect that wallet here — it signs the transfer.'},
     ],
     bridgeSelfGas: (token, chain) => [
       {t: 'There is no address for this one. Buy '},
       {t: token, em: true},
       {t: ' on '},
       {t: chain, em: true},
-      {t: ' into a wallet you control — a little more than you want to move, because the network fee comes out of it. Then come back here and connect that wallet — it signs the transfer, and dpay never holds it.'},
+      {t: ' into a wallet you control — a little more than you want to move, because the network fee comes out of it. Then connect that wallet here — it signs the transfer.'},
     ],
     buyThenConvert: (viaToken, target) => [
       {t: 'No provider sells '},
@@ -549,7 +542,7 @@ export const depositEn: DepositMessages = {
       {t: viaToken, em: true},
       {t: ' with a card, send it to the address above, then use Convert to swap it for '},
       {t: target, em: true},
-      {t: '. You sign that swap yourself, and dpay takes no part of it.'},
+      {t: '.'},
     ],
     testnetOnly: (symbol, chain) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${chain} faucet, then send it to the address above.`,
     testnetOnlyWallet: (symbol, chain) => `${symbol} is test money — it has no cash value and nobody sells it. Get some free from a public ${chain} faucet into a wallet you control, then connect that wallet here.`,
@@ -573,7 +566,7 @@ export const depositEn: DepositMessages = {
     upTo: pct => `up to ${pct}`,
     from: pct => `from ${pct}`,
     attribution: readOn => `Each provider's own published figures, read ${readOn}. They are limits, not prices — your exact fee is shown before you pay, and most providers also take a margin inside the rate they quote.`,
-    noEndorsement: 'Listed alphabetically. dpay does not recommend any of them, is not paid by any of them, and is not involved in what you buy.',
+    noEndorsement: 'Listed alphabetically. dpay recommends none of them, is paid by none of them, and takes no part in your purchase.',
   },
 };
 
