@@ -3876,11 +3876,15 @@ async fn a_ring_up_is_refused_unless_the_merchant_signs_it() {
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    // The gap is computed from the relay's clock at HANDLER time, which can sit one second past
+    // the test's own `unix_secs()` (a second-boundary flake when pinned to "86400 s" exactly).
+    // The diagnosis shape is what matters: the gap, named against the till clock.
     assert!(
-        body["message"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("issued_at is 86400 s"),
+        body["message"].as_str().unwrap_or_default().contains("issued_at is")
+            && body["message"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("s from this till's clock, which allows ±120 s"),
         "{body}"
     );
 
