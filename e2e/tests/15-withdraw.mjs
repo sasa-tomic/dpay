@@ -113,9 +113,10 @@ export async function run() {
     assert(ok, `withdraw sheet should show "Withdrawn ✓". body excerpt:\n${body.slice(0, 600)}`);
 
     // 7. The debited path proven directly on the fake-IC gateway: the ckBTC balance dropped by
-    //    EXACTLY the withdrawn amount (approve == burn amount; the row's fee is None → icrc1_fee 0).
+    //    the withdrawn amount plus the LEDGER's own fee — 10 sats, measured off the real ckBTC
+    //    ledger (icrc1_fee) and pinned in the catalog 2026-09-18.
     const after = await getBalance(relayBaseURL, accountHex, BTC_CURRENCY);
-    assertEq(after, String(SEED_SATS - WITHDRAW_SATS), 'post-withdraw ckBTC balance (burned at the principal)');
+    assertEq(after, String(SEED_SATS - WITHDRAW_SATS - 10), 'post-withdraw ckBTC balance (burned at the principal, plus the ledger fee)');
     console.log(`[15-withdraw] ✓ ckBTC balance ${before} → ${after} sats (approve + retrieve_btc_with_approval through the REAL app+gateway)`);
 
     await driver.screenshot('15-withdraw');
@@ -142,9 +143,10 @@ export async function run() {
     //    (a stale balance cache would fail here).
     await driver.click('btn-pay-scan', { timeoutMs: 5_000 });
     await openBalances(driver);
-    const reduced = await driver.waitForText('0.0005 BTC', { timeoutMs: 10_000 });
+    // 49_990 sats remain (the burn plus the pinned 10-sat ledger fee) — the row states it exactly.
+    const reduced = await driver.waitForText('0.0004999 BTC', { timeoutMs: 10_000 });
     const balBody = await driver.bodyText();
-    assert(reduced, `Balances ckBTC row should show the reduced 0.0005 BTC (50000 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
+    assert(reduced, `Balances ckBTC row should show the reduced 0.0004999 BTC (49990 sats remaining) after the withdraw. body excerpt:\n${balBody.slice(0, 500)}`);
     assert(!balBody.includes('0.001 BTC'), 'Balances must NOT still show the pre-withdraw 0.001 BTC (stale balance cache?)');
     console.log('[15-withdraw] ✓ UI ckBTC balance dropped to 0.0005 BTC (matches the gateway delta)');
 

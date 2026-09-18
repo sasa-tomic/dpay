@@ -99,7 +99,7 @@ export async function run() {
     const body = await driver.bodyText();
     assert(ok, `send surface should show "Withdrawn ✓". body excerpt:\n${body.slice(0, 600)}`);
     const after = await getBalance(relayBaseURL, accountHex, BTC_CURRENCY);
-    assertEq(after, String(SEED_SATS - WITHDRAW_SATS), 'post-withdraw balance (burned at the principal)');
+    assertEq(after, String(SEED_SATS - WITHDRAW_SATS - 10), 'post-withdraw balance (burned at the principal, plus the 10-sat ledger fee)');
     console.log(`[56-withdraw-saved-addr] ✓ withdrew ${WITHDRAW_BTC} BTC to ${WITHDRAW_ADDR} (address remembered)`);
 
     // 6. Flip the toggle back to "Scan to pay". This UNMOUNTS SendSheet — the address field, its
