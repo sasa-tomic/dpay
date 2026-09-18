@@ -207,6 +207,10 @@ export async function run() {
     // --- back to an empty counter ---------------------------------------------------------------
     await driver.click('btn-till-new', { timeoutMs: 4_000 });
     await driver.findByTestID('btn-till-ring-up', { timeoutMs: 4_000 });
+    // waitFor, not isPresent: under host load the two reset-render siblings can land across a
+    // paint boundary — the element IS part of the empty-counter state, so give it the same
+    // budget the button just used.
+    await driver.findByTestID('receive-code-form', { timeoutMs: 4_000 });
     assert(await driver.isPresent('receive-code-form'), 'the checkbox returns once nothing is live');
     // The note is the shared box's (the parent's), so "Next customer" keeps it exactly as it keeps
     // the price — a re-ring is almost always for the same thing, and the cashier edits, not retypes.
