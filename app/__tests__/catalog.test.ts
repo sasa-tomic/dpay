@@ -387,12 +387,17 @@ describe('assetTestKey — testnet currencies get a "-testnet" suffix (unique te
 describe('BUNDLED_CATALOG — authoritative per-currency metadata populated', () => {
   const byId = (id: number) => BUNDLED_CATALOG.find(c => c.currency === id)!;
 
-  it('ckBTC carries backing_symbol=BTC, wrapper_name=ckBTC, network=Bitcoin, onramp=Direct, offramp=Direct', () => {
+  it('ckBTC carries backing_symbol=BTC, wrapper_name=ckBTC, network=Bitcoin, fee=10 (measured), onramp=Direct, offramp=Direct', () => {
     const a = byId(1);
     expect(a.backing_symbol).toBe('BTC');
     expect(a.wrapper_name).toBe('ckBTC');
     expect(a.network).toBe('Bitcoin');
     expect(a.display_decimals).toBe(8);
+    // The MEASURED live ledger fee (2026-09-18, anonymous icrc1_fee query against the mainnet
+    // ckBTC ledger → 10 nat = 10 sats at 8 decimals). Pinned here so catalog drift cannot
+    // silently unprice the ckBTC convert routes; deliberately AHEAD of the prod relay row
+    // until the founder-run redeploy lands.
+    expect(a.fee).toBe('10');
     expect(a.onramp).toBe('Direct');
     expect(a.offramp).toBe('Direct');
   });

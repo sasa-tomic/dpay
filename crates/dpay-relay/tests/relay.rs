@@ -1771,7 +1771,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(ckbtc["backing_symbol"], "BTC");
     assert_eq!(ckbtc["network"], "Bitcoin");
     assert_eq!(ckbtc["display_decimals"], 8);
-    assert_eq!(ckbtc["fee"], serde_json::Value::Null); // read live at runtime
+    assert_eq!(ckbtc["fee"], "10"); // the MEASURED live ledger fee (2026-09-18 icrc1_fee → 10)
     assert_eq!(ckbtc["cap"], "100000");
     assert_eq!(ckbtc["onramp"], "Direct"); // chain-key Bitcoin ramp
     assert_eq!(ckbtc["offramp"], "Direct"); // retrieve_btc_with_approval

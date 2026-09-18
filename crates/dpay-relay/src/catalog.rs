@@ -578,7 +578,12 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             network: Some("Bitcoin".into()),
             display_decimals: Some(8),
             min_fraction_digits: None,
-            fee: None, // ckBTC ledger fee read live at runtime (MC2 validates)
+            // The MEASURED live ledger fee (2026-09-18, anonymous read-only query:
+            // `dfx canister call mxzaz-… icrc1_fee '(record {})' --network ic` → `(10 : nat)`
+            // = 10 sats at 8 decimals). The fake-IC gateway (ic_gateway.rs from_catalog) seeds
+            // this as the icrc1_fee it ENFORCES, so the offline fake ckBTC ledger now behaves
+            // like the real one. Corroborated by the testnet ckBTC row below (same 10).
+            fee: Some(U64String(10)),
             cap: Some(U64String(100_000)),
             chain_id: None, // not EVM
             token_contract: None,
@@ -1333,7 +1338,7 @@ mod catalog_truth_tests {
         assert_eq!(ckbtc.backing_symbol.as_deref(), Some("BTC"));
         assert_eq!(ckbtc.network.as_deref(), Some("Bitcoin"));
         assert_eq!(ckbtc.display_decimals.unwrap(), 8);
-        assert_eq!(ckbtc.fee, None, "ckBTC fee read live at runtime");
+        assert_eq!(ckbtc.fee, Some(U64String(10)), "the MEASURED live ckBTC ledger fee (2026-09-18 icrc1_fee query → 10 nat = 10 sats)");
         assert_eq!(ckbtc.cap, Some(U64String(100_000)));
         assert_eq!(ckbtc.chain_id, None);
         assert_eq!(ckbtc.token_contract, None);
@@ -1828,7 +1833,7 @@ mod wire_byte_shape_tests {
         let ckbtc = row_json(1);
         assert_eq!(
             ckbtc,
-            "{\"currency\":1,\"ledger\":\"mxzaz-hqaaa-aaaar-qaada-cai\",\"mintable\":false,\"minter\":\"mqygn-kiaaa-aaaar-qaadq-cai\",\"minter_family\":\"CkBtcUtxo\",\"symbol\":\"₿\",\"decimals\":8,\"wrapper_name\":\"ckBTC\",\"backing_symbol\":\"BTC\",\"network\":\"Bitcoin\",\"display_decimals\":8,\"min_fraction_digits\":null,\"fee\":null,\"cap\":\"100000\",\"chain_id\":null,\"token_contract\":null,\"gas_ledger\":null,\"onramp\":\"Direct\",\"offramp\":\"Direct\"}"
+            "{\"currency\":1,\"ledger\":\"mxzaz-hqaaa-aaaar-qaada-cai\",\"mintable\":false,\"minter\":\"mqygn-kiaaa-aaaar-qaadq-cai\",\"minter_family\":\"CkBtcUtxo\",\"symbol\":\"₿\",\"decimals\":8,\"wrapper_name\":\"ckBTC\",\"backing_symbol\":\"BTC\",\"network\":\"Bitcoin\",\"display_decimals\":8,\"min_fraction_digits\":null,\"fee\":\"10\",\"cap\":\"100000\",\"chain_id\":null,\"token_contract\":null,\"gas_ledger\":null,\"onramp\":\"Direct\",\"offramp\":\"Direct\"}"
         );
         let vchf = row_json(7);
         assert_eq!(

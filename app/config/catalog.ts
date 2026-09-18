@@ -271,8 +271,14 @@ export const BUNDLED_NETWORKS: NetworkSection[] = [
       {currency: 0, ledger: 'td2nx-oaaaa-aaaab-qhdnq-cai', mintable: true, minter: null, minter_family: null, symbol: '$', decimals: 2,
         wrapper_name: null, backing_symbol: null, network: null, display_decimals: null, min_fraction_digits: null, fee: null, cap: null,
         chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Unavailable', liquidity: null, ramp_partner: null, testnet: false},
+      // ckBTC's ledger transfer fee is the MEASURED live value (2026-09-18, anonymous read-only
+      // query: `dfx canister call mxzaz-hqaaa-aaaar-qaada-cai icrc1_fee '(record {})' --network ic`
+      // → `(10 : nat)`): 10 raw units = 10 sats at 8 decimals. Pinned AHEAD of the prod
+      // /api/v1/currencies row by design — the relay's compiled catalog is the sole catalog
+      // authority and its redeploys are founder-run; the bundled row does not wait on that.
+      // The pin is what admits the ckBTC hub routes (app/routes.ts hubRoutes) and direct pairs.
       {currency: 1, ledger: 'mxzaz-hqaaa-aaaar-qaada-cai', mintable: false, minter: 'mqygn-kiaaa-aaaar-qaadq-cai', minter_family: 'CkBtcUtxo', symbol: '₿', decimals: 8,
-        wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, min_fraction_digits: null, fee: null, cap: null,
+        wrapper_name: 'ckBTC', backing_symbol: 'BTC', network: 'Bitcoin', display_decimals: 8, min_fraction_digits: null, fee: '10', cap: null,
         chain_id: null, token_contract: null, gas_ledger: null, onramp: 'Direct', offramp: 'Direct', liquidity: null, ramp_partner: null, testnet: false},
       {currency: 2, ledger: 'xevnm-gaaaa-aaaar-qafnq-cai', mintable: false, minter: 'sv3dd-oaaaa-aaaar-qacoa-cai', minter_family: 'CkEthErc20', symbol: 'ckUSDC', decimals: 6,
         wrapper_name: 'ckUSDC', backing_symbol: 'USDC', network: 'Ethereum', display_decimals: 6, min_fraction_digits: 2, fee: '10000', cap: null,
