@@ -96,11 +96,28 @@ export async function run() {
       'no destination address input before the route is picked');
     // The one-route honesty note is GONE entirely (10x-verbosity pass 2026-09-16 — UI
     // meta-commentary); its absence stays pinned: no route census line renders in the picker.
-    assert(await driver.findByTestID('convert-dest-cefi-sideshift', {timeoutMs: 2_000}) != null,
-      'the SideShift cefi row is offered beside the route');
+    // D2 (2026-09-18 hub redesign): same-landing-spot venues MERGE into one destination —
+    // SideShift (USDC on Solana) is a mechanism inside the USDC-on-Solana group (the `:cctp`
+    // row), no longer its own row; Route A lands USDC on ETHEREUM, so ITS group is single-mech.
+    assert(await driver.findByTestID('convert-dest-cefi-sideshift', {timeoutMs: 1_000}).catch(() => null) == null,
+      'no standalone cefi row — the merge folded SideShift into the USDC destination');
     assert(await driver.findByTestID('convert-route-note', {timeoutMs: 1_000}).catch(() => null) == null,
       'no one-route note renders (deleted by the verbosity pass 2026-09-16)');
 
+    await driver.click(ROUTE_ROW);
+    // Route A is the ONLY mechanism landing USDC on Ethereum → no sub-picker, straight to
+    // the destination address (a route IS its mechanism).
+    assert(await driver.findByTestID('convert-dest-mechs', {timeoutMs: 1_000}).catch(() => null) == null,
+      'a single-mechanism route group picks itself — no sub-picker');
+
+    // The MERGE proof lives on the USDC-on-Solana group (the `:cctp` row): its sub-picker
+    // carries the route mechanism BESIDE the SideShift cefi venue (mech id = venue id).
+    await driver.click('convert-dest-route-multihop:icpswap-ckusdc:2:cctp');
+    assert(await driver.findByTestID('convert-dest-mech-multihop:icpswap-ckusdc:2:cctp', {timeoutMs: 4_000}) != null,
+      'the group\'s own route mechanism is the first offered');
+    assert(await driver.findByTestID('convert-dest-mech-sideshift-usdc', {timeoutMs: 4_000}) != null,
+      'the SideShift cefi mechanism is offered beside the route inside the USDC destination');
+    // Back to Route A for the rest of the flow.
     await driver.click(ROUTE_ROW);
     await driver.type('convert-dest-address', DEST);
     await driver.findByTestID('convert-route-min', {timeoutMs: 15_000});

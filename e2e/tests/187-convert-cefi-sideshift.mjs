@@ -40,7 +40,11 @@ const SETTLE_TEXT = '0.0495 SOL';
 const DEPOSIT_ADDRESS = 'e2e-deposit-address-01';
 const SHIFT_ID = 'e2e-shift-9c1d';
 const SETTLE_HASH = 'sol-settle-sig-187';
-const CEFI_ROW = 'convert-dest-cefi-sideshift';
+// D2 (2026-09-18 hub redesign): no standalone cefi row — SideShift rides as a MECHANISM
+// inside the SOL-on-Solana destination group (the group row carries the first route's id;
+// selecting it reveals the sub-picker where the cefi venue sits beside the route).
+const CEFI_ROW = 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter';
+const CEFI_MECH = 'convert-dest-mech-sideshift';
 
 export const meta = {
   id: '187',
@@ -79,6 +83,8 @@ async function pickCefiAndConfirm(driver) {
   await driver.type('convert-amount', AMOUNT_TEXT);
   await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
   await driver.click(CEFI_ROW, {timeoutMs: 5_000});
+  // D2 merge: the group row reveals the mechanism sub-picker; the cefi venue is a mech pick.
+  await driver.click(CEFI_MECH, {timeoutMs: 5_000});
   await driver.findByTestID('convert-settle-address', {timeoutMs: 8_000});
   await driver.waitForText('SideShift', {timeoutMs: 8_000});
   await driver.click('btn-convert-confirm', {timeoutMs: 5_000});
@@ -136,9 +142,12 @@ export async function run() {
     await driver.findByTestID('convert-headline', {timeoutMs: 15_000});
 
     assert(await driver.findByTestID(CEFI_ROW, {timeoutMs: 3_000}) != null,
-      'the SideShift destination row is offered beside the direct pair and routes');
-    assertIncludes(await driver.readText(CEFI_ROW), 'SideShift', 'the row names the venue');
+      'the SOL destination group (route + SideShift merged) is offered beside the direct pair');
     await driver.click(CEFI_ROW);
+    assert(await driver.findByTestID(CEFI_MECH, {timeoutMs: 4_000}) != null,
+      'SideShift is a mechanism inside the merged SOL destination (D2 merge)');
+    assertIncludes(await driver.readText(CEFI_MECH), 'SideShift', 'the mech row names the venue');
+    await driver.click(CEFI_MECH);
     const settle = await driver.readText('convert-settle-address');
     assertIncludes(settle, kp.address, 'the payout address is the wallet\'s OWN derived Solana address');
     await driver.waitForText(SETTLE_TEXT, {timeoutMs: 15_000});
