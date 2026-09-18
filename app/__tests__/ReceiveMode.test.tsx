@@ -637,11 +637,12 @@ describe('ReceiveMode — payee-quoted fee netting (exact-price rule, 2026-09-12
     expect(DpayCore.encodeRequest).not.toHaveBeenCalled();
   });
 
-  test('no fee known anywhere (ckBTC offline, catalog null) → the wire is the price verbatim', async () => {
+  test('no fee known anywhere → the wire is the price verbatim; pinned ckBTC nets its measured fee', async () => {
     jest.mocked(fetchLedgerFee).mockRejectedValue(new Error('offline'));
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // ckBTC (currency 1): 8 decimals, catalog fee null — "read live at runtime", and it can't.
+      // ckBTC (currency 1): 8 decimals. Its bundled row NOW carries the MEASURED fee '10'
+      // (2026-09-18 icrc1_fee), so even fully offline the request nets it: 25 BTC − 10 sats.
       const CKBTC_ASSET: SelectableAsset = {
         id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'ckBTC', linkToken: 'ckBTC',
         networkLabel: 'Internet Computer', network: null, decimals: 8, minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'ckbtc',
@@ -649,11 +650,22 @@ describe('ReceiveMode — payee-quoted fee netting (exact-price rule, 2026-09-12
       const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 1, assets: [CKBTC_ASSET], selectedAssetId: 'ic:1'});
       await act(async () => {});
       await makeRequest(tree, '25');
-      // The typed decimal rides verbatim (the payer pays price+fee, honestly displayed) and the
-      // disclosure stays silent — an unknown fee invents no numbers.
-      expect(linkAmountOf(tree)).toBe('25');
-      expect(hasTestID(tree, 'request-fee-line')).toBe(false);
+      expect(linkAmountOf(tree)).toBe('24.9999999');
+      const feeLine = tree.root.findAll(node => node.props && node.props.testID === 'request-fee-line')[0];
+      const feeText = textOf(feeLine.props.children);
+      expect(feeText).toContain('0.0000001');   // the pinned fee the payee absorbs
+      expect(feeText).toContain('24.9999999'); // the net that lands
       act(() => { tree.unmount(); });
+      // The unknown-fee seam itself is structural, not a ckBTC fact anymore: a row that
+      // registers no fee rides verbatim and the disclosure stays silent — an unknown fee
+      // invents no numbers.
+      const FEELESS = BUNDLED.map(c => (c.currency === 1 ? {...c, fee: null} : c));
+      const tree2 = mountReceive({catalog: FEELESS, selectedCurrency: 1, assets: [CKBTC_ASSET], selectedAssetId: 'ic:1'});
+      await act(async () => {});
+      await makeRequest(tree2, '25');
+      expect(linkAmountOf(tree2)).toBe('25');
+      expect(hasTestID(tree2, 'request-fee-line')).toBe(false);
+      act(() => { tree2.unmount(); });
     } finally {
       warn.mockRestore();
     }
@@ -703,7 +715,11 @@ describe('ReceiveMode — payee-quoted fee netting (exact-price rule, 2026-09-12
         id: 'ic:1', protocol: 'ic', currency: 1, symbol: 'ckBTC', linkToken: 'ckBTC',
         networkLabel: 'Internet Computer', network: null, decimals: 8, minFractionDigits: 2, liquidity: null, onramp: 'Unavailable', offramp: 'Unavailable', rampPartner: null, gasToken: null, visible: true, testKey: 'ckbtc',
       };
-      const tree = mountReceive({catalog: BUNDLED, selectedCurrency: 1, assets: [CKBTC_ASSET], selectedAssetId: 'ic:1', nfcStatus: 'ready'});
+      // ckBTC's row carries the MEASURED fee '10' now, so the unknown-fee seam is exercised
+      // against a fee-less row (the structural case, e.g. DEMO's shape) — the seam itself
+      // must never invent a number either way.
+      const FEELESS = BUNDLED.map(c => (c.currency === 1 ? {...c, fee: null} : c));
+      const tree = mountReceive({catalog: FEELESS, selectedCurrency: 1, assets: [CKBTC_ASSET], selectedAssetId: 'ic:1', nfcStatus: 'ready'});
       await act(async () => {});
       await makeRequest(tree, '25');
       const note = noteSpy.mock.calls.at(-1)![1];

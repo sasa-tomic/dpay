@@ -29,7 +29,7 @@ import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 
 const VCHF_LEDGER = 'ly36x-wiaaa-aaaai-aqj7q-cai';
 const ICP_LEDGER = 'ryjl3-tyaaa-aaaaa-aaaba-cai';
-const CATALOG = icpCatalogOf(BUNDLED_NETWORKS); // the real bundled rows: VCHF/ICP '10000', ckBTC/DEMO null
+const CATALOG = icpCatalogOf(BUNDLED_NETWORKS); // the real bundled rows: VCHF/ICP '10000', ckBTC '10' (MEASURED 2026-09-18), DEMO null
 
 beforeEach(async () => {
   await AsyncStorage.clear();
@@ -112,13 +112,13 @@ describe('ledgerFees — corruption tolerance (per-entry salvage, the txNotes co
 });
 
 describe('ledgerFees — catalogLedgerFee (pure lookup of the bundled row)', () => {
-  it('returns the real bundled fees: VCHF/ICP 10000 raw', () => {
+  it('returns the real bundled fees: VCHF/ICP 10000 raw, ckBTC 10 (MEASURED 2026-09-18 icrc1_fee)', () => {
     expect(catalogLedgerFee(CATALOG, 7)).toBe('10000');
     expect(catalogLedgerFee(CATALOG, 8)).toBe('10000');
+    expect(catalogLedgerFee(CATALOG, 1)).toBe('10'); // 10 sats — the live ckBTC ledger fee
   });
 
   it('returns null for rows that register no fee and for unknown currencies', () => {
-    expect(catalogLedgerFee(CATALOG, 1)).toBeNull(); // ckBTC registers none
     expect(catalogLedgerFee(CATALOG, 0)).toBeNull(); // DEMO is play money
     expect(catalogLedgerFee(CATALOG, 99)).toBeNull(); // unknown id — fail closed
   });
@@ -140,7 +140,7 @@ describe('ledgerFees — fallbackLedgerFee (the local chain: cache, then catalog
   });
 
   it('neither source knows → null (the seam then shows the wire — the honest last resort)', async () => {
-    await expect(fallbackLedgerFee('aaaaa-aa', CATALOG, 1)).resolves.toBeNull(); // ckBTC: no fee anywhere
+    await expect(fallbackLedgerFee('aaaaa-aa', CATALOG, 0)).resolves.toBeNull(); // DEMO registers no fee
     await expect(fallbackLedgerFee('aaaaa-aa', CATALOG, 99)).resolves.toBeNull(); // unknown currency
   });
 
