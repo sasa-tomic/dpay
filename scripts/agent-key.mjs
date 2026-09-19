@@ -19,13 +19,15 @@
 //
 //  - Ledger principals and decimals are read from `dfx/catalog_truth.json`, never restated here.
 //
-// Usage:
+// Usage (reachable as `just funds <subcommand>` — the ONE entry point; this script stays the
+// per-chain mechanism that entry point spawns):
 //   node scripts/agent-key.mjs init        generate the key (once); prints the principal only
 //   node scripts/agent-key.mjs principal   print the funding address (no decryption)
 //   node scripts/agent-key.mjs balance     query live mainnet balances (no decryption)
-//   node scripts/agent-key.mjs balance P   measure ANY principal — agent-funds watches the
+//   node scripts/agent-key.mjs balance P   measure ANY principal — the funds overview watches the
 //                                          abandoned one through this; needs no key at all
-//   node scripts/agent-key.mjs history     recent ICP ledger transactions for this key (no decryption)
+//   node scripts/agent-key.mjs history [P] recent ICP ledger transactions (default: this key;
+//                                          no decryption)
 //   node scripts/agent-key.mjs seed        print the seed hex — DECRYPTS; only for a spend
 import {readFileSync, writeFileSync, existsSync, mkdirSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
@@ -86,7 +88,7 @@ async function principalOf(seed) {
 function sops(args) {
   if (!existsSync(AGE_KEY)) {
     die(`age identity missing at ${AGE_KEY}\n` +
-        '  Restore it from your password manager, or run `just agent-key-init` for a NEW key\n' +
+        '  Restore it from your password manager, or run `just funds init icp-float` for a NEW key\n' +
         '  (which strands any funds held by the old one).');
   }
   return execFileSync('sops', args, {
@@ -96,7 +98,7 @@ function sops(args) {
 }
 
 function readPub() {
-  if (!existsSync(PUB)) die(`no key yet — run \`just agent-key-init\` (${PUB} missing)`);
+  if (!existsSync(PUB)) die(`no key yet — run \`just funds init icp-float\` (${PUB} missing)`);
   return JSON.parse(readFileSync(PUB, 'utf8'));
 }
 
@@ -141,9 +143,9 @@ async function cmdPrincipal() {
   console.log('\nFunding safety (docs/AGENT-FUNDS.md "Funding the float — do not guess the address"):');
   console.log('  1. copy the address printed ABOVE — never one from memory or chat scrollback');
   console.log('  2. paste-send the top-up');
-  console.log('  3. within a minute run `just agent-history` and CONFIRM the IN row — only then is it landed');
+  console.log('  3. within a minute run `just funds history` and CONFIRM the IN row — only then is it landed');
   console.log('The pre-rotation principal lrdna-…-mqe is DESTROYED and unrecoverable: a misdirected send');
-  console.log('there is gone forever. `just agent-funds` watches it and trips if funds ever appear.');
+  console.log('there is gone forever. `just funds` watches it and trips if funds ever appear.');
 }
 
 async function cmdSeed() {
@@ -158,9 +160,9 @@ async function cmdSeed() {
 }
 
 async function cmdBalance() {
-  // An explicit principal measures THAT principal (agent-funds' abandoned-principal watch and
-  // funds-reconcile pass one) and deliberately needs no key file at all — ledger balances are
-  // public. `--json` switches to a machine-readable form (same measures, same rules) for
+  // An explicit principal measures THAT principal (the funds overview's abandoned-principal watch
+  // and `funds reconcile` pass one) and deliberately needs no key file at all — ledger balances
+  // are public. `--json` switches to a machine-readable form (same measures, same rules) for
   // scripts/funds.mjs reconcile; the human-readable shape is unchanged.
   const rest = process.argv.slice(3);
   const json = rest.includes('--json');
@@ -205,7 +207,9 @@ async function cmdBalance() {
  *  legacy ACCOUNT IDENTIFIERS on both sides, so the key's own is derived here to tell an incoming
  *  transfer from an outgoing one rather than guessing from the sign of a balance change. */
 async function cmdHistory() {
-  const {principal} = readPub();
+  // An explicit principal reads THAT account's history (`just funds history <wallet>` passes the
+  // registry address — e.g. the abandoned principal); the default stays this key's own.
+  const principal = process.argv[3] ?? readPub().principal;
   const truth = JSON.parse(readFileSync(TRUTH, 'utf8'));
   const index = truth.principals.icp_index;
   if (!index) die('catalog_truth.json is missing principals.icp_index');

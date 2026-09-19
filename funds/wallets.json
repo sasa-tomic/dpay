@@ -9,7 +9,7 @@
       "custody": "scripts/agent-key.mjs",
       "secret": "secrets/agent-icp.sops.json",
       "created": "2026-09-05",
-      "purpose": "The mainnet test float itself — agent-balance measures EVERY ICRC ledger in the bundled catalog (currently ICP / VCHF / ckUSDC / ckBTC / ckETH); rules in CLAUDE.md, record in funds/ledger.jsonl"
+      "purpose": "The mainnet test float itself — `just funds` measures EVERY ICRC ledger in the bundled catalog (currently ICP / VCHF / ckUSDC / ckBTC / ckETH); rules in CLAUDE.md, record in funds/ledger.jsonl"
     },
     {
       "id": "sol-float",
@@ -30,7 +30,7 @@
       "secret": null,
       "created": "2026-09-01",
       "abandoned": "2026-09-05",
-      "purpose": "Pre-rotation principal, compromised 2026-09-05 (partial key disclosure into a local tool log) and emptied by the same-day rotation; seed DESTROYED — a misdirected send here is unrecoverable. agent-funds watches it; funds-reconcile anchors it at measured 0"
+      "purpose": "Pre-rotation principal, compromised 2026-09-05 (partial key disclosure into a local tool log) and emptied by the same-day rotation; seed DESTROYED — a misdirected send here is unrecoverable. `just funds` watches it; `funds reconcile` anchors it at measured 0"
     }
   ]
 }

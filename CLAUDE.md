@@ -145,9 +145,9 @@ Claude holds a funded mainnet key so it can prove things that have no sandbox (t
 provider has none; the VCHF/ICP funded-transfer proof has none). Mechanism, recovery and the spend
 log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context every session.
 
-- **Measure, never assume.** `just agent-balance` is the only statement of what the float holds. A
-  balance from memory, from a doc, or from a previous session is not evidence. `UNREADABLE` is not
-  zero.
+- **Measure, never assume.** `just funds` (per wallet: `just funds balance`) is the only statement
+  of what the float holds. A balance from memory, from a doc, or from a previous session is not
+  evidence. `UNREADABLE` is not zero.
 - **Ceiling: CHF 25 equivalent.** Claude never asks for or accepts more than this in the float, and
   never tops it up itself. Everything below is affordable *because* of the cap.
 - **Spend without asking only when ALL hold:** ≤ CHF 2 equivalent in one operation; the destination
@@ -165,8 +165,8 @@ log: `docs/AGENT-FUNDS.md`. The rules bind here because they must be in context 
 - **Every movement goes through the funds tooling — hard rule (2026-09-19).** `funds/ledger.jsonl`
   (append-only, version-controlled) and `funds/wallets.json` are the only record of what the float
   holds and did. Append every deposit/spend/conversion/fee/rotation with `node scripts/funds.mjs
-  add …` in the SAME session it happens; re-render the doc tables with `just funds-doc`;
-  `just funds-reconcile` must be CLEAN before the session claims completion. Never hand-edit the
+  add …` in the SAME session it happens; re-render the doc tables with `just funds doc`;
+  `just funds reconcile` must be CLEAN before the session claims completion. Never hand-edit the
   JSONL or the GENERATED doc tables (the testruns.py precedent: one interface). A session that
   moved float funds without ledger rows is INCOMPLETE.
 

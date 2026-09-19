@@ -673,50 +673,70 @@ cleanup wipe='': stop
 
 # --- agent test float (real mainnet money — rules in CLAUDE.md, mechanism in docs/AGENT-FUNDS.md) ---
 
-# print the funding address for the agent's mainnet test float (no decryption)
+# THE one entry point for the test float (founder ask 2026-09-20: a single way to do all of it).
+#   just funds                  overview: every wallet + every live balance + the abandoned watch
+#   just funds address [W]      the funding address, no decryption (W: icp-float | sol-float)
+#   just funds balance [W]      live census for one wallet, measured (UNREADABLE is never 0)
+#   just funds history [W]      what the money DID: ICP transfers + block indexes (IC wallets)
+#   just funds seed <W>         the seed hex — DECRYPTS; only immediately before an approved spend
+#   just funds init <W>         generate a NEW key for that wallet (refuses if one exists)
+#   just funds reconcile        ledger vs MEASURED — drift = an unrecorded movement (exit 1)
+#   just funds doc              re-render the GENERATED tables in docs/AGENT-FUNDS.md from funds/
+funds *args:
+    node scripts/funds.mjs {{args}}
+
+# ---------------------------------------------------------------------------------------------
+# DEPRECATED aliases — kept ONLY so a running agent session that still calls the old names is not
+# broken mid-spend. They print a notice and forward to the `just funds …` form, byte-identically.
+# DELETED AT THE MERGE WAVE (slice E sweeps these once the live-proof agent lands).
+# ---------------------------------------------------------------------------------------------
+
+# deprecated: the IC float's funding address → `just funds address`
 agent-principal:
-    node scripts/agent-key.mjs principal
+    @echo "deprecated: use 'just funds address'" >&2
+    node scripts/funds.mjs address
 
-# measure live mainnet balances of the test float — the ONLY source of truth for what it holds
+# deprecated: the IC float's live census → `just funds balance`
 agent-balance:
-    node scripts/agent-key.mjs balance
+    @echo "deprecated: use 'just funds balance'" >&2
+    node scripts/funds.mjs balance
 
-# what the float's money actually DID: recent ICP ledger transfers, with the BLOCK INDEX of each.
-# `agent-balance` says how much is left; this says where it went and at which block — and that block
-# index is the exact proof an OpenCryptoPay payment reports to the provider, so it is how a payment
-# made on a phone is verified from here, without taking anyone's word for it. Read-only, no decrypt.
+# deprecated: ICP transfers + block indexes → `just funds history`
 agent-history:
-    node scripts/agent-key.mjs history
+    @echo "deprecated: use 'just funds history'" >&2
+    node scripts/funds.mjs history
 
-# print the seed hex (DECRYPTS the sops secret). Only immediately before an approved spend.
+# deprecated: the IC float's seed → `just funds seed icp-float`
 agent-seed:
-    node scripts/agent-key.mjs seed
+    @echo "deprecated: use 'just funds seed icp-float'" >&2
+    node scripts/funds.mjs seed icp-float
 
-# generate a NEW test-float key. Refuses if one exists — rotating strands any funds still held.
+# deprecated: new IC key → `just funds init icp-float`
 agent-key-init:
-    node scripts/agent-key.mjs init
+    @echo "deprecated: use 'just funds init icp-float'" >&2
+    node scripts/funds.mjs init icp-float
 
-# generate a NEW agent Solana key. Refuses if one exists — rotating strands any funds still held.
-agent-sol-init:
-    node scripts/agent-sol.mjs init
-
-# the agent's Solana mainnet funding address (no decryption)
+# deprecated: the SOL wallet's funding address → `just funds address sol-float`
 agent-sol-principal:
-    node scripts/agent-sol.mjs principal
+    @echo "deprecated: use 'just funds address sol-float'" >&2
+    node scripts/funds.mjs address sol-float
 
-# EVERY wallet the agent controls + EVERY live balance, one command (registry: .dev/
-# agent-wallets.json; durable copy: docs/AGENT-FUNDS.md). `--seed` additionally DECRYPTS and
-# prints the SOL seed hex — only immediately before an approved SOL spend.
+# deprecated: new SOL key → `just funds init sol-float`
+agent-sol-init:
+    @echo "deprecated: use 'just funds init sol-float'" >&2
+    node scripts/funds.mjs init sol-float
+
+# deprecated: the multi-wallet overview → `just funds` (seed: `just funds seed sol-float`)
 agent-funds *flags:
+    @echo "deprecated: use 'just funds' (seed: 'just funds seed sol-float')" >&2
     node scripts/agent-funds.mjs {{flags}}
 
-# computed-from-ledger vs MEASURED live balances per wallet/asset — the carelessness tripwire:
-# drift after a genesis anchor = an unrecorded movement (exit 1). UNKNOWN (UNREADABLE) is not
-# clean. Clean reconcile is REQUIRED before a session that moved funds claims completion.
+# deprecated: the reconcile tripwire → `just funds reconcile`
 funds-reconcile:
+    @echo "deprecated: use 'just funds reconcile'" >&2
     node scripts/funds.mjs reconcile
 
-# re-render the GENERATED wallet/spend tables in docs/AGENT-FUNDS.md from funds/ — run after any
-# `node scripts/funds.mjs add`; hand-edits inside the GENERATED markers are lost on render.
+# deprecated: doc-table regeneration → `just funds doc`
 funds-doc:
+    @echo "deprecated: use 'just funds doc'" >&2
     node scripts/funds.mjs doc

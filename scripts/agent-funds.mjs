@@ -15,7 +15,7 @@
 //  - The wallet LIST comes from the COMMITTED `funds/wallets.json` (founder ask 2026-09-19: the
 //    record is version-controlled — a fresh clone finds every wallet). That file replaced the
 //    gitignored `.dev/agent-wallets.json`, which is retired. The same file renders the registry
-//    table in docs/AGENT-FUNDS.md and feeds `funds-reconcile`.
+//    table in docs/AGENT-FUNDS.md and feeds `funds reconcile`.
 //
 //  - A section that cannot be measured prints UNREADABLE and makes the whole command exit 1 — a
 //    wallet overview that silently skipped a chain would be worse than a failing one.
@@ -142,9 +142,10 @@ for (const w of wallets) {
 }
 
 const missing = Object.entries(SCRIPT_OF).filter(([chain]) => !wallets.some(w => w.chain === chain && w.status !== 'abandoned-never-fund'));
+const WALLET_ID = {icp: 'icp-float', solana: 'sol-float'};
 for (const [chain, script] of missing) {
   console.log(`── ${chain} mainnet · NO KEY ──`);
-  console.log(`   none yet — \`${script.replace('scripts/agent-', 'just agent-').replace('.mjs', '')}-init\` generates one\n`);
+  console.log(`   none yet — \`just funds init ${WALLET_ID[chain]}\` generates one\n`);
 }
 
 process.exit(failed ? 1 : 0);

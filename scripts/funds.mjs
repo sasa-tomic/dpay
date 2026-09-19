@@ -1,34 +1,43 @@
 #!/usr/bin/env node
 // The ONLY interfaces to the agent-funds record — the testruns.py precedent, applied to money
 // (founder ask 2026-09-19: the record must be version-controlled, and using the tooling is a HARD
-// rule, not a habit):
+// rule, not a habit). The custody scripts (agent-key.mjs / agent-sol.mjs / agent-funds.mjs) stay
+// the per-chain mechanism; this file is the single CLI on top of them — every subcommand is
+// reachable as `just funds <subcommand>` (founder ask 2026-09-20: ONE way to do all of it; the
+// old `just agent-*` recipe names are deprecated forwards and die at the merge wave).
 //
-//   add        append ONE validated movement to funds/ledger.jsonl. The JSONL is append-only and
-//              this is its only writer — corrections are NEW `correction` rows referencing the
-//              original, never edits.
-//   import F   append many validated rows from a JSON array file (backfill / ingesting rows that
-//              were hand-written into the doc before this tooling existed).
-//   doc        re-render the two GENERATED tables in docs/AGENT-FUNDS.md from funds/ (the
-//              FLOWS.md pattern: committed doc, rendered tables, hand-written prose around them).
-//   reconcile  computed-from-ledger vs MEASURED live balances per wallet/asset. The carelessness
-//              tripwire: any movement after a wallet's genesis anchor that has no ledger row is a
-//              loud DRIFT and a nonzero exit — an unrecorded movement can never look clean.
+//   (bare)        overview — every wallet + every live balance + the abandoned-principal watch
+//   balance [W]   one wallet's live census, measured (default: the IC float; UNREADABLE never 0)
+//   history [W]   what the money DID: ICP transfers + block indexes (IC wallets; default icp-float)
+//   address [W]   the funding address, no decryption (default: icp-float; + funding-safety block)
+//   seed <W>      the seed hex — DECRYPTS; only immediately before an approved spend
+//   init <W>      generate a NEW key for that wallet (refuses if one exists)
+//   add           append ONE validated movement to funds/ledger.jsonl. The JSONL is append-only
+//                 and this is its only writer — corrections are NEW `correction` rows referencing
+//                 the original, never edits.
+//   import F      append many validated rows from a JSON array file (backfill / ingesting rows
+//                 that were hand-written into the doc before this tooling existed).
+//   doc           re-render the two GENERATED tables in docs/AGENT-FUNDS.md from funds/ (the
+//                 FLOWS.md pattern: committed doc, rendered tables, hand-written prose around
+//                 them).
+//   reconcile     computed-from-ledger vs MEASURED live balances per wallet/asset. The carelessness
+//                 tripwire: any movement after a wallet's genesis anchor that has no ledger row is
+//                 a loud DRIFT and a nonzero exit — an unrecorded movement can never look clean.
 //
-// Why committed files: the record survives fresh clones and fresh contexts.
-// funds/wallets.json is the authoritative wallet registry (it REPLACES the gitignored
-// .dev/agent-wallets.json). Addresses are public; seeds stay sops-encrypted under secrets/ —
-// nothing in funds/ is secret. Why genesis rows: each wallet/asset anchors at a MEASURED balance;
-// ledger rows dated before their anchor are absorbed history (kept for audit), rows after it must
-// be explained exactly by the math, or reconcile fails.
+// Wallet ids come from funds/wallets.json, the authoritative registry: icp-float, sol-float,
+// icp-float-old. Addresses are public; seeds stay sops-encrypted under secrets/ — nothing in
+// funds/ is secret. Genesis rows anchor each wallet/asset at a MEASURED balance; rows dated before
+// the anchor are absorbed history (kept for audit), rows after it must be explained exactly by the
+// math, or reconcile fails.
 //
 // Usage:
-//   node scripts/funds.mjs add --kind spend --wallet icp-float --asset ICP --amount 0.01 \
+//   just funds                 (bare = overview)
+//   just funds add --kind spend --wallet icp-float --asset ICP --amount 0.01 \
 //        --direction out --counterparty "..." --tx icp:12345 --purpose "..."
-//   node scripts/funds.mjs import /tmp/opencode/backfill.json   (shred the file afterwards)
-//   node scripts/funds.mjs doc
-//   node scripts/funds.mjs reconcile
+//   just funds import /tmp/opencode/backfill.json   (shred the file afterwards)
+//   just funds doc | reconcile | balance [W] | history [W] | address [W] | seed <W> | init <W>
 import {readFileSync, writeFileSync, existsSync, appendFileSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
 
@@ -38,6 +47,7 @@ const WALLETS = join(ROOT, 'funds/wallets.json');
 const DOC = join(ROOT, 'docs/AGENT-FUNDS.md');
 const KEY = join(ROOT, 'scripts/agent-key.mjs');
 const SOL = join(ROOT, 'scripts/agent-sol.mjs');
+const OVERVIEW = join(ROOT, 'scripts/agent-funds.mjs');
 const KINDS = ['genesis', 'deposit', 'spend', 'convert', 'fee', 'correction'];
 const FIELDS = ['ts', 'kind', 'wallet', 'asset', 'amount', 'direction', 'counterparty', 'tx', 'purpose'];
 const DEC = /^\d+(\.\d+)?$/;
@@ -50,6 +60,29 @@ function die(msg) {
 
 function wallets() {
   return JSON.parse(readFileSync(WALLETS, 'utf8')).wallets;
+}
+
+/** Registry lookup for the custody subcommands. Default = the first live wallet (the IC float);
+ *  `seed`/`init` require an explicit id — an ambiguous decrypt or init is how mistakes happen. */
+function resolveWallet(name, required = false) {
+  const all = wallets();
+  const ids = all.map(w => w.id).join(', ');
+  if (!name) {
+    if (required) die(`a wallet id is required — funds/wallets.json lists: ${ids}`);
+    const live = all.find(w => w.status.startsWith('live'));
+    if (!live) die('no live wallet in funds/wallets.json');
+    return live;
+  }
+  const w = all.find(w => w.id === name);
+  if (!w) die(`unknown wallet "${name}" — funds/wallets.json lists: ${ids}`);
+  return w;
+}
+
+/** Run a custody script as if the user ran it — byte-identical output, exit code propagated. */
+function run(script, args) {
+  const r = spawnSync(process.execPath, [script, ...args], {cwd: ROOT, stdio: 'inherit', timeout: 300_000});
+  if (r.error) die(`${script} failed to start (${r.error.message.split('\n')[0]})`);
+  if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
 function rows() {
@@ -148,7 +181,7 @@ function renderRegion(lines, name) {
   const b = src.indexOf(close);
   if (a < 0 || b < 0 || b < a) die(`${DOC}: GENERATED markers for ${name} are missing — re-add them before rendering`);
   const note = '_GENERATED by `scripts/funds.mjs doc` from `funds/` — do not hand-edit. '
-    + 'Record a movement with `node scripts/funds.mjs add …` (hard rule), then re-render with `just funds-doc`._';
+    + 'Record a movement with `node scripts/funds.mjs add …` (hard rule), then re-render with `just funds doc`._';
   writeFileSync(DOC, `${src.slice(0, a + open.length)}\n${note}\n\n${lines.join('\n')}\n${src.slice(b)}`);
 }
 
@@ -234,7 +267,54 @@ function cmdReconcile() {
   }
 }
 
-const CMDS = {add: cmdAdd, import: cmdImport, doc: cmdDoc, reconcile: cmdReconcile};
+// --- the ONE entry point: custody subcommands over the per-chain scripts --------------------
+
+function cmdOverview() { run(OVERVIEW, []); }
+
+function cmdBalance() {
+  const w = resolveWallet(process.argv[3]);
+  if (w.chain === 'icp') run(KEY, ['balance', w.address]); // explicit principal: keyless, byte-identical
+  else if (w.chain === 'solana') run(SOL, ['balance']);
+  else die(`wallet ${w.id} has unknown chain "${w.chain}"`);
+}
+
+function cmdHistory() {
+  const w = resolveWallet(process.argv[3]);
+  if (w.chain !== 'icp') die(`history is implemented for IC wallets only (the pinned ICP index) — ${w.id} is on ${w.chain}`);
+  run(KEY, ['history', w.address]);
+}
+
+function cmdAddress() {
+  const w = resolveWallet(process.argv[3]);
+  if (w.status === 'abandoned-never-fund') {
+    die(`${w.id} is ABANDONED — NEVER FUND (its seed is destroyed; a send there is unrecoverable). `
+        + 'Its address is only ever listed by `just funds`, never handed out for funding.');
+  }
+  if (w.chain === 'icp') run(KEY, ['principal']);
+  else if (w.chain === 'solana') run(SOL, ['principal']);
+  else die(`wallet ${w.id} has unknown chain "${w.chain}"`);
+}
+
+function cmdSeed() {
+  const w = resolveWallet(process.argv[3], true);
+  if (w.chain === 'icp') run(KEY, ['seed']);
+  else if (w.chain === 'solana') run(SOL, ['seed']);
+  else die(`wallet ${w.id} has unknown chain "${w.chain}"`);
+}
+
+function cmdInit() {
+  const w = resolveWallet(process.argv[3], true);
+  if (w.chain === 'icp') run(KEY, ['init']);
+  else if (w.chain === 'solana') run(SOL, ['init']);
+  else die(`wallet ${w.id} has unknown chain "${w.chain}"`);
+}
+
+const CMDS = {
+  add: cmdAdd, import: cmdImport, doc: cmdDoc, reconcile: cmdReconcile,
+  overview: cmdOverview, balance: cmdBalance, history: cmdHistory,
+  address: cmdAddress, seed: cmdSeed, init: cmdInit,
+};
 const cmd = process.argv[2];
-if (!CMDS[cmd]) die(`usage: funds.mjs <${Object.keys(CMDS).join('|')}>`);
-CMDS[cmd]();
+if (cmd === undefined) CMDS.overview();
+else if (!CMDS[cmd]) die(`usage: just funds <${Object.keys(CMDS).join('|')}>  (bare = overview)`);
+else CMDS[cmd]();

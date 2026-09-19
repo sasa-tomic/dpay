@@ -73,7 +73,7 @@ function addressOf(seed) {
 function sops(args) {
   if (!existsSync(AGE_KEY)) {
     die(`age identity missing at ${AGE_KEY}\n` +
-        '  Restore it from your password manager, or run `just agent-sol-init` for a NEW key\n' +
+        '  Restore it from your password manager, or run `just funds init sol-float` for a NEW key\n' +
         '  (which strands any funds held by the old one).');
   }
   return execFileSync('sops', args, {
@@ -83,7 +83,7 @@ function sops(args) {
 }
 
 function readPub() {
-  if (!existsSync(PUB)) die(`no key yet — run \`just agent-sol-init\` (${PUB} missing)`);
+  if (!existsSync(PUB)) die(`no key yet — run \`just funds init sol-float\` (${PUB} missing)`);
   return JSON.parse(readFileSync(PUB, 'utf8'));
 }
 

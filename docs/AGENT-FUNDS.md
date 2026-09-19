@@ -27,7 +27,7 @@ Measured 2026-09-04, so the route is known to be real before anyone spends on it
   payable charge exists only after a real order is placed;
 - so the test is a WooCommerce checkout — cart → checkout details → the OpenCryptoPay code — and
   **Claude drives the whole round trip in the browser**, order included, then pays the resulting
-  charge from this float and verifies it with `just agent-history`.
+  charge from this float and verifies it with `just funds history`.
 - The operator is the **DFX Merch Association**, not DFX AG. A separate counterparty from the one
   answering `api.dfx.swiss`, which is what the "ask before the first payment to a new counterparty"
   rule is about.
@@ -47,35 +47,45 @@ the same phone paid order `2610` in VCHF: ledger block `81,062`, submitted as th
 
 ## Commands
 
-    just agent-funds          # EVERY wallet + EVERY live balance, one command (no decryption)
-    just agent-principal      # IC float: the funding address (no decryption)
-    just agent-balance        # IC float: live mainnet balances, measured (no decryption)
-    just agent-history        # IC float: what the money DID: transfers + block indexes (no decrypt)
-    just agent-seed           # IC float: the seed hex — DECRYPTS; only immediately before a spend
-    just agent-sol-principal  # SOL wallet: the funding address (no decryption)
-    just agent-sol-init       # generate a NEW agent SOL key (refuses if one exists)
-    just funds-reconcile      # ledger-computed vs MEASURED balances — drift = unrecorded movement (exit 1)
-    just funds-doc            # re-render the GENERATED wallet/spend tables in this file from funds/
+ONE entry point — `just funds <subcommand>` (founder ask 2026-09-20: a single way to do all of it):
 
-`agent-funds` is the one command a fresh session runs first: it prints every wallet the agent
+    just funds                  # overview: EVERY wallet + EVERY live balance + the abandoned watch
+    just funds address [W]      # the funding address, no decryption (W: icp-float | sol-float)
+    just funds balance [W]      # live census for one wallet, measured (UNREADABLE is never 0)
+    just funds history [W]      # what the money DID: ICP transfers + block indexes (IC wallets)
+    just funds seed <W>         # the seed hex — DECRYPTS; only immediately before an approved spend
+    just funds init <W>         # generate a NEW key for that wallet (refuses if one exists)
+    just funds reconcile        # ledger-computed vs MEASURED — drift = unrecorded movement (exit 1)
+    just funds doc              # re-render the GENERATED tables in this file from funds/
+
+Wallet ids come from `funds/wallets.json`: `icp-float`, `sol-float`, `icp-float-old` (balance and
+history also accept the abandoned id — measuring it is the watch). Recording a movement is part of
+the same surface: `node scripts/funds.mjs add …` (hard rule — CLAUDE.md), then `just funds doc`.
+
+The old recipe names (`just agent-balance`, `just agent-funds --seed`, `just agent-seed`,
+`just funds-reconcile`, …) still work as DEPRECATED forwards — each prints a notice to stderr and
+does exactly the equivalent above, byte-identically. They are deleted at the merge wave; do not
+start new usage with them.
+
+`just funds` is the one command a fresh session runs first: it prints every wallet the agent
 controls (from the committed `funds/wallets.json` registry), each wallet's ADDRESS, and every live
-balance measured at that moment. `agent-balance` remains the only balance statement for the IC
-float; `agent-funds` renders it verbatim rather than reimplementing it. `just agent-funds --seed`
-additionally DECRYPTS and prints the SOL seed hex — same discipline as `agent-seed`: only
+balance measured at that moment. `just funds balance` remains the only balance statement for the IC
+float; the overview renders it verbatim rather than reimplementing it. `just funds seed sol-float`
+DECRYPTS and prints the SOL seed hex — same discipline as `just funds seed icp-float`: only
 immediately before an approved spend.
 
 `funds/` is the version-controlled record, and using it is a HARD rule (CLAUDE.md): every movement
 of float funds — deposit, spend, conversion, fee, rotation — is appended to `funds/ledger.jsonl`
 through `node scripts/funds.mjs add …` in the same session it happens. The JSONL is append-only
-and never hand-edited; corrections are new `correction` rows. `just funds-reconcile` compares the
+and never hand-edited; corrections are new `correction` rows. `just funds reconcile` compares the
 ledger math against MEASURED balances and must be CLEAN before a session that moved funds claims
 completion: DRIFT is an unrecorded movement (record it, never explain it away), UNKNOWN is a
 balance nobody measured and is never treated as zero.
 
-`agent-balance` is the only source of truth for what the float holds. Never state a balance from
-memory or from this file — measure it. An unreachable ledger prints `UNREADABLE`, never `0`.
+`just funds balance` is the only source of truth for what the float holds. Never state a balance
+from memory or from this file — measure it. An unreachable ledger prints `UNREADABLE`, never `0`.
 
-`agent-history` is how a spend is VERIFIED rather than reported. A payment made on a phone appears
+`just funds history` is how a spend is VERIFIED rather than reported. A payment made on a phone appears
 here as an outgoing transfer with its amount, its destination and its block index — and for an
 OpenCryptoPay payment that block index is the exact proof the wallet reported to the provider, so
 "it paid" can be checked against the ledger instead of taken on trust. It reads the official ICP
@@ -91,13 +101,13 @@ record is version-controlled); this table is RENDERED from it by `scripts/funds.
 the JSON, never the table. The former gitignored `.dev/agent-wallets.json` is retired.
 
 <!-- GENERATED:wallets -->
-_GENERATED by `scripts/funds.mjs doc` from `funds/` — do not hand-edit. Record a movement with `node scripts/funds.mjs add …` (hard rule), then re-render with `just funds-doc`._
+_GENERATED by `scripts/funds.mjs doc` from `funds/` — do not hand-edit. Record a movement with `node scripts/funds.mjs add …` (hard rule), then re-render with `just funds doc`._
 
 | Wallet | Chain | Address | Secret | Status | What it is for |
 |--------|-------|---------|--------|--------|----------------|
-| `icp-float` | icp | `vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae` | `secrets/agent-icp.sops.json` | live | The mainnet test float itself — agent-balance measures EVERY ICRC ledger in the bundled catalog (currently ICP / VCHF / ckUSDC / ckBTC / ckETH); rules in CLAUDE.md, record in funds/ledger.jsonl; custody `scripts/agent-key.mjs` |
+| `icp-float` | icp | `vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae` | `secrets/agent-icp.sops.json` | live | The mainnet test float itself — `just funds` measures EVERY ICRC ledger in the bundled catalog (currently ICP / VCHF / ckUSDC / ckBTC / ckETH); rules in CLAUDE.md, record in funds/ledger.jsonl; custody `scripts/agent-key.mjs` |
 | `sol-float` | solana | `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU` | `secrets/agent-sol.sops.json` | live-unfunded | Solana-side float (native SOL + USDC/EURC SPL); funded via the SideShift partner key (secrets/sideshift.sops.json) or a direct founder drip; custody `scripts/agent-sol.mjs` |
-| `icp-float-old` | icp | `lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe` | none (destroyed) | **abandoned — NEVER FUND** | Pre-rotation principal, compromised 2026-09-05 (partial key disclosure into a local tool log) and emptied by the same-day rotation; seed DESTROYED — a misdirected send here is unrecoverable. agent-funds watches it; funds-reconcile anchors it at measured 0 |
+| `icp-float-old` | icp | `lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe` | none (destroyed) | **abandoned — NEVER FUND** | Pre-rotation principal, compromised 2026-09-05 (partial key disclosure into a local tool log) and emptied by the same-day rotation; seed DESTROYED — a misdirected send here is unrecoverable. `just funds` watches it; `funds reconcile` anchors it at measured 0 |
 <!-- /GENERATED:wallets -->
 
 Both live secrets are sops-encrypted with the SAME age identity (`.dev/age/agent-key.txt`), so the
@@ -119,24 +129,24 @@ FX-matrix live proofs (value moves between the agent's OWN wallets; net cost is 
 
 To fund the SOL wallet: run the CeFi convert in the app (local relay with the env set) and shift
 ~1.04 ICP from the IC float to `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU`, or the founder
-drips SOL directly. Until the shift runs, the wallet stays at a measured 0 — via
-`just agent-funds`, never an assumption.
+drips SOL directly. Until the shift runs, the wallet stays at a measured 0 — via `just funds`,
+never an assumption.
 
 ## Funding the float — do not guess the address
 
 A top-up sent to a wrong address string is not recoverable by care — only by procedure. The old
 float principal `lrdna-…-mqe` (full form in the registry above) is DESTROYED: its seed no longer
-exists anywhere, so a misdirected send there is gone forever. `just agent-funds` watches it every
+exists anywhere, so a misdirected send there is gone forever. `just funds` watches it every
 run and trips a loud MISDIRECTED FUNDING alarm if funds ever appear — but the alarm is the
 post-mortem, the procedure below is the prevention:
 
-1. run `just agent-principal` and copy the address from ITS OUTPUT — never from memory, chat
+1. run `just funds address` and copy the address from ITS OUTPUT — never from memory, chat
    scrollback, or an older doc;
 2. paste-send the top-up;
-3. within a minute run `just agent-history` and CONFIRM the IN row — only then is the top-up
+3. within a minute run `just funds history` and CONFIRM the IN row — only then is the top-up
    considered landed.
 
-Same discipline for the SOL wallet: `just agent-sol-principal`, paste-send, then `just agent-funds`
+Same discipline for the SOL wallet: `just funds address sol-float`, paste-send, then `just funds`
 must show the arrival before anything depends on it.
 
 ## Recovery
@@ -156,7 +166,7 @@ core the app signs with, so this is a real dpay identity — not a script-only k
 script cannot print it as a 24-word mnemonic (`app/lib/bip39.ts` reaches the RN i18n module through
 `app/lib/format.ts`, so it will not load outside the app), but the mnemonic is not the way in:
 Onboarding restores from the **64-hex seed** directly (`restoreMode: 'hex'`, `app/components/
-Onboarding.tsx`), which is exactly what `just agent-seed` prints. So an on-device funded test with
+Onboarding.tsx`), which is exactly what `just funds seed icp-float` prints. So an on-device funded test with
 this float is possible today, with no code change.
 
 ## Known limits of the encryption
@@ -175,10 +185,10 @@ The chain records *what* moved; it does not record *why*. That is this table's o
 a second copy of the balance. The authoritative record is the COMMITTED, APPEND-ONLY
 `funds/ledger.jsonl`; this table is RENDERED from it by `scripts/funds.mjs doc`. Record a movement
 with `node scripts/funds.mjs add …` in the same session it happens (hard rule — CLAUDE.md), then
-`just funds-doc`; a row hand-written here would be lost on the next render.
+`just funds doc`; a row hand-written here would be lost on the next render.
 
 <!-- GENERATED:spendlog -->
-_GENERATED by `scripts/funds.mjs doc` from `funds/` — do not hand-edit. Record a movement with `node scripts/funds.mjs add …` (hard rule), then re-render with `just funds-doc`._
+_GENERATED by `scripts/funds.mjs doc` from `funds/` — do not hand-edit. Record a movement with `node scripts/funds.mjs add …` (hard rule), then re-render with `just funds doc`._
 
 | Date | Kind | Wallet | Asset | Amount | To / From | Tx | Purpose |
 |------|------|--------|-------|--------|-----------|----|---------|
