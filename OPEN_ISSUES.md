@@ -398,6 +398,16 @@ single RED alone before believing it.
 - **Conversion PoC → officials confirmation** (post-PoC, founder-run): carry the built screen +
   the spec to the counsel/officials ask (`docs/REGULATORY.md` §7); the founder also owns the
   live-ship decision (`just up` ships the quote route).
+- **Relay deploy of the 2026-09-19 conversion-recovery wave** (founder-run, `docs/OPS.md` §3):
+  HEAD carries five prod-visible fixes the live testing proved necessary — the ICRC-2 approve
+  arg/decoder fix (conversions wedged at "Approving" forever), the stale-destination-quote guard,
+  the ICP-index ICRC-3 mirror (`/api/v1/transactions` 503s prod-wide), the settlement-probe
+  timestamp floor, and the fake-IC approve fidelity + flow 191. Until deploy, prod `/wallet`
+  still wedges conversions at "Approving" and the stuck watch cannot self-flip. LIVE-PROVEN on
+  the agent float: all SIX registered IC pools convert forward end-to-end through the real UI
+  (65mrh ICP→VCHF, hx7nb VCHF→ckUSDC, mohjv ckUSDC→ICP, xmiu5 ICP→ckBTC, akhru ckBTC→ckETH,
+  angxa ICP→ckETH); the hub (4-leg) executes legs but parked honestly mid-plan live — its
+  self-flip needs this deploy.
 - **Confirm-or-correct the reconstructed first-run UX decisions** —
   `docs/specs/2026-09-07-ux-decisions.md` records four decisions that are already SHIPPED IN CODE
   (preference-reason suppression, chooser preselect removal, first-run landing, rehearsal reframe)
