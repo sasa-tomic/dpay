@@ -210,8 +210,15 @@ async function pickDest(driver, substr, {timeoutMs = 15_000} = {}) {
     );
     const rank = (id) => (id.startsWith('convert-dest-inwallet-') ? 0
       : id.startsWith('convert-dest-route-') ? 1 : 2);
-    const hits = rows.filter((r) => r.id.includes(substr) || r.text.toLowerCase().includes(String(substr).toLowerCase()))
-      .sort((a, b) => rank(a.id) - rank(b.id));
+    // Exact testID wins outright; otherwise a row that is a proper path-prefix of another row
+    // (e.g. `:cctp` before `:cctp:jupiter`) is an intermediate, not a leaf — deprioritize it.
+    const allIds = rows.map((r) => r.id);
+    const isIntermediate = (id) => allIds.some((o) => o.startsWith(id + ':'));
+    const hits = rows.filter((r) => r.id === String(substr)
+        || r.id.includes(substr) || r.text.toLowerCase().includes(String(substr).toLowerCase()))
+      .sort((a, b) => (rank(a.id) - rank(b.id))
+        || ((a.id === substr ? 0 : 1) - (b.id === substr ? 0 : 1))
+        || ((isIntermediate(a.id) ? 1 : 0) - (isIntermediate(b.id) ? 1 : 0)));
     if (hits.length > 0) {
       log(`dest picked: ${hits[0].id} — ${hits[0].text}`);
       await driver.click(hits[0].id);
@@ -311,8 +318,31 @@ async function cmdProbe(src, amount) {
     await sleep(3_000);
     const routes = await listDestRoutes(driver);
     console.log('dest routes:', JSON.stringify(routes, null, 2));
-    const q = await readQuote(driver, {timeoutMs: 15_000}).catch((e) => ({err: String(e)}));
-    console.log('quote:', JSON.stringify(q, null, 2));
+    // D2 evolution: click the crossrail route row and watch the picker + settle address appear.
+    // The CeFi leaf is the FULL `:cctp:jupiter` row ("SOL — to your Solana address"); `:cctp`
+    // alone is the USDC-on-Solana intermediate and clicking it does nothing visible.
+    const row = routes.find((r) => r.id.endsWith(':jupiter'))
+      ?? routes.find((r) => r.id.includes('multihop') || /sol/i.test(r.text));
+    if (row) {
+      log(`probe picks route row: ${row.id}`);
+      await driver.click(row.id);
+      for (let t = 0; t <= 45; t += 5) {
+        await sleep(5_000);
+        const all = await driver.eval(() =>
+          Array.from(document.querySelectorAll('[data-testid^="convert-"]')).map((el) => el.getAttribute('data-testid'))
+            .filter((id) => /mech|settle|route|dest/.test(id)),
+        );
+        const uniq = [...new Set(all)];
+        console.log(`t+${t}s convert picker ids:`, JSON.stringify(uniq));
+        if (uniq.some((id) => id === 'convert-settle-address' || id.startsWith('convert-dest-mech-'))) {
+          const body = await driver.bodyText();
+          console.log(`t+${t}s body slice:`, body.replace(/\s+/g, ' ').slice(0, 700));
+          break;
+        }
+      }
+      const q = await readQuote(driver, {timeoutMs: 30_000}).catch((e) => ({err: String(e)}));
+      console.log('quote after D2 pick:', JSON.stringify(q, null, 2));
+    }
     await driver.screenshot('live-probe');
   });
 }
@@ -340,7 +370,9 @@ async function cmdB(icpAmount) {
   await withApp(async (driver) => {
     await openConvert(driver, 'icp');
     await driver.type('convert-amount', icpAmount);
-    await pickDest(driver, 'sol');
+    // The CeFi leaf is the FULL route id (flow 187's row): "SOL — to your Solana address".
+    // 'sol' as a plain substring also matches the USDC-on-Solana intermediate — use the id.
+    await pickDest(driver, 'convert-dest-route-multihop:icpswap-ckusdc:2:cctp:jupiter');
     // If a mechanism sub-picker appears, the CeFi rail is a mechanism choice — take sideshift.
     try {
       await driver.findByTestID('convert-dest-mechs', {timeoutMs: 4_000});
