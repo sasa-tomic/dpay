@@ -184,6 +184,9 @@ const recordFor = (v: VenueEntry, over: Partial<ConvertRecord> = {}): ConvertRec
 
 const fakeRes = (body: unknown, ok = true, status = 200) => ({ok, status, json: async () => body});
 const rowsRes = (rows: unknown[]) => fakeRes({transactions: rows});
+// Probe fixtures must look NEWER than any record's createdAtMs (the 2026-09-19 probe floor
+// ignores rows that predate the record — index timestamps are absolute).
+const NOW = (): number => Math.floor(Date.now() / 1000) + 3600;
 const myPrincipal = 'myprincipal123';
 const OPTS = {submitAttempts: 2, poll: {attempts: 1, intervalMs: 0}, settleAttempts: 2, settleIntervalMs: 0};
 const EXEC_DEPS = () => ({secretHex: 'sec', publicHex: 'pub', relayUrl: 'http://r', onUpdate: jest.fn()});
@@ -288,7 +291,7 @@ describe('INV-2 — every beneficiary is the user\'s own principal', () => {
         (String(path).includes('currency=7')
           ? rowsRes([
               {from: v.endpoint, to: 'someoneelse', amount: '190000000', currency: 7, block: 43},
-              {from: v.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 44},
+              {from: v.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 44, timestamp: NOW()},
             ])
           : rowsRes([])) as never);
       const seen = await probeConvertSettlement({
@@ -329,7 +332,7 @@ describe('INV-2 (multi-venue half) — a venue\'s settlement never claims anothe
       // counterparty identity is part of the match, not just the figures.
       jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
         (String(path).includes('currency=7')
-          ? rowsRes([{from: other.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 42}])
+          ? rowsRes([{from: other.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 42, timestamp: NOW()}])
           : rowsRes([])) as never);
       const seen = await probeConvertSettlement({
         relayUrl: 'http://r', publicHex: 'pub', myPrincipalLower: myPrincipal, record: recordFor(mine, {step: 'settling'}),
@@ -433,7 +436,7 @@ describe('INV-9 — every leg submits to ITS canister at the IC boundary; the re
       jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
       jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
         (String(path).includes('currency=7')
-          ? rowsRes([{from: v.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 77}])
+          ? rowsRes([{from: v.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 77, timestamp: NOW()}])
           : rowsRes([])) as never);
       const final = await executeConvert(recordFor(v), d, OPTS);
       expect(final.step).toBe('done');
@@ -479,7 +482,7 @@ describe('Wave-3 recovery invariant — "expired legs ⇒ submitTransfer is NEVE
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
       (String(path).includes('currency=7')
-        ? rowsRes([{from: VENUE_B.endpoint, to: myPrincipal, amount: '189995000', currency: 7, block: 555}])
+        ? rowsRes([{from: VENUE_B.endpoint, to: myPrincipal, amount: '189995000', currency: 7, block: 555, timestamp: NOW()}])
         : rowsRes([])) as never);
     const final = await executeConvert(
       recordFor(VENUE_B, {step: 'swapping', legs: expiredLegs(VENUE_B)}), EXEC_DEPS(), OPTS);
@@ -494,7 +497,7 @@ describe('Wave-3 recovery invariant — "probe match ⊆ [net, gross] ∧ ∉ cl
     jest.mocked(DpayCore.icpPrincipalFromPubkey).mockResolvedValue(myPrincipal as never);
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
       (String(path).includes('currency=7')
-        ? rowsRes([{from: v.endpoint, to: myPrincipal, amount, currency: 7, block: 900}])
+        ? rowsRes([{from: v.endpoint, to: myPrincipal, amount, currency: 7, block: 900, timestamp: NOW()}])
         : rowsRes([])) as never);
     return probeConvertSettlement({
       relayUrl: 'http://r', publicHex: 'pub', myPrincipalLower: myPrincipal,
@@ -522,8 +525,8 @@ describe('Wave-3 recovery invariant — "probe match ⊆ [net, gross] ∧ ∉ cl
     jest.mocked(relayFetch).mockImplementation(async (_relay: unknown, path: unknown) =>
       (String(path).includes('currency=7')
         ? rowsRes([
-            {from: VENUE_A.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 555},
-            {from: VENUE_A.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 556},
+            {from: VENUE_A.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 555, timestamp: NOW()},
+            {from: VENUE_A.endpoint, to: myPrincipal, amount: '190000000', currency: 7, block: 556, timestamp: NOW()},
           ])
         : rowsRes([])) as never);
     const seen = await probeConvertSettlement({

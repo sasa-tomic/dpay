@@ -53,6 +53,7 @@ use pocket_ic::{PocketIc, PocketIcBuilder};
 
 use dpay_core::generate_keypair;
 use dpay_relay::agent_ledger::{
+    IcpIndexOperation, IcpIndexTimestamp,
     icp_legacy_account_identifier, IcpIndexAccountTransactionsOk,
     IcpIndexAccountTransactionsResult, IcpIndexApprove, IcpIndexBurn,
     IcpIndexGetAccountTransactionsArgs, IcpIndexMint, IcpIndexTokens, IcpIndexTransaction,
@@ -298,40 +299,35 @@ fn tx_transfer(
     ts_ns: u64,
 ) -> IcpIndexTransactionWithId {
     IcpIndexTransactionWithId {
-        id: Nat::from(id),
+        id,
         transaction: IcpIndexTransaction {
-            burn: None,
-            mint: None,
-            approve: None,
-            transfer: Some(IcpIndexTransfer {
+            memo: 0,
+            icrc1_memo: Some(memo),
+            operation: IcpIndexOperation::Transfer(IcpIndexTransfer {
                 to: to.into(),
                 fee: Some(IcpIndexTokens { e8s: 10_000 }),
                 from: from.into(),
-                memo: None, // legacy nat64 memo absent; icrc1_memo carries the payload
-                icrc1_memo: Some(memo),
-                created_at_time: Some(ts_ns + 7), // fallback exists but `timestamp` must win
                 amount: IcpIndexTokens { e8s },
+                spender: None,
             }),
-            timestamp: ts_ns,
+            timestamp: Some(IcpIndexTimestamp { timestamp_nanos: ts_ns }),
+            created_at_time: Some(IcpIndexTimestamp { timestamp_nanos: ts_ns + 7 }), // fallback exists but `timestamp` must win
         },
     }
 }
 
 fn tx_mint(id: u64, to: &str, e8s: u64, memo: Vec<u8>, ts_ns: u64) -> IcpIndexTransactionWithId {
     IcpIndexTransactionWithId {
-        id: Nat::from(id),
+        id,
         transaction: IcpIndexTransaction {
-            burn: None,
-            mint: Some(IcpIndexMint {
+            memo: 0,
+            icrc1_memo: Some(memo),
+            operation: IcpIndexOperation::Mint(IcpIndexMint {
                 to: to.into(),
-                memo: None,
-                icrc1_memo: Some(memo),
-                created_at_time: None,
                 amount: IcpIndexTokens { e8s },
             }),
-            approve: None,
-            transfer: None,
-            timestamp: ts_ns,
+            timestamp: Some(IcpIndexTimestamp { timestamp_nanos: ts_ns }),
+            created_at_time: None,
         },
     }
 }
@@ -342,14 +338,17 @@ fn tx_unused_approve_and_burn_shaped_correctly() {
     // unit tests in agent_ledger.rs cover their omission from the REST contract.
     let _ = (
         IcpIndexApprove {
+            fee: None,
             from: String::new(),
+            allowance: IcpIndexTokens { e8s: 0 },
+            expected_allowance: None,
+            expires_at: None,
+            spender: String::new(),
         },
         IcpIndexBurn {
             from: String::new(),
-            memo: None,
-            icrc1_memo: None,
-            created_at_time: None,
             amount: IcpIndexTokens { e8s: 0 },
+            spender: None,
         },
     );
 }
@@ -369,7 +368,8 @@ fn ok_reply(rows: Vec<IcpIndexTransactionWithId>, oldest_tx_id: Option<u64>) -> 
     encode_one(&IcpIndexAccountTransactionsResult::Ok(
         IcpIndexAccountTransactionsOk {
             transactions: rows,
-            oldest_tx_id: oldest_tx_id.map(Nat::from),
+            oldest_tx_id,
+            balance: 0,
         },
     ))
     .expect("encode index reply")
