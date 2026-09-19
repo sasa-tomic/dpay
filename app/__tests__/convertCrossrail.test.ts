@@ -93,7 +93,7 @@ import {multihopRoutesFrom} from '../routes';
 import {BUNDLED_NETWORKS, icpCatalogOf} from '../config/catalog';
 import {deriveSolanaAddress} from '../solana/identity';
 import {deriveAta} from '../solana/spl';
-import {USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS} from '../solana/tokens';
+import {USDC_MINT_ADDRESS, WRAPPED_SOL_MINT_ADDRESS, EURC_MINT_ADDRESS} from '../solana/tokens';
 
 const BUNDLED = icpCatalogOf(BUNDLED_NETWORKS);
 const POOL = 'mohjv-bqaaa-aaaag-qjyia-cai';
@@ -507,5 +507,191 @@ describe('prepareCrossRailSolLeg + executeCrossRailSolSwap — the final Jupiter
     expect(out.step).toBe('failed_refunded');
     expect(out.failureCode).toBe('unknown');
     expect(out.failureDetail).toContain('blockhash');
+  });
+});
+
+// =================================================================================================
+// The EURC widening (2026-09-19): Route C composes to ANY registered USDC-pair Solana
+// token — jupiter-usdc-eurc turns CHF→EUR and USD(IC)→EUR into ONE intent. Pinned here:
+// the route row BESIDE the original (registry order, per-venue routeId), the optional-only
+// record widening (a native-SOL record carries none of the new fields), the fail-closed
+// hydration shape sets (mint+decimals travel together, the two floor shapes are mutually
+// exclusive, legacy hydrates byte-identically), the final leg's USDC→EURC quote with the
+// ATA-OWNER beneficiary check, and the done panel reading the realized credit in the OUT
+// MINT's base units (token credit at the ATA — never the native-lamports read).
+// =================================================================================================
+describe('the EURC widening — Route C to a registered USDC-pair SPL out', () => {
+  const deps = {secretHex: SECRET, publicHex: 'aabb', onUpdate: () => {}};
+  const EURC_OUT = '10300000';   // 10.3 EURC — the fresh quote's estimate (6 decimals)
+  const EURC_FLOOR = '10200000'; // the leg's own min-out — the compounded floor's tail
+
+  beforeEach(() => {
+    jest.mocked(fetchJupiterSwapTx).mockResolvedValue({
+      ok: true, swap: {swapTransaction: new Uint8Array([9, 9, 9]), lastValidBlockHeight: 300_000_000},
+    } as never);
+    jest.mocked(decodeVenueSwapTx).mockReturnValue({feePayer: SOL_ADDRESS} as never);
+    jest.mocked(verifyVenueSwapTxBeneficiaries).mockReturnValue({ok: true} as never);
+    jest.mocked(quoteSolMessageFee).mockResolvedValue(5000n);
+    // Synchronous seam (pure signer) — a resolved Promise here would read as `feePayer: undefined`.
+    jest.mocked(signVenueSwapTx).mockReturnValue({feePayer: SOL_ADDRESS, raw: new Uint8Array([1, 2, 3, 4])} as never);
+  });
+
+  function mockEurcQuote(): void {
+    jest.mocked(fetchJupiterQuote).mockResolvedValue({
+      ok: true,
+      quote: {
+        venueId: 'jupiter-usdc-eurc', inputMint: USDC_MINT_ADDRESS, outputMint: EURC_MINT_ADDRESS,
+        inAmount: '187700000', outAmount: EURC_OUT, otherAmountThreshold: EURC_FLOOR,
+        priceImpactPct: '0.002', slippageBps: 100, platformFeeBps: null, raw: {},
+        fetchedAtMs: Date.now(),
+      },
+    } as never);
+  }
+
+  async function plannedEurcRecord(over: Partial<ConvertRecord> = {}): Promise<ConvertRecord> {
+    const route = multihopRoutesFrom(BUNDLED, 8)[3]; // :cctp:jupiter-usdc-eurc
+    const rec = await prepareMultihopConvertRecord({
+      secretHex: SECRET, quote: hopQuote(), math: hopMath(), route, destAddress: DEST,
+    });
+    return {...rec, ...over};
+  }
+
+  /** The full chain to the final leg: prepare → IC legs → burn attached → mint verified →
+   *  the EURC leg signed (quotes the VERIFIED mint credit, freezes the EURC floor). */
+  async function eurcSwappingRecord(): Promise<ConvertRecord> {
+    mockEurcQuote();
+    const eurc = await plannedEurcRecord();
+    const ready = attachCctpBurnTx(await runIcLegs(eurc), '0x' + 'cd'.repeat(32));
+    fetchMock.mockResolvedValueOnce(fakeRes({messages: [{forwardTxHash: '5KqxTAk9'}]}));
+    jest.mocked(getSolTokenCredit).mockResolvedValue('187700000');
+    const solReady = await executeCrossRailConvert(ready, deps, {watchAttempts: 1, watchIntervalMs: 0});
+    expect(solReady.step).toBe('sol_ready');
+    return prepareCrossRailSolLeg(SECRET, solReady, 'http://relay');
+  }
+
+  test('route composition: the EURC venue composes BESIDE the SOL one — registry order, per-venue routeId', () => {
+    const routes = multihopRoutesFrom(BUNDLED, 8);
+    expect(routes[2]!.routeId).toBe('multihop:icpswap-ckusdc:2:cctp:jupiter');
+    expect(routes[2]!.crossRail!.sol!.outMint).toBe(WRAPPED_SOL_MINT_ADDRESS); // the original row, untouched
+    expect(routes[3]!.routeId).toBe('multihop:icpswap-ckusdc:2:cctp:jupiter-usdc-eurc');
+    expect(routes[3]!.crossRail!.sol).toEqual({
+      venueId: 'jupiter-usdc-eurc', outMint: EURC_MINT_ADDRESS, outSymbol: 'EURC', outDecimals: 6,
+    });
+    expect(routes[3]!.dest).toEqual({symbol: 'EURC', network: 'Solana'});
+  });
+
+  test('prepare freezes the out mint + decimals on the EURC route; the native-SOL record carries NONE of the new fields', async () => {
+    const eurc = await plannedEurcRecord();
+    expect(eurc.crossRail).toEqual({
+      kind: 'cctp_sol',
+      solAddress: SOL_ADDRESS,
+      mintRecipientAta: ATA_B58,
+      maxFeeSubunits: MAX_FEE,
+      mintFloorSubunits: (BigInt(MIN_OUT) - BigInt(MAX_FEE)).toString(),
+      solVenueId: 'jupiter-usdc-eurc',
+      solOutMint: EURC_MINT_ADDRESS,
+      solOutDecimals: 6,
+    });
+    expect(eurc.destSymbol).toBe('EURC');
+    expect(eurc.destNetwork).toBe('Solana');
+    expect(eurc.legPlan!.map(p => p.kind)).toEqual([
+      'approve', 'swap', 'approve', 'approve_gas', 'withdraw_erc20', 'cctp_burn', 'sol_swap',
+    ]);
+    // The compounded floor: the burn floor IS the IC minOut; the mint floor is what
+    // survives Circle's fee; the EURC leg's own floor (frozen later, at sol_ready)
+    // compounds from THAT — min from the previous leg's floor, never re-derived.
+    expect(BigInt(eurc.crossRail!.mintFloorSubunits!)).toBeLessThan(BigInt(MIN_OUT));
+
+    const sol = await plannedCrossRecord();
+    expect(sol.crossRail).toEqual({
+      kind: 'cctp_sol',
+      solAddress: SOL_ADDRESS,
+      mintRecipientAta: ATA_B58,
+      maxFeeSubunits: MAX_FEE,
+      mintFloorSubunits: (BigInt(MIN_OUT) - BigInt(MAX_FEE)).toString(),
+      solVenueId: 'jupiter',
+    });
+  });
+
+  test('hydration: the SPL-out widening round-trips; broken shape sets are refused; a legacy record stays byte-identical', async () => {
+    const eurc = await plannedEurcRecord();
+
+    const ok = hydrateConvertStore({[eurc.id]: JSON.parse(JSON.stringify(eurc))})[eurc.id]!;
+    expect(ok.crossRail).toEqual(eurc.crossRail);
+
+    // Mint WITHOUT decimals (or the reverse) is a shape this build never wrote — dropped.
+    const halfMint = JSON.parse(JSON.stringify(eurc));
+    delete halfMint.crossRail.solOutDecimals;
+    expect(hydrateConvertStore({[eurc.id]: halfMint})).toEqual({});
+
+    // The subunit floor REQUIRES the mint facts, and NEVER coexists with the lamports floor.
+    const subNoMint = JSON.parse(JSON.stringify(eurc));
+    subNoMint.crossRail.solExpectedSubunits = '10200000';
+    delete subNoMint.crossRail.solOutMint;
+    delete subNoMint.crossRail.solOutDecimals;
+    expect(hydrateConvertStore({[eurc.id]: subNoMint})).toEqual({});
+    const bothFloors = JSON.parse(JSON.stringify(eurc));
+    bothFloors.crossRail.solExpectedSubunits = '10200000';
+    bothFloors.crossRail.solExpectedLamports = '1025000000';
+    expect(hydrateConvertStore({[eurc.id]: bothFloors})).toEqual({});
+
+    // A legacy native-SOL record (solExpectedLamports, none of the new fields) hydrates
+    // byte-identically — the widening is optional-only.
+    const legacy = await plannedCrossRecord();
+    legacy.crossRail!.solExpectedLamports = '1025000000';
+    const legHyd = hydrateConvertStore({[legacy.id]: JSON.parse(JSON.stringify(legacy))})[legacy.id]!;
+    expect(legHyd.crossRail).toEqual(legacy.crossRail);
+  });
+
+  test('sol_ready signs against a FRESH USDC→EURC quote; the beneficiary check pins the DEVICE\'S OWN EURC ATA', async () => {
+    const ready = await eurcSwappingRecord();
+    const q = jest.mocked(fetchJupiterQuote).mock.calls[0]!;
+    expect(q[0]).toBe('http://relay');
+    expect(q[2]).toBe(USDC_MINT_ADDRESS);
+    expect(q[3]).toBe(EURC_MINT_ADDRESS);
+    expect(q[4]).toBe('187700000'); // the VERIFIED mint credit, never an estimate
+    expect(q[5]).toBe(100);
+    // The out floor is frozen in the OUT MINT's base units — and the native lamports
+    // field stays ABSENT (the two shapes are mutually exclusive on one record).
+    expect(ready.crossRail!.solExpectedSubunits).toBe(EURC_FLOOR);
+    expect(ready.crossRail!.solExpectedLamports).toBeUndefined();
+    // The beneficiary red line: the tx MUST pay out at the device's own EURC ATA.
+    const beneficiary = jest.mocked(verifyVenueSwapTxBeneficiaries).mock.calls[0]!;
+    expect(bs58.encode(beneficiary[1].pubkey)).toBe(SOL_ADDRESS);
+    expect(bs58.encode(beneficiary[1].outAta!)).toBe(bs58.encode(deriveAta(SOL_ADDRESS, EURC_MINT_ADDRESS)));
+    expect(ready.step).toBe('swapping');
+    expect(ready.legPlan!.map(p => p.state)).toEqual([
+      'confirmed', 'confirmed', 'confirmed', 'confirmed', 'confirmed', 'confirmed', 'sent',
+    ]);
+  });
+
+  test('execute: the realized credit is the OUT-MINT token credit at the ATA (EURC units, never the lamports read)', async () => {
+    const ready = await eurcSwappingRecord();
+    jest.mocked(submitRawSolTx).mockResolvedValue(ready.solanaLeg!.signature);
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({err: null, confirmationStatus: 'confirmed'} as never);
+    jest.mocked(getSolNativeCredit).mockResolvedValue('999999999'); // a native read would be a UNIT BUG
+    jest.mocked(getSolTokenCredit).mockResolvedValue(EURC_OUT);
+    const out = await executeCrossRailSolSwap(ready, deps, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
+    expect(out.step).toBe('done');
+    expect(out.outAmountNet).toBe(EURC_OUT);
+    expect(out.outTx).toBe(ready.solanaLeg!.signature);
+    const c = jest.mocked(getSolTokenCredit).mock.calls.at(-1)!;
+    expect(c[0]).toBe(ready.solanaLeg!.signature);
+    expect(c[1]).toBe(SOL_ADDRESS);
+    expect(c[2]).toBe(EURC_MINT_ADDRESS);
+    expect(out.legPlan!.map(p => p.state)).toEqual([
+      'confirmed', 'confirmed', 'confirmed', 'confirmed', 'confirmed', 'confirmed', 'confirmed',
+    ]);
+  });
+
+  test('unreadable payout falls back to the leg\'s OWN EURC floor (payout-floor honesty, right units)', async () => {
+    const ready = await eurcSwappingRecord();
+    jest.mocked(submitRawSolTx).mockResolvedValue(ready.solanaLeg!.signature);
+    jest.mocked(getSolSignatureStatus).mockResolvedValue({err: null, confirmationStatus: 'confirmed'} as never);
+    jest.mocked(getSolTokenCredit).mockResolvedValue(null);
+    const out = await executeCrossRailSolSwap(ready, deps, {submitAttempts: 1, confirmAttempts: 1, pollIntervalMs: 0});
+    expect(out.step).toBe('done');
+    expect(out.outAmountNet).toBe(EURC_FLOOR);
+    expect(out.failureDetail).toBe('payout-floor');
   });
 });
