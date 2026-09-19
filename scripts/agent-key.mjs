@@ -23,6 +23,8 @@
 //   node scripts/agent-key.mjs init        generate the key (once); prints the principal only
 //   node scripts/agent-key.mjs principal   print the funding address (no decryption)
 //   node scripts/agent-key.mjs balance     query live mainnet balances (no decryption)
+//   node scripts/agent-key.mjs balance P   measure ANY principal — agent-funds watches the
+//                                          abandoned one through this; needs no key at all
 //   node scripts/agent-key.mjs history     recent ICP ledger transactions for this key (no decryption)
 //   node scripts/agent-key.mjs seed        print the seed hex — DECRYPTS; only for a spend
 import {readFileSync, writeFileSync, existsSync, mkdirSync} from 'node:fs';
@@ -38,13 +40,29 @@ const SEC = join(ROOT, 'secrets/agent-icp.sops.json');
 const PUB = join(ROOT, 'secrets/agent-icp.pub.json');
 const AGE_KEY = join(ROOT, '.dev/age/agent-key.txt');
 
-/** The assets this float can hold. Keys index `principals` and `decimals` in catalog_truth.json —
- *  the ledger ids and decimals themselves are never copied here. */
-const ASSETS = [
-  {label: 'ICP', ledgerKey: 'icp_ledger', decKey: 'icp'},
-  {label: 'VCHF', ledgerKey: 'vchf_ledger', decKey: 'vchf'},
-  {label: 'ckBTC', ledgerKey: 'ckbtc_ledger', decKey: 'ckbtc'},
-];
+/** Every mainnet ICRC ledger in the bundled catalog, DERIVED from catalog_truth.json — the honest
+ *  census. A ledger added there appears here automatically; restating a list would silently hide
+ *  holdings the moment the catalog grows (the ckUSDC/ckETH omission that motivated this). The
+ *  balance is the only statement of what the float holds, so it must enumerate everything or it
+ *  lies by omission — a hidden zero and a hidden holding are the same lie.
+ *
+ *  Non-census keys, by rule: `demo_ledger` (local-replica token, not a mainnet float asset),
+ *  `testnet_*` (IC-testnet chain-key canisters), everything without a `_ledger` suffix (minters,
+ *  the index, the Solana eurc_mint). Ledgers sharing a principal are measured once
+ *  (`cketh_gas_ledger` IS `cketh_ledger`). Display order is presentation only. */
+function census(truth) {
+  const ORDER = ['icp', 'vchf', 'ckusdc', 'ckbtc', 'cketh']; // stable display order for the known five
+  const LABELS = {icp: 'ICP', vchf: 'VCHF', ckusdc: 'ckUSDC', ckbtc: 'ckBTC', cketh: 'ckETH'};
+  const DEC_KEY = {cketh: 'eth'}; // ckETH's decimals pin rides the `eth` key (the 18-dec row)
+  const stems = Object.keys(truth.principals)
+    .filter(k => k.endsWith('_ledger') && !k.startsWith('testnet_') && k !== 'demo_ledger')
+    .map(k => k.slice(0, -'_ledger'.length))
+    .sort((a, b) => ((ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+  const seen = new Set();
+  return stems
+    .filter(stem => { const p = truth.principals[`${stem}_ledger`]; if (seen.has(p)) return false; seen.add(p); return true; })
+    .map(stem => ({label: LABELS[stem] ?? stem.toUpperCase(), ledgerKey: `${stem}_ledger`, decKey: DEC_KEY[stem] ?? stem}));
+}
 
 function die(msg) {
   console.error(`agent-key: ${msg}`);
@@ -117,6 +135,15 @@ async function cmdInit() {
 
 async function cmdPrincipal() {
   console.log(readPub().principal);
+  // Paste-hazard guard: a top-up sent to a wrong string is unrecoverable, so the funding address
+  // is never handed over without its procedure. The destroyed principal is named SHORTENED on
+  // purpose — the full string must not be one careless copy away (full form: docs/AGENT-FUNDS.md).
+  console.log('\nFunding safety (docs/AGENT-FUNDS.md "Funding the float — do not guess the address"):');
+  console.log('  1. copy the address printed ABOVE — never one from memory or chat scrollback');
+  console.log('  2. paste-send the top-up');
+  console.log('  3. within a minute run `just agent-history` and CONFIRM the IN row — only then is it landed');
+  console.log('The pre-rotation principal lrdna-…-mqe is DESTROYED and unrecoverable: a misdirected send');
+  console.log('there is gone forever. `just agent-funds` watches it and trips if funds ever appear.');
 }
 
 async function cmdSeed() {
@@ -131,10 +158,13 @@ async function cmdSeed() {
 }
 
 async function cmdBalance() {
-  const {principal} = readPub();
+  // An explicit principal measures THAT principal (agent-funds' abandoned-principal watch passes
+  // one) and deliberately needs no key file at all — ledger balances are public.
+  const principal = process.argv[3] ?? readPub().principal;
   const truth = JSON.parse(readFileSync(TRUTH, 'utf8'));
+  const assets = census(truth);
   console.log(`principal ${principal}`);
-  for (const a of ASSETS) {
+  for (const a of assets) {
     const ledger = truth.principals[a.ledgerKey];
     const dec = truth.decimals[a.decKey];
     if (!ledger || dec === undefined) die(`catalog_truth.json is missing ${a.ledgerKey}/${a.decKey}`);
