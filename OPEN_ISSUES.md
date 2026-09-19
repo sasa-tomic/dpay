@@ -98,6 +98,25 @@
 
 
 
+**1.5 CeFi (SideShift) live ops — BLOCKED on `x-user-ip`: local partner-key proofs are
+structurally impossible until the relay reads a trusted-proxy header.** Value 8, effort S. First
+live CeFi order attempt (FX-matrix phase 1, 2026-09-20, driver `e2e/live-drive.mjs` op B): the app
+reached the full CeFi surface (route leaf, `sideshift` mechanism, settle-address gate) but the
+venue quote never rendered — upstream SideShift refuses every partner request whose `x-user-ip`
+is not a PUBLIC end-user IP (verbatim: `{"error":{"message":"The x-user-ip header must be set to
+the end-user IP address"}}`). The relay forwards its TCP peer only (`ClientIp`,
+`crates/dpay-relay/src/sideshift.rs:195`, "never fabricated" — correct instinct, wrong granularity):
+loopback/LAN peers fail, and a trycloudflare tunnel does NOT help (cloudflared connects over
+loopback). Fix is small and local to `sideshift.rs`: when the TCP peer is loopback/private, honor
+`X-Forwarded-For` (trusted-proxy pattern; prod-behind-a-proxy currently forwards the proxy's IP —
+public enough to pass, jurisdictionally approximate). Then: prod must carry the partner key per
+docs/OPS.md §3 (checked 2026-09-20, prod `44762b3` answers `sideshift-unconfigured`), and the
+in-app shift settles at the APP-derived SOL rail `BzFNJywhJYtPKNZN8fefuiKetSCD8Uotw1ibuP8MkZgX`
+(SLIP-10 of the IC float seed, `app/solana/identity.ts`) — NOT the registered `sol-float`
+`4Cuacz…` no app code signs from (docs/AGENT-FUNDS.md § funding path). Zero spend incurred; the
+driver's pre-signature gates refused everything. Op C (Jupiter SOL rail) is unfundable until a
+shift lands (both SOL wallets measured 0 by design).
+
 **1. Objective 3 (card/bank funding) — HARD-BLOCKED on founder/legal; NOTHING is offline-buildable
 until the blockers land. THE thing that unblocks it:**
 

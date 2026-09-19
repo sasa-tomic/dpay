@@ -132,6 +132,25 @@ To fund the SOL wallet: run the CeFi convert in the app (local relay with the en
 drips SOL directly. Until the shift runs, the wallet stays at a measured 0 — via `just funds`,
 never an assumption.
 
+**First live attempt (2026-09-20, FX-matrix phase 1) — BLOCKED at the quote layer, zero spend.**
+Driving the real app against the local partner-key relay (ICP→SOL via `sideshift`, settle at the
+app's own derived SOL rail `BzFNJywhJYtPKNZN8fefuiKetSCD8Uotw1ibuP8MkZgX` — see below), the UI
+reached the CeFi surface (route leaf, mechanism, settle-address gate all green) but the venue
+quote never rendered. Root cause, measured through the relay's proxy with the exact registered
+pair: SideShift's upstream refuses every partner request whose `x-user-ip` is not a PUBLIC end-user
+IP — verbatim: `{"error":{"message":"The x-user-ip header must be set to the end-user IP address"}}`.
+The relay forwards its TCP peer (`ClientIp`, `sideshift.rs:195`); a local peer is loopback/LAN
+(trycloudflare tunnel included — cloudflared connects over loopback), so LOCAL partner-key proofs
+are structurally impossible until the relay honors a trusted-proxy header (`X-Forwarded-For` when
+the peer is loopback/private) in `sideshift.rs`. Prod additionally needs the partner key wired per
+docs/OPS.md §3 (checked 2026-09-20: prod at commit `44762b3` answers `sideshift-unconfigured`).
+Nothing moved on-chain; the driver's pre-signature gates refused all spends. Also corrected by
+this attempt: the APP's Solana rail address is NOT the `sol-float` wallet — `app/solana/identity.ts`
+derives it by SLIP-10 ed25519 m/44'/501'/0'/0' FROM THE IC float seed (one backup recovers both
+rails), so any in-app shift settles at `BzFNJywhJYtPKNZN8fefuiKetSCD8Uotw1ibuP8MkZgX`, not
+`4Cuacz…` (the registered `sol-float` is an independent raw-seed key no app code signs from;
+measured 0 via `just funds` throughout; watch the derived address with `node e2e/live-sol.mjs`).
+
 ## Funding the float — do not guess the address
 
 A top-up sent to a wrong address string is not recoverable by care — only by procedure. The old
