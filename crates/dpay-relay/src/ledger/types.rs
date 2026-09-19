@@ -204,7 +204,7 @@ pub struct CurrencyDescriptor {
     /// preserved for every existing row (pinned by the byte-shape tests in `catalog.rs`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub liquidity: Option<LiquidityTier>,
-    /// The fiat-ramp PARTNER named by an `offramp = Partner` row (e.g. `"DFX"` on VEUR) — the
+    /// The fiat-ramp PARTNER named by an `offramp = Partner` row — the
     /// honest disclosure of who runs the off-ramp, so a later stage can surface it instead of an
     /// anonymous "Partner". OPTIONAL on the wire (`None` ⇒ absent key, byte-shape preserved);
     /// deliberately NOT validated against a partner registry here (the catalog is the registry).

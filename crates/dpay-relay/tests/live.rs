@@ -462,8 +462,8 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(hb["status"], "ok");
 
         // ---- (2) currencies: the COMPILED catalog, served without touching the facade ----
-        // v2 network-first envelope: icp mainnet (7 rows: DEMO 0, ckBTC 1, ckUSDC 2, ckETH 6,
-        // VCHF 7, ICP 8, VEUR 9 — the EUR Stage-1 row), icp testnet (the real trio ckTESTBTC 3 /
+        // v2 network-first envelope: icp mainnet (6 rows: DEMO 0, ckBTC 1, ckUSDC 2, ckETH 6,
+        // VCHF 7, ICP 8 — VEUR 9 retired 2026-09-19), icp testnet (the real trio ckTESTBTC 3 /
         // ckSepoliaUSDC 4 / ckSepoliaETH 5), solana mainnet (SOL + USDC + EURC). The VCHF row must
         // name THIS fixture's pinned principal — the fan-out target the balances/transactions
         // routes resolve against.
@@ -482,8 +482,8 @@ fn live_read_surface_at_user_principal() {
         assert_eq!(mainnet["environment"], "mainnet");
         assert_eq!(
             mainnet["assets"].as_array().map(Vec::len),
-            Some(7),
-            "the compiled mainnet section carries all 7 rows incl. VCHF 7 + ICP 8 + VEUR 9: {cb}"
+            Some(6),
+            "the compiled mainnet section carries all 6 rows incl. VCHF 7 + ICP 8: {cb}"
         );
         assert_eq!(
             networks[1]["environment"], "testnet",

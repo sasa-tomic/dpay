@@ -1710,7 +1710,7 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(solana["environment"], "mainnet");
 
     // IC mainnet section: the REAL prod rows (DEMO's network None is mainnet-side). VCHF
-    // (currency 7), ICP (currency 8) and VEUR (currency 9) carry network "Internet Computer"
+    // (currency 7) and ICP (currency 8) carry network "Internet Computer"
     // — the U3 pin: the relay's server-authoritative partition must file them MAINNET-side,
     // not testnet-side.
     let rows = mainnet["assets"]
@@ -1718,17 +1718,18 @@ async fn currencies_route_returns_demo_catalog() {
         .expect("icp mainnet assets array");
     assert_eq!(
         rows.len(),
-        7,
-        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckETH + VCHF + ICP + VEUR (the three Sepolia/testnet-BTC rows are testnet-side): {body}"
+        6,
+        "icp mainnet = DEMO_USD + ckBTC + ckUSDC + ckETH + VCHF + ICP (the three Sepolia/testnet-BTC rows are testnet-side): {body}"
     );
-    // Served order is the prod order: 0, 1, 2, 6, then the appended 7, 8, 9.
+    // Served order is the prod order: 0, 1, 2, 6, then the appended 7, 8. Currency 9 (VEUR)
+    // was retired 2026-09-19 — the id is never reused.
     let mainnet_ids: Vec<u64> = rows
         .iter()
         .map(|r| r["currency"].as_u64().unwrap())
         .collect();
     assert_eq!(
         mainnet_ids,
-        vec![0, 1, 2, 6, 7, 8, 9],
+        vec![0, 1, 2, 6, 7, 8],
         "mainnet section order: {body}"
     );
 
@@ -1901,35 +1902,6 @@ async fn currencies_route_returns_demo_catalog() {
     assert_eq!(icp["onramp"], "Unavailable");
     assert_eq!(icp["offramp"], "Unavailable");
 
-    // VEUR (currency 9): the EUR dual-rail Stage 1 row (2026-09-06) — a complete no-minter
-    // direct-ICRC mainnet asset in the VCHF/ICP shape, with the FIRST Partner off-ramp
-    // (DFX, named via ramp_partner) and the first liquidity tier on an IC row. The optional
-    // fields serialize ONLY when set — the ICP block above (no liquidity asserts reading
-    // Null) doubles as the old-row absence pin for this route.
-    let veur = rows
-        .iter()
-        .find(|r| r["currency"] == 9)
-        .expect("VEUR currency present");
-    assert_eq!(veur["mintable"], false);
-    assert_eq!(veur["symbol"], "VEUR");
-    assert_eq!(veur["decimals"], 8);
-    assert_eq!(veur["display_decimals"], 8);
-    assert_eq!(veur["min_fraction_digits"], 2);
-    assert_eq!(veur["wrapper_name"], "VEUR");
-    assert_eq!(veur["backing_symbol"], "VEUR"); // the issuer token — NEVER "EUR"
-    assert_eq!(veur["network"], "Internet Computer"); // files mainnet-side (U3 label)
-    assert_eq!(veur["ledger"], "wu6g4-6qaaa-aaaan-qmrza-cai"); // catalog_truth veur_ledger
-    assert_eq!(veur["fee"], "10000"); // 0.0001 VEUR raw
-    assert_eq!(veur["cap"], "1000000000000"); // 10,000 VEUR initial cap (mirrors VCHF — founder to confirm)
-    assert_eq!(veur["minter"], serde_json::Value::Null);
-    assert_eq!(veur["minter_family"], serde_json::Value::Null);
-    assert_eq!(veur["chain_id"], serde_json::Value::Null);
-    assert_eq!(veur["token_contract"], serde_json::Value::Null);
-    assert_eq!(veur["gas_ledger"], serde_json::Value::Null);
-    assert_eq!(veur["onramp"], "Unavailable"); // no compliant fiat on-ramp
-    assert_eq!(veur["offramp"], "Partner"); // DFX fiat off-ramp — the first Partner row
-    assert_eq!(veur["liquidity"], "thin");
-    assert_eq!(veur["ramp_partner"], "DFX");
     // The pre-EUR rows on THIS served body: the optional keys are ABSENT (indexing an absent
     // key in a serde_json Value yields Null) — the route-level half of the byte-identity pin.
     assert_eq!(icp["liquidity"], serde_json::Value::Null);
@@ -2088,7 +2060,7 @@ async fn currencies_route_returns_demo_catalog() {
 
 /// `GET /api/v1/balances/{hex}` returns `200` with a flat map of EVERY catalog currency's balance in
 /// ONE response. The payer is funded BAL_A in DEMO_USD (currency 0); every other catalog currency is
-/// unfunded → "0". Asserts: all 10 catalog currencies present (incl. VCHF 7 + ICP 8 + VEUR 9 —
+/// unfunded → "0". Asserts: all 9 catalog currencies present (incl. VCHF 7 + ICP 8 —
 /// zero-balance no-minter rows still enumerate), the funded primary reads BAL_A, the unfunded assets
 /// read "0", and the values are DECIMAL STRINGS (the MC1 units 2-4 shape — raw u64 across the JSON
 /// boundary as a string, never a number).
@@ -2112,13 +2084,13 @@ async fn balances_route_returns_all_currencies_in_one_response() {
     );
     assert_eq!(
         body.as_object().unwrap().len(),
-        10,
-        "demo catalog = 10 currencies (7 pre-existing + VCHF + ICP + VEUR), all present in one batch: {body}"
+        9,
+        "demo catalog = 9 currencies (7 pre-existing + VCHF + ICP), all present in one batch: {body}"
     );
 
     // Every catalog currency is present and unfunded → "0" (nothing pre-funds the
     // FakeLedger anymore — balances live at user principals on the fake-IC gateway).
-    for c in 0..=9u32 {
+    for c in 0..=8u32 {
         assert_eq!(
             body[c.to_string()],
             "0",

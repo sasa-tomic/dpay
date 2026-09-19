@@ -121,16 +121,6 @@ pub(crate) const VCHF_LEDGER_PRINCIPAL: &str = "ly36x-wiaaa-aaaai-aqj7q-cai";
 /// (`principals.icp_ledger`).
 pub(crate) const ICP_LEDGER_PRINCIPAL: &str = "ryjl3-tyaaa-aaaaa-aaaba-cai";
 
-/// The VEUR LEDGER principal (mainnet) — `wu6g4-6qaaa-aaaan-qmrza-cai`, the live VNX Euro ICRC-1
-/// ledger (8 decimals, fee 10_000 raw). Currency 9 in BOTH compiled catalogs (this module + the
-/// app's BUNDLED_NETWORKS), appended 2026-09-06 as Stage 1 of the founder-approved EUR dual-rail:
-/// a complete NO-MINTER direct-ICRC asset exactly like VCHF/ICP (payment is an app-signed
-/// `icrc1_transfer` straight to this ledger), with the FIRST `offramp = Partner` row — the DFX
-/// fiat off-ramp (`ramp_partner: "DFX"`). Single-sourced here so the catalog row can't drift;
-/// cross-checked against `dfx/catalog_truth.json` (`principals.veur_ledger`) by the
-/// `catalog_truth_tests` module below.
-pub(crate) const VEUR_LEDGER_PRINCIPAL: &str = "wu6g4-6qaaa-aaaan-qmrza-cai";
-
 /// A conversion venue's kind. Extensible by construction: a later Solana venue kind is a new
 /// variant (or a string on the wire), never a schema break — `cefi` (SideShift, 2026-09-15:
 /// founder decision 3's relay-held partner-key pattern, `crate::sideshift`) is deliberately
@@ -518,9 +508,8 @@ pub(crate) fn venue_servable(v: &VenueEntry, knob_armed: bool) -> bool {
 /// `/api/v1/currencies` on 2026-08-28 and transplanted VERBATIM (every field, null vs value):
 /// mainnet DEMO_USD (0, mintable, the faucet asset at the DUSD ledger) + ckBTC (1, CkBtcUtxo
 /// ramp) + ckUSDC (2, CkEthErc20 onramp) + ckETH (6, native-ETH within CkEthErc20,
-/// `token_contract` null) + the locked VCHF (7) / ICP (8) direct-ICRC rows + the VEUR (9)
-/// direct-ICRC row (EUR dual-rail Stage 1, 2026-09-06 — offramp=Partner via DFX, liquidity
-/// `thin`); testnet ckTESTBTC (3) + ckSepoliaUSDC (4) + ckSepoliaETH (5). The wallet reads
+/// `token_contract` null) + the locked VCHF (7) / ICP (8) direct-ICRC rows; testnet ckTESTBTC
+/// (3) + ckSepoliaUSDC (4) + ckSepoliaETH (5). The wallet reads
 /// `currency`/`symbol`/`decimals`/
 /// `minter_family` + the per-currency metadata for display. Principals are TEXT consts (not
 /// built via `candid::Principal`) because `candid` is feature-gated to `agent` and this module
@@ -534,8 +523,13 @@ pub(crate) fn venue_servable(v: &VenueEntry, knob_armed: bool) -> bool {
 /// onramp=`Direct` (`depositEth`), offramp=`Direct` (`withdraw_eth`); the Sepolia ckUSDC keeps
 /// offramp=`Unavailable` (its cash-out is not wired); ckTESTBTC / ckSepoliaETH are Direct both
 /// ways on the TESTNET rail (free testnet funds — the row only renders under the testnet
-/// toggle); VEUR onramp=`Unavailable` (no compliant fiat on-ramp), offramp=`Partner` (DFX) —
-/// the first Partner row, carrying `ramp_partner: "DFX"`.
+/// toggle) are Direct both ways on the TESTNET rail (free testnet funds).
+///
+/// Dropped 2026-09-19: the VEUR (9) row (EUR dual-rail Stage 1, 2026-09-06 — the only
+/// `offramp = Partner` row, DFX). VNX is winding VEUR down (measured 2026-09-19: zero swap
+/// liquidity on EVERY chain, Jupiter flags the Solana mint TOKEN_NOT_TRADABLE, no CEX market,
+/// vnx.io delisted it) — founder call: drop it fully. Currency id 9 is RETIRED, never reused
+/// for a different asset (ids are money-defining).
 pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
     vec![
         CurrencyDescriptor {
@@ -801,48 +795,6 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             liquidity: None,
             ramp_partner: None,
         },
-        CurrencyDescriptor {
-            // VEUR — VNX Euro as a complete NO-MINTER direct-ICRC asset (currency 9, appended
-            // 2026-09-06 — Stage 1 of the founder-approved EUR dual-rail; the solana EURC row
-            // below is the deep-liquidity half). Exactly the VCHF/ICP shape: `minter`/
-            // `minter_family` null by design (NEVER a fake family — the app's isPayableAsset
-            // accepts a complete trusted descriptor), payment is an app-signed `icrc1_transfer`
-            // straight to the ledger. The FIRST `offramp = Partner` row: DFX runs the fiat
-            // off-ramp (`ramp_partner: "DFX"`), while the on-ramp stays honestly Unavailable —
-            // no compliant fiat rail in. `backing_symbol`/`symbol`/`wrapper_name` are all
-            // "VEUR" (the payment unit is the ISSUER token, never "EUR" — same rule as
-            // VCHF/CHF). Values are the LOCKED spec row (8 decimals, fee 10_000 raw =
-            // 0.0001 VEUR, liquidity `thin`); the cap mirrors VCHF's shape at 10,000 VEUR raw
-            // as the initial payment-policy value (flagged for founder confirmation).
-            // Single-sourced in [`VEUR_LEDGER_PRINCIPAL`], cross-checked against
-            // dfx/catalog_truth.json. `thin` is chain-wide truth, not just ICP-side
-            // (measured 2026-09-19: every other VNX deployment is dead — Solana mint
-            // C4Kkr…519 is Jupiter TOKEN_NOT_TRADABLE with ~$84 pool TVL, the deepest
-            // pool on ANY chain is $608 on Base with zero trades, no CEX lists it, and
-            // vnx.io no longer lists VNX Euro among its products; ICP is the only rail
-            // with a working exit, the DFX off-ramp).
-            currency: 9, // VEUR (VNX Euro, direct ICRC-1)
-            ledger: VEUR_LEDGER_PRINCIPAL.to_string(),
-            mintable: false,
-            minter: None,
-            minter_family: None,
-            symbol: Some("VEUR".into()),
-            decimals: Some(8),
-            wrapper_name: Some("VEUR".into()),
-            backing_symbol: Some("VEUR".into()), // the issuer token — NEVER "EUR"
-            network: Some("Internet Computer".into()), // mainnet label — files mainnet-side via is_testnet_row
-            display_decimals: Some(8),
-            min_fraction_digits: Some(2), // unit-denominated — keep 2 decimals ('1.50', '0.00'), like VCHF
-            fee: Some(U64String(10_000)), // 0.0001 VEUR
-            cap: Some(U64String(1_000_000_000_000)), // initial payment-policy cap: 10,000 VEUR (mirrors VCHF's shape — founder to confirm)
-            chain_id: None,                          // not EVM
-            token_contract: None,                    // not an ERC-20
-            gas_ledger: None, // no gas ledger — direct ICRC transfer pays its own fee
-            onramp: RampCapability::Unavailable, // no compliant fiat on-ramp — honest absence
-            offramp: RampCapability::Partner, // DFX fiat off-ramp — the first Partner row
-            liquidity: Some(LiquidityTier::Thin),
-            ramp_partner: Some("DFX"),
-        },
     ]
 }
 
@@ -882,8 +834,8 @@ pub(crate) const SOLANA_USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZ
 pub(crate) const WRAPPED_SOL_MINT: &str = "So11111111111111111111111111111111111111112";
 
 /// The mainnet EURC mint — `HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr` (Circle's native
-/// EURC on solana mainnet, 6 decimals). The solana half of the EUR dual-rail (Stage 1,
-/// 2026-09-06): the DEEP-liquidity EUR asset, complementing the IC-side VEUR row (thin).
+/// EURC on solana mainnet, 6 decimals). THE EUR asset since the 2026-09-19 VEUR
+/// removal (the IC half of the old dual-rail is gone; VNX wound the token down).
 /// Cross-checked against `dfx/catalog_truth.json` (`principals.eurc_mint`) by the
 /// `catalog_truth_tests` module below.
 const SOLANA_EURC_MINT: &str = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
@@ -933,11 +885,10 @@ fn solana_network_section() -> NetworkBody {
                 liquidity: None,
             },
             SolanaAsset {
-                // EURC — the solana half of the EUR dual-rail (Stage 1, 2026-09-06): the
-                // DEEP-liquidity EUR asset (Circle's native solana EURC), complementing the
-                // IC-side VEUR row. No fiat ramp through dpay — the honest Unavailable —
-                // and `min_fraction_digits: 2` matches the unit-denominated policy (EURC
-                // reads '1.50' like USDC/VCHF/VEUR).
+                // EURC — the EUR asset (Circle's native solana EURC; sole EUR rail since
+                // the 2026-09-19 VEUR removal). No fiat ramp through dpay — the honest
+                // Unavailable — and `min_fraction_digits: 2` matches the unit-denominated
+                // policy (EURC reads '1.50' like USDC/VCHF).
                 token: "EURC",
                 symbol: "EURC",
                 decimals: 6,
@@ -1067,18 +1018,13 @@ mod environment_partition_tests {
     fn internet_computer_rows_are_mainnet() {
         // VCHF (currency 7) and native ICP (currency 8) carry network "Internet Computer" —
         // the 2026-08-28 fix: before "Internet Computer" joined the mainnet set, both rows
-        // were mis-filed testnet-side and hidden behind the wallet's testnet toggle. VEUR
-        // (currency 9, EUR dual-rail Stage 1 2026-09-06) rides the same label.
+        // were mis-filed testnet-side and hidden behind the wallet's testnet toggle.
         let vchf = CurrencyDescriptor {
             currency: 7,
             ..row_with_network(Some("Internet Computer"))
         };
         let icp = CurrencyDescriptor {
             currency: 8,
-            ..row_with_network(Some("Internet Computer"))
-        };
-        let veur = CurrencyDescriptor {
-            currency: 9,
             ..row_with_network(Some("Internet Computer"))
         };
         assert!(
@@ -1088,10 +1034,6 @@ mod environment_partition_tests {
         assert!(
             !is_testnet_row(&icp),
             "ICP (network \"Internet Computer\") is ICP MAINNET"
-        );
-        assert!(
-            !is_testnet_row(&veur),
-            "VEUR (network \"Internet Computer\") is ICP MAINNET"
         );
     }
 
@@ -1210,9 +1152,7 @@ mod catalog_truth_tests {
         );
         assert_eq!(VCHF_LEDGER_PRINCIPAL, p["vchf_ledger"].as_str().unwrap());
         assert_eq!(ICP_LEDGER_PRINCIPAL, p["icp_ledger"].as_str().unwrap());
-        // The EUR dual-rail pair (Stage 1, 2026-09-06): IC-side VEUR ledger + solana-side
-        // EURC mint — both money-defining, so both belt-and-suspenders pinned here too.
-        assert_eq!(VEUR_LEDGER_PRINCIPAL, p["veur_ledger"].as_str().unwrap());
+        // The solana EURC mint (the sole EUR rail since the 2026-09-19 VEUR removal).
         assert_eq!(SOLANA_EURC_MINT, p["eurc_mint"].as_str().unwrap());
         assert_eq!(
             CKUSDC_ERC20_ADDRESS,
@@ -1232,8 +1172,9 @@ mod catalog_truth_tests {
     fn ic_rows_pin_every_rows_principals_ids_and_order() {
         // The REAL-catalog pin: every IC row's ledger/minter principal matches the truth file,
         // the currency ids are exactly the durable set (0,1,2,6 mainnet-real + 3,4,5
-        // testnet-real + 7,8 locked + 9 VEUR), the source order is stable, and the SERVED
-        // sections come out in the documented order (mainnet 0,1,2,6,7,8,9 / testnet 3,4,5).
+        // testnet-real + 7,8 locked; 9 retired with VEUR, 2026-09-19), the source order is
+        // stable, and the SERVED sections come out in the documented order (mainnet
+        // 0,1,2,6,7,8 / testnet 3,4,5).
         let t = truth();
         let p = &t["principals"];
         let cat = ic_rows();
@@ -1241,12 +1182,12 @@ mod catalog_truth_tests {
         // Source order + ids.
         assert_eq!(
             cat.len(),
-            10,
-            "10 IC rows: 4 real mainnet + 3 real testnet + VCHF + ICP + VEUR"
+            9,
+            "9 IC rows: 4 real mainnet + 3 real testnet + VCHF + ICP"
         );
         assert_eq!(
             cat.iter().map(|d| d.currency).collect::<Vec<_>>(),
-            vec![0, 1, 2, 6, 3, 4, 5, 7, 8, 9],
+            vec![0, 1, 2, 6, 3, 4, 5, 7, 8],
             "ids stay the durable set; source order = mainnet-real, testnet-real, locked 7/8/9"
         );
 
@@ -1262,7 +1203,6 @@ mod catalog_truth_tests {
             (5, "testnet_cketh_ledger", Some("testnet_cketh_minter")),
             (7, "vchf_ledger", None),
             (8, "icp_ledger", None),
-            (9, "veur_ledger", None),
         ];
         for (cid, ledger_key, minter_key) in pins {
             let row = catalog_currency(&cat, *cid);
@@ -1291,7 +1231,7 @@ mod catalog_truth_tests {
         };
         assert_eq!(
             section_ids(0),
-            vec![0, 1, 2, 6, 7, 8, 9],
+            vec![0, 1, 2, 6, 7, 8],
             "icp MAINNET section order"
         );
         assert_eq!(section_ids(1), vec![3, 4, 5], "icp TESTNET section order");
@@ -1498,8 +1438,8 @@ mod catalog_truth_tests {
         // compiled catalogs (this module + the app's BUNDLED_NETWORKS).
         assert_eq!(
             cat.len(),
-            10,
-            "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR"
+            9,
+            "4 real mainnet + 3 real testnet + VCHF + ICP"
         );
         assert_eq!(
             cat[7].symbol.as_deref(),
@@ -1507,11 +1447,6 @@ mod catalog_truth_tests {
             "id 7 IS the VCHF row"
         );
         assert_eq!(cat[8].symbol.as_deref(), Some("ICP"), "id 8 IS the ICP row");
-        assert_eq!(
-            cat[9].symbol.as_deref(),
-            Some("VEUR"),
-            "id 9 IS the VEUR row (full locked-shape test below)"
-        );
 
         // --- VCHF (currency 7): every locked facet.
         let vchf = catalog_currency(&cat, 7);
@@ -1616,90 +1551,6 @@ mod catalog_truth_tests {
         assert_eq!(icp.ramp_partner, None);
     }
 
-    #[test]
-    fn ic_rows_veur_row_matches_truth_and_locked_shape() {
-        // EUR dual-rail Stage 1 (2026-09-06): the VEUR (9) row cannot diverge from
-        // dfx/catalog_truth.json (principal, decimals) nor from the LOCKED spec record (fee,
-        // cap, units, network, no-minter shape, Partner off-ramp + named DFX partner, thin
-        // liquidity). Same drift-alarm contract as the VCHF/ICP test above — a drifted field
-        // breaks either the cold-start fallback the wallet renders offline or the exact-ledger
-        // transfer target.
-        let t = truth();
-        let cat = ic_rows();
-
-        // --- ORDER + currency ID: VEUR is id 9, appended LAST (after VCHF/ICP). The spec
-        // locks 9 in BOTH compiled catalogs (this module + the app's BUNDLED_NETWORKS).
-        assert_eq!(
-            cat.len(),
-            10,
-            "4 real mainnet + 3 real testnet + VCHF + ICP + VEUR"
-        );
-        assert_eq!(
-            cat[9].symbol.as_deref(),
-            Some("VEUR"),
-            "id 9 IS the VEUR row"
-        );
-
-        // --- VEUR (currency 9): every locked facet.
-        let veur = catalog_currency(&cat, 9);
-        assert_eq!(
-            veur.ledger.as_str(),
-            t["principals"]["veur_ledger"].as_str().unwrap(),
-            "VEUR ledger principal == catalog_truth veur_ledger"
-        );
-        assert_eq!(veur.ledger.as_str(), VEUR_LEDGER_PRINCIPAL);
-        assert_eq!(
-            veur.decimals.unwrap(),
-            t["decimals"]["veur"].as_u64().unwrap() as u8,
-            "VEUR decimals == catalog_truth decimals.veur"
-        );
-        assert_eq!(
-            veur.display_decimals.unwrap(),
-            t["decimals"]["veur"].as_u64().unwrap() as u8
-        );
-        assert_eq!(
-            veur.fee,
-            Some(U64String(10_000)),
-            "locked: 0.0001 VEUR raw fee"
-        );
-        assert_eq!(
-            veur.cap,
-            Some(U64String(1_000_000_000_000)),
-            "locked: 10,000 VEUR initial cap (mirrors VCHF's shape — founder to confirm)"
-        );
-        assert_eq!(veur.wrapper_name.as_deref(), Some("VEUR"));
-        assert_eq!(
-            veur.backing_symbol.as_deref(),
-            Some("VEUR"),
-            "payment unit is VEUR (the issuer token), deliberately NOT EUR — same rule as VCHF/CHF"
-        );
-        assert_eq!(veur.symbol.as_deref(), Some("VEUR"));
-        assert_eq!(
-            veur.network.as_deref(),
-            Some("Internet Computer"),
-            "the mainnet label — anything else mis-files the row testnet-side"
-        );
-        // No-minter shape — NEVER a fake family (the rejected payability-gate shortcut).
-        assert!(!veur.mintable);
-        assert_eq!(veur.minter, None);
-        assert_eq!(veur.minter_family, None);
-        // The FIRST Partner row: no compliant fiat on-ramp (honest absence), DFX fiat
-        // off-ramp — named, so "Partner" never renders as an anonymous claim.
-        assert_eq!(veur.onramp, RampCapability::Unavailable);
-        assert_eq!(veur.offramp, RampCapability::Partner);
-        assert_eq!(veur.liquidity, Some(LiquidityTier::Thin));
-        assert_eq!(veur.ramp_partner, Some("DFX"));
-        assert_eq!(
-            veur.min_fraction_digits,
-            Some(2),
-            "unit-denominated — keep 2 decimals ('1.50', '0.00'), like VCHF"
-        );
-        // Not an EVM asset: all three chain fields null.
-        assert_eq!(veur.chain_id, None);
-        assert_eq!(veur.token_contract, None);
-        assert_eq!(veur.gas_ledger, None);
-    }
-
     /// The compact-display floor, pinned per row. Exactly the unit-denominated tokens people
     /// count like money carry `Some(2)` (ckUSDC, ckSepoliaUSDC, VCHF → `1.50`, `0.00`); every
     /// other row is unset ⇒ 0, i.e. written trimmed (`1.5 ICP`, `0 BTC`). This is display policy
@@ -1724,7 +1575,6 @@ mod catalog_truth_tests {
                 (5, None),        // ckSepoliaETH
                 (7, Some(2)),     // VCHF
                 (8, None),        // ICP
-                (9, Some(2)),     // VEUR — unit-denominated, like VCHF
             ]
         );
         // A floor above the display cap would ask the formatter for digits it may not show.
@@ -1756,9 +1606,8 @@ mod catalog_truth_tests {
         );
     }
 
-    /// The solana section's EUR row (EUR dual-rail Stage 1, 2026-09-06) — the DEEP-liquidity
-    /// half of the EUR pair, complementing the IC-side VEUR (thin). Truth-file mint/decimals
-    /// pins + locked shape.
+    /// The solana section's EUR row — the sole EUR rail since the 2026-09-19 VEUR removal.
+    /// Truth-file mint/decimals pins + locked shape.
     #[test]
     fn solana_eurc_row_matches_truth_and_locked_shape() {
         let t = truth();
@@ -1857,17 +1706,6 @@ mod wire_byte_shape_tests {
                 "currency {cid} must not carry ramp_partner"
             );
         }
-    }
-
-    #[test]
-    fn veur_row_serializes_with_the_new_optional_fields() {
-        // The LOCKED new-row wire shape: liquidity AFTER offramp (appended last), lowercase
-        // tier, ramp_partner naming the Partner.
-        let veur = row_json(9);
-        assert_eq!(
-            veur,
-            "{\"currency\":9,\"ledger\":\"wu6g4-6qaaa-aaaan-qmrza-cai\",\"mintable\":false,\"minter\":null,\"minter_family\":null,\"symbol\":\"VEUR\",\"decimals\":8,\"wrapper_name\":\"VEUR\",\"backing_symbol\":\"VEUR\",\"network\":\"Internet Computer\",\"display_decimals\":8,\"min_fraction_digits\":2,\"fee\":\"10000\",\"cap\":\"1000000000000\",\"chain_id\":null,\"token_contract\":null,\"gas_ledger\":null,\"onramp\":\"Unavailable\",\"offramp\":\"Partner\",\"liquidity\":\"thin\",\"ramp_partner\":\"DFX\"}"
-        );
     }
 
     #[test]
