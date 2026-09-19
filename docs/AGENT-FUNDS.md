@@ -90,13 +90,24 @@ copy. Update BOTH whenever a wallet is added, rotated, or abandoned.
 Both live secrets are sops-encrypted with the SAME age identity (`.dev/age/agent-key.txt`), so the
 Recovery rule below covers both wallets: one identity to back up, and losing it strands both.
 
-### The SOL wallet's funding path (honest state, 2026-09-19)
+### The SOL wallet's funding path (resolved 2026-09-19: the founder provided the SideShift partner key)
 
-The SOL wallet was created unfunded and the agent has NO keyless route to fill it: SideShift — the
-only IC→SOL conversion route considered — requires a partner key, so the agent cannot shift from
-the IC float by itself. Until the founder either drips SOL directly to `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU`
-(≤ CHF 2, the normal per-operation bound) or provides the SideShift partner key, this wallet stays
-at 0 — a measured 0, via `just agent-funds`, never an assumption.
+The SOL wallet was created unfunded and the agent had NO keyless route to fill it: SideShift — the
+only IC→SOL conversion route — requires a partner key for every quote/order (`x-sideshift-secret`;
+measured 2026-09-19: `/permissions` and `/shifts/{id}` are keyless, creation is not). The founder
+provided the partner account the same day; it is stored sops-encrypted at
+`secrets/sideshift.sops.json` (same age identity as the seeds; contains the account secret and the
+affiliate id). A relay run with `DPAY_SIDESHIFT_SECRET` / `DPAY_SIDESHIFT_AFFILIATE_ID` decrypted
+from that file makes the CeFi venues live; the device still never sees the key.
+
+Measured pair minimums that size any agent CeFi spend (2026-09-19): ICP→SOL min deposit
+**1.0357 ICP**; EURC(SOL)→ICP min deposit **8.702923 EURC**. Both are founder-approved for the
+FX-matrix live proofs (value moves between the agent's OWN wallets; net cost is the shift fee).
+
+To fund the SOL wallet: run the CeFi convert in the app (local relay with the env set) and shift
+~1.04 ICP from the IC float to `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU`, or the founder
+drips SOL directly. Until the shift runs, the wallet stays at a measured 0 — via
+`just agent-funds`, never an assumption.
 
 ## Recovery
 
