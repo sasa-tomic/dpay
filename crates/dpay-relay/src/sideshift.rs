@@ -78,9 +78,19 @@
 //! # x-user-ip (SideShift's proxying rule)
 //!
 //! SideShift's permissions doc: requests sent from an integration's own server MUST
-//! carry `x-user-ip` set to the end user's IP. The relay forwards the CONNECTING
-//! client's IP (wired via `into_make_service_with_connect_info` in main.rs; absent in
-//! oneshot-driven tests, where the header is simply omitted). It is forwarded as
+//! carry `x-user-ip` set to the end user's IP. The relay answers with the end user's
+//! IP, resolved honestly by deployment shape (measured live 2026-09-20: SideShift
+//! REFUSES the whole partner surface — quote included — unless the header carries a
+//! PUBLIC address): a PUBLIC connecting peer is the end user and wins outright
+//! (`into_make_service_with_connect_info` in main.rs; a public peer's `X-Forwarded-For`
+//! is ignored — spoofable from outside). A PRIVATE/loopback peer (or no socket info at
+//! all — oneshot-driven tests) means the relay sits BEHIND a reverse proxy or
+//! integration server, so the connecting address is the proxy's, not the user's: the
+//! `X-Forwarded-For` header the proxy added is honored — its LEFTMOST public entry (the
+//! de-facto standard's original client). A private/loopback XFF entry is never trusted
+//! (a chain of NAT'd proxies tells us nothing about the user). When neither path yields
+//! a public address, the best IP actually visible is forwarded as before, and when even
+//! that is absent the header is simply omitted — never fabricated. It is forwarded as
 //! SideShift requires — jurisdiction detection is their service's own need, and an
 //! honest integration satisfies it with the best IP it can actually see.
 
@@ -90,7 +100,7 @@ use std::sync::OnceLock;
 
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, FromRequestParts, State};
-use axum::http::{header, request::Parts, StatusCode};
+use axum::http::{header, request::Parts, HeaderName, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde_json::{json, Value};
 
@@ -185,23 +195,76 @@ impl SideShiftProxy {
     }
 }
 
+/// Whether the address is usable as an end-user IP for the venue's `x-user-ip`:
+/// anything but loopback, RFC1918 private, link-local, unspecified, or broadcast.
+/// (`IpAddr::is_global` is still gated on this toolchain — rustdoc issue #27709 — and
+/// the venue only needs "not an infrastructure address"; documentation ranges pass,
+/// which is harmless here.)
+fn ip_is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            !(v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast())
+        }
+        IpAddr::V6(v6) => {
+            let o = v6.octets();
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || (o[0] & 0xfe) == 0xfc // unique-local fc00::/7
+                || (o[0] == 0xfe && (o[1] & 0xc0) == 0x80)) // link-local fe80::/10
+        }
+    }
+}
+
+/// The end user's IP for SideShift's `x-user-ip`, resolved by deployment shape
+/// (see the module doc): a public TCP peer wins outright; a private/loopback peer
+/// (or absent socket info) means a reverse proxy is in front, so the LEFTMOST public
+/// `X-Forwarded-For` entry is the user; neither path yields one, the best IP actually
+/// visible is kept; no IP at all stays `None`. Never fabricated.
+fn end_user_ip(peer: Option<IpAddr>, forwarded_for: Option<&str>) -> Option<IpAddr> {
+    if let Some(p) = peer {
+        if ip_is_public(p) {
+            return Some(p);
+        }
+    }
+    if let Some(xff) = forwarded_for {
+        // "client, proxy1, proxy2" — the leftmost entry is the original client.
+        if let Some(first) = xff.split(',').next() {
+            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                if ip_is_public(ip) {
+                    return Some(ip);
+                }
+            }
+        }
+    }
+    peer
+}
+
 /// The connecting client's IP, when the server was started with connection info
-/// (prod: `into_make_service_with_connect_info`; oneshot-driven tests: absent).
-/// Infallible by construction so the route works identically under both servers —
-/// SideShift's `x-user-ip` is forwarded when we can see the IP and omitted when we
-/// cannot, never fabricated. Public only because the handlers that take it are public.
+/// (prod: `into_make_service_with_connect_info`; oneshot-driven tests: absent),
+/// upgraded to the end user's IP behind a reverse proxy via `X-Forwarded-For`
+/// (`end_user_ip` for the exact rules). Infallible by construction so the route works
+/// identically under both servers — SideShift's `x-user-ip` is forwarded when we can
+/// see an IP and omitted when we cannot, never fabricated. Public only because the
+/// handlers that take it are public.
 pub struct ClientIp(pub Option<IpAddr>);
 
 impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        Ok(ClientIp(
-            parts
-                .extensions
-                .get::<ConnectInfo<SocketAddr>>()
-                .map(|c| c.0.ip()),
-        ))
+        let peer = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0.ip());
+        let forwarded = parts
+            .headers
+            .get(HeaderName::from_static("x-forwarded-for"))
+            .and_then(|v| v.to_str().ok());
+        Ok(ClientIp(end_user_ip(peer, forwarded)))
     }
 }
 
@@ -602,6 +665,65 @@ mod tests {
         assert!(pair_direction(sol, usdc).is_none());
         assert!(pair_direction(icp, icp).is_none());
         assert!(pair_direction("", "").is_none());
+    }
+
+    #[test]
+    fn end_user_ip_public_peer_wins_and_ignores_xff() {
+        // A public connecting peer IS the end user — direct TCP, nothing spoofable.
+        let public: IpAddr = "203.0.113.99".parse().unwrap();
+        assert_eq!(end_user_ip(Some(public), None), Some(public));
+        // A public peer's X-Forwarded-For is IGNORED (spoofable from outside).
+        assert_eq!(
+            end_user_ip(Some(public), Some("198.51.100.7")),
+            Some(public)
+        );
+        assert_eq!(end_user_ip(Some(public), Some("junk")), Some(public));
+    }
+
+    #[test]
+    fn end_user_ip_private_peer_honors_a_public_xff_entry() {
+        // Loopback/LAN peer = the relay sits behind a reverse proxy (the documented
+        // integration-server shape, and the 2026-09-20 live blocker): the proxy's
+        // X-Forwarded-For names the real user — its LEFTMOST entry.
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        let lan: IpAddr = "192.168.0.13".parse().unwrap();
+        assert_eq!(
+            end_user_ip(Some(loopback), Some("203.0.113.7")),
+            Some("203.0.113.7".parse().unwrap())
+        );
+        assert_eq!(
+            end_user_ip(Some(lan), Some("198.51.100.9, 10.0.0.1, 127.0.0.1")),
+            Some("198.51.100.9".parse().unwrap())
+        );
+        // IPv6 end users ride the same rule.
+        assert_eq!(
+            end_user_ip(Some(loopback), Some("2001:db8::1, 10.0.0.1")),
+            Some("2001:db8::1".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn end_user_ip_never_fabricates_and_keeps_todays_fallback() {
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        let lan: IpAddr = "192.168.0.13".parse().unwrap();
+        // Absent XFF: the best IP actually visible is forwarded, exactly as before
+        // (today's behavior — private-but-honest beats nothing).
+        assert_eq!(end_user_ip(Some(lan), None), Some(lan));
+        // No socket info (oneshot-driven tests) and no XFF: omitted, never fabricated.
+        assert_eq!(end_user_ip(None, None), None);
+        // A private/loopback XFF entry is never trusted (NAT'd proxy chain says
+        // nothing about the user) — fall back to the visible peer.
+        assert_eq!(end_user_ip(Some(lan), Some("10.0.0.5")), Some(lan));
+        assert_eq!(end_user_ip(Some(loopback), Some("127.0.0.1")), Some(loopback));
+        // Junk XFF: same fallback.
+        assert_eq!(end_user_ip(Some(lan), Some("not-an-ip")), Some(lan));
+        assert_eq!(end_user_ip(Some(lan), Some("")), Some(lan));
+        // No peer but a public XFF (proxy that doesn't set ConnectInfo): the header
+        // is the only honest signal and is honored.
+        assert_eq!(
+            end_user_ip(None, Some("198.51.100.9")),
+            Some("198.51.100.9".parse().unwrap())
+        );
     }
 
     #[test]
