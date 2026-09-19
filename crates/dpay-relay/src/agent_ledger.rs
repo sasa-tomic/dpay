@@ -158,6 +158,13 @@ pub struct IcpIndexTokens {
     pub e8s: u64,
 }
 
+/// `record { timestamp_nanos: nat64 }` — the index's timestamp wrapper (pinned against the live
+/// wire 2026-09-19; the naked `opt nat64` guess decodes as trailing garbage).
+#[derive(CandidType, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IcpIndexTimestamp {
+    pub timestamp_nanos: u64,
+}
+
 /// Query argument: `record { account; start: opt nat; max_results: nat }` — `start` is the
 /// exclusive cursor (return transactions OLDER than this id); `None` = newest page. The
 /// `account` field is the standard ICRC-1 `Account` (identical wire shape), default subaccount.
@@ -168,76 +175,92 @@ pub struct IcpIndexGetAccountTransactionsArgs {
     pub max_results: Nat,
 }
 
+// SHAPE PINNED 2026-09-19 against the LIVE index reply (captured bytes; tests/icp_index_wire.rs
+// decodes them). The index was upgraded to an ICRC-3-style shape and the pre-upgrade mirrors
+// stopped unifying — every decode failed, /api/v1/transactions 503'd prod-wide and the convert
+// stuck-watch went blind. The new shape: ids and the top-level timestamp are nat64 (the old
+// `nat`/`u64` split is gone), the operation is ONE variant arm (capitalized ICRC-3 names) with
+// account principals as TEXT, `memo`/`icrc1_memo`/`created_at_time` are hoisted to the
+// transaction, `Ok` gained `balance`, and the Err payload is a record `{message: text}`.
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IcpIndexTransfer {
     pub to: String,
     pub fee: Option<IcpIndexTokens>,
     pub from: String,
-    pub memo: Option<u64>,
-    pub icrc1_memo: Option<Vec<u8>>,
-    pub created_at_time: Option<u64>,
     pub amount: IcpIndexTokens,
+    pub spender: Option<String>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IcpIndexMint {
     pub to: String,
-    pub memo: Option<u64>,
-    pub icrc1_memo: Option<Vec<u8>>,
-    pub created_at_time: Option<u64>,
     pub amount: IcpIndexTokens,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IcpIndexBurn {
     pub from: String,
-    pub memo: Option<u64>,
-    pub icrc1_memo: Option<Vec<u8>>,
-    pub created_at_time: Option<u64>,
     pub amount: IcpIndexTokens,
+    pub spender: Option<String>,
 }
 
 /// Approve is decoded ONLY to be recognized and dropped (`map_icp_index_txn` → `None`) —
-/// approvals move no balance the wallet renders. Fields beyond `from` are never read.
+/// approvals move no balance the wallet renders. Field values are never read.
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IcpIndexApprove {
+    pub fee: Option<IcpIndexTokens>,
     pub from: String,
+    pub allowance: IcpIndexTokens,
+    pub expected_allowance: Option<IcpIndexTokens>,
+    pub expires_at: Option<IcpIndexTimestamp>,
+    pub spender: String,
 }
 
-/// One index `Transaction`. `timestamp` is NANOSECONDS since epoch (the rows contract is unix
-/// seconds — divided in the mapper). At most one operation option is `Some` on the wire.
+/// The transaction's one operation — the ICRC-3 capitalized arm names.
+#[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub enum IcpIndexOperation {
+    Approve(IcpIndexApprove),
+    Burn(IcpIndexBurn),
+    Mint(IcpIndexMint),
+    Transfer(IcpIndexTransfer),
+}
+
+/// One index `Transaction`. `timestamp`/`created_at_time` are OPTIONAL NANOSECONDS since epoch
+/// (the rows contract is unix seconds — divided in the mapper); the legacy nat64 `memo` is
+/// dropped by the mapper so it can never satisfy a dpay exact-memo match.
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IcpIndexTransaction {
-    pub burn: Option<IcpIndexBurn>,
-    pub mint: Option<IcpIndexMint>,
-    pub approve: Option<IcpIndexApprove>,
-    pub transfer: Option<IcpIndexTransfer>,
-    pub timestamp: u64,
+    pub memo: u64,
+    pub icrc1_memo: Option<Vec<u8>>,
+    pub operation: IcpIndexOperation,
+    pub timestamp: Option<IcpIndexTimestamp>,
+    pub created_at_time: Option<IcpIndexTimestamp>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IcpIndexTransactionWithId {
-    pub id: Nat,
+    pub id: u64,
     pub transaction: IcpIndexTransaction,
 }
 
 /// Success reply: `transactions` is NEWEST-FIRST within the page; `oldest_tx_id` is the id of
 /// the oldest row in THIS reply when older transactions may exist, `None` when the account's
-/// history is exhausted.
+/// history is exhausted; `balance` is the account's current balance in e8s (not used here —
+/// balances come from `icrc1_balance_of`).
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct IcpIndexAccountTransactionsOk {
     pub transactions: Vec<IcpIndexTransactionWithId>,
-    pub oldest_tx_id: Option<Nat>,
+    pub oldest_tx_id: Option<u64>,
+    pub balance: u64,
 }
 
+/// The Err payload is now a record, not an enum.
 #[derive(CandidType, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub enum IcpIndexAccountTransactionsErr {
-    InvalidRequest,
-    Other,
+pub struct IcpIndexAccountTransactionsErr {
+    pub message: String,
 }
 
-/// The full reply variant: `variant { ok; err }` — mirrors the index's
-/// `GetAccountIdentifierTransactionsResult`.
+/// The full reply variant: `variant { Ok; Err }` (capitalized, ICRC-3 style).
 pub type IcpIndexAccountTransactionsResult =
     Result<IcpIndexAccountTransactionsOk, IcpIndexAccountTransactionsErr>;
 
@@ -1024,10 +1047,10 @@ impl AgentLedger {
         let index = *index;
         let account = me.clone();
         let agent = &self.agent;
-        let fetch = move |start: Option<Nat>| async move {
+        let fetch = move |start: Option<u64>| async move {
             let arg = encode_args((IcpIndexGetAccountTransactionsArgs {
                 account: account.clone(),
-                start,
+                start: start.map(Nat::from),
                 max_results: Nat::from(ICP_INDEX_PAGE_SIZE),
             },))
             .map_err(|e| {
@@ -1053,7 +1076,8 @@ impl AgentLedger {
                 })?
                 .map_err(|e| {
                     LedgerError::Transient(format!(
-                        "icp index get_account_transactions error: {e:?}"
+                        "icp index get_account_transactions error: {}",
+                        e.message
                     ))
                 })
         };
@@ -1087,11 +1111,11 @@ impl AgentLedger {
         deadline: std::time::Instant,
     ) -> Result<Vec<TxnRecord>, LedgerError>
     where
-        F: FnMut(Option<Nat>) -> Fut,
+        F: FnMut(Option<u64>) -> Fut,
         Fut: Future<Output = Result<IcpIndexAccountTransactionsOk, LedgerError>>,
     {
         let mut rows: Vec<TxnRecord> = Vec::new();
-        let mut start: Option<Nat> = None;
+        let mut start: Option<u64> = None;
         for _ in 0..HISTORY_MAX_ROUND_TRIPS {
             // Wall-clock budget: serve what we have (recent-rows-first) instead of burning the
             // full round-trip budget on a slow index — the same contract as the icrc3 walk.
@@ -1103,7 +1127,7 @@ impl AgentLedger {
                 // The index's transaction id IS the block index on the ICP ledger; a reply that
                 // could not state one is a reply we cannot identify a row from, so it fails the
                 // call rather than serving an unidentifiable row.
-                let block = nat_to_u64(&txn.id, "index transaction id")?;
+                let block = txn.id;
                 if let Some(record) =
                     map_icp_index_txn(&txn.transaction, me, my_account_id, currency, block)
                         .filter(|r| memo.is_none_or(|m| r.memo.eq_ignore_ascii_case(m)))
@@ -1121,7 +1145,7 @@ impl AgentLedger {
             let Some(oldest) = page.oldest_tx_id.clone() else {
                 break;
             };
-            if page.transactions.is_empty() || start.as_ref() == Some(&oldest) {
+            if page.transactions.is_empty() || start == Some(oldest) {
                 break;
             }
             start = Some(oldest);
@@ -1369,69 +1393,75 @@ fn map_icp_index_txn(
         }
     };
     let is_me = |acct: &str| acct.eq_ignore_ascii_case(my_account_id);
-    let ts_secs = |created_at_ns: Option<u64>| {
-        let ns = if txn.timestamp > 0 {
-            txn.timestamp
-        } else {
-            created_at_ns.unwrap_or(0)
-        };
-        ns / 1_000_000_000
-    };
-    let memo_hex = |m: &Option<Vec<u8>>| m.as_deref().map(hex::encode).unwrap_or_default();
+    // The index serves the row timestamp when it has one, the operation's created_at_time
+    // otherwise (both ns — divided to the unix-seconds rows contract).
+    let unwrap_ns = |t: Option<IcpIndexTimestamp>| t.map_or(0, |t| t.timestamp_nanos);
+    let ns = unwrap_ns(txn.timestamp);
+    let ns = if ns > 0 { ns } else { unwrap_ns(txn.created_at_time) };
+    let ts = ns / 1_000_000_000;
+    // The legacy nat64 `memo` is DROPPED so it can never satisfy a 16-byte dpay reconciliation
+    // exact-memo match; only the ICRC-1 memo blob counts.
+    let memo_hex = txn
+        .icrc1_memo
+        .as_deref()
+        .map(hex::encode)
+        .unwrap_or_default();
 
-    if let Some(transfer) = txn.transfer.as_ref() {
-        if !is_me(&transfer.from) && !is_me(&transfer.to) {
-            return None; // not ours (the index should never serve these; defensive all the same)
+    match &txn.operation {
+        IcpIndexOperation::Transfer(transfer) => {
+            if !is_me(&transfer.from) && !is_me(&transfer.to) {
+                return None; // not ours (the index should never serve these; defensive all the same)
+            }
+            Some(TxnRecord {
+                from: side(&transfer.from),
+                to: side(&transfer.to),
+                amount: U64String(transfer.amount.e8s),
+                nonce: String::new(), // IC-rail rows carry no dpay nonce
+                currency: currency as u32,
+                block,
+                timestamp: ts,
+                from_name: String::new(),
+                to_name: String::new(),
+                memo: memo_hex,
+            })
         }
-        return Some(TxnRecord {
-            from: side(&transfer.from),
-            to: side(&transfer.to),
-            amount: U64String(transfer.amount.e8s),
-            nonce: String::new(), // IC-rail rows carry no dpay nonce
-            currency: currency as u32,
-            block,
-            timestamp: ts_secs(transfer.created_at_time),
-            from_name: String::new(),
-            to_name: String::new(),
-            memo: memo_hex(&transfer.icrc1_memo),
-        });
-    }
-    if let Some(mint) = txn.mint.as_ref() {
-        if !is_me(&mint.to) {
-            return None;
+        IcpIndexOperation::Mint(mint) => {
+            if !is_me(&mint.to) {
+                return None;
+            }
+            Some(TxnRecord {
+                from: String::new(), // mint side renders as the app's mint sentinel
+                to: side(&mint.to),
+                amount: U64String(mint.amount.e8s),
+                nonce: String::new(),
+                currency: currency as u32,
+                block,
+                timestamp: ts,
+                from_name: String::new(),
+                to_name: String::new(),
+                memo: memo_hex,
+            })
         }
-        return Some(TxnRecord {
-            from: String::new(), // mint side renders as the app's mint sentinel
-            to: side(&mint.to),
-            amount: U64String(mint.amount.e8s),
-            nonce: String::new(),
-            currency: currency as u32,
-            block,
-            timestamp: ts_secs(mint.created_at_time),
-            from_name: String::new(),
-            to_name: String::new(),
-            memo: memo_hex(&mint.icrc1_memo),
-        });
-    }
-    if let Some(burn) = txn.burn.as_ref() {
-        if !is_me(&burn.from) {
-            return None; // only the burner's side renders
+        IcpIndexOperation::Burn(burn) => {
+            if !is_me(&burn.from) {
+                return None; // only the burner's side renders
+            }
+            Some(TxnRecord {
+                from: side(&burn.from),
+                to: String::new(), // burn sink renders as the sentinel
+                amount: U64String(burn.amount.e8s),
+                nonce: String::new(),
+                currency: currency as u32,
+                block,
+                timestamp: ts,
+                from_name: String::new(),
+                to_name: String::new(),
+                memo: memo_hex,
+            })
         }
-        return Some(TxnRecord {
-            from: side(&burn.from),
-            to: String::new(), // burn sink renders as the sentinel
-            amount: U64String(burn.amount.e8s),
-            nonce: String::new(),
-            currency: currency as u32,
-            block,
-            timestamp: ts_secs(burn.created_at_time),
-            from_name: String::new(),
-            to_name: String::new(),
-            memo: memo_hex(&burn.icrc1_memo),
-        });
+        // Approve (and future kinds): never rendered — approvals move no user-visible balance.
+        IcpIndexOperation::Approve(_) => None,
     }
-    // Approve (and future kinds): never rendered — approvals move no user-visible balance.
-    None
 }
 
 // ---- icp index history unit tests ---------------------------------------------------------------
@@ -1491,51 +1521,44 @@ mod icp_index_tests {
         ts_ns: u64,
     ) -> IcpIndexTransaction {
         IcpIndexTransaction {
-            burn: None,
-            mint: None,
-            approve: None,
-            transfer: Some(IcpIndexTransfer {
+            memo: legacy_memo.unwrap_or(0),
+            icrc1_memo,
+            operation: IcpIndexOperation::Transfer(IcpIndexTransfer {
                 to: to.to_owned(),
                 fee: None,
                 from: from.to_owned(),
-                memo: legacy_memo,
-                icrc1_memo,
-                created_at_time: Some(1_600_000_000_000_000_000),
                 amount: IcpIndexTokens { e8s },
+                spender: None,
             }),
-            timestamp: ts_ns,
+            timestamp: Some(IcpIndexTimestamp { timestamp_nanos: ts_ns }),
+            created_at_time: Some(IcpIndexTimestamp { timestamp_nanos: 1_600_000_000_000_000_000 }),
         }
     }
 
     fn mint_txn(to: &str, e8s: u64, ts_ns: u64) -> IcpIndexTransaction {
         IcpIndexTransaction {
-            burn: None,
-            mint: Some(IcpIndexMint {
+            memo: 0,
+            icrc1_memo: None,
+            operation: IcpIndexOperation::Mint(IcpIndexMint {
                 to: to.to_owned(),
-                memo: None,
-                icrc1_memo: None,
-                created_at_time: None,
                 amount: IcpIndexTokens { e8s },
             }),
-            approve: None,
-            transfer: None,
-            timestamp: ts_ns,
+            timestamp: Some(IcpIndexTimestamp { timestamp_nanos: ts_ns }),
+            created_at_time: None,
         }
     }
 
     fn burn_txn(from: &str, e8s: u64, ts_ns: u64) -> IcpIndexTransaction {
         IcpIndexTransaction {
-            burn: Some(IcpIndexBurn {
+            memo: 0,
+            icrc1_memo: None,
+            operation: IcpIndexOperation::Burn(IcpIndexBurn {
                 from: from.to_owned(),
-                memo: None,
-                icrc1_memo: None,
-                created_at_time: None,
                 amount: IcpIndexTokens { e8s },
+                spender: None,
             }),
-            mint: None,
-            approve: None,
-            transfer: None,
-            timestamp: ts_ns,
+            timestamp: Some(IcpIndexTimestamp { timestamp_nanos: ts_ns }),
+            created_at_time: None,
         }
     }
 
@@ -1546,17 +1569,11 @@ mod icp_index_tests {
         IcpIndexAccountTransactionsOk {
             transactions: rows
                 .into_iter()
-                .map(|(id, transaction)| IcpIndexTransactionWithId {
-                    id: Nat::from(id),
-                    transaction,
-                })
+                .map(|(id, transaction)| IcpIndexTransactionWithId { id, transaction })
                 .collect(),
-            oldest_tx_id: oldest.map(Nat::from),
+            oldest_tx_id: oldest,
+            balance: 0,
         }
-    }
-
-    fn nat_opt(n: &Option<Nat>) -> Option<u64> {
-        n.as_ref().map(|v| v.0.to_u64().expect("test ids fit u64"))
     }
 
     #[test]
@@ -1668,13 +1685,18 @@ mod icp_index_tests {
 
         // Approve: never rendered, even when it concerns me.
         let approve = IcpIndexTransaction {
-            burn: None,
-            mint: None,
-            approve: Some(IcpIndexApprove {
+            memo: 0,
+            icrc1_memo: None,
+            operation: IcpIndexOperation::Approve(IcpIndexApprove {
+                fee: None,
                 from: me_id.clone(),
+                allowance: IcpIndexTokens { e8s: 1 },
+                expected_allowance: None,
+                expires_at: None,
+                spender: me_id.clone(),
             }),
-            transfer: None,
-            timestamp: TS_NS,
+            timestamp: Some(IcpIndexTimestamp { timestamp_nanos: TS_NS }),
+            created_at_time: None,
         };
         assert!(map_icp_index_txn(&approve, &me, &me_id, cur, BLOCK).is_none());
 
@@ -1815,12 +1837,12 @@ mod icp_index_tests {
 
         let starts: Rc<RefCell<Vec<Option<u64>>>> = Rc::new(RefCell::new(Vec::new()));
         let seen = starts.clone();
-        let fetch = move |start: Option<Nat>| {
+        let fetch = move |start: Option<u64>| {
             let seen = seen.clone();
             let p1 = p1.clone();
             let p2 = p2.clone();
             async move {
-                seen.borrow_mut().push(nat_opt(&start));
+                seen.borrow_mut().push(start);
                 match seen.borrow().len() {
                     1 => Ok(p1),
                     _ => Ok(p2),
@@ -1893,7 +1915,7 @@ mod icp_index_tests {
         );
         let calls = Rc::new(Cell::new(0usize));
         let counter = calls.clone();
-        let fetch = move |_start: Option<Nat>| {
+        let fetch = move |_start: Option<u64>| {
             let calls = counter.clone();
             let p1 = p1.clone();
             async move {
@@ -1934,7 +1956,7 @@ mod icp_index_tests {
         // walk must cap at HISTORY_MAX_ROUND_TRIPS and serve Ok(empty), never loop.
         let calls = Rc::new(Cell::new(0usize));
         let counter = calls.clone();
-        let fetch = move |start: Option<Nat>| {
+        let fetch = move |start: Option<u64>| {
             let calls = counter.clone();
             async move {
                 let n = calls.get();
@@ -1985,7 +2007,7 @@ mod icp_index_tests {
         // Empty page (even with a cursor): stop after one round trip.
         let calls = Rc::new(Cell::new(0usize));
         let counter = calls.clone();
-        let fetch = move |_start: Option<Nat>| {
+        let fetch = move |_start: Option<u64>| {
             let calls = counter.clone();
             async move {
                 calls.set(calls.get() + 1);
@@ -2010,12 +2032,12 @@ mod icp_index_tests {
         let calls = Rc::new(Cell::new(0usize));
         let counter = calls.clone();
         let row_owner = me_id.clone();
-        let fetch = move |start: Option<Nat>| {
+        let fetch = move |start: Option<u64>| {
             let calls = counter.clone();
             let me_id = row_owner.clone();
             async move {
                 calls.set(calls.get() + 1);
-                let cursor = start.as_ref().and_then(|n| n.0.to_u64()).unwrap_or(7);
+                let cursor = start.unwrap_or(7);
                 Ok(page(
                     vec![(
                         cursor,
@@ -2057,7 +2079,7 @@ mod icp_index_tests {
         // (identical to the icrc3 walk's wall-clock budget).
         let called = Rc::new(Cell::new(false));
         let witness = called.clone();
-        let fetch = move |_start: Option<Nat>| {
+        let fetch = move |_start: Option<u64>| {
             let called = witness.clone();
             async move {
                 called.set(true);
@@ -2081,7 +2103,7 @@ mod icp_index_tests {
         // A fetch error propagates as THIS call's failure (Transient; the endpoint named) —
         // the per-currency isolation mechanism: each /transactions call serves exactly one
         // currency, so the Err fails only that currency's request, never the others.
-        let fetch = move |_start: Option<Nat>| async move {
+        let fetch = move |_start: Option<u64>| async move {
             Err::<IcpIndexAccountTransactionsOk, _>(LedgerError::Transient(
                 "get_account_transactions query: boom".into(),
             ))
