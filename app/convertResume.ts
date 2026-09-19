@@ -686,7 +686,7 @@ export async function abortConvertRecord(id: string): Promise<void> {
   const rec = state.records.get(id);
   requestConvertAbort(id);
   if (rec == null || isTerminalConvertStep(rec.step)) return;
-  await commit({...rec, step: 'aborted', abortedAtMs: Date.now()});
+  await commit({...rec, step: 'aborted', abortedFromStep: rec.step, abortedAtMs: Date.now()});
   clearTimer(id);
 }
 

@@ -116,6 +116,17 @@ struct FakeIcState {
     /// real-ledger refusal class the happy path cannot produce on demand — a stale/raced
     /// approval expectation — which the offline fake used to wave straight through.
     approve_fail: HashMap<String, u32>,
+    /// TEST KNOB (2026-09-19 in-flight abort window): method name → how many ms a reply to an
+    /// update call of THAT method stays invisible to read_state after its submit
+    /// (`POST /api/v1/test/ic_delay`; absent = immediate). The fake's stand-in for a slow
+    /// canister — submit accepted (202), reply still pending — the deterministic window the
+    /// convert-abort e2e needs: a swap envelope that is ON THE BOOKS while the user decides
+    /// whether to Stop watching.
+    call_delay_ms: HashMap<String, u64>,
+    /// request_id → the read_state instant its outcome becomes visible (stamped by
+    /// `submit_call` from `call_delay_ms`). Deadlines in the past are dropped lazily by
+    /// `submit_read_state` (drop = visible forever), so the map never grows unbounded.
+    reply_visible_at: HashMap<[u8; 32], u64>,
     requests: HashMap<[u8; 32], RequestState>,
     txns: Vec<FakeTxn>,
     next_block: u64,
@@ -212,6 +223,27 @@ struct FakeTxn {
     /// the same ledger read.
     block: u64,
 }
+
+/// The update methods [`FakeIc::execute_call`]'s dispatch answers (keep in sync with its
+/// `match`) — the allowlist [`FakeIc::arm_call_delay`] arms replies against. Queries are not
+/// armable: the knob models a slow canister UPDATE, and the update dispatch is the one place
+/// both the approve and the swap path flow through.
+const UPDATE_METHODS: [&str; 9] = [
+    "icrc1_transfer",
+    "transfer",
+    "icrc2_approve",
+    "icrc2_transfer_from",
+    "depositFromAndSwap",
+    "retrieve_btc_with_approval",
+    "withdraw_eth",
+    "withdraw_erc20",
+    "get_btc_address",
+];
+
+/// Upper bound for one armed reply delay (`POST /api/v1/test/ic_delay`) — long enough for any
+/// in-flight UI window a test needs, short enough that a typo can never wedge a suite for
+/// minutes. The route refuses beyond it with `delay_too_long` (the armer enforces it too).
+pub const IC_DELAY_CAP_MS: u64 = 30_000;
 
 /// The gateway. Shared into relay `AppState` under `test-helpers` only.
 pub struct FakeIc {
@@ -382,6 +414,24 @@ impl FakeIc {
             return false;
         }
         s.approve_fail.insert(ledger.to_string(), refusals);
+        true
+    }
+
+    /// Test seam armer (see `FakeIcState::call_delay_ms`): hold every reply to an update call
+    /// of `method` for `ms` after its submit (`ms: 0` disarms). `false` — refused — when
+    /// `method` is not one of the update methods the dispatch answers or `ms` exceeds
+    /// [`IC_DELAY_CAP_MS`]; the route turns those into the named 400s, exactly like the other
+    /// knobs' refusals.
+    pub fn arm_call_delay(&self, method: &str, ms: u64) -> bool {
+        if ms > IC_DELAY_CAP_MS || !UPDATE_METHODS.contains(&method) {
+            return false;
+        }
+        let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if ms == 0 {
+            s.call_delay_ms.remove(method);
+        } else {
+            s.call_delay_ms.insert(method.to_string(), ms);
+        }
         true
     }
 
@@ -1482,6 +1532,20 @@ fn submit_call(fake: &Arc<FakeIc>, env: &dpay_icp::envelope::VerifiedEnvelope) -
         return cbor_response(StatusCode::ACCEPTED, Vec::new());
     }
     let outcome = fake.execute_call(&mut s, env);
+    // TEST KNOB (POST /api/v1/test/ic_delay): an armed method's outcome is stamped with the
+    // read_state instant it becomes visible — the call itself is already 202-accepted and its
+    // effects are on the books, mirroring the real rail (submit accepted, canister still
+    // computing). `submit_read_state` omits the rid until that instant. The literal sleep
+    // cannot live here: this whole check→execute→insert section runs under one std Mutex
+    // acquisition, and a slow /call would trip the client's submit timeout instead.
+    if let Some(method) = env.method_name.as_deref() {
+        if let Some(&ms) = s.call_delay_ms.get(method) {
+            if ms > 0 {
+                s.reply_visible_at
+                    .insert(rid, now_ns().saturating_add(ms.saturating_mul(1_000_000)));
+            }
+        }
+    }
     s.requests.insert(rid, outcome);
     cbor_response(StatusCode::ACCEPTED, Vec::new())
 }
@@ -1525,7 +1589,7 @@ fn submit_query(fake: &Arc<FakeIc>, env: &dpay_icp::envelope::VerifiedEnvelope) 
 /// caller asked for.
 fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
     let tree = {
-        let s = fake.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut s = fake.state.lock().unwrap_or_else(|p| p.into_inner());
         let now = now_ns();
         let mut hidden = fake
             .hidden_outcomes
@@ -1536,15 +1600,22 @@ fn submit_read_state(fake: &Arc<FakeIc>) -> Response {
         // like a real boundary node before the outcome has landed in state certification.
         // Counters at 0 are dropped so the map never grows.
         hidden.retain(|_, left| *left > 0);
+        // TEST KNOB (see FakeIcState::call_delay_ms): a delayed rid is OMITTED from the cert
+        // until its deadline; past deadlines drop so the rid is visible PERMANENTLY from the
+        // first read_state after it (drop = unfiltered) and the map never grows.
+        s.reply_visible_at.retain(|_, deadline| *deadline > now);
         let entries: Vec<([u8; 32], RequestState)> = s
             .requests
             .iter()
-            .filter(|(rid, _)| match hidden.get_mut(*rid) {
-                Some(left) => {
-                    *left -= 1;
-                    false
-                }
-                None => true,
+            .filter(|(rid, _)| {
+                !s.reply_visible_at.contains_key(*rid)
+                    && match hidden.get_mut(*rid) {
+                        Some(left) => {
+                            *left -= 1;
+                            false
+                        }
+                        None => true,
+                    }
             })
             .map(|(k, v)| (*k, v.clone()))
             .collect();

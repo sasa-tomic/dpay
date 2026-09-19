@@ -435,6 +435,13 @@ pub fn app(state: AppState) -> Router {
     // `FakeIcState::approve_fail`.
     #[cfg(feature = "test-helpers")]
     let api = api.route("/test/approve_fail", axum::routing::post(test_approve_fail));
+    // Test seam for the fake-IC reply-delay knob (2026-09-19 in-flight abort window): arm
+    // "update calls of THIS method have their reply withheld from read_state for N ms after
+    // each submit" — the slow-canister stand-in that gives tests a deterministic
+    // submit-accepted / reply-pending window (the convert-abort e2e holds a live swap open
+    // with it). See `FakeIcState::call_delay_ms`.
+    #[cfg(feature = "test-helpers")]
+    let api = api.route("/test/ic_delay", axum::routing::post(test_ic_delay));
     // Test seam for the two-venue chooser world (multi-venue readiness V5): arm/disarm SERVING
     // a `test_helpers_served` fixture venue from GET /api/v1/venues. OFFLINE test build only —
     // the agent (prod) build has no knob at all, so it structurally can never serve an
@@ -923,6 +930,37 @@ async fn test_approve_fail(
     let refusals = req.refusals.unwrap_or(1).min(64);
     if !fake.arm_approve_fail(ledger, refusals) {
         return err(StatusCode::BAD_REQUEST, "unknown_ledger");
+    }
+    (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+}
+
+/// `POST /api/v1/test/ic_delay` JSON `{method, ms?}` → `{ok: true}` (test-helpers only) — the
+/// fake-IC reply-delay knob: update calls of THAT method have their reply withheld from
+/// read_state for `ms` after each submit (0 = disarm), while the submit itself stays a
+/// normal accepted 202. The fake's stand-in for a slow canister — the deterministic
+/// in-flight window (accepted, reply pending) a Stop-the-swap test needs; a real boundary
+/// node produces it only with real latency. An unknown `method` is a 400 `unknown_method`
+/// and a delay beyond the 30 s cap is a 400 `delay_too_long` — named refusals, exactly like
+/// the other knobs'.
+#[cfg(feature = "test-helpers")]
+async fn test_ic_delay(State(state): State<AppState>, Json(req): Json<IcDelayKnob>) -> Response {
+    let Some(fake) = state.fake_ic.clone() else {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "fake-IC gateway not attached",
+        );
+    };
+    let Some(method) = req.method.as_deref() else {
+        return err(StatusCode::BAD_REQUEST, "method is required");
+    };
+    let ms = req.ms.unwrap_or(0);
+    if ms > crate::ic_gateway::IC_DELAY_CAP_MS {
+        // Named before the armer's own (boolean) refusal so a too-long delay is never
+        // misreported as an unknown method.
+        return err(StatusCode::BAD_REQUEST, "delay_too_long");
+    }
+    if !fake.arm_call_delay(method, ms) {
+        return err(StatusCode::BAD_REQUEST, "unknown_method");
     }
     (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
 }
@@ -2346,6 +2384,19 @@ struct ApproveFailKnob {
     /// `AllowanceChanged { current_allowance: 0 }`. Default 1, capped at 64; 0 disarms.
     #[serde(default)]
     refusals: Option<u32>,
+}
+
+/// Body for `POST /api/v1/test/ic_delay` (test-helpers only) — the fake-IC reply-delay knob.
+#[cfg(feature = "test-helpers")]
+#[derive(Deserialize)]
+struct IcDelayKnob {
+    /// WHICH update method the knob targets, by exact name (e.g. "depositFromAndSwap") —
+    /// required; the gateway refuses names its dispatch does not answer.
+    method: Option<String>,
+    /// How many ms the reply stays invisible to read_state after each submit.
+    /// Default 0 = disarm.
+    #[serde(default)]
+    ms: Option<u64>,
 }
 
 /// Body for `POST /api/v1/test/venue` (offline test build only) — the venue-serving knob of

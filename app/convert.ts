@@ -597,6 +597,11 @@ export type ConvertRecord = {
   /** Set when the USER taps Stop (2026-09-19): the record freezes where it is. What the stop
    *  cost is derived from the legs (convertAbortFlavor), not stored. */
   abortedAtMs?: number;
+  /** The step the record sat at when Stop was tapped. The abort rewrites `step` to 'aborted',
+   *  which erases the flight position a DIRECT record's stop cost is derived from (its legs
+   *  carry no legPlan states — convertAbortFlavor reads this instead). Planned and Solana
+   *  records never need it: their flavor reads survive the rewrite untouched. */
+  abortedFromStep?: ConvertStep;
   /** The cross-rail block (Routes B/C): present iff the record was prepared on a route with
    *  a CCTP leg; extends the five IC legs with the external-signature burn and (Route C)
    *  the final Jupiter leg. */
@@ -786,6 +791,9 @@ function hydrateOneRecord(r: Record<string, unknown>, out: Record<string, Conver
   rec.step = r.step as ConvertStep;
   if (typeof r.acknowledgedStuckAtMs === 'number') rec.acknowledgedStuckAtMs = r.acknowledgedStuckAtMs;
   if (typeof r.abortedAtMs === 'number') rec.abortedAtMs = r.abortedAtMs;
+  if (typeof r.abortedFromStep === 'string' && (CONVERT_STEPS as string[]).includes(r.abortedFromStep)) {
+    rec.abortedFromStep = r.abortedFromStep as ConvertStep;
+  }
   if (typeof r.inDecimals === 'number') rec.inDecimals = r.inDecimals;
   if (typeof r.outDecimals === 'number') rec.outDecimals = r.outDecimals;
   if (r.failureCode != null && !['approve_refused', 'swap_refused', 'refunded', 'withdraw_refused', 'unknown', 'external_declined'].includes(r.failureCode as string)) return null;
@@ -1115,6 +1123,17 @@ export function convertAbortFlavor(rec: ConvertRecord): 'clean' | 'fee' | 'watch
   const plan = rec.legPlan ?? [];
   if (plan.some(l => l.kind === 'swap' && l.state !== 'pending')) return 'watching';
   if (plan.some(l => l.kind === 'approve' && l.state === 'confirmed')) return 'fee';
+  // DIRECT records carry no legPlan at all (hydration: "The direct 2-leg shape (legPlan
+  // absent)"), so the plan-based reads above never fire for them — and the abort rewrite of
+  // `step` erases the flight position, which made an abort mid-flight read as "nothing left
+  // the wallet" while the swap envelope was already on the wire. The step machine's own
+  // vocabulary carries the facts: from 'swapping' on, the depositFromAndSwap bytes are
+  // submitted (watching); 'approved' means the approve settled and its fee is spent (fee);
+  // anything earlier is genuinely clean. `abortedFromStep` preserves that position through
+  // the abort rewrite, so the terminal aborted card keeps the honest flavor.
+  const flown = rec.step === 'aborted' ? rec.abortedFromStep : rec.legPlan == null ? rec.step : undefined;
+  if (flown === 'swapping' || flown === 'settling' || flown === 'pending_withdrawal') return 'watching';
+  if (flown === 'approved') return 'fee';
   return 'clean';
 }
 
@@ -2303,7 +2322,7 @@ export async function executeConvert(
     // The abort chokepoint (2026-09-19): once the user taps Stop, every later transition
     // collapses to 'aborted' — no branch has to know the flag exists.
     if (rec.step !== 'aborted' && (rec.abortedAtMs != null || convertAborted(rec.id))) {
-      rec = {...rec, step: 'aborted', abortedAtMs: rec.abortedAtMs ?? nowMs};
+      rec = {...rec, step: 'aborted', abortedFromStep: rec.step, abortedAtMs: rec.abortedAtMs ?? nowMs};
     }
     deps.onUpdate(rec);
     await saveConvertRecord(deps.publicHex, rec);

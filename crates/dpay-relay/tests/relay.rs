@@ -4740,6 +4740,66 @@ async fn signed_call_outcome(
     request_status(&tree, &rid).expect("request_status decodes")
 }
 
+/// The SUBMIT half of [`signed_call_outcome`], split out for tests that observe WHEN an
+/// outcome becomes visible rather than what it says (the reply-delay knob's whole point):
+/// sign + POST the canister call, assert the empty 202, and return the request_id WITHOUT
+/// reading anything back.
+async fn signed_call_submit(
+    state: &AppState,
+    sk: &SigningKey,
+    canister: &str,
+    method: &str,
+    arg: Vec<u8>,
+) -> [u8; 32] {
+    let req = CallRequest {
+        canister: Principal::from_text(canister).expect("canister principal parses"),
+        method_name: method.to_string(),
+        arg,
+        ingress_expiry_ns: ingress_expiry(now_ns(), 300),
+        nonce: None,
+    };
+    let envelope = sign_update(sk, &req);
+    let rid = verify_envelope(&envelope)
+        .expect("our own envelope verifies")
+        .request_id;
+    let post = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v2/canister/{canister}/call"))
+        .body(Body::from(envelope))
+        .unwrap();
+    let (status, _h, body) = call_raw(state, post).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(body.is_empty(), "call replies with an empty 202 body");
+    rid
+}
+
+/// The READ half of [`signed_call_outcome`]: read_state ONE rid and decode its
+/// request_status the app's way. A rid with no terminal answer in THIS certificate — held
+/// back by the reply-delay knob, for one — decodes to `Unknown`, exactly like a real
+/// boundary node's cert before the outcome has landed.
+async fn read_request_status(
+    state: &AppState,
+    sk: &SigningKey,
+    canister: &str,
+    rid: &[u8; 32],
+) -> RequestStatus {
+    let path: &[&[u8]] = &[b"request_status", rid];
+    let read = sign_read_state(sk, &[path], ingress_expiry(now_ns(), 300));
+    let req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v2/canister/{canister}/read_state"))
+        .body(Body::from(read))
+        .unwrap();
+    let (status, _h, body) = call_raw(state, req).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "read_state must serve a certificate"
+    );
+    let tree = decode_read_state_tree(&body).expect("certificate decodes");
+    request_status(&tree, rid).expect("request_status decodes")
+}
+
 /// The swap Result carried by a replied depositFromAndSwap outcome.
 fn swap_result(outcome: RequestStatus) -> dpay_icp::icrc::PoolSwapResult {
     match outcome {
@@ -5576,6 +5636,119 @@ async fn approve_fail_knob_forces_allowance_changed() {
     let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
     swap_result_or_approve(&outcome);
     assert_eq!(fake.balance_for(ICP, &owner), 10_000_000_000 - 10_000);
+}
+
+/// The reply-delay knob (`POST /api/v1/test/ic_delay`): an armed method's update call is
+/// accepted (202) but its outcome is ABSENT from read_state until the delay elapses, then
+/// Replied byte-intact; the knob is PER-METHOD (the approve on the same record's path — a
+/// method the knob does not name — is never held); `ms: 0` disarms; unknown methods and
+/// over-cap delays are refused by name. The e2e convert-abort flow drives this route to hold
+/// a submitted swap open — the deterministic in-flight window the Stop tap needs.
+#[tokio::test]
+async fn ic_delay_knob_holds_the_reply_until_its_deadline() {
+    let (state, _led, fake) = state_with_fake(ledger()).await;
+    let payer = keypair();
+    let owner = user_principal(&pubkey(&payer));
+    fake.faucet_credit(ICP, &owner, 10_000_000_000);
+
+    // Shape: a knob without a method, an unknown method, and an over-cap delay are refused
+    // by name; the cap also lives on the armer itself.
+    let (status, json) =
+        post_test_knob(&state, "/api/v1/test/ic_delay", serde_json::json!({})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"], "method is required");
+    let (status, json) = post_test_knob(
+        &state,
+        "/api/v1/test/ic_delay",
+        serde_json::json!({ "method": "notAMethod", "ms": 10 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"], "unknown_method");
+    let (status, json) = post_test_knob(
+        &state,
+        "/api/v1/test/ic_delay",
+        serde_json::json!({ "method": "depositFromAndSwap", "ms": 30_001 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"], "delay_too_long");
+    assert!(
+        !fake.arm_call_delay("depositFromAndSwap", 30_001),
+        "the armer enforces the cap itself, not just the route"
+    );
+
+    // Arm a 2 s hold on the swap method ONLY, then run the approve→swap pair the app runs:
+    // the approve (a different method) replies immediately; the swap is accepted but its
+    // outcome is missing from read_state BEFORE the deadline and Replied after.
+    let (status, json) = post_test_knob(
+        &state,
+        "/api/v1/test/ic_delay",
+        serde_json::json!({ "method": "depositFromAndSwap", "ms": 2_000 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["ok"], true);
+
+    let spender = Account {
+        owner: Principal::from_text(SWAP_POOL).unwrap(),
+        subaccount: [0; 32],
+    };
+    let approve = approve_arg(
+        None,
+        &spender,
+        Some(100_000_000),
+        None,
+        Some(now_ns() + 300_000_000_000),
+        None,
+        None,
+        Some(10_000),
+    );
+    let outcome = signed_call_outcome(&state, &payer, ICP_LEDGER, "icrc2_approve", approve).await;
+    assert!(
+        matches!(swap_result_or_approve(&outcome), ApproveCheck::Approved),
+        "the approve — a method the knob does not name — is never held"
+    );
+
+    let quoted = fake
+        .swap_pool_quote(SWAP_POOL, ICP_IN_ZERO_FOR_ONE, 100_000_000)
+        .expect("the PoC venue's stub pool is seeded")
+        .amount_out;
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
+    let rid = signed_call_submit(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
+    let held = read_request_status(&state, &payer, SWAP_POOL, &rid).await;
+    assert_eq!(
+        held,
+        RequestStatus::Unknown,
+        "held: accepted, but no terminal answer in THIS certificate"
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(2_400)).await;
+    let landed = read_request_status(&state, &payer, SWAP_POOL, &rid).await;
+    assert_eq!(
+        swap_result(landed),
+        Ok(quoted),
+        "the reply lands byte-intact after the deadline"
+    );
+
+    // Disarm (ms 0): the NEXT swap's outcome is visible immediately (the exact-amount
+    // allowance is spent, so the immediate reply is the pool's own #err — a REPLY either
+    // way, which is the visibility this assertion is about).
+    let (status, json) = post_test_knob(
+        &state,
+        "/api/v1/test/ic_delay",
+        serde_json::json!({ "method": "depositFromAndSwap", "ms": 0 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["ok"], true);
+    let args = deposit_and_swap_arg(100_000_000, 0, 10_000, 10_000, ICP_IN_ZERO_FOR_ONE);
+    let rid = signed_call_submit(&state, &payer, SWAP_POOL, "depositFromAndSwap", args).await;
+    let immediate = read_request_status(&state, &payer, SWAP_POOL, &rid).await;
+    assert_eq!(
+        swap_result(immediate),
+        Err(PoolSwapError::InsufficientFunds),
+        "disarmed: the reply is visible immediately"
+    );
 }
 
 /// The knobs shape the curve the pool itself serves: fee_millionths 0 quotes above the
