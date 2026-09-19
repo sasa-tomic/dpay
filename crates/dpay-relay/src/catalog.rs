@@ -815,7 +815,12 @@ pub(crate) fn ic_rows() -> Vec<CurrencyDescriptor> {
             // 0.0001 VEUR, liquidity `thin`); the cap mirrors VCHF's shape at 10,000 VEUR raw
             // as the initial payment-policy value (flagged for founder confirmation).
             // Single-sourced in [`VEUR_LEDGER_PRINCIPAL`], cross-checked against
-            // dfx/catalog_truth.json.
+            // dfx/catalog_truth.json. `thin` is chain-wide truth, not just ICP-side
+            // (measured 2026-09-19: every other VNX deployment is dead — Solana mint
+            // C4Kkr…519 is Jupiter TOKEN_NOT_TRADABLE with ~$84 pool TVL, the deepest
+            // pool on ANY chain is $608 on Base with zero trades, no CEX lists it, and
+            // vnx.io no longer lists VNX Euro among its products; ICP is the only rail
+            // with a working exit, the DFX off-ramp).
             currency: 9, // VEUR (VNX Euro, direct ICRC-1)
             ledger: VEUR_LEDGER_PRINCIPAL.to_string(),
             mintable: false,
