@@ -715,6 +715,10 @@ describe('venue invariants — solana_amm (V11: Jupiter reaches the screen)', ()
     setRuntimeVenues(null);
     // Both bundled rows serve the wrapped-SOL side, in registry order, never ranked.
     expect(solanaVenuesForMint(WRAPPED_SOL_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter', 'jupiter-eurc']);
+    // jupiter-usdc-eurc (2026-09-19, EUR↔USD completion) makes USDC and EURC two-destination
+    // mints too: their SOL-pair row first (registry order), the rail-local FX venue second.
+    expect(solanaVenuesForMint(USDC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter', 'jupiter-usdc-eurc']);
+    expect(solanaVenuesForMint(EURC_MINT_ADDRESS).map(v => v.venue_id)).toEqual(['jupiter-eurc', 'jupiter-usdc-eurc']);
   });
 
   test('INV-1/2 (Solana): a venue tx paying from or to ANYONE but the user is refused BEFORE the signature', async () => {

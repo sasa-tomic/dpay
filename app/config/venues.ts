@@ -145,12 +145,30 @@ export const BUNDLED_VENUES: readonly VenueEntry[] = [
     // relay-proxied dials, mints derived from the Solana token registry, no fixture,
     // offline stand-in = the relay's test stub upstream).
     // Measured live 2026-09-16: SOL→EURC healthy keyless; the USDC↔EURC pair probed
-    // and SKIPPED (a thin ~13% spread market — revisit on depth).
+    // 2026-09-16 was SKIPPED on a then-apparent ~13% spread (an artifact of 1:1 USD/EUR
+    // parity) and REGISTERED 2026-09-19 as jupiter-usdc-eurc once re-measured.
     venue_id: 'jupiter-eurc',
     display_name: 'Jupiter',
     kind: 'solana_amm',
     endpoint: 'https://lite-api.jup.ag',
     pair_ledgers: [WRAPPED_SOL_MINT_ADDRESS, EURC_MINT_ADDRESS],
+    testnet: false,
+    disclosure_key: 'jupiter',
+  },
+  {
+    // The THIRD Solana venue (registered 2026-09-19, EUR↔USD completion — founder mandate):
+    // the same Jupiter aggregator family, on the rail-local pair USDC ↔ EURC — everything
+    // the jupiter row comment above says holds verbatim (https-origin endpoint as identity,
+    // relay-proxied dials, mints derived from the Solana token registry and UNORDERED, no
+    // fixture, offline stand-in = the relay's test stub upstream).
+    // Measured live 2026-09-19: 10 USDC → 8.698735 EURC and 8.6 EURC → 9.885319 USDC,
+    // keyless, platformFee null — both directions within ~2-3% of fair at EUR/USD ~1.17;
+    // the 2026-09-16 skip verdict had compared against 1:1 parity.
+    venue_id: 'jupiter-usdc-eurc',
+    display_name: 'Jupiter',
+    kind: 'solana_amm',
+    endpoint: 'https://lite-api.jup.ag',
+    pair_ledgers: [USDC_MINT_ADDRESS, EURC_MINT_ADDRESS],
     testnet: false,
     disclosure_key: 'jupiter',
   },

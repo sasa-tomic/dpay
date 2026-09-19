@@ -155,13 +155,26 @@
       "disclosure_key": "jupiter"
     },
     {
-      "_doc": "The SECOND Solana venue (registered 2026-09-16, convert coverage expansion — docs/specs/2026-09-16-convert-coverage-expansion.md §1): the same Jupiter aggregator family as the row above, on the rail-local pair SOL ↔ EURC. Identifier semantics match the jupiter row (mints in base58, https-origin endpoint as identity with relay-proxied dials, no fixture — the offline stand-in is the relay's test stub upstream). Measured live 2026-09-16: SOL→EURC quotes healthy both directions keyless (~110 ms, platformFee null). The USDC↔EURC pair was probed and deliberately SKIPPED — a thin ~13% spread market; revisit on depth.",
+      "_doc": "The SECOND Solana venue (registered 2026-09-16, convert coverage expansion — docs/specs/2026-09-16-convert-coverage-expansion.md §1): the same Jupiter aggregator family as the row above, on the rail-local pair SOL ↔ EURC. Identifier semantics match the jupiter row (mints in base58, https-origin endpoint as identity with relay-proxied dials, no fixture — the offline stand-in is the relay's test stub upstream). Measured live 2026-09-16: SOL→EURC quotes healthy both directions keyless (~110 ms, platformFee null). (The USDC↔EURC pair probed 2026-09-16 was SKIPPED on a then-apparent ~13% spread — an artifact of comparing against 1:1 USD/EUR parity; re-measured 2026-09-19 against the real EUR/USD rate (~1.17) it is fair and REGISTERED as jupiter-usdc-eurc.)",
       "venue_id": "jupiter-eurc",
       "display_name": "Jupiter",
       "kind": "solana_amm",
       "endpoint": "https://lite-api.jup.ag",
       "pair_ledgers": [
         "So11111111111111111111111111111111111111112",
+        "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
+      ],
+      "testnet": false,
+      "disclosure_key": "jupiter"
+    },
+    {
+      "_doc": "The THIRD Solana venue (registered 2026-09-19, EUR↔USD completion — founder mandate that EUR↔USD conversion exists): the same Jupiter aggregator family, on the rail-local pair USDC ↔ EURC. Identifier semantics match the jupiter rows (mints in base58, UNORDERED — the canonical USDC mint and the EURC mint; https-origin endpoint as identity with relay-proxied dials; no fixture — the offline stand-in is the relay's test stub upstream). Measured live 2026-09-19: 10 USDC → 8.698735 EURC (direct DefiTuna pool, priceImpactPct 0.000002) and 8.6 EURC → 9.885319 USDC (Whirlpool), keyless, platformFee null — both directions within ~2-3% of fair at EUR/USD ~1.17; the 2026-09-16 '13% spread' skip verdict was an artifact of comparing against 1:1 parity.",
+      "venue_id": "jupiter-usdc-eurc",
+      "display_name": "Jupiter",
+      "kind": "solana_amm",
+      "endpoint": "https://lite-api.jup.ag",
+      "pair_ledgers": [
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr"
       ],
       "testnet": false,

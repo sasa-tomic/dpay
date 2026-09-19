@@ -418,13 +418,33 @@ pub(crate) fn venues() -> Vec<VenueEntry> {
             // jupiter row comment above says holds verbatim (relay-proxied dials, https
             // origin endpoint as identity, mints in base58, fixture None).
             // Measured live 2026-09-16: SOL→EURC healthy both directions (~110 ms,
-            // platformFee null); the USDC↔EURC pair probed and SKIPPED — a thin ~13% spread
-            // market, revisit on depth.
+            // platformFee null); the USDC↔EURC pair probed 2026-09-16 was SKIPPED on a
+            // then-apparent ~13% spread (an artifact of 1:1 USD/EUR parity) and REGISTERED
+            // 2026-09-19 as jupiter-usdc-eurc once re-measured against the real rate.
             venue_id: "jupiter-eurc",
             display_name: "Jupiter",
             kind: VenueKind::SolanaAmm,
             endpoint: "https://lite-api.jup.ag",
             pair_ledgers: [WRAPPED_SOL_MINT, SOLANA_EURC_MINT],
+            testnet: false,
+            disclosure_key: "jupiter",
+            test_helpers_served: false,
+            fixture: None,
+        },
+        VenueEntry {
+            // The THIRD Solana venue (registered 2026-09-19, EUR↔USD completion — founder
+            // mandate): the same Jupiter aggregator family, on the rail-local pair
+            // USDC ↔ EURC. Everything the jupiter row comment above says holds verbatim
+            // (relay-proxied dials, https origin endpoint as identity, mints in base58 and
+            // UNORDERED, fixture None). Measured live 2026-09-19: 10 USDC → 8.698735 EURC
+            // (DefiTuna, priceImpactPct 0.000002) and 8.6 EURC → 9.885319 USDC (Whirlpool),
+            // keyless, platformFee null — both directions within ~2-3% of fair at EUR/USD
+            // ~1.17; the 2026-09-16 skip verdict had compared against 1:1 parity.
+            venue_id: "jupiter-usdc-eurc",
+            display_name: "Jupiter",
+            kind: VenueKind::SolanaAmm,
+            endpoint: "https://lite-api.jup.ag",
+            pair_ledgers: [SOLANA_USDC_MINT, SOLANA_EURC_MINT],
             testnet: false,
             disclosure_key: "jupiter",
             test_helpers_served: false,
@@ -1948,8 +1968,8 @@ mod venue_truth_tests {
             .collect();
         assert_eq!(
             served.len(),
-            10,
-            "exactly ten real venues are served today (six IC pools + two Jupiter + \
+            11,
+            "exactly eleven real venues are served today (six IC pools + three Jupiter + \
              two SideShift, one row per pair)"
         );
         assert_eq!(
@@ -1966,6 +1986,7 @@ mod venue_truth_tests {
                 "icpswap-vchf-ckusdc",
                 "jupiter",
                 "jupiter-eurc",
+                "jupiter-usdc-eurc",
                 "sideshift",
                 "sideshift-usdc",
             ],

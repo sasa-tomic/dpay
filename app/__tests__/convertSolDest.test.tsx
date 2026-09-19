@@ -10,7 +10,9 @@
  *     one-venue mint behaves exactly as before.
  *   * Switching destination re-quotes against the PICKED venue's pair and RESETS the quote
  *     (the old pair's digits never render under the new heading); the typed amount stays.
- *   * USDC and EURC inputs keep ONE destination (→ SOL) and render no chooser chrome.
+ *   * USDC and EURC inputs hold TWO destinations since jupiter-usdc-eurc (2026-09-19):
+ *     their SOL-pair venue first (registry order, still the default) + the rail-local
+ *     USDC↔EURC venue second.
  *   * A confirm failure's error line belongs to its pair — picking another destination clears
  *     it — and the picker is frozen while a confirm is in flight.
  *   * A mint no venue serves still fails closed on the unavailable panel.
@@ -78,9 +80,16 @@ const OUT_BY_MINT: Record<string, {outAmount: string; otherAmountThreshold: stri
   [EURC_MINT_ADDRESS]: {outAmount: '84120000', otherAmountThreshold: '83000000'},
   [WRAPPED_SOL_MINT_ADDRESS]: {outAmount: '14700000', otherAmountThreshold: '14500000'},
 };
+/** The jupiter-usdc-eurc digits, keyed by PAIR — both mints already carry their SOL-pair
+ *  digits above, so per-output-mint alone would mis-serve this venue's quotes.
+ *  1 USDC → 0.87 EURC (floor 0.855); 1 EURC → 1.149 USDC (floor 1.13). */
+const OUT_BY_PAIR: Record<string, {outAmount: string; otherAmountThreshold: string}> = {
+  [`${USDC_MINT_ADDRESS}>${EURC_MINT_ADDRESS}`]: {outAmount: '870000', otherAmountThreshold: '855000'},
+  [`${EURC_MINT_ADDRESS}>${USDC_MINT_ADDRESS}`]: {outAmount: '1149000', otherAmountThreshold: '1130000'},
+};
 
 function quoteOf(venueId: string, inputMint: string, outputMint: string, amount: string): {ok: true; quote: JupiterQuote} {
-  const digits = OUT_BY_MINT[outputMint];
+  const digits = OUT_BY_PAIR[`${inputMint}>${outputMint}`] ?? OUT_BY_MINT[outputMint];
   return {
     ok: true,
     quote: {
@@ -208,9 +217,15 @@ describe('SOL convert out-destination picker', () => {
     expect(textOf(tree, 'convert-headline')).not.toContain('USDC');
   });
 
-  test('USDC input: one destination (SOL), no chooser chrome, venue is jupiter', async () => {
+  test('USDC input: TWO destinations since jupiter-usdc-eurc — SOL first (default), EURC second', async () => {
     const tree = await mount(USDC_ASSET);
-    expect(exists(tree, 'convert-sol-dest')).toBe(false);
+    // Registry order: the SOL-pair venue (jupiter) first and preselected — the one-venue
+    // behavior is the default — then the rail-local FX venue's EURC row.
+    expect(exists(tree, 'convert-sol-dest')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-SOL')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-EURC')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(false);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
     const input = present(tree, 'convert-amount')[0];
     await act(async () => {
@@ -222,11 +237,30 @@ describe('SOL convert out-destination picker', () => {
       outputMint: WRAPPED_SOL_MINT_ADDRESS,
       amount: '1000000',
     });
+    // Pick EURC: the FX venue's own pair, quoted from the USDC mint.
+    const eurcChip = present(tree, 'convert-sol-dest-EURC')[0];
+    await act(async () => {
+      eurcChip.props.onPress();
+    });
+    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(false);
+    expect(checked(tree, 'convert-sol-dest-EURC')).toBe(true);
+    expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
+    expect(lastQuoteCall()).toEqual({
+      venueId: 'jupiter-usdc-eurc',
+      inputMint: USDC_MINT_ADDRESS,
+      outputMint: EURC_MINT_ADDRESS,
+      amount: '1000000',
+    });
+    expect(textOf(tree, 'convert-screen')).toContain('Convert USDC to EURC');
+    expect(textOf(tree, 'convert-headline')).toContain('0.87 EURC');
   });
 
-  test('EURC input: one destination (SOL), no chooser chrome, venue is jupiter-eurc', async () => {
+  test('EURC input: TWO destinations — SOL first (default), USDC second via jupiter-usdc-eurc', async () => {
     const tree = await mount(EURC_ASSET);
-    expect(exists(tree, 'convert-sol-dest')).toBe(false);
+    expect(exists(tree, 'convert-sol-dest')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-SOL')).toBe(true);
+    expect(exists(tree, 'convert-sol-dest-USDC')).toBe(true);
+    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(true);
     expect(exists(tree, 'convert-unavailable')).toBe(false);
     const input = present(tree, 'convert-amount')[0];
     await act(async () => {
@@ -238,6 +272,22 @@ describe('SOL convert out-destination picker', () => {
       outputMint: WRAPPED_SOL_MINT_ADDRESS,
       amount: '1000000',
     });
+    // Pick USDC: the FX venue's own pair, quoted from the EURC mint.
+    const usdcChip = present(tree, 'convert-sol-dest-USDC')[0];
+    await act(async () => {
+      usdcChip.props.onPress();
+    });
+    expect(checked(tree, 'convert-sol-dest-SOL')).toBe(false);
+    expect(checked(tree, 'convert-sol-dest-USDC')).toBe(true);
+    expect(present(tree, 'convert-amount')[0].props.value).toBe('1');
+    expect(lastQuoteCall()).toEqual({
+      venueId: 'jupiter-usdc-eurc',
+      inputMint: EURC_MINT_ADDRESS,
+      outputMint: USDC_MINT_ADDRESS,
+      amount: '1000000',
+    });
+    expect(textOf(tree, 'convert-screen')).toContain('Convert EURC to USDC');
+    expect(textOf(tree, 'convert-headline')).toContain('1.149 USDC');
   });
 
   test('a failed confirm leaves an error line that picking another destination clears', async () => {
