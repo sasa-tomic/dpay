@@ -47,10 +47,21 @@ the same phone paid order `2610` in VCHF: ledger block `81,062`, submitted as th
 
 ## Commands
 
-    just agent-principal   # the funding address (no decryption)
-    just agent-balance     # live mainnet balances, measured (no decryption)
-    just agent-history     # what the money DID: transfers + block indexes (no decryption)
-    just agent-seed        # the seed hex — DECRYPTS; only immediately before a spend
+    just agent-funds          # EVERY wallet + EVERY live balance, one command (no decryption)
+    just agent-principal      # IC float: the funding address (no decryption)
+    just agent-balance        # IC float: live mainnet balances, measured (no decryption)
+    just agent-history        # IC float: what the money DID: transfers + block indexes (no decrypt)
+    just agent-seed           # IC float: the seed hex — DECRYPTS; only immediately before a spend
+    just agent-sol-principal  # SOL wallet: the funding address (no decryption)
+    just agent-sol-init       # generate a NEW agent SOL key (refuses if one exists)
+
+`agent-funds` is the one command a fresh session runs first: it prints every wallet the agent
+controls (from the gitignored `.dev/agent-wallets.json` registry, falling back to the
+`secrets/*.pub.json` public halves plus the public record of the abandoned principal below), each
+wallet's ADDRESS, and every live balance measured at that moment. `agent-balance` remains the only
+balance statement for the IC float; `agent-funds` renders it verbatim rather than reimplementing
+it. `just agent-funds --seed` additionally DECRYPTS and prints the SOL seed hex — same discipline
+as `agent-seed`: only immediately before an approved spend.
 
 `agent-balance` is the only source of truth for what the float holds. Never state a balance from
 memory or from this file — measure it. An unreachable ledger prints `UNREADABLE`, never `0`.
@@ -63,12 +74,38 @@ index pinned in `dfx/catalog_truth.json`, and dies loudly rather than printing a
 never actually read: after a real payment, "no transactions" and "could not ask" are opposite
 answers.
 
+## Wallet registry
+
+Every wallet the agent controls, so a fresh session or a fresh context can find them all with one
+read. The gitignored machine-readable copy feeding `just agent-funds` is `.dev/agent-wallets.json`
+(treated like `.dev/testruns.db`: local, never committed); THIS section is the committed, durable
+copy. Update BOTH whenever a wallet is added, rotated, or abandoned.
+
+| Wallet | Chain | Address | Secret | Status | What it is for |
+|--------|-------|---------|--------|--------|----------------|
+| `icp-float` | ICP | `vloyo-oihno-j4uba-nhhke-zyh34-s2r4g-kwgx3-qkzzk-4svfu-focgr-5ae` | `secrets/agent-icp.sops.json` | live | The mainnet test float itself (ICP / VCHF / ckBTC); custody `scripts/agent-key.mjs`; created 2026-09-05 |
+| `sol-float` | Solana | `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU` | `secrets/agent-sol.sops.json` | live, unfunded | Solana-side float (native SOL + USDC/EURC SPL); custody `scripts/agent-sol.mjs`; created 2026-09-19 |
+| `icp-float-old` | ICP | `lrdna-ain6m-ja6ko-ac4j2-jqk3t-nqs22-4irws-bsm3b-trzzq-3yfz6-mqe` | none (destroyed) | **abandoned — NEVER FUND** | Pre-rotation principal, compromised 2026-09-05 and emptied by the same-day rotation; listed so no fresh context ever funds it |
+
+Both live secrets are sops-encrypted with the SAME age identity (`.dev/age/agent-key.txt`), so the
+Recovery rule below covers both wallets: one identity to back up, and losing it strands both.
+
+### The SOL wallet's funding path (honest state, 2026-09-19)
+
+The SOL wallet was created unfunded and the agent has NO keyless route to fill it: SideShift — the
+only IC→SOL conversion route considered — requires a partner key, so the agent cannot shift from
+the IC float by itself. Until the founder either drips SOL directly to `4CuaczYGkB4yXmB2op59JKeCd5G6rNBzTSfzSNitUsmU`
+(≤ CHF 2, the normal per-operation bound) or provides the SideShift partner key, this wallet stays
+at 0 — a measured 0, via `just agent-funds`, never an assumption.
+
 ## Recovery
 
 Two independent halves, and you need both:
 
-- `secrets/agent-icp.sops.json` — the encrypted seed. Committed; survives any clone.
-- `.dev/age/agent-key.txt` — the age identity. Gitignored, and `.dev/` is **not** backed up.
+- `secrets/agent-icp.sops.json` + `secrets/agent-sol.sops.json` — the encrypted seeds (IC float,
+  SOL wallet). Committed; survive any clone.
+- `.dev/age/agent-key.txt` — the age identity, the ONE key that decrypts both. Gitignored, and
+  `.dev/` is **not** backed up.
 
 So the age identity is the single point of failure. **Back up that one line to a password manager.**
 Without it the encrypted seed is unrecoverable and anything the float holds is gone.
