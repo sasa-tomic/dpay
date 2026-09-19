@@ -83,9 +83,12 @@ export type SideShiftFixedShift = {
 /** Fetch one SideShift quote THROUGH THE RELAY (the partner key lives there). The device
  *  sends rail ids; the relay maps them to the venue's coin/network codes, attaches the
  *  credentials, pins commissionRate "0", and wraps the venue's answer with attribution.
- *  Fail-closed vocabulary mirrors the IC quote path: 'unconfigured' (relay has no partner
- *  credential — the venue is absent, 503), 'unreachable', 'refused', 'unavailable',
- *  'shape'. NO result is ever defaulted. */
+ *  The attribution is the REGISTRY ROW that answered — the venue family is several rows
+ *  (sideshift, sideshift-usdc, sideshift-eurc, …) — so the check pins it to the exact row
+ *  this call quoted; a foreign or cross-row attribution is a shape failure. Fail-closed
+ *  vocabulary mirrors the IC quote path: 'unconfigured' (relay has no partner credential —
+ *  the venue is absent, 503), 'unreachable', 'refused', 'unavailable', 'shape'. NO result
+ *  is ever defaulted. */
 export async function fetchSideShiftQuote(
   relayUrl: string,
   venue: VenueEntry,
@@ -116,13 +119,13 @@ export async function fetchSideShiftQuote(
     | {venue_id?: unknown; quote?: Record<string, unknown> | null; fetched_at?: unknown}
     | null;
   const q = j != null ? j.quote : null;
-  if (j == null || j.venue_id !== 'sideshift' || q == null
+  if (j == null || j.venue_id !== venue.venue_id || q == null
     || typeof q.id !== 'string' || q.id.length === 0
     || typeof q.settleAmount !== 'string') {
     throw new Error('shape');
   }
   return {
-    venueId: 'sideshift',
+    venueId: venue.venue_id,
     quoteId: q.id,
     settleAmount: q.settleAmount,
     rate: typeof q.rate === 'string' ? q.rate : null,

@@ -109,6 +109,28 @@ describe('services/sideshift — the relay-proxied client', () => {
     }
   });
 
+  test('attribution is pinned to the ROW quoted: the family\'s other rows answer their own calls', async () => {
+    // The venue family is several registry rows (sideshift, sideshift-usdc,
+    // sideshift-eurc); the relay wraps each quote with the ROW that answered, and the
+    // client accepts exactly that row's id — a sibling's attribution on the wrong call is
+    // still a shape failure. (The sideshift-eurc quote — the EUR→IC bridge — is the case
+    // the original hardcoded `!== 'sideshift'` check silently broke.)
+    const eurcVenue = venueOfId('sideshift-eurc')!;
+    jest.mocked(relayFetch).mockResolvedValueOnce(
+      res({venue_id: 'sideshift-eurc', quote: {id: 'q-eurc', settleAmount: '1.17'}, fetched_at: 1_757_862_400}, 201) as never,
+    );
+    const out = await fetchSideShiftQuote(RELAY, eurcVenue, ICP_LEDGER, EURC_MINT_ADDRESS, '3');
+    expect(out.venueId).toBe('sideshift-eurc');
+    expect(out.settleAmount).toBe('1.17');
+    // a sideshift-attributed wrap answering the eurc row's call is a cross-row lie
+    jest.mocked(relayFetch).mockResolvedValueOnce(
+      res({venue_id: 'sideshift', quote: {id: 'q', settleAmount: '1'}, fetched_at: 1_757_862_400}, 201) as never,
+    );
+    await expect(
+      fetchSideShiftQuote(RELAY, eurcVenue, ICP_LEDGER, EURC_MINT_ADDRESS, '3'),
+    ).rejects.toThrow('shape');
+  });
+
   test('a venue row that is not the registered cefi pair is refused BEFORE any network', async () => {
     const hostile = {...VENUE, kind: 'ic_amm' as const};
     await expect(fetchSideShiftQuote(RELAY, hostile, ICP_LEDGER, WRAPPED_SOL_MINT_ADDRESS, '2'))
