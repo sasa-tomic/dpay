@@ -189,12 +189,12 @@ export function railLiquidity(asset: SelectableAsset): 'deep' | 'thin' | null {
 /**
  * The rail-health statement for `asset`, or null when the catalog makes none. Thin and deep are
  * the only two statements — there is deliberately no key for a tier the catalog cannot name. The
- * token named is the LEDGER token (`linkToken`), the same honesty choice as `railLineLabel`: the
- * line says how much VEUR exists, not how many "euros".
+ * note renders ON the rail it describes, so it never names the token: 2–3 words, per the founder
+ * (2026-09-19) — the essay the thin line used to carry is gone.
  */
 export function railLiquidityLine(asset: SelectableAsset): string | null {
   const tier = railLiquidity(asset);
-  if (tier === 'thin') return M.wallet.railHealth.thin(asset.linkToken ?? asset.symbol);
+  if (tier === 'thin') return M.wallet.railHealth.thin;
   if (tier === 'deep') return M.wallet.railHealth.deep;
   return null;
 }

@@ -71,7 +71,7 @@ export async function run() {
       'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
       'the EURC fee fact: signature fee + the one-time ATA rent, in SOL — never converted');
     const disclosure1 = await driver.readText('receive-rail-disclosure');
-    assert(!disclosure1.includes('Very little'),
+    assert(!disclosure1.includes('Thin liquidity'),
       `the DEEP rail carries no thin note — warn tone renders nothing on EURC. Got: ${JSON.stringify(disclosure1)}`);
     const eurcAddr1 = (await driver.readText('sol-receive-address')).trim();
     assert(BASE58.test(eurcAddr1), `the EURC rail address is a valid base58 ATA, got "${eurcAddr1}"`);
@@ -92,8 +92,8 @@ export async function run() {
       'Internet Computer · Fee 0.0001 VEUR',
       'the VEUR fee fact: the catalog row\'s 10000-e8s fee, in VEUR\'s own 8 decimals');
     const disclosure2 = await driver.readText('receive-rail-disclosure');
-    assertIncludes(disclosure2, 'Very little VEUR exists on-chain today',
-      'the thin note rides the disclosure itself — receiving on VEUR is the action it qualifies');
+    assertIncludes(disclosure2, 'Thin liquidity',
+      'the thin note rides the disclosure itself — 2 words, per the founder (2026-09-19)');
     const veurAddr = (await driver.readText('deposit-address')).trim();
     assertEq(veurAddr, wantPrincipal, 'the VEUR rail address is the wallet\'s own ICRC-1 principal');
     await driver.screenshot('131-eur-receive-veur');

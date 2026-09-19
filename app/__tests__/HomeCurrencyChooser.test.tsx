@@ -100,7 +100,7 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
     expect(eur).toContain('VEUR · Internet Computer');
     // …and NOTHING from the detail vocabulary: no fee, no liquidity statement, no ramp line, no
     // chain tag. The collapsed shape is the pre-detail shape, byte for byte.
-    for (const absent of ['Fee', 'Very little', 'Circulates', 'DFX', 'fiat ramp', 'SOLANA', 'IC']) {
+    for (const absent of ['Fee', 'Thin liquidity', 'Circulates', 'DFX', 'fiat ramp', 'SOLANA', 'IC']) {
       expect(eur).not.toContain(absent);
     }
     expect(isPresent(tree, 'home-currency-detail')).toBe(false);
@@ -148,11 +148,9 @@ describe('HomeCurrencyChooser — per-rail detail (Stage 5)', () => {
       'Solana · Fee 0.000005 SOL + one-time account rent 0.00203928 SOL',
     );
     expect(rowText(tree, 'rail-detail-fee-veur')).toBe('Internet Computer · Fee 0.0001 VEUR');
-    // Liquidity: deep on EURC (pro line), thin on VEUR (warn statement, named by ledger token).
+    // Liquidity: deep on EURC (pro line), thin on VEUR (warn statement, 2–3 words, no token).
     expect(rowText(tree, 'rail-detail-liquidity-sol-eurc')).toBe('Circulates widely on-chain today.');
-    expect(rowText(tree, 'rail-detail-liquidity-veur')).toBe(
-      'Very little VEUR exists on-chain today — receiving can be hard, and paying needs someone who holds it.',
-    );
+    expect(rowText(tree, 'rail-detail-liquidity-veur')).toBe('Thin liquidity');
     // Ramp: VEUR is DFX-sellable; EURC has no fiat ramp today.
     expect(rowText(tree, 'rail-detail-ramp-veur')).toBe('DFX — sell only today.');
     expect(rowText(tree, 'rail-detail-ramp-sol-eurc')).toBe('No fiat ramp — wallet to wallet only.');

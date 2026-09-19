@@ -38,7 +38,7 @@ export const walletEs: WalletMessages = {
   },
 
   railHealth: {
-    thin: token => `Hoy hay muy poco ${token} on-chain: recibir puede ser difícil y pagar requiere a alguien que lo tenga.`,
+    thin: 'Baja liquidez',
     deep: 'Circula ampliamente on-chain hoy.',
   },
 

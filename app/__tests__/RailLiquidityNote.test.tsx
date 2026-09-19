@@ -3,7 +3,7 @@
  *
  * One component, one testID (`rail-liquidity-note`), two tones, and the rule that makes flow 130's
  * "on VEUR only" assertion true in Balances: the TONE gates the tier. A warn note renders exactly
- * for a THIN rail (the liability statement, alert icon, warn colour — the established warnRow
+ * for a THIN rail (the liquidity statement, alert icon, warn colour — the established warnRow
  * idiom); a pro note renders exactly for a DEEP rail (a plain sub-line, no icon, so it never reads
  * as praise-from-a-caution-icon). Null-tier assets (SOL, USDC, VCHF — the catalog says nothing)
  * render NOTHING in either tone: no speculative copy for a tier the catalog cannot name.
@@ -43,12 +43,10 @@ const hasNote = (tree: renderer.ReactTestRenderer | null): boolean =>
   tree != null && tree.root.findAll(node => node.props && node.props.testID === 'rail-liquidity-note').length > 0;
 
 describe('RailLiquidityNote — tone gates tier, catalog gates everything', () => {
-  test('warn on a THIN rail (VEUR): the liability statement, named by LEDGER token', () => {
+  test('warn on a THIN rail (VEUR): the 2–3-word liquidity statement', () => {
     const tree = renderNote('ic:9', 'warn')!;
     expect(hasNote(tree)).toBe(true);
-    expect(noteText(tree)).toBe(
-      'Very little VEUR exists on-chain today — receiving can be hard, and paying needs someone who holds it.',
-    );
+    expect(noteText(tree)).toBe('Thin liquidity');
     act(() => { tree.unmount(); });
   });
 

@@ -97,9 +97,10 @@ export type WalletMessages = {
   };
 
   /** The catalog's per-rail liquidity statement — the rail-health lines (RailLiquidityNote).
-   *  `token` is the LEDGER token (VEUR), never the currency glyph. */
+   *  The note renders ON the rail it describes, so it never names the token (founder 2026-09-19:
+   *  the thin statement is 2–3 words, not an essay). */
   railHealth: {
-    thin: (token: string) => string;
+    thin: string;
     deep: string;
   };
 

@@ -53,7 +53,7 @@ export async function run() {
     const collapsed = await driver.readText('home-currency-EUR');
     assertIncludes(collapsed, 'EURC · Solana', 'the collapsed EUR row names the Solana rail');
     assertIncludes(collapsed, 'VEUR · Internet Computer', 'the collapsed EUR row names the IC rail');
-    for (const absent of ['Fee', 'Very little', 'Circulates', 'DFX', 'fiat ramp', 'sellable']) {
+    for (const absent of ['Fee', 'Thin liquidity', 'Circulates', 'DFX', 'fiat ramp', 'sellable']) {
       assert(!collapsed.includes(absent),
         `the collapsed row carries no detail copy ("${absent}") — detail is one tap away, not noise. Got: ${JSON.stringify(collapsed)}`);
     }
@@ -91,8 +91,8 @@ export async function run() {
     assertEq((await driver.readText('rail-detail-liquidity-sol-eurc')).trim(),
       'Circulates widely on-chain today.',
       'EURC\'s deep tier states plainly (no caution icon on a good fact)');
-    assertIncludes(await driver.readText('rail-detail-liquidity-veur'), 'Very little VEUR exists on-chain today',
-      'VEUR\'s thin tier warns, naming the LEDGER token (VEUR, never a bare "EUR")');
+    assertIncludes(await driver.readText('rail-detail-liquidity-veur'), 'Thin liquidity',
+      'VEUR\'s thin tier warns in 2 words (founder 2026-09-19) — the note sits ON the VEUR row, so it names no token');
     assertIncludes(await driver.readText('rail-detail-ramp-veur'), 'DFX — sell only today.',
       'VEUR\'s ramp fact: Partner offramp naming DFX, onramp Unavailable — sell-only, stated as such');
     assertEq((await driver.readText('rail-detail-ramp-sol-eurc')).trim(),

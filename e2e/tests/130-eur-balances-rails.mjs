@@ -16,7 +16,7 @@ export const meta = {
   name: 'eur-balances-rails',
   journey: 'onboard',
   covers: ['home-currency', 'balances', 'eur', 'eurc', 'veur', 'vchf', 'group-model', 'rail-health'],
-  verifies: 'home=EUR in the accounts route: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin-liability note renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none.',
+  verifies: 'home=EUR in the accounts route: EURC carries MAIN and VEUR a named rail badge as distinct rows with no group sum; the thin note ("Thin liquidity", 2 words) renders on VEUR ONLY (warn tone) — EURC/VCHF/other rows carry none.',
   timeoutMs: 90000,
 };
 
@@ -55,18 +55,16 @@ export async function run() {
 
     // --- 3. the health note: on the THIN rail only ------------------------------------------------
     const veurRow = await driver.readText('asset-veur');
-    assertIncludes(veurRow, 'Very little VEUR exists on-chain today',
-      'the thin rail carries the warn note, naming the LEDGER token');
-    assertIncludes(veurRow, 'receiving can be hard',
-      'the warn note states what thin liquidity MEANS for the user, not a bare tier label');
+    assertIncludes(veurRow, 'Thin liquidity',
+      'the thin rail carries the warn note — 2 words, per the founder (2026-09-19), no essay');
     const eurcRow = await driver.readText('asset-sol-eurc');
-    assert(!eurcRow.includes('Very little') && !eurcRow.includes('Circulates widely'),
+    assert(!eurcRow.includes('Thin liquidity') && !eurcRow.includes('Circulates widely'),
       `the deep rail carries NO health line in the accounts route (warn tone renders nothing on deep). Got: ${JSON.stringify(eurcRow)}`);
     const vchfRow = await driver.readText('asset-vchf');
-    assert(!vchfRow.includes('Very little') && !vchfRow.includes('Circulates widely'),
+    assert(!vchfRow.includes('Thin liquidity') && !vchfRow.includes('Circulates widely'),
       `an untiered row (VCHF) states nothing — no tier, no copy. Got: ${JSON.stringify(vchfRow)}`);
     const solRow = await driver.readText('asset-sol');
-    assert(!solRow.includes('Very little') && !solRow.includes('Circulates widely'),
+    assert(!solRow.includes('Thin liquidity') && !solRow.includes('Circulates widely'),
       `native SOL states nothing either. Got: ${JSON.stringify(solRow)}`);
     await driver.screenshot('130-eur-balance-rails');
 
